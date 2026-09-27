@@ -6,6 +6,11 @@ import type {
 	ProjectMutationResponse,
 } from "../transport/ws-rpc.js";
 import type { ProjectInfo, RelayMessage } from "../types.js";
+import {
+	attachedProjectState,
+	navigate,
+	replaceRoute,
+} from "./router.svelte.js";
 
 // ─── Server-owned state ─────────────────────────────────────────────────────
 // This store has no client half: the project list and the current slug both
@@ -31,27 +36,18 @@ export function handleProjectList(
 
 	// When the server confirms a newly added project, navigate to it.
 	// ChatLayout attaches the existing daemon socket to the new relay.
-	// Lazy import avoids pulling in router.svelte.ts at module init time,
-	// which would fail in test environments without a full window mock.
 	if (typeof addedSlug === "string") {
-		import("./router.svelte.js").then(({ navigate }) => {
-			navigate(`/?${new URLSearchParams({ p: addedSlug })}`);
-		});
+		navigate(`/?${new URLSearchParams({ p: addedSlug })}`);
 	}
 
 	// Removing the attached project returns to the session list.
-	if (Array.isArray(projects)) {
-		import("./router.svelte.js").then(
-			({ attachedProjectState, replaceRoute }) => {
-				if (
-					attachedProjectState.slug !== null &&
-					!projects.some((p) => p.slug === attachedProjectState.slug)
-				) {
-					attachedProjectState.slug = null;
-					replaceRoute("/?");
-				}
-			},
-		);
+	if (
+		Array.isArray(projects) &&
+		attachedProjectState.slug !== null &&
+		!projects.some((p) => p.slug === attachedProjectState.slug)
+	) {
+		attachedProjectState.slug = null;
+		replaceRoute("/?");
 	}
 }
 

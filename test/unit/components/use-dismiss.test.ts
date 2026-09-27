@@ -192,4 +192,25 @@ describe("dismiss", () => {
 		expect(lowerOnDismiss).toHaveBeenCalledOnce();
 		expect(upperOnDismiss).not.toHaveBeenCalled();
 	});
+
+	it("stops the dismissing click from reaching its target only when consumeClick is set", async () => {
+		const onDismiss = vi.fn();
+		const clicked = vi.fn();
+		const { getByTestId, rerender } = render(DismissHost, {
+			props: { options: { onDismiss, consumeClick: true } },
+		});
+		const outside = getByTestId("dismiss-ignore");
+		outside.addEventListener("click", clicked);
+
+		await fireEvent.pointerDown(outside);
+		await fireEvent.click(outside);
+		expect(onDismiss).toHaveBeenCalledOnce();
+		expect(clicked).not.toHaveBeenCalled();
+
+		await rerender({ options: { onDismiss } });
+		await fireEvent.pointerDown(outside);
+		await fireEvent.click(outside);
+		expect(onDismiss).toHaveBeenCalledTimes(2);
+		expect(clicked).toHaveBeenCalledOnce();
+	});
 });

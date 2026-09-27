@@ -20,7 +20,6 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
-	import TerminalTab from "./TerminalTab.svelte";
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -356,14 +355,17 @@
 
 		<!-- Terminal body area -->
 		<div class="term-body flex-1 relative overflow-hidden bg-code-bg">
-			{#each tabs as tab (tab.ptyId)}
-				<TerminalTab
-					ptyId={tab.ptyId}
-					active={tab.ptyId === activeTabId}
-					fontSize={termFontSize}
-					onFontSizeResize={handleFontSizeResize}
-				/>
-			{/each}
+			<!-- xterm is large, so it loads when the panel first opens. -->
+			{#await import("./TerminalTab.svelte") then { default: TerminalTab }}
+				{#each tabs as tab (tab.ptyId)}
+					<TerminalTab
+						ptyId={tab.ptyId}
+						active={tab.ptyId === activeTabId}
+						fontSize={termFontSize}
+						onFontSizeResize={handleFontSizeResize}
+					/>
+				{/each}
+			{/await}
 		</div>
 
 		<!-- Status message -->

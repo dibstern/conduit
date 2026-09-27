@@ -1007,7 +1007,9 @@
 					onclick={() => { if (!searching) setSettledShelfOpen(!uiState.settledShelfOpen); }}
 				>
 					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="uppercase">Settled</span>{" "}<span class="ml-auto font-medium">{arrangement.settled.length}</span>
+						<!-- No count: settled sessions grow without bound and load in pages,
+						     so any number here would undercount. -->
+						<span class="uppercase">Settled</span>
 				</TextButton>
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}

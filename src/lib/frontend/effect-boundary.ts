@@ -1,10 +1,8 @@
 // ─── Frontend Effect Boundary ───────────────────────────────────────────────
-// Lazy-loaded Schema validation for incoming daemon→client WebSocket messages.
+// Schema validation for incoming daemon→client WebSocket messages.
 // Validates against RelayMessageSchema (the full union of relay message types).
 //
 // Design:
-//   - Lazy import: Schema module (~50KB) is code-split via dynamic import,
-//     keeping it out of the main Vite bundle.
 //   - Cached decoder: The Schema decoder is created once on first call and
 //     reused for all subsequent messages.
 //   - Graceful degradation: Unknown future message types pass through unchanged.
@@ -13,6 +11,12 @@
 //
 // Uses RelayMessageSchema from shared-types.ts (daemon → client direction),
 // NOT IncomingWsMessage from ws-message-schemas.ts (client → daemon direction).
+
+import { Schema } from "effect";
+import {
+	KNOWN_RELAY_MESSAGE_TYPES,
+	RelayMessageSchema,
+} from "../shared-types.js";
 
 export class ProtocolDecodeError extends Error {
 	readonly raw: unknown;
@@ -42,12 +46,8 @@ const getMessageType = (raw: unknown): string | undefined => {
 	return typeof type === "string" ? type : undefined;
 };
 
-const getDecoder = async (): Promise<(raw: unknown) => unknown> => {
+const getDecoder = (): ((raw: unknown) => unknown) => {
 	if (_decoder) return _decoder;
-
-	// Lazy-load Effect and the Schema — keeps these out of the main bundle
-	const [{ Schema }, { KNOWN_RELAY_MESSAGE_TYPES, RelayMessageSchema }] =
-		await Promise.all([import("effect"), import("../shared-types.js")]);
 
 	const decode = Schema.decodeUnknownEither(RelayMessageSchema);
 
@@ -76,23 +76,20 @@ const getDecoder = async (): Promise<(raw: unknown) => unknown> => {
  * Known message types are decoded and returned with schema-validated fields.
  * Unknown messages pass through unchanged. Known messages with invalid
  * protocol shape reject with ProtocolDecodeError.
- *
- * The Schema module is lazy-loaded on first call for code-splitting.
  */
 export const validateIncomingMessage = async (
 	raw: unknown,
 ): Promise<unknown> => {
-	const decode = await getDecoder();
-	return decode(raw);
+	return getDecoder()(raw);
 };
 
 /**
- * Pre-load the schema decoder before opening the WebSocket. If the lazy chunk
- * fails to load, fall back to passthrough so the app keeps receiving messages.
+ * Build the schema decoder before opening the WebSocket. If building it
+ * fails, fall back to passthrough so the app keeps receiving messages.
  */
 export const preloadDecoder = async (): Promise<void> => {
 	try {
-		await getDecoder();
+		getDecoder();
 	} catch (err) {
 		console.warn(
 			"[effect-boundary] Failed to load Schema decoder; using passthrough",

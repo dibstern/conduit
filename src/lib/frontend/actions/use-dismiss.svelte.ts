@@ -22,6 +22,9 @@ export interface DismissOptions {
 	outsideClick?: boolean;
 	/** Extra nodes counted as "inside" (portaled menu, trigger button). */
 	ignore?: Array<HTMLElement | (() => HTMLElement | null) | null>;
+	/** The dismissing click goes no further, so a tap outside only closes the
+	 * surface instead of also activating what it landed on. Default false. */
+	consumeClick?: boolean;
 	/** When false the action is inert. Default true. */
 	enabled?: boolean;
 }
@@ -86,6 +89,10 @@ export function dismiss(
 			return;
 		}
 
+		if (options.consumeClick) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		}
 		options.onDismiss();
 	}
 

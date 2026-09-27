@@ -125,6 +125,7 @@
 	import { getWokenSessionText } from "../../utils/session-lifecycle.js";
 	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
 	import { onDestroy } from "svelte";
+	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -215,8 +216,6 @@
 	let suppressClick = false;
 	let suppressTimer: ReturnType<typeof setTimeout> | undefined;
 	let suppressNativeContextMenu = false;
-	let pendingOutsideBlock: ((event: MouseEvent) => void) | undefined;
-	let pendingOutsideTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// Combined rename state: local (double-click) OR external (context menu)
 	const isRenaming = $derived(localRenaming || renamingProp);
@@ -340,38 +339,16 @@
 		if (notify) onholdchange?.(null);
 	}
 
-	function clearOutsideBlock() {
-		if (pendingOutsideBlock) window.removeEventListener("click", pendingOutsideBlock, true);
-		if (pendingOutsideTimer) clearTimeout(pendingOutsideTimer);
-		pendingOutsideBlock = undefined;
-		pendingOutsideTimer = undefined;
-	}
-
 	$effect(() => {
 		if (heldSessionId !== undefined && heldSessionId !== session.id && heldDirection) closeHold(false);
 	});
 
+	// Registered only while a tray is held, so idle rows add no document
+	// listeners. A tap outside closes the tray and does nothing else.
 	$effect(() => {
-		if (!heldDirection) return;
-		const closeOutside = (event: PointerEvent) => {
-			if (!rowEl?.parentElement?.contains(event.target as Node)) {
-				const pressed = event.target as Node;
-				closeHold();
-				clearOutsideBlock();
-				const blockClick = (click: MouseEvent) => {
-					clearOutsideBlock();
-					const target = click.target as Node;
-					if (!pressed.contains(target) && !target.contains(pressed)) return;
-					click.preventDefault();
-					click.stopImmediatePropagation();
-				};
-				pendingOutsideBlock = blockClick;
-				window.addEventListener("click", blockClick, true);
-				pendingOutsideTimer = setTimeout(clearOutsideBlock, 450);
-			}
-		};
-		window.addEventListener("pointerdown", closeOutside, true);
-		return () => window.removeEventListener("pointerdown", closeOutside, true);
+		const area = rowEl?.parentElement;
+		if (!heldDirection || !area) return;
+		return dismiss(area, { onDismiss: () => closeHold(), consumeClick: true }).destroy;
 	});
 
 	function clearLongPress() {
@@ -466,7 +443,7 @@
 		closeHold();
 	}
 
-	onDestroy(() => { stopPointer(); clearOutsideBlock(); if (suppressTimer) clearTimeout(suppressTimer); });
+	onDestroy(() => { stopPointer(); if (suppressTimer) clearTimeout(suppressTimer); });
 
 	function handleMoreClick(e: MouseEvent) {
 		e.preventDefault();

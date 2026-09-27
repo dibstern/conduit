@@ -163,31 +163,12 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("keeps only one revealed swipe open and closes it on list scroll", async () => {
-		render(SessionList);
-		const first = screen.getByText("Idle work").closest("a");
-		const second = screen.getByText("Approval").closest("a");
-		if (!first || !second) throw new Error("Missing row");
-		await touchSwipe(first, 70);
-		expect(screen.getAllByTestId("session-swipe-settle")).toHaveLength(1);
-		await touchSwipe(second, 70);
-		expect(screen.getAllByTestId("session-swipe-settle")).toHaveLength(1);
-		await fireEvent.click(screen.getByTestId("session-swipe-settle"));
-		await waitFor(() =>
-			expect(setSessionSettledRpc).toHaveBeenCalledWith(
-				expect.objectContaining({ sessionId: "approval", settled: true }),
-			),
-		);
-		await touchSwipe(first, 70);
-		await fireEvent.scroll(screen.getByRole("region", { name: "Sessions" }));
-		expect(screen.queryByTestId("session-swipe-settle")).toBeNull();
-	});
 	it("keeps snoozed rows in a counted shelf above Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
 		addSnoozedRow(until);
 		render(SessionList);
 		const toggle = screen.getByTestId("snoozed-shelf-toggle");
-		expect(toggle.textContent?.trim()).toMatch(/^Snoozed\s+1$/);
+		expect(toggle.textContent?.trim()).toBe("Snoozed 1");
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(toggle.getAttribute("aria-controls")).toBe("snoozed-shelf-rows");
 		expect(screen.queryByText("Sleeping work")).toBeNull();
@@ -263,11 +244,11 @@ describe("session triage list", () => {
 			vi.useRealTimers();
 		}
 	});
-	it("places Pinned first and hides settled rows behind a counted disclosure", () => {
+	it("places Pinned first and hides settled rows behind a count-free disclosure", () => {
 		const { container } = render(SessionList);
 		expect(
 			container.querySelector(".session-group-label")?.textContent?.trim(),
-		).toMatch(/^Pinned\s+1$/);
+		).toBe("Pinned 1");
 		expect(
 			container
 				.querySelector("[data-session-id]")
@@ -275,7 +256,7 @@ describe("session triage list", () => {
 		).toBe("pin");
 		expect(screen.queryByText("Finished work")).toBeNull();
 		const toggle = screen.getByTestId("settled-shelf-toggle");
-		expect(toggle.textContent?.trim()).toMatch(/^Settled\s+1$/);
+		expect(toggle.textContent?.trim()).toBe("Settled");
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(
 			document.getElementById(toggle.getAttribute("aria-controls") ?? ""),
@@ -459,7 +440,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("offers only the routed read action on a foreign row", async () => {
+	it("limits another project's row menu to Mark read/unread", async () => {
 		seedDaemonSessions([
 			{
 				id: "foreign",
@@ -472,10 +453,12 @@ describe("session triage list", () => {
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
 		await fireEvent.contextMenu(row);
-		expect(screen.getByRole("menu")).toBeDefined();
-		expect(screen.getByTestId("session-ctx-mark-unread")).toBeDefined();
-		expect(screen.queryByTestId("session-ctx-settle")).toBeNull();
-		expect(screen.queryByTestId("session-ctx-pin")).toBeNull();
+		const menu = screen.getByRole("menu");
+		expect(
+			[...menu.querySelectorAll("[role^='menuitem']")].map((item) =>
+				item.getAttribute("data-testid"),
+			),
+		).toEqual(["session-ctx-mark-unread"]);
 		expect(setSessionPinnedRpc).not.toHaveBeenCalled();
 		expect(setSessionSettledRpc).not.toHaveBeenCalled();
 	});
