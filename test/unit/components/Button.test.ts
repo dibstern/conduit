@@ -7,6 +7,7 @@ import {
 	BUTTON_HOVER_FILLS,
 	BUTTON_TONES,
 	BUTTON_VARIANTS,
+	buttonClasses,
 } from "../../../src/lib/frontend/components/ui/button-recipes.js";
 
 const label = (text: string) =>
@@ -34,6 +35,33 @@ describe("Button", () => {
 
 		expect(button.className).toContain("bg-accent");
 		expect(button.className).toContain("h-8");
+	});
+
+	it("renders the recipe classes for a disabled customized button", () => {
+		const recipe = {
+			variant: "toolbar",
+			tone: "muted",
+			hoverFill: "alt",
+			disabledStyle: "faint",
+			layout: "baseline",
+			align: "between",
+			size: "sm",
+			iconOnly: false,
+			touchTarget: true,
+		} as const;
+		const className = "ml-2 hover:opacity-80";
+		const { getByRole } = render(Button, {
+			props: {
+				...recipe,
+				disabled: true,
+				class: className,
+				children: label("Go"),
+			},
+		});
+
+		expect(getByRole("button").className).toBe(
+			buttonClasses({ ...recipe, inert: true, className }),
+		);
 	});
 
 	it("merges the consumer class additively while keeping the base classes", () => {
@@ -247,13 +275,20 @@ describe("Button colour axes", () => {
 			for (const tone of BUTTON_TONES) {
 				for (const fill of BUTTON_HOVER_FILLS) {
 					for (const off of BUTTON_DISABLED_STYLES) {
-						const classes = emitted({
+						const classes = buttonClasses({
 							variant,
 							tone,
 							hoverFill: fill,
 							disabledStyle: off,
 							size: "content",
-						});
+							layout: "center",
+							align: "center",
+							iconOnly: false,
+							touchTarget: false,
+							inert: false,
+						})
+							.split(/\s+/)
+							.filter(Boolean);
 						const where = `${variant}/${tone}/${fill}/${off}`;
 
 						expect(restingText(classes).length, where).toBeLessThanOrEqual(1);
@@ -263,14 +298,11 @@ describe("Button colour axes", () => {
 						const expected = off === "none" ? 0 : 2;
 						expect(offState(classes, "opacity"), where).toHaveLength(expected);
 						expect(offState(classes, "cursor"), where).toHaveLength(expected);
-						cleanup();
 					}
 				}
 			}
 		}
-		// 3564 renders. It lands near 10s alone and over it under parallel
-		// load, so the default timeout makes this flaky rather than strict.
-	}, 60_000);
+	});
 
 	// conduit-test-or29: `:hover` keeps matching a disabled button, so a dead
 	// control used to light up under the cursor. The drop now has to survive

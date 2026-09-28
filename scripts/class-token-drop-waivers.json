@@ -1,4 +1,9 @@
 {
+	"src/lib/frontend/components/ui/Button.svelte :: cursor-pointer,no-underline,transition-colors": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "BASE_CLASSES moved intact into buttonClasses; Button still derives its rendered class through that function.",
+		"requires": "buttonClasses({"
+	},
 	"test/unit/pipeline/pipeline-properties.test.ts :: msg-pbt-nocrash,ses-drop,ses-dup,ses-pbt-nocrash,ses-shuffle": "These are test session and message ID prefixes, not CSS classes. Each literal became a template string with a per-invocation suffix for property isolation; the checker misreads the old event payload strings as classes.",
 	"src/lib/frontend/components/input/AttachMenu.svelte :: attach-menu-item": "Dead hook. No `.attach-menu-item` rule has existed in style.css for as long as git remembers, so the class styled nothing.",
 	"src/lib/frontend/components/input/AttachMenu.svelte :: bg-none": "`background-image: none` on an element that never had a background image.",
