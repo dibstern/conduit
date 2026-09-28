@@ -1,0 +1,142 @@
+[
+  {
+    "provider": "claude",
+    "scenario": "click",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "click",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "marked unread in A, then touched",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "before turn end 1",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "marked unread in A, then touched",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "before turn end 1",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "switched away and back",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "before turn end 1",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "switched away and back",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "before turn end 1",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "pointer rest after switching back",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "pointer rest after switching back",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "marked unread in B, then touched in A",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "before turn end 2",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "marked unread in B, then touched in A",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "before turn end 2",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "switched away and back after B's mark",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "before turn end 2",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "switched away and back after B's mark",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "before turn end 2",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "click after switching back",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "click after switching back",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  }
+]

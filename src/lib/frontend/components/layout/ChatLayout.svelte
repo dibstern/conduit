@@ -64,7 +64,7 @@
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
-	import { trackSeen } from "../../utils/attention.js";
+	import { observeOpenSession, trackSeen } from "../../utils/attention.js";
 	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
@@ -632,6 +632,12 @@
 		}
 		window.addEventListener("keydown", handleReadShortcut);
 		return () => window.removeEventListener("keydown", handleReadShortcut);
+	});
+
+	// A dot marked unread holds against touches until the user switches away
+	// (utils/attention.ts, conduit-test-hk9m.5).
+	$effect(() => {
+		observeOpenSession(sessionState.currentId ? findSession(sessionState.currentId) : undefined);
 	});
 
 	// ─── Show debug panel when feature flag enabled ────────────────────────────
