@@ -239,9 +239,9 @@ export const wsRpcHandlers = WsRpcGroup.of({
 	ResolveSession: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			const reader = yield* ReadQueryEffectTag;
-			const session = yield* reader.getSession(request.sessionId);
-			return { projectSlug: session === undefined ? null : config.slug };
+			const sessionManager = yield* SessionManagerServiceTag;
+			const exists = yield* sessionManager.sessionExists(request.sessionId);
+			return { projectSlug: exists ? config.slug : null };
 		}).pipe(Effect.catchAll(mapRpcFailure("ResolveSession"))),
 	GetAgents: (request) =>
 		Effect.gen(function* () {

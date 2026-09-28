@@ -363,6 +363,7 @@ async function createEffectHarness(sendSessionLists = () => Effect.void) {
 			getDefaultSessionId: unused,
 			getSessionFamily: unused,
 			getLastKnownSessionCount: unused,
+			sessionExists: unused,
 			listSessions: unused,
 			createSession: unused,
 			deleteSession: unused,

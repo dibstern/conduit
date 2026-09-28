@@ -22,6 +22,55 @@ test.describe("E2E Smoke Test", () => {
 		await app.waitForConnected();
 	});
 
+	test("opens a replay session URL without an error toast", async ({
+		page,
+		relayUrl,
+		harness,
+	}) => {
+		// Every reply to this page's ResolveSession request. The toast check below
+		// runs once the reply is in, when a failed resolve would already show it.
+		const resolveReplies: unknown[] = [];
+		page.on("websocket", (ws) => {
+			let requestId: string | undefined;
+			const parse = (payload: string | Buffer): Record<string, unknown> =>
+				typeof payload === "string" ? JSON.parse(payload) : {};
+			ws.on("framesent", (frame) => {
+				const message = parse(frame.payload);
+				if (message["tag"] === "ResolveSession") {
+					requestId = String(message["id"]);
+				}
+			});
+			ws.on("framereceived", (frame) => {
+				const message = parse(frame.payload);
+				if (
+					message["_tag"] === "Defect" ||
+					(requestId !== undefined && message["requestId"] === requestId)
+				) {
+					resolveReplies.push(message);
+				}
+			});
+		});
+		const app = new AppPage(page);
+		await app.goto(relayUrl);
+
+		await expect(
+			page.locator(
+				`#session-list .session-item.active[data-session-id="${harness.stack.initialSessionId}"]`,
+			),
+		).toBeVisible();
+		await expect(app.messages).toBeVisible();
+		await expect
+			.poll(() => resolveReplies)
+			.toEqual([
+				{
+					_tag: "Exit",
+					requestId: expect.any(String),
+					exit: { _tag: "Success", value: { projectSlug: "e2e-replay" } },
+				},
+			]);
+		await expect(page.getByText("Failed to open session")).toHaveCount(0);
+	});
+
 	test("input area is visible and functional", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
