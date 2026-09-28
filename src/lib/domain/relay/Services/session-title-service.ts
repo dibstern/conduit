@@ -21,6 +21,8 @@ import { SessionManagerServiceTag } from "./session-manager-service.js";
 
 const TITLE_GENERATION_TIMEOUT = Duration.seconds(30);
 const AUTO_TITLE_SOURCE = "auto-title";
+const TITLE_SYSTEM_PROMPT =
+	"You write concise sidebar titles for coding-assistant sessions.";
 
 export function sanitizeGeneratedTitle(raw: string): string | undefined {
 	const cleaned = raw
@@ -248,8 +250,24 @@ export const makeSessionTitleServiceLive = (
 								prompt: buildTitlePrompt(firstMessage),
 								options: {
 									cwd,
-									env: makeClaudeSdkEnv(),
-									model: "haiku",
+									// Skipping startup telemetry/update traffic saves ~0.5s.
+									env: {
+										...makeClaudeSdkEnv(),
+										CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+									},
+									model: "opus",
+									// Default thinking adds ~5s to a title call without improving it.
+									thinking: { type: "disabled" },
+									// The user's hooks, CLAUDE.md files and output style otherwise
+									// reach this prompt and leak into the title (e.g. a timestamp
+									// hook's context echoed as a prefix). Flag settings override
+									// them for this query only, keeping auth and env settings.
+									systemPrompt: TITLE_SYSTEM_PROMPT,
+									settings: {
+										disableAllHooks: true,
+										outputStyle: "default",
+										claudeMdExcludes: ["**"],
+									},
 									persistSession: false,
 									maxTurns: 1,
 									allowedTools: [],
