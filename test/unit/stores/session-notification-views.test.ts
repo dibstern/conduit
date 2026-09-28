@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Notification views over the server's session rows (ni8.23) ──────────────
 // The badge used to be a reducer the browser drove from a stream of events: it
 // counted questions up and down, remembered which sessions had been looked at,
@@ -7,7 +8,6 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	applySessionSnapshot,
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
@@ -42,29 +42,23 @@ beforeEach(() => {
 
 describe("getSessionIndicator", () => {
 	it("shows attention when the server says something is pending", () => {
-		applySessionSnapshot(
-			[
-				row("asking", { pendingQuestionCount: 1 }),
-				row("permitting", { pendingPermissionCount: 2 }),
-				row("quiet"),
-			],
-			"complete",
-		);
+		seedSessions([
+			row("asking", { pendingQuestionCount: 1 }),
+			row("permitting", { pendingPermissionCount: 2 }),
+			row("quiet"),
+		]);
 		expect(getSessionIndicator("asking", null)).toBe("attention");
 		expect(getSessionIndicator("permitting", null)).toBe("attention");
 		expect(getSessionIndicator("quiet", null)).toBe(null);
 	});
 
 	it("shows unseen activity when nothing is pending but something arrived", () => {
-		applySessionSnapshot([row("finished", { unread: true })], "complete");
+		seedSessions([row("finished", { unread: true })]);
 		expect(getSessionIndicator("finished", null)).toBe("done-unviewed");
 	});
 
 	it("prefers attention over unseen activity", () => {
-		applySessionSnapshot(
-			[row("both", { pendingQuestionCount: 1, unread: true })],
-			"complete",
-		);
+		seedSessions([row("both", { pendingQuestionCount: 1, unread: true })]);
 		expect(getSessionIndicator("both", null)).toBe("attention");
 	});
 
@@ -72,10 +66,7 @@ describe("getSessionIndicator", () => {
 		// The one piece of this that stays tab-local: a session cannot want your
 		// attention while you are looking at it, and which session that is differs
 		// per browser tab.
-		applySessionSnapshot(
-			[row("here", { pendingQuestionCount: 3, unread: true })],
-			"complete",
-		);
+		seedSessions([row("here", { pendingQuestionCount: 3, unread: true })]);
 		expect(getSessionIndicator("here", "here")).toBe(null);
 	});
 
@@ -84,25 +75,22 @@ describe("getSessionIndicator", () => {
 	});
 
 	it("clears the moment the server's row says the session was viewed", () => {
-		applySessionSnapshot([row("s1", { unread: true })], "complete");
+		seedSessions([row("s1", { unread: true })]);
 		expect(getSessionIndicator("s1", null)).toBe("done-unviewed");
 		// Exactly what a shell upsert delivers after `read_at` changes. No
 		// client-local viewed-set to keep in step, so there is nothing to drift.
-		applySessionSnapshot([row("s1", { unread: false })], "complete");
+		seedSessions([row("s1", { unread: false })]);
 		expect(getSessionIndicator("s1", null)).toBe(null);
 	});
 });
 
 describe("getAttentionSessions", () => {
 	it("returns the server's counts for every session that wants attention", () => {
-		applySessionSnapshot(
-			[
-				row("a", { pendingQuestionCount: 2, pendingPermissionCount: 1 }),
-				row("b", { pendingPermissionCount: 1 }),
-				row("c", { unread: true }),
-			],
-			"complete",
-		);
+		seedSessions([
+			row("a", { pendingQuestionCount: 2, pendingPermissionCount: 1 }),
+			row("b", { pendingPermissionCount: 1 }),
+			row("c", { unread: true }),
+		]);
 		expect(getAttentionSessions(null, noDescendants)).toEqual(
 			new Map([
 				["a", { questions: 2, permissions: 1 }],
@@ -112,14 +100,11 @@ describe("getAttentionSessions", () => {
 	});
 
 	it("excludes the current session and its descendants", () => {
-		applySessionSnapshot(
-			[
-				row("parent", { pendingQuestionCount: 1 }),
-				row("child", { pendingQuestionCount: 1 }),
-				row("other", { pendingQuestionCount: 1 }),
-			],
-			"complete",
-		);
+		seedSessions([
+			row("parent", { pendingQuestionCount: 1 }),
+			row("child", { pendingQuestionCount: 1 }),
+			row("other", { pendingQuestionCount: 1 }),
+		]);
 		const descendants = (id: string) =>
 			id === "parent" ? new Set(["child"]) : new Set<string>();
 		expect([...getAttentionSessions("parent", descendants).keys()]).toEqual([

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleSSEEvent } from "../../../src/lib/relay/sse-wiring.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import { seedSessions } from "../stores/session-fixtures.js";
 
 const { emit, settings } = vi.hoisted(() => ({
 	emit: vi.fn(),
@@ -182,10 +183,13 @@ it("deduplicates full and lightweight questions without suppressing later questi
 	const { handleMessage } = await import(
 		"../../../src/lib/frontend/stores/ws-dispatch.js"
 	);
-	const { applySessionUpsert, sessionState } = await import(
+	const { sessionState } = await import(
 		"../../../src/lib/frontend/stores/session.svelte.js"
 	);
-	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	sessionState.currentId = "s1";
 	const deps = createMockSSEWiringDeps();
 	const page = await import(

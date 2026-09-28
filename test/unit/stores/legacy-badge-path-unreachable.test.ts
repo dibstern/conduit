@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── The Legacy Badge Path Is Unreachable (ni8.23) ───────────────────────────
 // The badge used to be client state: a reducer fed by `notification_event`
 // broadcasts, plus a per-tab set of "sessions I have looked at". Both are gone —
@@ -19,7 +20,6 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
-	applySessionSnapshot,
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
@@ -107,26 +107,23 @@ describe("a legacy notification broadcast moves no badge", () => {
 	beforeEach(() => {
 		clearSessionState();
 		sessionState.currentId = "ses_current";
-		applySessionSnapshot(
-			[
-				{
-					id: "ses_current",
-					title: "Current",
-					status: "idle",
-					createdAt: Date.now(),
-				},
-				{
-					id: "ses_other",
-					title: "Other",
-					status: "idle",
-					createdAt: Date.now(),
-					pendingQuestionCount: 0,
-					pendingPermissionCount: 0,
-					unread: false,
-				},
-			],
-			"complete",
-		);
+		seedSessions([
+			{
+				id: "ses_current",
+				title: "Current",
+				status: "idle",
+				createdAt: Date.now(),
+			},
+			{
+				id: "ses_other",
+				title: "Other",
+				status: "idle",
+				createdAt: Date.now(),
+				pendingQuestionCount: 0,
+				pendingPermissionCount: 0,
+				unread: false,
+			},
+		]);
 	});
 
 	it("leaves the indicator alone for ask_user, done and error", () => {
@@ -151,18 +148,15 @@ describe("a legacy notification broadcast moves no badge", () => {
 		});
 		expect(getSessionIndicator("ses_other", "ses_current")).toBeNull();
 
-		applySessionSnapshot(
-			[
-				{
-					id: "ses_other",
-					title: "Other",
-					status: "idle",
-					createdAt: Date.now(),
-					pendingQuestionCount: 1,
-				},
-			],
-			"complete",
-		);
+		seedSessions([
+			{
+				id: "ses_other",
+				title: "Other",
+				status: "idle",
+				createdAt: Date.now(),
+				pendingQuestionCount: 1,
+			},
+		]);
 
 		expect(getSessionIndicator("ses_other", "ses_current")).toBe("attention");
 	});

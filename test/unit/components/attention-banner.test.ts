@@ -1,3 +1,4 @@
+import { seedSessions } from "../stores/session-fixtures.js";
 // ─── AttentionBanner Merge Logic Test ──────────────────────────────────────────
 // Verifies that AttentionBanner correctly merges two data sources:
 // 1. Local pending permissions (from permissions store)
@@ -43,7 +44,6 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	applySessionSnapshot,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -70,7 +70,7 @@ function setSessionTitles(
 	titles: Record<string, string>,
 	counts: Record<string, { questions?: number; permissions?: number }> = {},
 ) {
-	applySessionSnapshot(
+	seedSessions(
 		Object.entries(titles).map(([id, title]) => ({
 			id,
 			title,
@@ -79,7 +79,6 @@ function setSessionTitles(
 			pendingQuestionCount: counts[id]?.questions ?? 0,
 			pendingPermissionCount: counts[id]?.permissions ?? 0,
 		})),
-		"complete",
 	);
 }
 
@@ -223,32 +222,29 @@ describe("AttentionBanner merge logic", () => {
 
 	it("excludes descendant sessions from display", async () => {
 		// Set up parent/child relationship: ses_current → ses_child1
-		applySessionSnapshot(
-			[
-				{
-					id: "ses_current",
-					title: "Parent",
-					status: "idle",
-					createdAt: Date.now(),
-				},
-				{
-					id: "ses_child1",
-					title: "Child session",
-					status: "idle",
-					createdAt: Date.now(),
-					parentID: "ses_current",
-					// Server attention on a descendant must not surface either.
-					pendingQuestionCount: 1,
-				},
-				{
-					id: "ses_other1",
-					title: "Unrelated session",
-					status: "idle",
-					createdAt: Date.now(),
-				},
-			],
-			"complete",
-		);
+		seedSessions([
+			{
+				id: "ses_current",
+				title: "Parent",
+				status: "idle",
+				createdAt: Date.now(),
+			},
+			{
+				id: "ses_child1",
+				title: "Child session",
+				status: "idle",
+				createdAt: Date.now(),
+				parentID: "ses_current",
+				// Server attention on a descendant must not surface either.
+				pendingQuestionCount: 1,
+			},
+			{
+				id: "ses_other1",
+				title: "Unrelated session",
+				status: "idle",
+				createdAt: Date.now(),
+			},
+		]);
 
 		// Permissions for child session should NOT appear (shown inline)
 		permissionsState.pendingPermissions = [

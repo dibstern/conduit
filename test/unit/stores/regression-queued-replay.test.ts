@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Regression: sentDuringEpoch preserved during replay / session switch ────
 // The queued visual is now DERIVED from write-once `sentDuringEpoch` and
 // live `turnEpoch`. During replay, `addUserMessage` is called with
@@ -52,10 +53,7 @@ import {
 	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
 	replayEvents,
@@ -69,8 +67,11 @@ import { assertCacheRealisticEvents } from "../../helpers/cache-events.js";
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
-	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "test-session", title: "", status: "idle" },
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	clearMessages();
 	vi.useFakeTimers();
 });

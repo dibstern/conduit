@@ -1,4 +1,4 @@
-import { seedSearchResults } from "./session-fixtures.js";
+import { seedSearchResults, seedSessions } from "./session-fixtures.js";
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
 // The sidebar (SessionList.svelte) renders getAttentionGroups() -> getFilteredSessions().
 // A deleted session must leave that list in every UI state, including during an
@@ -35,7 +35,6 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import {
-	applySessionSnapshot,
 	clearSessionState,
 	getFilteredSessions,
 	sessionState,
@@ -60,7 +59,7 @@ const KEEPER = {
 beforeEach(() => {
 	clearSessionState();
 	sessionState.currentId = "keeper";
-	applySessionSnapshot([VICTIM, KEEPER], "complete");
+	seedSessions([VICTIM, KEEPER]);
 });
 
 /** Seed an active server search the way SessionList does: the query is the

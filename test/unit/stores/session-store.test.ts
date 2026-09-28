@@ -1,4 +1,5 @@
 // ─── Session Store Tests ─────────────────────────────────────────────────────
+// Direct legacy handler behavior checks are kept deliberately for R4/R6 deletion.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
@@ -49,6 +50,10 @@ import {
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applySessionChange,
+	sessionSubscription,
+} from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type {
@@ -56,7 +61,7 @@ import type {
 	SessionInfo,
 } from "../../../src/lib/frontend/types.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
-import { seedSearchResults } from "./session-fixtures.js";
+import { seedSearchResults, seedSessions } from "./session-fixtures.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 function msg<T extends RelayMessage["type"]>(data: {
@@ -110,6 +115,27 @@ beforeEach(() => {
 	clearDiscoveryState();
 	routerState.path = "/s/old-session";
 	attachedProjectState.slug = "project-a";
+});
+
+it("seedSessions settles the versioned map and fills both sidebar lists", () => {
+	seedSessions([
+		{ id: "root", title: "Root" },
+		{ id: "child", title: "Child", parentID: "root" },
+	]);
+
+	expect([...sessionSubscription.rows.keys()]).toEqual(["root", "child"]);
+	expect(sessionSubscription.settled).toBe(true);
+	expect(sessionState.rootSessions.map((row) => row.id)).toEqual(["root"]);
+	expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+		"root",
+		"child",
+	]);
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 0,
+		item: { id: "stale", title: "Stale", status: "idle" },
+	});
+	expect(sessionSubscription.rows.has("stale")).toBe(false);
 });
 
 describe("clearSessionState", () => {

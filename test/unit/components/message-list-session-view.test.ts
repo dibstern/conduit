@@ -4,11 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
 import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import {
-	handleSessionFamily,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { seedSessions } from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/components/chat/HistoryLoader.svelte",
@@ -177,14 +175,10 @@ describe("MessageList pending questions", () => {
 	});
 
 	beforeEach(() => {
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "root-a",
-			sessions: [
-				{ id: "root-a", title: "A", status: "idle" },
-				{ id: "child-a", title: "A child", status: "idle", parentID: "root-a" },
-			],
-		});
+		seedSessions([
+			{ id: "root-a", title: "A", status: "idle" },
+			{ id: "child-a", title: "A child", status: "idle", parentID: "root-a" },
+		]);
 		getOrCreateSessionSlot("root-a").messages.loadLifecycle = "ready";
 		getOrCreateSessionSlot("root-b").messages.loadLifecycle = "ready";
 		permissionsState.pendingQuestions = [
@@ -196,11 +190,7 @@ describe("MessageList pending questions", () => {
 	afterEach(() => {
 		cleanup();
 		permissionsState.pendingQuestions = [];
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "root-a",
-			sessions: [],
-		});
+		seedSessions([]);
 	});
 
 	it("shows questions from the viewed session's family", () => {
@@ -218,11 +208,7 @@ describe("MessageList pending questions", () => {
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");
 
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "root-b",
-			sessions: [{ id: "root-b", title: "B", status: "idle" }],
-		});
+		seedSessions([{ id: "root-b", title: "B", status: "idle" }]);
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");
 	});

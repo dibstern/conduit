@@ -6,7 +6,28 @@ import {
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { mockSession, mockSubagentSession } from "../../stories/mocks.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type { SessionInfo } from "../../types.js";
 import SubagentBackBar from "./SubagentBackBar.svelte";
+
+let sequence = 0;
+
+type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
+
+function seedSessions(rows: readonly Row[]): void {
+	const sessions: SessionInfo[] = rows.map((row) => ({
+		status: "idle",
+		...row,
+	}));
+	handleSessionList({ type: "session_list", roots: true, sessions });
+	handleSessionFamily({ type: "session_family", rootId: "", sessions });
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
+}
 
 const resetSessions = () => {
 	clearSessionState();
@@ -25,33 +46,20 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
 	beforeEach: () => {
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [mockSession],
-		});
-		handleSessionFamily({
-			type: "session_family",
-			rootId: mockSession.id,
-			sessions: [mockSession, mockSubagentSession],
-		});
+		seedSessions([mockSession, mockSubagentSession]);
 		sessionState.currentId = mockSubagentSession.id;
 	},
 };
 
 export const MissingParent: Story = {
 	beforeEach: () => {
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "sess_story_unavailable_parent",
-			sessions: [
-				{
-					...mockSubagentSession,
-					id: "sess_story_missing_parent",
-					parentID: "sess_story_unavailable_parent",
-				},
-			],
-		});
+		seedSessions([
+			{
+				...mockSubagentSession,
+				id: "sess_story_missing_parent",
+				parentID: "sess_story_unavailable_parent",
+			},
+		]);
 		sessionState.currentId = "sess_story_missing_parent";
 	},
 };

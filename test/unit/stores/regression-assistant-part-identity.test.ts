@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { seedSessions } from "./session-fixtures.js";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -29,10 +30,7 @@ import {
 	clearSessionChatState,
 	currentChat,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 const SESSION_ID = "assistant-part-identity";
@@ -40,7 +38,10 @@ const SESSION_ID = "assistant-part-identity";
 beforeEach(() => {
 	vi.useFakeTimers();
 	clearSessionChatState(SESSION_ID);
-	applySessionUpsert({ id: SESSION_ID, title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: SESSION_ID, title: "", status: "idle" },
+	]);
 	sessionState.currentId = SESSION_ID;
 });
 

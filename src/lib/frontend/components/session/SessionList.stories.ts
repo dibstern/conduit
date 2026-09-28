@@ -17,19 +17,30 @@ import {
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../types.js";
 import SessionList from "./SessionList.svelte";
 
-function seedRoots(
+let sequence = 0;
+
+function seedSessions(
 	rows: readonly (Omit<SessionInfo, "status"> & {
 		status?: SessionInfo["status"];
 	})[],
 ) {
+	const sessions = rows.map((row) => ({ status: "idle" as const, ...row }));
 	handleSessionList({
 		type: "session_list",
 		roots: true,
-		sessions: rows.map((row) => ({ status: "idle", ...row })),
+		sessions,
 	});
+	handleSessionFamily({ type: "session_family", rootId: "", sessions });
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
 }
 
 function seedDaemonSessions(
@@ -98,12 +109,7 @@ export const SelectMode: Story = {
 				status: "idle",
 			},
 		];
-		seedRoots(sessions);
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "select-one",
-			sessions,
-		});
+		seedSessions(sessions);
 		uiState.selectMode = true;
 	},
 	play: async ({ canvasElement }) => {
@@ -127,7 +133,7 @@ export const SnoozedShelfCollapsed: Story = {
 	name: "Snoozed shelf collapsed",
 	beforeEach: () => {
 		sessionState.now = SNOOZE_STORY_NOW;
-		seedRoots([
+		seedSessions([
 			{
 				id: "sleeping",
 				title: "Review build logs",
@@ -155,7 +161,7 @@ export const SnoozedShelfOpen: Story = {
 	beforeEach: () => {
 		uiState.snoozedShelfOpen = true;
 		sessionState.now = SNOOZE_STORY_NOW;
-		seedRoots([
+		seedSessions([
 			{
 				id: "sleeping",
 				title: "Review build logs",
@@ -185,7 +191,7 @@ export const SnoozedShelfOpen: Story = {
 export const PinnedAndSettledShelfCollapsed: Story = {
 	name: "Pinned and settled, shelf collapsed",
 	beforeEach: () => {
-		seedRoots([
+		seedSessions([
 			...mockSessionsAllGroups,
 			{
 				id: "pinned",
@@ -215,7 +221,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 	name: "Pinned and settled, shelf open",
 	beforeEach: () => {
 		uiState.settledShelfOpen = true;
-		seedRoots([
+		seedSessions([
 			...mockSessionsAllGroups,
 			{
 				id: "pinned",
@@ -243,7 +249,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 
 export const WithItems: Story = {
 	beforeEach: () => {
-		seedRoots([...mockSessionsAllGroups]);
+		seedSessions([...mockSessionsAllGroups]);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		sessionState.currentId = mockSessionsAllGroups[0]!.id;
 		routerState.path = `/s/${sessionState.currentId}`;
@@ -253,7 +259,7 @@ export const WithItems: Story = {
 export const FilteredToNeedsYou: Story = {
 	name: "Filtered to needs you",
 	beforeEach: () => {
-		seedRoots([
+		seedSessions([
 			...mockSessionsAllGroups,
 			{
 				id: "approval",
@@ -275,7 +281,7 @@ export const FilteredToNeedsYou: Story = {
 export const FilterMatchesNothing: Story = {
 	name: "Filter matches nothing",
 	beforeEach: () => {
-		seedRoots([{ id: "idle", title: "Plan release", attention: "idle" }]);
+		seedSessions([{ id: "idle", title: "Plan release", attention: "idle" }]);
 		routerState.search = "?status=unread";
 	},
 	play: async ({ canvasElement }) => {
@@ -290,7 +296,9 @@ export const FilterMatchesNothing: Story = {
 export const GroupedByProject: Story = {
 	name: "Grouped by project",
 	beforeEach: () => {
-		seedRoots([{ id: "local", title: "Build sidebar", attention: "working" }]);
+		seedSessions([
+			{ id: "local", title: "Build sidebar", attention: "working" },
+		]);
 		seedDaemonSessions([
 			{
 				id: "foreign",
@@ -314,7 +322,7 @@ export const GroupedByProject: Story = {
 
 export const Searching: Story = {
 	beforeEach: () => {
-		seedRoots([...mockSessionsAllGroups]);
+		seedSessions([...mockSessionsAllGroups]);
 		setSearchQuery("dark");
 	},
 };
@@ -337,7 +345,7 @@ export const Loading: Story = {
 // box. This is the assertion: the field has no other focus path to regress.
 export const SearchFocused: Story = {
 	beforeEach: () => {
-		seedRoots([...mockSessionsAllGroups]);
+		seedSessions([...mockSessionsAllGroups]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -352,7 +360,7 @@ export const SearchFocused: Story = {
 // shows the scoped empty state and the chip with its clear button.
 export const Scoped: Story = {
 	beforeEach: () => {
-		seedRoots([...mockSessionsAllGroups]);
+		seedSessions([...mockSessionsAllGroups]);
 		routerState.search = "?p=acme";
 	},
 	play: async ({ canvasElement }) => {
@@ -366,7 +374,7 @@ export const Scoped: Story = {
 
 export const ScopePickerOpen: Story = {
 	beforeEach: () => {
-		seedRoots([...mockSessionsAllGroups]);
+		seedSessions([...mockSessionsAllGroups]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

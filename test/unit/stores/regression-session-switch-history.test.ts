@@ -1,4 +1,5 @@
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { seedSessions } from "./session-fixtures.js";
 // ─── Regression: Session Switch History ──────────────────────────────────────
 // Verifies that switching sessions properly clears messages and that
 // the ws.svelte.ts handleMessage dispatches session_switched correctly.
@@ -67,7 +68,6 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -111,7 +111,10 @@ beforeEach(() => {
 	];
 	for (const id of knownSessionIds) {
 		clearSessionChatState(id);
-		applySessionUpsert({ id, title: "", status: "idle" });
+		seedSessions([
+			...sessionState.sessions.values(),
+			{ id, title: "", status: "idle" },
+		]);
 	}
 	vi.useFakeTimers();
 });

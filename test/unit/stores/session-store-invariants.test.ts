@@ -1,5 +1,6 @@
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { seedSearchResults } from "./session-fixtures.js";
+// Direct legacy handler behavior checks are kept deliberately for R4/R6 deletion.
 // ─── Session store invariants ────────────────────────────────────────────────
 // The session store is split in two: a server-owned map of `SessionInfo` rows
 // written only by the `applySession*` functions, and a client-owned block

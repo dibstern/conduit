@@ -154,5 +154,9 @@
 		"movedTo": "src/lib/frontend/components/session/GitIdentity.svelte",
 		"requires": "<GitIdentity",
 		"reason": "The identity line's typography moved with its markup into GitIdentity, which now renders project, branch, worktree and the dirty marker as separately truncating parts."
-	}
+	},
+	"test/unit/components/attention-banner.test.ts :: complete": "Not a class. This was the second positional argument to applySessionSnapshot (the literal string \"complete\"), removed when the call site moved to session-fixtures.ts's seedSessions door (ni8.5 R1); the door has no status argument. The checker's recipe-continuation heuristic matches a removed line that is only a quoted string plus a trailing comma.",
+	"test/unit/stores/legacy-badge-path-unreachable.test.ts :: complete": "Not a class. This was the second positional argument to applySessionSnapshot (the literal string \"complete\"), removed when the call site moved to session-fixtures.ts's seedSessions door (ni8.5 R1); the door has no status argument. The checker's recipe-continuation heuristic matches a removed line that is only a quoted string plus a trailing comma.",
+	"test/unit/stores/permissions-store.test.ts :: complete": "Not a class. This was the second positional argument to applySessionSnapshot (the literal string \"complete\"), removed when the call site moved to session-fixtures.ts's seedSessions door (ni8.5 R1); the door has no status argument. The checker's recipe-continuation heuristic matches a removed line that is only a quoted string plus a trailing comma.",
+	"test/unit/stores/session-notification-views.test.ts :: complete": "Not a class. This was the second positional argument to applySessionSnapshot (the literal string \"complete\"), removed when the call site moved to session-fixtures.ts's seedSessions door (ni8.5 R1); the door has no status argument. The checker's recipe-continuation heuristic matches a removed line that is only a quoted string plus a trailing comma."
 }

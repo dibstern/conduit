@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Regression: foreground phase flags must not decide background state ─────
 // The global phase flags (isProcessing/isStreaming/…) describe the session on
 // screen.  Two paths used to read them for work that belongs to another
@@ -53,7 +54,6 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -86,9 +86,14 @@ function lastAssistant(messages: ChatMessage[]): AssistantMessage {
 beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
-	for (const id of ["session-a", "session-b"]) {
-		applySessionUpsert({ id, title: "", status: "idle" });
-	}
+	seedSessions([
+		...sessionState.sessions.values(),
+		...["session-a", "session-b"].map((id) => ({
+			id,
+			title: "",
+			status: "idle" as const,
+		})),
+	]);
 	vi.useFakeTimers();
 });
 

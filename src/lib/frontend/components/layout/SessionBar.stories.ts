@@ -22,8 +22,28 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
-import type { OpenCodeInstance } from "../../types.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type { OpenCodeInstance, SessionInfo } from "../../types.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
+
+let sequence = 0;
+
+type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
+
+function seedSessions(rows: readonly Row[]): void {
+	const sessions: SessionInfo[] = rows.map((row) => ({
+		status: "idle",
+		...row,
+	}));
+	handleSessionList({ type: "session_list", roots: true, sessions });
+	handleSessionFamily({ type: "session_family", rootId: "", sessions });
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
+}
 
 // Rendered through a phone-width frame; see the fixture for why.
 const meta = {
@@ -46,16 +66,7 @@ const meta = {
 		projectState.projects = [
 			{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
 		];
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [mockSession, mockSessionLongTitle],
-		});
-		handleSessionFamily({
-			type: "session_family",
-			rootId: mockSession.id,
-			sessions: [mockSession, mockSessionLongTitle],
-		});
+		seedSessions([mockSession, mockSessionLongTitle]);
 		sessionState.currentId = mockSession.id;
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only
@@ -153,12 +164,7 @@ export const OpeningTerminalClearsBadge: Story = {
 
 function showState(overrides: Partial<typeof mockSession>) {
 	const session = { ...mockSession, ...overrides };
-	handleSessionList({ type: "session_list", roots: true, sessions: [session] });
-	handleSessionFamily({
-		type: "session_family",
-		rootId: session.id,
-		sessions: [session],
-	});
+	seedSessions([session]);
 	sessionState.currentId = session.id;
 }
 
@@ -199,16 +205,12 @@ export const NeedsAttention: Story = {
 	beforeEach: () => {
 		// Attention elsewhere, deliberately not in the open session: the badge
 		// counts what the back control would take you to, not what you can see.
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				mockSession,
-				mockSessionLongTitle,
-				{ ...mockSession, id: "sess_other_a", pendingQuestionCount: 1 },
-				{ ...mockSession, id: "sess_other_b", pendingPermissionCount: 1 },
-			],
-		});
+		seedSessions([
+			mockSession,
+			mockSessionLongTitle,
+			{ ...mockSession, id: "sess_other_a", pendingQuestionCount: 1 },
+			{ ...mockSession, id: "sess_other_b", pendingPermissionCount: 1 },
+		]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

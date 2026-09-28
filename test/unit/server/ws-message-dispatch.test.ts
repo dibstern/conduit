@@ -1,3 +1,4 @@
+import { seedSessions } from "../stores/session-fixtures.js";
 // ─── WS Message Dispatch Tests ───────────────────────────────────────────────
 // Gap 1: handleToolContentResponse — tool_content message updates chat state
 // Gap 2: handleConnectionStatus — connection_status → banner lifecycle
@@ -81,10 +82,7 @@ import {
 	clearInstanceState,
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
@@ -100,7 +98,10 @@ beforeEach(() => {
 	clearMessages();
 	// Set currentId and register session BEFORE creating test slots,
 	// so testActivity()/testMessages() register under the correct key ("s1").
-	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	sessionState.currentId = "s1";
 	ta = testActivity();
 	tm = testMessages();

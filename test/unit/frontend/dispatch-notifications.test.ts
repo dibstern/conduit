@@ -1,3 +1,4 @@
+import { seedSessions } from "../stores/session-fixtures.js";
 // ─── handleMessage → triggerNotifications wiring ─────────────────────────────
 // Verifies that handleMessage() calls triggerNotifications() for exactly the
 // four notification-worthy message types: done, error, permission_request,
@@ -78,10 +79,7 @@ import {
 	isStreaming,
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
@@ -90,8 +88,10 @@ beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions used in test events so routePerSession's
 	// unknown-session guard doesn't drop them.
-	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
-	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	seedSessions([
+		{ id: "test-session", title: "", status: "idle" },
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	clearMessages();
 	triggerNotificationsMock.mockClear();
 });

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// Direct legacy apply-door behavior checks are kept deliberately for R4/R6 deletion.
 // ─── The session store is a view ─────────────────────────────────────────────
 // The authoritative map lives with the subscription that fills it. The store
 // reads it; it does not hold a copy. These tests hold that line from both

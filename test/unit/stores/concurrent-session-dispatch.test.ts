@@ -1,5 +1,9 @@
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { seedFamilySessions, seedRootSessions } from "./session-fixtures.js";
+import {
+	seedFamilySessions,
+	seedRootSessions,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Concurrent Session Dispatch Tests ──────────────────────────────────────
 // Verifies that interleaved per-session events for sessions A/B/C are routed
 // independently. Covers: live event buffering during replay, notification_event
@@ -55,7 +59,6 @@ import {
 	permissionsState,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
@@ -81,9 +84,14 @@ beforeEach(() => {
 	);
 	seedFamilySessions("root-a", []);
 	sessionState.currentId = "session-a";
-	for (const id of ["session-a", "session-b", "session-c"]) {
-		applySessionUpsert({ id, title: "", status: "idle" });
-	}
+	seedSessions([
+		...sessionState.sessions.values(),
+		...["session-a", "session-b", "session-c"].map((id) => ({
+			id,
+			title: "",
+			status: "idle" as const,
+		})),
+	]);
 	vi.useFakeTimers();
 });
 
@@ -377,11 +385,14 @@ describe("Unknown-session guard — drops events silently", () => {
 
 	it("processes events after session is registered", () => {
 		// Register the session
-		applySessionUpsert({
-			id: "new-session",
-			title: "",
-			status: "idle",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "new-session",
+				title: "",
+				status: "idle",
+			},
+		]);
 
 		handleMessage({
 			type: "delta",

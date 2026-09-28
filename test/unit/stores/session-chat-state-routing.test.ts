@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Session Chat State Routing Tests ────────────────────────────────────────
 // Verifies that routePerSession dispatches per-session events to the correct
 // session slot by event.sessionId, without cross-contaminating other slots.
@@ -46,7 +47,6 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -59,9 +59,14 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
 	// Register all sessions used in tests.
-	for (const id of ["session-a", "session-b", "session-c"]) {
-		applySessionUpsert({ id, title: "", status: "idle" });
-	}
+	seedSessions([
+		...sessionState.sessions.values(),
+		...["session-a", "session-b", "session-c"].map((id) => ({
+			id,
+			title: "",
+			status: "idle" as const,
+		})),
+	]);
 	vi.useFakeTimers();
 });
 

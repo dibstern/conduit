@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Turn Epoch & Queued Pipeline Tests ──────────────────────────────────────
 // Integration tests for the multi-step sequences that caused scroll and
 // queued-message bugs.  These test the PIPELINE (multiple functions in
@@ -57,10 +58,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
 	replayEvents,
@@ -81,8 +79,11 @@ let tm: SessionMessages;
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
-	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "test-session", title: "", status: "idle" },
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

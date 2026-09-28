@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedSessions } from "../stores/session-fixtures.js";
 
 const { handleMessageMock, instances, replaceStateMock } = vi.hoisted(() => ({
 	handleMessageMock: vi.fn(),
@@ -77,7 +78,6 @@ import {
 import {
 	clearSessionState,
 	getAttentionSessions,
-	handleSessionList,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -122,7 +122,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			if (message.type === "project_attached") {
 				attachedProjectState.slug = message.slug;
 			}
-			if (message.type === "session_list") handleSessionList(message);
+			if (message.type === "session_list" && message.roots === true)
+				seedSessions(message.sessions);
 		});
 		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 		replaceStateMock.mockClear();
@@ -418,18 +419,14 @@ describe("WebSocket reconnect stream lifecycle", () => {
 	])("reconciles attention from rows after reconnect %s", async (_, reconnect) => {
 		connect();
 		instances[0]?.open();
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				{
-					id: "root-a",
-					title: "Root",
-					status: "idle",
-					pendingQuestionCount: 1,
-				},
-			],
-		});
+		seedSessions([
+			{
+				id: "root-a",
+				title: "Root",
+				status: "idle",
+				pendingQuestionCount: 1,
+			},
+		]);
 
 		reconnect();
 		connect();

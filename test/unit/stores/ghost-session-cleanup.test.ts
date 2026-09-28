@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Ghost Session Cleanup ────────────────────────────────────────────────────
 // Verifies that clearSessionChatState is wired to:
 // 1. session_deleted relay events
@@ -48,7 +49,6 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	handleSessionFamily,
 	handleSessionList,
@@ -83,11 +83,14 @@ afterEach(() => {
 describe("clearSessionChatState wired to session_deleted", () => {
 	it("session_deleted event cleans up per-session chat state", () => {
 		// Pre-populate a session slot
-		applySessionUpsert({
-			id: "deleted-session",
-			title: "To Delete",
-			status: "idle",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "deleted-session",
+				title: "To Delete",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("deleted-session");
 
 		expect(sessionActivity.has("deleted-session")).toBe(true);
@@ -120,24 +123,34 @@ describe("clearSessionChatState wired to session_deleted", () => {
 	});
 });
 
+// Direct legacy handler behavior checks are kept deliberately for R4/R6 deletion.
 describe("handleSessionList drop path", () => {
 	it("removes membership without evicting cached chat state", () => {
 		// Pre-populate sessions map with sessions A, B, C
-		applySessionUpsert({
-			id: "session-A",
-			title: "A",
-			status: "idle",
-		});
-		applySessionUpsert({
-			id: "session-B",
-			title: "B",
-			status: "idle",
-		});
-		applySessionUpsert({
-			id: "session-C",
-			title: "C",
-			status: "idle",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-A",
+				title: "A",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-B",
+				title: "B",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-C",
+				title: "C",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 		getOrCreateSessionSlot("session-C");
@@ -167,16 +180,22 @@ describe("handleSessionList drop path", () => {
 
 	it("search-payload guard: search results do not trigger cleanup", () => {
 		// Pre-populate sessions map
-		applySessionUpsert({
-			id: "session-A",
-			title: "A",
-			status: "idle",
-		});
-		applySessionUpsert({
-			id: "session-B",
-			title: "B",
-			status: "idle",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-A",
+				title: "A",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-B",
+				title: "B",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 
@@ -198,16 +217,22 @@ describe("handleSessionList drop path", () => {
 
 	it("roots=true session_list does not trigger diff cleanup", () => {
 		// Pre-populate
-		applySessionUpsert({
-			id: "session-A",
-			title: "A",
-			status: "idle",
-		});
-		applySessionUpsert({
-			id: "session-B",
-			title: "B",
-			status: "idle",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-A",
+				title: "A",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-B",
+				title: "B",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 
@@ -229,7 +254,10 @@ describe("active-session teardown", () => {
 	it("session_deleted for the active session cleans up state", () => {
 		const activeId = "active-session";
 		sessionState.currentId = activeId;
-		applySessionUpsert({ id: activeId, title: "Active", status: "idle" });
+		seedSessions([
+			...sessionState.sessions.values(),
+			{ id: activeId, title: "Active", status: "idle" },
+		]);
 		getOrCreateSessionSlot(activeId);
 
 		handleMessage({
@@ -243,6 +271,7 @@ describe("active-session teardown", () => {
 	});
 });
 
+// Direct legacy family handler behavior is kept deliberately for R4/R6 deletion.
 it("switching families preserves the target transcript and removes old family membership", () => {
 	handleSessionFamily({
 		type: "session_family",

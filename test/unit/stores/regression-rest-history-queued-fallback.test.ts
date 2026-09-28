@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Regression: rest-history queued fallback false positives ────────────────
 // Claude (relay-local) sessions ALWAYS reload via the `rest-history` projected
 // path (see handlers/session.ts resolveSessionHistory — non-opencode returns
@@ -54,10 +55,7 @@ import {
 	type SessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
 	HistoryMessage,
 	UserMessage,
@@ -70,7 +68,10 @@ let tm: SessionMessages;
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
-	applySessionUpsert({ id: "test-session", title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "test-session", title: "", status: "idle" },
+	]);
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();

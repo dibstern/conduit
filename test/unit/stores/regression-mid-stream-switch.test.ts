@@ -1,4 +1,5 @@
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { seedSessions } from "./session-fixtures.js";
 // ─── Regression: Mid-Stream Session Switch ───────────────────────────────────
 // Reproduces: "when we switch away from a session that has received messages
 // from opencode, then switch back to it, the history of messages received
@@ -57,7 +58,6 @@ import {
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -89,9 +89,11 @@ beforeEach(() => {
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	applySessionUpsert({ id: "session-a", title: "", status: "idle" });
-	applySessionUpsert({ id: "session-b", title: "", status: "idle" });
-	applySessionUpsert({ id: "s1", title: "", status: "idle" });
+	seedSessions([
+		{ id: "session-a", title: "", status: "idle" },
+		{ id: "session-b", title: "", status: "idle" },
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	vi.useFakeTimers();
 });
 

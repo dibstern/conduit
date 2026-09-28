@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { seedSessions } from "./session-fixtures.js";
 
 vi.mock("dompurify", () => ({
 	default: { sanitize: (html: string) => html },
@@ -8,10 +9,7 @@ vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
 }));
 
 import * as chat from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import { triggerNotifications } from "../../../src/lib/frontend/stores/ws-notifications.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
@@ -23,7 +21,10 @@ afterEach(() => {
 });
 
 it("a duplicate delta for A cannot swallow B's terminal without an assistant message", () => {
-	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s", title: "test", status: "idle" },
+	]);
 	const { activity } = chat.getOrCreateSessionSlot("s");
 	const delta = {
 		type: "delta",
@@ -41,7 +42,10 @@ it("a duplicate delta for A cannot swallow B's terminal without an assistant mes
 });
 
 it("an anonymous delta after A ends begins a turn without status events", () => {
-	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s", title: "test", status: "idle" },
+	]);
 	const { activity } = chat.getOrCreateSessionSlot("s");
 	handleMessage({
 		sessionId: "s",
@@ -58,7 +62,10 @@ it("an anonymous delta after A ends begins a turn without status events", () => 
 });
 
 it("durably ending A then receiving B advances the epoch exactly once", () => {
-	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s", title: "test", status: "idle" },
+	]);
 	const { activity, messages } = chat.getOrCreateSessionSlot("s");
 	handleMessage({
 		sessionId: "s",
@@ -124,7 +131,10 @@ it("terminalTurnIds retains only the eight most recent durable turns", () => {
 });
 
 it("two identified live turns advance the epoch twice in total", () => {
-	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s", title: "test", status: "idle" },
+	]);
 	const { activity } = chat.getOrCreateSessionSlot("s");
 	for (const messageId of ["assistant-x", "assistant-y"]) {
 		handleMessage({ type: "delta", sessionId: "s", messageId, text: "answer" });
@@ -141,7 +151,10 @@ it.each([
 	["error", "done", "status"],
 	["error", "status", "done"],
 ] as const)("one terminal transition through dispatch: %s, %s, %s", (...order) => {
-	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s", title: "test", status: "idle" },
+	]);
 	const { activity, messages } = chat.getOrCreateSessionSlot("s");
 	handleMessage({
 		type: "delta",
@@ -238,7 +251,10 @@ it("two different turns each end once, including turns without assistant text", 
 });
 
 it("reconnect then terminal replay does not end the turn again or alert", () => {
-	applySessionUpsert({ id: "s", title: "test", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s", title: "test", status: "idle" },
+	]);
 	sessionState.currentId = "s";
 	const { activity, messages } = chat.getOrCreateSessionSlot("s");
 	handleMessage({

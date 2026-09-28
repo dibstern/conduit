@@ -9,6 +9,7 @@
 // Fix: finalizeAll skips subagent tools, leaving them to event-driven completion.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { seedSessions } from "./session-fixtures.js";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -41,17 +42,17 @@ import {
 	clearMessages,
 	clearSessionChatState,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	applySessionUpsert,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = null;
 	clearSessionChatState("sub-parent");
-	applySessionUpsert({ id: "sub-parent", title: "", status: "idle" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "sub-parent", title: "", status: "idle" },
+	]);
 	vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());

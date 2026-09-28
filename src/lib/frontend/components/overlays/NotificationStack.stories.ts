@@ -6,12 +6,37 @@ import {
 } from "../../stores/permissions.svelte.js";
 import {
 	clearSessionState,
+	handleSessionFamily,
 	handleSessionList,
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
-import type { PermissionId, Toast as ToastType } from "../../types.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type {
+	PermissionId,
+	SessionInfo,
+	Toast as ToastType,
+} from "../../types.js";
 import NotificationStack from "./NotificationStack.svelte";
+
+let sequence = 0;
+
+type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
+
+function seedSessions(rows: readonly Row[]): void {
+	const sessions: SessionInfo[] = rows.map((row) => ({
+		status: "idle",
+		...row,
+	}));
+	handleSessionList({ type: "session_list", roots: true, sessions });
+	handleSessionFamily({ type: "session_family", rootId: "", sessions });
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
+}
 
 const meta = {
 	title: "Overlays/NotificationStack",
@@ -41,17 +66,15 @@ function setupAttention(opts: {
 }) {
 	flushSync(() => {
 		sessionState.currentId = "ses_current";
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
+		seedSessions(
+			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,
 				title,
 				status: "idle" as const,
 				createdAt: 1_735_689_600_000,
 				pendingQuestionCount: opts.questionSessions?.includes(id) ? 1 : 0,
 			})),
-		});
+		);
 
 		for (const p of opts.permissions ?? []) {
 			handlePermissionRequest({

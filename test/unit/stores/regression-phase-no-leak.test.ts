@@ -1,3 +1,4 @@
+import { seedSessions } from "./session-fixtures.js";
 // ─── Regression: Phase No Leak Between Sessions ─────────────────────────────
 // Verifies that switching between sessions with different phases does not
 // cause phase leaks. When switching from A(streaming) to B(idle) and back
@@ -49,7 +50,6 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applySessionUpsert,
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -58,9 +58,14 @@ beforeEach(() => {
 	clearMessages();
 	sessionState.currentId = "session-a";
 	// Register sessions
-	for (const id of ["session-a", "session-b"]) {
-		applySessionUpsert({ id, title: "", status: "idle" });
-	}
+	seedSessions([
+		...sessionState.sessions.values(),
+		...["session-a", "session-b"].map((id) => ({
+			id,
+			title: "",
+			status: "idle" as const,
+		})),
+	]);
 	vi.useFakeTimers();
 });
 
