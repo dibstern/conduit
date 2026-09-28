@@ -154,43 +154,51 @@ async function readPipeline(
 
 describe("Pipeline property-based tests", () => {
 	it("PBT: all thinking blocks have done=true after full pipeline", async () => {
-		await fc.assert(
-			fc.asyncProperty(eventSequenceArb, async (blocks) => {
-				const harness = makeEffectProjectionHarness();
-				try {
-					await seedSession(harness, "ses-pbt");
-					await projectBlocks(harness, "ses-pbt", "msg-pbt", blocks);
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(eventSequenceArb, async (blocks) => {
+					const runId = ++runIndex;
+					const sessionId = `ses-pbt-${runId}`;
+					const messageId = `msg-pbt-${runId}`;
+					await seedSession(harness, sessionId);
+					await projectBlocks(harness, sessionId, messageId, blocks);
 
-					const chat = await readPipeline(harness, "ses-pbt");
+					const chat = await readPipeline(harness, sessionId);
 					const thinkingBlocks = chat.filter(
 						(m): m is ThinkingMessage => m.type === "thinking",
 					);
 					for (const t of thinkingBlocks) {
 						expect(t.done).toBe(true);
 					}
-				} finally {
-					await harness.dispose();
-				}
-			}),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
+				}),
+				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("PBT: thinking blocks appear before their paired text in output", async () => {
-		// Adaptation: the plan's original assertion (firstThinking < firstAssistant
-		// whenever both exist) is fundamentally wrong for interleaved block arrays
-		// like [text, thinking, ...] — the first text can legitimately appear before
-		// any thinking. Restrict the invariant to sequences where the first block
-		// with content is a thinking block; in that case the pipeline must preserve
-		// that ordering end-to-end.
-		await fc.assert(
-			fc.asyncProperty(eventSequenceArb, async (blocks) => {
-				const harness = makeEffectProjectionHarness();
-				try {
-					await seedSession(harness, "ses-pbt-ord");
-					await projectBlocks(harness, "ses-pbt-ord", "msg-pbt-ord", blocks);
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			// Adaptation: the plan's original assertion (firstThinking < firstAssistant
+			// whenever both exist) is fundamentally wrong for interleaved block arrays
+			// like [text, thinking, ...] — the first text can legitimately appear before
+			// any thinking. Restrict the invariant to sequences where the first block
+			// with content is a thinking block; in that case the pipeline must preserve
+			// that ordering end-to-end.
+			await fc.assert(
+				fc.asyncProperty(eventSequenceArb, async (blocks) => {
+					const runId = ++runIndex;
+					const sessionId = `ses-pbt-ord-${runId}`;
+					const messageId = `msg-pbt-ord-${runId}`;
+					await seedSession(harness, sessionId);
+					await projectBlocks(harness, sessionId, messageId, blocks);
 
-					const chat = await readPipeline(harness, "ses-pbt-ord");
+					const chat = await readPipeline(harness, sessionId);
 					const types = chat.map((m) => m.type);
 					const firstThinking = types.indexOf("thinking");
 					const firstAssistant = types.indexOf("assistant");
@@ -209,53 +217,63 @@ describe("Pipeline property-based tests", () => {
 					) {
 						expect(firstThinking).toBeLessThan(firstAssistant);
 					}
-				} finally {
-					await harness.dispose();
-				}
-			}),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
+				}),
+				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("PBT: round-trip fidelity — text blocks with content produce assistant messages", async () => {
-		await fc.assert(
-			fc.asyncProperty(eventSequenceArb, async (blocks) => {
-				const harness = makeEffectProjectionHarness();
-				try {
-					await seedSession(harness, "ses-pbt-rt");
-					await projectBlocks(harness, "ses-pbt-rt", "msg-pbt-rt", blocks);
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(eventSequenceArb, async (blocks) => {
+					const runId = ++runIndex;
+					const sessionId = `ses-pbt-rt-${runId}`;
+					const messageId = `msg-pbt-rt-${runId}`;
+					await seedSession(harness, sessionId);
+					await projectBlocks(harness, sessionId, messageId, blocks);
 
-					const chat = await readPipeline(harness, "ses-pbt-rt");
+					const chat = await readPipeline(harness, sessionId);
 					const hasTextContent = blocks.some(
 						(b) => b.type === "text" && b.deltas.some((d) => d.length > 0),
 					);
 					if (hasTextContent) {
 						expect(chat.some((m) => m.type === "assistant")).toBe(true);
 					}
-				} finally {
-					await harness.dispose();
-				}
-			}),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
+				}),
+				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("PBT: session isolation — events for session A absent from session B", async () => {
-		await fc.assert(
-			fc.asyncProperty(
-				eventSequenceArb,
-				eventSequenceArb,
-				async (blocksA, blocksB) => {
-					const harness = makeEffectProjectionHarness();
-					try {
-						await seedSession(harness, "ses-iso-a");
-						await seedSession(harness, "ses-iso-b");
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(
+					eventSequenceArb,
+					eventSequenceArb,
+					async (blocksA, blocksB) => {
+						const runId = ++runIndex;
+						const sessionA = `ses-iso-a-${runId}`;
+						const messageA = `msg-a-${runId}`;
+						const sessionB = `ses-iso-b-${runId}`;
+						const messageB = `msg-b-${runId}`;
+						await seedSession(harness, sessionA);
+						await seedSession(harness, sessionB);
 
-						await projectBlocks(harness, "ses-iso-a", "msg-a", blocksA);
-						await projectBlocks(harness, "ses-iso-b", "msg-b", blocksB);
+						await projectBlocks(harness, sessionA, messageA, blocksA);
+						await projectBlocks(harness, sessionB, messageB, blocksB);
 
-						const chatA = await readPipeline(harness, "ses-iso-a");
-						const chatB = await readPipeline(harness, "ses-iso-b");
+						const chatA = await readPipeline(harness, sessionA);
+						const chatB = await readPipeline(harness, sessionB);
 
 						// Count expected thinking blocks per session
 						const expectedThinkingA = blocksA.filter(
@@ -287,39 +305,38 @@ describe("Pipeline property-based tests", () => {
 						if (expectedTextB > 0) {
 							expect(assistantB.length).toBeGreaterThanOrEqual(1);
 						}
-					} finally {
-						await harness.dispose();
-					}
-				},
-			),
-			{ seed: SEED, numRuns: 50, endOnFailure: true },
-		);
+					},
+				),
+				{ seed: SEED, numRuns: 50, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("PBT: pipeline never crashes on valid event sequences", async () => {
-		await fc.assert(
-			fc.asyncProperty(eventSequenceArb, async (blocks) => {
-				const harness = makeEffectProjectionHarness();
-				try {
-					await seedSession(harness, "ses-pbt-nocrash");
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(eventSequenceArb, async (blocks) => {
+					const runId = ++runIndex;
+					const sessionId = `ses-pbt-nocrash-${runId}`;
+					const messageId = `msg-pbt-nocrash-${runId}`;
+					await seedSession(harness, sessionId);
 					// Should not throw for any valid sequence
 					await expect(
 						(async () => {
-							await projectBlocks(
-								harness,
-								"ses-pbt-nocrash",
-								"msg-pbt-nocrash",
-								blocks,
-							);
-							await readPipeline(harness, "ses-pbt-nocrash");
+							await projectBlocks(harness, sessionId, messageId, blocks);
+							await readPipeline(harness, sessionId);
 						})(),
 					).resolves.toBeUndefined();
-				} finally {
-					await harness.dispose();
-				}
-			}),
-			{ seed: SEED, numRuns: 200, endOnFailure: true },
-		);
+				}),
+				{ seed: SEED, numRuns: 200, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 });
 
@@ -356,11 +373,15 @@ const corruptedSequenceArb = fc
 
 describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 	it("PBT: pipeline never crashes on shuffled event order", async () => {
-		await fc.assert(
-			fc.asyncProperty(corruptedSequenceArb, async ({ blocks, seed }) => {
-				const harness = makeEffectProjectionHarness();
-				try {
-					await seedSession(harness, "ses-shuffle");
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(corruptedSequenceArb, async ({ blocks, seed }) => {
+					const runId = ++runIndex;
+					const sessionId = `ses-shuffle-${runId}`;
+					const messageId = `msg-s-${runId}`;
+					await seedSession(harness, sessionId);
 					const events: StoredEvent[] = [];
 					let seq = 0;
 					let ts = 1_000_000_000_000;
@@ -369,11 +390,11 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 					events.push(
 						makeStored(
 							"message.created",
-							"ses-shuffle",
+							sessionId,
 							{
-								messageId: "msg-s",
+								messageId,
 								role: "assistant",
-								sessionId: "ses-shuffle",
+								sessionId,
 							},
 							{ sequence: ++seq, createdAt: ts++ },
 						),
@@ -383,9 +404,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							events.push(
 								makeStored(
 									"thinking.start",
-									"ses-shuffle",
+									sessionId,
 									{
-										messageId: "msg-s",
+										messageId,
 										partId: block.partId,
 									},
 									{ sequence: ++seq, createdAt: ts++ },
@@ -395,9 +416,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								events.push(
 									makeStored(
 										"thinking.delta",
-										"ses-shuffle",
+										sessionId,
 										{
-											messageId: "msg-s",
+											messageId,
 											partId: block.partId,
 											text,
 										},
@@ -408,9 +429,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							events.push(
 								makeStored(
 									"thinking.end",
-									"ses-shuffle",
+									sessionId,
 									{
-										messageId: "msg-s",
+										messageId,
 										partId: block.partId,
 									},
 									{ sequence: ++seq, createdAt: ts++ },
@@ -421,9 +442,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								events.push(
 									makeStored(
 										"text.delta",
-										"ses-shuffle",
+										sessionId,
 										{
-											messageId: "msg-s",
+											messageId,
 											partId: block.partId,
 											text,
 										},
@@ -436,9 +457,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 					events.push(
 						makeStored(
 							"turn.completed",
-							"ses-shuffle",
+							sessionId,
 							{
-								messageId: "msg-s",
+								messageId,
 								cost: 0,
 								duration: 0,
 								tokens: { input: 0, output: 0 },
@@ -461,26 +482,30 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 							for (const event of shuffled) {
 								await harness.reproject([event]);
 							}
-							await readPipeline(harness, "ses-shuffle");
+							await readPipeline(harness, sessionId);
 						})(),
 					).resolves.toBeUndefined();
-				} finally {
-					await harness.dispose();
-				}
-			}),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
+				}),
+				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("PBT: pipeline never crashes on sequences with randomly dropped events", async () => {
-		await fc.assert(
-			fc.asyncProperty(
-				corruptedSequenceArb,
-				fc.integer({ min: 1, max: 3 }),
-				async ({ blocks, seed }, dropCount) => {
-					const harness = makeEffectProjectionHarness();
-					try {
-						await seedSession(harness, "ses-drop");
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(
+					corruptedSequenceArb,
+					fc.integer({ min: 1, max: 3 }),
+					async ({ blocks, seed }, dropCount) => {
+						const runId = ++runIndex;
+						const sessionId = `ses-drop-${runId}`;
+						const messageId = `msg-d-${runId}`;
+						await seedSession(harness, sessionId);
 						const events: StoredEvent[] = [];
 						let seq = 0;
 						let ts = 1_000_000_000_000;
@@ -488,11 +513,11 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						events.push(
 							makeStored(
 								"message.created",
-								"ses-drop",
+								sessionId,
 								{
-									messageId: "msg-d",
+									messageId,
 									role: "assistant",
-									sessionId: "ses-drop",
+									sessionId,
 								},
 								{ sequence: ++seq, createdAt: ts++ },
 							),
@@ -502,9 +527,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								events.push(
 									makeStored(
 										"thinking.start",
-										"ses-drop",
+										sessionId,
 										{
-											messageId: "msg-d",
+											messageId,
 											partId: block.partId,
 										},
 										{ sequence: ++seq, createdAt: ts++ },
@@ -514,9 +539,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 									events.push(
 										makeStored(
 											"thinking.delta",
-											"ses-drop",
+											sessionId,
 											{
-												messageId: "msg-d",
+												messageId,
 												partId: block.partId,
 												text,
 											},
@@ -527,9 +552,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								events.push(
 									makeStored(
 										"thinking.end",
-										"ses-drop",
+										sessionId,
 										{
-											messageId: "msg-d",
+											messageId,
 											partId: block.partId,
 										},
 										{ sequence: ++seq, createdAt: ts++ },
@@ -540,9 +565,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 									events.push(
 										makeStored(
 											"text.delta",
-											"ses-drop",
+											sessionId,
 											{
-												messageId: "msg-d",
+												messageId,
 												partId: block.partId,
 												text,
 											},
@@ -555,9 +580,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						events.push(
 							makeStored(
 								"turn.completed",
-								"ses-drop",
+								sessionId,
 								{
-									messageId: "msg-d",
+									messageId,
 									cost: 0,
 									duration: 0,
 									tokens: { input: 0, output: 0 },
@@ -588,27 +613,31 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								for (const event of filtered) {
 									await harness.reproject([event]);
 								}
-								await readPipeline(harness, "ses-drop");
+								await readPipeline(harness, sessionId);
 							})(),
 						).resolves.toBeUndefined();
-					} finally {
-						await harness.dispose();
-					}
-				},
-			),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
+					},
+				),
+				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("PBT: pipeline never crashes on sequences with duplicate events", async () => {
-		await fc.assert(
-			fc.asyncProperty(
-				corruptedSequenceArb,
-				fc.integer({ min: 1, max: 3 }),
-				async ({ blocks, seed }, dupCount) => {
-					const harness = makeEffectProjectionHarness();
-					try {
-						await seedSession(harness, "ses-dup");
+		const harness = makeEffectProjectionHarness();
+		let runIndex = 0;
+		try {
+			await fc.assert(
+				fc.asyncProperty(
+					corruptedSequenceArb,
+					fc.integer({ min: 1, max: 3 }),
+					async ({ blocks, seed }, dupCount) => {
+						const runId = ++runIndex;
+						const sessionId = `ses-dup-${runId}`;
+						const messageId = `msg-dp-${runId}`;
+						await seedSession(harness, sessionId);
 						const events: StoredEvent[] = [];
 						let seq = 0;
 						let ts = 1_000_000_000_000;
@@ -616,11 +645,11 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						events.push(
 							makeStored(
 								"message.created",
-								"ses-dup",
+								sessionId,
 								{
-									messageId: "msg-dp",
+									messageId,
 									role: "assistant",
-									sessionId: "ses-dup",
+									sessionId,
 								},
 								{ sequence: ++seq, createdAt: ts++ },
 							),
@@ -630,9 +659,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								events.push(
 									makeStored(
 										"thinking.start",
-										"ses-dup",
+										sessionId,
 										{
-											messageId: "msg-dp",
+											messageId,
 											partId: block.partId,
 										},
 										{ sequence: ++seq, createdAt: ts++ },
@@ -642,9 +671,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 									events.push(
 										makeStored(
 											"thinking.delta",
-											"ses-dup",
+											sessionId,
 											{
-												messageId: "msg-dp",
+												messageId,
 												partId: block.partId,
 												text,
 											},
@@ -655,9 +684,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								events.push(
 									makeStored(
 										"thinking.end",
-										"ses-dup",
+										sessionId,
 										{
-											messageId: "msg-dp",
+											messageId,
 											partId: block.partId,
 										},
 										{ sequence: ++seq, createdAt: ts++ },
@@ -668,9 +697,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 									events.push(
 										makeStored(
 											"text.delta",
-											"ses-dup",
+											sessionId,
 											{
-												messageId: "msg-dp",
+												messageId,
 												partId: block.partId,
 												text,
 											},
@@ -683,9 +712,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						events.push(
 							makeStored(
 								"turn.completed",
-								"ses-dup",
+								sessionId,
 								{
-									messageId: "msg-dp",
+									messageId,
 									cost: 0,
 									duration: 0,
 									tokens: { input: 0, output: 0 },
@@ -712,16 +741,16 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 								for (const event of withDups) {
 									await harness.reproject([event]);
 								}
-								await readPipeline(harness, "ses-dup");
+								await readPipeline(harness, sessionId);
 							})(),
 						).resolves.toBeUndefined();
-					} finally {
-						await harness.dispose();
-					}
-				},
-			),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
+					},
+				),
+				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
+			);
+		} finally {
+			await harness.dispose();
+		}
 	});
 });
 
