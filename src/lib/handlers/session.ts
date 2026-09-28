@@ -41,6 +41,7 @@ const SESSION_METADATA_FANOUT = 4;
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
+	readonly skipMarkRead?: boolean;
 }
 
 interface NewSessionPayload {
@@ -413,7 +414,11 @@ const switchClientToSession = (
 		}
 	});
 
-export const recordSessionViewed = (clientId: string, sessionId: string) =>
+export const recordSessionViewed = (
+	clientId: string,
+	sessionId: string,
+	{ skipMarkRead = false }: { readonly skipMarkRead?: boolean } = {},
+) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
@@ -425,6 +430,10 @@ export const recordSessionViewed = (clientId: string, sessionId: string) =>
 			eventType: "session_viewed",
 			sessionId,
 		} as RelayMessage);
+
+		// A tab holding this session unread (desktop Mark unread) views it
+		// without recording the read.
+		if (skipMarkRead) return;
 
 		// Read state is durable but best-effort: opening the session must still
 		// succeed if recording it is temporarily unavailable. Logged rather than
@@ -462,15 +471,19 @@ export const viewSessionForClient = ({
 	clientId,
 	sessionId,
 	skipMetadata,
+	skipMarkRead,
 }: {
 	readonly clientId: string;
 	readonly sessionId: string;
 	readonly skipMetadata?: boolean;
+	readonly skipMarkRead?: boolean;
 }) =>
 	Effect.gen(function* () {
 		if (!sessionId) return;
 		yield* switchClientToSession(clientId, sessionId);
-		yield* recordSessionViewed(clientId, sessionId);
+		yield* recordSessionViewed(clientId, sessionId, {
+			skipMarkRead: skipMarkRead === true,
+		});
 
 		// Fire-and-forget metadata (unless skipMetadata is set)
 		if (!skipMetadata) {
@@ -490,6 +503,7 @@ export const handleViewSession = (
 	viewSessionForClient({
 		clientId,
 		sessionId: payload.sessionId,
+		...(payload.skipMarkRead === true ? { skipMarkRead: true } : {}),
 		...(skipMetadata != null ? { skipMetadata } : {}),
 	});
 

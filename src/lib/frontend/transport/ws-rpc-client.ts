@@ -170,6 +170,7 @@ export interface ViewSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId: string;
+	readonly skipMarkRead?: boolean;
 }
 
 export interface AttachProjectRpcInput {

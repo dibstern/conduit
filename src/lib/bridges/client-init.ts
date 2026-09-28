@@ -239,6 +239,7 @@ export interface ClientInitDeps {
 }
 
 export interface ClientInitEffectOptions {
+	readonly skipMarkRead?: boolean;
 	readonly skipDefaultSession?: boolean;
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
@@ -514,7 +515,9 @@ export const handleClientConnectedEffect = (
 				),
 			);
 		if (validatedRequestedSessionId) {
-			yield* recordSessionViewed(clientId, validatedRequestedSessionId);
+			yield* recordSessionViewed(clientId, validatedRequestedSessionId, {
+				skipMarkRead: options.skipMarkRead === true,
+			});
 		}
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();

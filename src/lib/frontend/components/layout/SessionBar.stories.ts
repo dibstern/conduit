@@ -12,6 +12,10 @@ import {
 	routerState,
 } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import {
+	noteReadStateChanged,
+	noteSessionOpened,
+} from "../../stores/session-unread-hold.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	handlePtyOutput,
@@ -32,6 +36,7 @@ const meta = {
 	// be caught: gate it.
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	beforeEach: () => {
+		noteSessionOpened("__storybook_reset__");
 		resetNotifState();
 		// Storybook shares module-level stores across stories.
 		instanceState.instances = [];
@@ -494,5 +499,39 @@ export const DesktopNoSession: Story = {
 		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-title")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
+	},
+};
+
+export const DesktopUnread: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const session = { ...mockSession, unread: true };
+		showState(session);
+		noteReadStateChanged(session, true);
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("session-bar-unread-chip"),
+		).toBeVisible();
+	},
+};
+
+export const DesktopUnreadAndSettled: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const session = {
+			...mockSession,
+			unread: true,
+			settledAt: Date.now() - 3_600_000,
+		};
+		showState(session);
+		noteReadStateChanged(session, true);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-state-chip")).toBeVisible();
 	},
 };

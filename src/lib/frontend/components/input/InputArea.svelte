@@ -40,6 +40,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { noteMessageSent } from "../../stores/session-unread-hold.svelte.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -368,6 +369,7 @@
 			}
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
+		noteMessageSent(sid);
 		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
 		rateLimitChatSend(() => {
 			void sendMessageRpc({

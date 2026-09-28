@@ -449,6 +449,9 @@ if (stories.length > 0) {
 		// The views rail is desktop-only (hidden below md); phones switch views
 		// from the session bar instead, so there is nothing to capture at mobile.
 		["layout-viewsrail--independent-views", "mobile"],
+		// The unread hold and chip exist only in the desktop session bar.
+		["layout-sessionbar--desktop-unread", "mobile"],
+		["layout-sessionbar--desktop-unread-and-settled", "mobile"],
 		// These stories pin the wide desktop row. The phone project applies phone
 		// media rules even when the fixture requests a wide canvas.
 		["layout-sessionbar--desktop-git-identity", "mobile"],

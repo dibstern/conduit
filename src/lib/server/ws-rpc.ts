@@ -1163,6 +1163,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		viewSessionForClient({
 			clientId: request.originId,
 			sessionId: request.sessionId,
+			...(request.skipMarkRead === true ? { skipMarkRead: true } : {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catchAll((error) =>

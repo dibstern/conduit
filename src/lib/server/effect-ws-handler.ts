@@ -152,7 +152,8 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			ws.close(1001, "Server shutting down");
 			return () => {};
 		}
-		const { clientId, requestedSessionId, skipDefaultSession } = options;
+		const { clientId, requestedSessionId, skipMarkRead, skipDefaultSession } =
+			options;
 		let attached = true;
 		// In-flight effects can retain this connection after detach removes the
 		// client from the relay. Revoke their access before another relay attaches.
@@ -216,6 +217,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 							clientId,
 							clientCount,
 							...(requestedSessionId != null && { requestedSessionId }),
+							...(skipMarkRead != null && { skipMarkRead }),
 							...(skipDefaultSession != null && { skipDefaultSession }),
 						});
 					}),

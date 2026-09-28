@@ -64,6 +64,7 @@
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
+	import { noteSessionOpened } from "../../stores/session-unread-hold.svelte.js";
 	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
@@ -499,7 +500,7 @@
 					replaceRoute("/");
 					return;
 				}
-				return viewSessionRpc({ projectSlug, sessionId, originId: getBrowserClientId() });
+				return viewSessionRpc({ projectSlug, sessionId, originId: getBrowserClientId(), ...noteSessionOpened(sessionId) });
 			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
 		});
 		return () => { cancelled = true; };

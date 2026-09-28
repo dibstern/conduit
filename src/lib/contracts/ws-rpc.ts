@@ -1190,6 +1190,7 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
+			skipMarkRead: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}

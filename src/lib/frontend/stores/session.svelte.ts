@@ -43,6 +43,10 @@ import {
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
+import {
+	noteSessionOpened,
+	noteSessionSnapshot,
+} from "./session-unread-hold.svelte.js";
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -591,6 +595,8 @@ export function handleSessionList(
 			(session) => !removedIds.has(session.id),
 		);
 	sessionState.rootSessions = nextRoots;
+	for (const session of nextRoots)
+		noteSessionSnapshot(session.id, session.unread);
 	syncSessionMembership();
 }
 
@@ -598,6 +604,8 @@ export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
 	sessionState.familySessions = msg.sessions;
+	for (const session of msg.sessions)
+		noteSessionSnapshot(session.id, session.unread);
 	syncSessionMembership();
 }
 
@@ -840,6 +848,7 @@ export function handleSessionSwitched(
 ): void {
 	const { id, requestId } = msg;
 	if (id) {
+		noteSessionOpened(id);
 		sessionState.currentId = id;
 		if (!findSession(id)) {
 			sessionState.sessions.set(id, {
@@ -892,6 +901,7 @@ export function setSearchQuery(query: string): void {
 }
 
 export function setCurrentSession(id: string | null): void {
+	if (id) noteSessionOpened(id);
 	sessionState.currentId = id;
 }
 
@@ -925,6 +935,7 @@ export function switchToSession(
 ): void {
 	// Capture the outgoing session for permission cleanup in ws-dispatch.
 	_switchingFromId = sessionState.currentId;
+	const readOptions = noteSessionOpened(sessionId);
 	if (_switchingFromId && _switchingFromId !== sessionId) {
 		abortSessionReplay(_switchingFromId);
 	}
@@ -940,6 +951,7 @@ export function switchToSession(
 			projectSlug: slug,
 			sessionId,
 			originId: getBrowserClientId(),
+			...readOptions,
 		};
 		if (view) {
 			view(input);

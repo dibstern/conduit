@@ -10,6 +10,7 @@ import {
 	searchSessions,
 	sessionState,
 } from "../stores/session.svelte.js";
+import { noteReadStateChanged } from "../stores/session-unread-hold.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
 import { showToast } from "../stores/ui.svelte.js";
 import {
@@ -50,6 +51,7 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 		await (markUnread
 			? markSessionUnreadRpc(input)
 			: markSessionReadRpc(input));
+		noteReadStateChanged(session, markUnread);
 		if (foreign) await refreshForeign();
 		if (
 			markUnread &&
@@ -71,6 +73,7 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 								: markSessionUnreadRpc(input)
 						)
 							.then(async () => {
+								noteReadStateChanged(session, !markUnread);
 								if (foreign) await refreshForeign();
 							})
 							.catch(() => {

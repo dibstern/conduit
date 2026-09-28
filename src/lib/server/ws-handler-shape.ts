@@ -5,6 +5,8 @@ import type { IncomingMessageType } from "./ws-router.js";
 export interface WsAttachOptions {
 	clientId: string;
 	requestedSessionId?: string;
+	/** The tab holds the requested session unread: view it without marking it read. */
+	skipMarkRead?: boolean;
 	/** Leave session selection to the browser when no session was requested. */
 	skipDefaultSession?: boolean;
 }
@@ -13,6 +15,7 @@ export interface WsClientConnectedEvent {
 	clientId: string;
 	clientCount: number;
 	requestedSessionId?: string;
+	skipMarkRead?: boolean;
 	skipDefaultSession?: boolean;
 }
 

@@ -30,6 +30,7 @@
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
 	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { isSessionUnreadHeld } from "../../stores/session-unread-hold.svelte.js";
 	import { backToSessions, toggleSessionRead } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
@@ -232,6 +233,18 @@
 					titleMenuOpen = true;
 				}}
 			/>
+		{/if}
+		{#if session?.unread === true && isSessionUnreadHeld(session.id)}
+			<Menu ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
+				{#snippet trigger({ props })}
+					<Button {...props} variant="ghost" size="content" hoverFill="none" class="group -my-[13px] min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
+						<Badge variant="quiet" shape="pill" size="sm" class="group-hover:bg-brand-a/10 group-focus-visible:bg-brand-a/10 group-active:bg-brand-a/15 group-data-[state=open]:bg-brand-a/15">
+							<span class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>Unread
+						</Badge>
+					</Button>
+				{/snippet}
+				<MenuItem data-testid="session-bar-unread-mark-read" onselect={() => void sessionVerbActions.markRead(session)}>Mark read</MenuItem>
+			</Menu>
 		{/if}
 		{#if stateChip && session}
 			{#if stateChip.kind === "woke"}

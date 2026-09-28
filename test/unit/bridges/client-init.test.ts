@@ -209,6 +209,25 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		);
 	});
 
+	it("records a held session view without marking it read", async () => {
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session", {
+				skipMarkRead: true,
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "session_viewed",
+			sessionId: "requested-session",
+		});
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
 	it("does not mark a default session read", async () => {
 		const { sessionManagerService, layer } = makeClientInitEffectLayer(
 			makeEmptyHistoryReadQuery("opencode"),
