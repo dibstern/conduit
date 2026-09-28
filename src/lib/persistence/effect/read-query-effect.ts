@@ -20,7 +20,7 @@ import { sessionFamilyQuery } from "../session-family-query.js";
 export const deriveSessionSnooze = (
 	row: Pick<
 		SessionRow,
-		"snoozed_at" | "snoozed_until" | "woken_at" | "woken_reason" | "unread"
+		"snoozed_at" | "snoozed_until" | "woken_at" | "woken_reason"
 	>,
 	now = Date.now(),
 ): Pick<
@@ -33,12 +33,10 @@ export const deriveSessionSnooze = (
 		(row.snoozed_until !== null && row.snoozed_until <= now
 			? row.snoozed_until
 			: null);
-	// Woken stays shown until the session is seen, the same moment its dot
-	// clears. A time wake on a session already seen is simply back in the list.
+	// Woken stays shown until the session is opened, which unsnoozes it; its
+	// unread dot is a separate matter (conduit-test-hk9m.9).
 	if (wakeAt !== null)
-		return row.unread === 1
-			? { wokenAt: wakeAt, wokeBecause: row.woken_reason ?? "time" }
-			: {};
+		return { wokenAt: wakeAt, wokeBecause: row.woken_reason ?? "time" };
 	return {
 		snoozedAt: row.snoozed_at,
 		...(row.snoozed_until !== null ? { snoozedUntil: row.snoozed_until } : {}),

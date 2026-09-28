@@ -11,6 +11,7 @@
 		projectSessionList,
 		sessionMatchesStatus,
 		isSessionSnoozed,
+		isSessionWoken,
 		setSearchQuery,
 		setCurrentSession,
 		switchToSession,
@@ -336,6 +337,16 @@
 	// Scope; conduit-test-hk9m.3, .4).
 	function handleSwitchSession(session: SessionInfo) {
 		touch(session, "sidebar-pick");
+		// Opening a woken session is what clears its Woke badge; hovering or
+		// clicking its open view does not (conduit-test-hk9m.9).
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (projectSlug && isSessionWoken(session, sessionState.now)) {
+			unsnoozeSessionRpc({
+				projectSlug,
+				sessionId: session.id,
+				originId: getBrowserClientId(),
+			}).catch(() => showToast("Couldn't clear the wake", { variant: "error" }));
+		}
 		if (session.id !== sessionState.currentId) {
 			switchToSession(session.id, session.projectSlug);
 		}

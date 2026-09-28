@@ -21,6 +21,7 @@ export default defineConfig({
 		"session-auto-settle.spec.ts",
 		"session-arrange.spec.ts",
 		"session-snooze.spec.ts",
+		"session-woken.spec.ts",
 		"session-mark-unread.spec.ts",
 		"session-unread.spec.ts",
 		"session-unread-upgrade.spec.ts",

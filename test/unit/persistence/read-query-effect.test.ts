@@ -215,13 +215,12 @@ describe("typed session row derivations", () => {
 			}).pipe(Effect.provide(testLayer)),
 	);
 
-	it("keeps a timed or indefinite snooze until its wake, then clears it once seen", () => {
+	it("keeps a timed or indefinite snooze until its wake, and the wake until it is unsnoozed", () => {
 		const row = {
 			snoozed_at: 10,
 			snoozed_until: 30,
 			woken_at: null,
 			woken_reason: null,
-			unread: 1,
 		};
 		expect(deriveSessionSnooze(row, 29)).toEqual({
 			snoozedAt: 10,
@@ -231,7 +230,11 @@ describe("typed session row derivations", () => {
 			wokenAt: 30,
 			wokeBecause: "time",
 		});
-		expect(deriveSessionSnooze({ ...row, unread: 0 }, 30)).toEqual({});
+		// Seen or not, a wake shows until opening the session unsnoozes it.
+		expect(deriveSessionSnooze(row, 1_000)).toEqual({
+			wokenAt: 30,
+			wokeBecause: "time",
+		});
 		expect(deriveSessionSnooze({ ...row, snoozed_until: null }, 100)).toEqual({
 			snoozedAt: 10,
 		});

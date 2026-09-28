@@ -224,7 +224,12 @@ describe("listDaemonSessions", () => {
 				wokenAt: 150,
 				wokeBecause: "approval",
 			});
-			expect(sessions.get("read")).not.toHaveProperty("wokenAt");
+			// Seen or not, a wake shows until opening the session unsnoozes it
+			// (conduit-test-hk9m.9).
+			expect(sessions.get("read")).toMatchObject({
+				wokenAt: 50,
+				wokeBecause: "turn",
+			});
 		}).pipe(
 			Effect.provide(
 				makeProjectRegistryLive([

@@ -25,6 +25,11 @@ export interface ClaudeReplayPlan {
 	readonly turns: readonly ClaudeTraceName[];
 	/** Pause before every replayed message (e.g. to keep a turn stoppable). */
 	readonly delayMs?: number;
+	/**
+	 * Ask the runtime's canUseTool after this tool's tool_use, as the SDK does
+	 * before running a tool, and hold the rest of the turn until it answers.
+	 */
+	readonly askPermissionFor?: string;
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
 }
@@ -117,8 +122,9 @@ export function createClaudeTraceReplayer(
 	let sent = 0;
 	let unplannedTurn: Error | undefined;
 
-	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt }) => {
+	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt, options }) => {
 		let interrupted = false;
+		let aborted = new AbortController();
 
 		async function* replay(): AsyncGenerator<SDKMessage, void> {
 			for await (const _prompt of prompt) {
@@ -131,10 +137,31 @@ export function createClaudeTraceReplayer(
 					throw unplannedTurn;
 				}
 				interrupted = false;
+				aborted = new AbortController();
 				for (const message of freshTurn(trace, sessionId)) {
 					if (plan.delayMs) await sleep(plan.delayMs);
 					if (interrupted) break;
 					yield message;
+					const tool =
+						message.type === "assistant"
+							? message.message.content.find(
+									(block) =>
+										block.type === "tool_use" &&
+										block.name === plan.askPermissionFor,
+								)
+							: undefined;
+					if (tool?.type === "tool_use" && options?.canUseTool)
+						await options.canUseTool(
+							tool.name,
+							typeof tool.input === "object" && tool.input !== null
+								? { ...tool.input }
+								: {},
+							{
+								signal: aborted.signal,
+								toolUseID: tool.id,
+								requestId: `req_${tool.id}`,
+							},
+						);
 				}
 			}
 		}
@@ -145,10 +172,12 @@ export function createClaudeTraceReplayer(
 			// result, so no SDK error result is synthesized here.
 			interrupt: async () => {
 				interrupted = true;
+				aborted.abort();
 				return undefined;
 			},
 			close: () => {
 				interrupted = true;
+				aborted.abort();
 			},
 			// Settings the runtime syncs before each turn; traces are fixed.
 			setModel: async () => {},
