@@ -1144,10 +1144,22 @@ export async function markSessionReadRpc(
 	await runTransportEffect(callMarkSessionRead(input));
 }
 
-export async function markSessionSeenRpc(
+/**
+ * Resolves "disconnected" when the report never reached the server (socket
+ * down or dropped mid-flight), so the caller can hold it for reconnect. A
+ * server-side failure still rejects.
+ */
+export function markSessionSeenRpc(
 	input: MarkSessionSeenRpcInput,
-): Promise<void> {
-	await runTransportEffect(callMarkSessionSeen(input));
+): Promise<"saved" | "disconnected"> {
+	return runTransportEffect(
+		callMarkSessionSeen(input).pipe(
+			Effect.as("saved" as const),
+			Effect.catchTag("RpcClientError", () =>
+				Effect.succeed("disconnected" as const),
+			),
+		),
+	);
 }
 
 export async function setSessionPinnedRpc(

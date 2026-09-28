@@ -1,0 +1,42 @@
+[
+  {
+    "provider": "opencode",
+    "scenario": "sent on reconnect",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "sent on reconnect",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": "turn end 1",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "dropped after B's pick",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "dropped after B's pick",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  }
+]

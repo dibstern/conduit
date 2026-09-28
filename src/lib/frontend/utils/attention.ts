@@ -67,15 +67,47 @@ export function touch(
 	const projectSlug = session.projectSlug ?? getCurrentSlug();
 	if (!report || !projectSlug) return;
 	reported.set(session.id, report.upTo);
+	send(session.id, projectSlug, report.upTo);
+}
+
+/**
+ * Reports a dropped connection kept from reaching the server, one per session.
+ * Each is sent once when its project reattaches, and only if the row is still
+ * unread (conduit-test-hk9m.6).
+ */
+const pending = new Map<
+	string,
+	{ readonly projectSlug: string; readonly upTo: number }
+>();
+
+function send(sessionId: string, projectSlug: string, upTo: number): void {
+	pending.delete(sessionId);
 	markSessionSeenRpc({
 		projectSlug,
-		sessionId: session.id,
-		upTo: report.upTo,
+		sessionId,
+		upTo,
 		originId: getBrowserClientId(),
-	}).catch(() => {
-		if (reported.get(session.id) === report.upTo) reported.delete(session.id);
-		showToast("Couldn't mark read", { variant: "error" });
-	});
+	}).then(
+		(outcome) => {
+			// `reported` stays set, so the rest of the burst stays quiet.
+			if (outcome === "disconnected")
+				pending.set(sessionId, { projectSlug, upTo });
+		},
+		() => {
+			if (reported.get(sessionId) === upTo) reported.delete(sessionId);
+			showToast("Couldn't mark read", { variant: "error" });
+		},
+	);
+}
+
+/** Call once the reattached project's fresh session list is applied. */
+export function flushPendingSeen(projectSlug: string): void {
+	for (const [sessionId, report] of pending) {
+		if (report.projectSlug !== projectSlug) continue;
+		pending.delete(sessionId);
+		if (findSession(sessionId)?.unread === true)
+			send(sessionId, projectSlug, report.upTo);
+	}
 }
 
 const DWELL_MS = 300;

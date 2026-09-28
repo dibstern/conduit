@@ -107,6 +107,7 @@ import {
 	handleForkSession,
 	handleNewSession,
 	loadMoreHistoryForSession,
+	markSessionSeenForClient,
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
@@ -5358,4 +5359,48 @@ describe("handleMessage", () => {
 			}),
 		);
 	});
+});
+
+// A failed save fails toward unread: the caller gets the typed error, the
+// failure is logged, and nothing retries it (conduit-test-hk9m.6).
+describe("markSessionSeenForClient", () => {
+	it.effect(
+		"returns a failed save as a typed error, logged once, not retried",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const failure = new SessionManagerError({
+				operation: "markSessionSeen",
+				cause: new Error("SQLITE_BUSY"),
+			});
+			const sessionManagerService = makeMockSessionManagerService({
+				markSessionSeen: vi.fn(() => Effect.fail(failure)),
+			});
+
+			return markSessionSeenForClient({
+				clientId: "client-1",
+				sessionId: "session-1",
+				upTo: 4,
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						Layer.succeed(WebSocketHandlerTag, ws),
+						Layer.succeed(LoggerTag, log),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+				Effect.flip,
+				Effect.tap((error) => {
+					expect(error).toBe(failure);
+					expect(sessionManagerService.markSessionSeen).toHaveBeenCalledOnce();
+					expect(log.warn).toHaveBeenCalledOnce();
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining("session-1"),
+						failure,
+					);
+					expect(ws.broadcast).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
 });

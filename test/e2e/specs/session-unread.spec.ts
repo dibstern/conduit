@@ -5,9 +5,11 @@
 // resting over the transcript. Watching, window focus, a passing pointer, a
 // hidden page, an off-screen view and a scrolled-up transcript do not clear
 // it. Reload, reconnect and a relay restart keep the dot; a sub-agent never
-// gets one.
+// gets one. A report that lands late marks only the turn end it was made for;
+// one lost to a dropped connection is sent on reconnect if the dot is still
+// there.
 // Spec: docs/adr/0004-session-mutations-are-canonical-events.md (Scope),
-// conduit-test-hk9m.3 and conduit-test-hk9m.4.
+// conduit-test-hk9m.3, conduit-test-hk9m.4 and conduit-test-hk9m.6.
 //
 // Each step records dot state plus the row's last_turn_end_version and
 // seen_version into a report. The raw report is attached to the run; the
@@ -15,7 +17,7 @@
 // text deltas the relay coalesced and so vary from run to run.
 
 import { DatabaseSync } from "node:sqlite";
-import type { Browser, Page, TestInfo } from "@playwright/test";
+import type { Browser, Page, TestInfo, WebSocketRoute } from "@playwright/test";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -77,7 +79,9 @@ type ReportName =
 	| "fork"
 	| "click-and-typing"
 	| "focus-and-scroll"
-	| "dwell-and-viewport";
+	| "dwell-and-viewport"
+	| "held-report"
+	| "dropped-report";
 
 class Report {
 	readonly entries: ReportEntry[] = [];
@@ -514,6 +518,158 @@ async function dwellAndViewport(
 	await ctx.windows.B.context().close();
 }
 
+// ─── Failing toward unread (conduit-test-hk9m.6) ─────────────────────────────
+// A's sockets go through a proxy that can hold its MarkSessionSeen frames in
+// flight, cut the connection and keep it down, so a report can be made to
+// land late or not at all.
+
+async function proxySockets(page: Page) {
+	let holding = false;
+	let offline = false;
+	let reports = 0;
+	const held: (() => void)[] = [];
+	const sockets: WebSocketRoute[] = [];
+	await page.routeWebSocket(/\/(ws|rpc)(\?|$)/, (ws) => {
+		if (offline) {
+			void ws.close();
+			return;
+		}
+		const server = ws.connectToServer();
+		sockets.push(ws);
+		ws.onMessage((message) => {
+			const report =
+				typeof message === "string" && message.includes("MarkSessionSeen");
+			if (report) reports++;
+			if (report && holding) held.push(() => server.send(message));
+			else server.send(message);
+		});
+	});
+	return {
+		/** MarkSessionSeen frames A has sent, held or not. */
+		reports: () => reports,
+		hold: () => {
+			holding = true;
+		},
+		release: () => {
+			holding = false;
+			for (const send of held.splice(0)) send();
+		},
+		/** Drops A's sockets, and any held frame with them, until `reconnect`. */
+		disconnect: async () => {
+			offline = true;
+			holding = false;
+			held.length = 0;
+			for (const ws of sockets.splice(0)) await ws.close();
+		},
+		reconnect: async () => {
+			offline = false;
+			await expect(page.locator("#connect-overlay")).toBeHidden({
+				timeout: 30_000,
+			});
+		},
+	};
+}
+
+const seenVersion = (ctx: Interaction) =>
+	query<{ seen_version: number | null }>(
+		ctx.harness,
+		"SELECT seen_version FROM sessions WHERE id = ?",
+		ctx.sessionId,
+	)[0]?.seen_version;
+
+async function clickTranscript(page: Page) {
+	await paused(page, () =>
+		transcript(page).click({ position: { x: 24, y: 24 } }),
+	);
+}
+
+async function heldReport(
+	provider: Provider,
+	fixtures: Fixtures,
+	testInfo: TestInfo,
+) {
+	const proxy = await proxySockets(fixtures.page);
+	const ctx = await openInteraction(provider, fixtures);
+	const { A } = ctx.windows;
+
+	await test.step("a report that lands after the next turn end leaves that turn unread", async () => {
+		await newDot(ctx, "First turn");
+		proxy.hold();
+		await clickTranscript(A);
+		await expect.poll(proxy.reports).toBe(1);
+		await newDot(ctx, "Second turn");
+		proxy.release();
+		await expect
+			.poll(() => seenVersion(ctx))
+			.toBe(turnEnds(ctx.harness, ctx.sessionId)[0]);
+		await expectDot(ctx.windows, ctx.sessionId, true);
+		await ctx.report.record(
+			"held report lands late",
+			ctx.windows,
+			ctx.sessionId,
+		);
+	});
+
+	await test.step("the next touch clears it", async () => {
+		await clickTranscript(A);
+		await expectDot(ctx.windows, ctx.sessionId, false);
+		expect(proxy.reports()).toBe(2);
+		await ctx.report.record("next touch", ctx.windows, ctx.sessionId);
+	});
+
+	await ctx.report.check(testInfo, "held-report");
+	await ctx.windows.B.context().close();
+}
+
+async function droppedReport(
+	provider: Provider,
+	fixtures: Fixtures,
+	testInfo: TestInfo,
+) {
+	const proxy = await proxySockets(fixtures.page);
+	const ctx = await openInteraction(provider, fixtures);
+	const { A, B } = ctx.windows;
+
+	await test.step("a report lost to a dropped connection is sent on reconnect", async () => {
+		await newDot(ctx, "First turn");
+		proxy.hold();
+		await clickTranscript(A);
+		await expect.poll(proxy.reports).toBe(1);
+		await proxy.disconnect();
+		await expect(dot(B, ctx.sessionId)).toHaveCount(1);
+		await proxy.reconnect();
+		for (const page of [A, B])
+			await expect(dot(page, ctx.sessionId)).toHaveCount(0, {
+				timeout: 20_000,
+			});
+		expect(proxy.reports()).toBe(2);
+		await ctx.report.record("sent on reconnect", ctx.windows, ctx.sessionId);
+	});
+
+	await test.step("a lost report is dropped if another window cleared the dot", async () => {
+		await newDot(ctx, "Second turn");
+		proxy.hold();
+		await clickTranscript(A);
+		await expect.poll(proxy.reports).toBe(3);
+		await proxy.disconnect();
+		await row(B, ctx.sessionId).click();
+		await expect(dot(B, ctx.sessionId)).toHaveCount(0);
+		await proxy.reconnect();
+		await expect(dot(A, ctx.sessionId)).toHaveCount(0, { timeout: 20_000 });
+		// A stray flush would follow the reconnect's session list.
+		await A.waitForTimeout(1_000);
+		expect(proxy.reports()).toBe(3);
+		await ctx.report.record(
+			"dropped after B's pick",
+			ctx.windows,
+			ctx.sessionId,
+		);
+	});
+
+	await ctx.report.check(testInfo, "dropped-report");
+	await ctx.windows.B.context().close();
+}
+
 test.describe("Session unread dot", () => {
 	test.beforeEach(({ page }) => {
 		const viewport = page.viewportSize();
@@ -572,6 +728,32 @@ test.describe("Session unread dot", () => {
 			harness,
 		}, testInfo) => {
 			await dwellAndViewport(
+				"opencode",
+				{ page, browser, relayUrl, harness },
+				testInfo,
+			);
+		});
+
+		test("a report that lands late leaves the next turn end unread", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			await heldReport(
+				"opencode",
+				{ page, browser, relayUrl, harness },
+				testInfo,
+			);
+		});
+
+		test("a report lost to a dropped connection is sent on reconnect if still unread", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			await droppedReport(
 				"opencode",
 				{ page, browser, relayUrl, harness },
 				testInfo,
@@ -768,6 +950,40 @@ test.describe("Session unread dot", () => {
 				harness,
 			}, testInfo) => {
 				await dwellAndViewport(
+					"claude",
+					{ page, browser, relayUrl, harness },
+					testInfo,
+				);
+			});
+		});
+
+		test.describe("failing toward unread", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+				},
+			});
+
+			test("a report that lands late leaves the next turn end unread", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await heldReport(
+					"claude",
+					{ page, browser, relayUrl, harness },
+					testInfo,
+				);
+			});
+
+			test("a report lost to a dropped connection is sent on reconnect if still unread", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await droppedReport(
 					"claude",
 					{ page, browser, relayUrl, harness },
 					testInfo,
