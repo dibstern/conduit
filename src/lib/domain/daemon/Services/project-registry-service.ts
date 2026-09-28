@@ -24,6 +24,7 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import { withCachedProjectGit } from "../../../git/session-git.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { requestConfigSave } from "./config-persistence-service.js";
@@ -187,6 +188,14 @@ export const allProjects = Effect.gen(function* () {
 	}
 	return projects.sort((a, b) => (b.lastUsed ?? 0) - (a.lastUsed ?? 0));
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
+
+export const projectInfos = allProjects.pipe(Effect.map(withCachedProjectGit));
+
+export const broadcastProjectList = Effect.gen(function* () {
+	const projects = yield* projectInfos;
+	yield* broadcastToAll({ type: "project_list", projects });
+	return projects;
+});
 
 /** Get all ready entries as [slug, ProjectReady] pairs. */
 export const readyEntries = Effect.gen(function* () {

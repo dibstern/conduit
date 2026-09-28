@@ -112,6 +112,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 	instanceId: Schema.optional(Schema.String),
 });

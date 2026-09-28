@@ -69,18 +69,13 @@ export function applyProjectMutationResponse(
 }
 
 const toProjectInfoList = (
-	projects: ReadonlyArray<{
-		readonly slug: string;
-		readonly title: string;
-		readonly directory: string;
-		readonly clientCount?: number | undefined;
-		readonly instanceId?: string | undefined;
-	}>,
+	projects: GetProjectsResponse["projects"],
 ): ProjectInfo[] =>
 	projects.map((project) => ({
 		slug: project.slug,
 		title: project.title,
 		directory: project.directory,
+		...(project.git != null ? { git: project.git } : {}),
 		...(project.clientCount != null
 			? { clientCount: project.clientCount }
 			: {}),

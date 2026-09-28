@@ -33,8 +33,10 @@ import {
 import {
 	addProjectToEffectRegistry,
 	allProjects,
+	broadcastProjectList,
 	broadcastToAll,
 	type ProjectRegistryTag,
+	projectInfos,
 	removeProjectFromEffectRegistry,
 	replaceRelay,
 	updateProject,
@@ -112,11 +114,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			);
 
-		const projectList = Effect.gen(function* () {
-			const projects = yield* allProjects;
-			yield* broadcastToAll({ type: "project_list", projects });
-			return projects;
-		});
+		const projectList = broadcastProjectList;
 		const instanceList = Effect.gen(function* () {
 			const instances = Array.from(yield* getInstances);
 			yield* broadcastToAll({ type: "instance_list", instances });
@@ -127,7 +125,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			GetProjects: (request) =>
 				run(
 					"GetProjects",
-					allProjects.pipe(
+					projectInfos.pipe(
 						Effect.map((projects) => ({
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),

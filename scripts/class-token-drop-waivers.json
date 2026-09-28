@@ -135,5 +135,10 @@
 	},
 	"src/lib/frontend/components/session/SessionList.svelte :: This,its": "Words in a removed comment; neither is a class token.",
 	"src/lib/frontend/components/session/SheetActionItem.svelte :: className,danger,disabled:text-text-dimmer,flex,font-brand,gap-3,items-center,min-h-[44px],px-4,text-[14px],text-error,text-text,variant": "SheetActionItem was removed in favor of MenuItem with touch density. SessionContextMenu supplies the 44px floor and inner typography; MenuItem supplies padding, colors, disabled state and danger icon. className, danger and variant are parser artifacts from the deleted component.",
-	"src/lib/frontend/components/session/__fixtures__/SessionContextMenuHarness.svelte :: px-2,py-1,rounded-md,text-text-muted": "The Storybook-only anchor now uses ui/Button variant ghost and size sm, so its local control styling was intentionally removed."
+	"src/lib/frontend/components/session/__fixtures__/SessionContextMenuHarness.svelte :: px-2,py-1,rounded-md,text-text-muted": "The Storybook-only anchor now uses ui/Button variant ghost and size sm, so its local control styling was intentionally removed.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,leading-none,text-sm": {
+		"movedTo": "src/lib/frontend/components/session/GitIdentity.svelte",
+		"requires": "<GitIdentity",
+		"reason": "The identity line's typography moved with its markup into GitIdentity, which now renders project, branch, worktree and the dirty marker as separately truncating parts."
+	}
 }

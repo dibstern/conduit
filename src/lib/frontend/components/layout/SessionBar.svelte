@@ -47,6 +47,7 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
+	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import { sessionVerbActions } from "../session/session-verbs.js";
 	import {
@@ -63,13 +64,13 @@
 	const title = $derived(session?.title || "New Session");
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
 
-	// The design mock also shows a branch and a PR number beside the project.
-	// The frontend has neither, so identity is the project alone; it falls back
-	// to the slug because the project list arrives over the socket and the bar
-	// renders before it does.
+	// The project list arrives after the bar can render, so use the slug until then.
 	const identity = $derived(
 		projectState.projects.find((p) => p.slug === getCurrentSlug())?.title ??
 			getCurrentSlug(),
+	);
+	const git = $derived(
+		projectState.projects.find((p) => p.slug === getCurrentSlug())?.git,
 	);
 
 	const attentionCount = $derived(
@@ -163,12 +164,7 @@
 	-->
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2">
 		{#if identity}
-			<span
-				data-testid="session-bar-identity"
-				class="min-w-0 truncate text-sm font-medium leading-none text-text-muted"
-			>
-				{identity}
-			</span>
+			<GitIdentity project={identity} {git} />
 		{/if}
 		<InstanceBadgeMenu />
 	</div>
