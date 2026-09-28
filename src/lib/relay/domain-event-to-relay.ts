@@ -1,6 +1,7 @@
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { UntaggedRelayMessage } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
+import { isRecord } from "../utils.js";
 
 export type DomainEventRelayTranslation =
 	| {
@@ -178,7 +179,6 @@ export function translateDomainEventToRelay(
 		case "session.permission_mode_changed":
 			return emit({
 				type: "permission_mode_info",
-				sessionId: event.sessionId,
 				mode: event.data.mode,
 			});
 
@@ -203,10 +203,6 @@ function emit(
 
 function silent(reason: string): DomainEventRelayTranslation {
 	return { kind: "silent", reason };
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
 function stringify(v: unknown): string {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
+import { isRecord } from "../../utils.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -134,10 +135,6 @@ function toClaudeQuestionAnswers(
 
 function stringField(value: unknown): string {
 	return typeof value === "string" ? value : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 function abortSignalEffect(signal: AbortSignal): Effect.Effect<never, Error> {

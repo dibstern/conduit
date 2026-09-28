@@ -51,7 +51,9 @@ describe("session triage RPCs", () => {
 							pinned: value,
 						}),
 					).toEqual({ ok: true });
-					expect(service.setSessionSettled).toHaveBeenCalledWith("s1", value);
+					expect(service.setSessionSettled).toHaveBeenCalledWith("s1", {
+						settled: value,
+					});
 					expect(service.setSessionPinned).toHaveBeenCalledWith("s1", value);
 				}
 				expect(

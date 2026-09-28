@@ -64,7 +64,11 @@ export function synthesizeTextPart(
 	// Emit new text as delta
 	if (currentText.length > prevLength) {
 		const newText = currentText.slice(prevLength);
-		events.push({ type: deltaType, text: newText, messageId });
+		if (deltaType === "thinking_delta") {
+			events.push({ type: "thinking_delta", text: newText, messageId });
+		} else {
+			events.push({ type: "delta", text: newText, messageId });
+		}
 	}
 
 	// Check if reasoning is done (has end time)

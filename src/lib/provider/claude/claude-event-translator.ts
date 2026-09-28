@@ -29,6 +29,7 @@ import type {
 	EventPayloadMap,
 } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
+import { isRecord } from "../../utils.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
 import { AssistantTextLedger, type Emission } from "./assistant-text-ledger.js";
@@ -160,10 +161,6 @@ function serializeToolResultContent(content: unknown): string {
 	}
 	if (content == null) return "";
 	return JSON.stringify(content);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 function fmtTokens(tokens: number): string {

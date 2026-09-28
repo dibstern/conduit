@@ -126,6 +126,11 @@ export interface LoadHistoryOptions {
 	historyPageSize?: number;
 }
 
+export interface SetSessionSettledOptions {
+	readonly settled: boolean;
+	readonly automatic?: boolean;
+}
+
 const toReadonlyMap = <K, V>(map: HashMap.HashMap<K, V>): ReadonlyMap<K, V> =>
 	new Map(HashMap.toEntries(map));
 
@@ -689,8 +694,7 @@ const readSessionForTriage = (sessionId: string) =>
 
 export const setSessionSettled = (
 	sessionId: string,
-	settled: boolean,
-	automatic = false,
+	{ settled, automatic = false }: SetSessionSettledOptions,
 ) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);
@@ -1232,8 +1236,7 @@ export interface SessionManagerService {
 	markSessionRead(sessionId: string): Effect.Effect<void, SessionManagerError>;
 	setSessionSettled(
 		sessionId: string,
-		settled: boolean,
-		automatic?: boolean,
+		options: SetSessionSettledOptions,
 	): Effect.Effect<boolean, SessionManagerError>;
 	setSessionAutoSettleDisabled(
 		sessionId: string,
@@ -1718,11 +1721,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 				withSessionCommandServices(markSessionRead(sessionId)),
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
-			setSessionSettled: (sessionId, settled, automatic) =>
+			setSessionSettled: (sessionId, options) =>
 				triageLock.withPermits(1)(
-					withSessionCommandServices(
-						setSessionSettled(sessionId, settled, automatic),
-					),
+					withSessionCommandServices(setSessionSettled(sessionId, options)),
 				),
 			setSessionAutoSettleDisabled: (sessionId, disabled) =>
 				triageLock.withPermits(1)(

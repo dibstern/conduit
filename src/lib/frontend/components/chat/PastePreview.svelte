@@ -6,7 +6,6 @@
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
 	import type { PendingImage } from "../../types.js";
-	import { formatFileSize, escapeHtml } from "../../utils/format.js";
 
 	let {
 		images,

@@ -9,17 +9,9 @@
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import type { AgentList } from "../domain/relay/Services/agent-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import type {
-	PendingPermissionRecoveryInput,
-	PendingQuestion,
-} from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
-import type {
-	OpenCodeProviderList,
-	OpenCodeSessionDetail,
-} from "../domain/relay/Services/services.js";
+import type { OpenCodeProviderList } from "../domain/relay/Services/services.js";
 import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
@@ -44,70 +36,25 @@ import {
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
-import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import {
+	addProjectedModelExecution,
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
 	patchMissingDoneForProcessingState,
 	resolveSessionHistoryFromRows,
 	type SessionHistorySource,
-	type SessionSwitchDeps,
-	switchClientToSession,
 } from "../session/session-switch.js";
-import { findContextWindowOptions } from "../shared-types.js";
-import type {
-	OpenCodeInstance,
-	PendingPermission,
-	ProviderInfo,
-	RelayMessage,
-} from "../types.js";
+import {
+	findContextWindowOptions,
+	type HistoryMessage,
+} from "../shared-types.js";
+import type { OpenCodeInstance, ProviderInfo } from "../types.js";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
 
 /** Effect-backed session bootstrap capabilities needed by client-init. */
-export interface ClientInitSessionService {
-	getSessionFamily(
-		sessionId: string,
-	): Promise<Extract<RelayMessage, { type: "session_family" }>>;
-	getDefaultSessionId(title?: string): Promise<string>;
-	sendSessionLists(
-		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
-		options?: {
-			statuses?:
-				| Record<string, import("../instance/sdk-types.js").SessionStatus>
-				| undefined;
-		},
-	): Promise<void>;
-	resolveSessionHistory(sessionId: string): Promise<SessionHistorySource>;
-	loadPreRenderedHistory(
-		sessionId: string,
-		offset?: number,
-	): Promise<{
-		messages: import("../shared-types.js").HistoryMessage[];
-		hasMore: boolean;
-		total?: number;
-	}>;
-	seedPaginationCursor(
-		sessionId: string,
-		messageId: string,
-	): void | Promise<void>;
-	getLastMessageAtMap?(): ReadonlyMap<string, number>;
-}
-
-export interface ClientInitOverrideState {
-	getModel(sessionId: string): Promise<ModelOverride | undefined>;
-	getDefaultModel(): Promise<ModelOverride | undefined>;
-	getVariant(sessionId: string): Promise<string>;
-	getDefaultVariant(): Promise<string>;
-	getContextWindow(sessionId: string): Promise<string>;
-	getDefaultContextWindow(): Promise<string>;
-	setDefaultModel(model: ModelOverride): Promise<void>;
-	hasActiveProcessingTimeout(sessionId: string): Promise<boolean>;
-}
-
 function toConfiguredOpenCodeProviders(
 	providerResult: OpenCodeProviderList,
 ): ProviderInfo[] {
@@ -169,57 +116,6 @@ function addClaudeProvider(
 	return true;
 }
 
-export interface ClientInitDeps {
-	wsHandler: {
-		broadcast: (msg: RelayMessage) => void;
-		sendTo: (clientId: string, msg: RelayMessage) => void;
-		setClientSession: (clientId: string, sessionId: string) => void;
-		/**
-		 * Phase 0b: called after the initial `session_list` has been
-		 * dispatched so that any per-session events buffered during bootstrap
-		 * are flushed to the client in the order they were produced.
-		 */
-		markClientBootstrapped: (clientId: string) => void;
-	};
-	client: OpenCodeAPI;
-	sessionService: ClientInitSessionService;
-	overrideState: ClientInitOverrideState;
-	terminal: {
-		replay(clientId: string): Promise<void>;
-	};
-	agentService: {
-		listAgents(activeSessionId: string | undefined): Promise<AgentList>;
-	};
-	modelService: {
-		getSession(sessionId: string): Promise<OpenCodeSessionDetail>;
-		listProviders(): Promise<OpenCodeProviderList>;
-	};
-	pendingInteractions: {
-		listPendingPermissions(): Promise<PendingPermission[]>;
-		recoverPendingPermissions(
-			permissions: readonly PendingPermissionRecoveryInput[],
-		): Promise<PendingPermission[]>;
-		listPendingQuestions(sessionId?: string): Promise<PendingQuestion[]>;
-	};
-	/** Optional legacy sync snapshot for Promise-shaped unit callers. */
-	statusPoller?: {
-		isProcessing(sessionId: string): boolean;
-		getCurrentStatuses(): Record<
-			string,
-			import("../instance/sdk-types.js").SessionStatus
-		>;
-	};
-	/** Optional supplier of the current OpenCode instance list */
-	getInstances?: () =>
-		| ReadonlyArray<Readonly<OpenCodeInstance>>
-		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
-	/** Optional supplier of cached update version (for replaying to new clients) */
-	getCachedUpdate?: () => string | null | PromiseLike<string | null>;
-	/** Optional Claude SDK capability discovery, provided by the relay Effect runtime. */
-	discoverClaudeCapabilities?: () => Promise<ProviderCapabilities>;
-	log: Logger;
-}
-
 export interface ClientInitEffectOptions {
 	readonly skipDefaultSession?: boolean;
 	readonly getInstances?: () =>
@@ -243,10 +139,14 @@ const resolveClientInitHistoryEffect = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		let projectedSource: SessionHistorySource = { kind: "empty" };
+		let projectedMessages: readonly HistoryMessage[] = [];
 		if (readQueryOption._tag === "Some") {
 			const rows =
 				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
 			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+			if (projectedSource.kind === "rest-history") {
+				projectedMessages = projectedSource.history.messages;
+			}
 
 			// The projection is authoritative only for relay-local (claude)
 			// sessions. OpenCode projections currently persist structure without
@@ -271,7 +171,13 @@ const resolveClientInitHistoryEffect = (sessionId: string) =>
 		if (historyResult._tag === "Right") {
 			return {
 				kind: "rest-history",
-				history: historyResult.right,
+				history: {
+					...historyResult.right,
+					messages: addProjectedModelExecution(
+						historyResult.right.messages,
+						projectedMessages,
+					),
+				},
 			} satisfies SessionHistorySource;
 		}
 
@@ -370,11 +276,7 @@ const switchClientToSessionForInitEffect = (
 		return family;
 	});
 
-/**
- * Effect-owned production client bootstrap. This is the canonical relay path;
- * handleClientConnected() below remains for the existing Promise-shaped unit
- * tests while production no longer builds service bridges in relay-stack.
- */
+/** Effect-owned production client bootstrap. */
 export const handleClientConnectedEffect = (
 	clientId: string,
 	requestedSessionId?: string,
@@ -823,437 +725,3 @@ export const handleClientConnectedEffect = (
 			}
 		}
 	});
-
-// ─── Handler ─────────────────────────────────────────────────────────────────
-
-/**
- * Handle a newly connected browser client. Sends all initial state:
- * - Active session with cached events or REST API history
- * - Session list
- * - Model info (from session or overrides)
- * - Agent list (filtered)
- * - Provider/model list (connected only)
- * - PTY list + scrollback replay
- *
- * When `requestedSessionId` is provided (via ?session= WS query param),
- * it overrides the global active session for this client's init — preventing
- * a flash of wrong content when opening a session link in a new tab.
- *
- * Errors are sent as INIT_FAILED messages without crashing the handler.
- */
-export async function handleClientConnected(
-	deps: ClientInitDeps,
-	clientId: string,
-	requestedSessionId?: string,
-): Promise<void> {
-	const { wsHandler, client, sessionService, pendingInteractions } = deps;
-	const { overrideState } = deps;
-
-	const sendInitError = (err: unknown, prefix: string) => {
-		deps.log.warn(`${prefix}: ${formatErrorDetail(err)}`);
-		wsHandler.sendTo(
-			clientId,
-			RelayError.fromCaught(err, "INIT_FAILED", prefix).toSystemError(),
-		);
-	};
-
-	// ── Active session with event replay ─────────────────────────────────
-	// Use the requested session (from ?session= query param) if provided,
-	// otherwise compute the default (most recent or newly created).
-	const activeId =
-		requestedSessionId || (await sessionService.getDefaultSessionId());
-	const familyIds = new Set<string>(activeId ? [activeId] : []);
-	let activeSessionModel: ModelOverride | undefined;
-	if (activeId) {
-		// pollerManager intentionally omitted — not available in ClientInitDeps.
-		// skipPollerSeed: true ensures switchClientToSession never accesses it.
-		// The `satisfies` check guarantees a compile error if SessionSwitchDeps
-		// adds new required fields that this object doesn't provide.
-		const family = await sessionService.getSessionFamily(activeId);
-		for (const session of family.sessions) familyIds.add(session.id);
-		wsHandler.sendTo(clientId, family);
-		await switchClientToSession(
-			{
-				sessionMgr: sessionService,
-				wsHandler,
-				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
-				processingTimeouts: {
-					hasActiveProcessingTimeout: overrideState.hasActiveProcessingTimeout,
-				},
-				log: deps.log,
-				getInputDraft: getSessionInputDraft,
-				resolveSessionHistory: sessionService.resolveSessionHistory,
-			} satisfies SessionSwitchDeps,
-			clientId,
-			activeId,
-			{ skipPollerSeed: true },
-		);
-
-		// Send model/agent info from the active session
-		try {
-			const session = await deps.modelService.getSession(activeId);
-			if (session.modelID) {
-				activeSessionModel = {
-					modelID: session.modelID,
-					providerID: session.providerID ?? "",
-				};
-				wsHandler.sendTo(clientId, {
-					type: "model_info",
-					model: session.modelID,
-					provider: session.providerID ?? "",
-				});
-			} else {
-				// Session has no model set — fall back to per-session override or default
-				const fallbackModel = await overrideState.getModel(activeId);
-				if (fallbackModel) {
-					wsHandler.sendTo(clientId, {
-						type: "model_info",
-						model: fallbackModel.modelID,
-						provider: fallbackModel.providerID,
-					});
-				}
-			}
-		} catch (err) {
-			deps.log.warn(
-				`Failed to load session info for ${activeId}: ${
-					err instanceof Error ? err.message : String(err)
-				}`,
-			);
-			const fallbackModel = await overrideState.getModel(activeId);
-			if (fallbackModel) {
-				wsHandler.sendTo(clientId, {
-					type: "model_info",
-					model: fallbackModel.modelID,
-					provider: fallbackModel.providerID,
-				});
-			}
-		}
-	}
-
-	// ── Session list ─────────────────────────────────────────────────────
-	// Phase 0b: session_list-first invariant — emit the initial session_list
-	// before marking the client bootstrapped. Any per-session events that
-	// fired on the project firehose during bootstrap are buffered
-	// per-client by WebSocketHandler and flushed by markClientBootstrapped.
-	try {
-		const statuses = deps.statusPoller?.getCurrentStatuses();
-		await sessionService.sendSessionLists(
-			(msg) => wsHandler.sendTo(clientId, msg),
-			{ statuses },
-		);
-	} catch (err) {
-		sendInitError(err, "Failed to list sessions");
-	} finally {
-		// Mark bootstrapped even if session_list failed — otherwise the
-		// client's queue would grow unbounded. A failed bootstrap still
-		// emits INIT_FAILED, and the frontend handles the error path.
-		wsHandler.markClientBootstrapped(clientId);
-	}
-
-	// ── Pending permissions + questions (reconnect replay) ───────────────
-	// First replay any permissions already tracked by the pending interaction service.
-	const servicePending = await pendingInteractions.listPendingPermissions();
-	const sentPermissionIds = new Set<string>();
-	for (const perm of servicePending) {
-		wsHandler.sendTo(clientId, {
-			type: "permission_request",
-			sessionId: perm.sessionId,
-			requestId: perm.requestId,
-			toolName: perm.toolName,
-			toolInput: perm.toolInput,
-		});
-		sentPermissionIds.add(perm.requestId);
-	}
-	// Then fetch from the API to recover any permissions the bridge missed
-	// (e.g. relay restart, SSE event lost). Dedup against already-sent IDs.
-	try {
-		const apiPermissions = await client.permission.list();
-		const newPerms = apiPermissions.filter((p) => !sentPermissionIds.has(p.id));
-		if (newPerms.length > 0) {
-			const recoveryInput = newPerms.map((p) => {
-				const raw = p as {
-					id: string;
-					permission: string;
-					sessionID?: string;
-					patterns?: string[];
-					metadata?: Record<string, unknown>;
-					always?: string[];
-				};
-				return {
-					id: raw.id,
-					permission: raw.permission,
-					...(raw.sessionID != null && { sessionId: raw.sessionID }),
-					...(raw.patterns != null && { patterns: raw.patterns }),
-					...(raw.metadata != null && { metadata: raw.metadata }),
-					...(raw.always != null && { always: raw.always }),
-				};
-			});
-			const recovered =
-				await pendingInteractions.recoverPendingPermissions(recoveryInput);
-			for (const perm of recovered) {
-				wsHandler.sendTo(clientId, {
-					type: "permission_request",
-					sessionId: perm.sessionId,
-					requestId: perm.requestId,
-					toolName: perm.toolName,
-					toolInput: perm.toolInput,
-				});
-			}
-		}
-	} catch (err) {
-		deps.log.warn(
-			`Failed to fetch pending permissions from API: ${formatErrorDetail(err)}`,
-		);
-	}
-	// Replay pending questions for the client's active session family
-	try {
-		const sentQuestionIds = new Set<string>();
-		const servicePendingQuestions =
-			await pendingInteractions.listPendingQuestions();
-		for (const pq of servicePendingQuestions) {
-			if (pq.sessionId && activeId && !familyIds.has(pq.sessionId)) continue;
-			wsHandler.sendTo(clientId, {
-				type: "ask_user",
-				sessionId: pq.sessionId || activeId || "",
-				toolId: pq.requestId,
-				questions: pq.questions.map((q) => ({
-					question: q.question,
-					header: q.header ?? "",
-					options: (q.options ?? []) as Array<{
-						label: string;
-						description?: string;
-					}>,
-					multiSelect: q.multiSelect ?? false,
-				})),
-				...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
-				...(pq.providerId ? { providerId: pq.providerId } : {}),
-			});
-			sentQuestionIds.add(pq.requestId);
-		}
-		const pendingQuestions = await client.question.list();
-		deps.log.debug(
-			`client=${clientId} listPendingQuestions returned ${pendingQuestions.length} question(s)${pendingQuestions.length > 0 ? `: ${JSON.stringify(pendingQuestions.map((q) => ({ id: q.id, hasQuestions: !!q["questions"], hasTool: !!q["tool"] })))}` : ""}`,
-		);
-		for (const pq of pendingQuestions) {
-			if (sentQuestionIds.has(pq.id)) continue;
-			// Filter questions to the client's active session family
-			const qSessionId = pq["sessionID"] as string | undefined;
-			if (qSessionId && activeId && !familyIds.has(qSessionId)) continue;
-
-			const rawQuestions = pq["questions"] as
-				| Array<{
-						question?: string;
-						header?: string;
-						options?: Array<{ label?: string; description?: string }>;
-						multiple?: boolean;
-						custom?: boolean;
-				  }>
-				| undefined;
-			if (!Array.isArray(rawQuestions)) {
-				deps.log.debug(
-					`client=${clientId} skipping question ${pq.id}: questions field is not an array (${typeof pq["questions"]})`,
-				);
-				continue;
-			}
-			const questions = mapQuestionFields(rawQuestions);
-			const tool = pq["tool"] as { callID?: string } | undefined;
-			const toolCallId = tool?.callID;
-			deps.log.debug(
-				`client=${clientId} sending ask_user: toolId=${pq.id} toolUseId=${toolCallId ?? "none"} questionCount=${questions.length}`,
-			);
-			wsHandler.sendTo(clientId, {
-				type: "ask_user",
-				sessionId: qSessionId ?? activeId ?? "",
-				toolId: pq.id,
-				questions,
-				providerId: "opencode",
-				...(toolCallId ? { toolUseId: toolCallId } : {}),
-			});
-		}
-	} catch (err) {
-		deps.log.warn(
-			`Failed to replay pending questions: ${formatErrorDetail(err)}`,
-		);
-	}
-
-	// ── Agent list (filter out internal agents) ──────────────────────────
-	try {
-		const result = await deps.agentService.listAgents(activeId);
-		wsHandler.sendTo(clientId, {
-			type: "agent_list",
-			providerScope: result.providerScope,
-			agents: [...result.agents],
-			...(result.activeAgentId ? { activeAgentId: result.activeAgentId } : {}),
-		});
-	} catch (err) {
-		sendInitError(err, "Failed to list agents");
-	}
-
-	// ── Provider/model list + auto-select default ────────────────────────
-	try {
-		let providerResult: OpenCodeProviderList | undefined;
-		const providers: ProviderInfo[] = [];
-		let openCodeError: unknown;
-		try {
-			providerResult = await deps.modelService.listProviders();
-			providers.push(...toConfiguredOpenCodeProviders(providerResult));
-			wsHandler.sendTo(clientId, { type: "model_list", providers });
-		} catch (err) {
-			openCodeError = err;
-			deps.log.warn(
-				`OpenCode provider discovery failed during client init: ${formatErrorDetail(err)}`,
-			);
-		}
-
-		// Merge Claude in-process models when the orchestration engine is available.
-		// Mirrors model discovery so the initial client_connected payload doesn't
-		// overwrite the merged list the client later receives from RPC.
-		//   "Anthropic - opencode" → routes via OpenCode REST API
-		//   "Anthropic - claude"  → routes via in-process Claude Agent SDK
-		let claudeAdded = false;
-		if (deps.discoverClaudeCapabilities) {
-			try {
-				const claudeCaps = await deps.discoverClaudeCapabilities();
-				claudeAdded = addClaudeProvider(providers, claudeCaps);
-				if (claudeAdded) {
-					wsHandler.sendTo(clientId, { type: "model_list", providers });
-				}
-			} catch {
-				// Claude provider instance may not be available — skip silently
-			}
-		}
-		if (openCodeError && !claudeAdded && providers.length === 0) {
-			throw openCodeError;
-		}
-
-		// Send variant info — current thinking level and available variants
-		// for the active model (per-session when available, global fallback)
-		const currentVariant = activeId
-			? await overrideState.getVariant(activeId)
-			: await overrideState.getDefaultVariant();
-		const activeModelOverride = activeId
-			? await overrideState.getModel(activeId)
-			: await overrideState.getDefaultModel();
-		const activeModel = activeId
-			? (activeModelOverride ?? activeSessionModel)
-			: activeModelOverride;
-		const activeModelId = activeModel?.modelID;
-		let availableVariants: string[] = [];
-		if (activeModelId) {
-			for (const p of providers) {
-				const model = p.models.find(
-					(m: { id: string; variants?: string[] }) => m.id === activeModelId,
-				);
-				if (model?.variants) {
-					availableVariants = model.variants;
-					break;
-				}
-			}
-		}
-		wsHandler.sendTo(clientId, {
-			type: "variant_info",
-			variant: currentVariant,
-			variants: availableVariants,
-		});
-		wsHandler.sendTo(clientId, {
-			type: "context_window_info",
-			contextWindow: activeId
-				? await overrideState.getContextWindow(activeId)
-				: await overrideState.getDefaultContextWindow(),
-			options: findContextWindowOptions(providers, activeModelId),
-		});
-
-		// Send default model info to new client
-		const defaultModel = await overrideState.getDefaultModel();
-		if (defaultModel) {
-			wsHandler.sendTo(clientId, {
-				type: "default_model_info",
-				model: defaultModel.modelID,
-				provider: defaultModel.providerID,
-				variant: await overrideState.getDefaultVariant(),
-			});
-		}
-
-		// Auto-select default model if none set.
-		// Priority: defaultModel (seeded from config or user-set) > provider-level default.
-		if (!defaultModel && providerResult) {
-			// Fallback: first connected provider's default model
-			for (const providerId of providerResult.connected) {
-				const defaultModelId = providerResult.defaults[providerId];
-				if (defaultModelId) {
-					await overrideState.setDefaultModel({
-						providerID: providerId,
-						modelID: defaultModelId,
-					});
-					wsHandler.broadcast({
-						type: "model_info",
-						model: defaultModelId,
-						provider: providerId,
-					});
-					deps.log.info(
-						`Auto-selected default: ${defaultModelId} (${providerId})`,
-					);
-					break;
-				}
-			}
-		} else if (!defaultModel && claudeAdded) {
-			const defaultClaudeModel = providers
-				.find((provider) => provider.id === "claude")
-				?.models.at(0);
-			if (defaultClaudeModel) {
-				await overrideState.setDefaultModel({
-					providerID: "claude",
-					modelID: defaultClaudeModel.id,
-				});
-				wsHandler.broadcast({
-					type: "model_info",
-					model: defaultClaudeModel.id,
-					provider: "claude",
-				});
-				deps.log.info(
-					`Auto-selected default: ${defaultClaudeModel.id} (claude)`,
-				);
-			}
-		} else if (
-			defaultModel &&
-			providers.some((provider) => provider.id === defaultModel.providerID)
-		) {
-			// Broadcast existing default to new client
-			wsHandler.sendTo(clientId, {
-				type: "model_info",
-				model: defaultModel.modelID,
-				provider: defaultModel.providerID,
-			});
-			deps.log.info(
-				`Default: ${defaultModel.modelID} (${defaultModel.providerID})`,
-			);
-		}
-	} catch (err) {
-		sendInitError(err, "Failed to list providers");
-	}
-
-	// ── PTY list + scrollback replay ─────────────────────────────────────
-	await deps.terminal.replay(clientId);
-
-	// ── Instance list ─────────────────────────────────────────────────────
-	if (deps.getInstances) {
-		try {
-			const instances = await deps.getInstances();
-			wsHandler.sendTo(clientId, { type: "instance_list", instances });
-		} catch (err) {
-			sendInitError(err, "Failed to list instances");
-		}
-	}
-
-	// ── Cached update notification ───────────────────────────────────────
-	if (deps.getCachedUpdate) {
-		try {
-			const version = await deps.getCachedUpdate();
-			if (version) {
-				wsHandler.sendTo(clientId, { type: "update_available", version });
-			}
-		} catch (err) {
-			sendInitError(err, "Failed to replay update");
-		}
-	}
-}

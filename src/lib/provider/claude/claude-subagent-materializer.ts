@@ -12,6 +12,7 @@ import type {
 	EventPayloadMap,
 	MessageRole,
 } from "../../persistence/events.js";
+import { isRecord } from "../../utils.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
@@ -507,8 +508,4 @@ function replaceSet<T>(target: Set<T>, source: Set<T>): void {
 	for (const value of source) {
 		target.add(value);
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }

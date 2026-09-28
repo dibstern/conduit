@@ -157,11 +157,11 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 		run: ({ service, readQuery, seedSession }) =>
 			Effect.gen(function* () {
 				yield* seedSession("ses-settled", "Settle me");
-				yield* service.setSessionSettled("ses-settled", true);
+				yield* service.setSessionSettled("ses-settled", { settled: true });
 				expect(
 					(yield* readQuery.getSession("ses-settled"))?.settled_at,
 				).toEqual(expect.any(Number));
-				yield* service.setSessionSettled("ses-settled", false);
+				yield* service.setSessionSettled("ses-settled", { settled: false });
 				expect(
 					(yield* readQuery.getSession("ses-settled"))?.settled_at,
 				).toBeNull();

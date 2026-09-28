@@ -1221,7 +1221,10 @@ export async function createProjectRelay(
 							hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
 							hasLiveBackgroundWork: backgroundLiveness.hasLiveWork,
 							setSettled: (id) =>
-								startup.sessionManagerService.setSessionSettled(id, true, true),
+								startup.sessionManagerService.setSessionSettled(id, {
+									settled: true,
+									automatic: true,
+								}),
 							broadcastSessionList: () =>
 								startup.sessionManagerService.sendSessionLists((msg) =>
 									wsHandler.broadcast(msg),

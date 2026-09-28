@@ -25,6 +25,11 @@ export function assertNever(value: never): never {
 	throw new Error(`Unexpected value: ${String(value)}`);
 }
 
+/** Narrow an unknown value to a non-array object record. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Generate a slug from a directory path */
 export function generateSlug(
 	directory: string,

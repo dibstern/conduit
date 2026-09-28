@@ -7,7 +7,6 @@
 	import { getAttentionSessions, dispatch } from "../../stores/notification-reducer.svelte.js";
 	import { getDescendantSessionIds, getRemotePermissions } from "../../stores/permissions.svelte.js";
 	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";

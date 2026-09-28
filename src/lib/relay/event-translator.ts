@@ -6,6 +6,7 @@ import type { PermissionId, UntaggedRelayMessage } from "../shared-types.js";
 import type {
 	AskUserQuestion,
 	PartType,
+	RelayMessage,
 	TodoItem,
 	TodoStatus,
 	ToolName,
@@ -251,7 +252,7 @@ export function translateReasoningPartUpdated(
 export function translatePermission(
 	event: SSEEvent,
 	sessionId?: string,
-): UntaggedRelayMessage | null {
+): Extract<RelayMessage, { type: "permission_request" }> | null {
 	if (!isPermissionAskedEvent(event)) return null;
 	if (!sessionId) return null;
 	const { properties: props } = event;
@@ -429,7 +430,7 @@ export function translateMessageCreated(
 /** Translate message.updated event (usage/cost data) */
 export function translateMessageUpdated(
 	event: SSEEvent,
-): UntaggedRelayMessage | null {
+): Extract<RelayMessage, { type: "result" }> | null {
 	if (!isMessageUpdatedEvent(event)) return null;
 	// OpenCode sends message data under "info" (observed in live SSE events),
 	// but we also support "message" for backward compatibility.

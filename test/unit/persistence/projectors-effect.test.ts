@@ -1614,7 +1614,7 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
-	it("tool.running replaces malformed metadata with the next valid metadata", () =>
+	it("tool.running preserves malformed metadata", () =>
 		runTest(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -1638,11 +1638,10 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 				);
 				yield* runner.projectEvent(e4);
 
-				const rows = yield* sql<{ metadata: string | null }>`
-					SELECT metadata FROM message_parts WHERE id = 'tool1'`;
-				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
-					providerTaskId: "task-1",
-				});
+				const rows = yield* sql<{ status: string; metadata: string | null }>`
+					SELECT status, metadata FROM message_parts WHERE id = 'tool1'`;
+				expect(rows[0]?.status).toBe("running");
+				expect(rows[0]?.metadata).toBe("{not json");
 			}),
 		));
 

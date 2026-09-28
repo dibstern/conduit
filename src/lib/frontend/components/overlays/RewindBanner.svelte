@@ -5,7 +5,6 @@
   conversation only, files only.
 -->
 <script lang="ts">
-	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import Radio from "../ui/Radio.svelte";
 	import Modal from "./Modal.svelte";
@@ -168,4 +167,3 @@
 			</div>
 		</Surface>
 </Modal>
-

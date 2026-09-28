@@ -272,6 +272,29 @@ export function resolveSessionHistoryFromRows(
 	};
 }
 
+/**
+ * Restore model-execution metadata from persisted projection rows onto the
+ * corresponding provider REST messages.
+ */
+export function addProjectedModelExecution(
+	messages: readonly HistoryMessage[],
+	projectedMessages: readonly HistoryMessage[],
+): HistoryMessage[] {
+	const executionByMessageId = new Map(
+		projectedMessages.flatMap((message) =>
+			message.role === "user" && message.modelExecution
+				? [[message.id, message.modelExecution] as const]
+				: [],
+		),
+	);
+	return messages.map((message) => {
+		const modelExecution = executionByMessageId.get(message.id);
+		return message.role === "user" && modelExecution
+			? { ...message, modelExecution }
+			: message;
+	});
+}
+
 // ─── Async I/O functions ────────────────────────────────────────────────────
 
 /**

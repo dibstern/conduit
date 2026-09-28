@@ -1,4 +1,10 @@
 import type { CanonicalToolInput } from "../../persistence/events.js";
+import {
+	optNum,
+	optStr,
+	str,
+	toRecord,
+} from "../normalize-tool-input-helpers.js";
 
 /**
  * Normalize raw Claude SDK tool input into CanonicalToolInput.
@@ -105,48 +111,6 @@ export function normalizeToolInput(
 		default:
 			return { tool: "Unknown", name, raw: input };
 	}
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function toRecord(v: unknown): Record<string, unknown> {
-	if (v && typeof v === "object" && !Array.isArray(v)) {
-		return v as Record<string, unknown>;
-	}
-	return {};
-}
-
-/** Read the first defined string value from multiple key aliases. */
-function str(input: Record<string, unknown>, ...keys: string[]): string {
-	for (const k of keys) {
-		const v = input[k];
-		if (typeof v === "string") return v;
-	}
-	return "";
-}
-
-/** Optional string field — only included if defined. */
-function optStr(
-	input: Record<string, unknown>,
-	...keys: string[]
-): Record<string, string> {
-	for (const k of keys) {
-		const v = input[k];
-		if (typeof v === "string" && v.length > 0) return { [k]: v };
-	}
-	return {};
-}
-
-/** Optional number field — only included if defined. */
-function optNum(
-	input: Record<string, unknown>,
-	...keys: string[]
-): Record<string, number> {
-	for (const k of keys) {
-		const v = input[k];
-		if (typeof v === "number") return { [k]: v };
-	}
-	return {};
 }
 
 /** Optional boolean field — only included if defined. */

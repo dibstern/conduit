@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	__setProbeOverrideForTesting,
-	resetCapabilityCacheForTesting,
-} from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { __setProbeOverrideForTesting } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { makeUnsafeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 
@@ -15,7 +12,6 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 	let workspace: string;
 
 	beforeEach(() => {
-		resetCapabilityCacheForTesting();
 		__setProbeOverrideForTesting(async () => ({
 			models: [
 				{
@@ -45,7 +41,6 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 
 	afterEach(() => {
 		__setProbeOverrideForTesting(undefined);
-		resetCapabilityCacheForTesting();
 		rmSync(workspace, { recursive: true, force: true });
 	});
 

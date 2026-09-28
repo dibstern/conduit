@@ -5,12 +5,12 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
+import { isRecord } from "../../utils.js";
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
 	StoredEvent,
 } from "../events.js";
-
 import {
 	getSessionStatements,
 	SESSION_HANDLED_TYPES,
@@ -53,23 +53,27 @@ function encodeJson(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+/** Shallow-merge new tool metadata into the stored JSON object. Corrupt stored metadata is logged and kept as-is. */
 function mergeMetadata(
 	current: string | null,
 	next: Record<string, unknown> | undefined,
-): string | null {
-	if (next === undefined) return current;
-	let currentObject: Record<string, unknown> = {};
-	if (current != null) {
-		try {
-			const parsed: unknown = JSON.parse(current);
-			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-				currentObject = parsed as Record<string, unknown>;
-			}
-		} catch {
-			currentObject = {};
-		}
+	sessionId: string,
+	partId: string,
+): Effect.Effect<string | null> {
+	if (next === undefined) return Effect.succeed(current);
+	if (current == null) return Effect.succeed(encodeJson(next));
+	const keepCorrupt = (reason: string) =>
+		Effect.logError(
+			`Unable to merge corrupt message part metadata for session ${sessionId}, part ${partId}; preserving stored metadata: ${reason}`,
+		).pipe(Effect.as(current));
+	try {
+		const parsed: unknown = JSON.parse(current);
+		return isRecord(parsed)
+			? Effect.succeed(encodeJson({ ...parsed, ...next }))
+			: keepCorrupt("Stored metadata must be a JSON object");
+	} catch (error) {
+		return keepCorrupt(error instanceof Error ? error.message : String(error));
 	}
-	return encodeJson({ ...currentObject, ...next });
 }
 
 // ─── Session Projector ──────────────────────────────────────────────────────
@@ -237,9 +241,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 			if (isEventType(event, "tool.running")) {
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
-				const metadata = mergeMetadata(
+				const metadata = yield* mergeMetadata(
 					rows[0]?.metadata ?? null,
 					event.data.metadata,
+					event.sessionId,
+					event.data.partId,
 				);
 				yield* sql`
 					UPDATE message_parts
@@ -258,9 +264,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const resultJson = encodeJson(event.data.result);
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
-				const metadata = mergeMetadata(
+				const metadata = yield* mergeMetadata(
 					rows[0]?.metadata ?? null,
 					event.data.metadata,
+					event.sessionId,
+					event.data.partId,
 				);
 				yield* sql`
 					UPDATE message_parts

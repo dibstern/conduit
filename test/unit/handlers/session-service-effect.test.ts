@@ -188,7 +188,9 @@ describe("session handlers with Effect-native model service", () => {
 					sessionId: "s1",
 					pinned: false,
 				});
-				expect(service.setSessionSettled).toHaveBeenCalledWith("s1", true);
+				expect(service.setSessionSettled).toHaveBeenCalledWith("s1", {
+					settled: true,
+				});
 				expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
 				expect(wsHandler.broadcast).toHaveBeenCalledTimes(changed ? 2 : 0);
 			}).pipe(Effect.provide(layer));

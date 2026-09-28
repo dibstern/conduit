@@ -1,4 +1,5 @@
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
+import { isRecord } from "../utils.js";
 
 export function providerRefsFromRuntimeData(
 	type: ProviderRuntimeEvent["type"],
@@ -43,8 +44,4 @@ export function providerRefsFromRuntimeData(
 
 function stringField(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object" && !Array.isArray(value);
 }

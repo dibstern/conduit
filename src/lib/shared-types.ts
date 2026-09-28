@@ -1795,8 +1795,11 @@ export type GlobalRelayEvent = Exclude<
  */
 export type UntaggedRelayMessage =
 	| RelayMessage
-	// biome-ignore lint/suspicious/noExplicitAny: intentionally loose — translator output before sessionId tagging
-	| (Record<string, any> & { type: string });
+	| (PerSessionEvent extends infer Event
+			? Event extends { sessionId: string }
+				? Omit<Event, "sessionId">
+				: never
+			: never);
 
 /**
  * Tag a per-session event with the given sessionId. Non-per-session events

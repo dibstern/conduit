@@ -9,6 +9,7 @@
 	import { HTTPS_VERIFY_TIMEOUT_MS, SETUP_STEP_TRANSITION_MS } from "../ui-constants.js";
 	import {
 		type PlatformInfo,
+		type SetupStepId,
 		type SetupInfo,
 		type StatusVariant,
 		detectPlatform,
@@ -48,7 +49,7 @@
 		isIPad: false,
 	});
 
-	let steps: string[] = $state([]);
+	let steps: SetupStepId[] = $state([]);
 	let currentStepIdx = $state(0);
 	let currentStep = $derived(steps[currentStepIdx] ?? "done");
 
@@ -91,8 +92,9 @@
 			(location.hostname === "localhost" ||
 				location.hostname === "127.0.0.1");
 
-		steps = buildStepList(platform, hasCert, lanMode, hasPushSub);
-		futureStepCount = countFutureHttpsSteps(platform, hasCert, lanMode, hasPushSub);
+		const stepOptions = { hasCert, lanMode, hasPushSub };
+		steps = buildStepList(platform, stepOptions);
+		futureStepCount = countFutureHttpsSteps(platform, stepOptions);
 
 		// Step offset: carry forward completed steps from cert→HTTPS redirect
 		// or from PWA standalone re-open.

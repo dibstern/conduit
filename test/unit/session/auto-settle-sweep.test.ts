@@ -106,7 +106,8 @@ describe("relay automatic settlement sweep", () => {
 				const ports = {
 					hasViewer: (id: string) => viewers.has(id),
 					hasLiveBackgroundWork: background.hasLiveWork,
-					setSettled: (id: string) => service.setSessionSettled(id, true, true),
+					setSettled: (id: string) =>
+						service.setSessionSettled(id, { settled: true, automatic: true }),
 					broadcastSessionList: () => service.sendSessionLists(broadcast),
 				};
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(2);
@@ -133,7 +134,7 @@ describe("relay automatic settlement sweep", () => {
 				]);
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(0);
 				expect(broadcast).toHaveBeenCalled();
-				yield* service.setSessionSettled("eligible", false);
+				yield* service.setSessionSettled("eligible", { settled: false });
 				expect(
 					(yield* read.getSession("eligible"))?.settled_automatically,
 				).toBe(0);

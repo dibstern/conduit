@@ -18,6 +18,7 @@ import {
 	isSessionStatusEvent,
 	sessionErrorText,
 } from "../../relay/opencode-events.js";
+import { isRecord } from "../../utils.js";
 import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
@@ -668,10 +669,6 @@ function trackedPart(
 
 function stringField(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

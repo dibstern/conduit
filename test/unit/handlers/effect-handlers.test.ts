@@ -3662,7 +3662,11 @@ describe("sendMessageToSession", () => {
 							),
 						),
 					);
-					if (settled) yield* service.setSessionSettled("s1", true, true);
+					if (settled)
+						yield* service.setSessionSettled("s1", {
+							settled: true,
+							automatic: true,
+						});
 					if (snoozed) yield* service.snoozeSession("s1", null);
 					const provider: ProviderTurnService = {
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),

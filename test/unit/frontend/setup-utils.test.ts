@@ -34,9 +34,7 @@ describe("buildStepList", () => {
 	test("HTTPS desktop (tailscale): pwa, push, done", () => {
 		const steps = buildStepList(
 			makePlatform({ isHttps: true, isTailscale: true }),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(steps).toEqual(["pwa", "push", "done"]);
 	});
@@ -44,9 +42,7 @@ describe("buildStepList", () => {
 	test("HTTP with cert (onboarding page, tailscale): cert, pwa, done (no push)", () => {
 		const steps = buildStepList(
 			makePlatform({ isHttps: false, isTailscale: true }),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(steps).toEqual(["cert", "pwa", "done"]);
 	});
@@ -54,9 +50,7 @@ describe("buildStepList", () => {
 	test("HTTPS standalone with push (tailscale): just done", () => {
 		const steps = buildStepList(
 			makePlatform({ isHttps: true, isStandalone: true, isTailscale: true }),
-			true,
-			false,
-			true,
+			{ hasCert: true, lanMode: false, hasPushSub: true },
 		);
 		expect(steps).toEqual(["done"]);
 	});
@@ -65,9 +59,7 @@ describe("buildStepList", () => {
 		// In Node, window is undefined → isLocal=false
 		const steps = buildStepList(
 			makePlatform({ isHttps: true, isTailscale: false }),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(steps[0]).toBe("tailscale");
 	});
@@ -75,20 +67,17 @@ describe("buildStepList", () => {
 	test("tailscale network: no tailscale step", () => {
 		const steps = buildStepList(
 			makePlatform({ isHttps: true, isTailscale: true }),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(steps).not.toContain("tailscale");
 	});
 
 	test("lan mode: no tailscale step", () => {
-		const steps = buildStepList(
-			makePlatform({ isHttps: true }),
-			true,
-			true,
-			false,
-		);
+		const steps = buildStepList(makePlatform({ isHttps: true }), {
+			hasCert: true,
+			lanMode: true,
+			hasPushSub: false,
+		});
 		expect(steps).not.toContain("tailscale");
 	});
 
@@ -100,9 +89,7 @@ describe("buildStepList", () => {
 				isHttps: true,
 				isTailscale: true,
 			}),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		const pushIdx = steps.indexOf("push");
 		const pwaIdx = steps.indexOf("pwa");
@@ -114,9 +101,7 @@ describe("buildStepList", () => {
 	test("no cert: no cert step", () => {
 		const steps = buildStepList(
 			makePlatform({ isHttps: false, isTailscale: true }),
-			false,
-			false,
-			false,
+			{ hasCert: false, lanMode: false, hasPushSub: false },
 		);
 		expect(steps).not.toContain("cert");
 	});
@@ -128,9 +113,7 @@ describe("countFutureHttpsSteps", () => {
 	test("returns 0 when already on HTTPS", () => {
 		const count = countFutureHttpsSteps(
 			makePlatform({ isHttps: true, isTailscale: true }),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(count).toBe(0);
 	});
@@ -138,9 +121,7 @@ describe("countFutureHttpsSteps", () => {
 	test("returns 0 when no cert", () => {
 		const count = countFutureHttpsSteps(
 			makePlatform({ isHttps: false, isTailscale: true }),
-			false,
-			false,
-			false,
+			{ hasCert: false, lanMode: false, hasPushSub: false },
 		);
 		expect(count).toBe(0);
 	});
@@ -151,9 +132,7 @@ describe("countFutureHttpsSteps", () => {
 		// Future steps not in HTTP: push → 1
 		const count = countFutureHttpsSteps(
 			makePlatform({ isHttps: false, isTailscale: true }),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(count).toBe(1);
 	});
@@ -164,9 +143,7 @@ describe("countFutureHttpsSteps", () => {
 		// Future steps not in HTTP: none → 0
 		const count = countFutureHttpsSteps(
 			makePlatform({ isHttps: false, isTailscale: true }),
-			true,
-			false,
-			true,
+			{ hasCert: true, lanMode: false, hasPushSub: true },
 		);
 		expect(count).toBe(0);
 	});
@@ -182,9 +159,7 @@ describe("countFutureHttpsSteps", () => {
 				isHttps: false,
 				isTailscale: true,
 			}),
-			true,
-			false,
-			false,
+			{ hasCert: true, lanMode: false, hasPushSub: false },
 		);
 		expect(count).toBe(1);
 	});

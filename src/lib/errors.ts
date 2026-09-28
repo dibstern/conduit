@@ -79,7 +79,11 @@ function contextDetails(
 
 type TaggedRelayErrorConstructor = abstract new (
 	...args: never[]
-) => { readonly _tag: string };
+) => {
+	readonly _tag: string;
+	readonly message: string;
+	readonly context: Record<string, unknown>;
+};
 
 type TaggedRelayErrorMethods<Tag extends string> = {
 	readonly code: Tag;
@@ -107,9 +111,6 @@ function withTaggedRelayErrorMethods(
 	Base: TaggedRelayErrorConstructor,
 ): unknown {
 	abstract class TaggedRelayErrorWithMethods extends Base {
-		declare readonly _tag: string;
-		declare readonly message: string;
-		declare readonly context: Record<string, unknown>;
 		abstract get statusCode(): number;
 
 		get code(): this["_tag"] {

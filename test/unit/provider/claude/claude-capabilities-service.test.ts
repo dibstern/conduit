@@ -1,10 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
-import {
-	__setProbeOverrideForTesting,
-	resetCapabilityCacheForTesting,
-} from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { __setProbeOverrideForTesting } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	ClaudeCapabilitiesServiceLive,
 	ClaudeCapabilitiesServiceTag,
@@ -14,7 +11,6 @@ import {
 describe("ClaudeCapabilitiesService", () => {
 	it.effect("caches per layer and expires with TestClock", () =>
 		Effect.gen(function* () {
-			resetCapabilityCacheForTesting();
 			const probe = vi
 				.fn()
 				.mockResolvedValueOnce({
@@ -45,13 +41,11 @@ describe("ClaudeCapabilitiesService", () => {
 			expect(third.models[0]?.id).toBe("claude-sonnet-2");
 			expect(probe).toHaveBeenCalledTimes(2);
 			__setProbeOverrideForTesting(undefined);
-			resetCapabilityCacheForTesting();
 		}),
 	);
 
 	it.effect("dedupes concurrent probes inside one layer", () =>
 		Effect.gen(function* () {
-			resetCapabilityCacheForTesting();
 			const release = yield* Deferred.make<void>();
 			const probe = vi.fn(async () => {
 				await Effect.runPromise(Deferred.await(release));
@@ -68,7 +62,6 @@ describe("ClaudeCapabilitiesService", () => {
 
 			expect(probe).toHaveBeenCalledTimes(1);
 			__setProbeOverrideForTesting(undefined);
-			resetCapabilityCacheForTesting();
 		}),
 	);
 

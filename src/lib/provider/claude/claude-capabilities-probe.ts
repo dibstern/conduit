@@ -278,11 +278,6 @@ let probeOverride:
 	| ((workspaceRoot: string) => Promise<ProbeResult>)
 	| undefined;
 
-export function resetCapabilityCacheForTesting(): void {
-	// Capability caching now lives in ClaudeCapabilitiesService. This helper
-	// remains for tests that reset probe overrides between cases.
-}
-
 export function __setProbeOverrideForTesting(
 	fn: ((workspaceRoot: string) => Promise<ProbeResult>) | undefined,
 ): void {

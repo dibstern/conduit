@@ -8,33 +8,35 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: [
-		"chat.spec.ts",
-		"chat-lifecycle.spec.ts",
-		"permissions.spec.ts",
-		"advanced-ui.spec.ts",
-		"smoke.spec.ts",
-		"sessions.spec.ts",
-		"session-triage.spec.ts",
-		"session-select-mode.spec.ts",
-		"session-auto-settle.spec.ts",
-		"session-arrange.spec.ts",
-		"session-snooze.spec.ts",
-		"session-mark-unread.spec.ts",
-		"session-gestures.spec.ts",
-		"deep-search.spec.ts",
-		"session-keyboard.spec.ts",
-		"sidebar-layout.spec.ts",
-		"ui-features.spec.ts",
-		"debug-panel.spec.ts",
-		"pin-page.spec.ts",
-		"unified-rendering.spec.ts",
-		"scroll-stability.spec.ts",
-		"terminal.spec.ts",
-		"notification-session-nav-replay.spec.ts",
-		"fork-session.spec.ts",
-		"fork-session-messages.spec.ts",
-		"pwa-background-resume.spec.ts",
+	// New replay specs are included by default. Keep specs with a different harness
+	// in this explicit list, alongside the config that owns them.
+	testMatch: "**/*.spec.ts",
+	testIgnore: [
+		// playwright-daemon.config.ts: real daemon and OpenCode.
+		"daemon-*.spec.ts",
+		// playwright-live.config.ts: an ephemeral OpenCode instance.
+		"live-smoke.spec.ts",
+		// playwright-multi-instance.config.ts: Vite preview with a mocked WebSocket.
+		"multi-instance.spec.ts",
+		// playwright-notification-nav.config.ts: Vite preview with a mocked WebSocket.
+		"notification-session-nav.spec.ts",
+		// playwright-notification-reducer.config.ts: Vite preview with a mocked WebSocket.
+		"notification-reducer-indicators.spec.ts",
+		// playwright-project-management.config.ts: Vite preview with a mocked WebSocket.
+		"project-management.spec.ts",
+		// playwright-question-flow.config.ts: Vite preview with a mocked WebSocket.
+		"question-flow.spec.ts",
+		// playwright-subagent.config.ts: Vite preview with a mocked WebSocket.
+		"subagent-sessions.spec.ts",
+		// playwright-variant.config.ts: Vite preview with a mocked WebSocket.
+		"variant-selector.spec.ts",
+		"context-window-selector.spec.ts",
+		"permission-mode-selector.spec.ts",
+		"composer-drift-layout.spec.ts",
+		"composer-large-paste.spec.ts",
+		// playwright-visual.config.ts: visual snapshot suite.
+		"visual-mockup.spec.ts",
+		"composer-layout.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],

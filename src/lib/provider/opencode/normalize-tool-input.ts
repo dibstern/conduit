@@ -1,4 +1,10 @@
 import type { CanonicalToolInput } from "../../persistence/events.js";
+import {
+	optNum,
+	optStr,
+	str,
+	toRecord,
+} from "../normalize-tool-input-helpers.js";
 
 /**
  * Normalize raw OpenCode tool input into CanonicalToolInput.
@@ -109,38 +115,6 @@ export function normalizeToolInput(
 		default:
 			return { tool: "Unknown", name, raw: input };
 	}
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function toRecord(v: unknown): Record<string, unknown> {
-	if (v && typeof v === "object" && !Array.isArray(v)) {
-		return v as Record<string, unknown>;
-	}
-	return {};
-}
-
-function str(input: Record<string, unknown>, key: string): string {
-	const v = input[key];
-	return typeof v === "string" ? v : "";
-}
-
-function optStr(
-	input: Record<string, unknown>,
-	key: string,
-): Record<string, string> {
-	const v = input[key];
-	if (typeof v === "string" && v.length > 0) return { [key]: v };
-	return {};
-}
-
-function optNum(
-	input: Record<string, unknown>,
-	key: string,
-): Record<string, number> {
-	const v = input[key];
-	if (typeof v === "number") return { [key]: v };
-	return {};
 }
 
 function optBool(

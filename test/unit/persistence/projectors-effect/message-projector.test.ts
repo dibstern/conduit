@@ -611,7 +611,7 @@ describe("MessageProjector", () => {
 			});
 		});
 
-		it("replaces malformed tool metadata with the next valid metadata", async () => {
+		it("preserves malformed tool metadata", async () => {
 			await project(
 				makeStored(
 					"message.created",
@@ -660,9 +660,8 @@ describe("MessageProjector", () => {
 				"SELECT * FROM message_parts WHERE id = ?",
 				["tool1"],
 			);
-			expect(JSON.parse(part?.metadata ?? "{}")).toEqual({
-				providerTaskId: "task-1",
-			});
+			expect(part?.status).toBe("running");
+			expect(part?.metadata).toBe("{not json");
 		});
 
 		it("does not reopen a completed tool when late metadata arrives", async () => {

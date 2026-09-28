@@ -2,7 +2,6 @@
 <!-- OpenCode "O" mark animation overlay shown during WebSocket connection.    -->
 
 <script lang="ts">
-	import { fade } from "svelte/transition";
 	import { wsState, getIsConnected } from "../../stores/ws.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";

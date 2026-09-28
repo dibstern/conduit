@@ -207,7 +207,7 @@ export const IPCCommandSchema = Schema.Union(
 	InstanceStatusSchema,
 );
 
-// ─── VALID_COMMANDS set (kept for backward compat with existing tests) ──────
+// Known IPC commands. Anything else is rejected as unknown before schema validation.
 
 export const VALID_COMMANDS = new Set([
 	"add_project",
@@ -296,8 +296,8 @@ export function validateCommand(
 }
 
 /**
- * Produce error messages matching the original validateCommand output.
- * This ensures backward compatibility for existing tests and consumers.
+ * Turn a schema failure into the short, field-specific error message that IPC
+ * clients such as the CLI show to the user.
  */
 function schemaErrorToIPCResponse(
 	cmd: Record<string, unknown> & { cmd: string },

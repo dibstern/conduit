@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Logger } from "../logger.js";
+import { isRecord } from "../utils.js";
 
 /**
  * Resolve the correct project config file to write to.
@@ -94,8 +95,4 @@ function deepMerge(
 		}
 	}
 	return result;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return v !== null && typeof v === "object" && !Array.isArray(v);
 }

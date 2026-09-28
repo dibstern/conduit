@@ -22,6 +22,7 @@ import {
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
+	addProjectedModelExecution,
 	buildSessionSwitchedMessage,
 	extractOldestMessageId,
 	patchMissingDoneForProcessingState,
@@ -57,25 +58,6 @@ interface DeleteSessionPayload {
 interface ForkSessionPayload {
 	readonly sessionId?: string;
 	readonly messageId?: string;
-}
-
-function addProjectedModelExecution(
-	messages: readonly HistoryMessage[],
-	projectedMessages: readonly HistoryMessage[],
-): HistoryMessage[] {
-	const executionByMessageId = new Map(
-		projectedMessages.flatMap((message) =>
-			message.role === "user" && message.modelExecution
-				? [[message.id, message.modelExecution] as const]
-				: [],
-		),
-	);
-	return messages.map((message) => {
-		const modelExecution = executionByMessageId.get(message.id);
-		return message.role === "user" && modelExecution
-			? { ...message, modelExecution }
-			: message;
-	});
 }
 
 /**
@@ -651,7 +633,7 @@ export const setSessionSettledForClient = ({
 		const wsHandler = yield* WebSocketHandlerTag;
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
-		if (yield* service.setSessionSettled(sessionId, settled)) {
+		if (yield* service.setSessionSettled(sessionId, { settled })) {
 			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
 			const config = yield* Effect.serviceOption(ConfigTag);
 			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {

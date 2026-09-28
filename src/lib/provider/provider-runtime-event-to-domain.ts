@@ -16,6 +16,7 @@ import {
 	type TurnErrorPayload,
 	type TurnModelResolvedPayload,
 } from "../persistence/events.js";
+import { isRecord } from "../utils.js";
 
 export type ProviderRuntimeDomainMapperState = {
 	readonly currentAssistantMessageIds: ReadonlyMap<string, string>;
@@ -764,10 +765,6 @@ function canonicalToolInput(
 
 function dataRecord(event: ProviderRuntimeEvent): Record<string, unknown> {
 	return isRecord(event.data) ? event.data : {};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 function stringField(value: unknown): string | undefined {

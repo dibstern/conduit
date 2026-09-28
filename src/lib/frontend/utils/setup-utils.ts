@@ -24,6 +24,14 @@ export interface SetupInfo {
 
 export type StatusVariant = "ok" | "warn" | "pending";
 
+export type SetupStepId = "tailscale" | "cert" | "push" | "pwa" | "done";
+
+export interface BuildStepListOptions {
+	readonly hasCert: boolean;
+	readonly lanMode: boolean;
+	readonly hasPushSub: boolean;
+}
+
 // ─── Platform detection ─────────────────────────────────────────────────────
 
 export function detectPlatform(): PlatformInfo {
@@ -91,14 +99,12 @@ export async function detectPushSubscription(): Promise<boolean> {
 
 export function buildStepList(
 	platform: PlatformInfo,
-	hasCert: boolean,
-	lanMode: boolean,
-	hasPushSub: boolean,
-): string[] {
+	{ hasCert, lanMode, hasPushSub }: BuildStepListOptions,
+): SetupStepId[] {
 	const isLocal =
 		typeof window !== "undefined" &&
 		(location.hostname === "localhost" || location.hostname === "127.0.0.1");
-	const newSteps: string[] = [];
+	const newSteps: SetupStepId[] = [];
 
 	if (!platform.isTailscale && !isLocal && !lanMode) newSteps.push("tailscale");
 	if (hasCert && !platform.isHttps) newSteps.push("cert");
@@ -124,16 +130,14 @@ export function buildStepList(
 
 export function countFutureHttpsSteps(
 	platform: PlatformInfo,
-	hasCert: boolean,
-	lanMode: boolean,
-	hasPushSub: boolean,
+	options: BuildStepListOptions,
 ): number {
-	if (!hasCert || platform.isHttps) return 0;
+	if (!options.hasCert || platform.isHttps) return 0;
 
 	// Simulate what the HTTPS page will build
 	const httpsPlat = { ...platform, isHttps: true };
-	const httpsSteps = buildStepList(httpsPlat, hasCert, lanMode, hasPushSub);
-	const httpSteps = buildStepList(platform, hasCert, lanMode, hasPushSub);
+	const httpsSteps = buildStepList(httpsPlat, options);
+	const httpSteps = buildStepList(platform, options);
 
 	// The HTTPS list won't have "cert" but may gain "push".
 	// Count steps in HTTPS list that aren't in HTTP list (excluding "done").

@@ -1173,16 +1173,22 @@ describe("SessionManagerService", () => {
 						),
 					);
 				}
-				expect(yield* service.setSessionSettled("settled", true)).toBe(false);
+				expect(
+					yield* service.setSessionSettled("settled", { settled: true }),
+				).toBe(false);
 				expect(yield* store.readAllBySession("settled")).toHaveLength(2);
-				expect(yield* service.setSessionSettled("settled", false)).toBe(true);
+				expect(
+					yield* service.setSessionSettled("settled", { settled: false }),
+				).toBe(true);
 				const blocked = yield* Effect.either(
-					service.setSessionSettled("pinned", true),
+					service.setSessionSettled("pinned", { settled: true }),
 				);
 				expect(blocked._tag).toBe("Left");
 				expect(yield* store.readAllBySession("pinned")).toHaveLength(2);
 				expect(yield* service.setSessionPinned("pinned", false)).toBe(true);
-				expect(yield* service.setSessionSettled("pinned", true)).toBe(true);
+				expect(
+					yield* service.setSessionSettled("pinned", { settled: true }),
+				).toBe(true);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
@@ -1228,13 +1234,15 @@ describe("SessionManagerService", () => {
 						),
 					);
 				}
-				expect(yield* service.setSessionSettled("older", false)).toBe(false);
+				expect(
+					yield* service.setSessionSettled("older", { settled: false }),
+				).toBe(false);
 				expect(yield* service.setSessionPinned("older", false)).toBe(false);
 				expect(
 					yield* Effect.all(
 						[
-							service.setSessionSettled("older", true),
-							service.setSessionSettled("older", true),
+							service.setSessionSettled("older", { settled: true }),
+							service.setSessionSettled("older", { settled: true }),
 						],
 						{ concurrency: "unbounded" },
 					),
@@ -1243,11 +1251,13 @@ describe("SessionManagerService", () => {
 					(s) => s.id === "older",
 				);
 				expect(settled?.settledAt).toEqual(expect.any(Number));
-				expect(yield* service.setSessionSettled("older", false)).toBe(true);
+				expect(
+					yield* service.setSessionSettled("older", { settled: false }),
+				).toBe(true);
 				expect(yield* service.setSessionPinned("older", true)).toBe(true);
 				expect(yield* service.setSessionPinned("older", true)).toBe(false);
 				const blocked = yield* Effect.either(
-					service.setSessionSettled("older", true),
+					service.setSessionSettled("older", { settled: true }),
 				);
 				expect(blocked._tag).toBe("Left");
 				if (blocked._tag === "Left")
@@ -1259,7 +1269,9 @@ describe("SessionManagerService", () => {
 				expect(pinned).not.toHaveProperty("settledAt");
 				expect(yield* service.setSessionPinned("older", false)).toBe(true);
 				expect(yield* service.setSessionPinned("older", false)).toBe(false);
-				expect(yield* service.setSessionSettled("older", true)).toBe(true);
+				expect(
+					yield* service.setSessionSettled("older", { settled: true }),
+				).toBe(true);
 				// Pinning a settled session un-settles it: a session is never both.
 				expect(yield* service.setSessionPinned("older", true)).toBe(true);
 				const repinned = (yield* service.listSessions()).find(
@@ -1845,7 +1857,8 @@ describe("snooze session commands", () => {
 				const service = yield* SessionManagerServiceTag;
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
 				yield* service.snoozeSession("s1", null);
-				if (action === "settle") yield* service.setSessionSettled("s1", true);
+				if (action === "settle")
+					yield* service.setSessionSettled("s1", { settled: true });
 				else yield* service.setSessionPinned("s1", true);
 				expect(
 					(yield* store.readAllBySession("s1")).map((event) => event.type),

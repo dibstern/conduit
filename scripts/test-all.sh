@@ -52,6 +52,7 @@ run "Build"            pnpm build
 run "E2E replay tests"         pnpm exec playwright test --config test/e2e/playwright-replay.config.ts
 run "E2E daemon tests"         pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
 run "E2E multi-instance tests" pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts
+run "E2E notification navigation tests" pnpm exec playwright test --config test/e2e/playwright-notification-nav.config.ts
 run "E2E subagent tests"       pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts
 run "E2E visual tests"         pnpm exec playwright test --config test/e2e/playwright-visual.config.ts
 

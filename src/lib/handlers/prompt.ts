@@ -112,7 +112,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				);
 			const unsettled = yield* sessionManagerService.setSessionSettled(
 				activeId,
-				false,
+				{ settled: false },
 			);
 			if (unsnoozed || unsettled) {
 				yield* sessionManagerService.sendSessionLists((msg) =>
