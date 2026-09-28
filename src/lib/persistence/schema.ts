@@ -38,6 +38,8 @@ export const FORK_POINT_TIMESTAMP_MIGRATION = "0021_fork_point_timestamp.sql";
 export const SESSIONS_MARKED_UNREAD_MIGRATION =
 	"0022_sessions_marked_unread.sql";
 export const SESSION_ATTENTION_MIGRATION = "0023_session_attention.sql";
+export const READ_STATE_TO_TURN_ENDS_MIGRATION =
+	"0024_read_state_to_turn_ends.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

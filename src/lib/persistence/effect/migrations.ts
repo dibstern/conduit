@@ -15,6 +15,7 @@ import {
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
+	READ_STATE_TO_TURN_ENDS_MIGRATION,
 	readMigrationSql,
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
@@ -84,6 +85,9 @@ const sessionsMarkedUnreadMigrationSql = readMigrationSql(
 );
 const sessionAttentionMigrationSql = readMigrationSql(
 	SESSION_ATTENTION_MIGRATION,
+);
+const readStateToTurnEndsMigrationSql = readMigrationSql(
+	READ_STATE_TO_TURN_ENDS_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -996,6 +1000,12 @@ export const effectMigrationEntries = {
 		if (columns.some((column) => column.name === "last_turn_end_version"))
 			return;
 		yield* executeSqlStatements(sessionAttentionMigrationSql);
+	}),
+	"0025_read_state_to_turn_ends": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (!columns.some((column) => column.name === "read_at")) return;
+		yield* executeSqlStatements(readStateToTurnEndsMigrationSql);
 	}),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 

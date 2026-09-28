@@ -937,49 +937,21 @@ const withSessionAttention = (
 export const markSessionSeen = (sessionId: string, upTo: number) =>
 	withSessionAttention("markSessionSeen", sessionId, markSeen(sessionId, upTo));
 
-// The context-menu commands. Their events still record read_at, which a woken
-// snooze reads; the dot itself is SessionAttention's.
+// The context-menu commands. SessionAttention is the only writer of read
+// state; main's session.read/unread events are no longer appended (hk9m.7).
 export const markSessionRead = (sessionId: string) =>
-	applySessionCommand({
-		type: "session.read",
-		data: { sessionId },
-	}).pipe(
-		Effect.mapError(
-			(cause) =>
-				new SessionManagerError({ operation: "markSessionRead", cause }),
-		),
-		Effect.zipRight(
-			withSessionAttention(
-				"markSessionRead",
-				sessionId,
-				markSeen(sessionId, Number.MAX_SAFE_INTEGER),
-			),
-		),
-		Effect.asVoid,
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.markSessionRead", { attributes: { sessionId } }),
-	);
+	withSessionAttention(
+		"markSessionRead",
+		sessionId,
+		markSeen(sessionId, Number.MAX_SAFE_INTEGER),
+	).pipe(Effect.asVoid);
 
 export const markSessionUnread = (sessionId: string) =>
-	applySessionCommand({
-		type: "session.unread",
-		data: { sessionId },
-	}).pipe(
-		Effect.mapError(
-			(cause) =>
-				new SessionManagerError({ operation: "markSessionUnread", cause }),
-		),
-		Effect.zipRight(
-			withSessionAttention(
-				"markSessionUnread",
-				sessionId,
-				markUnread(sessionId),
-			),
-		),
-		Effect.asVoid,
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.markSessionUnread", { attributes: { sessionId } }),
-	);
+	withSessionAttention(
+		"markSessionUnread",
+		sessionId,
+		markUnread(sessionId),
+	).pipe(Effect.asVoid);
 
 const readSessionForTriage = (sessionId: string) =>
 	Effect.gen(function* () {

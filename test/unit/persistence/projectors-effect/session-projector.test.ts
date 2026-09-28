@@ -10,10 +10,8 @@ import {
 	type SessionCreatedPayload,
 	type SessionPermissionModeChangedPayload,
 	type SessionProviderChangedPayload,
-	type SessionReadPayload,
 	type SessionRenamedPayload,
 	type SessionStatusPayload,
-	type SessionUnreadPayload,
 	type StoredEvent,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
@@ -55,7 +53,6 @@ interface SessionRow {
 	last_message_at: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
-	read_at: number | null;
 	settled_at: number | null;
 	pinned_at: number | null;
 	snoozed_at: number | null;
@@ -691,58 +688,6 @@ describe("SessionProjector", () => {
 		);
 		expect(afterClear?.[column]).toBeNull();
 		expect(afterClear?.updated_at).toBe(now);
-	});
-
-	describe("session read state", () => {
-		it("sets read_at from the event timestamp and clears it when unread", async () => {
-			await project(
-				makeStored(
-					"session.created",
-					"s1",
-					{
-						sessionId: "s1",
-						title: "Test",
-						provider: "opencode",
-					} satisfies SessionCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"session.read",
-					"s1",
-					{ sessionId: "s1" } satisfies SessionReadPayload,
-					2,
-					now + 100,
-				),
-			);
-			const afterRead = await queryOne<SessionRow>(
-				"SELECT * FROM sessions WHERE id = ?",
-				["s1"],
-			);
-			expect(afterRead?.read_at).toBe(now + 100);
-			// updated_at is the session list's sort key, so merely reading a session
-			// must not jump it to the top of the list.
-			expect(afterRead?.updated_at).toBe(now);
-
-			await project(
-				makeStored(
-					"session.unread",
-					"s1",
-					{ sessionId: "s1" } satisfies SessionUnreadPayload,
-					3,
-					now + 200,
-				),
-			);
-			const afterUnread = await queryOne<SessionRow>(
-				"SELECT * FROM sessions WHERE id = ?",
-				["s1"],
-			);
-			expect(afterUnread?.read_at).toBeNull();
-			expect(afterUnread?.updated_at).toBe(now);
-		});
 	});
 
 	describe("turn.completed", () => {

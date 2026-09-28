@@ -94,7 +94,11 @@ fails the build if anything outside `SessionAttention` writes `seen_version`.
 
 Main's `session.read` and `session.unread` events predate this amendment. They
 stay decodable, so the stored log still reads, but they no longer project.
-The migration that introduces `seen_version` carries their effect over once.
+Migration `0024_read_state_to_turn_ends` carries their effect over once: a
+session main showed as read is seen up to its last turn end, and any other
+session starts one short of it. Then it drops `read_at` and `marked_unread_at`.
+A session copied in from a provider (a Claude fork) starts seen up to its last
+imported turn end. `SessionAttention` writes that after the import commits.
 
 What this gives up is a history of when things were read. Nothing consumes one.
 If something ever needs it, `SessionAttention` is the single place to add it.

@@ -37,9 +37,16 @@ function decide(
 	source: TouchSource,
 ): { readonly upTo: number } | null {
 	const upTo = state.lastTurnEndVersion;
-	if (!state.unread || upTo === undefined) return null;
-	if (source === "sidebar-pick") return { upTo };
-	if (state.reported === upTo || !state.pageVisible || !state.turnEndInView)
+	if (!state.unread) return null;
+	// A session marked unread before its first turn end has no version; 0
+	// still clears it, since seen is capped at its virtual turn end of -1.
+	if (source === "sidebar-pick") return { upTo: upTo ?? 0 };
+	if (
+		upTo === undefined ||
+		state.reported === upTo ||
+		!state.pageVisible ||
+		!state.turnEndInView
+	)
 		return null;
 	return { upTo };
 }

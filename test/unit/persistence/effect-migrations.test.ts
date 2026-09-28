@@ -58,6 +58,7 @@ const expectedNames = [
 	"fork_point_timestamp",
 	"sessions_marked_unread",
 	"session_attention",
+	"read_state_to_turn_ends",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -172,13 +173,13 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions (id, provider, last_message_at, created_at, updated_at)
 				VALUES ('existing', 'opencode', 2000000000456, 2000000000000, 2000000000456)`;
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(prefix(12));
 				const rows = yield* sql<{ read_at: number; last_message_at: number }>`
 				SELECT read_at, last_message_at FROM sessions WHERE id = 'existing'`;
 				expect(rows).toEqual([
 					{ read_at: 2_000_000_000_456, last_message_at: 2_000_000_000_456 },
 				]);
-				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+				expect(yield* makeEffectSqlMigrator(prefix(12))).toEqual([]);
 				const columns = yield* sql<{
 					name: string;
 				}>`PRAGMA table_info(sessions)`;
@@ -394,7 +395,6 @@ describe("Effect migration lineage", () => {
 				}>`PRAGMA table_info(sessions)`;
 				expect(columns.map((row) => row.name)).toEqual(
 					expect.arrayContaining([
-						"read_at",
 						"last_turn_error_at",
 						"settled_at",
 						"pinned_at",
@@ -403,12 +403,12 @@ describe("Effect migration lineage", () => {
 						"version",
 						"fork_point_timestamp",
 						"fork_point_message_id",
-						"marked_unread_at",
 						"last_turn_end_version",
 						"seen_version",
 					]),
 				);
-				expect(columns.map((row) => row.name)).not.toContain("last_viewed_at");
+				for (const retired of ["read_at", "marked_unread_at", "last_viewed_at"])
+					expect(columns.map((row) => row.name)).not.toContain(retired);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
@@ -445,7 +445,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(13);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(14);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -453,7 +453,7 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("reconciles local-main id 18 and reruns 18 through 24 once", () =>
+	it.effect("reconciles local-main id 18 and reruns 18 through 25 once", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(17));
 			const sql = yield* SqlClient.SqlClient;
@@ -479,7 +479,6 @@ describe("Effect migration lineage", () => {
 					"version",
 					"fork_point_timestamp",
 					"fork_point_message_id",
-					"marked_unread_at",
 					"last_turn_end_version",
 					"seen_version",
 				]),
@@ -492,20 +491,103 @@ describe("Effect migration lineage", () => {
 		}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("appends only migrations 23 and 24 to a HEAD id-22 database", () =>
+	it.effect("appends only migrations 23 to 25 to a HEAD id-22 database", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(22));
 			const sql = yield* SqlClient.SqlClient;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[23, "sessions_marked_unread"],
 				[24, "session_attention"],
+				[25, "read_state_to_turn_ends"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
-			expect(columns.map((row) => row.name)).toContain("marked_unread_at");
+			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
 			expect(columns.map((row) => row.name)).toContain("last_turn_end_version");
 			expect(columns.map((row) => row.name)).toContain("seen_version");
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
 		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"carries main's read state into turn-end positions (failure list 1-17)",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(24));
+				const sql = yield* SqlClient.SqlClient;
+				// id, parent, fork point, last_message_at, read_at, marked_unread_at, preset last/seen
+				const sessions = [
+					["a-no-turns", null, null, null, null, null, null, null],
+					["b-error-last-tied", null, null, 100, 100, null, null, null],
+					["c-interrupted-only", null, null, 50, null, null, null, null],
+					["d-interrupted-after", null, null, 20, 10, null, null, null],
+					["e-marked-and-read", null, null, 50, 100, 60, null, null],
+					["f-child", "b-error-last-tied", null, 50, null, null, null, null],
+					["g-fork", "b-error-last-tied", "evt", 50, null, null, null, null],
+					["h-already-seen", null, null, 50, null, null, 9, 9],
+				] as const;
+				for (const [
+					id,
+					parent,
+					fork,
+					lastMessage,
+					read,
+					marked,
+					last,
+					seen,
+				] of sessions)
+					yield* sql`INSERT INTO sessions (id, provider, parent_id, fork_point_event,
+						last_message_at, read_at, marked_unread_at, last_turn_end_version,
+						seen_version, created_at, updated_at)
+						VALUES (${id}, 'claude', ${parent}, ${fork}, ${lastMessage}, ${read},
+						${marked}, ${last}, ${seen}, 1, 1)`;
+				const events = [
+					["a-no-turns", 1, "message.created"],
+					["b-error-last-tied", 3, "turn.completed"],
+					["b-error-last-tied", 7, "turn.error"],
+					["c-interrupted-only", 4, "turn.interrupted"],
+					["d-interrupted-after", 2, "turn.completed"],
+					["d-interrupted-after", 5, "turn.interrupted"],
+					["e-marked-and-read", 3, "turn.completed"],
+					["f-child", 3, "turn.completed"],
+					["g-fork", 3, "turn.completed"],
+					["h-already-seen", 3, "turn.completed"],
+					["orphan", 1, "turn.completed"],
+				] as const;
+				for (const [sessionId, version, type] of events)
+					yield* sql`INSERT INTO events (event_id, session_id, stream_version, type,
+						data, provider, created_at)
+						VALUES (${`${sessionId}-${version}`}, ${sessionId}, ${version}, ${type},
+						'{}', 'claude', 1)`;
+
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[25, "read_state_to_turn_ends"],
+				]);
+				const rows = yield* sql<{
+					id: string;
+					last_turn_end_version: number | null;
+					seen_version: number | null;
+					unread: number;
+				}>`SELECT id, last_turn_end_version, seen_version, unread
+					FROM sessions ORDER BY id`;
+				expect(
+					rows.map((row) => [
+						row.id,
+						row.last_turn_end_version,
+						row.seen_version,
+						row.unread,
+					]),
+				).toEqual([
+					["a-no-turns", null, null, 0],
+					["b-error-last-tied", 7, 7, 0],
+					["c-interrupted-only", null, -2, 1],
+					["d-interrupted-after", 2, 1, 1],
+					["e-marked-and-read", 3, 2, 1],
+					["f-child", 3, 2, 0],
+					["g-fork", 3, 2, 1],
+					["h-already-seen", 9, 9, 0],
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
 	it.effect(

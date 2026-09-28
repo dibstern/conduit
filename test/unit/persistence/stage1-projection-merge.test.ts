@@ -16,7 +16,7 @@ import {
 const database = SqliteClient.layer({ filename: ":memory:" });
 
 describe("merged Effect projection", () => {
-	it("stamps main's read and triage state", async () => {
+	it("projects nothing for retired read events and still stamps triage state", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
@@ -36,8 +36,8 @@ describe("merged Effect projection", () => {
 				};
 				yield* projector.project(read, { version: 41 });
 				expect(
-					yield* sql`SELECT read_at, version FROM sessions WHERE id = 'session'`,
-				).toEqual([{ read_at: 100, version: 41 }]);
+					yield* sql`SELECT version FROM sessions WHERE id = 'session'`,
+				).toEqual([{ version: 0 }]);
 				const unread: StoredEvent = {
 					...canonicalEvent(
 						"session.unread",
@@ -49,6 +49,9 @@ describe("merged Effect projection", () => {
 					streamVersion: 2,
 				};
 				yield* projector.project(unread, { version: 42 });
+				expect(
+					yield* sql`SELECT version FROM sessions WHERE id = 'session'`,
+				).toEqual([{ version: 0 }]);
 				const settled: StoredEvent = {
 					...canonicalEvent(
 						"session.settled",
@@ -61,10 +64,9 @@ describe("merged Effect projection", () => {
 				};
 				yield* projector.project(settled, { version: 43 });
 				expect(
-					yield* sql`SELECT read_at, settled_at, settled_automatically, version FROM sessions WHERE id = 'session'`,
+					yield* sql`SELECT settled_at, settled_automatically, version FROM sessions WHERE id = 'session'`,
 				).toEqual([
 					{
-						read_at: null,
 						settled_at: 102,
 						settled_automatically: 1,
 						version: 43,

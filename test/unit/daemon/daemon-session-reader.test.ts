@@ -32,7 +32,6 @@ const makeProjectStore = (
 		readonly updatedAt: number;
 		readonly parentId?: string;
 		readonly lastMessageAt?: number | null;
-		readonly readAt?: number | null;
 		readonly lastTurnEndVersion?: number | null;
 		readonly seenVersion?: number | null;
 		readonly settledAt?: number | null;
@@ -58,13 +57,13 @@ const makeProjectStore = (
 			for (const session of sessions) {
 				yield* sql`INSERT INTO sessions (
 					id, provider, title, status, parent_id, last_message_at,
-					read_at, last_turn_end_version, seen_version, settled_at,
+					last_turn_end_version, seen_version, settled_at,
 					pinned_at, snoozed_at, snoozed_until, woken_at, woken_reason,
 					created_at, updated_at
 				) VALUES (
 					${session.id}, 'opencode', ${session.title}, 'idle',
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
-					${session.readAt ?? null}, ${session.lastTurnEndVersion ?? null},
+					${session.lastTurnEndVersion ?? null},
 					${session.seenVersion ?? null}, ${session.settledAt ?? null},
 					${session.pinnedAt ?? null}, ${session.snoozedAt ?? null},
 					${session.snoozedUntil ?? null}, ${session.wokenAt ?? null},
@@ -135,7 +134,6 @@ describe("listDaemonSessions", () => {
 				title: "Finished away",
 				updatedAt: 300,
 				lastMessageAt: 300,
-				readAt: 200,
 				settledAt: 0,
 				pinnedAt: 456,
 			},
@@ -144,14 +142,12 @@ describe("listDaemonSessions", () => {
 				title: "Already read",
 				updatedAt: 200,
 				lastMessageAt: 200,
-				readAt: 200,
 			},
 			{
 				id: "empty",
 				title: "Empty",
 				updatedAt: 100,
 				lastMessageAt: null,
-				readAt: null,
 			},
 		]);
 
@@ -201,6 +197,8 @@ describe("listDaemonSessions", () => {
 				snoozedAt: 100,
 				wokenAt: 150,
 				wokenReason: "approval",
+				lastTurnEndVersion: 5,
+				seenVersion: 4,
 			},
 			{
 				id: "read",
@@ -209,7 +207,8 @@ describe("listDaemonSessions", () => {
 				snoozedAt: 10,
 				wokenAt: 50,
 				wokenReason: "turn",
-				readAt: 50,
+				lastTurnEndVersion: 5,
+				seenVersion: 5,
 			},
 		]);
 		return Effect.gen(function* () {

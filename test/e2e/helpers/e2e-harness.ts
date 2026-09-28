@@ -131,8 +131,9 @@ export interface ReplayHarness {
 	/** The fresh per-run SQLite event store, when persistence is on. */
 	eventsDbPath?: string;
 	/** Stop the relay and start a fresh one on the same port, config dir and
-	 *  event store, as a daemon restart would. Open pages reconnect on their own. */
-	restart(): Promise<void>;
+	 *  event store, as a daemon restart would. Open pages reconnect on their own.
+	 *  `whileStopped` runs between the two, e.g. to rewrite the event store. */
+	restart(whileStopped?: () => void): Promise<void>;
 	stop(): Promise<void>;
 }
 
@@ -249,8 +250,9 @@ export async function createReplayHarness(
 		projectUrl: `/s/${encodeURIComponent(sessionId)}`,
 		...(claudeReplayer ? { claudeReplayer } : {}),
 		...(eventsDbPath ? { eventsDbPath } : {}),
-		async restart(): Promise<void> {
+		async restart(whileStopped?: () => void): Promise<void> {
 			await stack.stop();
+			whileStopped?.();
 			stack = await startStack(relayPort);
 		},
 		async stop(): Promise<void> {

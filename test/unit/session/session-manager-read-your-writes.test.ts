@@ -159,7 +159,6 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				yield* service.markSessionRead(sessionId);
 
 				const row = yield* readQuery.getSession(sessionId);
-				expect(row?.read_at).not.toBeNull();
 				expect(row?.unread).toBe(0);
 			}),
 	},
@@ -173,7 +172,6 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				yield* service.markSessionUnread(sessionId);
 
 				const row = yield* readQuery.getSession(sessionId);
-				expect(row?.read_at).toBeNull();
 				expect(row?.unread).toBe(1);
 			}),
 	},

@@ -954,6 +954,10 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	// canonical vocabulary only so historical stores still decode.
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
+	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
+	// Kept so historical stores still decode.
+	"session.read",
+	"session.unread",
 ];
 
 /**

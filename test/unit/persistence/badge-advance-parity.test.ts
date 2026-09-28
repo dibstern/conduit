@@ -20,6 +20,7 @@ import Database from "better-sqlite3";
 import { Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import { markSeen } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
@@ -128,24 +129,22 @@ const expectAdvanceMatchesRow = (advances: readonly ReadModelAdvance[]) =>
 		expect(last?.version).toBe(version);
 	});
 
-it("marking read advances the row version and announces it", async () => {
+it("marking seen advances the row version and announces it", async () => {
 	await withPersistence((advances) =>
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
 			yield* createSession;
-			advances.length = 0;
-
 			yield* commit([
 				canonicalEvent(
-					"session.read",
+					"turn.completed",
 					SESSION,
-					{ sessionId: SESSION },
-					{
-						provider: "claude",
-						createdAt: 1_700_000_000_000,
-					},
+					{ messageId: "m1" },
+					{ provider: "claude" },
 				),
 			]);
+			advances.length = 0;
+
+			expect(yield* markSeen(SESSION, Number.MAX_SAFE_INTEGER)).toBe(true);
 
 			yield* expectAdvanceMatchesRow(advances);
 		}),
