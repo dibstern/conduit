@@ -26,6 +26,8 @@ interface AttentionState {
 	readonly lastTurnEndVersion: number | undefined;
 	/** The turn end this tab already reported: the rest of a burst is quiet. */
 	readonly reported: number | undefined;
+	/** The latest turn end was marked unread while this tab had it open. */
+	readonly held: boolean;
 	readonly pageVisible: boolean;
 	/** The newest turn end is inside the transcript's viewport and the window's. */
 	readonly turnEndInView: boolean;
@@ -39,12 +41,19 @@ function decide(
 	const upTo = state.lastTurnEndVersion;
 	if (!state.unread || upTo === undefined) return null;
 	if (source === "sidebar-pick") return { upTo };
-	if (state.reported === upTo || !state.pageVisible || !state.turnEndInView)
+	if (
+		state.held ||
+		state.reported === upTo ||
+		!state.pageVisible ||
+		!state.turnEndInView
+	)
 		return null;
 	return { upTo };
 }
 
 const reported = new Map<string, number>();
+/** Turn ends marked unread while open here, by session (see observeOpenSession). */
+const held = new Map<string, number>();
 
 export function touch(
 	session: Pick<
@@ -59,6 +68,7 @@ export function touch(
 			unread: session.unread === true,
 			lastTurnEndVersion: session.lastTurnEndVersion,
 			reported: reported.get(session.id),
+			held: held.get(session.id) === session.lastTurnEndVersion,
 			pageVisible: document.visibilityState === "visible",
 			turnEndInView,
 		},
@@ -76,6 +86,37 @@ export function touch(
 		if (reported.get(session.id) === report.upTo) reported.delete(session.id);
 		showToast("Couldn't mark read", { variant: "error" });
 	});
+}
+
+type OpenSession = Pick<SessionInfo, "id" | "unread" | "lastTurnEndVersion">;
+let open: OpenSession | undefined;
+
+/**
+ * Follows the session this tab has open (conduit-test-hk9m.5). A row that
+ * turns unread while its turn end stays put was marked unread, here or in
+ * another window, so touches on the view leave it until the user switches
+ * away; a newer turn end is a new dot and counts as usual. Judged from the
+ * row's own `unread`, never `attention`, which a root rolls up from its forks.
+ * Switching away ends the departing session's hold and burst, so coming back
+ * counts as usual.
+ */
+export function observeOpenSession(session: OpenSession | undefined): void {
+	const upTo = session?.lastTurnEndVersion;
+	if (open && open.id !== session?.id) {
+		held.delete(open.id);
+		reported.delete(open.id);
+	} else if (
+		session?.unread === true &&
+		open?.unread !== true &&
+		upTo !== undefined &&
+		upTo === open?.lastTurnEndVersion
+	)
+		held.set(session.id, upTo);
+	open = session && {
+		id: session.id,
+		unread: session.unread,
+		lastTurnEndVersion: upTo,
+	};
 }
 
 const DWELL_MS = 300;

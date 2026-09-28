@@ -148,6 +148,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 		hasMore: false,
 	},
 	clearSessionState: vi.fn(),
+	findSession: vi.fn(),
 	loadDaemonSessions: vi.fn(async () => {}),
 	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),

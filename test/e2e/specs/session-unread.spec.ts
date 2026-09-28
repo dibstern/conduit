@@ -6,8 +6,10 @@
 // hidden page, an off-screen view and a scrolled-up transcript do not clear
 // it. Reload, reconnect and a relay restart keep the dot; a sub-agent never
 // gets one.
+// A dot marked unread by hand holds against those touches, in every window,
+// until the user switches away from the session.
 // Spec: docs/adr/0004-session-mutations-are-canonical-events.md (Scope),
-// conduit-test-hk9m.3 and conduit-test-hk9m.4.
+// conduit-test-hk9m.3, conduit-test-hk9m.4 and conduit-test-hk9m.5.
 //
 // Each step records dot state plus the row's last_turn_end_version and
 // seen_version into a report. The raw report is attached to the run; the
@@ -77,7 +79,8 @@ type ReportName =
 	| "fork"
 	| "click-and-typing"
 	| "focus-and-scroll"
-	| "dwell-and-viewport";
+	| "dwell-and-viewport"
+	| "mark-unread";
 
 class Report {
 	readonly entries: ReportEntry[] = [];
@@ -514,6 +517,114 @@ async function dwellAndViewport(
 	await ctx.windows.B.context().close();
 }
 
+// ─── Mark unread holds until switch-away (conduit-test-hk9m.5) ───────────────
+// A row that turns unread while its turn end stays put was marked unread, from
+// this window or another: touching the view leaves it until the user switches
+// away from the session. A clears the first turn end itself before marking it,
+// so its burst guard is already spent; B clears the second, so A has never
+// reported it and only the hold can keep the dot.
+
+async function markUnread(page: Page, sessionId: string) {
+	await new SidebarPage(page).openContextMenu(sessionId);
+	await page.getByTestId("session-ctx-mark-unread").click();
+}
+
+/** A rests its pointer on the transcript and clicks it. */
+async function restAndClick(A: Page) {
+	await paused(A, async () => {
+		const centre = await transcriptCentre(A);
+		await A.mouse.move(centre.x, centre.y);
+		await A.clock.runFor(350);
+		await transcript(A).click({ position: { x: 24, y: 24 } });
+		await A.clock.runFor(350);
+	});
+}
+
+const OTHER_SESSION = "ses_e2e_other";
+
+/** A switches to another session and comes back without picking this one. */
+async function switchAwayAndBack(ctx: Interaction) {
+	const { A } = ctx.windows;
+	await row(A, OTHER_SESSION).click();
+	await expect(A).not.toHaveURL(new RegExp(`/s/${ctx.sessionId}$`));
+	await A.goBack();
+	await expect(A).toHaveURL(new RegExp(`/s/${ctx.sessionId}$`));
+	await expect(A.locator("[data-turn-end]")).toBeInViewport();
+}
+
+async function markUnreadHolds(
+	provider: Provider,
+	fixtures: Fixtures,
+	testInfo: TestInfo,
+) {
+	const ctx = await openInteraction(provider, fixtures);
+	const { A, B } = ctx.windows;
+	// Somewhere to switch away to: a session's first streamed event seeds its
+	// row, and a user message ends no turn.
+	const now = Date.now();
+	ctx.harness.mock.emitTestEvent("session.created", {
+		info: {
+			id: OTHER_SESSION,
+			title: "Elsewhere",
+			time: { created: now, updated: now },
+		},
+	});
+	ctx.harness.mock.emitTestEvent("message.updated", {
+		info: {
+			id: "msg_e2e_other",
+			sessionID: OTHER_SESSION,
+			role: "user",
+			time: { created: now },
+		},
+	});
+	await expect(row(A, OTHER_SESSION)).toBeVisible();
+
+	await test.step("marked unread in A with one finished turn, A's pointer and clicks keep it", async () => {
+		await newDot(ctx, "First turn");
+		await paused(A, async () => {
+			await transcript(A).click({ position: { x: 24, y: 24 } });
+			await expectCleared(ctx, 1, "click");
+		});
+		await markUnread(A, ctx.sessionId);
+		await expectDot(ctx.windows, ctx.sessionId, true);
+		await restAndClick(A);
+		await expectKept(ctx, 1, "marked unread in A, then touched");
+	});
+
+	await test.step("switching away and back lets a resting pointer clear it", async () => {
+		await switchAwayAndBack(ctx);
+		await expectKept(ctx, 1, "switched away and back");
+		await paused(A, async () => {
+			const centre = await transcriptCentre(A);
+			await A.mouse.move(centre.x, centre.y);
+			await A.clock.runFor(350);
+			await expectCleared(ctx, 2, "pointer rest after switching back");
+		});
+	});
+
+	await test.step("marked unread in B, A's pointer and clicks keep it", async () => {
+		await newDot(ctx, "Second turn");
+		await row(B, ctx.sessionId).click();
+		await expectDot(ctx.windows, ctx.sessionId, false);
+		await markUnread(B, ctx.sessionId);
+		await expectDot(ctx.windows, ctx.sessionId, true);
+		await restAndClick(A);
+		await expectKept(ctx, 2, "marked unread in B, then touched in A");
+	});
+
+	await test.step("A switching away and back lets a click clear it", async () => {
+		await switchAwayAndBack(ctx);
+		await expectKept(ctx, 2, "switched away and back after B's mark");
+		await paused(A, async () => {
+			await transcript(A).click({ position: { x: 24, y: 24 } });
+			await expectCleared(ctx, 3, "click after switching back");
+		});
+	});
+
+	await ctx.report.check(testInfo, "mark-unread");
+	await B.context().close();
+}
+
 test.describe("Session unread dot", () => {
 	test.beforeEach(({ page }) => {
 		const viewport = page.viewportSize();
@@ -572,6 +683,19 @@ test.describe("Session unread dot", () => {
 			harness,
 		}, testInfo) => {
 			await dwellAndViewport(
+				"opencode",
+				{ page, browser, relayUrl, harness },
+				testInfo,
+			);
+		});
+
+		test("a marked-unread dot holds against touches until A switches away and back", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			await markUnreadHolds(
 				"opencode",
 				{ page, browser, relayUrl, harness },
 				testInfo,
@@ -768,6 +892,19 @@ test.describe("Session unread dot", () => {
 				harness,
 			}, testInfo) => {
 				await dwellAndViewport(
+					"claude",
+					{ page, browser, relayUrl, harness },
+					testInfo,
+				);
+			});
+
+			test("a marked-unread dot holds against touches until A switches away and back", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await markUnreadHolds(
 					"claude",
 					{ page, browser, relayUrl, harness },
 					testInfo,
