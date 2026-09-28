@@ -111,7 +111,7 @@ describe("listDaemonSessions", () => {
 			const result = yield* listDaemonSessions({}, cache);
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
-			).toEqual({ branch: "main" });
+			).toEqual({ branch: "main", dirty: true });
 			expect(
 				result.sessions.find((session) => session.id === "plain-session"),
 			).not.toHaveProperty("git");

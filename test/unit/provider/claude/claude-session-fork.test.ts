@@ -104,6 +104,49 @@ describe("forkClaudeTranscript", () => {
 		).rejects.toThrow("was not found in the Claude transcript");
 		expect(forkSession).not.toHaveBeenCalled();
 	});
+
+	it("uses the newest earlier assistant found in the transcript", async () => {
+		const forkSession = vi.fn(async () => ({ sessionId: "sdk-fork" }));
+		const readTranscript = vi.fn(async () => [
+			entry("prompt-1", "user", { content: "Question" }),
+			entry("thinking-1", "assistant", { id: "known", content: "Thinking" }),
+			entry("answer-1", "assistant", { id: "answer", content: "Answer" }),
+			entry("prompt-2", "user", { content: "Next" }),
+			entry("answer-2", "assistant", { id: "later", content: "Later" }),
+		]);
+		await forkClaudeTranscript(
+			{
+				parentSdkId: "sdk-parent",
+				projectDir: "/project",
+				title: "Fork",
+				messageId: "result-only",
+				fallbackMessageIds: ["missing", "known"],
+			},
+			{ readTranscript, forkSession },
+		);
+		expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
+			dir: "/project",
+			title: "Fork",
+			upToMessageId: "answer-1",
+		});
+	});
+
+	it("rejects when the target and every fallback are absent", async () => {
+		const forkSession = vi.fn(async () => ({ sessionId: "sdk-fork" }));
+		await expect(
+			forkClaudeTranscript(
+				{
+					parentSdkId: "sdk-parent",
+					projectDir: "/project",
+					title: "Fork",
+					messageId: "result-only",
+					fallbackMessageIds: ["also-missing"],
+				},
+				{ readTranscript: async () => [], forkSession },
+			),
+		).rejects.toThrow("was not found in the Claude transcript");
+		expect(forkSession).not.toHaveBeenCalled();
+	});
 });
 
 describe("defaultClaudeSessionForkSdk", () => {

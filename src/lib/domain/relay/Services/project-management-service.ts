@@ -1,4 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
+import { withCachedProjectGit } from "../../../git/session-git.js";
 import type { ProjectInfo } from "../../../shared-types.js";
 import { ConfigTag, OpenCodeSettingsServiceTag } from "./services.js";
 
@@ -86,7 +87,7 @@ export const ProjectManagementServiceLive: Layer.Layer<
 			return Effect.tryPromise({
 				try: () => Promise.resolve(getProjects()),
 				catch: toError("list"),
-			});
+			}).pipe(Effect.map(withCachedProjectGit));
 		};
 		const listProjects = () =>
 			Effect.gen(function* () {
@@ -95,11 +96,13 @@ export const ProjectManagementServiceLive: Layer.Layer<
 				const ocProjects = yield* settingsService
 					.listProjects()
 					.pipe(Effect.mapError(toError("list")));
-				return ocProjects.map((project) => ({
-					slug: project.id ?? "unknown",
-					title: project.name ?? project.id ?? "Unknown",
-					directory: project.path ?? "",
-				}));
+				return withCachedProjectGit(
+					ocProjects.map((project) => ({
+						slug: project.id ?? "unknown",
+						title: project.name ?? project.id ?? "Unknown",
+						directory: project.path ?? "",
+					})),
+				);
 			});
 
 		return {

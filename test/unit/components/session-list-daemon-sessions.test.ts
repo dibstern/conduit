@@ -84,6 +84,7 @@ describe("SessionList daemon sessions", () => {
 
 		expect(foreignRow.getAttribute("href")).toBe("/s/foreign-session");
 		expect(within(foreignRow).getByText("unlisted-project")).toBeDefined();
+		// A foreign row keeps its menu; the triage suite pins that menu to read state.
 		expect(
 			within(foreignRow).getByRole("button", { name: /More options/ }),
 		).toBeDefined();

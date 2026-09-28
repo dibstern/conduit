@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Queue } from "effect";
-import { expect } from "vitest";
+import { afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
@@ -13,12 +17,14 @@ import {
 	isStarting,
 	makeProjectRegistryLive,
 	markReady,
+	projectInfos,
 	waitForRelay,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
@@ -29,6 +35,12 @@ const testProject: StoredProject = {
 	title: "Test Project",
 	lastUsed: Date.now(),
 };
+
+const fixtureDirs: string[] = [];
+afterEach(() => {
+	for (const directory of fixtureDirs.splice(0))
+		rmSync(directory, { recursive: true, force: true });
+});
 
 /** Stub RelayCache that records calls for assertions. */
 const makeStubRelayCache = (): RelayCache => ({
@@ -51,6 +63,56 @@ const testLayer = Layer.mergeAll(
 	ConfigPersistenceNoopLive,
 	Layer.succeed(RelayCacheTag, makeStubRelayCache()),
 );
+
+describe("projectInfos", () => {
+	it.effect(
+		"includes cached git for a project and omits it for an uncached one",
+		() => {
+			const directory = mkdtempSync(join(tmpdir(), "conduit-registry-git-"));
+			fixtureDirs.push(directory);
+			execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
+				cwd: directory,
+			});
+			writeFileSync(join(directory, "tracked"), "content");
+			execFileSync("git", ["add", "tracked"], { cwd: directory });
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"user.name=Test",
+					"-c",
+					"user.email=test@example.com",
+					"commit",
+					"-qm",
+					"initial",
+				],
+				{ cwd: directory },
+			);
+			const cached = { ...testProject, slug: "cached", directory };
+			const uncached = {
+				...testProject,
+				slug: "uncached",
+				directory: join(directory, "other"),
+			};
+
+			return Effect.gen(function* () {
+				const git = yield* Effect.promise(() =>
+					daemonSessionGitCache.refresh(directory),
+				);
+				expect(git).toMatchObject({ branch: "main", dirty: false });
+				yield* addWithoutRelay(cached);
+				yield* addWithoutRelay(uncached);
+				const projects = yield* projectInfos;
+				expect(
+					projects.find((project) => project.slug === "cached"),
+				).toHaveProperty("git", git);
+				expect(
+					projects.find((project) => project.slug === "uncached"),
+				).not.toHaveProperty("git");
+			}).pipe(Effect.provide(Layer.fresh(testLayer)));
+		},
+	);
+});
 
 // ─── Tests: broadcastToAll ──────────────────────────────────────────────────
 

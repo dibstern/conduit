@@ -37,8 +37,10 @@ function rewindToMain(dbPath: string, sessionId: string, state: MainReadState) {
 		for (const column of ["read_at", "marked_unread_at"])
 			if (!columns.has(column))
 				db.exec(`ALTER TABLE sessions ADD COLUMN ${column} INTEGER`);
+		// Main's ledger ends before session_attention, so every later
+		// migration is unrecorded too.
 		db.exec(
-			"DELETE FROM effect_sql_migrations WHERE name IN ('session_attention', 'read_state_to_turn_ends')",
+			"DELETE FROM effect_sql_migrations WHERE migration_id >= (SELECT migration_id FROM effect_sql_migrations WHERE name = 'session_attention')",
 		);
 		db.exec(
 			"UPDATE sessions SET read_at = COALESCE(last_message_at, created_at), marked_unread_at = NULL",

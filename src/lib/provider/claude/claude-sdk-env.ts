@@ -25,6 +25,9 @@ export function makeClaudeSdkEnv(opts?: {
 		delete env[key];
 	}
 	env["CLAUDE_AGENT_SDK_CLIENT_APP"] = "conduit";
+	// claude.ai account connectors (Gmail, Drive, ...) otherwise load into every
+	// session, and their "sign in again" notices leak into model replies.
+	env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
 	if (opts?.configDir !== undefined && opts.configDir.length > 0) {
 		env["CLAUDE_CONFIG_DIR"] = opts.configDir;
 	}

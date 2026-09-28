@@ -21,6 +21,7 @@ import {
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
+	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
@@ -1006,6 +1007,16 @@ export const effectMigrationEntries = {
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (!columns.some((column) => column.name === "read_at")) return;
 		yield* executeSqlStatements(readStateToTurnEndsMigrationSql);
+	}),
+	// Only a store that ran a local build recording forks in forked_from has the
+	// column (conduit-test-l4ek). Everywhere else this is a no-op.
+	"0026_sessions_forked_from": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (!columns.some((column) => column.name === "forked_from")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION),
+		);
 	}),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 

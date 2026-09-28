@@ -25,19 +25,16 @@
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		getCurrentSlug,
 	} from "../../stores/router.svelte.js";
 	import {
 		forceBarOpen,
 		isBarCollapsed,
+		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
 	import { findSession, getAttentionSessions, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
-	import { setSidebarPanel, showToast } from "../../stores/ui.svelte.js";
 	import { backToSessions, toggleSessionRead } from "../../utils/session-read.js";
-	import { WsRpcError } from "../../transport/ws-rpc.js";
-	import { setSessionAutoSettleRpc, setSessionSettledRpc, unsnoozeSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
 	import Badge from "../ui/Badge.svelte";
@@ -45,8 +42,13 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
+	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import SessionContextMenu from "../session/SessionContextMenu.svelte";
+	import GitIdentity from "../session/GitIdentity.svelte";
+	import SessionRenameInput from "../session/SessionRenameInput.svelte";
+	import { sessionVerbActions } from "../session/session-verbs.js";
 	import {
 		openSettings,
 		shareViaQr,
@@ -61,13 +63,13 @@
 	const title = $derived(session?.title || "New Session");
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
 
-	// The design mock also shows a branch and a PR number beside the project.
-	// The frontend has neither, so identity is the project alone; it falls back
-	// to the slug because the project list arrives over the socket and the bar
-	// renders before it does.
+	// The project list arrives after the bar can render, so use the slug until then.
 	const identity = $derived(
 		projectState.projects.find((p) => p.slug === getCurrentSlug())?.title ??
 			getCurrentSlug(),
+	);
+	const git = $derived(
+		projectState.projects.find((p) => p.slug === getCurrentSlug())?.git,
 	);
 
 	const attentionCount = $derived(
@@ -91,45 +93,10 @@
 	let overflowOpen = $state(false);
 	let overflowOpener: HTMLElement | null = null;
 	let stateMenuOpen = $state(false);
+	let titleMenuOpen = $state(false);
+	let titleMenuAnchor: HTMLElement | null = $state(null);
+	let renaming = $state(false);
 
-	function rpcInput() {
-		if (!session) return null;
-		if (session.projectSlug != null && session.projectSlug !== getCurrentSlug()) return null;
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		return projectSlug
-			? { projectSlug, sessionId: session.id, originId: getBrowserClientId() }
-			: null;
-	}
-
-	async function unsettle() {
-		const input = rpcInput();
-		if (!input) return;
-		try {
-			await setSessionSettledRpc({ ...input, settled: false });
-		} catch {
-			showToast("Couldn't un-settle session", { variant: "error" });
-		}
-	}
-
-	async function toggleAutoSettle() {
-		const input = rpcInput();
-		if (!input || !session) return;
-		try {
-			await setSessionAutoSettleRpc({ ...input, disabled: session.autoSettleDisabled !== true });
-		} catch {
-			showToast("Couldn't change auto-settle", { variant: "error" });
-		}
-	}
-
-	async function wakeNow() {
-		const input = rpcInput();
-		if (!input) return;
-		try {
-			await unsnoozeSessionRpc(input);
-		} catch (error) {
-			showToast(error instanceof WsRpcError ? error.message : "Couldn't unsnooze session", { variant: "error" });
-		}
-	}
 </script>
 
 <div
@@ -196,12 +163,7 @@
 	-->
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2">
 		{#if identity}
-			<span
-				data-testid="session-bar-identity"
-				class="min-w-0 truncate text-sm font-medium leading-none text-text-muted"
-			>
-				{identity}
-			</span>
+			<GitIdentity project={identity} {git} />
 		{/if}
 		<InstanceBadgeMenu />
 	</div>
@@ -224,7 +186,11 @@
 			class="min-w-0 truncate font-semibold leading-tight text-text"
 			class:text-lg={!collapsed}
 			class:text-base={collapsed}
-		><span class="block truncate">{title}</span></h1>
+		>
+			{#if renaming && session}
+				<SessionRenameInput {session} onend={() => { renaming = false; }} class="font-brand min-h-[44px] md:min-h-0" />
+			{:else}<span class="block truncate">{title}</span>{/if}
+		</h1>
 		{#if !collapsed}
 			<Button
 				variant="ghost"
@@ -235,11 +201,11 @@
 				class="-my-[13px] shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
 				ariaLabel="Session menu"
 				aria-haspopup="menu"
-				aria-expanded={overflowOpen}
+				aria-expanded={titleMenuOpen}
 				data-testid="session-bar-title-menu"
 				onclick={(event) => {
-					overflowOpener = event.currentTarget as HTMLElement;
-					overflowOpen = true;
+					titleMenuAnchor = event.currentTarget as HTMLElement;
+					titleMenuOpen = true;
 				}}
 			/>
 		{/if}
@@ -270,17 +236,16 @@
 						{/if}
 					</div>
 					{#if stateChip.kind === "snoozed"}
-						<MenuItem data-testid="session-bar-wake" onselect={() => void wakeNow()}>
+						<MenuItem data-testid="session-bar-wake" onselect={() => void sessionVerbActions.unsnooze(session)}>
 							<Icon name="undo" size={13} /><span>Wake now</span>
 						</MenuItem>
 					{:else}
-						<MenuItem data-testid="session-bar-unsettle" onselect={() => void unsettle()}>
+						<MenuItem data-testid="session-bar-unsettle" onselect={() => void sessionVerbActions.settle(session, false)}>
 							<Icon name="undo" size={13} /><span>Un-settle</span>
 						</MenuItem>
-						<MenuItem data-testid="session-bar-auto-settle" aria-checked={session.autoSettleDisabled !== true} onselect={() => void toggleAutoSettle()}>
-							<span class="w-[13px] shrink-0" aria-hidden="true">{#if session.autoSettleDisabled !== true}<Icon name="check" size={13} />{/if}</span>
-							<span>Auto-settle when idle</span>
-						</MenuItem>
+						<MenuCheckboxItem data-testid="session-bar-auto-settle" checked={session.autoSettleDisabled !== true} onselect={() => void sessionVerbActions.autoSettle(session, session.autoSettleDisabled !== true)}>
+							<span class="w-[13px] shrink-0" aria-hidden="true"></span><span>Auto-settle when idle</span>
+						</MenuCheckboxItem>
 					{/if}
 				</Menu>
 			{/if}
@@ -413,6 +378,24 @@
 			</MenuItem>
 		{/if}
 	</Menu>
+
+	{#if titleMenuOpen && titleMenuAnchor && session}
+		<SessionContextMenu
+			{session}
+			anchor={titleMenuAnchor}
+			projectLabel={identity ?? undefined}
+			branch={session.git?.branch}
+			presentation={sessionViewState.compact ? "sheet" : "menu"}
+			now={sessionState.now}
+			host={{ rename: () => { renaming = true; } }}
+			onclose={() => { titleMenuOpen = false; }}
+			extras={[
+				{ testId: "session-title-share", label: "Share", icon: "share", run: shareViaQr },
+				{ testId: "session-title-settings", label: "Settings", icon: "settings", run: () => openSettings() },
+				...(featureFlags.debug ? [{ testId: "session-title-debug", label: "Debug panel", icon: "bug", run: toggleDebugPanel } as const] : []),
+			]}
+		/>
+	{/if}
 
 	{#if !collapsed}
 		<div id="session-bar-views" data-testid="session-bar-views">

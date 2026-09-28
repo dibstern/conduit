@@ -1,6 +1,7 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import {
+	SessionGitSchema,
 	type SessionInfo,
 	SessionInfoSchema,
 	SessionPermissionModeSchema,
@@ -140,6 +141,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 	instanceId: Schema.optional(Schema.String),
 });

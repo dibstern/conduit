@@ -232,6 +232,12 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		projectSlug: "test-project" as string | null,
 	})),
 	attachProjectRpc: vi.fn(async () => {}),
+	listDaemonSessionsRpc: vi.fn(async () => ({
+		sessions: [],
+		availability: [],
+		hasMore: false,
+		nextCursor: null,
+	})),
 	listSessionsRpc: vi.fn(async (input: { roots?: boolean }) => ({
 		projectSlug: "test-project",
 		roots: input.roots === true,

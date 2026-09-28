@@ -176,6 +176,13 @@ export const StatusPollerLive: Layer.Layer<
 				reportFailure("Status poller poll failed", cause),
 			),
 		);
+		const refreshGit = config.refreshSessionGit
+			? Effect.tryPromise(config.refreshSessionGit).pipe(
+					Effect.catchAllCause((cause) =>
+						reportFailure("Git state refresh failed", cause),
+					),
+				)
+			: Effect.void;
 		const forkPoll = runPoll.pipe(Effect.fork, Effect.asVoid);
 		const invokeChangedCallback = (
 			callback: StatusPollerChangedCallback,
@@ -226,6 +233,7 @@ export const StatusPollerLive: Layer.Layer<
 						Effect.gen(function* () {
 							if (yield* Ref.get(started)) {
 								yield* runPoll;
+								yield* refreshGit;
 							}
 						}),
 					),
@@ -241,6 +249,7 @@ export const StatusPollerLive: Layer.Layer<
 					yield* Ref.set(started, true);
 					if (!wasStarted) {
 						yield* runPoll;
+						yield* refreshGit;
 					}
 				}),
 			stop: () => Ref.set(started, false),

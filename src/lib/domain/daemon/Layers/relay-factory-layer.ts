@@ -13,6 +13,7 @@
 import { mkdirSync } from "node:fs";
 import type http from "node:http";
 import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
 	Cause,
 	Context,
@@ -29,6 +30,7 @@ import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
 	OpenCodeInstance,
+	SessionGit,
 } from "../../../shared-types.js";
 import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
@@ -48,6 +50,7 @@ import {
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import {
+	broadcastProjectList,
 	broadcastToAll,
 	allProjects as getEffectProjects,
 	ProjectRegistryTag,
@@ -204,6 +207,13 @@ export const RelayFactoryLive = (
 						Effect.provideService(DaemonEventBusTag, eventBus),
 					),
 				);
+			const publishProjectList = () =>
+				runCallback(
+					broadcastProjectList.pipe(
+						Effect.provideService(ProjectRegistryTag, projectRegistry),
+						Effect.provideService(DaemonEventBusTag, eventBus),
+					),
+				);
 
 			const getInstances = () =>
 				runCallback(
@@ -330,6 +340,7 @@ export const RelayFactoryLive = (
 						// Create the relay using the imperative createProjectRelay while
 						// threading Effect-owned daemon read models and instance callbacks.
 						const ac = new AbortController();
+						let lastPublishedGit: SessionGit | undefined;
 						const relay = yield* Effect.tryPromise({
 							try: () =>
 								createProjectRelay({
@@ -345,7 +356,13 @@ export const RelayFactoryLive = (
 									listDaemonSessions,
 									broadcastSessionListChanged,
 									refreshSessionGit: async () => {
-										await daemonSessionGitCache.refresh(project.directory);
+										const git = await daemonSessionGitCache.refresh(
+											project.directory,
+										);
+										if (isDeepStrictEqual(git, lastPublishedGit)) return;
+										await publishProjectList();
+										await broadcastSessionListChanged();
+										lastPublishedGit = git;
 									},
 									getInstances,
 									addInstance,

@@ -588,6 +588,14 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 					...(claudeConfigDir !== undefined && { configDir: claudeConfigDir }),
 					title,
 					...(messageId !== undefined && { messageId }),
+					...(messageId !== undefined && {
+						fallbackMessageIds: parentMessages
+							.slice(0, parentMessages.indexOf(forkPointMessage))
+							.flatMap((message) =>
+								message.role === "assistant" ? [message.id] : [],
+							)
+							.reverse(),
+					}),
 				}),
 			catch: (cause) =>
 				new SessionCommandError({

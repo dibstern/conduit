@@ -73,6 +73,34 @@ test("j/k cross groups; Enter opens; settle, undo, pin, snooze and rename work f
 	await expect(page).toHaveURL(/\/s\/[^/]+$/);
 });
 
+test("row rename commits on Enter, ignores empty titles, and cancels on Escape", async ({
+	page,
+	relayUrl,
+}) => {
+	const rows = await twoRows(page, relayUrl);
+	const id = await rows.first().getAttribute("data-session-id");
+	if (!id) throw new Error("missing session id");
+	const row = page.locator(`#session-list [data-session-id="${id}"]`);
+	await row.dblclick();
+	let input = row.getByRole("textbox", { name: "Session name" });
+	await expect(input).toBeFocused();
+	await input.fill("Renamed from row");
+	await input.press("Enter");
+	await expect(row).toContainText("Renamed from row");
+	await row.dblclick();
+	input = row.getByRole("textbox", { name: "Session name" });
+	await input.fill("  ");
+	await input.press("Enter");
+	await expect(row).toContainText("Renamed from row");
+	await row.dblclick();
+	input = row.getByRole("textbox", { name: "Session name" });
+	await input.fill("Discarded title");
+	await input.press("Escape");
+	await expect(row).toContainText("Renamed from row");
+	await page.reload();
+	await expect(row).toContainText("Renamed from row");
+});
+
 test("scope digits, shortcut sheet and text-field guards", async ({
 	page,
 	relayUrl,

@@ -9,6 +9,7 @@ import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Toast from "../../../src/lib/frontend/components/overlays/Toast.svelte";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
+import SnoozePickerHost from "../../../src/lib/frontend/components/session/SnoozePickerHost.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
 	attachedProjectState,
@@ -470,6 +471,7 @@ describe("session triage list", () => {
 		vi.spyOn(Date, "now").mockReturnValue(now);
 		render(SessionList);
 		render(Toast);
+		render(SnoozePickerHost);
 		const row = screen.getByText("Idle work").closest("a");
 		if (!row) throw new Error("Missing row");
 		await fireEvent.mouseOver(row);
@@ -512,6 +514,7 @@ describe("session triage list", () => {
 		uiState.snoozedShelfOpen = true;
 		render(SessionList);
 		render(Toast);
+		render(SnoozePickerHost);
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Sleeping work" }),
 		);
@@ -542,6 +545,7 @@ describe("session triage list", () => {
 		);
 		render(SessionList);
 		render(Toast);
+		render(SnoozePickerHost);
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);

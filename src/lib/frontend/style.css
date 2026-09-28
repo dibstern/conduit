@@ -615,9 +615,12 @@ body:has(dialog:modal) {
 #session-bar-back {
 	grid-area: back;
 }
+/* Stretch to the track and right-align inside it. `justify-self: end` sizes the
+   item to its nowrap content, which then overflows leftward over the back
+   control instead of truncating. */
 #session-bar-meta {
 	grid-area: meta;
-	justify-self: end;
+	justify-content: flex-end;
 }
 /* Size is a `class:` directive on the element, not a rule here. `font-size:
    var(--text-lg)` was tried and is a trap: Tailwind v4 emits a theme variable

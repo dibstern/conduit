@@ -13,15 +13,7 @@
 	<SessionContextMenu
 		{session}
 		{anchor}
-		onrename={() => {}}
-		onsettle={() => {}}
-		onautosettle={() => {}}
-		onpin={() => {}}
-		onsnooze={() => {}}
-		onunsnooze={() => {}}
-		ondelete={() => {}}
-		oncopyresume={() => {}}
-		onfork={() => {}}
+		host={{ rename: () => {} }}
 		onclose={() => { anchor = null; }}
 	/>
 {/if}

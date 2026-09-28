@@ -35,7 +35,7 @@
 	hljs.registerAliases(["svelte", "vue"], { languageName: "xml" });
 	import { themeState } from "../../stores/theme.svelte.js";
 
-	let { message }: { message: AssistantMessage } = $props();
+	let { message, forkMessageId }: { message: AssistantMessage; forkMessageId?: string | undefined } = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
 
 	// ─── Copy-on-click state machine ───────────────────────────────────────────
@@ -332,14 +332,14 @@
 
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation(); // Don't trigger the copy click handler
-		if (message.messageId) {
+		if (forkMessageId) {
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
 			void forkSessionRpc({
 				projectSlug,
 				originId: getBrowserClientId(),
 				...(sessionState.currentId ? { sessionId: sessionState.currentId } : {}),
-				messageId: message.messageId,
+				messageId: forkMessageId,
 			}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 		}
 	}
@@ -409,7 +409,7 @@
 					ariaLabel={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
 					onclick={handleClick}
 				/>
-				{#if message.messageId}
+				{#if forkMessageId}
 					<Button
 						variant="ghost"
 						size="content"

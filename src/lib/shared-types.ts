@@ -226,6 +226,9 @@ export interface SessionGit {
 	branch?: string;
 	head?: string;
 	worktree?: string;
+	dirty?: boolean;
+	ahead?: number;
+	behind?: number;
 	merged?: boolean;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
 }
@@ -234,6 +237,9 @@ export const SessionGitSchema = Schema.Struct({
 	branch: Schema.optionalWith(Schema.String, { exact: true }),
 	head: Schema.optionalWith(Schema.String, { exact: true }),
 	worktree: Schema.optionalWith(Schema.String, { exact: true }),
+	dirty: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
+	behind: Schema.optionalWith(Schema.Number, { exact: true }),
 	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	operation: Schema.optionalWith(
 		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
@@ -438,6 +444,7 @@ export interface ProjectInfo {
 	slug: string;
 	title: string;
 	directory: string;
+	git?: SessionGit;
 	clientCount?: number;
 	instanceId?: string;
 }
@@ -632,6 +639,7 @@ const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 	instanceId: Schema.optional(Schema.String),
 });

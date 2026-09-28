@@ -1,9 +1,50 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SessionContextMenu from "../../../src/lib/frontend/components/session/SessionContextMenu.svelte";
+import { openSnoozePicker } from "../../../src/lib/frontend/stores/snooze-picker.svelte.js";
+import {
+	setSessionAutoSettleRpc,
+	setSessionPinnedRpc,
+	setSessionSettledRpc,
+	unsnoozeSessionRpc,
+} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
-afterEach(cleanup);
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+		>()),
+		getCurrentSlug: () => "test",
+	}),
+);
+vi.mock(
+	"../../../src/lib/frontend/stores/snooze-picker.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/snooze-picker.svelte.js")
+		>()),
+		openSnoozePicker: vi.fn(),
+	}),
+);
+vi.mock(
+	"../../../src/lib/frontend/transport/ws-rpc-client.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
+		>()),
+		setSessionAutoSettleRpc: vi.fn().mockResolvedValue(undefined),
+		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
+		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
+		unsnoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
+	}),
+);
+
+afterEach(() => {
+	cleanup();
+	vi.clearAllMocks();
+});
 
 function openMenu(
 	session: Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>,
@@ -14,28 +55,16 @@ function openMenu(
 		onrename?: () => void;
 	},
 ) {
-	const onsettle = vi.fn();
-	const onpin = vi.fn();
-	const onsnooze = vi.fn();
-	const onunsnooze = vi.fn();
 	render(SessionContextMenu, {
 		props: {
 			session: { status: "idle", ...session },
 			anchor: options?.anchor ?? document.body,
 			projectLabel: options?.projectLabel,
 			branch: options?.branch,
-			onsettle,
-			onpin,
-			onsnooze,
-			onunsnooze,
-			onrename: options?.onrename ?? vi.fn(),
-			ondelete: vi.fn(),
-			oncopyresume: vi.fn(),
-			onfork: vi.fn(),
+			host: { rename: options?.onrename ?? vi.fn() },
 			onclose: vi.fn(),
 		},
 	});
-	return { onsettle, onpin, onsnooze, onunsnooze };
 }
 
 describe("session triage menu", () => {
@@ -83,19 +112,68 @@ describe("session triage menu", () => {
 		anchor.remove();
 		input.remove();
 	});
-	it("shows triage actions and shortcuts above Rename, with a divider", async () => {
-		const { onsettle } = openMenu({ id: "a", title: "Alpha" });
-		const items = await screen.findAllByRole("menuitem");
-		expect(items.slice(0, 5).map((item) => item.textContent?.trim())).toEqual([
-			"Settle s",
-			"Auto-settle when idle",
-			"Snooze… z",
-			"Pin to top p",
-			"Rename r",
+	it("puts Settle and Pin above Rename, with a divider", async () => {
+		openMenu({ id: "a", title: "Alpha" });
+		await screen.findByTestId("session-ctx-rename");
+		const firstFour = [
+			...screen
+				.getByRole("menu")
+				.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'),
+		].slice(0, 4);
+		expect(firstFour.map((item) => item.getAttribute("data-testid"))).toEqual([
+			"session-ctx-settle",
+			"session-ctx-auto-settle",
+			"session-ctx-snooze",
+			"session-ctx-pin",
 		]);
-		expect(screen.getAllByRole("separator")).toHaveLength(2);
+		for (const [index, label] of [
+			"Settle",
+			"Auto-settle when idle",
+			"Snooze…",
+			"Pin to top",
+		].entries()) {
+			expect(firstFour[index]?.textContent).toContain(label);
+		}
+		expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
+		expect(screen.getByTestId("session-ctx-rename")).toBeTruthy();
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
-		expect(onsettle).toHaveBeenCalledWith("a", true);
+		expect(setSessionSettledRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "test",
+				sessionId: "a",
+				settled: true,
+			}),
+		);
+	});
+
+	it("toggles auto-settle through a checkbox item", async () => {
+		openMenu({ id: "a", title: "Alpha" });
+		const checkbox = await screen.findByRole("menuitemcheckbox", {
+			name: "Auto-settle when idle",
+		});
+		expect(checkbox.getAttribute("aria-checked")).toBe("true");
+		await fireEvent.click(checkbox);
+		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "test",
+				sessionId: "a",
+				disabled: true,
+			}),
+		);
+		cleanup();
+		openMenu({ id: "a", title: "Alpha", autoSettleDisabled: true });
+		const unchecked = await screen.findByRole("menuitemcheckbox", {
+			name: "Auto-settle when idle",
+		});
+		expect(unchecked.getAttribute("aria-checked")).toBe("false");
+		await fireEvent.click(unchecked);
+		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "test",
+				sessionId: "a",
+				disabled: false,
+			}),
+		);
 	});
 
 	it("hides snooze on settled rows", async () => {
@@ -105,49 +183,68 @@ describe("session triage menu", () => {
 	});
 
 	it("disables snooze on pinned and waiting rows with reasons", async () => {
-		const { onsnooze } = openMenu({ id: "a", title: "Alpha", pinnedAt: 1 });
+		openMenu({ id: "a", title: "Alpha", pinnedAt: 1 });
 		const snooze = await screen.findByTestId("session-ctx-snooze");
 		expect(snooze.getAttribute("aria-disabled")).toBe("true");
 		expect(snooze.textContent).toContain("Unpin to snooze");
 		await fireEvent.click(snooze);
-		expect(onsnooze).not.toHaveBeenCalled();
+		expect(openSnoozePicker).not.toHaveBeenCalled();
 		cleanup();
 		for (const attention of ["needs-approval", "needs-reply"] as const) {
 			openMenu({ id: "a", title: "Alpha", attention });
 			const waiting = await screen.findByTestId("session-ctx-snooze");
 			expect(waiting.getAttribute("aria-disabled")).toBe("true");
 			expect(waiting.textContent).toContain("Waiting on you");
+			await fireEvent.click(waiting);
+			expect(openSnoozePicker).not.toHaveBeenCalled();
 			cleanup();
 		}
 	});
 
 	it("changes or removes an existing snooze", async () => {
-		const { onsnooze } = openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
+		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
 		const change = await screen.findByTestId("session-ctx-snooze");
 		expect(change.textContent).toContain("Change snooze…");
 		await fireEvent.click(change);
-		expect(onsnooze).toHaveBeenCalledWith("a");
-		// Re-open: selecting a menu item closes the portal.
+		expect(openSnoozePicker).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "a" }),
+			"center",
+		);
+		// Re-open with the same snoozed state.
 		cleanup();
-		const { onunsnooze } = openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
+		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
-		expect(onunsnooze).toHaveBeenCalledWith("a");
+		expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
+			expect.objectContaining({ projectSlug: "test", sessionId: "a" }),
+		);
 	});
 
 	it("un-settles a settled session", async () => {
-		const { onsettle } = openMenu({ id: "a", title: "Alpha", settledAt: 0 });
+		openMenu({ id: "a", title: "Alpha", settledAt: 0 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsettle"));
-		expect(onsettle).toHaveBeenCalledWith("a", false);
+		expect(setSessionSettledRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "test",
+				sessionId: "a",
+				settled: false,
+			}),
+		);
 	});
 
 	it("pins a session", async () => {
-		const { onpin } = openMenu({ id: "a", title: "Alpha" });
+		openMenu({ id: "a", title: "Alpha" });
 		await fireEvent.click(await screen.findByTestId("session-ctx-pin"));
-		expect(onpin).toHaveBeenCalledWith("a", true);
+		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "test",
+				sessionId: "a",
+				pinned: true,
+			}),
+		);
 	});
 
 	it("explains the disabled Settle action on a pinned session and allows Unpin", async () => {
-		const { onsettle, onpin } = openMenu({
+		openMenu({
 			id: "a",
 			title: "Alpha",
 			pinnedAt: 0,
@@ -156,8 +253,14 @@ describe("session triage menu", () => {
 		expect(settle.getAttribute("aria-disabled")).toBe("true");
 		expect(settle.textContent).toContain("Unpin to settle");
 		await fireEvent.click(settle);
-		expect(onsettle).not.toHaveBeenCalled();
+		expect(setSessionSettledRpc).not.toHaveBeenCalled();
 		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
-		expect(onpin).toHaveBeenCalledWith("a", false);
+		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "test",
+				sessionId: "a",
+				pinned: false,
+			}),
+		);
 	});
 });

@@ -59,6 +59,7 @@ const expectedNames = [
 	"sessions_marked_unread",
 	"session_attention",
 	"read_state_to_turn_ends",
+	"sessions_forked_from",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -445,7 +446,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(14);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(15);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -453,7 +454,7 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("reconciles local-main id 18 and reruns 18 through 25 once", () =>
+	it.effect("reconciles local-main id 18 and reruns 18 through 26 once", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(17));
 			const sql = yield* SqlClient.SqlClient;
@@ -491,7 +492,96 @@ describe("Effect migration lineage", () => {
 		}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("appends only migrations 23 to 25 to a HEAD id-22 database", () =>
+	it.effect(
+		"migrates the live local-main ledger (18 sessions_marked_unread, 19 sessions_forked_from)",
+		() =>
+			Effect.gen(function* () {
+				// The shape recorded in the live store on 2026-09-28 (conduit-test-l4ek).
+				yield* makeEffectSqlMigrator(prefix(17));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`ALTER TABLE sessions ADD COLUMN marked_unread_at INTEGER`;
+				yield* sql`ALTER TABLE sessions ADD COLUMN forked_from TEXT`;
+				yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
+					VALUES (18, 'sessions_marked_unread'), (19, 'sessions_forked_from')`;
+				const liveColumns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(liveColumns.map((row) => row.name)).toEqual([
+					"id",
+					"provider",
+					"provider_sid",
+					"title",
+					"status",
+					"parent_id",
+					"fork_point_event",
+					"last_message_at",
+					"created_at",
+					"updated_at",
+					"permission_mode",
+					"read_at",
+					"last_turn_error_at",
+					"settled_at",
+					"pinned_at",
+					"snoozed_at",
+					"snoozed_until",
+					"woken_at",
+					"woken_reason",
+					"unsettled_at",
+					"auto_settle_disabled_at",
+					"settled_automatically",
+					"marked_unread_at",
+					"forked_from",
+				]);
+				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at)
+					VALUES ('origin', 'claude', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, provider, forked_from, fork_point_event,
+					created_at, updated_at) VALUES
+					('fork', 'claude', 'origin', 'boundary', 1, 1),
+					('orphan-fork', 'claude', 'deleted', 'gone', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+					VALUES ('boundary', 'origin', 'assistant', 200, 200)`;
+
+				expect(yield* makeEffectSqlMigrator()).toEqual(
+					expectedNames.slice(17).map((name, index) => [index + 18, name]),
+				);
+				const history = yield* sql<{ name: string }>`
+					SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history.map((row) => row.name)).toEqual(expectedNames);
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(columns.map((row) => row.name)).not.toContain("forked_from");
+				expect(
+					yield* sql`SELECT id, parent_id, fork_point_event, fork_point_timestamp,
+						fork_point_message_id FROM sessions ORDER BY id`,
+				).toEqual([
+					{
+						id: "fork",
+						parent_id: "origin",
+						fork_point_event: "boundary",
+						fork_point_timestamp: 200,
+						fork_point_message_id: "boundary",
+					},
+					{
+						id: "origin",
+						parent_id: null,
+						fork_point_event: null,
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					},
+					{
+						id: "orphan-fork",
+						parent_id: null,
+						fork_point_event: "gone",
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					},
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect("appends only migrations 23 to 26 to a HEAD id-22 database", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(prefix(22));
 			const sql = yield* SqlClient.SqlClient;
@@ -499,6 +589,7 @@ describe("Effect migration lineage", () => {
 				[23, "sessions_marked_unread"],
 				[24, "session_attention"],
 				[25, "read_state_to_turn_ends"],
+				[26, "sessions_forked_from"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -561,6 +652,7 @@ describe("Effect migration lineage", () => {
 
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[25, "read_state_to_turn_ends"],
+					[26, "sessions_forked_from"],
 				]);
 				const rows = yield* sql<{
 					id: string;

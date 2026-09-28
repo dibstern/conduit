@@ -366,7 +366,7 @@ test.describe("phone", () => {
 		const sheet = page.getByTestId("session-action-sheet");
 		await expect(sheet).toBeVisible();
 		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
-		const panel = page.getByTestId("modal-sheet-panel");
+		const panel = sheet;
 		const box = await panel.boundingBox();
 		expect(box).not.toBeNull();
 		expect(box?.x).toBe(0);
@@ -396,7 +396,7 @@ test.describe("phone", () => {
 		await longPress(row);
 		await expect(sheet).toBeVisible();
 		await page
-			.getByTestId("modal-sheet-scrim")
+			.getByTestId("menu-sheet-scrim")
 			.click({ position: { x: 10, y: 10 } });
 		await expect(sheet).toHaveCount(0);
 		await expect(row.getByTitle("Pinned session")).toBeVisible();
@@ -454,5 +454,56 @@ test.describe("phone", () => {
 		await expect(page.getByTestId("session-swipe-action")).toHaveCount(0);
 		await expect(page.getByTestId("session-swipe-mark-unread")).toBeVisible();
 		await expect(row).toBeVisible();
+	});
+
+	test("phone: title sheet shares sidebar verbs and works without the list mounted", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await gotoRelay(page, new URL("/", relayUrl).toString());
+		const row = page.locator("#session-list .session-item").first();
+		await expect(row).toBeVisible();
+		await longPress(row);
+		const listMenu = page.getByTestId("session-action-sheet");
+		const listVerbs = await listMenu
+			.locator(
+				'[data-testid^="session-ctx-"]:is([role="menuitem"], [role="menuitemcheckbox"])',
+			)
+			.evaluateAll((items) =>
+				items.map((item) => item.getAttribute("data-testid")),
+			);
+		await page.keyboard.press("Escape");
+		const sessionId = await row.getAttribute("data-session-id");
+		await page.goto(new URL(`/s/${sessionId}`, relayUrl).toString());
+		await expect(page.locator("#sidebar")).toBeHidden();
+		const trigger = page.getByTestId("session-bar-title-menu");
+		await trigger.click();
+		const sheet = page.getByTestId("session-action-sheet");
+		await expect(sheet).toBeVisible();
+		const box = await sheet.boundingBox();
+		expect(box?.x).toBe(0);
+		expect(box?.width).toBe(393);
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
+		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
+		const titleVerbs = await sheet
+			.locator(
+				'[data-testid^="session-ctx-"]:is([role="menuitem"], [role="menuitemcheckbox"])',
+			)
+			.evaluateAll((items) =>
+				items.map((item) => item.getAttribute("data-testid")),
+			);
+		expect(titleVerbs).toEqual(
+			listVerbs.filter((id) => id !== "session-ctx-select"),
+		);
+		await page.keyboard.press("Escape");
+		await expect(trigger).toBeFocused();
+		await trigger.click();
+		await sheet.getByTestId("session-ctx-snooze").click();
+		await expect(page.getByTestId("snooze-option-indefinite")).toBeVisible();
+		await page.getByTestId("snooze-option-indefinite").click();
+		await expect(
+			page.getByRole("status").filter({ hasText: "Snoozed “" }),
+		).toBeVisible();
 	});
 });

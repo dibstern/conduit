@@ -183,3 +183,29 @@ export const RadioSelection: Story = {
 		).toHaveAttribute("aria-checked", "true");
 	},
 };
+
+export const CheckboxSelection: Story = {
+	args: { open: false, checked: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const trigger = canvas.getByRole("button", { name: "Open menu" });
+		await userEvent.click(trigger);
+		const checkbox = body.getByRole("menuitemcheckbox", {
+			name: "Auto-settle when idle",
+		});
+		await expect(checkbox).toHaveAttribute("aria-checked", "true");
+		await expect(checkbox.querySelector("svg")).toBeInTheDocument();
+		await userEvent.click(checkbox);
+		await expect(canvas.getByTestId("checked-value")).toHaveTextContent(
+			"false",
+		);
+		await waitFor(() =>
+			expect(body.queryByRole("menu")).not.toBeInTheDocument(),
+		);
+		await userEvent.click(trigger);
+		await expect(
+			body.getByRole("menuitemcheckbox", { name: "Auto-settle when idle" }),
+		).toHaveAttribute("aria-checked", "false");
+	},
+};

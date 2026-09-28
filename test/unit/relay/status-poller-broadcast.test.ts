@@ -218,6 +218,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 interface TestHarness {
 	relay: ProjectRelay;
 	mock: MockOpenCode;
+	refreshSessionGit: ReturnType<typeof vi.fn<() => Promise<void>>>;
 	relayPort: number;
 	connectClient(opts?: { session?: string }): Promise<TestWsClient>;
 	stop(): Promise<void>;
@@ -225,6 +226,7 @@ interface TestHarness {
 
 async function createTestHarness(): Promise<TestHarness> {
 	const mock = await createMockOpenCode();
+	const refreshSessionGit = vi.fn(async () => undefined);
 
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
@@ -243,6 +245,7 @@ async function createTestHarness(): Promise<TestHarness> {
 			sseGracePeriodMs: 300,
 			sseActiveThresholdMs: 500,
 		},
+		refreshSessionGit,
 	});
 
 	const browserSockets = new WebSocketServer({ noServer: true });
@@ -282,6 +285,7 @@ async function createTestHarness(): Promise<TestHarness> {
 	return {
 		relay,
 		mock,
+		refreshSessionGit,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
 			let url = `ws://127.0.0.1:${relayPort}/ws`;
@@ -319,6 +323,21 @@ describe("Status poller → browser processing/done transitions", () => {
 	afterAll(async () => {
 		if (harness) await harness.stop();
 	}, 10_000);
+
+	it("refreshes git on the status poll cadence", async () => {
+		await vi.waitFor(
+			() => expect(harness.refreshSessionGit).toHaveBeenCalled(),
+			{ timeout: 3000 },
+		);
+		const previousCalls = harness.refreshSessionGit.mock.calls.length;
+		await vi.waitFor(
+			() =>
+				expect(harness.refreshSessionGit.mock.calls.length).toBeGreaterThan(
+					previousCalls,
+				),
+			{ timeout: 3000 },
+		);
+	});
 
 	it("sends status:processing to clients viewing a session that becomes busy", async () => {
 		const client = await harness.connectClient();
