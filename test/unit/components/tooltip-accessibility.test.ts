@@ -17,7 +17,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	startInstanceRpc: vi.fn(async () => undefined),
 }));
 
-import Header from "../../../src/lib/frontend/components/layout/Header.svelte";
+import SessionBar from "../../../src/lib/frontend/components/layout/SessionBar.svelte";
 import ConnectOverlay from "../../../src/lib/frontend/components/overlays/ConnectOverlay.svelte";
 import { wsState } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
@@ -50,7 +50,7 @@ describe("non-focusable tooltip accessibility", () => {
 	});
 
 	it("announces connection state changes through the status region", async () => {
-		render(Header);
+		render(SessionBar);
 
 		const status = screen.getByRole("status");
 		expect(status.textContent).toBe("Disconnected");

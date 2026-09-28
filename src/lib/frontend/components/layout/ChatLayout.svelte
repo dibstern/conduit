@@ -1,5 +1,5 @@
 <!-- ─── Chat Layout ─────────────────────────────────────────────────────────── -->
-<!-- Session list and chat: Sidebar + Header + Messages + Input. -->
+<!-- Session list and chat: Sidebar + SessionBar + Messages + Input. -->
 <!-- Wires all feature/overlay components into the layout hierarchy. -->
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
@@ -7,7 +7,6 @@
 	import { onMount, tick, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
 	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
-	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -601,7 +600,7 @@
 		return () => vv.removeEventListener("resize", onViewportResize);
 	});
 
-	// ─── QR modal event bridge (Header dispatches "qr:show") ─────────────────
+	// ─── QR modal event bridge (SessionBar dispatches "qr:show") ─────────────
 
 	$effect(() => {
 		function onQrShow() {
@@ -611,7 +610,7 @@
 		return () => window.removeEventListener("qr:show", onQrShow);
 	});
 
-	// ─── Settings panel event bridge (Header dispatches "settings:open") ──────
+	// ─── Settings panel event bridge (SessionBar dispatches "settings:open") ──
 
 	$effect(() => {
 		function onSettingsOpen(e: Event) {
@@ -675,7 +674,7 @@
 		}
 	});
 
-	// ─── Debug panel toggle event (from Header bug icon) ───────────────────────
+	// ─── Debug panel toggle event (from SessionBar menu) ───────────────────────
 	$effect(() => {
 		function onDebugToggle() {
 			debugPanelVisible = !debugPanelVisible;
@@ -722,16 +721,9 @@
 		class:select-none={isResizing || isSidebarResizing || isPaneResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<!-- Chrome: on a phone the session owns the top bar, and the global
-		     header is replaced rather than stacked under. Exactly one of the two
-		     renders, so there is never a second row of chrome to scroll past. -->
-		{#if sessionViewState.compact}
-			<!-- The list screen has its own bar in Sidebar; skipping this one keeps
-			     the shared instance badge test IDs unique. -->
-			{#if !phoneListScreen}<SessionBar />{/if}
-		{:else}
-			<Header />
-		{/if}
+		<!-- The list screen has its own bar in Sidebar; keep one session bar
+		     mounted across breakpoint changes so its state follows the viewport. -->
+		{#if !phoneListScreen}<SessionBar />{/if}
 
 		<!-- Banners (update available, skip permissions, etc.). The phone list
 		     screen hides #app, so Sidebar shows them there instead. -->

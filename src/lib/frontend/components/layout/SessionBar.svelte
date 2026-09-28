@@ -1,22 +1,19 @@
 <!--
-  SessionBar — the session's own top bar, phones only (design bar 20).
+  SessionBar — the session's top bar on phones and desktop (design bar 20).
 
-  Two layouts, one DOM tree. Expanded it is two rows: back-to-the-list with its
-  attention badge plus the project identity, then the session title and Views. Sitting at
-  the bottom of the transcript collapses it to a single 46px row carrying back,
-  the title, a chevron that brings the bar back, and the overflow menu. The view
-  sheet is available from the expanded row.
+  One component for both layouts. On phones the expanded form has an identity
+  row and a title/Views row; at the bottom of the transcript it collapses to a
+  single 46px row. Desktop keeps one row regardless of transcript position.
 
   You collapse by scrolling to the bottom and expand by scrolling up or by
   pressing the chevron. There is deliberately no collapse button: hiding chrome
   is never urgent, getting it back is.
 
-  Geometry lives in style.css as a grid keyed on `data-collapsed`, so the title
-  moves between rows without being re-parented and the <h1> never unmounts.
+  Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
+  title moves between rows without being re-parented and the <h1> never unmounts.
 
-  On compact viewports this REPLACES the global header rather than stacking
-  under it. The instance badge stays beside the project identity, and the
-  title menu carries the header's global actions in the expanded bar.
+  The instance badge stays beside the project identity. The title menu carries
+  session verbs and global actions; the desktop overflow carries global actions.
 -->
 
 <script lang="ts">
@@ -48,7 +45,9 @@
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
-	import { sessionVerbActions } from "../session/session-verbs.js";
+	import { getSettleVerb, sessionVerbActions } from "../session/session-verbs.js";
+	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
+	import { wsState } from "../../stores/ws.svelte.js";
 	import {
 		openSettings,
 		shareViaQr,
@@ -62,6 +61,16 @@
 	const session = $derived(findSession(sessionState.currentId ?? ""));
 	const title = $derived(session?.title || "New Session");
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
+	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
+	const statusTitle = $derived(wsState.statusText || "Connecting");
+	const statusClass = $derived.by(() => {
+		switch (wsState.status) {
+			case "connected": return "bg-success";
+			case "processing": return "bg-success animate-[pulse-dot_1.2s_ease-in-out_infinite]";
+			case "error": return "bg-error";
+			default: return "bg-text-muted";
+		}
+	});
 
 	// The project list arrives after the bar can render, so use the slug until then.
 	const identity = $derived(
@@ -99,13 +108,44 @@
 	let titleMenuOpen = $state(false);
 	let titleMenuAnchor: HTMLElement | null = $state(null);
 	let renaming = $state(false);
+	// The two layouts anchor their menus differently, so crossing the
+	// breakpoint closes any open one rather than leaving it floating.
+	$effect(() => {
+		void sessionViewState.compact;
+		titleMenuOpen = false;
+		stateMenuOpen = false;
+		overflowOpen = false;
+	});
 
 </script>
+
+<!--
+	Where you are. Identity is the first thing to give: it truncates while the
+	back control stays whole, because losing the way out is worse than losing
+	the project's name. On phones it is the first row and is gone when
+	collapsed; on desktop it follows the title. Rendered from one snippet in
+	either position so DOM order always matches visual order.
+
+	The instance badge sits beside the identity: which instance this project
+	runs on is part of where you are. Absent with a single instance. It keeps
+	the pill recipe's 18px height rather than the bar's 44px touch target,
+	because a 44px rounded-full pill reads as a rendering fault; the real fix is
+	a small-paint/large-hit-area capability on ui/Button (conduit-test-lciu).
+-->
+{#snippet identityBlock()}
+	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
+		{#if identity}
+			<GitIdentity project={identity} {git} />
+		{/if}
+		<InstanceBadgeMenu />
+	</div>
+{/snippet}
 
 <div
 	id="session-bar"
 	data-testid="session-bar"
 	data-collapsed={collapsed}
+	data-compact={sessionViewState.compact}
 	role="region"
 	aria-label="Session controls"
 	tabindex="-1"
@@ -124,6 +164,7 @@
 		is decorative and `display: none` would leave the only way off the screen
 		with no accessible name at all.
 	-->
+	{#if sessionViewState.compact || uiState.sidebarCollapsed}
 	<Button
 		id="session-bar-back"
 		variant="ghost"
@@ -132,7 +173,7 @@
 		iconSize={17}
 		class="shrink-0 min-h-[44px] gap-1.5 rounded-lg pl-1 pr-2 text-base font-semibold"
 		data-testid="session-bar-back"
-		onclick={backToSessions}
+		onclick={sessionViewState.compact ? backToSessions : expandSidebar}
 	>
 		<span class:sr-only={collapsed}>Sessions</span>
 		{#if attentionCount > 0}
@@ -146,30 +187,9 @@
 			</Badge>
 		{/if}
 	</Button>
+	{/if}
 
-	<!--
-		Where you are. Identity is the first thing to give: it truncates while
-		the back control stays whole, because losing the way out is worse than
-		losing the project's name. The whole area is gone when collapsed.
-
-		The instance badge sits beside the identity, as in the header: which
-		instance this project runs on is part of where you are. Absent with a
-		single instance.
-
-		The badge is deliberately left at the pill recipe's own 18px height
-		rather than raised to the bar's 44px touch target. `min-h-[44px]` was
-		tried and captured: `pill` is `rounded-full`, so 44px turns a 10px label
-		into a tall empty lozenge that reads as a rendering fault. Its tap target
-		is exactly the desktop header's, so this is not a regression, and the
-		real fix is a small-paint/large-hit-area capability on ui/Button rather
-		than a call-site override (conduit-test-lciu).
-	-->
-	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2">
-		{#if identity}
-			<GitIdentity project={identity} {git} />
-		{/if}
-		<InstanceBadgeMenu />
-	</div>
+	{#if sessionViewState.compact}{@render identityBlock()}{/if}
 
 	<!-- The session title, and the only string in the bar allowed to ellipse. It
 	     is the page heading on a phone; the global header's <h1> is suppressed at
@@ -182,6 +202,7 @@
 
 	     Expanded, the title chevron opens the session menu.
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
+	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
 		<h1
 			id="session-bar-title"
@@ -216,7 +237,7 @@
 			{#if stateChip.kind === "woke"}
 				<Badge variant="quiet" shape="pill" size="sm" class="shrink-0" data-testid="session-bar-state-chip" data-state="woke" title={stateChip.label}>
 					<Icon name={stateChip.icon} size={13} class="text-accent" />
-					{#if !collapsed}<span>{stateChip.label}</span>{/if}
+					{#if !collapsed}<span class="desktop-state-label">{stateChip.label}</span>{/if}
 				</Badge>
 			{:else}
 				<Menu bind:open={stateMenuOpen} ariaLabel="Session state options" align="end" data-testid="session-bar-state-menu">
@@ -224,7 +245,7 @@
 						<Button {...props} variant="ghost" size="content" class="min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
 							<Badge variant="quiet" shape="pill" size="sm">
 								<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-brand-b" : "text-success"} />
-								{#if !collapsed}<span>{stateChip.label}</span>{/if}
+								{#if !collapsed}<span class="desktop-state-label">{stateChip.label}</span>{/if}
 							</Badge>
 						</Button>
 					{/snippet}
@@ -254,8 +275,36 @@
 			{/if}
 		{/if}
 	</div>
+	{/if}
 
-	{#if !collapsed}
+	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
+
+	{#if !sessionViewState.compact && settleVerb}
+		<Button
+			id="session-bar-settle"
+			variant="secondary"
+			size="sm"
+			icon={settleVerb.icon ?? "check"}
+			disabled={settleVerb.disabledReason != null}
+			title={settleVerb.disabledReason ?? settleVerb.label}
+			ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
+			data-testid="session-bar-settle"
+			onclick={settleVerb.run}
+		>
+			<span id="session-bar-settle-label">{settleVerb.label}</span>
+		</Button>
+	{/if}
+
+	{#if !sessionViewState.compact}
+		<div id="session-bar-connection" class="flex shrink-0 items-center gap-1.5 text-xs text-text-muted">
+			<span id="status" class="status-dot size-[7px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
+			{#if uiState.clientCount > 1}
+				<Badge id="client-count-badge" variant="accent-solid" size="count" shape="pill">{uiState.clientCount}</Badge>
+			{/if}
+		</div>
+	{/if}
+
+	{#if sessionViewState.compact && !collapsed}
 		<Menu presentation="sheet" ariaLabel="Views" data-testid="session-bar-views-sheet">
 			{#snippet trigger({ props })}
 				<Button
@@ -297,7 +346,7 @@
 		</Menu>
 	{/if}
 
-	{#if collapsed}
+	{#if sessionViewState.compact && collapsed}
 		<!--
 			Getting the bar back. `secondary` rather than `ghost` so it does not
 			read as the same kind of thing as the overflow beside it: at the bar's
@@ -324,10 +373,10 @@
 		/>
 	{/if}
 
-	{#if collapsed}
+	{#if collapsed || !sessionViewState.compact}
 		<!--
-		The existing collapsed row keeps its overflow menu until the island
-		replaces this layout. Expanded actions are in the title menu.
+		The phone's collapsed row and the desktop bar use this overflow. Expanded
+		phone actions remain in the title menu.
 
 		Deliberately not here: the connection status dot and the client count,
 		which are ambient signals rather than actions and say nothing once
@@ -335,7 +384,7 @@
 		-->
 	<Menu
 		bind:open={overflowOpen}
-		presentation="sheet"
+		presentation={sessionViewState.compact ? "sheet" : "popover"}
 		ariaLabel="More actions"
 		align="end"
 		onCloseAutoFocus={(event) => {
@@ -367,6 +416,7 @@
 			/>
 		{/snippet}
 
+		{#if sessionViewState.compact}
 		{#each sessionViews as view (view.id)}
 			<MenuItem
 				data-testid={`overflow-view-${view.id}`}
@@ -383,8 +433,9 @@
 			</MenuItem>
 		{/each}
 		<MenuSeparator />
+		{/if}
 
-		{#if session && session.settledAt == null && !isSessionSnoozed(session, sessionState.now)}
+		{#if sessionViewState.compact && session && session.settledAt == null && !isSessionSnoozed(session, sessionState.now)}
 			<MenuItem
 				data-testid={session.unread ? "overflow-mark-read" : "overflow-mark-unread"}
 				onselect={() => void toggleSessionRead(session)}

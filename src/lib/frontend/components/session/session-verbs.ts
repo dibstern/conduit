@@ -235,6 +235,25 @@ export const sessionVerbActions = {
 	markRead: toggleSessionRead,
 };
 
+export function getSettleVerb(
+	session: SessionInfo,
+	now: number,
+): SessionVerb | undefined {
+	if (isForeignSession(session)) return undefined;
+	const actions = getSessionActionState(session, now);
+	return {
+		testId:
+			session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle",
+		label: session.settledAt != null ? "Un-settle" : "Settle",
+		icon: session.settledAt != null ? "undo" : "check",
+		hint: "s",
+		disabledReason: actions.settleDisabledReason,
+		run: () => {
+			void settle(session, !actions.settled);
+		},
+	};
+}
+
 export function getSessionVerbs(
 	session: SessionInfo,
 	now: number,
@@ -242,32 +261,18 @@ export function getSessionVerbs(
 	snoozePlacement: "center" | "sheet",
 ): SessionVerbEntry[] {
 	const actions = getSessionActionState(session, now);
-	const markOnly = isForeignSession(session);
+	const settleVerb = getSettleVerb(session, now);
+	const markOnly = settleVerb === undefined;
 	const items: SessionVerbEntry[] = [];
-	if (!markOnly) {
-		items.push(
-			{
-				testId:
-					session.settledAt != null
-						? "session-ctx-unsettle"
-						: "session-ctx-settle",
-				label: session.settledAt != null ? "Un-settle" : "Settle",
-				icon: session.settledAt != null ? "undo" : "check",
-				hint: "s",
-				disabledReason: actions.settleDisabledReason,
-				run: () => {
-					void settle(session, !actions.settled);
-				},
+	if (settleVerb) {
+		items.push(settleVerb, {
+			testId: "session-ctx-auto-settle",
+			label: "Auto-settle when idle",
+			checked: session.autoSettleDisabled !== true,
+			run: () => {
+				void autoSettle(session, session.autoSettleDisabled !== true);
 			},
-			{
-				testId: "session-ctx-auto-settle",
-				label: "Auto-settle when idle",
-				checked: session.autoSettleDisabled !== true,
-				run: () => {
-					void autoSettle(session, session.autoSettleDisabled !== true);
-				},
-			},
-		);
+		});
 		if (actions.snoozeVisible) {
 			items.push({
 				testId: "session-ctx-snooze",

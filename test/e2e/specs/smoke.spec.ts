@@ -52,7 +52,7 @@ test.describe("E2E Smoke Test", () => {
 		expect(count).toBeGreaterThan(0);
 	});
 
-	test("header elements are present", async ({ page, relayUrl }) => {
+	test("merged bar controls are present", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
@@ -62,7 +62,8 @@ test.describe("E2E Smoke Test", () => {
 		// Status dot
 		await expect(app.statusDot).toBeVisible();
 
-		// QR share button
+		await app.moreActionsBtn.click();
+		// Share action
 		await expect(app.qrBtn).toBeVisible();
 	});
 });

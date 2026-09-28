@@ -191,8 +191,8 @@ async function showSessionListOnMobile(page: Page): Promise<void> {
 }
 
 /**
- * The gear. On a phone it lives in the list overflow or the session title
- * sheet, because the global header is replaced at this width.
+ * Settings lives in the list overflow or session title sheet on a phone,
+ * and in the session bar overflow on desktop.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
@@ -207,7 +207,8 @@ async function openSettingsPanel(page: Page): Promise<void> {
 		await page.getByTestId("session-title-settings").click();
 		return;
 	}
-	await page.locator("#settings-btn, [title='Settings']").click();
+	await page.getByTestId("session-bar-overflow").click();
+	await page.getByTestId("overflow-settings").click();
 }
 
 /** Open project management from the desktop sidebar or phone list bar. */

@@ -449,6 +449,12 @@ if (stories.length > 0) {
 		// The views rail is desktop-only (hidden below md); phones switch views
 		// from the session bar instead, so there is nothing to capture at mobile.
 		["layout-viewsrail--independent-views", "mobile"],
+		// These stories pin the wide desktop row. The phone project applies phone
+		// media rules even when the fixture requests a wide canvas.
+		["layout-sessionbar--desktop-git-identity", "mobile"],
+		["layout-sessionbar--desktop-long-title-narrow", "mobile"],
+		["layout-sessionbar--desktop-settled", "mobile"],
+		["layout-sessionbar--desktop-no-session", "mobile"],
 		// These stories exercise the desktop Files pane; phone Files uses a separate overlay.
 		["layout-chatlayout--files-tree", "mobile"],
 		["layout-chatlayout--files-preview", "mobile"],

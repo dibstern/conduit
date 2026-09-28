@@ -33,8 +33,7 @@ const meta = {
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	beforeEach: () => {
 		resetNotifState();
-		// Layout/Header seeds this same module-level store, and Storybook shares
-		// it across story files. Reset or the badge appears in every story.
+		// Storybook shares module-level stores across stories.
 		instanceState.instances = [];
 		routerState.path = `/s/${mockSession.id}`;
 		routerState.search = "";
@@ -48,7 +47,7 @@ const meta = {
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only
 		// the story that wants the collapse gets it.
-		sessionViewState.compact = false;
+		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
 		sessionViewState.forcedOpen = true;
 		sessionViewState.filesOpen = false;
@@ -247,7 +246,7 @@ export const NarrowestPhone: Story = {
 };
 
 // Two instances minimum: the badge is a picker, and a picker with one option is
-// noise. Mirrors Layout/Header's fixture so the two bars can be compared.
+// noise.
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
@@ -330,7 +329,7 @@ export const OverflowMenuOpen: Story = {
 		await expect(
 			within(menu).getByRole("menuitem", { name: "Chat" }),
 		).toHaveAttribute("aria-current", "true");
-		// Debug is behind its feature flag, as it is in the header.
+		// Debug is behind its feature flag.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
 	},
 };
@@ -418,5 +417,82 @@ export const ExpandedByChevron: Story = {
 		// Still at the bottom: the chevron overrides the rule, it does not move
 		// the transcript.
 		expect(sessionViewState.atBottom).toBe(true);
+	},
+};
+
+export const DesktopGitIdentity: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		projectState.projects = [
+			{
+				slug: "conduit",
+				title: "conduit",
+				directory: "/src/conduit",
+				git: { branch: "feature/17xt", worktree: "linked-15", dirty: true },
+			},
+		];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-compact", "false");
+		await expect(canvas.getByTestId("session-bar-identity")).toHaveTextContent(
+			/conduit.*feature\/17xt.*linked-15/,
+		);
+		await expect(canvas.getByTitle("Uncommitted changes")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+	},
+};
+
+export const DesktopLongTitleNarrow: Story = {
+	args: { width: 480 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		sessionState.currentId = mockSessionLongTitle.id;
+		routerState.path = `/s/${mockSessionLongTitle.id}`;
+	},
+	play: async ({ canvasElement }) => {
+		const bar = within(canvasElement).getByTestId("session-bar");
+		const title = within(bar).getByTestId("session-bar-title");
+		const label = title.querySelector("span");
+		expect(title.clientWidth).toBeGreaterThanOrEqual(110);
+		expect(label?.scrollWidth).toBeGreaterThan(label?.clientWidth ?? 0);
+		expect(bar.scrollWidth).toBe(bar.clientWidth);
+	},
+};
+
+export const DesktopSettled: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		showState({ settledAt: Date.now() - 3_600_000 });
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-state-chip")).toHaveAttribute(
+			"data-state",
+			"settled",
+		);
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			"Un-settle",
+		);
+	},
+};
+
+export const DesktopNoSession: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		sessionState.currentId = null;
+		routerState.path = "/";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-identity")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+		expect(canvas.queryByTestId("session-bar-title")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
 	},
 };

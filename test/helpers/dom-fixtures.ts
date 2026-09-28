@@ -72,7 +72,6 @@ export const SHARED_DOM_HTML = `
   <textarea id="input"></textarea>
   <button id="send" disabled></button>
   <span id="status" class="status-dot w-[7px] h-[7px] rounded-full shrink-0 bg-text-muted"></span>
-  <select id="session-select"></select>
 `;
 
 /**
@@ -84,29 +83,16 @@ export const FULL_DOM_HTML = `
     <div id="sidebar"></div>
     <button id="sidebar-toggle-btn"></button>
     <div id="app">
-      <div id="header">
-        <div id="header-left">
-          <button id="sidebar-expand-btn" class="header-icon-btn hidden" title="Open sidebar"><i data-lucide="panel-left-open"></i></button>
-          <h1 id="project-name" class="text-[15px] font-semibold truncate">Conduit</h1>
-        </div>
-        <div id="header-right">
-          <div id="agent-selector"></div>
-          <div id="model-display"></div>
-          <select id="session-select" class="hidden" title="Switch session"></select>
-          <div id="debug-menu-wrap" class="hidden">
-            <button id="debug-btn" class="header-icon-btn" title="Debug"><i data-lucide="bug"></i></button>
-          </div>
-          <button id="terminal-toggle-btn" class="header-icon-btn relative" title="Terminal">
-            <i data-lucide="square-terminal"></i>
-            <span id="terminal-badge" class="terminal-badge hidden"></span>
-          </button>
-          <button id="qr-btn" class="header-icon-btn" title="Share"><i data-lucide="share"></i></button>
-          <div id="notif-settings-wrap">
-            <button id="notif-settings-btn" class="header-icon-btn" title="Notification settings"><i data-lucide="sliders-horizontal"></i></button>
-            <div id="notif-menu" class="notif-menu hidden"></div>
-          </div>
-          <span id="client-count-badge" class="client-count-badge hidden"></span>
-          <span id="status" class="status-dot w-[7px] h-[7px] rounded-full shrink-0 bg-text-muted" title="Connecting"></span>
+      <div id="session-bar" data-testid="session-bar" data-compact="false">
+        <div id="session-bar-title-row"><h1 id="session-bar-title">Test Session</h1></div>
+        <div id="session-bar-meta"><span data-testid="session-bar-identity">Conduit</span></div>
+        <button data-testid="session-bar-settle">Settle</button>
+        <div id="session-bar-connection"><span id="status" role="status" title="Connecting"></span></div>
+        <button id="session-bar-more" data-testid="session-bar-overflow" title="More actions">⋯</button>
+        <div data-testid="session-bar-overflow-menu" role="menu" class="hidden">
+          <button data-testid="overflow-share" role="menuitem">Share</button>
+          <button data-testid="overflow-settings" role="menuitem">Settings</button>
+          <button data-testid="overflow-debug" role="menuitem">Debug panel</button>
         </div>
       </div>
       <div id="banner-container"></div>

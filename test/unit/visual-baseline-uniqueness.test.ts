@@ -33,8 +33,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
-	"layout-header--connected | layout-header--processing":
-		"connected and processing share the same green dot once capture freezes the processing pulse at opacity 1; the difference is title and screen-reader text",
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
 	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":

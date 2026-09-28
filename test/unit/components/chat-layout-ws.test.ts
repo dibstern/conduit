@@ -15,10 +15,6 @@ const wsLifecycleHarness = vi.hoisted(() => ({
 
 // Layout components
 vi.mock(
-	"../../../src/lib/frontend/components/layout/Header.svelte",
-	emptyComponent,
-);
-vi.mock(
 	"../../../src/lib/frontend/components/layout/Sidebar.svelte",
 	() => import("../../helpers/SidebarStub.svelte"),
 );

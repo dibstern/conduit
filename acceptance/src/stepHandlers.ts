@@ -331,15 +331,64 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
-		// The session bar REPLACES the header at this width rather than stacking
-		// under it, so the header must be absent from the DOM, not merely hidden:
-		// two stacked bars was the bug bar 18 exists to fix.
-		name: "global header is not rendered",
-		match: /^the global header is not rendered$/,
+		name: "only the session bar is rendered above the transcript",
+		match: /^only the session bar is rendered above the transcript$/,
 		run: async ({ world }) => {
-			const count = await world.page.locator("#header").count();
-			if (count !== 0) {
-				throw new Error(`expected no #header on a phone, found ${count}`);
+			const count = await world.page.locator("#app > #session-bar").count();
+			if (count !== 1) {
+				throw new Error(
+					`expected one session bar above the transcript, found ${count}`,
+				);
+			}
+		},
+	},
+	{
+		name: "desktop merged bar remains one row",
+		match: /^the desktop session bar remains one row$/,
+		run: async ({ world }) => {
+			const bar = world.page.getByTestId("session-bar");
+			await bar.waitFor({ state: "visible" });
+			const layout = await bar.evaluate((element) => ({
+				compact: element.getAttribute("data-compact"),
+				collapsed: element.getAttribute("data-collapsed"),
+				height: element.getBoundingClientRect().height,
+			}));
+			if (
+				layout.compact !== "false" ||
+				layout.collapsed !== "false" ||
+				layout.height > 50
+			) {
+				throw new Error(
+					`desktop bar is not one row: ${JSON.stringify(layout)}`,
+				);
+			}
+		},
+	},
+	{
+		name: "enable desktop debug action",
+		match: /^I enable the desktop Debug action$/,
+		run: async ({ world }) => {
+			await world.page.keyboard.press("Control+Shift+KeyD");
+			await world.page
+				.locator('.debug-panel button[title="Close panel"]')
+				.click();
+			await world.page.locator(".debug-panel").waitFor({ state: "hidden" });
+		},
+	},
+	{
+		name: "desktop overflow lists global actions",
+		match:
+			/^the desktop overflow lists Share, Settings and Debug panel in order$/,
+		run: async ({ world }) => {
+			const menu = world.page.getByTestId("session-bar-overflow-menu");
+			await menu.waitFor({ state: "visible" });
+			const actions = await menu.getByRole("menuitem").allTextContents();
+			const expected = ["Share", "Settings", "Debug panel"];
+			if (
+				JSON.stringify(actions.map((action) => action.trim())) !==
+				JSON.stringify(expected)
+			) {
+				throw new Error(`desktop overflow actions: ${JSON.stringify(actions)}`);
 			}
 		},
 	},

@@ -1,6 +1,6 @@
 // ─── E2E Debug Panel Tests ───────────────────────────────────────────────────
 // Smoke tests for the WS debug observability feature: feature flags, debug
-// panel, Settings debug tab, header bug icon, keyboard shortcut, and the
+// panel, Settings debug tab, desktop overflow action, keyboard shortcut, and the
 // window.__wsDebug() console API.
 // Uses real relay backed by MockOpenCodeServer.
 
@@ -12,8 +12,8 @@ test.use({ recording: "chat-simple" });
 // ─── Selectors ───────────────────────────────────────────────────────────────
 
 const DEBUG_PANEL = ".debug-panel";
-const DEBUG_BTN = "#debug-btn";
-const SETTINGS_BTN = "#header-settings-btn";
+const DEBUG_BTN = '[data-testid="overflow-debug"]';
+const SETTINGS_BTN = '[data-testid="overflow-settings"]';
 const SETTINGS_PANEL = "#settings-panel";
 const DEBUG_TAB = 'button:has-text("Debug")';
 const DEBUG_TOGGLE =
@@ -21,6 +21,10 @@ const DEBUG_TOGGLE =
 const CLEAR_BTN = 'button[title="Clear log"]';
 const CLOSE_BTN = 'button[title="Close panel"]';
 const VERBOSE_BTN = 'button[title*="logging"]';
+
+async function openMoreActions(page: import("@playwright/test").Page) {
+	await page.getByTestId("session-bar-overflow").click();
+}
 
 // ─── URL param activation ────────────────────────────────────────────────────
 
@@ -35,7 +39,8 @@ test.describe("Debug Panel — URL Activation", () => {
 		// Panel title
 		await expect(page.locator(DEBUG_PANEL).getByText("WS Debug")).toBeVisible();
 
-		// Header bug icon should appear
+		await openMoreActions(page);
+		// The debug action appears in the merged bar's menu.
 		await expect(page.locator(DEBUG_BTN)).toBeVisible();
 	});
 
@@ -65,14 +70,18 @@ test.describe("Debug Panel — Keyboard Shortcut", () => {
 
 		// Panel should not be visible initially
 		await expect(page.locator(DEBUG_PANEL)).not.toBeAttached();
+		await openMoreActions(page);
 		await expect(page.locator(DEBUG_BTN)).not.toBeAttached();
+		await page.keyboard.press("Escape");
 
 		// Press Ctrl+Shift+D to enable
 		await page.keyboard.press("Control+Shift+KeyD");
 
-		// Debug panel and bug icon should appear
+		// Debug panel and menu action should appear
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
+		await openMoreActions(page);
 		await expect(page.locator(DEBUG_BTN)).toBeVisible();
+		await page.keyboard.press("Escape");
 
 		// Press again to disable
 		await page.keyboard.press("Control+Shift+KeyD");
@@ -81,6 +90,7 @@ test.describe("Debug Panel — Keyboard Shortcut", () => {
 		await expect(page.locator(DEBUG_PANEL)).not.toBeAttached({
 			timeout: 5_000,
 		});
+		await openMoreActions(page);
 		await expect(page.locator(DEBUG_BTN)).not.toBeAttached();
 	});
 });
@@ -93,6 +103,7 @@ test.describe("Debug Panel — Settings Tab", () => {
 		await app.goto(relayUrl);
 
 		// Open settings
+		await openMoreActions(page);
 		await page.locator(SETTINGS_BTN).click();
 		await expect(page.locator(SETTINGS_PANEL)).toBeVisible();
 
@@ -111,8 +122,9 @@ test.describe("Debug Panel — Settings Tab", () => {
 		// Close settings
 		await page.keyboard.press("Escape");
 
-		// Debug panel and bug icon should now be visible
+		// Debug panel and menu action should now be visible
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
+		await openMoreActions(page);
 		await expect(page.locator(DEBUG_BTN)).toBeVisible();
 	});
 
@@ -127,6 +139,7 @@ test.describe("Debug Panel — Settings Tab", () => {
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
 
 		// Open settings and check toggle state
+		await openMoreActions(page);
 		await page.locator(SETTINGS_BTN).click();
 		await expect(page.locator(SETTINGS_PANEL)).toBeVisible();
 		await page.locator(DEBUG_TAB).click();
@@ -138,10 +151,10 @@ test.describe("Debug Panel — Settings Tab", () => {
 	});
 });
 
-// ─── Header bug icon ────────────────────────────────────────────────────────
+// ─── Desktop overflow action ────────────────────────────────────────────────
 
-test.describe("Debug Panel — Header Bug Icon", () => {
-	test("bug icon toggles panel visibility", async ({ page, relayUrl }) => {
+test.describe("Debug Panel — Desktop Overflow", () => {
+	test("Debug panel action toggles visibility", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(`${relayUrl}?feats=debug`);
 
@@ -152,7 +165,8 @@ test.describe("Debug Panel — Header Bug Icon", () => {
 		await page.locator(CLOSE_BTN).click();
 		await expect(page.locator(DEBUG_PANEL)).toBeHidden();
 
-		// Re-open via bug icon
+		// Re-open from the merged bar.
+		await openMoreActions(page);
 		await page.locator(DEBUG_BTN).click();
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible();
 	});

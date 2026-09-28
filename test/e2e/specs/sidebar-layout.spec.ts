@@ -200,7 +200,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(app.sidebar).toBeVisible();
 	});
 
-	test("header elements are appropriately visible", async ({
+	test("merged bar shows identity, status and Share", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -213,8 +213,118 @@ test.describe("Sidebar Layout — Desktop", () => {
 		// Status dot always visible
 		await expect(app.statusDot).toBeVisible();
 
-		// QR button always visible
+		await app.moreActionsBtn.click();
+		// Share lives in the desktop overflow.
 		await expect(app.qrBtn).toBeVisible();
+	});
+
+	test("desktop overflow lists global actions and Escape restores focus", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(`${relayUrl}?feats=debug`);
+		const more = page.getByTestId("session-bar-overflow");
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-compact",
+			"false",
+		);
+		await more.click();
+		const menu = page.getByTestId("session-bar-overflow-menu");
+		await expect(menu).toBeVisible();
+		await expect(menu.getByRole("menuitem")).toHaveText([
+			"Share",
+			"Settings",
+			"Debug panel",
+		]);
+		await page.keyboard.press("Escape");
+		await expect(menu).toBeHidden();
+		await expect(more).toBeFocused();
+	});
+
+	test("open desktop menus close when the viewport becomes a phone", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(relayUrl);
+		await page.getByTestId("session-bar-overflow").click();
+		await expect(page.getByTestId("session-bar-overflow-menu")).toBeVisible();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-compact",
+			"true",
+		);
+		await expect(page.getByTestId("session-bar-overflow-menu")).toHaveCount(0);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.getByTestId("session-bar-title-menu").click();
+		await expect(page.getByTestId("session-ctx-menu")).toBeVisible();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-compact",
+			"true",
+		);
+		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
+	});
+
+	test("desktop bar renders without an open session", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		const bar = page.getByTestId("session-bar");
+		await expect(bar).toBeVisible();
+		await expect(bar).toHaveAttribute("data-compact", "false");
+		await expect(bar.getByTestId("session-bar-identity")).toBeVisible();
+		await expect(bar.locator("#status")).toBeVisible();
+		await expect(bar.getByTestId("session-bar-overflow")).toBeVisible();
+		await expect(bar.getByTestId("session-bar-title")).toHaveCount(0);
+		await expect(bar.getByTestId("session-bar-settle")).toHaveCount(0);
+	});
+
+	test("long title fits the narrow desktop bar without overlap", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 800, height: 900 });
+		await new AppPage(page).goto(relayUrl);
+		await page.getByTestId("session-bar-title-menu").click();
+		await page.getByTestId("session-ctx-rename").click();
+		const longTitle =
+			"Investigate the long running terminal session across every project and linked worktree";
+		await page.getByRole("textbox", { name: "Session name" }).fill(longTitle);
+		await page.getByRole("textbox", { name: "Session name" }).press("Enter");
+		await expect(page.getByTestId("session-bar-title")).toContainText(
+			longTitle,
+		);
+		const layout = await page.getByTestId("session-bar").evaluate((bar) => {
+			const bounds = bar.getBoundingClientRect();
+			const children = Array.from(bar.children)
+				.filter((child) => getComputedStyle(child).display !== "none")
+				.map((child) => ({
+					id: child.id || child.getAttribute("data-testid"),
+					box: child.getBoundingClientRect(),
+				}));
+			return {
+				barWidth: bar.clientWidth,
+				scrollWidth: bar.scrollWidth,
+				bounds,
+				children,
+			};
+		});
+		expect(layout.scrollWidth).toBeLessThanOrEqual(layout.barWidth);
+		for (const [index, child] of layout.children.entries()) {
+			expect(child.box.left, child.id ?? "child").toBeGreaterThanOrEqual(
+				layout.bounds.left,
+			);
+			expect(child.box.right, child.id ?? "child").toBeLessThanOrEqual(
+				layout.bounds.right,
+			);
+			const previous = layout.children[index - 1];
+			if (previous) {
+				expect(child.box.left, child.id ?? "child").toBeGreaterThanOrEqual(
+					previous.box.right,
+				);
+			}
+		}
 	});
 });
 
