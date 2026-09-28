@@ -410,11 +410,33 @@ export const handleClientConnectedEffect = (
 		const engine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 
+		// An unknown requested id selects no session, never the default: a
+		// session_switched here would rewrite the URL and cancel the frontend's
+		// route resolve, which owns the not-found banner. A failed check is not a
+		// missing session, so the id is trusted and the frontend's resolve
+		// surfaces the failure.
+		const validatedRequestedSessionId = requestedSessionId
+			? yield* sessionService.sessionExists(requestedSessionId).pipe(
+					Effect.match({
+						onFailure: (err) => {
+							log.warn(
+								`Could not verify requested session ${requestedSessionId}: ${formatErrorDetail(err)}`,
+							);
+							return requestedSessionId;
+						},
+						onSuccess: (exists) => {
+							if (exists) return requestedSessionId;
+							log.info(
+								`Requested session ${requestedSessionId} not found; no session selected`,
+							);
+							return undefined;
+						},
+					}),
+				)
+			: undefined;
+
 		const activeIdResult = requestedSessionId
-			? yield* Effect.succeed({
-					_tag: "Right",
-					right: requestedSessionId,
-				} as const)
+			? ({ _tag: "Right", right: validatedRequestedSessionId } as const)
 			: options.skipDefaultSession
 				? ({ _tag: "Right", right: undefined } as const)
 				: yield* Effect.either(sessionService.getDefaultSessionId());
@@ -491,8 +513,8 @@ export const handleClientConnectedEffect = (
 					Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
 				),
 			);
-		if (requestedSessionId) {
-			yield* recordSessionViewed(clientId, requestedSessionId);
+		if (validatedRequestedSessionId) {
+			yield* recordSessionViewed(clientId, validatedRequestedSessionId);
 		}
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();

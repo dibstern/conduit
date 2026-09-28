@@ -71,6 +71,46 @@ test.describe("E2E Smoke Test", () => {
 		await expect(page.getByText("Failed to open session")).toHaveCount(0);
 	});
 
+	test("returns an unknown session URL to the session list", async ({
+		page,
+		relayUrl,
+	}) => {
+		const unknownId = "unknown-session-vik1-34";
+		const receivedFrames: Record<string, unknown>[] = [];
+		page.on("websocket", (ws) => {
+			ws.on("framereceived", (frame) => {
+				if (typeof frame.payload === "string") {
+					receivedFrames.push(JSON.parse(frame.payload));
+				}
+			});
+		});
+		const app = new AppPage(page);
+		await app.goto(new URL(`/s/${unknownId}`, relayUrl).href);
+
+		await expect(
+			page.getByText("Session not found. That session no longer exists."),
+		).toBeVisible();
+		await expect(page).toHaveURL(new URL("/", relayUrl).href);
+		await expect(page.getByText("Failed to open session")).toHaveCount(0);
+		await expect(
+			page.locator(
+				`#session-list .session-item.active[data-session-id="${unknownId}"]`,
+			),
+		).toHaveCount(0);
+		expect(
+			receivedFrames.filter(
+				(frame) =>
+					(frame["type"] === "session_switched" &&
+						frame["sessionId"] === unknownId) ||
+					(frame["type"] === "session_family" &&
+						frame["rootId"] === unknownId) ||
+					(frame["type"] === "notification_event" &&
+						frame["eventType"] === "session_viewed" &&
+						frame["sessionId"] === unknownId),
+			),
+		).toEqual([]);
+	});
+
 	test("input area is visible and functional", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);

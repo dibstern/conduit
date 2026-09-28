@@ -144,6 +144,7 @@ function makeClientInitEffectLayer(
 	const wsHandler = makeMockWebSocketHandler();
 	const sessionManagerService = makeMockSessionManagerService({
 		loadPreRenderedHistory,
+		sessionExists: vi.fn(() => Effect.succeed(true)),
 		...sessionManagerOverrides,
 	});
 	const orchestrationEngine = {
@@ -178,6 +179,20 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 				Effect.provide(layer),
 			),
 		);
+		expect(sessionManagerService.sessionExists).toHaveBeenCalledWith(
+			"requested-session",
+		);
+		expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+			"client-1",
+			"requested-session",
+		);
+		expect(wsHandler.sendTo).toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "session_switched",
+				sessionId: "requested-session",
+			}),
+		);
 		expect(sessionManagerService.markSessionRead).toHaveBeenCalledWith(
 			"requested-session",
 		);
@@ -202,7 +217,116 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		await Effect.runPromise(
 			handleClientConnectedEffect("client-1").pipe(Effect.provide(layer)),
 		);
+		expect(sessionManagerService.sessionExists).not.toHaveBeenCalled();
 		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
+	it("selects no session when the requested session does not exist", async () => {
+		const log = makeMockLogger();
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+				{ sessionExists: vi.fn(() => Effect.succeed(false)) },
+				log,
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "unknown-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(sessionManagerService.sessionExists).toHaveBeenCalledWith(
+			"unknown-session",
+		);
+		// A default-session switch would rewrite the frontend's URL and cancel
+		// the route resolve that shows the not-found banner.
+		expect(sessionManagerService.getDefaultSessionId).not.toHaveBeenCalled();
+		expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_switched" }),
+		);
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_family" }),
+		);
+		expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "notification_event",
+				sessionId: "unknown-session",
+			}),
+		);
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+		expect(log.info).toHaveBeenCalledWith(
+			"Requested session unknown-session not found; no session selected",
+		);
+	});
+
+	it("selects no session for an unknown id when the default is skipped", async () => {
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+				{ sessionExists: vi.fn(() => Effect.succeed(false)) },
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "unknown-session", {
+				skipDefaultSession: true,
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(sessionManagerService.getDefaultSessionId).not.toHaveBeenCalled();
+		expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_switched" }),
+		);
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_family" }),
+		);
+		expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "notification_event",
+				sessionId: "unknown-session",
+			}),
+		);
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
+	it("trusts the requested session when its existence check fails", async () => {
+		const log = makeMockLogger();
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+				{
+					sessionExists: vi.fn(() =>
+						Effect.fail(
+							new SessionManagerError({
+								operation: "sessionExists",
+								cause: "provider unavailable",
+							}),
+						),
+					),
+				},
+				log,
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(sessionManagerService.getDefaultSessionId).not.toHaveBeenCalled();
+		expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+			"client-1",
+			"requested-session",
+		);
+		expect(sessionManagerService.markSessionRead).toHaveBeenCalledWith(
+			"requested-session",
+		);
+		expect(log.warn).toHaveBeenCalledWith(
+			expect.stringContaining("provider unavailable"),
+		);
 	});
 
 	it("logs a read failure and completes requested-session init", async () => {
