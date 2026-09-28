@@ -8,6 +8,7 @@
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import Modal from "./Modal.svelte";
+	import { copyToClipboard } from "../../utils/clipboard.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -81,24 +82,7 @@
 
 	async function copyUrl(): Promise<void> {
 		const url = getShareUrl();
-		try {
-			if (navigator.clipboard?.writeText) {
-				await navigator.clipboard.writeText(url);
-			} else {
-				// Fallback for older browsers
-				const ta = document.createElement("textarea");
-				ta.value = url;
-				ta.style.position = "fixed";
-				ta.style.left = "-9999px";
-				document.body.appendChild(ta);
-				ta.select();
-				document.execCommand("copy");
-				ta.remove();
-			}
-		} catch {
-			// Silently fail if clipboard access is denied
-			return;
-		}
+		if (!await copyToClipboard(url)) return;
 
 		copied = true;
 		if (copyTimer) clearTimeout(copyTimer);
@@ -170,4 +154,3 @@
 			</p>
 		</Surface>
 </Modal>
-

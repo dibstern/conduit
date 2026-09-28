@@ -1,10 +1,14 @@
 import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect, Either } from "effect";
-import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
+import {
+	type Rpc,
+	RpcClient,
+	type RpcClientError,
+	type RpcGroup,
+	RpcSerialization,
+} from "@effect/rpc";
+import { Effect, Either, type Schema } from "effect";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { GetSkillContentResponse } from "../../contracts/ws-rpc.js";
-import type { SessionPermissionMode } from "../../shared-types.js";
 import { runTransportEffect } from "./runtime.js";
 import {
 	type ClaudeSettingsResponse,
@@ -25,14 +29,10 @@ import {
 	type ListDirectoriesResponse,
 	type ListSessionsResponse,
 	type LoadMoreHistoryResponse,
-	type PermissionDecision,
-	type PermissionPersistScope,
-	type PermissionUpdateDestination,
 	type ProjectMutationResponse,
 	type PtyListResponse,
 	type ReloadProviderSessionResponse,
 	type ResolveClaudeSettingsResponse,
-	type RpcLogLevel,
 	type ScanNowResponse,
 	type SetDefaultModelResponse,
 	type SetDefaultPermissionModeResponse,
@@ -44,386 +44,90 @@ import {
 	WsRpcGroup,
 } from "./ws-rpc.js";
 
-export interface CancelSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly commandId: string;
-}
+type WsRpc = RpcGroup.Rpcs<typeof WsRpcGroup>;
+type WsRpcMethod = WsRpc["_tag"];
+type WsRpcInput<Method extends WsRpcMethod> = Rpc.PayloadConstructor<
+	Rpc.ExtractTag<WsRpc, Method>
+>;
+type WsRpcEncodedInput<Method extends WsRpcMethod> = Omit<
+	Schema.Schema.Encoded<Rpc.ExtractTag<WsRpc, Method>["payloadSchema"]>,
+	"_tag"
+>;
+type WsRpcOutput<Method extends WsRpcMethod> = Rpc.Success<
+	Rpc.ExtractTag<WsRpc, Method>
+>;
+type WsRpcError<Method extends WsRpcMethod> =
+	| Rpc.Error<Rpc.ExtractTag<WsRpc, Method>>
+	| RpcClientError.RpcClientError;
 
-export interface GetModelsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
-
-export interface GetAgentsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
-
-export interface GetCommandsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-}
-
-export interface GetProjectsRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface AddProjectRpcInput {
-	readonly projectSlug?: string;
-	readonly directory: string;
-	readonly instanceId?: string;
-}
-
-export interface RemoveProjectRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-}
-
-export interface RenameProjectRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-	readonly title: string;
-}
-
-export interface SetProjectInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-	readonly instanceId: string;
-}
-
-export interface InstanceMutationRpcInput {
-	readonly projectSlug: string;
-	readonly instanceId: string;
-}
-
-export interface RenameInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly instanceId: string;
-	readonly name: string;
-}
-
-export interface AddInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly name: string;
-	readonly driver?: string;
-	readonly managed?: boolean;
-	readonly port?: number;
-	readonly url?: string;
-	readonly env?: Record<string, string>;
-	readonly configDir?: string;
-}
-
-export interface UpdateInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly instanceId: string;
-	readonly name?: string;
-	readonly port?: number;
-	readonly env?: Record<string, string>;
-	readonly configDir?: string;
-}
-
-export interface ScanNowRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface DetectProxyRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface ListPtysRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-}
-
-export interface CreatePtyRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-}
-
-export interface ResizePtyRpcInput {
-	readonly projectSlug: string;
-	readonly ptyId: string;
-	readonly originId?: string;
-	readonly cols?: number;
-	readonly rows?: number;
-}
-
-export interface ClosePtyRpcInput {
-	readonly projectSlug: string;
-	readonly ptyId: string;
-}
-
-export interface CreateSessionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly title?: string;
-	readonly requestId?: string;
-	/** Harness instance to bind the session to (preferred over providerId). */
-	readonly instanceId?: string;
-	readonly providerId?: string;
-}
-
-export interface ViewSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId: string;
-}
-
-export interface AttachProjectRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-}
-
-export interface DeleteSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
-export interface ForkSessionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly sessionId?: string;
-	readonly messageId?: string;
-}
-
-export interface RespondPermissionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly commandId: string;
-	readonly requestId: string;
-	readonly decision: PermissionDecision;
-	readonly persistScope?: PermissionPersistScope;
-	readonly persistPattern?: string;
-	readonly permissionDestination?: PermissionUpdateDestination;
-}
-
-export interface AnswerQuestionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly commandId: string;
-	readonly toolId: string;
-	readonly answers: Readonly<Record<string, string>>;
-}
-
-export interface RejectQuestionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly commandId: string;
-	readonly toolId: string;
-}
-
-export interface GetTodoRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface GetFileTreeRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface GetFileListRpcInput {
-	readonly projectSlug: string;
-	readonly path?: string;
-}
-
-export interface GetFileContentRpcInput {
-	readonly projectSlug: string;
-	readonly path: string;
-}
-
-export interface GetToolContentRpcInput {
-	readonly projectSlug: string;
-	readonly toolId: string;
-}
-
-export interface GetSkillContentRpcInput {
-	readonly projectSlug: string;
-	readonly name: string;
-}
-
-export interface ListDirectoriesRpcInput {
-	readonly projectSlug: string;
-	readonly path: string;
-}
-
-export interface SwitchAgentRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly agentId: string;
-	readonly originId?: string;
-}
-
-export interface SwitchContextWindowRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly contextWindow: string;
-	readonly originId?: string;
-}
-
-export interface SwitchModelRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly modelId: string;
-	readonly providerId: string;
-	readonly originId?: string;
-}
-
-export interface SetDefaultModelRpcInput {
-	readonly projectSlug: string;
-	readonly model: string;
-	readonly provider: string;
-	readonly originId?: string;
-}
-
-export interface SetDefaultPermissionModeRpcInput {
-	readonly projectSlug: string;
-	readonly mode: SessionPermissionMode;
-	readonly originId?: string;
-}
-
-export interface SetHiddenEntriesRpcInput {
-	readonly projectSlug: string;
-	readonly hiddenModels?: readonly string[];
-	readonly hiddenAgents?: readonly string[];
-	readonly originId?: string;
-}
-
-export interface GetClaudeSettingsRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface SetClaudeSettingsRpcInput {
-	readonly projectSlug: string;
-	readonly overrides: ClaudeSettingsOverrides;
-	readonly originId?: string;
-}
-
-export interface ResolveClaudeSettingsRpcInput {
-	readonly projectSlug: string;
-	readonly instanceId: string;
-}
-
-export interface ReloadProviderSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly commandId: string;
-	readonly originId?: string;
-}
-
-export interface RenameSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly title: string;
-	readonly originId?: string;
-}
-
-export interface MarkSessionReadRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
-export interface SetSessionSettledRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly settled: boolean;
-	readonly originId?: string;
-}
-
-export interface SetSessionPinnedRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly pinned: boolean;
-	readonly originId?: string;
-}
-
-export interface SetSessionAutoSettleRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly disabled: boolean;
-	readonly originId?: string;
-}
-
-export interface SnoozeSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly until: number | null;
-	readonly originId?: string;
-}
-
-export interface UnsnoozeSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
-export interface SwitchVariantRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly variant: string;
-	readonly originId?: string;
-}
-
-export interface SwitchPermissionModeRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly mode: SessionPermissionMode;
-	readonly originId?: string;
-}
-
-export interface ListSessionsRpcInput {
-	readonly projectSlug: string;
-	readonly roots?: boolean;
-	readonly query?: string;
-}
-
-export interface ListDaemonSessionsRpcInput {
-	readonly projectSlug: string;
-	readonly limit?: number;
-	readonly roots?: boolean;
-	readonly search?: string;
-	readonly cursor?: {
-		readonly updatedAt: number;
-		readonly id: string;
-	};
-	readonly scope?: string;
-}
-
-export interface LoadMoreHistoryRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly offset: number;
-}
-
-export interface RewindSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly messageId: string;
-}
-
-export interface SendMessageRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly text: string;
-	readonly commandId: string;
-	readonly images?: readonly string[];
-	readonly originId?: string;
-}
-
-export interface SyncInputDraftRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly text: string;
-	readonly originId?: string;
-}
-
-export interface SetLogLevelRpcInput {
-	readonly projectSlug: string;
-	readonly level: RpcLogLevel;
-}
+export type CancelSessionRpcInput = WsRpcInput<"CancelSession">;
+export type GetModelsRpcInput = WsRpcInput<"GetModels">;
+export type GetAgentsRpcInput = WsRpcInput<"GetAgents">;
+export type GetCommandsRpcInput = WsRpcInput<"GetCommands">;
+export type GetProjectsRpcInput = WsRpcInput<"GetProjects">;
+export type AddProjectRpcInput = WsRpcInput<"AddProject">;
+export type RemoveProjectRpcInput = WsRpcInput<"RemoveProject">;
+export type RenameProjectRpcInput = WsRpcInput<"RenameProject">;
+export type SetProjectInstanceRpcInput = WsRpcInput<"SetProjectInstance">;
+export type InstanceMutationRpcInput = Omit<
+	WsRpcInput<"RemoveInstance">,
+	"_tag"
+>;
+export type RenameInstanceRpcInput = WsRpcInput<"RenameInstance">;
+export type AddInstanceRpcInput = WsRpcInput<"AddInstance">;
+export type UpdateInstanceRpcInput = WsRpcInput<"UpdateInstance">;
+export type ScanNowRpcInput = WsRpcInput<"ScanNow">;
+export type DetectProxyRpcInput = WsRpcInput<"DetectProxy">;
+export type ListPtysRpcInput = WsRpcInput<"ListPtys">;
+export type CreatePtyRpcInput = WsRpcInput<"CreatePty">;
+export type ResizePtyRpcInput = WsRpcInput<"ResizePty">;
+export type ClosePtyRpcInput = WsRpcInput<"ClosePty">;
+export type CreateSessionRpcInput = WsRpcEncodedInput<"CreateSession">;
+export type AttachProjectRpcInput = WsRpcInput<"AttachProject">;
+export type ViewSessionRpcInput = WsRpcInput<"ViewSession">;
+export type DeleteSessionRpcInput = WsRpcInput<"DeleteSession">;
+export type ForkSessionRpcInput = WsRpcInput<"ForkSession">;
+export type RespondPermissionRpcInput = WsRpcInput<"RespondPermission">;
+export type AnswerQuestionRpcInput = WsRpcInput<"AnswerQuestion">;
+export type RejectQuestionRpcInput = WsRpcInput<"RejectQuestion">;
+export type GetTodoRpcInput = WsRpcInput<"GetTodo">;
+export type GetFileTreeRpcInput = WsRpcInput<"GetFileTree">;
+export type GetFileListRpcInput = WsRpcInput<"GetFileList">;
+export type GetFileContentRpcInput = WsRpcInput<"GetFileContent">;
+export type GetToolContentRpcInput = WsRpcInput<"GetToolContent">;
+export type GetSkillContentRpcInput = WsRpcInput<"GetSkillContent">;
+export type ListDirectoriesRpcInput = WsRpcInput<"ListDirectories">;
+export type SwitchAgentRpcInput = WsRpcInput<"SwitchAgent">;
+export type SwitchContextWindowRpcInput = WsRpcInput<"SwitchContextWindow">;
+export type SwitchModelRpcInput = WsRpcInput<"SwitchModel">;
+export type SetDefaultModelRpcInput = WsRpcInput<"SetDefaultModel">;
+export type SetDefaultPermissionModeRpcInput =
+	WsRpcInput<"SetDefaultPermissionMode">;
+export type SetHiddenEntriesRpcInput = WsRpcInput<"SetHiddenEntries">;
+export type GetClaudeSettingsRpcInput = WsRpcInput<"GetClaudeSettings">;
+export type SetClaudeSettingsRpcInput = WsRpcInput<"SetClaudeSettings">;
+export type ResolveClaudeSettingsRpcInput = WsRpcInput<"ResolveClaudeSettings">;
+export type ReloadProviderSessionRpcInput = WsRpcInput<"ReloadProviderSession">;
+export type RenameSessionRpcInput = WsRpcInput<"RenameSession">;
+export type SetSessionSettledRpcInput = WsRpcInput<"SetSessionSettled">;
+export type MarkSessionReadRpcInput = Omit<
+	WsRpcInput<"MarkSessionRead">,
+	"_tag"
+>;
+export type SetSessionPinnedRpcInput = WsRpcInput<"SetSessionPinned">;
+export type SetSessionAutoSettleRpcInput = WsRpcInput<"SetSessionAutoSettle">;
+export type SnoozeSessionRpcInput = WsRpcInput<"SnoozeSession">;
+export type UnsnoozeSessionRpcInput = WsRpcInput<"UnsnoozeSession">;
+export type SwitchVariantRpcInput = WsRpcInput<"SwitchVariant">;
+export type SwitchPermissionModeRpcInput = WsRpcInput<"SwitchPermissionMode">;
+export type ListSessionsRpcInput = WsRpcInput<"ListSessions">;
+export type ResolveSessionRpcInput = WsRpcInput<"ResolveSession">;
+export type ListDaemonSessionsRpcInput = WsRpcInput<"ListDaemonSessions">;
+export type LoadMoreHistoryRpcInput = WsRpcInput<"LoadMoreHistory">;
+export type RewindSessionRpcInput = WsRpcInput<"RewindSession">;
+export type SendMessageRpcInput = WsRpcInput<"SendMessage">;
+export type SyncInputDraftRpcInput = WsRpcInput<"SyncInputDraft">;
+export type SetLogLevelRpcInput = WsRpcInput<"SetLogLevel">;
 
 export interface WsRpcLocation {
 	readonly protocol: string;
@@ -437,901 +141,17 @@ export const makeWsRpcUrl = (
 	return `${protocol}//${location.host}/rpc`;
 };
 
-const callCancelSession = (input: CancelSessionRpcInput) =>
+const callRpc = <Method extends WsRpcMethod>(
+	method: Method,
+	input: WsRpcInput<Method>,
+): Effect.Effect<WsRpcOutput<Method>, WsRpcError<Method>> =>
 	Effect.scoped(
 		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.CancelSession(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetModels = (input: GetModelsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetModels(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetAgents = (input: GetAgentsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetAgents(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetCommands = (input: GetCommandsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetCommands(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetProjects = (input: GetProjectsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetProjects(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callAddProject = (input: AddProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.AddProject({
-				...(input.projectSlug != null
-					? { projectSlug: input.projectSlug }
-					: {}),
-				directory: input.directory,
-				...(input.instanceId != null ? { instanceId: input.instanceId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRemoveProject = (input: RemoveProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RemoveProject(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRenameProject = (input: RenameProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RenameProject(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetProjectInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callStartInstance = (input: InstanceMutationRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.StartInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callStopInstance = (input: InstanceMutationRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.StopInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRemoveInstance = (input: InstanceMutationRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RemoveInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRenameInstance = (input: RenameInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.RenameInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callAddInstance = (input: AddInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.AddInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callUpdateInstance = (input: UpdateInstanceRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.UpdateInstance(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callScanNow = (input: ScanNowRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ScanNow(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callDetectProxy = (input: DetectProxyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.DetectProxy(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callListPtys = (input: ListPtysRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListPtys(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callCreatePty = (input: CreatePtyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.CreatePty(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callResizePty = (input: ResizePtyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.ResizePty({
-				projectSlug: input.projectSlug,
-				ptyId: input.ptyId,
-				...(input.originId != null ? { originId: input.originId } : {}),
-				...(input.cols != null ? { cols: input.cols } : {}),
-				...(input.rows != null ? { rows: input.rows } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callClosePty = (input: ClosePtyRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.ClosePty(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callCreateSession = (input: CreateSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.CreateSession({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				...(input.title != null ? { title: input.title } : {}),
-				...(input.requestId != null ? { requestId: input.requestId } : {}),
-				...(input.instanceId != null
-					? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
-					: {}),
-				...(input.providerId != null ? { providerId: input.providerId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callAttachProject = (input: AttachProjectRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.AttachProject(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callViewSession = (input: ViewSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.ViewSession(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callDeleteSession = (input: DeleteSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.DeleteSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId != null ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callForkSession = (input: ForkSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ForkSession({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
-				...(input.messageId != null ? { messageId: input.messageId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRespondPermission = (input: RespondPermissionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RespondPermission({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				commandId: input.commandId,
-				requestId: input.requestId,
-				decision: input.decision,
-				...(input.persistScope != null
-					? { persistScope: input.persistScope }
-					: {}),
-				...(input.persistPattern != null
-					? { persistPattern: input.persistPattern }
-					: {}),
-				...(input.permissionDestination != null
-					? { permissionDestination: input.permissionDestination }
-					: {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callAnswerQuestion = (input: AnswerQuestionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.AnswerQuestion({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				commandId: input.commandId,
-				toolId: input.toolId,
-				answers: { ...input.answers },
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRejectQuestion = (input: RejectQuestionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RejectQuestion({
-				projectSlug: input.projectSlug,
-				originId: input.originId,
-				commandId: input.commandId,
-				toolId: input.toolId,
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetTodo = (input: GetTodoRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetTodo(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetFileTree = (input: GetFileTreeRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetFileTree(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetFileList = (input: GetFileListRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetFileList(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetFileContent = (input: GetFileContentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetFileContent(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetToolContent = (input: GetToolContentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetToolContent(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetSkillContent = (input: GetSkillContentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetSkillContent(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callListDirectories = (input: ListDirectoriesRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListDirectories(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSwitchAgent = (input: SwitchAgentRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SwitchAgent({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				agentId: input.agentId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSwitchContextWindow = (input: SwitchContextWindowRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchContextWindow({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				contextWindow: input.contextWindow,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSwitchModel = (input: SwitchModelRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchModel({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				modelId: input.modelId,
-				providerId: input.providerId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetDefaultModel({
-				projectSlug: input.projectSlug,
-				model: input.model,
-				provider: input.provider,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetDefaultPermissionMode = (
-	input: SetDefaultPermissionModeRpcInput,
-) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetDefaultPermissionMode({
-				projectSlug: input.projectSlug,
-				mode: input.mode,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetHiddenEntries({
-				projectSlug: input.projectSlug,
-				...(input.hiddenModels ? { hiddenModels: input.hiddenModels } : {}),
-				...(input.hiddenAgents ? { hiddenAgents: input.hiddenAgents } : {}),
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callGetClaudeSettings = (input: GetClaudeSettingsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.GetClaudeSettings(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetClaudeSettings = (input: SetClaudeSettingsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SetClaudeSettings({
-				projectSlug: input.projectSlug,
-				overrides: input.overrides,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ResolveClaudeSettings(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ReloadProviderSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				commandId: input.commandId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRenameSession = (input: RenameSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RenameSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				title: input.title,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SetSessionSettled({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				settled: input.settled,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callMarkSessionUnread = (input: MarkSessionReadRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.MarkSessionUnread({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callMarkSessionRead = (input: MarkSessionReadRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.MarkSessionRead({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SetSessionPinned({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				pinned: input.pinned,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetSessionAutoSettle = (input: SetSessionAutoSettleRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SetSessionAutoSettle({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				disabled: input.disabled,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSnoozeSession = (input: SnoozeSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SnoozeSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				until: input.until,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callUnsnoozeSession = (input: UnsnoozeSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.UnsnoozeSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSwitchVariant = (input: SwitchVariantRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchVariant({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				variant: input.variant,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.SwitchPermissionMode({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				mode: input.mode,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callListSessions = (input: ListSessionsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListSessions(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-export interface ResolveSessionRpcInput {
-	readonly projectSlug?: string;
-	readonly sessionId: string;
-}
-
-const callResolveSession = (input: ResolveSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ResolveSession(input);
+			const client = yield* RpcClient.make(WsRpcGroup, { flatten: true });
+			return yield* client(method, input) as unknown as Effect.Effect<
+				WsRpcOutput<Method>,
+				WsRpcError<Method>
+			>;
 		}),
 	).pipe(
 		Effect.provide(RpcClient.layerProtocolSocket()),
@@ -1343,417 +163,331 @@ const callResolveSession = (input: ResolveSessionRpcInput) =>
 export async function resolveSessionRpc(
 	input: ResolveSessionRpcInput,
 ): Promise<{ readonly projectSlug: string | null }> {
-	return await runTransportEffect(callResolveSession(input));
+	return await runTransportEffect(callRpc("ResolveSession", input));
 }
-
-const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.ListDaemonSessions(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			return yield* client.LoadMoreHistory(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callRewindSession = (input: RewindSessionRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.RewindSession(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSendMessage = (input: SendMessageRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SendMessage({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				text: input.text,
-				commandId: input.commandId,
-				...(input.images ? { images: [...input.images] } : {}),
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SyncInputDraft({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				text: input.text,
-				...(input.originId ? { originId: input.originId } : {}),
-			});
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
-
-const callSetLogLevel = (input: SetLogLevelRpcInput) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const client = yield* RpcClient.make(WsRpcGroup);
-			yield* client.SetLogLevel(input);
-		}),
-	).pipe(
-		Effect.provide(RpcClient.layerProtocolSocket()),
-		Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-		Effect.provide(Socket.layerWebSocketConstructorGlobal),
-		Effect.provide(RpcSerialization.layerJson),
-	);
 
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callCancelSession(input));
+	await runTransportEffect(callRpc("CancelSession", input));
 }
 
 export async function getModelsRpc(
 	input: GetModelsRpcInput,
 ): Promise<GetModelsResponse> {
-	return await runTransportEffect(callGetModels(input));
+	return await runTransportEffect(callRpc("GetModels", input));
 }
 
 export async function getAgentsRpc(
 	input: GetAgentsRpcInput,
 ): Promise<GetAgentsResponse> {
-	return await runTransportEffect(callGetAgents(input));
+	return await runTransportEffect(callRpc("GetAgents", input));
 }
 
 export async function getCommandsRpc(
 	input: GetCommandsRpcInput,
 ): Promise<GetCommandsResponse> {
-	return await runTransportEffect(callGetCommands(input));
+	return await runTransportEffect(callRpc("GetCommands", input));
 }
 
 export async function getProjectsRpc(
 	input: GetProjectsRpcInput,
 ): Promise<GetProjectsResponse> {
-	return await runTransportEffect(callGetProjects(input));
+	return await runTransportEffect(callRpc("GetProjects", input));
 }
 
 export async function addProjectRpc(
 	input: AddProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callAddProject(input));
+	return await runTransportEffect(callRpc("AddProject", input));
 }
 
 export async function removeProjectRpc(
 	input: RemoveProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callRemoveProject(input));
+	return await runTransportEffect(callRpc("RemoveProject", input));
 }
 
 export async function renameProjectRpc(
 	input: RenameProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callRenameProject(input));
+	return await runTransportEffect(callRpc("RenameProject", input));
 }
 
 export async function setProjectInstanceRpc(
 	input: SetProjectInstanceRpcInput,
 ): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callSetProjectInstance(input));
+	return await runTransportEffect(callRpc("SetProjectInstance", input));
 }
 
 export async function startInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callStartInstance(input));
+	return await runTransportEffect(callRpc("StartInstance", input));
 }
 
 export async function stopInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callStopInstance(input));
+	return await runTransportEffect(callRpc("StopInstance", input));
 }
 
 export async function removeInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callRemoveInstance(input));
+	return await runTransportEffect(callRpc("RemoveInstance", input));
 }
 
 export async function renameInstanceRpc(
 	input: RenameInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callRenameInstance(input));
+	return await runTransportEffect(callRpc("RenameInstance", input));
 }
 
 export async function addInstanceRpc(
 	input: AddInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callAddInstance(input));
+	return await runTransportEffect(callRpc("AddInstance", input));
 }
 
 export async function updateInstanceRpc(
 	input: UpdateInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callUpdateInstance(input));
+	return await runTransportEffect(callRpc("UpdateInstance", input));
 }
 
 export async function scanNowRpc(
 	input: ScanNowRpcInput,
 ): Promise<ScanNowResponse> {
-	return await runTransportEffect(callScanNow(input));
+	return await runTransportEffect(callRpc("ScanNow", input));
 }
 
 export async function detectProxyRpc(
 	input: DetectProxyRpcInput,
 ): Promise<DetectProxyResponse> {
-	return await runTransportEffect(callDetectProxy(input));
+	return await runTransportEffect(callRpc("DetectProxy", input));
 }
 
 export async function listPtysRpc(
 	input: ListPtysRpcInput,
 ): Promise<PtyListResponse> {
-	return await runTransportEffect(callListPtys(input));
+	return await runTransportEffect(callRpc("ListPtys", input));
 }
 
 export async function createPtyRpc(input: CreatePtyRpcInput): Promise<void> {
-	await runTransportEffect(callCreatePty(input));
+	await runTransportEffect(callRpc("CreatePty", input));
 }
 
 export async function resizePtyRpc(input: ResizePtyRpcInput): Promise<void> {
-	await runTransportEffect(callResizePty(input));
+	await runTransportEffect(callRpc("ResizePty", input));
 }
 
 export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
-	await runTransportEffect(callClosePty(input));
+	await runTransportEffect(callRpc("ClosePty", input));
 }
 
 export async function createSessionRpc(
 	input: CreateSessionRpcInput,
 ): Promise<CreateSessionResponse> {
-	return await runTransportEffect(callCreateSession(input));
+	return await runTransportEffect(
+		callRpc("CreateSession", {
+			projectSlug: input.projectSlug,
+			originId: input.originId,
+			...(input.title != null ? { title: input.title } : {}),
+			...(input.requestId != null ? { requestId: input.requestId } : {}),
+			...(input.instanceId != null
+				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
+				: {}),
+			...(input.providerId != null ? { providerId: input.providerId } : {}),
+		}),
+	);
 }
 
 export async function viewSessionRpc(
 	input: ViewSessionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callViewSession(input));
+	await runTransportEffect(callRpc("ViewSession", input));
 }
 
 export async function attachProjectRpc(
 	input: AttachProjectRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callAttachProject(input));
+	await runTransportEffect(callRpc("AttachProject", input));
 }
 
 export async function deleteSessionRpc(
 	input: DeleteSessionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callDeleteSession(input));
+	await runTransportEffect(callRpc("DeleteSession", input));
 }
 
 export async function forkSessionRpc(
 	input: ForkSessionRpcInput,
 ): Promise<ForkSessionResponse> {
-	return await runTransportEffect(callForkSession(input));
+	return await runTransportEffect(callRpc("ForkSession", input));
 }
 
 export async function respondPermissionRpc(
 	input: RespondPermissionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callRespondPermission(input));
+	await runTransportEffect(callRpc("RespondPermission", input));
 }
 
 export async function answerQuestionRpc(
 	input: AnswerQuestionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callAnswerQuestion(input));
+	await runTransportEffect(callRpc("AnswerQuestion", input));
 }
 
 export async function rejectQuestionRpc(
 	input: RejectQuestionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callRejectQuestion(input));
+	await runTransportEffect(callRpc("RejectQuestion", input));
 }
 
 export async function getTodoRpc(
 	input: GetTodoRpcInput,
 ): Promise<GetTodoResponse> {
-	return await runTransportEffect(callGetTodo(input));
+	return await runTransportEffect(callRpc("GetTodo", input));
 }
 
 export async function getFileTreeRpc(
 	input: GetFileTreeRpcInput,
 ): Promise<GetFileTreeResponse> {
-	return await runTransportEffect(callGetFileTree(input));
+	return await runTransportEffect(callRpc("GetFileTree", input));
 }
 
 export async function getFileListRpc(
 	input: GetFileListRpcInput,
 ): Promise<GetFileListResponse> {
-	return await runTransportEffect(callGetFileList(input));
+	return await runTransportEffect(callRpc("GetFileList", input));
 }
 
 export async function getFileContentRpc(
 	input: GetFileContentRpcInput,
 ): Promise<GetFileContentResponse> {
-	return await runTransportEffect(callGetFileContent(input));
+	return await runTransportEffect(callRpc("GetFileContent", input));
 }
 
 export async function getToolContentRpc(
 	input: GetToolContentRpcInput,
 ): Promise<GetToolContentResponse> {
-	return await runTransportEffect(callGetToolContent(input));
+	return await runTransportEffect(callRpc("GetToolContent", input));
 }
 
 export async function getSkillContentRpc(
 	input: GetSkillContentRpcInput,
 ): Promise<GetSkillContentResponse> {
-	return await runTransportEffect(callGetSkillContent(input));
+	return await runTransportEffect(callRpc("GetSkillContent", input));
 }
 
 export async function listDirectoriesRpc(
 	input: ListDirectoriesRpcInput,
 ): Promise<ListDirectoriesResponse> {
-	return await runTransportEffect(callListDirectories(input));
+	return await runTransportEffect(callRpc("ListDirectories", input));
 }
 
 export async function switchAgentRpc(
 	input: SwitchAgentRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSwitchAgent(input));
+	await runTransportEffect(callRpc("SwitchAgent", input));
 }
 
 export async function switchContextWindowRpc(
 	input: SwitchContextWindowRpcInput,
 ): Promise<SwitchContextWindowResponse> {
-	return await runTransportEffect(callSwitchContextWindow(input));
+	return await runTransportEffect(callRpc("SwitchContextWindow", input));
 }
 
 export async function switchModelRpc(
 	input: SwitchModelRpcInput,
 ): Promise<SwitchModelResponse> {
-	return await runTransportEffect(callSwitchModel(input));
+	return await runTransportEffect(callRpc("SwitchModel", input));
 }
 
 export async function setDefaultModelRpc(
 	input: SetDefaultModelRpcInput,
 ): Promise<SetDefaultModelResponse> {
-	return await runTransportEffect(callSetDefaultModel(input));
+	return await runTransportEffect(callRpc("SetDefaultModel", input));
 }
 
 export async function setDefaultPermissionModeRpc(
 	input: SetDefaultPermissionModeRpcInput,
 ): Promise<SetDefaultPermissionModeResponse> {
-	return await runTransportEffect(callSetDefaultPermissionMode(input));
+	return await runTransportEffect(callRpc("SetDefaultPermissionMode", input));
 }
 
 export async function setHiddenEntriesRpc(
 	input: SetHiddenEntriesRpcInput,
 ): Promise<SetHiddenEntriesResponse> {
-	return await runTransportEffect(callSetHiddenEntries(input));
+	return await runTransportEffect(callRpc("SetHiddenEntries", input));
 }
 
 export async function getClaudeSettingsRpc(
 	input: GetClaudeSettingsRpcInput,
 ): Promise<ClaudeSettingsResponse> {
-	return await runTransportEffect(callGetClaudeSettings(input));
+	return await runTransportEffect(callRpc("GetClaudeSettings", input));
 }
 
 export async function setClaudeSettingsRpc(
 	input: SetClaudeSettingsRpcInput,
 ): Promise<ClaudeSettingsResponse> {
-	return await runTransportEffect(callSetClaudeSettings(input));
+	return await runTransportEffect(callRpc("SetClaudeSettings", input));
 }
 
 export async function resolveClaudeSettingsRpc(
 	input: ResolveClaudeSettingsRpcInput,
 ): Promise<ResolveClaudeSettingsResponse> {
-	return await runTransportEffect(callResolveClaudeSettings(input));
+	return await runTransportEffect(callRpc("ResolveClaudeSettings", input));
 }
 
 export async function reloadProviderSessionRpc(
 	input: ReloadProviderSessionRpcInput,
 ): Promise<ReloadProviderSessionResponse> {
-	return await runTransportEffect(callReloadProviderSession(input));
+	return await runTransportEffect(callRpc("ReloadProviderSession", input));
 }
 
 export async function renameSessionRpc(
 	input: RenameSessionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callRenameSession(input));
+	await runTransportEffect(callRpc("RenameSession", input));
 }
 
 export async function setSessionSettledRpc(
 	input: SetSessionSettledRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSetSessionSettled(input));
+	await runTransportEffect(callRpc("SetSessionSettled", input));
 }
 
 export async function markSessionUnreadRpc(
 	input: MarkSessionReadRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callMarkSessionUnread(input));
+	await runTransportEffect(callRpc("MarkSessionUnread", input));
 }
 
 export async function markSessionReadRpc(
 	input: MarkSessionReadRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callMarkSessionRead(input));
+	await runTransportEffect(callRpc("MarkSessionRead", input));
 }
 
 export async function setSessionPinnedRpc(
 	input: SetSessionPinnedRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSetSessionPinned(input));
+	await runTransportEffect(callRpc("SetSessionPinned", input));
 }
 
 export async function setSessionAutoSettleRpc(
 	input: SetSessionAutoSettleRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSetSessionAutoSettle(input));
+	await runTransportEffect(callRpc("SetSessionAutoSettle", input));
 }
 
 export async function getAutoSettleSettingRpc(): Promise<number | null> {
 	return await runTransportEffect(
-		Effect.scoped(
-			Effect.gen(function* () {
-				const client = yield* RpcClient.make(WsRpcGroup);
-				return (yield* client.GetAutoSettleSetting({})).autoSettleAfterDays;
-			}),
-		).pipe(
-			Effect.provide(RpcClient.layerProtocolSocket()),
-			Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-			Effect.provide(Socket.layerWebSocketConstructorGlobal),
-			Effect.provide(RpcSerialization.layerJson),
+		Effect.map(
+			callRpc("GetAutoSettleSetting", {}),
+			(response) => response.autoSettleAfterDays,
 		),
 	);
 }
@@ -1762,18 +496,9 @@ export async function setAutoSettleSettingRpc(
 	days: number | null,
 ): Promise<number | null> {
 	return await runTransportEffect(
-		Effect.scoped(
-			Effect.gen(function* () {
-				const client = yield* RpcClient.make(WsRpcGroup);
-				return (yield* client.SetAutoSettleSetting({
-					autoSettleAfterDays: days,
-				})).autoSettleAfterDays;
-			}),
-		).pipe(
-			Effect.provide(RpcClient.layerProtocolSocket()),
-			Effect.provide(Socket.layerWebSocket(makeWsRpcUrl())),
-			Effect.provide(Socket.layerWebSocketConstructorGlobal),
-			Effect.provide(RpcSerialization.layerJson),
+		Effect.map(
+			callRpc("SetAutoSettleSetting", { autoSettleAfterDays: days }),
+			(response) => response.autoSettleAfterDays,
 		),
 	);
 }
@@ -1782,7 +507,7 @@ export async function snoozeSessionRpc(
 	input: SnoozeSessionRpcInput,
 ): Promise<void> {
 	const result = await runTransportEffect(
-		Effect.either(callSnoozeSession(input)),
+		Effect.either(callRpc("SnoozeSession", input)),
 	);
 	if (Either.isLeft(result)) throw result.left;
 }
@@ -1791,7 +516,7 @@ export async function unsnoozeSessionRpc(
 	input: UnsnoozeSessionRpcInput,
 ): Promise<void> {
 	const result = await runTransportEffect(
-		Effect.either(callUnsnoozeSession(input)),
+		Effect.either(callRpc("UnsnoozeSession", input)),
 	);
 	if (Either.isLeft(result)) throw result.left;
 }
@@ -1799,53 +524,53 @@ export async function unsnoozeSessionRpc(
 export async function switchVariantRpc(
 	input: SwitchVariantRpcInput,
 ): Promise<SwitchVariantResponse> {
-	return await runTransportEffect(callSwitchVariant(input));
+	return await runTransportEffect(callRpc("SwitchVariant", input));
 }
 
 export async function switchPermissionModeRpc(
 	input: SwitchPermissionModeRpcInput,
 ): Promise<SwitchPermissionModeResponse> {
-	return await runTransportEffect(callSwitchPermissionMode(input));
+	return await runTransportEffect(callRpc("SwitchPermissionMode", input));
 }
 
 export async function listSessionsRpc(
 	input: ListSessionsRpcInput,
 ): Promise<ListSessionsResponse> {
-	return await runTransportEffect(callListSessions(input));
+	return await runTransportEffect(callRpc("ListSessions", input));
 }
 
 export async function listDaemonSessionsRpc(
 	input: ListDaemonSessionsRpcInput,
 ): Promise<ListDaemonSessionsResponse> {
-	return await runTransportEffect(callListDaemonSessions(input));
+	return await runTransportEffect(callRpc("ListDaemonSessions", input));
 }
 
 export async function loadMoreHistoryRpc(
 	input: LoadMoreHistoryRpcInput,
 ): Promise<LoadMoreHistoryResponse> {
-	return await runTransportEffect(callLoadMoreHistory(input));
+	return await runTransportEffect(callRpc("LoadMoreHistory", input));
 }
 
 export async function rewindSessionRpc(
 	input: RewindSessionRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callRewindSession(input));
+	await runTransportEffect(callRpc("RewindSession", input));
 }
 
 export async function sendMessageRpc(
 	input: SendMessageRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSendMessage(input));
+	await runTransportEffect(callRpc("SendMessage", input));
 }
 
 export async function syncInputDraftRpc(
 	input: SyncInputDraftRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSyncInputDraft(input));
+	await runTransportEffect(callRpc("SyncInputDraft", input));
 }
 
 export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
-	await runTransportEffect(callSetLogLevel(input));
+	await runTransportEffect(callRpc("SetLogLevel", input));
 }

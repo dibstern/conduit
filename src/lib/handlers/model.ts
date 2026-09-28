@@ -43,7 +43,11 @@ import {
 	loadRelaySettings,
 	saveRelaySettings,
 } from "../relay/relay-settings.js";
-import type { ContextWindowOption, ProviderInfo } from "../shared-types.js";
+import {
+	type ContextWindowOption,
+	findContextWindowOptions,
+	type ProviderInfo,
+} from "../shared-types.js";
 
 class RelaySettingsSaveError extends Data.TaggedError(
 	"RelaySettingsSaveError",
@@ -85,23 +89,6 @@ const resolveSessionFromContext = (clientId: string) =>
 		const wsHandler = yield* WebSocketHandlerTag;
 		return wsHandler.getClientSession(clientId);
 	});
-
-function findContextWindowOptions(
-	providers: ReadonlyArray<{
-		models: ReadonlyArray<{
-			id: string;
-			contextWindowOptions?: readonly ContextWindowOption[];
-		}>;
-	}>,
-	modelId: string | undefined,
-): readonly ContextWindowOption[] {
-	if (!modelId) return [];
-	for (const provider of providers) {
-		const model = provider.models.find((m) => m.id === modelId);
-		if (model?.contextWindowOptions) return model.contextWindowOptions;
-	}
-	return [];
-}
 
 const cloneContextWindowOptions = (
 	options:

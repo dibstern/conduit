@@ -172,6 +172,23 @@ export interface ContextWindowOption {
 	isDefault?: boolean;
 }
 
+export function findContextWindowOptions(
+	providers: ReadonlyArray<{
+		models: ReadonlyArray<{
+			id: string;
+			contextWindowOptions?: readonly ContextWindowOption[];
+		}>;
+	}>,
+	modelId: string | undefined,
+): readonly ContextWindowOption[] {
+	if (!modelId) return [];
+	for (const provider of providers) {
+		const model = provider.models.find((m) => m.id === modelId);
+		if (model?.contextWindowOptions) return model.contextWindowOptions;
+	}
+	return [];
+}
+
 export interface ModelInfo {
 	id: string;
 	name: string;

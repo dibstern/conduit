@@ -69,7 +69,6 @@ const RelayErrorFields = {
 };
 
 // ─── Mixin: shared serialization methods for TaggedError subclasses ─────────
-// Each Schema.TaggedError subclass mixes in these methods via direct definition.
 
 /** Helper to build context details for serialization */
 function contextDetails(
@@ -78,81 +77,121 @@ function contextDetails(
 	return Object.keys(ctx).length > 0 ? ctx : undefined;
 }
 
-// ─── Schema.TaggedError subclasses ──────────────────────────────────────────
+type TaggedRelayErrorConstructor = abstract new (
+	...args: never[]
+) => { readonly _tag: string };
 
-export class OpenCodeConnectionError extends Schema.TaggedError<OpenCodeConnectionError>()(
-	"OpenCodeConnectionError",
-	{ ...RelayErrorFields },
-) {
-	get statusCode() {
-		return 502;
-	}
-	get code() {
-		return this._tag;
-	}
-
-	toJSON(): { error: { code: string; message: string; details?: unknown } } {
-		const details = contextDetails(this.context);
-		return {
-			error: {
-				code: this._tag,
-				message: this.message,
-				...(details ? { details } : {}),
-			},
-		};
-	}
-
+type TaggedRelayErrorMethods<Tag extends string> = {
+	readonly code: Tag;
+	toJSON(): { error: { code: string; message: string; details?: unknown } };
 	toWebSocket(): {
 		type: "error";
 		code: string;
 		message: string;
 		statusCode?: number;
 		details?: Record<string, unknown>;
-	} {
-		const details = contextDetails(this.context);
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
+	};
+	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }>;
+	toSystemError(): Extract<RelayMessage, { type: "system_error" }>;
+	toLog(): Record<string, unknown>;
+};
+
+function withTaggedRelayErrorMethods<TBase extends TaggedRelayErrorConstructor>(
+	Base: TBase,
+): Omit<TBase, "prototype"> &
+	(abstract new (
+		...args: ConstructorParameters<TBase>
+	) => Omit<InstanceType<TBase>, keyof TaggedRelayErrorMethods<string>> &
+		TaggedRelayErrorMethods<InstanceType<TBase>["_tag"]>);
+function withTaggedRelayErrorMethods(
+	Base: TaggedRelayErrorConstructor,
+): unknown {
+	abstract class TaggedRelayErrorWithMethods extends Base {
+		declare readonly _tag: string;
+		declare readonly message: string;
+		declare readonly context: Record<string, unknown>;
+		abstract get statusCode(): number;
+
+		get code(): this["_tag"] {
+			return this._tag;
+		}
+
+		toJSON(): { error: { code: string; message: string; details?: unknown } } {
+			const details = contextDetails(this.context);
+			return {
+				error: {
+					code: this._tag,
+					message: this.message,
+					...(details ? { details } : {}),
+				},
+			};
+		}
+
+		toWebSocket(): {
+			type: "error";
+			code: string;
+			message: string;
+			statusCode?: number;
+			details?: Record<string, unknown>;
+		} {
+			const details = contextDetails(this.context);
+			return {
+				type: "error",
+				code: this._tag,
+				message: this.message,
+				...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+				...(details ? { details } : {}),
+			};
+		}
+
+		toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
+			return { ...this.toWebSocket(), sessionId };
+		}
+
+		toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
+			const details = contextDetails(this.context);
+			return {
+				type: "system_error",
+				code: this._tag,
+				message: this.message,
+				...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
+				...(details ? { details } : {}),
+			};
+		}
+
+		toLog(): Record<string, unknown> {
+			return {
+				error: this._tag,
+				message: this.message,
+				...redactSensitive(this.context),
+			};
+		}
 	}
 
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
-	}
+	return TaggedRelayErrorWithMethods;
+}
 
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details = contextDetails(this.context);
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
+// ─── Schema.TaggedError subclasses ──────────────────────────────────────────
 
-	toLog(): Record<string, unknown> {
-		return {
-			error: this._tag,
-			message: this.message,
-			...redactSensitive(this.context),
-		};
+export class OpenCodeConnectionError extends withTaggedRelayErrorMethods(
+	Schema.TaggedError<OpenCodeConnectionError>()("OpenCodeConnectionError", {
+		...RelayErrorFields,
+	}),
+) {
+	get statusCode() {
+		return 502;
 	}
 }
 
-export class OpenCodeApiError extends Schema.TaggedError<OpenCodeApiError>()(
-	"OpenCodeApiError",
-	{
+export class OpenCodeApiError extends withTaggedRelayErrorMethods(
+	Schema.TaggedError<OpenCodeApiError>()("OpenCodeApiError", {
 		...RelayErrorFields,
 		endpoint: Schema.String,
 		responseStatus: Schema.Number,
 		responseBody: Schema.optionalWith(Schema.Unknown, {
 			default: () => undefined,
 		}),
-	},
+	}),
 ) {
 	// Enrich message for 4xx errors with response body (preserves old behavior)
 	constructor(props: {
@@ -184,311 +223,45 @@ export class OpenCodeApiError extends Schema.TaggedError<OpenCodeApiError>()(
 	get statusCode() {
 		return this.responseStatus >= 500 ? 502 : this.responseStatus;
 	}
-	get code() {
-		return this._tag;
-	}
-
-	toJSON(): { error: { code: string; message: string; details?: unknown } } {
-		const details = contextDetails(this.context);
-		return {
-			error: {
-				code: this._tag,
-				message: this.message,
-				...(details ? { details } : {}),
-			},
-		};
-	}
-
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	} {
-		const details = contextDetails(this.context);
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
-	}
-
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details = contextDetails(this.context);
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toLog(): Record<string, unknown> {
-		return {
-			error: this._tag,
-			message: this.message,
-			...redactSensitive(this.context),
-		};
-	}
 }
 
-export class SSEConnectionError extends Schema.TaggedError<SSEConnectionError>()(
-	"SSEConnectionError",
-	{ ...RelayErrorFields },
+export class SSEConnectionError extends withTaggedRelayErrorMethods(
+	Schema.TaggedError<SSEConnectionError>()("SSEConnectionError", {
+		...RelayErrorFields,
+	}),
 ) {
 	get statusCode() {
 		return 502;
 	}
-	get code() {
-		return this._tag;
-	}
-
-	toJSON(): { error: { code: string; message: string; details?: unknown } } {
-		const details = contextDetails(this.context);
-		return {
-			error: {
-				code: this._tag,
-				message: this.message,
-				...(details ? { details } : {}),
-			},
-		};
-	}
-
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	} {
-		const details = contextDetails(this.context);
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
-	}
-
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details = contextDetails(this.context);
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toLog(): Record<string, unknown> {
-		return {
-			error: this._tag,
-			message: this.message,
-			...redactSensitive(this.context),
-		};
-	}
 }
 
-export class WebSocketError extends Schema.TaggedError<WebSocketError>()(
-	"WebSocketError",
-	{ ...RelayErrorFields },
+export class WebSocketError extends withTaggedRelayErrorMethods(
+	Schema.TaggedError<WebSocketError>()("WebSocketError", {
+		...RelayErrorFields,
+	}),
 ) {
 	get statusCode() {
 		return 400;
 	}
-	get code() {
-		return this._tag;
-	}
-
-	toJSON(): { error: { code: string; message: string; details?: unknown } } {
-		const details = contextDetails(this.context);
-		return {
-			error: {
-				code: this._tag,
-				message: this.message,
-				...(details ? { details } : {}),
-			},
-		};
-	}
-
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	} {
-		const details = contextDetails(this.context);
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
-	}
-
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details = contextDetails(this.context);
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toLog(): Record<string, unknown> {
-		return {
-			error: this._tag,
-			message: this.message,
-			...redactSensitive(this.context),
-		};
-	}
 }
 
-export class AuthenticationError extends Schema.TaggedError<AuthenticationError>()(
-	"AuthenticationError",
-	{ ...RelayErrorFields },
+export class AuthenticationError extends withTaggedRelayErrorMethods(
+	Schema.TaggedError<AuthenticationError>()("AuthenticationError", {
+		...RelayErrorFields,
+	}),
 ) {
 	get statusCode() {
 		return 401;
 	}
-	get code() {
-		return this._tag;
-	}
-
-	toJSON(): { error: { code: string; message: string; details?: unknown } } {
-		const details = contextDetails(this.context);
-		return {
-			error: {
-				code: this._tag,
-				message: this.message,
-				...(details ? { details } : {}),
-			},
-		};
-	}
-
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	} {
-		const details = contextDetails(this.context);
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
-	}
-
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details = contextDetails(this.context);
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toLog(): Record<string, unknown> {
-		return {
-			error: this._tag,
-			message: this.message,
-			...redactSensitive(this.context),
-		};
-	}
 }
 
-export class ConfigurationError extends Schema.TaggedError<ConfigurationError>()(
-	"ConfigurationError",
-	{ ...RelayErrorFields },
+export class ConfigurationError extends withTaggedRelayErrorMethods(
+	Schema.TaggedError<ConfigurationError>()("ConfigurationError", {
+		...RelayErrorFields,
+	}),
 ) {
 	get statusCode() {
 		return 500;
-	}
-	get code() {
-		return this._tag;
-	}
-
-	toJSON(): { error: { code: string; message: string; details?: unknown } } {
-		const details = contextDetails(this.context);
-		return {
-			error: {
-				code: this._tag,
-				message: this.message,
-				...(details ? { details } : {}),
-			},
-		};
-	}
-
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	} {
-		const details = contextDetails(this.context);
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
-	}
-
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details = contextDetails(this.context);
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	toLog(): Record<string, unknown> {
-		return {
-			error: this._tag,
-			message: this.message,
-			...redactSensitive(this.context),
-		};
 	}
 }
 

@@ -13,7 +13,7 @@ media/_video_tmp/
 media/_debug/
 media/_test_output/
 
-/test-output.log
+/test-output*.log
 /.conduit
 
 # Beads / Dolt files (added by bd init)

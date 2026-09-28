@@ -211,7 +211,6 @@ export class ClaudePermissionService {
 			})
 			.pipe(
 				Effect.disconnect,
-				Effect.raceFirst(Effect.disconnect(abortSignalEffect(options.signal))),
 				Effect.map((answers) => ({
 					behavior: "allow" as const,
 					updatedInput: {
@@ -219,10 +218,21 @@ export class ClaudePermissionService {
 						answers: toClaudeQuestionAnswers(questions, answers),
 					},
 				})),
+				Effect.raceFirst(
+					Effect.disconnect(
+						// abortSignalEffect signals abort by failing, so map that failure.
+						abortSignalEffect(options.signal).pipe(
+							Effect.orElseSucceed(() => ({
+								behavior: "deny" as const,
+								message: "Turn interrupted",
+							})),
+						),
+					),
+				),
 				Effect.catchAll(() =>
 					Effect.succeed({
 						behavior: "deny" as const,
-						message: "Turn interrupted",
+						message: "Question request failed.",
 					}),
 				),
 			);

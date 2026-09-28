@@ -174,7 +174,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				);
 				mapperState = result.state;
 
-				// Persist to SQLite when available (before WS send for durability).
+				// Attempt persistence before WS send; failures are logged and delivery continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
 				// Compaction notices are UI-only EXCEPT the terminal "completed"
@@ -194,7 +194,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						if (persistResult._tag === "Left") {
 							yield* Effect.sync(() => {
 								const err = persistResult.left;
-								log.debug(
+								log.error(
 									`Persist failed for runtime event ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 								);
 							});
@@ -207,7 +207,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 							if (persistResult._tag === "Left") {
 								yield* Effect.sync(() => {
 									const err = persistResult.left;
-									log.debug(
+									log.error(
 										`Persist failed for ${domainEvent.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 									);
 								});

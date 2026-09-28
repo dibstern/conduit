@@ -405,7 +405,7 @@ export function writeCrashInfo(info: CrashInfo, configDir?: string): void {
 		ensureDir(dir);
 		writeFileSync(join(dir, "crash.json"), JSON.stringify(info), "utf-8");
 	} catch {
-		// Non-critical — log warning in production, silently ignore here
+		// Non-critical — silently ignore write failures.
 	}
 }
 

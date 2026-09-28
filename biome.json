@@ -29,7 +29,6 @@
 	"linter": {
 		"rules": {
 			"complexity": {
-				"noCommaOperator": "off",
 				"useLiteralKeys": "off"
 			},
 			"style": {

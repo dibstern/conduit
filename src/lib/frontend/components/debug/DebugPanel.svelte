@@ -8,6 +8,7 @@
 	import { confirm } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { setLogLevelRpc } from "../../transport/ws-rpc-client.js";
+	import { copyToClipboard } from "../../utils/clipboard.js";
 
 	let copyFlash = $state(false);
 
@@ -36,23 +37,9 @@
 			}
 			return line;
 		});
-		try {
-			await navigator.clipboard.writeText(lines.join("\n"));
-			copyFlash = true;
-			setTimeout(() => { copyFlash = false; }, 1200);
-		} catch {
-			// Fallback for contexts without clipboard API
-			const ta = document.createElement("textarea");
-			ta.value = lines.join("\n");
-			ta.style.position = "fixed";
-			ta.style.opacity = "0";
-			document.body.appendChild(ta);
-			ta.select();
-			document.execCommand("copy");
-			document.body.removeChild(ta);
-			copyFlash = true;
-			setTimeout(() => { copyFlash = false; }, 1200);
-		}
+		if (!await copyToClipboard(lines.join("\n"))) return;
+		copyFlash = true;
+		setTimeout(() => { copyFlash = false; }, 1200);
 	}
 
 	// ─── Props ──────────────────────────────────────────────────────────────

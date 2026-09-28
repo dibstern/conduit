@@ -206,8 +206,7 @@ export function getOrCreateSessionActivity(id: string): SessionActivity {
 	if (id === "") throw new Error("getOrCreateSessionActivity: empty sessionId");
 	const existing = sessionActivity.get(id);
 	if (existing) return existing;
-	// biome-ignore lint/style/useConst: $state() requires let for Svelte 5 reactivity
-	let a: SessionActivity = $state(createEmptySessionActivity());
+	const a: SessionActivity = $state(createEmptySessionActivity());
 	sessionActivity.set(id, a);
 	return a;
 }
@@ -219,8 +218,7 @@ export function getOrCreateSessionMessages(id: string): SessionMessages {
 		touchLRU(id);
 		return existing;
 	}
-	// biome-ignore lint/style/useConst: $state() requires let for Svelte 5 reactivity
-	let m: SessionMessages = $state(createEmptySessionMessages());
+	const m: SessionMessages = $state(createEmptySessionMessages());
 	sessionMessages.set(id, m);
 	ensureLRUCap();
 	touchLRU(id);
@@ -1581,11 +1579,6 @@ export function flushPendingRender(
 	);
 }
 
-/** Clear all messages (e.g. on session switch).
- *
- *  IMPORTANT: Do NOT read reactive $state (e.g. sessionState.currentId)
- *  inside this function — it is called from $effect contexts and reading
- *  reactive state here creates infinite effect loops. */
 /**
  * Seed the ToolRegistry from chat messages loaded via REST history.
  * Without this, SSE events arriving for history-loaded tools would be
@@ -1630,6 +1623,13 @@ export function activateSessionChatState(sessionId: string): void {
 	historyState.messageCount = messages?.historyMessageCount ?? 0;
 }
 
+/**
+ * Clear all messages (e.g. on session switch).
+ *
+ * Reads reactive `sessionState.currentId`, so a direct call from an `$effect`
+ * body would subscribe that effect to session changes and can loop. Call it
+ * from event callbacks or inside `untrack()`, as ChatLayout does.
+ */
 export function clearMessages(): void {
 	phaseReset(); // must be cleared before abort hook — stops replay generation check
 	onClearMessages?.(sessionState.currentId); // abort in-flight async replays

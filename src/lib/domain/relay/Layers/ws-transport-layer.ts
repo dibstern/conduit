@@ -97,7 +97,7 @@ const heartbeatOnce = Effect.fn("ws.heartbeat.tick")(function* () {
 	for (const [clientId, client] of clients) {
 		if (!client.isAlive) {
 			staleClients.push([clientId, client]);
-			yield* Effect.sync(() => {
+			yield* Effect.try(() => {
 				client.ws.terminate?.();
 				if (!client.ws.terminate) client.ws.close();
 			}).pipe(Effect.catchAll(() => Effect.void));
@@ -122,7 +122,7 @@ const heartbeatOnce = Effect.fn("ws.heartbeat.tick")(function* () {
 	}
 
 	for (const [_clientId, client] of clientsToPing) {
-		yield* Effect.sync(() => client.ws.ping?.()).pipe(
+		yield* Effect.try(() => client.ws.ping?.()).pipe(
 			Effect.catchAll(() => Effect.void),
 		);
 	}

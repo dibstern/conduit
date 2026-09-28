@@ -39,368 +39,381 @@ export function translateProviderRuntimeEventToDomain(
 } {
 	const data = dataRecord(event);
 
-	if (event.type === "message.created") {
-		const messageId = messageIdFromData(event, data);
-		const role = messageRole(data["role"]);
-		const nextState =
-			role === "assistant"
-				? withCurrentAssistantMessageId(event, state, messageId)
-				: state;
-		return {
-			events: [
+	switch (event.type) {
+		case "message.created": {
+			const messageId = messageIdFromData(event, data);
+			const role = messageRole(data["role"]);
+			const nextState =
+				role === "assistant"
+					? withCurrentAssistantMessageId(event, state, messageId)
+					: state;
+			return {
+				events: [
+					canonicalEvent(
+						"message.created",
+						event.sessionId,
+						{
+							messageId,
+							role,
+							sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+							...(event.turnId ? { turnId: event.turnId } : {}),
+						},
+						eventOptions(event),
+					),
+				],
+				state: nextState,
+			};
+		}
+
+		case "text.delta": {
+			const messageId = messageIdFromData(event, data);
+			return {
+				events: [
+					canonicalEvent(
+						"text.delta",
+						event.sessionId,
+						{
+							messageId,
+							partId: stringField(data["partId"]) ?? `${messageId}:text`,
+							text: stringField(data["text"]) ?? "",
+						},
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		case "thinking.start": {
+			const partId = partIdFromData(event, data);
+			const messageId = messageIdFromDataOrState(event, data, state);
+			return {
+				events: [
+					canonicalEvent(
+						"thinking.start",
+						event.sessionId,
+						{ messageId, partId },
+						eventOptions(event),
+					),
+				],
+				state: withItemMessageId(event, state, partId, messageId),
+			};
+		}
+
+		case "thinking.delta": {
+			const partId = partIdFromData(event, data);
+			return {
+				events: [
+					canonicalEvent(
+						"thinking.delta",
+						event.sessionId,
+						{
+							messageId: messageIdForPart(event, data, state, partId),
+							partId,
+							text: stringField(data["text"]) ?? "",
+						},
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		case "thinking.end": {
+			const partId = partIdFromData(event, data);
+			return {
+				events: [
+					canonicalEvent(
+						"thinking.end",
+						event.sessionId,
+						{
+							messageId: messageIdForPart(event, data, state, partId),
+							partId,
+						},
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		case "tool.started": {
+			const partId = partIdFromData(event, data);
+			const messageId = messageIdFromDataOrState(event, data, state);
+			return {
+				events: [
+					toolStartedEvent(event, data, messageId, partId, event.eventId),
+				],
+				state: withStartedToolPartId(
+					event,
+					withItemMessageId(event, state, partId, messageId),
+					partId,
+				),
+			};
+		}
+
+		case "tool.running": {
+			const partId = partIdFromData(event, data);
+			return {
+				events: [
+					canonicalEvent(
+						"tool.running",
+						event.sessionId,
+						{
+							messageId: messageIdForPart(event, data, state, partId),
+							partId,
+							...(isRecord(data["metadata"])
+								? { metadata: data["metadata"] }
+								: {}),
+							// Refreshed input for tools whose args stream after tool.started
+							...(isRecord(data["input"]) ? { input: data["input"] } : {}),
+							...(typeof data["callId"] === "string"
+								? { callId: data["callId"] }
+								: {}),
+							...(typeof data["toolName"] === "string"
+								? { toolName: data["toolName"] }
+								: {}),
+						},
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		case "tool.completed": {
+			const partId = partIdFromData(event, data);
+			const messageId = messageIdForPart(event, data, state, partId);
+			const events: CanonicalEvent[] = [];
+			const toolWasStarted = state.startedToolPartIds.has(
+				partKey(event, partId),
+			);
+			if (!toolWasStarted) {
+				events.push(
+					toolStartedEvent(
+						event,
+						data,
+						messageId,
+						partId,
+						`${event.eventId}:tool.started`,
+					),
+				);
+			}
+			events.push(
 				canonicalEvent(
-					"message.created",
+					"tool.completed",
 					event.sessionId,
 					{
 						messageId,
-						role,
-						sessionId: stringField(data["sessionId"]) ?? event.sessionId,
-						...(event.turnId ? { turnId: event.turnId } : {}),
-					},
-					eventOptions(event),
-				),
-			],
-			state: nextState,
-		};
-	}
-
-	if (event.type === "text.delta") {
-		const messageId = messageIdFromData(event, data);
-		return {
-			events: [
-				canonicalEvent(
-					"text.delta",
-					event.sessionId,
-					{
-						messageId,
-						partId: stringField(data["partId"]) ?? `${messageId}:text`,
-						text: stringField(data["text"]) ?? "",
-					},
-					eventOptions(event),
-				),
-			],
-			state,
-		};
-	}
-
-	if (event.type === "thinking.start") {
-		const partId = partIdFromData(event, data);
-		const messageId = messageIdFromDataOrState(event, data, state);
-		return {
-			events: [
-				canonicalEvent(
-					"thinking.start",
-					event.sessionId,
-					{ messageId, partId },
-					eventOptions(event),
-				),
-			],
-			state: withItemMessageId(event, state, partId, messageId),
-		};
-	}
-
-	if (event.type === "thinking.delta") {
-		const partId = partIdFromData(event, data);
-		return {
-			events: [
-				canonicalEvent(
-					"thinking.delta",
-					event.sessionId,
-					{
-						messageId: messageIdForPart(event, data, state, partId),
 						partId,
-						text: stringField(data["text"]) ?? "",
-					},
-					eventOptions(event),
-				),
-			],
-			state,
-		};
-	}
-
-	if (event.type === "thinking.end") {
-		const partId = partIdFromData(event, data);
-		return {
-			events: [
-				canonicalEvent(
-					"thinking.end",
-					event.sessionId,
-					{
-						messageId: messageIdForPart(event, data, state, partId),
-						partId,
-					},
-					eventOptions(event),
-				),
-			],
-			state,
-		};
-	}
-
-	if (event.type === "tool.started") {
-		const partId = partIdFromData(event, data);
-		const messageId = messageIdFromDataOrState(event, data, state);
-		return {
-			events: [toolStartedEvent(event, data, messageId, partId, event.eventId)],
-			state: withStartedToolPartId(
-				event,
-				withItemMessageId(event, state, partId, messageId),
-				partId,
-			),
-		};
-	}
-
-	if (event.type === "tool.running") {
-		const partId = partIdFromData(event, data);
-		return {
-			events: [
-				canonicalEvent(
-					"tool.running",
-					event.sessionId,
-					{
-						messageId: messageIdForPart(event, data, state, partId),
-						partId,
+						result: data["result"] ?? "",
+						duration: numberFieldValue(data["duration"]) ?? 0,
 						...(isRecord(data["metadata"])
 							? { metadata: data["metadata"] }
 							: {}),
-						// Refreshed input for tools whose args stream after tool.started
-						...(isRecord(data["input"]) ? { input: data["input"] } : {}),
-						...(typeof data["callId"] === "string"
-							? { callId: data["callId"] }
-							: {}),
-						...(typeof data["toolName"] === "string"
-							? { toolName: data["toolName"] }
+						// Refreshed input for tools whose args stream after tool.started.
+						// On an orphan completion the input belongs to the synthesized
+						// tool.started above instead.
+						...(toolWasStarted && isRecord(data["input"])
+							? { input: data["input"] }
 							: {}),
 					},
 					eventOptions(event),
-				),
-			],
-			state,
-		};
-	}
-
-	if (event.type === "tool.completed") {
-		const partId = partIdFromData(event, data);
-		const messageId = messageIdForPart(event, data, state, partId);
-		const events: CanonicalEvent[] = [];
-		const toolWasStarted = state.startedToolPartIds.has(partKey(event, partId));
-		if (!toolWasStarted) {
-			events.push(
-				toolStartedEvent(
-					event,
-					data,
-					messageId,
-					partId,
-					`${event.eventId}:tool.started`,
 				),
 			);
-		}
-		events.push(
-			canonicalEvent(
-				"tool.completed",
-				event.sessionId,
-				{
-					messageId,
+			return {
+				events,
+				state: withStartedToolPartId(
+					event,
+					withItemMessageId(event, state, partId, messageId),
 					partId,
-					result: data["result"] ?? "",
-					duration: numberFieldValue(data["duration"]) ?? 0,
-					...(isRecord(data["metadata"]) ? { metadata: data["metadata"] } : {}),
-					// Refreshed input for tools whose args stream after tool.started.
-					// On an orphan completion the input belongs to the synthesized
-					// tool.started above instead.
-					...(toolWasStarted && isRecord(data["input"])
-						? { input: data["input"] }
-						: {}),
-				},
-				eventOptions(event),
-			),
-		);
-		return {
-			events,
-			state: withStartedToolPartId(
-				event,
-				withItemMessageId(event, state, partId, messageId),
-				partId,
-			),
-		};
-	}
-
-	if (event.type === "file.attached") {
-		const partId = partIdFromData(event, data);
-		const filename = stringField(data["filename"]);
-		return singleEvent(event, state, "file.attached", {
-			messageId: messageIdForPart(event, data, state, partId),
-			partId,
-			mime: stringField(data["mime"]) ?? "",
-			...(filename != null ? { filename } : {}),
-			url: stringField(data["url"]) ?? "",
-		});
-	}
-
-	if (event.type === "turn.completed") {
-		const cost = numberFieldValue(data["cost"]);
-		const tokens = tokensValue(data["tokens"]);
-		const duration =
-			numberFieldValue(data["duration"]) ??
-			numberFieldValue(data["durationMs"]);
-		const payload = {
-			messageId: messageIdFromDataOrState(event, data, state),
-			...(cost != null ? { cost } : {}),
-			...(tokens != null ? { tokens } : {}),
-			...(duration != null ? { duration } : {}),
-		} satisfies TurnCompletedPayload;
-		return singleEvent(event, state, "turn.completed", payload);
-	}
-
-	if (event.type === "turn.error") {
-		const code = stringField(data["code"]);
-		const payload = {
-			messageId: messageIdFromDataOrState(event, data, state),
-			error:
-				stringField(data["error"]) ??
-				stringField(data["message"]) ??
-				"Provider runtime error",
-			...(code != null ? { code } : {}),
-		} satisfies TurnErrorPayload;
-		return singleEvent(event, state, "turn.error", payload);
-	}
-
-	if (event.type === "turn.interrupted") {
-		return singleEvent(event, state, "turn.interrupted", {
-			messageId: messageIdFromDataOrState(event, data, state),
-		});
-	}
-
-	if (event.type === "turn.model_resolved") {
-		const requestedModel = stringField(data["requestedModel"]);
-		const expectedModel = stringField(data["expectedModel"]);
-		const payload = {
-			...(requestedModel !== undefined ? { requestedModel } : {}),
-			...(expectedModel !== undefined ? { expectedModel } : {}),
-			actualModel: stringField(data["actualModel"]) ?? "",
-		} satisfies TurnModelResolvedPayload;
-		return singleEvent(event, state, "turn.model_resolved", payload);
-	}
-
-	if (event.type === "session.permission_mode_changed") {
-		const mode = stringField(data["mode"]);
-		// Drop rather than coerce: the append would fail schema decode anyway,
-		// and a coerced mode would misreport what the session is actually in.
-		if (!isSessionPermissionMode(mode)) return { events: [], state };
-		return singleEvent(event, state, "session.permission_mode_changed", {
-			sessionId: stringField(data["sessionId"]) ?? event.sessionId,
-			mode,
-		});
-	}
-
-	if (event.type === "session.created") {
-		const parentId = stringField(data["parentId"]);
-		const providerSessionId =
-			stringField(data["providerSessionId"]) ??
-			event.providerRefs.providerSessionId;
-		const payload = {
-			sessionId: stringField(data["sessionId"]) ?? event.sessionId,
-			title: stringField(data["title"]) ?? "Untitled",
-			provider: stringField(data["provider"]) ?? event.providerId,
-			...(parentId != null ? { parentId } : {}),
-			...(providerSessionId != null ? { providerSessionId } : {}),
-		} satisfies SessionCreatedPayload;
-		return singleEvent(event, state, "session.created", payload);
-	}
-
-	if (event.type === "session.renamed") {
-		const title = stringField(data["title"]);
-		if (title == null || title.length === 0) return { events: [], state };
-		return singleEvent(event, state, "session.renamed", {
-			sessionId: event.sessionId,
-			title,
-		});
-	}
-
-	if (event.type === "session.status") {
-		const status = sessionStatus(data["status"]);
-		return singleEvent(event, state, "session.status", {
-			sessionId: event.sessionId,
-			status,
-			...(event.turnId ? { turnId: event.turnId } : {}),
-		});
-	}
-
-	if (event.type === "session.compaction") {
-		const preTokens = numberFieldValue(data["preTokens"]);
-		const postTokens = numberFieldValue(data["postTokens"]);
-		return singleEvent(event, state, "session.compaction", {
-			sessionId: event.sessionId,
-			state: sessionCompactionState(data["state"]),
-			detail: stringField(data["detail"]) ?? "Compaction update",
-			...(preTokens != null ? { preTokens } : {}),
-			...(postTokens != null ? { postTokens } : {}),
-		});
-	}
-
-	if (event.type === "session.provider_changed") {
-		const oldProvider = stringField(data["oldProvider"]);
-		const newProvider = stringField(data["newProvider"]);
-		if (oldProvider == null || newProvider == null)
-			return { events: [], state };
-		return singleEvent(event, state, "session.provider_changed", {
-			sessionId: event.sessionId,
-			oldProvider,
-			newProvider,
-		});
-	}
-
-	if (event.type === "permission.asked") {
-		return singleEvent(event, state, "permission.asked", {
-			id: requestId(event, data),
-			sessionId: event.sessionId,
-			toolName: stringField(data["toolName"]) ?? "Unknown",
-			input: data["input"],
-		});
-	}
-
-	if (event.type === "permission.resolved") {
-		return singleEvent(event, state, "permission.resolved", {
-			id: requestId(event, data),
-			decision: permissionDecision(stringField(data["decision"]) ?? ""),
-			...(data["resolvedBy"] === "auto" ? { resolvedBy: "auto" as const } : {}),
-		});
-	}
-
-	if (event.type === "question.asked") {
-		return singleEvent(event, state, "question.asked", {
-			id: requestId(event, data),
-			sessionId: event.sessionId,
-			questions: data["questions"],
-		});
-	}
-
-	if (event.type === "question.resolved") {
-		return singleEvent(event, state, "question.resolved", {
-			id: requestId(event, data),
-			answers: isRecord(data["answers"]) ? data["answers"] : {},
-		});
-	}
-
-	if (event.type === "tool.input_updated") {
-		const partId = partIdFromData(event, data);
-		return {
-			events: [
-				canonicalEvent(
-					"tool.input_updated",
-					event.sessionId,
-					{
-						messageId: messageIdForPart(event, data, state, partId),
-						partId,
-						...data,
-					},
-					eventOptions(event),
 				),
-			],
-			state,
-		};
-	}
+			};
+		}
 
-	return { events: [], state };
+		case "file.attached": {
+			const partId = partIdFromData(event, data);
+			const filename = stringField(data["filename"]);
+			return singleEvent(event, state, "file.attached", {
+				messageId: messageIdForPart(event, data, state, partId),
+				partId,
+				mime: stringField(data["mime"]) ?? "",
+				...(filename != null ? { filename } : {}),
+				url: stringField(data["url"]) ?? "",
+			});
+		}
+
+		case "turn.completed": {
+			const cost = numberFieldValue(data["cost"]);
+			const tokens = tokensValue(data["tokens"]);
+			const duration =
+				numberFieldValue(data["duration"]) ??
+				numberFieldValue(data["durationMs"]);
+			const payload = {
+				messageId: messageIdFromDataOrState(event, data, state),
+				...(cost != null ? { cost } : {}),
+				...(tokens != null ? { tokens } : {}),
+				...(duration != null ? { duration } : {}),
+			} satisfies TurnCompletedPayload;
+			return singleEvent(event, state, "turn.completed", payload);
+		}
+
+		case "turn.error": {
+			const code = stringField(data["code"]);
+			const payload = {
+				messageId: messageIdFromDataOrState(event, data, state),
+				error:
+					stringField(data["error"]) ??
+					stringField(data["message"]) ??
+					"Provider runtime error",
+				...(code != null ? { code } : {}),
+			} satisfies TurnErrorPayload;
+			return singleEvent(event, state, "turn.error", payload);
+		}
+
+		case "turn.interrupted": {
+			return singleEvent(event, state, "turn.interrupted", {
+				messageId: messageIdFromDataOrState(event, data, state),
+			});
+		}
+
+		case "turn.model_resolved": {
+			const requestedModel = stringField(data["requestedModel"]);
+			const expectedModel = stringField(data["expectedModel"]);
+			const payload = {
+				...(requestedModel !== undefined ? { requestedModel } : {}),
+				...(expectedModel !== undefined ? { expectedModel } : {}),
+				actualModel: stringField(data["actualModel"]) ?? "",
+			} satisfies TurnModelResolvedPayload;
+			return singleEvent(event, state, "turn.model_resolved", payload);
+		}
+
+		case "session.permission_mode_changed": {
+			const mode = stringField(data["mode"]);
+			// Drop rather than coerce: the append would fail schema decode anyway,
+			// and a coerced mode would misreport what the session is actually in.
+			if (!isSessionPermissionMode(mode)) return { events: [], state };
+			return singleEvent(event, state, "session.permission_mode_changed", {
+				sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+				mode,
+			});
+		}
+
+		case "session.created": {
+			const parentId = stringField(data["parentId"]);
+			const providerSessionId =
+				stringField(data["providerSessionId"]) ??
+				event.providerRefs.providerSessionId;
+			const payload = {
+				sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+				title: stringField(data["title"]) ?? "Untitled",
+				provider: stringField(data["provider"]) ?? event.providerId,
+				...(parentId != null ? { parentId } : {}),
+				...(providerSessionId != null ? { providerSessionId } : {}),
+			} satisfies SessionCreatedPayload;
+			return singleEvent(event, state, "session.created", payload);
+		}
+
+		case "session.renamed": {
+			const title = stringField(data["title"]);
+			if (title == null || title.length === 0) return { events: [], state };
+			return singleEvent(event, state, "session.renamed", {
+				sessionId: event.sessionId,
+				title,
+			});
+		}
+
+		case "session.status": {
+			const status = sessionStatus(data["status"]);
+			return singleEvent(event, state, "session.status", {
+				sessionId: event.sessionId,
+				status,
+				...(event.turnId ? { turnId: event.turnId } : {}),
+			});
+		}
+
+		case "session.compaction": {
+			const preTokens = numberFieldValue(data["preTokens"]);
+			const postTokens = numberFieldValue(data["postTokens"]);
+			return singleEvent(event, state, "session.compaction", {
+				sessionId: event.sessionId,
+				state: sessionCompactionState(data["state"]),
+				detail: stringField(data["detail"]) ?? "Compaction update",
+				...(preTokens != null ? { preTokens } : {}),
+				...(postTokens != null ? { postTokens } : {}),
+			});
+		}
+
+		case "session.provider_changed": {
+			const oldProvider = stringField(data["oldProvider"]);
+			const newProvider = stringField(data["newProvider"]);
+			if (oldProvider == null || newProvider == null)
+				return { events: [], state };
+			return singleEvent(event, state, "session.provider_changed", {
+				sessionId: event.sessionId,
+				oldProvider,
+				newProvider,
+			});
+		}
+
+		case "permission.asked": {
+			return singleEvent(event, state, "permission.asked", {
+				id: requestId(event, data),
+				sessionId: event.sessionId,
+				toolName: stringField(data["toolName"]) ?? "Unknown",
+				input: data["input"],
+			});
+		}
+
+		case "permission.resolved": {
+			return singleEvent(event, state, "permission.resolved", {
+				id: requestId(event, data),
+				decision: permissionDecision(stringField(data["decision"]) ?? ""),
+				...(data["resolvedBy"] === "auto"
+					? { resolvedBy: "auto" as const }
+					: {}),
+			});
+		}
+
+		case "question.asked": {
+			return singleEvent(event, state, "question.asked", {
+				id: requestId(event, data),
+				sessionId: event.sessionId,
+				questions: data["questions"],
+			});
+		}
+
+		case "question.resolved": {
+			return singleEvent(event, state, "question.resolved", {
+				id: requestId(event, data),
+				answers: isRecord(data["answers"]) ? data["answers"] : {},
+			});
+		}
+
+		case "tool.input_updated": {
+			const partId = partIdFromData(event, data);
+			return {
+				events: [
+					canonicalEvent(
+						"tool.input_updated",
+						event.sessionId,
+						{
+							messageId: messageIdForPart(event, data, state, partId),
+							partId,
+							...data,
+						},
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		default: {
+			const _exhaustive: never = event.type;
+			return { events: [], state };
+		}
+	}
 }
 
 const sessionPermissionModes = new Set<string>(SESSION_PERMISSION_MODES);

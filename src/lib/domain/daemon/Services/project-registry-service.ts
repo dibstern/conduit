@@ -394,12 +394,7 @@ export const updateProject = (
 			}
 			const entry = existing.value;
 			const updatedProject = { ...entry.project, ...updates };
-			const updatedEntry: ProjectState =
-				entry._tag === "Ready"
-					? { ...entry, project: updatedProject }
-					: entry._tag === "Error"
-						? { ...entry, project: updatedProject }
-						: { ...entry, project: updatedProject };
+			const updatedEntry: ProjectState = { ...entry, project: updatedProject };
 			return [false, HashMap.set(state, slug, updatedEntry)] as const;
 		});
 
@@ -435,12 +430,7 @@ export const touchLastUsed = (slug: string) =>
 			}
 			const entry = existing.value;
 			const updatedProject = { ...entry.project, lastUsed: Date.now() };
-			const updatedEntry: ProjectState =
-				entry._tag === "Ready"
-					? { ...entry, project: updatedProject }
-					: entry._tag === "Error"
-						? { ...entry, project: updatedProject }
-						: { ...entry, project: updatedProject };
+			const updatedEntry: ProjectState = { ...entry, project: updatedProject };
 			return [true, HashMap.set(state, slug, updatedEntry)] as const;
 		});
 

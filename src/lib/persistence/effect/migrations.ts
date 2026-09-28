@@ -415,6 +415,21 @@ const executeSqlStatements = (
 		}
 	});
 
+const runAddColumnMigrationIfMissing = (
+	tableName: string,
+	columnName: string,
+	sqlText: string,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql.unsafe<{ name: string }>(
+			`PRAGMA table_info(${tableName})`,
+		);
+		if (columns.some((column) => column.name === columnName)) return;
+
+		yield* executeSqlStatements(sqlText);
+	});
+
 const failSchemaMismatch = (
 	message: string,
 ): Effect.Effect<never, Migrator.MigrationError> =>
@@ -536,33 +551,17 @@ const runBaselineEventStoreMigration: Effect.Effect<
 	yield* verifyExistingBaselineSchema;
 });
 
-const runMessagePartMetadataMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(message_parts)",
-	);
-	if (columns.some((column) => column.name === "metadata")) return;
+const runMessagePartMetadataMigration = runAddColumnMigrationIfMissing(
+	"message_parts",
+	"metadata",
+	messagePartMetadataMigrationSql,
+);
 
-	yield* executeSqlStatements(messagePartMetadataMigrationSql);
-});
-
-const runDurableProviderCommandsMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(command_receipts)",
-	);
-	if (columns.some((column) => column.name === "fingerprint_hash")) return;
-
-	yield* executeSqlStatements(durableProviderCommandsMigrationSql);
-});
+const runDurableProviderCommandsMigration = runAddColumnMigrationIfMissing(
+	"command_receipts",
+	"fingerprint_hash",
+	durableProviderCommandsMigrationSql,
+);
 
 const runDropEventsSessionFkMigration = executeSqlStatements(
 	dropEventsSessionFkMigrationSql,
@@ -579,19 +578,11 @@ const runMessagePartsCompactionTypeMigration = executeSqlStatements(
 	messagePartsCompactionTypeMigrationSql,
 );
 
-const runMessagesContextWindowMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(messages)",
-	);
-	if (columns.some((column) => column.name === "context_window")) return;
-
-	yield* executeSqlStatements(messagesContextWindowMigrationSql);
-});
+const runMessagesContextWindowMigration = runAddColumnMigrationIfMissing(
+	"messages",
+	"context_window",
+	messagesContextWindowMigrationSql,
+);
 
 const runTurnModelExecutionMigration: Effect.Effect<
 	void,
@@ -612,74 +603,35 @@ const runTurnModelExecutionMigration: Effect.Effect<
 	}
 });
 
-const runSessionsPermissionModeMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(sessions)",
-	);
-	if (columns.some((column) => column.name === "permission_mode")) return;
+const runSessionsPermissionModeMigration = runAddColumnMigrationIfMissing(
+	"sessions",
+	"permission_mode",
+	sessionsPermissionModeMigrationSql,
+);
 
-	yield* executeSqlStatements(sessionsPermissionModeMigrationSql);
-});
+const runSessionsReadAtMigration = runAddColumnMigrationIfMissing(
+	"sessions",
+	"read_at",
+	sessionsReadAtMigrationSql,
+);
 
-const runSessionsReadAtMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(sessions)",
-	);
-	if (columns.some((column) => column.name === "read_at")) return;
+const runSessionsLastTurnErrorMigration = runAddColumnMigrationIfMissing(
+	"sessions",
+	"last_turn_error_at",
+	sessionsLastTurnErrorMigrationSql,
+);
 
-	yield* executeSqlStatements(sessionsReadAtMigrationSql);
-});
+const runSessionsSettledPinnedMigration = runAddColumnMigrationIfMissing(
+	"sessions",
+	"pinned_at",
+	sessionsSettledPinnedMigrationSql,
+);
 
-const runSessionsLastTurnErrorMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(sessions)",
-	);
-	if (columns.some((column) => column.name === "last_turn_error_at")) return;
-
-	yield* executeSqlStatements(sessionsLastTurnErrorMigrationSql);
-});
-
-const runSessionsSettledPinnedMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(sessions)",
-	);
-	if (columns.some((column) => column.name === "pinned_at")) return;
-
-	yield* executeSqlStatements(sessionsSettledPinnedMigrationSql);
-});
-
-const runSessionsSnoozedMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(sessions)",
-	);
-	if (columns.some((column) => column.name === "woken_reason")) return;
-	yield* executeSqlStatements(sessionsSnoozedMigrationSql);
-});
+const runSessionsSnoozedMigration = runAddColumnMigrationIfMissing(
+	"sessions",
+	"woken_reason",
+	sessionsSnoozedMigrationSql,
+);
 
 const runSessionsAutoSettleMigration: Effect.Effect<
 	void,
@@ -705,18 +657,11 @@ const runSessionsAutoSettleMigration: Effect.Effect<
 	}
 });
 
-const runSessionsMarkedUnreadMigration: Effect.Effect<
-	void,
-	unknown,
-	SqlClient.SqlClient
-> = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const columns = yield* sql.unsafe<{ name: string }>(
-		"PRAGMA table_info(sessions)",
-	);
-	if (columns.some((column) => column.name === "marked_unread_at")) return;
-	yield* executeSqlStatements(sessionsMarkedUnreadMigrationSql);
-});
+const runSessionsMarkedUnreadMigration = runAddColumnMigrationIfMissing(
+	"sessions",
+	"marked_unread_at",
+	sessionsMarkedUnreadMigrationSql,
+);
 
 /** 2026-07-15T00:00:00.000Z — midnight UTC of the day 0004_drop_events_session_fk shipped (b2b698c6). */
 export const LEGACY_SKELETON_CUTOFF_MS = 1_784_073_600_000;

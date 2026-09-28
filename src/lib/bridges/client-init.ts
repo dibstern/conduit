@@ -57,7 +57,7 @@ import {
 	type SessionSwitchDeps,
 	switchClientToSession,
 } from "../session/session-switch.js";
-import type { ContextWindowOption } from "../shared-types.js";
+import { findContextWindowOptions } from "../shared-types.js";
 import type {
 	OpenCodeInstance,
 	PendingPermission,
@@ -106,23 +106,6 @@ export interface ClientInitOverrideState {
 	getDefaultContextWindow(): Promise<string>;
 	setDefaultModel(model: ModelOverride): Promise<void>;
 	hasActiveProcessingTimeout(sessionId: string): Promise<boolean>;
-}
-
-function findContextWindowOptions(
-	providers: ReadonlyArray<{
-		models: ReadonlyArray<{
-			id: string;
-			contextWindowOptions?: readonly ContextWindowOption[];
-		}>;
-	}>,
-	modelId: string | undefined,
-): readonly ContextWindowOption[] {
-	if (!modelId) return [];
-	for (const provider of providers) {
-		const model = provider.models.find((m) => m.id === modelId);
-		if (model?.contextWindowOptions) return model.contextWindowOptions;
-	}
-	return [];
 }
 
 function toConfiguredOpenCodeProviders(
