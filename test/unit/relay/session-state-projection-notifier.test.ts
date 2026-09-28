@@ -1,12 +1,23 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer, TestClock } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	Logger,
+	Scope,
+	TestClock,
+} from "effect";
 import { expect, vi } from "vitest";
 import {
 	makeSessionStateProjectionNotifierLive,
 	SessionStateProjectionNotifierLive,
 } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import {
+	SessionManagerError,
+	SessionManagerServiceTag,
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import {
 	makeMockSessionManagerService,
@@ -14,6 +25,97 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("SessionStateProjectionNotifier", () => {
+	it.effect(
+		"interrupts an in-flight broadcast when its relay scope closes",
+		() =>
+			Effect.gen(function* () {
+				const started = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const finished = yield* Deferred.make<void>();
+				const errors: string[] = [];
+				const logger = Logger.make<unknown, void>((entry) => {
+					if (entry.logLevel._tag === "Error")
+						errors.push(String(entry.message));
+				});
+				const sessionManagerService = makeMockSessionManagerService({
+					sendSessionLists: () =>
+						Effect.gen(function* () {
+							yield* Deferred.succeed(started, undefined);
+							yield* Deferred.await(release);
+							return yield* Effect.fail(
+								new SessionManagerError({
+									operation: "listSessions",
+									cause: new Error("The database connection is not open"),
+								}),
+							);
+						}).pipe(Effect.ensuring(Deferred.succeed(finished, undefined))),
+				});
+				const layer = SessionStateProjectionNotifierLive.pipe(
+					Layer.provide(
+						Layer.merge(
+							Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						),
+					),
+				);
+
+				yield* Effect.gen(function* () {
+					const scope = yield* Scope.make();
+					const context = yield* Layer.buildWithScope(layer, scope);
+					const notifier = yield* Effect.provide(
+						SessionStateProjectionNotifierTag,
+						context,
+					);
+					yield* Effect.provide(
+						notifier.sessionStateProjected("session-1", "text.delta"),
+						context,
+					);
+					yield* TestClock.adjust("150 millis");
+					yield* Deferred.await(started);
+					yield* Scope.close(scope, Exit.void);
+					yield* Deferred.succeed(release, undefined);
+					yield* Deferred.await(finished);
+					expect(errors).toEqual([]);
+				}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger)));
+			}),
+	);
+
+	it.effect("logs the underlying cause of a real broadcast failure", () =>
+		Effect.gen(function* () {
+			const errors: string[] = [];
+			const logger = Logger.make<unknown, void>((entry) => {
+				if (entry.logLevel._tag === "Error") errors.push(String(entry.message));
+			});
+			const sessionManagerService = makeMockSessionManagerService({
+				sendSessionLists: () =>
+					Effect.fail(
+						new SessionManagerError({
+							operation: "listSessions",
+							cause: new Error("SQLite query failed"),
+						}),
+					),
+			});
+			const layer = SessionStateProjectionNotifierLive.pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+			);
+
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				yield* notifier.sessionStateProjected("session-1", "text.delta");
+				yield* TestClock.adjust("150 millis");
+				expect(errors.join("\n")).toContain("SQLite query failed");
+			}).pipe(
+				Effect.provide(layer),
+				Effect.provide(Logger.replace(Logger.defaultLogger, logger)),
+			);
+		}),
+	);
+
 	it.effect("refreshes git before broadcasting a completed turn", () =>
 		Effect.gen(function* () {
 			const order: string[] = [];
