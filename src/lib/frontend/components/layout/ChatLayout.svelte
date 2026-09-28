@@ -64,7 +64,11 @@
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
-	import { observeOpenSession, trackSeen } from "../../utils/attention.js";
+	import {
+		flushPendingSeen,
+		observeOpenSession,
+		trackSeen,
+	} from "../../utils/attention.js";
 	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
@@ -368,7 +372,9 @@
 			void loadDaemonSessions();
 			void listSessionsRpc({ projectSlug: slug, roots: true })
 				.then((response) => {
-					if (generation === attachGeneration) applyListSessionsResponse(response);
+					if (generation !== attachGeneration) return;
+					applyListSessionsResponse(response);
+					flushPendingSeen(slug);
 				})
 				.catch(() => {
 					if (generation === attachGeneration) showToast("Failed to load sessions", { variant: "error" });

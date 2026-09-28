@@ -753,7 +753,21 @@ export const markSessionSeenForClient = ({
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		if (yield* sessionManagerService.markSessionSeen(sessionId, upTo)) {
+		// A failed save leaves the row unread; the typed error goes back to the
+		// caller and nothing retries it (conduit-test-hk9m.6).
+		const changed = yield* sessionManagerService
+			.markSessionSeen(sessionId, upTo)
+			.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`client=${clientId} Mark seen failed: ${sessionId} up to ${upTo}`,
+							error,
+						),
+					),
+				),
+			);
+		if (changed) {
 			// Interim cross-window sync: the stamp's advance is published, but the
 			// sidebar still renders from full lists (ni8.5.20).
 			yield* sessionManagerService.sendSessionLists((msg) =>
