@@ -25,6 +25,26 @@ function readLog(path: string) {
 	return readFileSync(path, "utf8");
 }
 
+/**
+ * An environment in which the hook can reach only the stubs in `bin`. A real
+ * Lefthook would run `pnpm test`, which runs this file again, so every
+ * inherited LEFTHOOK* setting is dropped and LEFTHOOK_BIN pins the stub.
+ */
+function stubbedHookEnv(
+	bin: string,
+	extra: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+	const inherited = Object.fromEntries(
+		Object.entries(process.env).filter(([key]) => !key.startsWith("LEFTHOOK")),
+	);
+	return {
+		...inherited,
+		...extra,
+		LEFTHOOK_BIN: join(bin, "lefthook"),
+		PATH: `${bin}${delimiter}${process.env["PATH"] ?? ""}`,
+	};
+}
+
 describe("Beads pre-commit hook", () => {
 	it("exits before running Beads when Lefthook fails", () => {
 		const sandbox = mkdtempSync(join(tmpdir(), "conduit-pre-commit-"));
@@ -52,11 +72,7 @@ exit 0
 			const result = spawnSync("sh", [preCommitHook], {
 				cwd: repoRoot,
 				encoding: "utf8",
-				env: {
-					...process.env,
-					HOOK_LOG: log,
-					PATH: `${bin}${delimiter}${process.env["PATH"] ?? ""}`,
-				},
+				env: stubbedHookEnv(bin, { HOOK_LOG: log }),
 			});
 
 			expect(result.status).toBe(42);
@@ -92,11 +108,7 @@ exit 0
 			const result = spawnSync("sh", [preCommitHook], {
 				cwd: repoRoot,
 				encoding: "utf8",
-				env: {
-					...process.env,
-					HOOK_LOG: log,
-					PATH: `${bin}${delimiter}${process.env["PATH"] ?? ""}`,
-				},
+				env: stubbedHookEnv(bin, { HOOK_LOG: log }),
 			});
 
 			expect(result.status).toBe(0);
@@ -134,12 +146,7 @@ exit 0
 			const result = spawnSync("sh", [preCommitHook], {
 				cwd: repoRoot,
 				encoding: "utf8",
-				env: {
-					...process.env,
-					HOOK_LOG: log,
-					LEFTHOOK: "0",
-					PATH: `${bin}${delimiter}${process.env["PATH"] ?? ""}`,
-				},
+				env: stubbedHookEnv(bin, { HOOK_LOG: log, LEFTHOOK: "0" }),
 			});
 
 			expect(result.status).toBe(0);
@@ -183,10 +190,7 @@ exit 42
 			const install = spawnSync("node", [hookInstaller], {
 				cwd: sandbox,
 				encoding: "utf8",
-				env: {
-					...process.env,
-					PATH: `${bin}${delimiter}${process.env["PATH"] ?? ""}`,
-				},
+				env: stubbedHookEnv(bin),
 			});
 
 			expect(install.status).toBe(0);
@@ -208,11 +212,7 @@ exit 0
 			const result = spawnSync("sh", [hook], {
 				cwd: sandbox,
 				encoding: "utf8",
-				env: {
-					...process.env,
-					HOOK_LOG: log,
-					PATH: `${bin}${delimiter}${process.env["PATH"] ?? ""}`,
-				},
+				env: stubbedHookEnv(bin, { HOOK_LOG: log }),
 			});
 
 			expect(result.status).toBe(42);
