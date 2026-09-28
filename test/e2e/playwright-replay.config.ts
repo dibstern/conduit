@@ -26,6 +26,7 @@ export default defineConfig({
 		"deep-search.spec.ts",
 		"session-keyboard.spec.ts",
 		"sidebar-layout.spec.ts",
+		"files-pane.spec.ts",
 		"ui-features.spec.ts",
 		"debug-panel.spec.ts",
 		"pin-page.spec.ts",

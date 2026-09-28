@@ -157,5 +157,7 @@
 	"src/lib/frontend/components/layout/SessionBar.stories.ts :: tab": "An ARIA role in getByRole, not a class. The phone views are menuitemradio items in the Views sheet now, not tabs (17xt.11).",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: session-view-label": "The phone views tab row it labelled was removed with its style.css rules; views live in the Views sheet (17xt.11).",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: session-view-shortcut": "Removed with the phone views tab row and its style.css rule. Phones have no keyboard shortcuts to hint (17xt.11).",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: ml-auto,text-text-muted": "Styled the ⌘⇧U shortcut hint in the phone overflow menu. Phones have no keyboard, so the hint was removed, not restyled (17xt.11)."
+	"src/lib/frontend/components/layout/SessionBar.svelte :: ml-auto,text-text-muted": "Styled the ⌘⇧U shortcut hint in the phone overflow menu. Phones have no keyboard, so the hint was removed, not restyled (17xt.11).",
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: border-border,border-l": "The fixed-width Files pane became resizable (17xt.14). The divider's centred 1px bg-border line now draws the edge between chat and pane.",
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: w-[clamp(280px,40%,640px)]": "The fixed-width Files pane became resizable (17xt.14). paneDefaultWidth (40% of the row, capped at 640px, floored at FILES_PANE_MIN_WIDTH) and the remembered per-session width set it inline."
 }

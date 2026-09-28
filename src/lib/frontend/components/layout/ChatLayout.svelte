@@ -4,7 +4,7 @@
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
-	import { onMount, untrack } from "svelte";
+	import { onMount, tick, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
 	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
@@ -28,6 +28,7 @@
 	import TerminalPanel from "../terminal/TerminalPanel.svelte";
 	import PlanMode from "../chat/PlanMode.svelte";
 	import FileViewer from "../file/FileViewer.svelte";
+	import Button from "../ui/Button.svelte";
 	import {
 		uiState,
 		closeFileViewer,
@@ -58,7 +59,7 @@
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
-	import { sessionViewState, watchCompactViewport } from "../../stores/session-view.svelte.js";
+	import { FILES_PANE_MIN_WIDTH, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -146,6 +147,76 @@
 	// ─── Sidebar resize state ─────────────────────────────────────────────
 
 	let isSidebarResizing = $state(false);
+	const CHAT_MIN_WIDTH = 360;
+	const FILES_DIVIDER_WIDTH = 6;
+	let paneRowEl: HTMLDivElement | undefined = $state(undefined);
+	let paneRowWidth = $state(0);
+	let isPaneResizing = $state(false);
+	let paneDrag: { pointerId: number; startX: number; startWidth: number } | null = null;
+	const paneMaxWidth = $derived(Math.max(FILES_PANE_MIN_WIDTH, paneRowWidth - FILES_DIVIDER_WIDTH - CHAT_MIN_WIDTH));
+	const paneDefaultWidth = $derived(Math.max(FILES_PANE_MIN_WIDTH, Math.min(640, paneRowWidth * 0.4)));
+	const paneWidth = $derived(Math.min(paneMaxWidth, sessionViewState.filesPaneWidth ?? paneDefaultWidth));
+	const filesPaneForcedExpanded = $derived(!sessionViewState.compact && sessionViewState.filesOpen && paneRowWidth < CHAT_MIN_WIDTH + FILES_DIVIDER_WIDTH + FILES_PANE_MIN_WIDTH);
+	const filesPaneExpanded = $derived(!sessionViewState.compact && sessionViewState.filesOpen && (sessionViewState.filesPaneExpanded || filesPaneForcedExpanded));
+
+	$effect(() => {
+		if (!paneRowEl) return;
+		const measure = () => { paneRowWidth = paneRowEl?.clientWidth ?? 0; };
+		measure();
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", measure);
+			return () => window.removeEventListener("resize", measure);
+		}
+		const observer = new ResizeObserver(([entry]) => {
+			if (entry) paneRowWidth = entry.contentRect.width;
+		});
+		observer.observe(paneRowEl);
+		return () => observer.disconnect();
+	});
+
+	function closeFilesPane() {
+		setFilesOpen(false);
+		closeFileViewer();
+		void tick().then(() => document.querySelector<HTMLButtonElement>('[data-testid="views-rail-files"]')?.focus({ preventScroll: true }));
+	}
+
+	function toggleFilesPaneExpanded() {
+		sessionViewState.filesPaneExpanded = !filesPaneExpanded;
+		void tick().then(() => document.getElementById("files-pane-expand")?.focus({ preventScroll: true }));
+	}
+
+	function handlePanePointerDown(event: PointerEvent) {
+		if (event.button !== 0) return;
+		event.preventDefault();
+		paneDrag = { pointerId: event.pointerId, startX: event.clientX, startWidth: paneWidth };
+		isPaneResizing = true;
+		event.currentTarget instanceof HTMLElement && event.currentTarget.setPointerCapture(event.pointerId);
+	}
+
+	function handlePanePointerMove(event: PointerEvent) {
+		if (!paneDrag || event.pointerId !== paneDrag.pointerId) return;
+		setFilesPaneWidth(Math.min(paneMaxWidth, Math.max(FILES_PANE_MIN_WIDTH, paneDrag.startWidth + paneDrag.startX - event.clientX)));
+	}
+
+	function handlePanePointerEnd(event: PointerEvent) {
+		if (!paneDrag || event.pointerId !== paneDrag.pointerId) return;
+		paneDrag = null;
+		isPaneResizing = false;
+		if (event.currentTarget instanceof HTMLElement && event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+	}
+
+	function handlePaneKeydown(event: KeyboardEvent) {
+		let width: number;
+		switch (event.key) {
+			case "ArrowLeft": width = paneWidth + 16; break;
+			case "ArrowRight": width = paneWidth - 16; break;
+			case "Home": width = FILES_PANE_MIN_WIDTH; break;
+			case "End": width = paneMaxWidth; break;
+			default: return;
+		}
+		event.preventDefault();
+		setFilesPaneWidth(Math.min(paneMaxWidth, Math.max(FILES_PANE_MIN_WIDTH, width)));
+	}
 
 	function handleSidebarResizeStart(e: MouseEvent | TouchEvent) {
 		if (uiState.sidebarCollapsed) return;
@@ -500,6 +571,12 @@
 	// own bar replaces the global header. Kept here rather than in each consumer
 	// so the chrome cannot disagree with itself about what "compact" means.
 	$effect(() => watchCompactViewport());
+	let paneSessionId = sessionState.currentId;
+	$effect(() => {
+		const sessionId = sessionState.currentId;
+		if (sessionId !== paneSessionId) closeFileViewer();
+		paneSessionId = sessionId;
+	});
 
 
 	// ─── Visual viewport tracking (keyboard avoidance when terminal is open) ──
@@ -642,7 +719,7 @@
 		id="app"
 		class="flex-1 flex flex-col min-w-0 relative pt-[env(safe-area-inset-top,0px)]"
 		class:h-full={!vvHeight}
-		class:select-none={isResizing || isSidebarResizing}
+		class:select-none={isResizing || isSidebarResizing || isPaneResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
 		<!-- Chrome: on a phone the session owns the top bar, and the global
@@ -679,44 +756,81 @@
 		{/if}
 
 		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
-		<div class="flex flex-1 min-h-0 min-w-0">
-			<div class="relative flex flex-col flex-1 min-h-0 min-w-0">
-				<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized}>
-					<MessageList />
-					<InputArea />
-				</div>
-				{#if sessionViewState.compact && sessionViewState.filesEverOpened}
-					<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={phoneView !== "files"} inert={phoneView !== "files"}>
-						<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; }} />
+		<div class="relative flex flex-1 min-h-0 min-w-0">
+			<div bind:this={paneRowEl} class="relative flex flex-1 min-h-0 min-w-0">
+				<!-- Lift horizontal clipping while the in-DOM 404px model picker overhangs a narrow chat column. -->
+				<div class="flex flex-col flex-1 min-h-0 min-w-0 has-[#model-picker]:overflow-x-visible" class:overflow-x-clip={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded} class:relative={!filesPaneExpanded} class:absolute={filesPaneExpanded} class:inset-0={filesPaneExpanded} class:invisible={filesPaneExpanded} inert={filesPaneExpanded} style:min-width={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded ? `${CHAT_MIN_WIDTH}px` : undefined}>
+					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized}>
+						<MessageList />
+						<InputArea />
 					</div>
-				{/if}
-
-				<!-- Terminal Panel (resizable bottom panel) -->
-				{#if terminalState.panelOpen}
-					<!-- Resize handle (a full-screen phone terminal has no height to resize) -->
-					{#if !mobileMaximized}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							class="terminal-resize-handle h-1.5 shrink-0 cursor-ns-resize flex items-center justify-center group hover:bg-accent/10 transition-colors"
-							onmousedown={handleResizeStart}
-							ontouchstart={handleResizeStart}
-						>
-							<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
+					{#if sessionViewState.compact && sessionViewState.filesEverOpened}
+						<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={phoneView !== "files"} inert={phoneView !== "files"}>
+							<SidebarFilePanel onClose={() => { setFilesOpen(false); }} />
 						</div>
 					{/if}
-					<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
-						<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+
+					<!-- Terminal Panel (resizable bottom panel) -->
+					{#if terminalState.panelOpen}
+						<!-- Resize handle (a full-screen phone terminal has no height to resize) -->
+						{#if !mobileMaximized}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="terminal-resize-handle h-1.5 shrink-0 cursor-ns-resize flex items-center justify-center group hover:bg-accent/10 transition-colors"
+								onmousedown={handleResizeStart}
+								ontouchstart={handleResizeStart}
+							>
+								<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
+							</div>
+						{/if}
+						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
+							<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+						</div>
+					{/if}
+				</div>
+				{#if !sessionViewState.compact && sessionViewState.filesOpen}
+					{#snippet paneTitle()}
+						<span id="files-pane-title" class="ml-1.5 shrink-0 text-xs font-semibold text-text-muted">Files</span>
+						{#if uiState.fileViewerOpen && uiState.fileViewerPath}
+							<span class="min-w-0 truncate rounded-full border border-border-subtle bg-bg-alt px-2 py-0.5 font-mono text-xs text-text-muted" dir="rtl" title={uiState.fileViewerPath}>{uiState.fileViewerPath}</span>
+						{/if}
+					{/snippet}
+					{#snippet paneActions()}
+						<Button id="files-pane-expand" variant={uiState.fileViewerOpen ? "ghost" : "toolbar"} size="content" tone={uiState.fileViewerOpen ? "muted" : "dimmer"} hoverFill="overlay" class="h-6 w-6 shrink-0 rounded-md" iconOnly icon={filesPaneExpanded ? "minimize" : "maximize"} iconSize={uiState.fileViewerOpen ? 16 : 14} ariaLabel={filesPaneForcedExpanded ? "Not enough room to show chat beside Files" : filesPaneExpanded ? "Restore Files pane" : "Expand Files pane"} title={filesPaneForcedExpanded ? "Not enough room to show chat beside Files" : filesPaneExpanded ? "Restore Files pane" : "Expand Files pane"} aria-pressed={filesPaneExpanded} disabled={filesPaneForcedExpanded} onclick={toggleFilesPaneExpanded} />
+						<Button variant={uiState.fileViewerOpen ? "ghost" : "toolbar"} size="content" tone={uiState.fileViewerOpen ? "muted" : "dimmer"} hoverFill="overlay" class="h-6 w-6 shrink-0 rounded-md" iconOnly icon="x" iconSize={uiState.fileViewerOpen ? 16 : 14} ariaLabel="Close Files pane" title="Close Files pane" onclick={closeFilesPane} />
+					{/snippet}
+					{#if !filesPaneExpanded}
+						<Button
+							variant="toolbar"
+							size="content"
+							tone="inherit"
+							hoverFill="none"
+							type="button"
+							role="separator"
+							aria-orientation="vertical"
+							ariaLabel="Resize Files pane"
+							aria-valuemin={FILES_PANE_MIN_WIDTH}
+							aria-valuemax={paneMaxWidth}
+							aria-valuenow={paneWidth}
+							aria-valuetext={`${paneWidth}px`}
+							tabindex={0}
+							class="group relative z-10 w-1.5 shrink-0 cursor-col-resize aria-[orientation=vertical]:cursor-col-resize touch-none rounded-none after:absolute after:inset-y-0 after:-inset-x-px after:content-[''] focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-text"
+							onpointerdown={handlePanePointerDown}
+							onpointermove={handlePanePointerMove}
+							onpointerup={handlePanePointerEnd}
+							onpointercancel={handlePanePointerEnd}
+							onlostpointercapture={handlePanePointerEnd}
+							onkeydown={handlePaneKeydown}
+						><span aria-hidden="true" class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors {isPaneResizing ? 'bg-accent' : 'bg-border hover:bg-accent/50 group-hover:bg-accent/50 group-focus-visible:bg-accent'}"></span></Button>
+					{/if}
+					<div data-testid="side-pane-files" aria-labelledby="files-pane-title" class="relative flex shrink-0 min-h-0 min-w-0 flex-col bg-bg-surface" style:flex={filesPaneExpanded ? "1 1 0%" : "0 0 auto"} style:width={filesPaneExpanded ? undefined : `${paneWidth}px`}>
+						<div class="relative flex flex-1 min-h-0" class:invisible={uiState.fileViewerOpen} inert={uiState.fileViewerOpen}>
+							<SidebarFilePanel pane paneTitle={uiState.fileViewerOpen ? undefined : paneTitle} paneActions={uiState.fileViewerOpen ? undefined : paneActions} onClose={closeFilesPane} />
+						</div>
+						{#if uiState.fileViewerOpen}<div class="absolute inset-0 flex min-h-0"><FileViewer pane {paneTitle} {paneActions} visible onClose={closeFileViewer} /></div>{/if}
 					</div>
 				{/if}
 			</div>
-			{#if !sessionViewState.compact && sessionViewState.filesOpen}
-				<div data-testid="side-pane-files" class="relative flex w-[clamp(280px,40%,640px)] shrink-0 min-h-0 flex-col border-l border-border bg-bg-surface">
-					<div class="absolute inset-0 flex min-h-0" class:invisible={uiState.fileViewerOpen} inert={uiState.fileViewerOpen}>
-						<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; closeFileViewer(); }} />
-					</div>
-					<FileViewer visible={uiState.fileViewerOpen} onClose={closeFileViewer} />
-				</div>
-			{/if}
 			<ViewsRail />
 		</div>
 

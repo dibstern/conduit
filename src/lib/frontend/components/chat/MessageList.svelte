@@ -56,9 +56,9 @@
 
 	// Reset scroll state on session switch
 	$effect(() => {
-		const _sid = sessionState.currentId; // track session changes
+		const sessionId = sessionState.currentId;
 		scrollCtrl.resetForSession();
-		noteSessionChanged();
+		untrack(() => noteSessionChanged(sessionId));
 	});
 
 	// Publish for chrome outside the transcript (e.g. the session bar) so the app

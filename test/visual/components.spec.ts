@@ -449,6 +449,12 @@ if (stories.length > 0) {
 		// The views rail is desktop-only (hidden below md); phones switch views
 		// from the session bar instead, so there is nothing to capture at mobile.
 		["layout-viewsrail--independent-views", "mobile"],
+		// These stories exercise the desktop Files pane; phone Files uses a separate overlay.
+		["layout-chatlayout--files-tree", "mobile"],
+		["layout-chatlayout--files-preview", "mobile"],
+		["layout-chatlayout--files-preview-error", "mobile"],
+		["layout-chatlayout--files-expanded", "mobile"],
+		["layout-chatlayout--files-forced-expanded", "mobile"],
 	]);
 
 	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs

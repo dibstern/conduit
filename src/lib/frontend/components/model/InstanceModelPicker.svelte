@@ -372,7 +372,7 @@
 	</span>
 {/snippet}
 
-<div id="model-display" class="relative inline-flex items-center" use:dismiss={{ onDismiss: closePicker, escape: false, enabled: pickerOpen }}>
+<div id="model-display" class="relative inline-flex min-w-0 items-center" use:dismiss={{ onDismiss: closePicker, escape: false, enabled: pickerOpen }}>
 	<!-- Trigger: selected instance icon + current model name -->
 	<!-- `toolbar` is the variant whose recipe this already was: borderless,
 	     transparent, dim, with a hover step. Its own `text-text-dimmer` and
@@ -391,14 +391,14 @@
 		size="content"
 		data-testid="model-picker-trigger"
 		data-instance-id={selectedId}
-		class="model-btn gap-1.5 h-9 px-2 text-text-muted text-xs font-medium duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
+		class="model-btn min-w-0 gap-1.5 h-9 px-2 text-text-muted text-xs font-medium duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
 		title="Switch model"
 		aria-expanded={pickerOpen}
 		aria-controls={pickerOpen ? "model-picker" : undefined}
 		onclick={togglePicker}
 	>
 		{@render driverIcon(selectedDriver, 18, selectedInstance?.isCustom ?? false)}
-		<span class="model-label overflow-hidden text-ellipsis whitespace-nowrap">
+		<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
 			{displayName}
 		</span>
 		<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />
@@ -710,4 +710,3 @@
 		</Surface>
 	{/if}
 </div>
-

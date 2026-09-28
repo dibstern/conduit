@@ -711,7 +711,7 @@
 			{/if}
 
 			<!-- Bottom row: attach + agent + model + send -->
-			<div id="input-bottom" class="flex items-center justify-between gap-1">
+			<div id="input-bottom" class="flex min-w-0 items-center justify-between gap-1">
 				<div
 					id="input-bottom-left"
 					class="flex items-center gap-1 min-w-0"
@@ -720,7 +720,7 @@
 					<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
 
 					<!-- Agent selector -->
-					<div id="agent-selector-wrap">
+					<div id="agent-selector-wrap" class="min-w-0">
 						<AgentSelector />
 					</div>
 				</div>

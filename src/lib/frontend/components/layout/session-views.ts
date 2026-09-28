@@ -1,4 +1,7 @@
-import { sessionViewState } from "../../stores/session-view.svelte.js";
+import {
+	sessionViewState,
+	setFilesOpen,
+} from "../../stores/session-view.svelte.js";
 import { closePanel, terminalState } from "../../stores/terminal.svelte.js";
 import { closeFileViewer } from "../../stores/ui.svelte.js";
 import { toggleTerminal } from "./chrome-actions.js";
@@ -28,7 +31,7 @@ export const sessionViews: readonly SessionView[] = [
 			// Desktop Chat selection is reserved for 17xt.16's shortcuts.
 			if (!sessionViewState.compact) return;
 			closePanel();
-			sessionViewState.filesOpen = false;
+			setFilesOpen(false);
 		},
 	},
 	{
@@ -39,7 +42,7 @@ export const sessionViews: readonly SessionView[] = [
 		isOn: () => terminalState.panelOpen,
 		select: () => {
 			if (sessionViewState.compact) {
-				sessionViewState.filesOpen = false;
+				setFilesOpen(false);
 				if (terminalState.panelOpen) return;
 			}
 			toggleTerminal();
@@ -65,11 +68,11 @@ export const sessionViews: readonly SessionView[] = [
 			sessionViewState.filesEverOpened = true;
 			if (sessionViewState.compact) {
 				closePanel();
-				sessionViewState.filesOpen = true;
+				setFilesOpen(true);
 				return;
 			}
 			if (sessionViewState.filesOpen) closeFileViewer();
-			sessionViewState.filesOpen = !sessionViewState.filesOpen;
+			setFilesOpen(!sessionViewState.filesOpen);
 		},
 	},
 ];

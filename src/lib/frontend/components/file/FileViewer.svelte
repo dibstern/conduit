@@ -2,6 +2,7 @@
 <!-- File preview in the desktop Files pane or a full-screen phone overlay. -->
 
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import type { RelayMessage } from "../../types.js";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
@@ -18,10 +19,16 @@
 		visible = false,
 		onClose,
 		overlay = false,
+		pane = false,
+		paneTitle,
+		paneActions,
 	}: {
 		visible?: boolean;
 		onClose?: () => void;
 		overlay?: boolean | undefined;
+		pane?: boolean;
+		paneTitle?: Snippet | undefined;
+		paneActions?: Snippet | undefined;
 	} = $props();
 
 	// ─── Font size state ──────────────────────────────────────────────────────
@@ -70,7 +77,9 @@
 	let binary = $state(false);
 	let truncated = $state(false);
 	let loading = $state(false);
+	let loadError = $state<string | null>(null);
 	let copyIcon = $state<"copy" | "check">("copy");
+	let fileContentRequestId = 0;
 
 	// DOM ref for the <code> element (for hljs)
 	let codeEl: HTMLElement | undefined = $state();
@@ -78,11 +87,23 @@
 	// A preview remounts when the viewport crosses the phone breakpoint.
 	$effect(() => {
 		const path = visible ? uiState.fileViewerPath : null;
+		const requestId = ++fileContentRequestId;
 		if (!path) return;
 		const slug = getCurrentSlug();
 		if (!slug) return;
+		filePath = path;
+		content = null;
+		binary = false;
+		truncated = false;
+		loadError = null;
 		loading = true;
-		void getFileContentRpc({ projectSlug: slug, path }).then(applyGetFileContentResponse);
+		void getFileContentRpc({ projectSlug: slug, path })
+			.then(applyGetFileContentResponse)
+			.catch(() => {
+				if (requestId !== fileContentRequestId) return;
+				loading = false;
+				loadError = "Failed to load file preview. Return to the file tree and try again.";
+			});
 	});
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
@@ -143,7 +164,7 @@
 	$effect(() => {
 		if (!visible) return;
 		const unsub = onFileBrowser((msg: RelayMessage) => {
-			if (msg.type === "file_content") {
+			if (msg.type === "file_content" && (!uiState.fileViewerPath || msg.path === uiState.fileViewerPath)) {
 				const rawContent = msg.content ?? "";
 				filePath = msg.path;
 				binary = msg.binary ?? false;
@@ -151,6 +172,7 @@
 				truncated = isTruncated;
 				content = isTruncated ? rawContent.slice(0, 50_000) : rawContent;
 				loading = false;
+				loadError = null;
 			}
 		});
 		return unsub;
@@ -191,6 +213,7 @@
 		content = null;
 		binary = false;
 		truncated = false;
+		loadError = null;
 		onClose?.();
 	}
 
@@ -199,10 +222,10 @@
 	}
 </script>
 
-{#if visible && (filePath || loading)}
+{#if visible && (filePath || loading || loadError)}
 	<div id="file-viewer" class="file-viewer-pane" class:phone-overlay={overlay}>
-		<!-- Header -->
-		<div class="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle shrink-0 min-h-[44px]">
+		<div class={pane ? "flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle px-2 py-1" : "flex min-h-[44px] shrink-0 items-center gap-2 border-b border-border-subtle px-4 py-2.5"}>
+			{#if pane && paneTitle}{@render paneTitle()}{/if}
 			<!-- Back to the file tree, which stays mounted behind the preview. -->
 			<Button
 				variant="ghost"
@@ -214,25 +237,25 @@
 				iconSize={16}
 				ariaLabel="File browser"
 				title="File browser"
-				class="fv-btn w-7 h-7 rounded-md shrink-0"
+				class={pane ? "fv-btn w-6 h-6 rounded-md shrink-0" : "fv-btn w-7 h-7 rounded-md shrink-0"}
 				onclick={handleOpenFileBrowser}
 			/>
 			<span
 				id="file-viewer-path"
-				class="flex-1 font-mono text-base text-text-secondary truncate"
+				class={pane ? "sr-only" : "flex-1 min-w-0 font-mono text-base text-text-secondary truncate"}
 				dir="rtl"
 			>
 				{filePath ?? ""}
 			</span>
 			<!-- Font size controls -->
-			<div class="flex items-center gap-0 shrink-0">
+			<div class="flex items-center gap-0 shrink-0" class:ml-auto={pane}>
 				<Button
 					variant="ghost"
 					size="content"
 					tone="dimmer"
 					hoverFill="alt"
 					disabledStyle="faint"
-					class="shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"
+					class={pane ? "shrink-0 w-6 h-6 rounded font-mono text-base duration-100" : "shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"}
 					title="Decrease font size"
 					ariaLabel="Decrease font size"
 					disabled={fontSize <= FONT_SIZE_MIN}
@@ -247,7 +270,7 @@
 					tone="dimmer"
 					hoverFill="alt"
 					disabledStyle="faint"
-					class="shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"
+					class={pane ? "shrink-0 w-6 h-6 rounded font-mono text-base duration-100" : "shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"}
 					title="Increase font size"
 					ariaLabel="Increase font size"
 					disabled={fontSize >= FONT_SIZE_MAX}
@@ -267,10 +290,11 @@
 				iconSize={16}
 				ariaLabel="Copy contents"
 				title="Copy contents"
-				class="fv-btn w-7 h-7 rounded-md shrink-0"
+				class={pane ? "fv-btn w-6 h-6 rounded-md shrink-0" : "fv-btn w-7 h-7 rounded-md shrink-0"}
 				onclick={handleCopy}
 			/>
-			<Button
+			{#if pane && paneActions}{@render paneActions()}{/if}
+			{#if !pane}<Button
 				variant="ghost"
 				size="content"
 				tone="muted"
@@ -282,7 +306,7 @@
 				title="Close"
 				class="fv-btn w-7 h-7 rounded-md shrink-0"
 				onclick={handleClose}
-			/>
+			/>{/if}
 		</div>
 
 		<!-- Body -->
@@ -298,6 +322,8 @@
 						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 						<span class="ml-2">Loading…</span>
 					</div>
+				{:else if loadError}
+					<p role="alert" class="px-4 py-12 text-center text-sm text-error">{loadError}</p>
 				{:else if binary}
 					<div class="flex items-center justify-center h-full text-text-muted text-sm py-12">
 						Binary file — cannot preview
