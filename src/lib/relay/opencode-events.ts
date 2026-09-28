@@ -313,6 +313,7 @@ export function isPermissionRepliedEvent(
 
 interface MessagePayload {
 	id?: string;
+	sessionID?: string;
 	role?: string;
 	cost?: number;
 	tokens?: {
@@ -322,6 +323,10 @@ interface MessagePayload {
 		contextWindow?: number;
 	};
 	time?: { created?: number; completed?: number };
+	/** The user message this step answers; every step of a turn shares it. */
+	parentID?: string;
+	finish?: string;
+	error?: unknown;
 }
 
 export interface MessageUpdatedEvent extends SSEEventBase {

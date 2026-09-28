@@ -1054,6 +1054,12 @@ export function handleResult(
 	msg: Extract<RelayMessage, { type: "result" }>,
 ): void {
 	const { usage, cost, duration } = msg;
+	// A step inside a longer turn only moves the context meter; a result
+	// message here would end the turn's segment early.
+	if (msg.midTurn) {
+		updateContextFromTokens(messages, usage);
+		return;
+	}
 	const messageId = "messageId" in msg ? msg.messageId : undefined;
 
 	// ── Deduplicate result bars ─────────────────────────────────────────

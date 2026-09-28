@@ -448,9 +448,57 @@ export function translateMessageCreated(
 	};
 }
 
-/** Translate message.updated event (usage/cost data) */
+/** The part of an OpenCode assistant message a turn's bill is made from. */
+interface OpenCodeStep {
+	cost?: number;
+	time?: { created?: number; completed?: number };
+}
+
+/**
+ * OpenCode runs one turn as a chain of assistant messages, one per model step,
+ * all answering the same user message (`parentID`). A step that finishes with
+ * "tool-calls" or "unknown" hands straight to the next step; any other finish,
+ * or an error, ends the turn. This mirrors OpenCode's own prompt-loop exit.
+ */
+export function endsOpenCodeTurn(step: {
+	finish?: unknown;
+	error?: unknown;
+}): boolean {
+	return (
+		step.error != null ||
+		(step.finish !== "tool-calls" && step.finish !== "unknown")
+	);
+}
+
+/**
+ * A whole turn's bill: every step's cost, and the time from its first step
+ * starting to `last` completing. OpenCode prices each step on its own.
+ */
+export function openCodeTurnTotals(
+	last: OpenCodeStep,
+	steps: Iterable<OpenCodeStep>,
+): { cost: number; duration: number } {
+	let cost = 0;
+	let start = last.time?.created;
+	for (const step of steps) {
+		cost += step.cost ?? 0;
+		const created = step.time?.created;
+		if (created != null && (start == null || created < start)) start = created;
+	}
+	const end = last.time?.completed;
+	return { cost, duration: end != null && start != null ? end - start : 0 };
+}
+
+/**
+ * Translate message.updated into the turn's result. Only a completed step has
+ * final numbers, and only the step that ends the turn closes it; an earlier
+ * step still reports its usage, marked `midTurn`, for the context meter.
+ *
+ * @param turnSteps  Every step of this turn seen so far, including this one.
+ */
 export function translateMessageUpdated(
 	event: SSEEvent,
+	turnSteps?: Iterable<OpenCodeStep>,
 ): UntaggedRelayMessage | null {
 	if (!isMessageUpdatedEvent(event)) return null;
 	// OpenCode sends message data under "info" (observed in live SSE events),
@@ -458,7 +506,9 @@ export function translateMessageUpdated(
 	const { properties: props } = event;
 
 	const msg = props.info ?? props.message;
-	if (!msg || msg.role !== "assistant") return null;
+	if (!msg || msg.role !== "assistant" || msg.time?.completed == null) {
+		return null;
+	}
 
 	const messageId = msg.id;
 	return {
@@ -472,13 +522,10 @@ export function translateMessageUpdated(
 				? { context_window: msg.tokens.contextWindow }
 				: {}),
 		},
-		cost: msg.cost ?? 0,
-		duration:
-			msg.time?.completed && msg.time?.created
-				? msg.time.completed - msg.time.created
-				: 0,
+		...openCodeTurnTotals(msg, turnSteps ?? [msg]),
 		sessionId: props.sessionID ?? "",
 		...(messageId != null && { messageId }),
+		...(!endsOpenCodeTurn(msg) && { midTurn: true as const }),
 	};
 }
 
@@ -623,6 +670,30 @@ export function createTranslator(
 		Map<string, { type: PartType; status?: ToolStatus }>
 	>();
 
+	// Each session's turn in flight: the user message it answers, and its steps.
+	const sessionTurns = new Map<
+		string,
+		{ parentID: string; steps: Map<string, OpenCodeStep> }
+	>();
+
+	/** Record an assistant step against its turn; returns the turn's steps. */
+	function recordTurnStep(event: SSEEvent): Iterable<OpenCodeStep> | undefined {
+		if (!isMessageUpdatedEvent(event)) return undefined;
+		const msg = event.properties.info ?? event.properties.message;
+		if (msg?.role !== "assistant" || msg.id == null || msg.parentID == null) {
+			return undefined;
+		}
+		// OpenCode puts the session on the message itself, not on the event.
+		const key = msg.sessionID ?? event.properties.sessionID ?? DEFAULT_SESSION;
+		let turn = sessionTurns.get(key);
+		if (turn?.parentID !== msg.parentID) {
+			turn = { parentID: msg.parentID, steps: new Map() };
+			sessionTurns.set(key, turn);
+		}
+		turn.steps.set(msg.id, msg);
+		return turn.steps.values();
+	}
+
 	function getOrCreateSessionParts(
 		sessionId: string | undefined,
 	): Map<string, { type: PartType; status?: ToolStatus }> {
@@ -678,8 +749,8 @@ export function createTranslator(
 			// Message updated (cost/tokens)
 			if (eventType === "message.updated") {
 				return wrapResult(
-					translateMessageUpdated(event),
-					"message updated: not an assistant message",
+					translateMessageUpdated(event, recordTurnStep(event)),
+					"message updated: not an assistant message, or still running",
 				);
 			}
 
@@ -814,8 +885,10 @@ export function createTranslator(
 		reset(sessionId?: string) {
 			if (sessionId != null) {
 				sessionParts.delete(sessionId);
+				sessionTurns.delete(sessionId);
 			} else {
 				sessionParts.clear();
+				sessionTurns.clear();
 			}
 		},
 

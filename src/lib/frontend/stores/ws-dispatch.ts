@@ -491,7 +491,8 @@ async function convertHistoryAsync(
 
 	for (let i = 0; i < messages.length; i += CHUNK) {
 		const slice = messages.slice(i, i + CHUNK);
-		const converted = historyToChatMessages(slice, render);
+		// The whole list, so a turn cut by a chunk still bills every step.
+		const converted = historyToChatMessages(slice, render, messages);
 		result.push(...converted);
 
 		if (i + CHUNK < messages.length) {
