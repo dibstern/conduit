@@ -76,6 +76,7 @@ import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
 } from "../domain/relay/Services/relay-status-snapshot.js";
+import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
@@ -1099,6 +1100,25 @@ export async function createProjectRelay(
 					yield* Effect.sync(() =>
 						log.info(
 							`Restored permission modes for ${restoredPermissionModes} session(s)`,
+						),
+					);
+				}
+				// Before the command gate opens, so no live ask exists yet.
+				const rejectedPermissions =
+					yield* resolveOrphanedClaudePermissions.pipe(
+						Effect.catchAll((error) =>
+							Effect.sync(() => {
+								log.warn(
+									`Could not reject Claude permissions left pending by a crash: ${formatErrorDetail(error)}`,
+								);
+								return 0;
+							}),
+						),
+					);
+				if (rejectedPermissions > 0) {
+					yield* Effect.sync(() =>
+						log.info(
+							`Rejected ${rejectedPermissions} Claude permission(s) left pending by a crash`,
 						),
 					);
 				}

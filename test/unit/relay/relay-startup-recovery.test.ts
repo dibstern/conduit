@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -73,6 +74,98 @@ it("recovers historical sessions before startup can create a live session", asyn
 		expect(sessions.ids).toContain("historical");
 		expect(sessions.ids).toContain(sessions.liveId);
 		expect(relay.initialSessionId).toBe("historical");
+	} finally {
+		await relay?.stop();
+		server.close();
+		vi.unstubAllGlobals();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+it("rejects Claude permissions a crash left pending and leaves OpenCode's alone", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-orphaned-permissions-"));
+	const filename = join(dir, "events.db");
+	const server = createServer();
+	let relay: ProjectRelay | undefined;
+	vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+		const request = input instanceof Request ? input : new Request(input);
+		const path = new URL(request.url).pathname;
+		if (path === "/event") return new Response(null, { status: 503 });
+		return Response.json(
+			path === "/path"
+				? { state: dir, config: dir, worktree: dir, directory: dir }
+				: path === "/session" || path === "/permission"
+					? []
+					: {},
+		);
+	});
+	const seed = (provider: "claude" | "opencode") =>
+		Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			const sessionId = `${provider}-session`;
+			yield* store.append(
+				canonicalEvent(
+					"session.created",
+					sessionId,
+					{ sessionId, title: provider, provider },
+					{ provider },
+				),
+			);
+			yield* store.append(
+				canonicalEvent(
+					"permission.asked",
+					sessionId,
+					{
+						id: `${provider}-permission`,
+						sessionId,
+						toolName: "Bash",
+						input: { command: "ls" },
+					},
+					{ provider },
+				),
+			);
+			yield* store.append(
+				canonicalEvent(
+					"question.asked",
+					sessionId,
+					{ id: `${provider}-question`, sessionId, questions: [] },
+					{ provider },
+				),
+			);
+		});
+	try {
+		await Effect.runPromise(
+			Effect.all([seed("claude"), seed("opencode")]).pipe(
+				Effect.provide(makePersistenceEffectLayer(filename)),
+			),
+		);
+
+		relay = await createProjectRelay({
+			httpServer: server,
+			opencodeUrl: "http://opencode.test",
+			projectDir: dir,
+			slug: "orphaned-permissions",
+			configDir: dir,
+			persistenceDbPath: filename,
+			log: createSilentLogger(),
+		});
+		const approvals = await relay.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{
+					id: string;
+					status: string;
+					decision: string | null;
+				}>`
+					SELECT id, status, decision FROM pending_approvals ORDER BY id`;
+			}),
+		);
+		expect(approvals).toEqual([
+			{ id: "claude-permission", status: "resolved", decision: "reject" },
+			{ id: "claude-question", status: "pending", decision: null },
+			{ id: "opencode-permission", status: "pending", decision: null },
+			{ id: "opencode-question", status: "pending", decision: null },
+		]);
 	} finally {
 		await relay?.stop();
 		server.close();
