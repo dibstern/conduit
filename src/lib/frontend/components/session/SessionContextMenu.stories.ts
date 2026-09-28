@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import SessionContextMenuHarness from "./__fixtures__/SessionContextMenuHarness.svelte";
 
@@ -12,6 +13,12 @@ const meta = {
 		docs: { story: { inline: false, height: "340px" } },
 	},
 	args: { session: mockSession },
+	play: async () => {
+		const menu = await within(document.body).findByRole("menu", {
+			name: "Session actions",
+		});
+		await expect(within(menu).getByTestId("session-ctx-rename")).toBeVisible();
+	},
 } satisfies Meta<typeof SessionContextMenuHarness>;
 
 export default meta;

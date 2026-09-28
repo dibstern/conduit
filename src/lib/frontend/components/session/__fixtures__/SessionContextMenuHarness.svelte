@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SessionInfo } from "../../../types.js";
 	import SessionContextMenu from "../SessionContextMenu.svelte";
+	import Button from "../../ui/Button.svelte";
 
 	let { session, projectLabel, branch, presentation = "menu" }: { session: SessionInfo; projectLabel?: string; branch?: string; presentation?: "menu" | "sheet" } = $props();
 
@@ -11,18 +12,18 @@
 	 * collide against — a stub returning only `bottom`/`right` silently
 	 * produced a menu pinned to the top-left corner.
 	 */
-	let anchor: HTMLElement | null = $state(null);
+	let anchor: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 </script>
 
 <div class="flex h-40 items-start justify-end p-4">
-	<button
-		bind:this={anchor}
-		type="button"
-		aria-label="Session actions"
-		class="rounded-md px-2 py-1 text-text-muted"
+	<Button
+		bind:element={anchor}
+		variant="ghost"
+		size="sm"
+		ariaLabel="Session actions"
 	>
 		…
-	</button>
+	</Button>
 </div>
 
 {#if anchor}
@@ -32,16 +33,7 @@
 		{projectLabel}
 		{branch}
 		{presentation}
-		onrename={() => {}}
-		onsettle={() => {}}
-		onautosettle={() => {}}
-		onpin={() => {}}
-		onmarkread={() => {}}
-		onsnooze={() => {}}
-		onunsnooze={() => {}}
-		ondelete={() => {}}
-		oncopyresume={() => {}}
-		onfork={() => {}}
+		host={{ rename: () => {} }}
 		onclose={() => {}}
 	/>
 {/if}

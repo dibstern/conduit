@@ -39,10 +39,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		deleteSessionRpc,
-		forkSessionRpc,
-		renameSessionRpc,
 		setSessionSettledRpc,
-		setSessionAutoSettleRpc,
 		setSessionPinnedRpc,
 		snoozeSessionRpc,
 		unsnoozeSessionRpc,
@@ -56,13 +53,13 @@
 		setSnoozedShelfOpen,
 	} from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
-	import { getSnoozePresets } from "../../utils/snooze.js";
-	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
+	import { getSessionVerbs, isForeignSession, sessionVerbActions } from "./session-verbs.js";
+	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -93,7 +90,6 @@
 	let ctxMenuSession = $state<SessionInfo | null>(null);
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
 	let ctxMenuPresentation = $state<"menu" | "sheet">("menu");
-	let snoozeSession = $state<SessionInfo | null>(null);
 	let snoozePlacement = $state<"center" | "sheet">("center");
 	let snoozeSheetNow = $state(0);
 	let heldSessionId = $state<string | null>(null);
@@ -270,12 +266,6 @@
 	// to. Only the daemon's cold cross-project read sets projectSlug, so an
 	// absent slug means "this relay's own session", which is why the current
 	// project's rows come out local.
-	function isForeignSession(session: SessionInfo): boolean {
-		return (
-			session.projectSlug != null && session.projectSlug !== getCurrentSlug()
-		);
-	}
-
 	function getRowHref(session: SessionInfo): string {
 		return getSessionHref(session.id);
 	}
@@ -353,126 +343,6 @@
 		renamingSessionId = id;
 	}
 
-	async function handleCtxSettle(session: SessionInfo, settled: boolean) {
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (!projectSlug || isForeignSession(session)) return;
-		const input = { projectSlug, sessionId: session.id, originId: getBrowserClientId() };
-		try {
-			await setSessionSettledRpc({ ...input, settled });
-			if (settled) {
-				showToast(`Moved “${session.title || "New Session"}” to Settled`, {
-					duration: 5000,
-					action: {
-						label: "Undo",
-						run: () => {
-							void setSessionSettledRpc({ ...input, settled: false }).catch(() => {
-								showToast("Couldn't undo", { variant: "error" });
-							});
-						},
-					},
-				});
-			}
-		} catch {
-			showToast("Couldn't settle session", { variant: "error" });
-		}
-	}
-
-	async function handleCtxPin(session: SessionInfo, pinned: boolean) {
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (!projectSlug || isForeignSession(session)) return;
-		const input = { projectSlug, sessionId: session.id, originId: getBrowserClientId() };
-		try {
-			await setSessionPinnedRpc({ ...input, pinned });
-			if (pinned) {
-				showToast(`Pinned “${session.title || "New Session"}” to the top`, {
-					duration: 5000,
-					action: {
-						label: "Undo",
-						run: () => {
-							void setSessionPinnedRpc({ ...input, pinned: false }).catch(() => {
-								showToast("Couldn't undo", { variant: "error" });
-							});
-						},
-					},
-				});
-			}
-		} catch {
-			showToast("Couldn't pin session", { variant: "error" });
-		}
-	}
-
-	async function handleCtxAutoSettle(session: SessionInfo, disabled: boolean) {
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (!projectSlug || isForeignSession(session)) return;
-		try {
-			await setSessionAutoSettleRpc({ projectSlug, sessionId: session.id, disabled, originId: getBrowserClientId() });
-		} catch {
-			showToast("Couldn't change auto-settle", { variant: "error" });
-		}
-	}
-
-	function handleOpenSnooze(session: SessionInfo) {
-		if (isForeignSession(session)) return;
-		snoozePlacement = "center";
-		snoozeSheetNow = Date.now();
-		snoozeSession = session;
-	}
-
-	function handleCommitSnooze(session: SessionInfo) {
-		snoozeSheetNow = Date.now();
-		const tomorrow = getSnoozePresets(snoozeSheetNow).find((preset) => preset.id === "tomorrow");
-		if (tomorrow) void handleSnooze(session, tomorrow.until);
-	}
-
-	async function handleSnooze(session: SessionInfo, until: number | null) {
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (!projectSlug || isForeignSession(session)) return;
-		const input = { projectSlug, sessionId: session.id, originId: getBrowserClientId() };
-		const wasSnoozed = isSessionSnoozed(session, snoozeSheetNow);
-		const previousUntil = session.snoozedUntil ?? null;
-		try {
-			await snoozeSessionRpc({ ...input, until });
-			showToast(
-				until === null
-					? `Snoozed “${session.title || "New Session"}” until something happens`
-					: `Snoozed “${session.title || "New Session"}” until ${formatSnoozeTime(until, snoozeSheetNow)}`,
-				{
-					duration: 5000,
-					action: {
-						label: "Undo",
-						run: () => {
-							const undo = wasSnoozed
-								? snoozeSessionRpc({ ...input, until: previousUntil })
-								: unsnoozeSessionRpc(input);
-							void undo.catch(() => showToast("Couldn't undo", { variant: "error" }));
-						},
-					},
-				},
-			);
-		} catch (error) {
-			showToast(
-				error instanceof WsRpcError ? error.message : "Couldn't snooze session",
-				{ variant: "error" },
-			);
-		}
-	}
-
-	async function handleUnsnooze(session: SessionInfo) {
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
-		if (!projectSlug || isForeignSession(session)) return;
-		try {
-			await unsnoozeSessionRpc({
-				projectSlug,
-				sessionId: session.id,
-				originId: getBrowserClientId(),
-			});
-		} catch (error) {
-			showToast(error instanceof WsRpcError ? error.message : "Couldn't unsnooze session", {
-				variant: "error",
-			});
-		}
-	}
-
 	function handleRenameEnd() {
 		renamingSessionId = null;
 	}
@@ -543,24 +413,26 @@
 		const session = filtered.find((item) => item.id === row.dataset["sessionId"]);
 		if (!session || isForeignSession(session)) return;
 		const actions = getSessionActionState(session, sessionState.now);
+		const verbs = getSessionVerbs(session, sessionState.now, { rename: () => { renamingSessionId = session.id; }, select: () => handleEnterSelect(session.id) }, "center");
+		const runVerb = (testId: string) => { const verb = verbs.find((item) => "testId" in item && item.testId === testId); if (verb && "run" in verb) verb.run(); };
 		switch (event.key) {
 			case "s":
 				event.preventDefault();
 				if (actions.settleDisabledReason) showToast(actions.settleDisabledReason, { variant: "warn" });
-				else void handleCtxSettle(session, !actions.settled);
+				else runVerb(actions.settled ? "session-ctx-unsettle" : "session-ctx-settle");
 				break;
 			case "z":
 				event.preventDefault();
-				if (actions.snoozed) void handleUnsnooze(session);
-				else if (actions.snoozeVisible && !actions.snoozeDisabledReason) handleOpenSnooze(session);
+				if (actions.snoozed) runVerb("session-ctx-unsnooze");
+				else if (actions.snoozeVisible && !actions.snoozeDisabledReason) runVerb("session-ctx-snooze");
 				break;
 			case "p":
 				event.preventDefault();
-				void handleCtxPin(session, !actions.pinned);
+				runVerb(actions.pinned ? "session-ctx-unpin" : "session-ctx-pin");
 				break;
 			case "r":
 				event.preventDefault();
-				handleCtxRename(session.id);
+				runVerb("session-ctx-rename");
 				break;
 		}
 	}
@@ -570,42 +442,6 @@
 		const target = shortcutReturnFocus;
 		shortcutReturnFocus = null;
 		void tick().then(() => target?.focus());
-	}
-
-	async function handleCtxDelete(id: string, title: string) {
-		const confirmed = await confirm(
-			`Delete "${title}"? This session and its history will be permanently removed.`,
-			"Delete",
-		);
-		if (confirmed) {
-			const projectSlug = getCurrentSlug();
-			if (!projectSlug) return;
-			// Surface failures: a rejected delete used to vanish into an
-			// unhandled rejection, leaving the row in place with no feedback.
-			deleteSessionRpc({
-				projectSlug,
-				sessionId: id,
-				originId: getBrowserClientId(),
-			}).catch(() => {
-				showToast(`Couldn't delete "${title}"`, { variant: "warn" });
-			});
-		}
-	}
-
-	function handleCtxCopyResume(_id: string) {
-		// Copy is handled inside the context menu component
-	}
-
-	function handleCtxFork(id: string) {
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
-		void forkSessionRpc({
-			projectSlug,
-			sessionId: id,
-			originId: getBrowserClientId(),
-		}).then((response) => {
-			if (!sessionState.currentId) switchToSession(response.sessionId, response.projectSlug);
-		}).catch(() => showToast("Failed to fork session", { variant: "error" }));
 	}
 
 	function resetSelectMode() {
@@ -763,11 +599,6 @@
 		bulkPending = false;
 	}
 
-	function handleRename(id: string, title: string) {
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
-		void renameSessionRpc({ projectSlug, sessionId: id, title });
-	}
 </script>
 
 <!-- A click anywhere forgets the focused row; focusin re-records it if the click landed on one. -->
@@ -943,13 +774,12 @@
 				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
-				onsettle={(_id, next) => { void handleCtxSettle(s, next); }}
+				onsettle={(_id, next) => { void sessionVerbActions.settle(s, next); }}
 				onmarkread={(_id) => { void toggleSessionRead(s); }}
-				onpin={(_id, next) => { void handleCtxPin(s, next); }}
-				onsnooze={() => handleOpenSnooze(s)}
-				onunsnooze={() => { void handleUnsnooze(s); }}
-				oncommitsnooze={() => handleCommitSnooze(s)}
-				onrename={handleRename}
+				onpin={(_id, next) => { void sessionVerbActions.pin(s, next); }}
+				onsnooze={() => openSnoozePicker(s, "center")}
+				onunsnooze={() => { void sessionVerbActions.unsnooze(s); }}
+				oncommitsnooze={() => sessionVerbActions.commitTomorrow(s)}
 				onrenameend={handleRenameEnd}
 			/>
 		{/if}
@@ -1098,19 +928,8 @@
 		branch={ctxMenuSession.git?.branch}
 		presentation={ctxMenuPresentation}
 		now={sessionState.now}
-		onrename={handleCtxRename}
-		onselect={(id) => handleEnterSelect(id)}
-		onsettle={(_id, next) => { if (ctxMenuSession) void handleCtxSettle(ctxMenuSession, next); }}
-		onautosettle={(_id, disabled) => { if (ctxMenuSession) void handleCtxAutoSettle(ctxMenuSession, disabled); }}
-		onpin={(_id, next) => { if (ctxMenuSession) void handleCtxPin(ctxMenuSession, next); }}
-		onmarkread={(_id) => { if (ctxMenuSession) void toggleSessionRead(ctxMenuSession); }}
-		onsnooze={(_id) => { if (ctxMenuSession) { handleOpenSnooze(ctxMenuSession); snoozePlacement = ctxMenuPresentation === "sheet" ? "sheet" : "center"; } }}
-		onunsnooze={(_id) => { if (ctxMenuSession) void handleUnsnooze(ctxMenuSession); }}
-		ondelete={handleCtxDelete}
-		oncopyresume={handleCtxCopyResume}
-		onfork={handleCtxFork}
+		host={{ rename: () => { if (ctxMenuSession) handleCtxRename(ctxMenuSession.id); }, select: () => { if (ctxMenuSession) handleEnterSelect(ctxMenuSession.id); } }}
 		onclose={handleCloseContextMenu}
-		markOnly={isForeignSession(ctxMenuSession)}
 	/>
 {/if}
 
@@ -1124,16 +943,5 @@
 		now={snoozeSheetNow}
 		onclose={() => { bulkSnoozeOpen = false; }}
 		onsnooze={(until) => { void handleBulkSnooze(until); }}
-	/>
-{/if}
-
-{#if snoozeSession}
-	<SnoozeSheet
-		open={true}
-		placement={snoozePlacement}
-		sessionTitle={snoozeSession.title}
-		now={snoozeSheetNow}
-		onclose={() => { snoozeSession = null; }}
-		onsnooze={(until) => { if (snoozeSession) void handleSnooze(snoozeSession, until); }}
 	/>
 {/if}

@@ -120,7 +120,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
-	import TextInput from "../ui/TextInput.svelte";
+	import SessionRenameInput from "./SessionRenameInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 	import { isSessionWoken } from "../../stores/session.svelte.js";
 	import { getWokenSessionText } from "../../utils/session-lifecycle.js";
@@ -160,7 +160,6 @@
 		onholdchange,
 		menuOpen = false,
 		markOnly = false,
-		onrename,
 		onrenameend,
 	}: {
 		session: SessionInfo;
@@ -195,14 +194,12 @@
 		onholdchange?: (id: string | null) => void;
 		/** This row's action menu is open: keep its anchor and verbs on screen. */
 		menuOpen?: boolean;
-		onrename?: (id: string, title: string) => void;
 		onrenameend?: () => void;
 	} = $props();
 
 	// ─── Local state ────────────────────────────────────────────────────────────
 
 	let localRenaming = $state(false);
-	let renameValue = $state("");
 	let moreBtnEl: HTMLButtonElement | HTMLAnchorElement | undefined =
 		$state(undefined);
 	let rowEl: HTMLAnchorElement | undefined = $state();
@@ -220,14 +217,6 @@
 
 	// Combined rename state: local (double-click) OR external (context menu)
 	const isRenaming = $derived(localRenaming || renamingProp);
-
-	// Initialize rename value when context menu triggers rename mode.
-	// Only reads renamingProp (no circular write to localRenaming).
-	$effect(() => {
-		if (renamingProp) {
-			renameValue = session.title || "New Session";
-		}
-	});
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
@@ -462,47 +451,13 @@
 
 	function startRename() {
 		localRenaming = true;
-		renameValue = session.title || "New Session";
 	}
 
 	function handleDblClick(e: MouseEvent) {
-		if (selectMode || !onrename) return;
+		if (selectMode || markOnly || !onrenameend) return;
 		e.preventDefault();
 		e.stopPropagation();
 		startRename();
-	}
-
-	function commitRename() {
-		const newTitle = renameValue.trim();
-		localRenaming = false;
-		onrenameend?.();
-		if (newTitle && newTitle !== session.title) {
-			onrename?.(session.id, newTitle);
-		}
-	}
-
-	function cancelRename() {
-		localRenaming = false;
-		onrenameend?.();
-	}
-
-	function handleRenameKeydown(e: KeyboardEvent) {
-		if (e.key === "Enter") {
-			e.preventDefault();
-			commitRename();
-		} else if (e.key === "Escape") {
-			e.preventDefault();
-			cancelRename();
-		}
-	}
-
-	function handleRenameBlur() {
-		commitRename();
-	}
-
-	function handleRenameClick(e: MouseEvent) {
-		e.preventDefault();
-		e.stopPropagation();
 	}
 </script>
 
@@ -647,15 +602,10 @@
 			     additive `border-accent` here would silently lose to the base
 			     `border-border` (Tailwind emits border-colour utilities
 			     alphabetically). -->
-			<TextInput
-				aria-label="Session name"
-				size="sm"
+			<SessionRenameInput
+				{session}
 				class="font-brand min-h-[44px] md:min-h-0"
-				bind:value={renameValue}
-				onkeydown={handleRenameKeydown}
-				onblur={handleRenameBlur}
-				onclick={handleRenameClick}
-				autofocus
+				onend={() => { localRenaming = false; onrenameend?.(); }}
 			/>
 		{:else}
 			<span

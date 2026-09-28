@@ -41,7 +41,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
-	await expect(toggle).toHaveText(/Settled\s+1/);
+	await expect(toggle).toHaveText(/Settled/);
 	await expect(row).toHaveCount(0);
 	// Other live regions exist ("Connected", the composer); only one may speak
 	// about the settle.

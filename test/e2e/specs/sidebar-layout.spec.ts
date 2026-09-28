@@ -129,7 +129,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 test.describe("Sidebar Layout — Mobile", () => {
 	test.use({ viewport: { width: 375, height: 667 }, persistence: true });
 
-	test("mobile: both session menu triggers open the same bottom sheet", async ({
+	test("mobile: overflow and title menus use bottom sheets", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -171,16 +171,16 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(overflow).toBeFocused();
 
 		await titleChevron.click();
-		await expect(menu).toBeVisible();
+		const titleMenu = page.getByTestId("session-action-sheet");
+		await expect(titleMenu).toBeVisible();
+		await expect(titleMenu.getByTestId("session-ctx-settle")).toBeVisible();
 		await page.keyboard.press("Escape");
-		await expect(menu).toBeHidden();
+		await expect(titleMenu).toBeHidden();
 		await expect(titleChevron).toBeFocused();
 		await titleChevron.click();
-		await menu.getByRole("menuitem", { name: "Files" }).click();
-		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
-		await expect(menu).toBeHidden();
-		await expect(titleChevron).toBeFocused();
-		await page.getByTestId("session-view-chat").click();
+		await titleMenu.getByTestId("session-title-settings").click();
+		await expect(page.locator("#settings-panel")).toBeVisible();
+		await page.getByTestId("settings-close-btn").click();
 
 		await overflow.click();
 		await menu.getByRole("menuitem", { name: "Terminal" }).click();
@@ -212,6 +212,63 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(menu.getByRole("menuitem", { name: "Files" })).toBeVisible();
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
 		expect(await bar.boundingBox()).toEqual(collapsedBefore);
+	});
+
+	test("mobile: title menu settles, renames, and opens chrome actions", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		await new AppPage(page).goto(relayUrl);
+		const trigger = page.getByTestId("session-bar-title-menu");
+		const sheet = page.getByTestId("session-action-sheet");
+		await trigger.click();
+		await sheet.getByTestId("session-ctx-settle").click();
+		await expect(
+			page.getByRole("status").filter({ hasText: "Moved “" }),
+		).toBeVisible();
+		await page.getByTestId("toast-action").click();
+		await trigger.click();
+		await sheet.getByTestId("session-ctx-rename").click();
+		const input = page.getByRole("textbox", { name: "Session name" });
+		await expect(input).toBeFocused();
+		await input.fill("Renamed from title menu");
+		await input.press("Enter");
+		await expect(page.getByTestId("session-bar-title")).toContainText(
+			"Renamed from title menu",
+		);
+		await page.reload();
+		await expect(page.getByTestId("session-bar-title")).toContainText(
+			"Renamed from title menu",
+		);
+		await trigger.click();
+		await sheet.getByTestId("session-title-share").click();
+		await expect(
+			page.getByRole("heading", { name: "Share Session" }),
+		).toBeVisible();
+		await page.keyboard.press("Escape");
+		await trigger.click();
+		await sheet.getByTestId("session-title-settings").click();
+		await expect(page.locator("#settings-panel")).toBeVisible();
+	});
+
+	test("mobile: debug flag adds the title menu Debug action", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const url = new URL(relayUrl);
+		url.searchParams.set("feats", "debug");
+		await new AppPage(page).goto(url.toString());
+		const panel = page.locator(".debug-panel");
+		await expect(panel).toBeVisible();
+		await panel.getByTitle("Close panel").click();
+		await expect(panel).toBeHidden();
+		await page.getByTestId("session-bar-title-menu").click();
+		const debug = page.getByTestId("session-title-debug");
+		await expect(debug).toBeVisible();
+		await debug.click();
+		await expect(panel).toBeVisible();
 	});
 
 	test("mobile: session views switch without losing transcript or files position", async ({

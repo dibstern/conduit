@@ -8,6 +8,7 @@
 	import PinPage from "./pages/PinPage.svelte";
 	import SetupPage from "./pages/SetupPage.svelte";
 	import ConfirmModal from "./components/overlays/ConfirmModal.svelte";
+	import SnoozePickerHost from "./components/session/SnoozePickerHost.svelte";
 
 	const route = $derived(getCurrentRoute());
 	$effect(() => normalizeRoute());
@@ -22,3 +23,4 @@
 {/if}
 
 <ConfirmModal />
+<SnoozePickerHost />

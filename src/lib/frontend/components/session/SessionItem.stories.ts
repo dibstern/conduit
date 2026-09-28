@@ -20,7 +20,7 @@ const meta = {
 	tags: ["autodocs"],
 	args: {
 		oncontextmenu: fn(),
-		onrename: fn(),
+		onrenameend: fn(),
 	},
 } satisfies Meta<typeof SessionItem>;
 
@@ -359,6 +359,11 @@ export const Renaming: Story = {
 		session: mockSession,
 		active: false,
 		renaming: true,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByRole("textbox", { name: "Session name" }),
+		).toHaveFocus();
 	},
 };
 

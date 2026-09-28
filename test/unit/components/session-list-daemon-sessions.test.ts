@@ -76,9 +76,10 @@ describe("SessionList daemon sessions", () => {
 
 		expect(foreignRow.getAttribute("href")).toBe("/s/foreign-session");
 		expect(within(foreignRow).getByText("unlisted-project")).toBeDefined();
+		// A foreign row keeps its menu; the triage suite pins that menu to read state.
 		expect(
-			within(foreignRow).queryByRole("button", { name: /More options/ }),
-		).toBeNull();
+			within(foreignRow).getByRole("button", { name: /More options/ }),
+		).toBeDefined();
 		expect(
 			within(localRow).getByRole("button", { name: /More options/ }),
 		).toBeDefined();
@@ -87,14 +88,14 @@ describe("SessionList daemon sessions", () => {
 		expect(within(foreignRow).queryByRole("textbox")).toBeNull();
 
 		await fireEvent.click(
-			view.getByRole("button", { name: "Cleanup sessions" }),
+			view.getByRole("button", { name: "Select sessions" }),
 		);
 		expect(within(foreignRow).queryByRole("checkbox")).toBeNull();
 		expect(
 			within(localRow).getByRole("checkbox").getAttribute("aria-checked"),
 		).toBe("false");
 
-		await fireEvent.click(view.getByRole("button", { name: "Select all" }));
+		await fireEvent.click(view.getByRole("button", { name: "All" }));
 		expect(
 			within(localRow).getByRole("checkbox").getAttribute("aria-checked"),
 		).toBe("true");
@@ -112,7 +113,9 @@ describe("SessionList daemon sessions", () => {
 		expect(within(localRow).getByText("Current project")).toBeDefined();
 	});
 
-	it("names no project on any row when only one project is registered", () => {
+	// The provenance line always leads with the project square (vik1.22), so a
+	// lone project is named too rather than leaving the line headless.
+	it("names the project on every row even when only one project is registered", () => {
 		projectState.projects = [
 			{
 				slug: "current-project",
@@ -127,7 +130,7 @@ describe("SessionList daemon sessions", () => {
 		);
 		expect(localRow).not.toBeNull();
 		if (!localRow) return;
-		expect(within(localRow).queryByText("Current project")).toBeNull();
+		expect(within(localRow).getByText("Current project")).toBeDefined();
 	});
 
 	it("says which projects are missing from the list, naming them by title", () => {

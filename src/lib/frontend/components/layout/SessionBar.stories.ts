@@ -327,16 +327,18 @@ export const OverflowMenuOpen: Story = {
 
 export const TitleChevronSheet: Story = {
 	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
 		const menu = await within(document.body).findByTestId(
-			"session-bar-overflow-menu",
+			"session-action-sheet",
 		);
 		await expect(menu).toHaveClass(/bottom-0/);
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Chat" }),
-		).toBeVisible();
+		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
+		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 	},
 };
 
