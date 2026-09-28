@@ -581,7 +581,7 @@ body:has(dialog:modal) {
    unmounts, so collapsing is a state change rather than the heading vanishing
    and a different one appearing.
 
-   Child order in the markup is back, meta, title, chevron, more — chosen so the
+   Child order in the markup is back, meta, title, Views, chevron, more — chosen so the
    focus order matches the visual order in BOTH layouts, since grid areas move
    boxes around without moving the DOM.
 
@@ -590,17 +590,17 @@ body:has(dialog:modal) {
    truncate instead of pushing the back control off the edge. */
 #session-bar {
 	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	grid-template-columns: auto minmax(0, 1fr) auto;
 	grid-template-areas:
-		"back  meta  meta  more"
-		"title title title title"
-		"views views views views";
+		"back  meta  meta"
+		"title title views";
 	align-items: center;
 	column-gap: 6px;
 	padding: 3px 12px 6px;
 }
 
 #session-bar[data-collapsed="true"] {
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas: "back title chev more";
 	min-height: 46px;
 	padding: 0 12px;
@@ -636,22 +636,8 @@ body:has(dialog:modal) {
 #session-bar-more {
 	grid-area: more;
 }
-#session-bar-views {
+#session-bar-views-button {
 	grid-area: views;
-	min-width: 0;
-	width: 100%;
-	padding-top: 2px;
-}
-#session-bar-views [role="tab"] {
-	container-type: inline-size;
-}
-@container (max-width: 76px) {
-	.session-view-label {
-		display: none;
-	}
-}
-.session-view-shortcut {
-	display: none;
 }
 
 /* ─── Compact route layout ─────────────────────────────────────────────────── */
@@ -1003,33 +989,41 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── File Viewer (split pane beside chat) ────────────────────────────────── */
-
-/* Desktop: flex sibling of #app — width driven by --file-viewer-w */
-@media (min-width: 1024px) {
-	.file-viewer-pane {
-		width: var(--file-viewer-w, 50%);
-		min-width: 280px;
-		border-left: 1px solid var(--color-border);
-		background: var(--color-bg);
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
-		flex-shrink: 0;
-	}
+/* ─── File Viewer ──────────────────────────────────────────────────────────── */
+.file-viewer-pane {
+	min-width: 0;
+	min-height: 0;
+	flex: 1;
+	background: var(--color-bg);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 }
 
-/* Mobile: full-screen overlay */
-@media (max-width: 1023px) {
-	.file-viewer-pane {
-		position: fixed;
-		inset: 0;
-		background: var(--color-bg);
-		z-index: var(--z-pane);
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
-	}
+.file-viewer-pane.phone-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-pane);
+}
+
+.file-viewer-body {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* The line gutter is sticky and raised, so it paints over any outline on the
+   scroller itself. Draw the scroller's keyboard-focus ring as an overlay above it. */
+.file-viewer-body:has(> :focus-visible)::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: var(--z-raised);
+	outline: 2px solid var(--color-text);
+	outline-offset: -2px;
+	pointer-events: none;
 }
 
 /* ─── File Browser (4.4) ──────────────────────────────────────────────────── */

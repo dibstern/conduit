@@ -10,6 +10,8 @@
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
+	import ViewsRail from "./ViewsRail.svelte";
+	import { activeSessionView } from "./session-views.js";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
 	import MessageList from "../chat/MessageList.svelte";
@@ -32,11 +34,8 @@
 		showToast,
 		resetProjectUI,
 		setSidebarWidth,
-		setFileViewerWidth,
 		SIDEBAR_MIN_WIDTH,
 		SIDEBAR_MAX_WIDTH,
-		FILE_VIEWER_MIN_WIDTH,
-		FILE_VIEWER_MAX_WIDTH,
 	} from "../../stores/ui.svelte.js";
 	import {
 		connect,
@@ -94,12 +93,17 @@
 		) || TERMINAL_DEFAULT_HEIGHT,
 	);
 	let isResizing = $state(false);
-	let mobileMaximized = $state(false);
 	/** Visual viewport height — tracks keyboard show/hide on mobile. */
 	let vvHeight = $state<number | null>(null);
 	let appEl: HTMLDivElement | undefined = $state(undefined);
 	let sessionListScrollTop = 0;
 	let wasPhoneListScreen = false;
+
+	// A phone shows one view. It is derived rather than stored, so crossing the
+	// breakpoint never discards the desktop's open panes or file preview.
+	const phoneView = $derived(sessionViewState.compact ? activeSessionView() : undefined);
+	// On a phone the terminal is a whole view, never a split under the transcript.
+	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const phoneListScreen = $derived.by(() => {
 		const route = getCurrentRoute();
@@ -142,47 +146,6 @@
 	// ─── Sidebar resize state ─────────────────────────────────────────────
 
 	let isSidebarResizing = $state(false);
-
-	// ─── File viewer resize state ─────────────────────────────────────────
-
-	let isFileViewerResizing = $state(false);
-	let layoutEl: HTMLDivElement | undefined = $state(undefined);
-
-	function handleFileViewerResizeStart(e: MouseEvent | TouchEvent) {
-		e.preventDefault();
-		isFileViewerResizing = true;
-		const startX = "touches" in e ? ((e as TouchEvent).touches[0]?.clientX ?? 0) : e.clientX;
-		const layoutWidth = layoutEl?.clientWidth ?? window.innerWidth;
-
-		function onMove(ev: MouseEvent | TouchEvent) {
-			const clientX =
-				"touches" in ev
-					? ((ev as TouchEvent).touches[0]?.clientX ?? 0)
-					: (ev as MouseEvent).clientX;
-			// File viewer is on the right — mouse moving left = wider viewer
-			const viewerWidth = layoutWidth - clientX;
-			const percent = (viewerWidth / layoutWidth) * 100;
-			setFileViewerWidth(
-				Math.max(
-					FILE_VIEWER_MIN_WIDTH,
-					Math.min(FILE_VIEWER_MAX_WIDTH, percent),
-				),
-			);
-		}
-
-		function onEnd() {
-			isFileViewerResizing = false;
-			document.removeEventListener("mousemove", onMove);
-			document.removeEventListener("mouseup", onEnd);
-			document.removeEventListener("touchmove", onMove);
-			document.removeEventListener("touchend", onEnd);
-		}
-
-		document.addEventListener("mousemove", onMove);
-		document.addEventListener("mouseup", onEnd);
-		document.addEventListener("touchmove", onMove, { passive: false });
-		document.addEventListener("touchend", onEnd);
-	}
 
 	function handleSidebarResizeStart(e: MouseEvent | TouchEvent) {
 		if (uiState.sidebarCollapsed) return;
@@ -268,10 +231,11 @@
 	/**
 	 * Touch-drag handler for the terminal tab bar (bottom-sheet pattern).
 	 * Uses a movement threshold so taps on tabs/buttons still fire normally.
-	 * In mobileMaximized mode, dragging down exits maximized and snaps to default height.
-	 * In normal mode, drags resize the terminal pixel-by-pixel.
+	 * Drags resize the terminal pixel-by-pixel. A full-screen phone terminal has
+	 * no height to drag; the Views sheet is how you leave it.
 	 */
 	function handleTabBarTouchStart(e: TouchEvent) {
+		if (mobileMaximized) return;
 		const startY = e.touches[0]?.clientY ?? 0;
 		const startH = terminalHeight;
 		const threshold = 8; // px before treating as a drag
@@ -293,19 +257,10 @@
 
 			ev.preventDefault(); // prevent scroll once dragging
 
-			if (mobileMaximized) {
-				// In maximized mode: dragging down exits maximized, snap to default
-				if (delta < -threshold) {
-					mobileMaximized = false;
-					terminalHeight = TERMINAL_DEFAULT_HEIGHT;
-				}
-			} else {
-				const newH = Math.max(
-					TERMINAL_MIN_HEIGHT,
-					Math.min(maxH, startH + delta),
-				);
-				terminalHeight = newH;
-			}
+			terminalHeight = Math.max(
+				TERMINAL_MIN_HEIGHT,
+				Math.min(maxH, startH + delta),
+			);
 		}
 
 		function onEnd() {
@@ -313,15 +268,13 @@
 			document.removeEventListener("touchend", onEnd);
 			if (isDragging) {
 				isResizing = false;
-				if (!mobileMaximized) {
-					try {
-						localStorage.setItem(
-							TERMINAL_STORAGE_KEY,
-							String(Math.round(terminalHeight)),
-						);
-					} catch {
-						/* ignore */
-					}
+				try {
+					localStorage.setItem(
+						TERMINAL_STORAGE_KEY,
+						String(Math.round(terminalHeight)),
+					);
+				} catch {
+					/* ignore */
 				}
 			}
 		}
@@ -538,23 +491,9 @@
 		return unsub;
 	});
 
-	// ─── Terminal mobile-maximize event bridge (Sidebar dispatches "terminal:mobile-maximize") ──
-
+	// A full-screen phone terminal has no room for the todo overlay.
 	$effect(() => {
-		function onTerminalMobileMaximize() {
-			mobileMaximized = true;
-			// Auto-collapse the todo overlay to free vertical space
-			window.dispatchEvent(new CustomEvent("todo:collapse"));
-		}
-		window.addEventListener("terminal:mobile-maximize", onTerminalMobileMaximize);
-		return () => window.removeEventListener("terminal:mobile-maximize", onTerminalMobileMaximize);
-	});
-
-	// Clear mobileMaximized when terminal panel closes
-	$effect(() => {
-		if (!terminalState.panelOpen) {
-			mobileMaximized = false;
-		}
+		if (mobileMaximized) window.dispatchEvent(new CustomEvent("todo:collapse"));
 	});
 
 	// One matchMedia listener for the whole app decides whether the session's
@@ -562,13 +501,14 @@
 	// so the chrome cannot disagree with itself about what "compact" means.
 	$effect(() => watchCompactViewport());
 
+
 	// ─── Visual viewport tracking (keyboard avoidance when terminal is open) ──
 	// CSS dvh does NOT account for the virtual keyboard. We listen to the
 	// visualViewport API and constrain #app height so the terminal stays above
 	// the keyboard and xterm.js refits via its ResizeObserver.
-	// Active whenever the terminal panel is open on a mobile-width viewport.
+	// Active whenever the phone terminal is showing.
 	$effect(() => {
-		if (!terminalState.panelOpen || !sessionViewState.compact) {
+		if (!mobileMaximized) {
 			vvHeight = null;
 			return;
 		}
@@ -668,7 +608,7 @@
 	});
 </script>
 
-<div bind:this={layoutEl} id="layout" class={layoutClass}>
+<div id="layout" class={layoutClass}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
 		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
@@ -702,7 +642,7 @@
 		id="app"
 		class="flex-1 flex flex-col min-w-0 relative pt-[env(safe-area-inset-top,0px)]"
 		class:h-full={!vvHeight}
-		class:select-none={isResizing || isSidebarResizing || isFileViewerResizing}
+		class:select-none={isResizing || isSidebarResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
 		<!-- Chrome: on a phone the session owns the top bar, and the global
@@ -739,34 +679,45 @@
 		{/if}
 
 		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
-		<div class="relative flex flex-col flex-1 min-h-0">
-			<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={sessionViewState.filesOpen || mobileMaximized}>
-				<MessageList />
-				<InputArea />
-			</div>
-			{#if sessionViewState.compact && sessionViewState.filesEverOpened}
-				<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={!sessionViewState.filesOpen} inert={!sessionViewState.filesOpen}>
-					<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; }} />
+		<div class="flex flex-1 min-h-0 min-w-0">
+			<div class="relative flex flex-col flex-1 min-h-0 min-w-0">
+				<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized}>
+					<MessageList />
+					<InputArea />
 				</div>
-			{/if}
+				{#if sessionViewState.compact && sessionViewState.filesEverOpened}
+					<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={phoneView !== "files"} inert={phoneView !== "files"}>
+						<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; }} />
+					</div>
+				{/if}
 
-		<!-- Terminal Panel (resizable bottom panel) -->
-		{#if terminalState.panelOpen}
-			<!-- Resize handle (hidden when mobile-maximized — tab bar is the drag target) -->
-			{#if !mobileMaximized}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					class="terminal-resize-handle h-1.5 shrink-0 cursor-ns-resize flex items-center justify-center group hover:bg-accent/10 transition-colors"
-					onmousedown={handleResizeStart}
-					ontouchstart={handleResizeStart}
-				>
-					<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
+				<!-- Terminal Panel (resizable bottom panel) -->
+				{#if terminalState.panelOpen}
+					<!-- Resize handle (a full-screen phone terminal has no height to resize) -->
+					{#if !mobileMaximized}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="terminal-resize-handle h-1.5 shrink-0 cursor-ns-resize flex items-center justify-center group hover:bg-accent/10 transition-colors"
+							onmousedown={handleResizeStart}
+							ontouchstart={handleResizeStart}
+						>
+							<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
+						</div>
+					{/if}
+					<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
+						<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+					</div>
+				{/if}
+			</div>
+			{#if !sessionViewState.compact && sessionViewState.filesOpen}
+				<div data-testid="side-pane-files" class="relative flex w-[clamp(280px,40%,640px)] shrink-0 min-h-0 flex-col border-l border-border bg-bg-surface">
+					<div class="absolute inset-0 flex min-h-0" class:invisible={uiState.fileViewerOpen} inert={uiState.fileViewerOpen}>
+						<SidebarFilePanel onClose={() => { sessionViewState.filesOpen = false; closeFileViewer(); }} />
+					</div>
+					<FileViewer visible={uiState.fileViewerOpen} onClose={closeFileViewer} />
 				</div>
 			{/if}
-			<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
-				<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
-			</div>
-		{/if}
+			<ViewsRail />
 		</div>
 
 		<!-- Info Panels (absolute positioned floating panels) -->
@@ -774,20 +725,10 @@
 	</div>
 	<!-- /#app -->
 
-	<!-- File viewer resize handle (desktop only, visible when file viewer is open) -->
-	{#if uiState.fileViewerOpen}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="file-viewer-resize-handle w-1 shrink-0 cursor-col-resize hidden lg:flex items-center justify-center group hover:bg-accent/10 transition-colors relative"
-			onmousedown={handleFileViewerResizeStart}
-			ontouchstart={handleFileViewerResizeStart}
-		>
-			<div class="absolute inset-y-0 -left-0.5 -right-0.5"></div>
-		</div>
+	<!-- The phone preview remains a full-screen overlay. -->
+	{#if sessionViewState.compact}
+		<FileViewer visible={phoneView === "files" && uiState.fileViewerOpen} onClose={closeFileViewer} overlay />
 	{/if}
-
-	<!-- File Viewer: split pane on desktop, full overlay on mobile -->
-	<FileViewer visible={uiState.fileViewerOpen} onClose={closeFileViewer} />
 </div>
 <!-- /#layout -->
 

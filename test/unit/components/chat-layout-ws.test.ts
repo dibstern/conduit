@@ -155,7 +155,7 @@ vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
-	terminalState: { panelOpen: false },
+	terminalState: { panelOpen: false, unreadPtyIds: new Set() },
 	destroyAll: vi.fn(),
 	applyPtyListResponse: vi.fn(),
 }));
@@ -185,17 +185,13 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 		sidebarWidth: 256,
 		rewindActive: false,
 		fileViewerOpen: false,
-		fileViewerWidth: 400,
 	},
 	closeFileViewer: vi.fn(),
 	showToast: vi.fn(),
 	resetProjectUI: vi.fn(),
 	setSidebarWidth: vi.fn(),
-	setFileViewerWidth: vi.fn(),
 	SIDEBAR_MIN_WIDTH: 200,
 	SIDEBAR_MAX_WIDTH: 400,
-	FILE_VIEWER_MIN_WIDTH: 200,
-	FILE_VIEWER_MAX_WIDTH: 600,
 }));
 
 vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({

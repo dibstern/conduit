@@ -68,9 +68,14 @@ describe("handlePtyCreated", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1", "bash"));
 		expect(terminalState.tabs.size).toBe(1);
 		expect(terminalState.activeTabId).toBe("pty1");
-		expect(terminalState.panelOpen).toBe(true);
 		// Sequential naming: ignores server title, generates "Terminal N"
 		expect(terminalState.tabs.get("pty1")?.title).toBe("Terminal 1");
+	});
+
+	it("leaves the panel closed when the user switched away before the tab arrived", () => {
+		terminalState.panelOpen = false;
+		handlePtyCreated(ptyCreatedMsg("pty1", "bash"));
+		expect(terminalState.panelOpen).toBe(false);
 	});
 
 	it("uses sequential title regardless of server title", () => {

@@ -1,7 +1,6 @@
 // ─── E2E: Terminal Panel ─────────────────────────────────────────────────────
-// Tests the terminal panel UI with real xterm.js rendering.
-// Uses the replay fixture — the mock's echo-mode PTY WebSocket echoes input
-// back as output, so no PTY recording is needed.
+// Tests the terminal panel UI with real xterm.js rendering and local PTYs.
+// The replay fixture mocks OpenCode, but terminal tabs run the worker's shell.
 
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -9,6 +8,19 @@ import { AppPage } from "../page-objects/app.page.js";
 test.use({ recording: "chat-simple" });
 
 test.describe("Terminal Panel", () => {
+	test("phone terminal view fills the viewport width", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await new AppPage(page).goto(relayUrl);
+		await page.getByTestId("session-bar-views-button").click();
+		await page.getByTestId("session-bar-view-terminal").click();
+		const panel = page.locator("#terminal-panel");
+		await expect(panel).toBeVisible();
+		await expect.poll(async () => (await panel.boundingBox())?.width).toBe(390);
+	});
+
 	test("clicking terminal toggle opens the panel and creates a tab", async ({
 		page,
 		relayUrl,
@@ -52,13 +64,12 @@ test.describe("Terminal Panel", () => {
 		const xtermScreen = page.locator("#terminal-panel .xterm-screen");
 		await expect(xtermScreen).toBeVisible({ timeout: 10_000 });
 
-		// The mock sends "$ " as an initial prompt — wait for it to render
-		// xterm renders text into rows; check the terminal has content
+		// xterm renders shell output into rows; check that the screen is mounted.
 		const xtermRows = page.locator("#terminal-panel .xterm-rows");
 		await expect(xtermRows).toBeVisible();
 	});
 
-	test("typing in terminal produces echoed output", async ({
+	test("typing in terminal produces shell output", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -75,24 +86,13 @@ test.describe("Terminal Panel", () => {
 		const xtermScreen = page.locator("#terminal-panel .xterm-screen");
 		await expect(xtermScreen).toBeVisible({ timeout: 10_000 });
 
-		// Type into the terminal (xterm captures keyboard input when focused)
-		await page.keyboard.type("hello", { delay: 50 });
-
-		// The echo-mode mock sends input back as output
-		await page.waitForFunction(
-			() =>
-				document
-					.querySelector("#terminal-panel .xterm-rows")
-					?.textContent?.includes("hello"),
-			null,
+		// The marker appears only in command output, not in the echoed input.
+		await page.keyboard.type("printf 'hel%s\\n' lo", { delay: 50 });
+		await page.keyboard.press("Enter");
+		await expect(page.locator("#terminal-panel .xterm-rows")).toContainText(
+			"hello",
 			{ timeout: 5_000 },
 		);
-
-		// Confirm text is present
-		const terminalText = await page
-			.locator("#terminal-panel .xterm-rows")
-			.textContent();
-		expect(terminalText).toContain("hello");
 	});
 
 	test("creating a second terminal tab works", async ({ page, relayUrl }) => {
@@ -180,16 +180,14 @@ test.describe("Terminal Panel", () => {
 			timeout: 10_000,
 		});
 
-		// Type in tab 1
-		await page.keyboard.type("tab1data", { delay: 30 });
-		await page.waitForFunction(
-			() =>
-				document
-					.querySelector("#terminal-panel .xterm-rows")
-					?.textContent?.includes("tab1data"),
-			null,
-			{ timeout: 5_000 },
+		const activeRows = page.locator(
+			"#terminal-panel .term-tab-content:not(.hidden) .xterm-rows",
 		);
+
+		// Wait for command output, rather than input echoed during shell startup.
+		await page.keyboard.type("printf 'tab1%s\\n' data", { delay: 30 });
+		await page.keyboard.press("Enter");
+		await expect(activeRows).toContainText("tab1data", { timeout: 5_000 });
 
 		// Create tab 2
 		await page.locator(".term-new-btn").click();
@@ -197,23 +195,22 @@ test.describe("Terminal Panel", () => {
 
 		// Tab 2 should be active and have its own xterm instance
 		await expect(tabs.nth(1)).toHaveClass(/term-tab-active/);
+		await expect(
+			page.locator(
+				"#terminal-panel .term-tab-content:not(.hidden) .xterm-screen",
+			),
+		).toBeVisible();
+		await page.keyboard.type("printf 'tab2%s\\n' data", { delay: 30 });
+		await page.keyboard.press("Enter");
+		await expect(activeRows).toContainText("tab2data", { timeout: 5_000 });
+		await expect(activeRows).not.toContainText("tab1data");
 
 		// Switch back to tab 1
 		await tabs.first().click();
 		await expect(tabs.first()).toHaveClass(/term-tab-active/);
 
-		// Tab 1's content should still have our typed text.
-		// Scope to the visible tab — inactive tabs use class:hidden but
-		// remain in the DOM with their own .xterm-rows.
-		const activeRows =
-			"#terminal-panel .term-tab-content:not(.hidden) .xterm-rows";
-		await page.waitForFunction(
-			(selector) =>
-				document.querySelector(selector)?.textContent?.includes("tab1data"),
-			activeRows,
-			{ timeout: 5_000 },
-		);
-		const terminalText = await page.locator(activeRows).textContent();
-		expect(terminalText).toContain("tab1data");
+		// Inactive tabs stay mounted; switching back should restore tab 1's output.
+		await expect(activeRows).toContainText("tab1data", { timeout: 5_000 });
+		await expect(activeRows).not.toContainText("tab2data");
 	});
 });

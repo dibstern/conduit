@@ -1,15 +1,16 @@
-<!-- ─── Sidebar File Panel ───────────────────────────────────────────────────── -->
-<!-- File browser shared by the sidebar and the phone session view. -->
+<!-- ─── File Tree Panel ─────────────────────────────────────────────────────── -->
+<!-- File browser shared by the desktop pane and phone session view. -->
 <!-- Owns WS subscriptions for file_list/file_content. -->
 
 <script lang="ts">
 	import { untrack } from "svelte";
 	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
-	import { openFileViewer, setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getFileContentRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
-	import { applyGetFileContentResponse, applyGetFileListResponse } from "../../stores/ws-dispatch.js";
+	import { getFileListRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -89,14 +90,21 @@
 		loadDirectory(path);
 	}
 
+	// The tree is inert while a preview covers it, so closing the preview hands
+	// focus back to the row that opened it. Found by path rather than by
+	// activeElement because Safari does not focus buttons on click.
+	let previewedPath: string | undefined;
+	$effect(() => {
+		if (uiState.fileViewerOpen || !previewedPath || !fileTreeEl) return;
+		fileTreeEl
+			.querySelector<HTMLElement>(`[data-path="${CSS.escape(previewedPath)}"]`)
+			?.focus({ preventScroll: true });
+		previewedPath = undefined;
+	});
+
 	function handleFileClick(fullPath: string) {
+		previewedPath = fullPath;
 		openFileViewer(fullPath);
-		const slug = getCurrentSlug();
-		if (slug) {
-			void getFileContentRpc({ projectSlug: slug, path: fullPath }).then(
-				applyGetFileContentResponse,
-			);
-		}
 	}
 
 	function handleDirClick(fullPath: string) {
@@ -117,7 +125,7 @@
 
 	function closePanel() {
 		if (onClose) onClose();
-		else setSidebarPanel("sessions");
+		else sessionViewState.filesOpen = false;
 	}
 
 	// ─── WS message subscription ───────────────────────────────────────────────

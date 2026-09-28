@@ -1,18 +1,15 @@
 <!-- ─── File Viewer ───────────────────────────────────────────────────────────── -->
-<!-- Split-pane file content viewer with syntax highlighting, line numbers, -->
-<!-- and copy-to-clipboard. Sits beside #app on desktop, full overlay on mobile. -->
+<!-- File preview in the desktop Files pane or a full-screen phone overlay. -->
 
 <script lang="ts">
 	import type { RelayMessage } from "../../types.js";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { setSidebarPanel, showToast, uiState } from "../../stores/ui.svelte.js";
-	import {
-		getCurrentSessionId,
-		navigate,
-	} from "../../stores/router.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { showToast, uiState } from "../../stores/ui.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getFileContentRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileContentResponse } from "../../stores/ws-dispatch.js";
 	import hljs from "highlight.js";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
@@ -20,9 +17,11 @@
 	let {
 		visible = false,
 		onClose,
+		overlay = false,
 	}: {
 		visible?: boolean;
 		onClose?: () => void;
+		overlay?: boolean | undefined;
 	} = $props();
 
 	// ─── Font size state ──────────────────────────────────────────────────────
@@ -76,6 +75,16 @@
 	// DOM ref for the <code> element (for hljs)
 	let codeEl: HTMLElement | undefined = $state();
 
+	// A preview remounts when the viewport crosses the phone breakpoint.
+	$effect(() => {
+		const path = visible ? uiState.fileViewerPath : null;
+		if (!path) return;
+		const slug = getCurrentSlug();
+		if (!slug) return;
+		loading = true;
+		void getFileContentRpc({ projectSlug: slug, path }).then(applyGetFileContentResponse);
+	});
+
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
 	const fileExt = $derived(filePath?.split(".").pop()?.toLowerCase() ?? "");
@@ -121,6 +130,12 @@
 				hljs.highlightElement(codeEl);
 			}
 		}
+	});
+
+	// The tree behind the preview goes inert, so focus moves into the preview.
+	let regionEl: HTMLDivElement | undefined = $state(undefined);
+	$effect(() => {
+		regionEl?.focus({ preventScroll: true });
 	});
 
 	// ─── WS subscription ──────────────────────────────────────────────────────
@@ -180,29 +195,15 @@
 	}
 
 	function handleOpenFileBrowser() {
-		setSidebarPanel("files");
-		if (!sessionViewState.compact) return;
 		handleClose();
-		if (getCurrentSessionId()) navigate("/");
 	}
 </script>
 
 {#if visible && (filePath || loading)}
-	<div id="file-viewer" class="file-viewer-pane" style="--file-viewer-w: {uiState.fileViewerWidth}%">
+	<div id="file-viewer" class="file-viewer-pane" class:phone-overlay={overlay}>
 		<!-- Header -->
 		<div class="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle shrink-0 min-h-[44px]">
-			<!-- Mobile: file browser button (opens sidebar to files panel) -->
-			<!--
-				`lg:hidden` survives migration because it is a RESPONSIVE variant:
-				Tailwind emits variants after the unprefixed utilities, so it still
-				beats BASE's `inline-flex` at the breakpoint. The unprefixed `flex`
-				did not, and was already a no-op here anyway.
-
-				Dropped throughout this header: `transition-[background,color]`,
-				which BASE's `transition-colors` already outranked (arbitrary values
-				sort BEFORE named ones), and `duration-150`, which only restates
-				Tailwind's default.
-			-->
+			<!-- Back to the file tree, which stays mounted behind the preview. -->
 			<Button
 				variant="ghost"
 				size="content"
@@ -213,7 +214,7 @@
 				iconSize={16}
 				ariaLabel="File browser"
 				title="File browser"
-				class="fv-btn lg:hidden w-7 h-7 rounded-md shrink-0"
+				class="fv-btn w-7 h-7 rounded-md shrink-0"
 				onclick={handleOpenFileBrowser}
 			/>
 			<span
@@ -239,7 +240,7 @@
 				>
 					&#8722;
 				</Button>
-				<span class="text-sm text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
+				<span class="text-sm text-text-muted font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
 				<Button
 					variant="ghost"
 					size="content"
@@ -285,38 +286,40 @@
 		</div>
 
 		<!-- Body -->
-		<!-- The region scrolls and its content is a static <pre>, so it has no tabbable
-		     descendant and must be focusable or a keyboard-only user cannot scroll it at
-		     all (axe scrollable-region-focusable); Svelte's non-interactive-tabindex
-		     heuristic does not model that case. -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div class="flex-1 overflow-auto" role="region" aria-labelledby="file-viewer-path" tabindex="0">
-			{#if loading}
-				<div class="flex items-center justify-center py-12 text-text-dimmer text-sm">
-					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-					<span class="ml-2">Loading…</span>
-				</div>
-			{:else if binary}
-				<div class="flex items-center justify-center h-full text-text-dimmer text-sm py-12">
-					Binary file — cannot preview
-				</div>
-			{:else if content !== null}
-				<!-- Code with line numbers (two-column flex) -->
-				<div class="fv-code flex min-h-0">
-					<!-- Gutter (line numbers) -->
-				<pre
-					class="fv-gutter shrink-0 py-3 pr-2 pl-3.5 text-right select-none border-r border-border-subtle min-w-[44px] sticky left-0 bg-bg z-[var(--z-raised)] font-mono leading-[1.55] text-text-dimmer/50"
-					style="font-size: {fontSize}px"
-				>{lineNumbers}</pre>
-					<!-- Code content -->
-					<pre class="fv-content flex-1 py-3 px-3.5 min-w-0 font-mono leading-[1.55] text-text-secondary" style="font-size: {fontSize}px"><code bind:this={codeEl}>{content}</code></pre>
-				</div>
-				{#if truncated}
-					<div class="text-xs text-text-dimmer italic px-4 py-2 border-t border-border-subtle">
-						File truncated — showing first 50 KB
+		<div class="file-viewer-body">
+			<!-- The region scrolls and its content is a static <pre>, so it has no tabbable
+			     descendant and must be focusable or a keyboard-only user cannot scroll it at
+			     all (axe scrollable-region-focusable); Svelte's non-interactive-tabindex
+			     heuristic does not model that case. -->
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<div bind:this={regionEl} class="flex-1 min-h-0 overflow-auto focus-visible:outline-none" role="region" aria-labelledby="file-viewer-path" tabindex="0">
+				{#if loading}
+					<div class="flex items-center justify-center py-12 text-text-muted text-sm">
+						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+						<span class="ml-2">Loading…</span>
 					</div>
+				{:else if binary}
+					<div class="flex items-center justify-center h-full text-text-muted text-sm py-12">
+						Binary file — cannot preview
+					</div>
+				{:else if content !== null}
+					<!-- Code with line numbers (two-column flex) -->
+					<div class="fv-code flex min-h-0">
+						<!-- Gutter (line numbers) -->
+					<pre
+						class="fv-gutter shrink-0 py-3 pr-2 pl-3.5 text-right select-none border-r border-border-subtle min-w-[44px] sticky left-0 bg-bg z-[var(--z-raised)] font-mono leading-[1.55] text-text-muted"
+						style="font-size: {fontSize}px"
+					>{lineNumbers}</pre>
+						<!-- Code content -->
+						<pre class="fv-content flex-1 py-3 px-3.5 min-w-0 font-mono leading-[1.55] text-text-secondary" style="font-size: {fontSize}px"><code bind:this={codeEl}>{content}</code></pre>
+					</div>
+					{#if truncated}
+						<div class="text-xs text-text-muted italic px-4 py-2 border-t border-border-subtle">
+							File truncated — showing first 50 KB
+						</div>
+					{/if}
 				{/if}
-			{/if}
+			</div>
 		</div>
 	</div>
 {/if}

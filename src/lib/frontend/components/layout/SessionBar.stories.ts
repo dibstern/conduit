@@ -18,7 +18,6 @@ import {
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
-import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import type { OpenCodeInstance } from "../../types.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
@@ -37,7 +36,6 @@ const meta = {
 		// Layout/Header seeds this same module-level store, and Storybook shares
 		// it across story files. Reset or the badge appears in every story.
 		instanceState.instances = [];
-		uiState.sidebarPanel = "files";
 		routerState.path = `/s/${mockSession.id}`;
 		routerState.search = "";
 		attachedProjectState.slug = "conduit";
@@ -75,7 +73,6 @@ export const Default: Story = {
 		const back = canvas.getByRole("button", { name: /Sessions/ });
 		await userEvent.click(back);
 		expect(routerState.path).toBe("/");
-		expect(uiState.sidebarPanel).toBe("sessions");
 
 		expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
 			"Test Session",
@@ -84,29 +81,32 @@ export const Default: Story = {
 			"conduit",
 		);
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
-		// The overflow trigger is the only route to settings, share and the
-		// terminal at this width, so its presence is not cosmetic.
-		expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
+		expect(canvas.getByTestId("session-bar-views-button")).toBeVisible();
+		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
 		expect(canvas.queryByTestId("instance-badge")).toBeNull();
 	},
 };
 
-export const Switcher: Story = {
+export const ViewsSheetOpen: Story = {
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const tabs = within(canvas.getByTestId("session-bar-views")).getAllByRole(
-			"tab",
+		await userEvent.click(canvas.getByTestId("session-bar-views-button"));
+		const sheet = await within(document.body).findByTestId(
+			"session-bar-views-sheet",
 		);
-		await expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+		await expect(sheet).toBeVisible();
+		const items = within(sheet).getAllByRole("menuitemradio");
+		expect(items.map((item) => item.textContent?.trim())).toEqual([
 			"Chat",
 			"Terminal",
 			"Diff",
 			"Files",
 		]);
-		await expect(tabs[0]).toHaveAttribute("aria-selected", "true");
-		await expect(tabs[2]).toBeDisabled();
-		for (const tab of tabs)
-			expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+		await expect(items[0]).toHaveAttribute("aria-checked", "true");
+		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
 	},
 };
 
@@ -116,28 +116,34 @@ function emitOutputFromTwoTerminals() {
 	handlePtyOutput({ type: "pty_output", ptyId: "pty-2", data: "three" });
 }
 
-export const WithTerminalBadge: Story = {
+export const WithViewBadge: Story = {
 	beforeEach: emitOutputFromTwoTerminals,
 	play: async ({ canvasElement }) => {
-		const terminal = within(canvasElement).getByRole("tab", {
-			name: "Terminal",
-		});
-		await expect(terminal).toHaveTextContent("2");
-		await expect(terminal).toHaveAttribute("aria-selected", "false");
+		const button = within(canvasElement).getByTestId(
+			"session-bar-views-button",
+		);
+		await expect(button).toHaveTextContent("2");
 	},
 };
 
 export const OpeningTerminalClearsBadge: Story = {
+	tags: ["viewport-capture"],
 	beforeEach: emitOutputFromTwoTerminals,
 	play: async ({ canvasElement }) => {
-		const terminal = within(canvasElement).getByRole("tab", {
-			name: "Terminal",
-		});
-		await expect(terminal).toHaveTextContent("2");
+		const button = within(canvasElement).getByTestId(
+			"session-bar-views-button",
+		);
+		await expect(button).toHaveTextContent("2");
 		openPanel();
 		await tick();
-		await expect(terminal).toHaveAttribute("aria-selected", "true");
-		await expect(terminal).not.toHaveTextContent("2");
+		await expect(button).not.toHaveTextContent("2");
+		await userEvent.click(button);
+		const sheet = await within(document.body).findByTestId(
+			"session-bar-views-sheet",
+		);
+		await expect(
+			within(sheet).getByTestId("session-bar-view-terminal"),
+		).toHaveAttribute("aria-checked", "true");
 		expect(terminalState.unreadPtyIds.size).toBe(0);
 	},
 };
@@ -264,7 +270,7 @@ const mockInstances: OpenCodeInstance[] = [
 ];
 
 /**
- * The instance badge stays in the bar rather than moving into the overflow
+ * The instance badge stays in the bar rather than moving into a menu
  * menu: it says where this project's work runs, which is identity, and a status
  * dot that only exists behind a closed menu reports nothing.
  */
@@ -292,13 +298,17 @@ export const WithInstanceBadge: Story = {
 };
 
 /**
- * Everything the replaced global header used to offer. Without this menu those
- * actions have no route on a phone at all — the sidebar has never carried a
- * settings entry.
+ * The collapsed bar keeps its overflow while the expanded bar uses the title
+ * and Views sheets.
  */
 export const OverflowMenuOpen: Story = {
 	// The menu portals to <body>, so the capture has to frame the page.
 	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-overflow"));

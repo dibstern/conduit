@@ -27,9 +27,9 @@ interface StoryEntry {
 const VIEWPORT_CAPTURE_TAG = "viewport-capture";
 
 const LIGHT_STORY_IDS = new Set([
-	// Sidebar surfaces and its file-browser panel expose the main navigation palette.
+	// The sidebar and the file browser expose the main navigation palette.
 	"layout-sidebar--default",
-	"layout-sidebar--file-browser-panel",
+	"file-sidebarfilepanel--expanded-directory",
 	// Populated and open-shelf lists expose grouping, borders, and nested surfaces.
 	"session-sessionlist--with-items",
 	"session-sessionlist--pinned-and-settled-shelf-open",
@@ -437,12 +437,18 @@ if (stories.length > 0) {
 		["overlays-notifsettings--closed", "all"],
 		["overlays-rewindbanner--inactive", "all"],
 		["overlays-connectoverlay--connected", "all"],
+		// Settles to the cleared viewer; the back-to-tree contract is its play().
+		["file-fileviewer--back-to-file-tree", "all"],
 
 		// Renders no pixels at either width, so both captures were blank. Note it
 		// is deliberately NOT added to build-health's EXPECTED_EMPTY_ROOT: it does
 		// render child elements, they just have no visible extent, so that check
 		// still earns its keep here.
 		["overlays-attentionbanner--no-notifications", "all"],
+
+		// The views rail is desktop-only (hidden below md); phones switch views
+		// from the session bar instead, so there is nothing to capture at mobile.
+		["layout-viewsrail--independent-views", "mobile"],
 	]);
 
 	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs

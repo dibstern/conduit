@@ -1,5 +1,6 @@
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { closePanel, terminalState } from "../../stores/terminal.svelte.js";
+import { closeFileViewer } from "../../stores/ui.svelte.js";
 import { toggleTerminal } from "./chrome-actions.js";
 
 export type SessionView = {
@@ -9,17 +10,23 @@ export type SessionView = {
 	badge?: () => number | undefined;
 	shortcut?: string;
 	disabled?: boolean;
-	isActive: () => boolean;
-	activate: () => void;
+	isOn: () => boolean;
+	select: () => void;
 };
 
+/** Phones show one view at a time. Desktop keeps chat visible and toggles
+ *  side views independently, so `isOn` and `select` branch on `compact`. */
 export const sessionViews: readonly SessionView[] = [
 	{
 		id: "chat",
 		label: "Chat",
 		icon: "message-square",
-		isActive: () => !terminalState.panelOpen && !sessionViewState.filesOpen,
-		activate: () => {
+		isOn: () =>
+			!sessionViewState.compact ||
+			(!terminalState.panelOpen && !sessionViewState.filesOpen),
+		select: () => {
+			// Desktop Chat selection is reserved for 17xt.16's shortcuts.
+			if (!sessionViewState.compact) return;
 			closePanel();
 			sessionViewState.filesOpen = false;
 		},
@@ -29,10 +36,13 @@ export const sessionViews: readonly SessionView[] = [
 		label: "Terminal",
 		icon: "square-terminal",
 		badge: () => terminalState.unreadPtyIds.size || undefined,
-		isActive: () => terminalState.panelOpen,
-		activate: () => {
-			sessionViewState.filesOpen = false;
-			if (!terminalState.panelOpen) toggleTerminal();
+		isOn: () => terminalState.panelOpen,
+		select: () => {
+			if (sessionViewState.compact) {
+				sessionViewState.filesOpen = false;
+				if (terminalState.panelOpen) return;
+			}
+			toggleTerminal();
 		},
 	},
 	{
@@ -40,22 +50,32 @@ export const sessionViews: readonly SessionView[] = [
 		label: "Diff",
 		icon: "code",
 		disabled: true,
-		isActive: () => false,
-		activate: () => {},
+		isOn: () => false,
+		select: () => {},
 	},
 	{
 		id: "files",
 		label: "Files",
 		icon: "folder-tree",
-		isActive: () => !terminalState.panelOpen && sessionViewState.filesOpen,
-		activate: () => {
-			closePanel();
+		isOn: () =>
+			sessionViewState.compact
+				? !terminalState.panelOpen && sessionViewState.filesOpen
+				: sessionViewState.filesOpen,
+		select: () => {
 			sessionViewState.filesEverOpened = true;
-			sessionViewState.filesOpen = true;
+			if (sessionViewState.compact) {
+				closePanel();
+				sessionViewState.filesOpen = true;
+				return;
+			}
+			if (sessionViewState.filesOpen) closeFileViewer();
+			sessionViewState.filesOpen = !sessionViewState.filesOpen;
 		},
 	},
 ];
 
 export function activeSessionView(): string {
-	return sessionViews.find((view) => view.isActive())?.id ?? "chat";
+	if (terminalState.panelOpen) return "terminal";
+	if (sessionViewState.filesOpen) return "files";
+	return "chat";
 }

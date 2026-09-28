@@ -1,11 +1,11 @@
 <!--
-  SessionBar — the session's own top bar, phones only (design bar 18).
+  SessionBar — the session's own top bar, phones only (design bar 20).
 
-  Two layouts, one DOM tree. Expanded it is three bands: back-to-the-list with its
-  attention badge plus the project identity, then the session title and views. Sitting at
+  Two layouts, one DOM tree. Expanded it is two rows: back-to-the-list with its
+  attention badge plus the project identity, then the session title and Views. Sitting at
   the bottom of the transcript collapses it to a single 46px row carrying back,
   the title, a chevron that brings the bar back, and the overflow menu. The view
-  switcher band is omitted in the collapsed row.
+  sheet is available from the expanded row.
 
   You collapse by scrolling to the bottom and expand by scrolling up or by
   pressing the chevron. There is deliberately no collapse button: hiding chrome
@@ -15,10 +15,8 @@
   moves between rows without being re-parented and the <h1> never unmounts.
 
   On compact viewports this REPLACES the global header rather than stacking
-  under it, so the header's global actions come with it: the instance badge
-  keeps its place beside the project identity, and the rest move into the
-  overflow menu at the end of band 1. Nothing the header could reach becomes
-  unreachable on a phone.
+  under it. The instance badge stays beside the project identity, and the
+  title menu carries the header's global actions in the expanded bar.
 -->
 
 <script lang="ts">
@@ -39,12 +37,13 @@
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
 	import Badge from "../ui/Badge.svelte";
-	import Tabs from "../ui/Tabs.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
@@ -79,6 +78,9 @@
 
 	const collapsed = $derived(isBarCollapsed());
 	const activeView = $derived(activeSessionView());
+	const viewBadgeCount = $derived(
+		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
+	);
 
 	let barEl: HTMLElement | null = $state(null);
 
@@ -178,7 +180,7 @@
 	     Collapsed it drops a size: the row shares its width with the state
 	     glyph and two 44px controls.
 
-	     Expanded, the title chevron opens the same menu as the overflow button.
+	     Expanded, the title chevron opens the session menu.
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
 		<h1
@@ -253,6 +255,48 @@
 		{/if}
 	</div>
 
+	{#if !collapsed}
+		<Menu presentation="sheet" ariaLabel="Views" data-testid="session-bar-views-sheet">
+			{#snippet trigger({ props })}
+				<Button
+					{...props}
+					id="session-bar-views-button"
+					variant="secondary"
+					size="sm"
+					icon="panels-top-left"
+					touchTarget
+					class="shrink-0"
+					data-testid="session-bar-views-button"
+				>
+					Views
+					{#if viewBadgeCount > 0}
+						<Badge variant="accent-solid" size="count" shape="pill">{viewBadgeCount}</Badge>
+					{/if}
+				</Button>
+			{/snippet}
+			<div class="border-b border-border px-4 py-3 font-brand text-[14px] font-semibold text-text">Views</div>
+			<MenuRadioGroup value={activeView}>
+				{#each sessionViews as view (view.id)}
+					<MenuRadioItem
+						value={view.id}
+						data-testid={`session-bar-view-${view.id}`}
+						class="min-h-[44px]"
+						disabled={view.disabled === true}
+						onselect={view.select}
+					>
+						<span class="flex items-center gap-2">
+							<Icon name={view.icon} size={16} class="shrink-0" />
+							<span class="min-w-0 flex-1">{view.label}</span>
+							{#if view.badge?.()}
+								<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
+							{/if}
+						</span>
+					</MenuRadioItem>
+				{/each}
+			</MenuRadioGroup>
+		</Menu>
+	{/if}
+
 	{#if collapsed}
 		<!--
 			Getting the bar back. `secondary` rather than `ghost` so it does not
@@ -280,16 +324,15 @@
 		/>
 	{/if}
 
-	<!--
-		Everything the global header offered that is not identity. The header
-		is gone at this width, and the sidebar has never had a settings entry,
-		so without this the whole set is simply unreachable on a phone. It
-		survives the collapse for the same reason.
+	{#if collapsed}
+		<!--
+		The existing collapsed row keeps its overflow menu until the island
+		replaces this layout. Expanded actions are in the title menu.
 
 		Deliberately not here: the connection status dot and the client count,
 		which are ambient signals rather than actions and say nothing once
 		they are hidden behind a closed menu.
-	-->
+		-->
 	<Menu
 		bind:open={overflowOpen}
 		presentation="sheet"
@@ -329,7 +372,7 @@
 				data-testid={`overflow-view-${view.id}`}
 				disabled={view.disabled === true}
 				aria-current={view.id === activeView ? "true" : undefined}
-				onselect={view.activate}
+				onselect={view.select}
 			>
 				<Icon name={view.icon} size={16} class="shrink-0" />
 				<span class="min-w-0 flex-1">{view.label}</span>
@@ -347,7 +390,6 @@
 				onselect={() => void toggleSessionRead(session)}
 			>
 				{session.unread ? "Mark read" : "Mark unread"}
-				<span class="ml-auto text-xs text-text-muted">⌘⇧U</span>
 			</MenuItem>
 			<MenuSeparator />
 		{/if}
@@ -374,6 +416,7 @@
 			</MenuItem>
 		{/if}
 	</Menu>
+	{/if}
 
 	{#if titleMenuOpen && titleMenuAnchor && session}
 		<SessionContextMenu
@@ -393,27 +436,4 @@
 		/>
 	{/if}
 
-	{#if !collapsed}
-		<div id="session-bar-views" data-testid="session-bar-views">
-			<Tabs
-				value={activeView}
-				options={sessionViews.map((view) => ({ value: view.id, label: view.label, disabled: view.disabled === true, testId: `session-view-${view.id}` }))}
-				variant="switcher"
-				label="Session views"
-				onValueChange={(id) => sessionViews.find((view) => view.id === id && !view.disabled)?.activate()}
-			>
-				{#snippet optionContent(option)}
-					{@const view = sessionViews.find((entry) => entry.id === option.value)}
-					{#if view}
-						<Icon name={view.icon} size={16} class="shrink-0" />
-						<span class="session-view-label truncate">{view.label}</span>
-						{#if view.badge?.()}
-							<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
-						{/if}
-						{#if view.shortcut}<span class="session-view-shortcut">{view.shortcut}</span>{/if}
-					{/if}
-				{/snippet}
-			</Tabs>
-		</div>
-	{/if}
 </div>

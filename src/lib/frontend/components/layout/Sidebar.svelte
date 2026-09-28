@@ -1,5 +1,5 @@
 <!-- ─── Sidebar ─────────────────────────────────────────────────────────────── -->
-<!-- Left sidebar with session actions, session list, and file browser panel. -->
+<!-- Left sidebar with session actions and session list. -->
 <!-- Desktop: collapsible via toggle. Phone: full-screen list route. -->
 
 <script lang="ts">
@@ -10,17 +10,14 @@
 	import SessionList from "../session/SessionList.svelte";
 	import SessionGroupMenu from "../session/SessionGroupMenu.svelte";
 	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
-	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import {
 		uiState,
 		collapseSidebar,
-		setSidebarPanel,
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { navigate, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { createPtyRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
-	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
+	import { createPtyRpc } from "../../transport/ws-rpc-client.js";
 	import { beginCreateTab, failCreateTab, terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -61,20 +58,6 @@
 		}
 	}
 
-	function handleFileBrowser() {
-		if (uiState.sidebarPanel === "files") {
-			setSidebarPanel("sessions");
-		} else {
-			setSidebarPanel("files");
-			const slug = getCurrentSlug();
-			if (slug) {
-				void getFileListRpc({ projectSlug: slug, path: "." }).then(
-					applyGetFileListResponse,
-				);
-			}
-		}
-	}
-
 	function requestTerminalCreate() {
 		const slug = getCurrentSlug();
 		if (!slug || !beginCreateTab()) return;
@@ -91,10 +74,6 @@
 		toggleTerminalPanel();
 		if (!wasOpen && terminalState.tabs.size === 0) {
 			requestTerminalCreate();
-		}
-		// On a phone, maximize the terminal so it replaces the list screen.
-		if (!wasOpen && sessionViewState.compact) {
-			window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
 		}
 	}
 
@@ -321,21 +300,6 @@
 				>
 			</Button>
 			<Button
-				id="file-browser-btn"
-				variant="ghost"
-				size="content"
-				align="start"
-				tone="secondary"
-				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
-				onclick={handleFileBrowser}
-			>
-				<Icon name="folder-tree" size={16} class="shrink-0" />
-				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
-					>File browser</span
-				>
-			</Button>
-			<Button
 				id="terminal-sidebar-btn"
 				variant="ghost"
 				size="content"
@@ -352,7 +316,6 @@
 			</Button>
 		</div>
 
-	{#if uiState.sidebarPanel === "sessions"}
 		<!-- Sessions panel -->
 		<div
 			id="sidebar-panel-sessions"
@@ -363,10 +326,6 @@
 				<SessionList onaddproject={() => { projectsOpen = true; }} />
 			</div>
 		</div>
-		{:else}
-			<!-- File browser panel -->
-			<SidebarFilePanel />
-		{/if}
 	</nav>
 
 </div>

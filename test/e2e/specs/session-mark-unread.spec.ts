@@ -118,16 +118,17 @@ test("settling and un-settling preserve unread while the menu hides the action",
 test.describe("phone", () => {
 	test.use({ viewport: { width: 375, height: 740 } });
 
-	test("overflow and composer shortcut return to the list with undo", async ({
+	test("title sheet and composer shortcut return to the list with undo", async ({
 		page,
 		relayUrl,
 	}) => {
 		await gotoRelay(page, new URL("/", relayUrl).toString());
 		const row = page.locator("#session-list .session-item").first();
 		await row.click();
-		await page.getByTestId("session-bar-overflow").click();
-		await expect(page.getByTestId("overflow-mark-unread")).toContainText("⌘⇧U");
-		await page.getByTestId("overflow-mark-unread").click();
+		await page.getByTestId("session-bar-title-menu").click();
+		const sheet = page.getByTestId("session-action-sheet");
+		await expect(sheet).not.toContainText(/[⌘⇧]/);
+		await sheet.getByTestId("session-ctx-mark-unread").click();
 		await expect(page.getByTestId("session-bar")).toHaveCount(0);
 		await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 		await expect(

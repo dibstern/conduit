@@ -142,9 +142,20 @@
 	"src/lib/frontend/components/session/SessionList.svelte :: This,its": "Words in a removed comment; neither is a class token.",
 	"src/lib/frontend/components/session/SheetActionItem.svelte :: className,danger,disabled:text-text-dimmer,flex,font-brand,gap-3,items-center,min-h-[44px],px-4,text-[14px],text-error,text-text,variant": "SheetActionItem was removed in favor of MenuItem with touch density. SessionContextMenu supplies the 44px floor and inner typography; MenuItem supplies padding, colors, disabled state and danger icon. className, danger and variant are parser artifacts from the deleted component.",
 	"src/lib/frontend/components/session/__fixtures__/SessionContextMenuHarness.svelte :: px-2,py-1,rounded-md,text-text-muted": "The Storybook-only anchor now uses ui/Button variant ghost and size sm, so its local control styling was intentionally removed.",
+	"test/unit/visual-baseline-uniqueness.test.ts :: Switcher,bar,captures,chevron,collapsed,drifted,forced-open,forces,frame,fully,mean,normal,open,,ordinary": "Words in the reason string of a removed ALLOWED_DUPLICATE_GROUPS entry; none is a class token. The SessionBar Switcher story it paired with was removed, so the entry matched nothing.",
+	"test/visual/components.spec.ts :: layout-sidebar--file-browser-panel": "A story id, not a class token. The Sidebar no longer hosts the file browser, so its FileBrowserPanel story was removed; the light-theme check now covers the file browser through file-sidebarfilepanel--expanded-directory.",
+	"src/lib/frontend/components/file/FileViewer.svelte :: lg:hidden": "The file-browser back control is now visible inside the desktop Files pane as well as on phones.",
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: file-viewer-resize-handle": "The old desktop FileViewer split pane and its resize handle were removed. The Files pane gets its divider in 17xt.14.",
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: lg:flex": "The removed FileViewer resize handle supplied this responsive display class; the new Files pane has no resize handle yet.",
+	"src/lib/frontend/components/file/FileViewer.svelte :: text-text-dimmer,text-text-dimmer/50": "FileViewer status text and line numbers moved to text-text-muted on every viewport: dimmer failed the strict axe colour-contrast gate on the preview surface (17xt.13).",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,leading-none,text-sm": {
 		"movedTo": "src/lib/frontend/components/session/GitIdentity.svelte",
 		"requires": "<GitIdentity",
 		"reason": "The identity line's typography moved with its markup into GitIdentity, which now renders project, branch, worktree and the dirty marker as separately truncating parts."
-	}
+	},
+	"acceptance/src/stepHandlers.ts :: switcher": "Step wording, not a class. The phone views switcher row is gone (17xt.11); the steps now say the Views sheet.",
+	"src/lib/frontend/components/layout/SessionBar.stories.ts :: tab": "An ARIA role in getByRole, not a class. The phone views are menuitemradio items in the Views sheet now, not tabs (17xt.11).",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: session-view-label": "The phone views tab row it labelled was removed with its style.css rules; views live in the Views sheet (17xt.11).",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: session-view-shortcut": "Removed with the phone views tab row and its style.css rule. Phones have no keyboard shortcuts to hint (17xt.11).",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: ml-auto,text-text-muted": "Styled the ⌘⇧U shortcut hint in the phone overflow menu. Phones have no keyboard, so the hint was removed, not restyled (17xt.11)."
 }

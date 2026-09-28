@@ -93,6 +93,13 @@ export const SEGMENTED_VARIANTS = {
 		selected: "bg-bg-surface text-text shadow-sm",
 		unselected: "text-text-muted hover:text-text disabled:opacity-50",
 	},
+	/** Compact vertical dock beside desktop panes. */
+	rail: {
+		list: "flex flex-col items-center gap-1 py-1",
+		item: "relative flex h-[32px] w-[32px] items-center justify-center rounded-md text-base cursor-pointer transition-colors",
+		selected: "bg-bg-alt text-text",
+		unselected: "text-text-muted hover:text-text disabled:opacity-50",
+	},
 } as const satisfies Record<string, SegmentedRecipe>;
 
 export type SegmentedVariant = keyof typeof SEGMENTED_VARIANTS;

@@ -50,8 +50,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"the a11y story takes the default args untouched and asserts radiogroup/radio/aria-checked in play(); the control looks the same because the roles are invisible, which is the point",
 	"ui-tabs--announces-tab-semantics | ui-tabs--underline | ui-tabs--underline-is-drawn-by-classes":
 		"all three render the default tab strip: one asserts tablist/tab/aria-selected in play(), and one asserts the selected tab has no inline `style` attribute -- the underline it draws from `border-b-2` alone must be identical to the one the inline style used to draw, so byte equality is the proof that the dead-class fix was zero-diff",
-	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--switcher":
-		"the chevron forces the collapsed bar fully open, so its end frame must be the ordinary open bar that Switcher captures; a pixel difference would mean the forced-open bar drifted from the normal one",
 
 	// Verified legitimate (conduit-test-6owk). ToolItem is a pure dispatcher
 	// that passes each message unchanged to its selected card, and each pair uses

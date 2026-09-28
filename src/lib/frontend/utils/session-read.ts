@@ -11,7 +11,7 @@ import {
 	sessionState,
 } from "../stores/session.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
-import { setSidebarPanel, showToast } from "../stores/ui.svelte.js";
+import { showToast } from "../stores/ui.svelte.js";
 import {
 	markSessionReadRpc,
 	markSessionUnreadRpc,
@@ -19,7 +19,6 @@ import {
 import type { SessionInfo } from "../types.js";
 
 export function backToSessions(): void {
-	setSidebarPanel("sessions");
 	if (previousHistoryEntryIsSessionList()) {
 		window.history.back();
 	} else {

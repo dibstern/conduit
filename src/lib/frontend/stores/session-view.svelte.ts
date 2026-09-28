@@ -16,7 +16,7 @@ export const sessionViewState = $state({
 	/** The chevron's override: the bar stays expanded even at the bottom. Starts
 	 *  true so a fresh load arrives with the full bar on screen. */
 	forcedOpen: true,
-	/** Phone files layer; the transcript stays mounted behind it. */
+	/** Files view, rendered as an overlay on phones and a pane on desktop. */
 	filesOpen: false,
 	filesEverOpened: false,
 

@@ -88,6 +88,7 @@
     StarOff,
     Brain,
     Moon,
+    PanelsTopLeft,
   } from '@lucide/svelte';
 
   // Map of kebab-case icon name to Svelte component.
@@ -189,6 +190,7 @@
     'star': Star,
     'star-off': StarOff,
     'brain': Brain,
+    'panels-top-left': PanelsTopLeft,
   };
 
   let {

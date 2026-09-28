@@ -214,8 +214,9 @@ export function handlePtyCreated(
 	newTabs.set(ptyId, { ptyId, title, exited: false });
 	terminalState.tabs = newTabs;
 	terminalState.activeTabId = ptyId;
-	terminalState.panelOpen = true;
-	terminalState.unreadPtyIds = new Set();
+	// Visibility stays with whoever opened the panel. The confirmation can land
+	// after the user has switched away, or come from another browser, and must
+	// not pull the terminal back over the view they chose.
 
 	// Initialize scrollback (don't overwrite if output arrived before pty_created)
 	if (!scrollbackBuffers.has(ptyId)) {

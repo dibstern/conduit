@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import {
 	requestNewSession,
 	resetSessionCreation,
@@ -14,7 +15,6 @@ const meta = {
 	beforeEach: () => {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
-		uiState.sidebarPanel = "sessions";
 	},
 } satisfies Meta<typeof Sidebar>;
 
@@ -22,14 +22,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-	beforeEach: () => {
-		uiState.sidebarPanel = "sessions";
-	},
-};
-
-export const FileBrowserPanel: Story = {
-	beforeEach: () => {
-		uiState.sidebarPanel = "files";
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getAllByRole("button", { name: "New session" })[0],
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", { name: "File browser" }),
+		).toBeNull();
 	},
 };
 

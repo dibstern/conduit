@@ -156,10 +156,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "remember transcript scroll position",
 		match: /^I remember the transcript scroll position$/,
 		run: async ({ world }) => {
-			const position = await world.page
+			const { position, maxScroll } = await world.page
 				.locator("#messages")
-				.evaluate((el) => el.scrollTop);
-			if (position <= 0)
+				.evaluate((el) => ({
+					position: el.scrollTop,
+					maxScroll: el.scrollHeight - el.clientHeight,
+				}));
+			if (maxScroll <= 0 || position >= maxScroll)
 				throw new Error("transcript did not scroll before switching views");
 			transcriptScrollPositions.set(world.page, position);
 		},
@@ -168,24 +171,27 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "choose session view",
 		match: /^I choose the (Chat|Terminal) session view$/,
 		run: async ({ world, match }) => {
+			await world.page.getByTestId("session-bar-views-button").click();
 			await world.page
-				.getByRole("tab", { name: match[1] ?? "", exact: true })
+				.getByTestId(`session-bar-view-${match[1]?.toLowerCase()}`)
 				.click();
 		},
 	},
 	{
-		name: "remember session views from switcher",
-		match: /^I remember the session views from the switcher$/,
+		name: "remember session views from Views sheet",
+		match: /^I remember the session views from the Views sheet$/,
 		run: async ({ world }) => {
+			await world.page.getByTestId("session-bar-views-button").click();
 			rememberedSessionViews.set(
 				world.page,
 				await world.page
-					.getByTestId("session-bar-views")
-					.getByRole("tab")
-					.evaluateAll((tabs) =>
-						tabs.map((tab) => tab.getAttribute("aria-label") ?? ""),
+					.getByTestId("session-bar-views-sheet")
+					.getByRole("menuitemradio")
+					.evaluateAll((items) =>
+						items.map((item) => item.textContent?.trim() ?? ""),
 					),
 			);
+			await world.page.keyboard.press("Escape");
 		},
 	},
 	{
@@ -200,7 +206,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	},
 	{
 		name: "menu lists same session views",
-		match: /^the menu lists the same session views as the switcher$/,
+		match: /^the menu lists the same session views as the Views sheet$/,
 		run: async ({ world }) => {
 			const expected = rememberedSessionViews.get(world.page);
 			if (!expected?.length)
@@ -215,7 +221,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 				);
 			if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 				throw new Error(
-					`menu views ${JSON.stringify(actual)} differ from switcher ${JSON.stringify(expected)}`,
+					`menu views ${JSON.stringify(actual)} differ from Views sheet ${JSON.stringify(expected)}`,
 				);
 			}
 		},
@@ -250,9 +256,19 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "session view is selected",
 		match: /^the (Chat|Terminal) session view is selected$/,
 		run: async ({ world, match }) => {
+			const expanded =
+				(await world.page.getByTestId("session-bar-views-button").count()) > 0;
+			await world.page
+				.getByTestId(
+					expanded ? "session-bar-views-button" : "session-bar-overflow",
+				)
+				.click();
 			const selected = await world.page
-				.getByRole("tab", { name: match[1] ?? "", exact: true })
-				.getAttribute("aria-selected");
+				.getByTestId(
+					`${expanded ? "session-bar-view" : "overflow-view"}-${match[1]?.toLowerCase()}`,
+				)
+				.getAttribute(expanded ? "aria-checked" : "aria-current");
+			await world.page.keyboard.press("Escape");
 			if (selected !== "true")
 				throw new Error(`${match[1]} view is not selected`);
 		},

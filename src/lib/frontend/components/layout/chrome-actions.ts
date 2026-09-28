@@ -10,7 +10,6 @@
 
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
-import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	beginCreateTab,
 	failCreateTab,
@@ -36,8 +35,9 @@ export function toggleDebugPanel(): void {
 
 /**
  * Show or hide the terminal panel. Opening it with no tabs yet also asks the
- * daemon for one, so the panel is never revealed empty; on a phone it opens
- * maximized because a split terminal and transcript leaves neither usable.
+ * daemon for one, so the panel is never revealed empty. On a phone an open
+ * terminal is the whole view (see ChatLayout), because a split terminal and
+ * transcript leaves neither usable.
  */
 export function toggleTerminal(): void {
 	const wasOpen = terminalState.panelOpen;
@@ -55,9 +55,5 @@ export function toggleTerminal(): void {
 				failCreateTab("Failed to create terminal");
 			});
 		}
-	}
-
-	if (sessionViewState.compact) {
-		window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
 	}
 }
