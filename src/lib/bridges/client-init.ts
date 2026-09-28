@@ -44,6 +44,7 @@ import {
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
+import { recordSessionViewed } from "../handlers/session.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -490,6 +491,9 @@ export const handleClientConnectedEffect = (
 					Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
 				),
 			);
+		if (requestedSessionId) {
+			yield* recordSessionViewed(clientId, requestedSessionId);
+		}
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
 		const sentPermissionIds = new Set<string>();

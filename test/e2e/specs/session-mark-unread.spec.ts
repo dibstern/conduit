@@ -7,6 +7,29 @@ test.use({
 	screenshot: "off",
 });
 
+test("a direct session URL marks it read in another tab and after reload", async ({
+	page,
+	context,
+	relayUrl,
+}) => {
+	await gotoRelay(page, new URL("/", relayUrl).toString());
+	const row = page.locator("#session-list .session-item").first();
+	await row.click();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	const sessionUrl = await row.getAttribute("href");
+	expect(sessionUrl).toBeTruthy();
+	await row.click({ button: "right" });
+	await page.getByTestId("session-ctx-mark-unread").click();
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+
+	const directPage = await context.newPage();
+	await gotoRelay(directPage, new URL(sessionUrl!, relayUrl).toString());
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	await page.reload();
+	await expect(row).toBeVisible();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+});
+
 test("context menu, focused row and transcript toggle read state with undo", async ({
 	page,
 	relayUrl,

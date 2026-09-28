@@ -17,6 +17,7 @@ import {
 	setDefaultVariant,
 	setPermissionMode,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import type { Logger } from "../../../src/lib/logger.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -26,6 +27,7 @@ import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	createMockClientInitDeps,
+	makeMockLogger,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -137,6 +139,7 @@ function makeClientInitEffectLayer(
 	readQuery: ReadQueryEffect,
 	loadPreRenderedHistory: ReturnType<typeof vi.fn>,
 	sessionManagerOverrides: Partial<SessionManagerService> = {},
+	log: Logger = makeMockLogger(),
 ) {
 	const wsHandler = makeMockWebSocketHandler();
 	const sessionManagerService = makeMockSessionManagerService({
@@ -150,11 +153,13 @@ function makeClientInitEffectLayer(
 
 	return {
 		wsHandler,
+		sessionManagerService,
 		layer: Layer.merge(
 			makeTestHandlerLayer({
 				wsHandler,
 				sessionManagerService,
 				orchestrationEngine,
+				log,
 			}),
 			Layer.succeed(ReadQueryEffectTag, readQuery),
 		),
@@ -162,6 +167,73 @@ function makeClientInitEffectLayer(
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
+	it("records a requested session view and re-broadcasts lists", async () => {
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(sessionManagerService.markSessionRead).toHaveBeenCalledWith(
+			"requested-session",
+		);
+		expect(wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "session_viewed",
+			sessionId: "requested-session",
+		});
+		await vi.waitFor(() =>
+			expect(sessionManagerService.sendSessionLists).toHaveBeenCalledTimes(2),
+		);
+		expect(wsHandler.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "session_list" }),
+		);
+	});
+
+	it("does not mark a default session read", async () => {
+		const { sessionManagerService, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("opencode"),
+			vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+		);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1").pipe(Effect.provide(layer)),
+		);
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
+	it("logs a read failure and completes requested-session init", async () => {
+		const log = makeMockLogger();
+		const markSessionRead = vi.fn(() =>
+			Effect.fail(
+				new SessionManagerError({
+					operation: "markSessionRead",
+					cause: "store unavailable",
+				}),
+			),
+		);
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("opencode"),
+			vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			{ markSessionRead },
+			log,
+		);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(log.warn).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"client=client-1 Failed to record read state for requested-session",
+			),
+		);
+		expect(wsHandler.markClientBootstrapped).toHaveBeenCalledWith("client-1");
+	});
+
 	effectIt.effect(
 		"a sessionless daemon attach sends project lists without selecting or creating a session",
 		() =>
