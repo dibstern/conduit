@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Turn activity: 21 ways to compress 181 steps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--brand:#fe3781;--cyan:#00e5ff;--bg:#0d0e11;--alt:#1b1e24;--surf:#141619;--tx:#eceef2;--tx2:#a8afbb;--mut:#838b98;--dim:#676e79;--bd:#2d323b;--bds:#20242b;--chip:#3a414c;--ok:#3fd69a;--err:#f4607a;--warn:#f4b740;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;--sans:"Chakra Petch",system-ui,sans-serif}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--tx);font:13px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+code{font:11.5px var(--mono);background:var(--alt);padding:0 4px;border-radius:3px}
+svg{display:block;width:100%;height:auto}
+.mono{font-family:var(--mono);font-size:11.5px}
+.dimtxt{color:var(--dim)}
+.note{color:var(--mut);font-size:12px;margin:8px 0 0}
+
+/* page */
+.top{max-width:1180px;margin:0 auto;padding:40px 24px 16px}
+.top h1{font-size:28px;margin:0 0 6px}
+.top h1 em{color:var(--brand);font-style:normal}
+.sub{color:var(--tx2);max-width:780px;margin:0 0 6px}
+.insight{margin:16px 0 8px;padding:12px 16px;border:1px solid var(--bd);border-left:3px solid var(--cyan);background:var(--surf);border-radius:8px;max-width:780px;color:var(--tx2)}
+.insight b{color:var(--cyan)}
+.fine{color:var(--dim);font-size:12px;max-width:780px}
+nav.tiers{position:sticky;top:0;z-index:5;background:rgba(13,14,17,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--bds)}
+nav.tiers .in{max-width:1180px;margin:0 auto;padding:8px 24px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+nav.tiers a{color:var(--mut);text-decoration:none;font:11px var(--mono);padding:1px 5px;border-radius:4px}
+nav.tiers a:hover{color:var(--tx);background:var(--alt)}
+nav.tiers .t{color:var(--tx2);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:11px;margin-left:10px}
+main{max-width:1180px;margin:0 auto;padding:0 24px 160px}
+.tier-h{margin:56px 0 0;font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--tx2);border-bottom:1px solid var(--bds);padding-bottom:8px}
+.tier-h span{color:var(--dim);text-transform:none;letter-spacing:0;margin-left:8px}
+.design{display:grid;grid-template-columns:290px minmax(0,1fr);gap:28px;padding:28px 0;border-bottom:1px solid var(--bds)}
+@media (max-width:980px){.design{grid-template-columns:1fr}}
+.meta .num{font:600 12px var(--mono);color:var(--brand)}
+.meta h2{margin:2px 0 8px;font-size:19px;line-height:1.25}
+.meta p{margin:0 0 8px;color:var(--tx2)}
+.meta .trade{color:var(--mut);font-size:12px}
+.meta .trade b{color:var(--tx2);font-weight:600}
+.stage{max-width:720px;width:100%;border:1px solid var(--bds);border-radius:10px;padding:14px;position:relative;min-width:0;outline:none}
+
+/* shared bits */
+.row{display:flex;align-items:center;gap:8px;padding:2px 6px;border-radius:5px;min-height:22px;cursor:pointer;font-size:12px}
+.row:hover,.row.cur{background:var(--alt)}
+button.row{width:100%;text-align:left}
+.row .g{width:14px;text-align:center;flex:none}
+.row .v{color:var(--mut);flex:none;width:52px}
+.row .l{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--tx2);font-family:var(--mono);font-size:11.5px}
+.row .l.msg{color:var(--tx);font-family:var(--sans);font-size:12.5px}
+.row .d,.d{color:var(--dim);font:11px var(--mono);flex:none;white-space:nowrap}
+.sel{outline:1.5px solid var(--brand)!important;outline-offset:1px}
+svg .sel{stroke:#fff!important;stroke-width:2px!important;outline:none!important}
+.scroll{max-height:420px;overflow:auto;padding-right:4px}
+.scroll.short{max-height:260px}
+.nest{padding-left:14px;border-left:1px solid var(--bds);margin:2px 0 6px 13px}
+.hdr{display:flex;align-items:center;flex-wrap:wrap;gap:6px;color:var(--mut);font-size:12px;margin-bottom:8px}
+.hdr b{color:var(--tx);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+.chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--chip);border-radius:999px;padding:1px 8px;font-size:11px;color:var(--tx2);white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;display:inline-block}
+button.chip:hover{border-color:var(--mut);color:var(--tx)}
+.chip.on{background:var(--alt);color:var(--tx);border-color:var(--brand)}
+.chip.v-good{border-color:rgba(63,214,154,.5);color:var(--ok)}
+.chip.v-bad{border-color:rgba(244,96,122,.5);color:var(--err)}
+.chip.v-mid{border-color:rgba(244,183,64,.5);color:var(--warn)}
+.vb{font-size:10.5px;padding:0 6px;border-radius:4px;flex:none;white-space:nowrap;font-family:var(--sans)}
+.vb.good{color:var(--ok);background:rgba(63,214,154,.1)}
+.vb.bad{color:var(--err);background:rgba(244,96,122,.12)}
+.vb.mid{color:var(--warn);background:rgba(244,183,64,.1)}
+.vb.run{color:var(--cyan);background:rgba(0,229,255,.1)}
+.od{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;font-size:9px;flex:none;border:1px solid var(--chip);color:var(--mut)}
+.od.good{color:var(--ok);border-color:rgba(63,214,154,.55)}
+.od.bad{color:var(--err);border-color:rgba(244,96,122,.55)}
+.od.mid{color:var(--warn);border-color:rgba(244,183,64,.55)}
+.od.run{color:var(--cyan);border-color:rgba(0,229,255,.55)}
+.cbar{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--bds);flex:none;gap:1px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.segc{display:inline-flex;border:1px solid var(--chip);border-radius:7px;overflow:hidden}
+.segc button{padding:3px 10px;font-size:11.5px;color:var(--mut)}
+.segc button.on{background:var(--alt);color:var(--tx)}
+.q{flex:1;min-width:160px;background:var(--alt);border:1px solid var(--bd);border-radius:7px;color:var(--tx);padding:4px 10px;font:12px var(--sans)}
+.gap{display:block;width:100%;text-align:left;color:var(--dim);font-size:11px;padding:1px 6px 1px 28px;border-radius:4px}
+.gap:hover{color:var(--tx2);background:var(--alt)}
+.lnk{color:var(--brand);text-decoration:underline dotted;text-underline-offset:3px}
+.caret{color:var(--mut);transition:transform .15s}
+.open>.caret{transform:rotate(90deg)}
+.blink{animation:blink 1.2s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* inspector + tooltip */
+#insp{position:fixed;right:20px;bottom:20px;width:390px;max-width:calc(100vw - 40px);max-height:72vh;overflow:auto;background:var(--surf);border:1px solid var(--bd);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.6);z-index:20;padding:14px 16px}
+#insp .ih{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mut)}
+#insp .ih b{color:var(--tx)}
+#insp .ih .sp{flex:1}
+#insp .il{margin:10px 0;padding:10px;background:var(--bg);border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--tx);white-space:pre-wrap;word-break:break-word}
+#insp .il.msg{font-family:var(--sans);font-size:13px}
+#insp dl{display:grid;grid-template-columns:80px 1fr;gap:4px 10px;margin:0;font-size:12px}
+#insp dt{color:var(--dim)}
+#insp dd{margin:0;color:var(--tx2)}
+#insp .nb{margin-top:10px;border-top:1px solid var(--bds);padding-top:8px}
+#insp .kb{margin-top:8px;font-size:11px}
+.kbd{font:10px var(--mono);border:1px solid var(--chip);border-radius:4px;padding:0 4px;color:var(--mut)}
+.ib{border:1px solid var(--chip);border-radius:6px;padding:1px 8px;font-size:11px}
+.ib:hover{background:var(--alt)}
+#tip{position:fixed;pointer-events:none;z-index:30;background:#000;border:1px solid var(--bd);border-radius:6px;padding:5px 8px;font-size:11px;max-width:360px;color:var(--tx2)}
+#tip b{color:var(--tx)}
+#tip .mono{display:block;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* today */
+.cur-bar{display:flex;gap:1px;height:10px;border-radius:3px;overflow:hidden;margin:6px 0}
+.cur-bar span{min-width:0;opacity:.85;cursor:pointer}
+.cur-list{position:relative;margin-top:8px;max-height:210px;overflow:hidden}
+.fade{position:absolute;inset:auto 0 0 0;height:80px;background:linear-gradient(transparent,var(--bg));display:flex;align-items:flex-end;justify-content:center;color:var(--mut);font-size:12px;pointer-events:none}
+
+/* B1 */
+.acc{border-bottom:1px solid var(--bds)}
+.acc-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 6px;border-radius:6px}
+.acc-head:hover{background:var(--alt)}
+.acc-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-m{color:var(--dim);font-size:11px;white-space:nowrap}
+/* B3 */
+.seg{padding:8px 0 4px;border-bottom:1px solid var(--bds)}
+.seg-h{display:flex;gap:10px;align-items:baseline;font-size:13.5px;color:var(--tx);cursor:pointer}
+.seg-h .d{margin-left:auto}
+/* B5 */
+.tl-bands{position:relative;height:20px;margin-bottom:3px}
+.tl-band{position:absolute;top:0;height:18px;border-radius:4px;background:var(--alt);border:1px solid var(--bd);font:10px var(--mono);color:var(--mut);overflow:hidden}
+.tl-band:hover{color:var(--tx);border-color:var(--mut)}
+.tl-area{position:relative;cursor:crosshair;padding:4px 0;background:var(--surf);border-radius:5px;touch-action:none;user-select:none}
+.tl-lane{position:relative;height:24px}
+.tl-lane.bg{height:14px;margin-top:4px}
+.tk{position:absolute;top:0;bottom:0;border-radius:1px;cursor:pointer}
+.bgk{background:repeating-linear-gradient(90deg,var(--cyan) 0 3px,transparent 3px 5px);top:2px;bottom:2px}
+.bgnote{position:absolute;left:6px;top:0;font-size:10px;line-height:14px;color:var(--cyan);opacity:.8}
+.brush{position:absolute;top:0;bottom:0;background:rgba(254,55,129,.13);border:1px solid var(--brand);border-radius:3px;pointer-events:none}
+.tl-axis{position:relative;height:16px;font:10px var(--mono);color:var(--dim);margin:3px 0 8px}
+.tl-axis span{position:absolute;transform:translateX(-50%)}
+.tl-axis span:first-child{transform:none}
+/* B6 */
+.card{background:var(--surf);border:1px solid var(--bd);border-radius:10px;padding:14px}
+.card-h{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;margin-bottom:10px}
+.outs{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:6px}
+.outs li{display:flex;gap:8px;align-items:center}
+.refs{margin-left:auto;display:flex;gap:6px;font:11px var(--mono)}
+.kv{display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;border-top:1px solid var(--bds);padding-top:6px;margin-top:6px}
+.kv>span{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}
+details.all{margin-top:10px;border-top:1px solid var(--bds);padding-top:8px}
+details.all summary{cursor:pointer;color:var(--mut)}
+/* B7 */
+.tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.tbl th{position:sticky;top:0;background:var(--bg);text-align:left;color:var(--mut);font-weight:500;padding:3px 6px;cursor:pointer;border-bottom:1px solid var(--bd);white-space:nowrap}
+.tbl th::after{content:attr(data-s);margin-left:4px;color:var(--brand)}
+.tbl td{padding:1px 6px;border-bottom:1px solid var(--bds);white-space:nowrap}
+.tbl td.n{color:var(--dim);font-family:var(--mono);font-size:10.5px}
+.tbl td.lab{max-width:330px;overflow:hidden;text-overflow:ellipsis;color:var(--tx2)}
+.tbl tr{cursor:pointer}
+.tbl tr:hover td{background:var(--alt)}
+.mb{display:inline-block;height:5px;border-radius:2px;margin-right:6px;vertical-align:middle;opacity:.8}
+/* M1 */
+.spk{display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid var(--bds)}
+.spk-t{display:flex;gap:8px;align-items:center;width:124px;flex:none;text-align:left;font-size:12px}
+.spk-t:hover{color:var(--brand)}
+.spk-b{flex:1;display:flex;align-items:flex-end;gap:1px;height:28px;min-width:0;overflow:hidden}
+.spk-b span{width:3px;flex:none;border-radius:1px;cursor:pointer}
+.spk-b span:hover{filter:brightness(1.5)}
+.spk .d{width:52px;text-align:right}
+/* M2 */
+.rr{display:flex;align-items:stretch;min-height:22px}
+.rr>.row{flex:1;min-width:0}
+.gut{display:flex;flex:none}
+.ln{width:14px;position:relative;color:#4a525e}
+.ln.on::before{content:'';position:absolute;left:6px;top:0;bottom:0;width:2px;background:currentColor}
+.ln.dash::before{background:repeating-linear-gradient(currentColor 0 3px,transparent 3px 6px)}
+.ln.l1{color:#b48cff}
+.ln.l1.cx,.ln.l2{color:var(--cyan)}
+.nd{position:absolute;left:1px;top:50%;margin-top:-6px;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg);z-index:1}
+button.rr{width:100%;text-align:left}
+.grp-t{padding:3px 6px;color:var(--dim);font-size:11px;align-self:center}
+button.rr:hover .grp-t{color:var(--tx2)}
+/* M3 */
+.score{display:flex;align-items:stretch;gap:6px;overflow-x:auto;padding:4px 0 10px}
+.vcard{flex:none;width:132px;text-align:left;border:1px solid var(--bd);border-top:3px solid var(--mut);border-radius:8px;padding:8px;background:var(--surf);display:flex;flex-direction:column;gap:4px}
+.vcard.good{border-top-color:var(--ok)}
+.vcard.bad{border-top-color:var(--err)}
+.vcard.mid{border-top-color:var(--warn)}
+.vcard.run{border-top-color:var(--cyan)}
+.vn{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.vt{font-size:12.5px;line-height:1.3;flex:1}
+.conn{flex:none;align-self:center;display:flex;flex-direction:column;align-items:center;font-size:10px;color:var(--dim);padding:4px 6px;border:1px dashed var(--chip);border-radius:6px}
+.conn.on,.conn:hover{color:var(--tx);border-color:var(--brand)}
+/* M4 */
+.waf{display:flex;flex-wrap:wrap;gap:3px}
+.cell{width:17px;height:17px;border-radius:3px;background:color-mix(in srgb,var(--c) 16%,transparent);position:relative;cursor:pointer;transition:opacity .15s}
+.cell::after{content:'';position:absolute;inset:calc((1 - var(--f)) * 7px);background:var(--c);border-radius:2px}
+.cell.dim{opacity:.12}
+.waf-ch{width:17px;height:17px;display:grid;place-items:center;font:600 10px var(--mono);color:var(--brand);border:1px solid var(--brand);border-radius:3px;margin-left:8px}
+.waf-ch:first-child{margin-left:0}
+/* M5 */
+.sw-r{display:flex;align-items:center;gap:8px;height:22px}
+.sw-n{width:74px;flex:none;font-size:11px;color:var(--mut);text-align:right}
+.sw-t{position:relative;flex:1;height:14px;background:var(--surf);border-radius:3px}
+.sw-b{position:absolute;top:1px;bottom:1px;border-radius:1px;cursor:pointer;opacity:.9}
+.sw-b.bg{background:repeating-linear-gradient(90deg,var(--cyan) 0 5px,rgba(0,229,255,.35) 5px 8px)!important}
+.sw-brk{position:absolute;top:-5px;bottom:-5px;width:3%;background:var(--bg);border-left:1px dashed var(--chip);border-right:1px dashed var(--chip)}
+.sw-ax{position:relative;flex:1;height:16px;font:10px var(--mono);color:var(--dim)}
+.sw-ax span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+/* M6 */
+.zr{width:120px;accent-color:var(--brand)}
+.sent{font-size:16px;line-height:1.65;margin:6px 0}
+.zc{display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:5px 6px;border-radius:6px}
+.zc:hover{background:var(--alt)}
+.zc-t{flex:1;min-width:0}
+/* M7 */
+.mx-r{display:grid;grid-template-columns:128px repeat(4,1fr);gap:3px;margin-bottom:3px}
+.mx-h span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;text-align:center}
+.mx-c{display:flex;gap:6px;align-items:center;font-size:12px}
+.mx-cell{border-radius:5px;padding:3px;font:11px var(--mono);color:var(--tx);border:1px solid transparent}
+.mx-cell:hover:not(:disabled){border-color:var(--mut)}
+.mx-cell:disabled{color:var(--dim);cursor:default}
+.mx-tot span{text-align:center;font:10.5px var(--mono);color:var(--mut)}
+/* X1 */
+.sub text{font:10.5px var(--sans);fill:var(--tx2)}
+.sub .st{cursor:pointer}
+.sub .st:hover text{fill:#fff}
+.sub circle[data-i]{cursor:pointer}
+/* X2 */
+.ecg{background:#020a05;border-radius:8px;border:1px solid #0c3a1c;overflow:hidden;font-family:var(--mono)}
+.ecg-top{display:flex;gap:20px;padding:8px 12px;color:#39ff88;font-size:10px;text-shadow:0 0 6px rgba(57,255,136,.6);flex-wrap:wrap;align-items:center}
+.ecg-top b{font-size:19px;display:block;line-height:1.1}
+.ecg-sc{overflow-x:auto;position:relative}
+.ecg-sc canvas{display:block;cursor:crosshair}
+.ecg-cur{position:absolute;top:0;bottom:0;width:1px;background:rgba(57,255,136,.8);box-shadow:0 0 8px #39ff88;pointer-events:none}
+.ecg-read{padding:6px 12px;color:#39ff88;font-size:11px;border-top:1px solid #0c3a1c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ecg button{color:#39ff88;border:1px solid #1d6b3a;border-radius:4px;padding:2px 8px;margin-left:auto;font:11px var(--mono)}
+/* X3 */
+.clock{max-width:440px;margin:0 auto}
+.clock .ck-l{font:10px var(--mono);fill:var(--dim);text-anchor:middle;dominant-baseline:middle}
+.clock [data-i],.clock .chr{cursor:pointer}
+.clock .ctr{text-anchor:middle;fill:var(--tx);font-family:var(--sans)}
+/* X4 */
+.script{background:#f3efe4;color:#1a1a1a;font:13px/1.45 "Courier Prime","Courier New",monospace;padding:28px 44px;border-radius:4px;max-height:520px}
+.sc-h{font-weight:700;margin:22px 0 8px;text-transform:uppercase}
+.sc-h:first-child{margin-top:0}
+.sc-a{display:block;text-align:left;font:inherit;color:#444;margin:6px 0}
+.sc-a:hover{color:#000;text-decoration:underline}
+.sc-c{margin:12px 0 0 38%;font-weight:700}
+.sc-d{margin:0 14% 8px 22%;cursor:pointer}
+.sc-t{text-align:right;margin:10px 0 2px;cursor:pointer;font-weight:700}
+.sc-r{text-align:right;margin:0 0 8px;font-style:italic}
+.sc-r.bad{color:#b0102c}
+.sc-r.good{color:#0a7a4a}
+.script .row:hover{background:#e6e0d0}
+.script .nest{border-color:#c9c1ac}
+.script .row .l,.script .row .l.msg{color:#222}
+.script .row .d,.script .row .v{color:#666}
+/* X5 */
+.rcpt-wrap{display:flex;justify-content:center;padding:6px 0 18px}
+.rcpt{width:40ch;background:#f6f4ee;color:#141414;font:12px/1.5 var(--mono);padding:18px 1.5ch 20px;position:relative;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.rcpt::after{content:'';position:absolute;left:0;right:0;bottom:-8px;height:8px;background:linear-gradient(135deg,#f6f4ee 4px,transparent 0) 0 0/8px 8px,linear-gradient(-135deg,#f6f4ee 4px,transparent 0) 0 0/8px 8px}
+.rc-c{text-align:center}
+.rc-hr{border-top:1px dashed #555;margin:8px 0}
+.rc-l,.rc-i,.rc-s,.rc-t{white-space:pre;display:block;width:100%;text-align:left;font:inherit;color:inherit}
+.rc-l:hover,.rc-i:hover{background:#e7e2d4}
+.rc-s{color:#666;font-size:10.5px}
+.rc-items{font-size:10.5px;color:#333;margin:2px 0 6px}
+.rc-i{cursor:pointer;font-size:10.5px}
+.rc-t{font-weight:700;font-size:14px}
+.bc{display:flex;align-items:stretch;justify-content:center;height:34px;gap:1px;margin:3px 0}
+.bc span{background:#141414;cursor:pointer;flex:none}
+.bc span.th{opacity:.4}
+.bc span:hover,.bc span.sel{background:var(--brand);outline:none!important;opacity:1}
+/* X6 */
+.tower text{font:10.5px var(--sans);fill:var(--tx2)}
+.tower .dimt{fill:var(--dim);font-family:var(--mono);font-size:9.5px}
+.tower .fl{cursor:pointer}
+.tower .fl:hover .slab{fill:#1b1e24}
+/* X7 */
+.vcr{background:#000;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.term{height:300px;overflow:auto;padding:10px 12px;font:11.5px/1.55 var(--mono);color:#cfd6df}
+.term>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.term>div:hover{background:#111}
+.t-think{color:#8a6a2a}.t-say{color:#fff}.t-edit{color:var(--brand)}.t-bg{color:var(--cyan)}.t-dur{color:#555}
+.t-ch{color:var(--brand);margin:6px 0 2px}
+.t-res.good{color:var(--ok)}.t-res.bad{color:var(--err)}.t-res.mid{color:var(--warn)}
+.t-cur{display:inline-block;width:7px;height:13px;background:#cfd6df;animation:blink 1s steps(1) infinite;vertical-align:middle}
+.vcr-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--bds);background:var(--surf)}
+.vb-btn{border:1px solid var(--chip);border-radius:5px;padding:2px 9px;font:12px var(--mono)}
+.vb-btn:hover{background:var(--alt)}
+.tc{font:12px var(--mono);color:var(--cyan);margin-left:auto}
+.scrub{width:100%;accent-color:var(--brand)}
+.marks{position:relative;height:14px;font:9px var(--mono);color:var(--dim);margin:0 18px}
+.marks span{position:absolute;transform:translateX(-50%)}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Turn activity: <em>21 ways</em> to compress 181 steps</h1>
+  <p class="sub">One real turn: <b id="st-line"></b>. Seven best-practice designs, seven in between, seven off the wall. Every one can still get down to a single step: <b>click any step, anywhere, to open the same inspector</b> (then use <span class="kbd">←</span> <span class="kbd">→</span>).</p>
+  <div class="insight" id="insight"></div>
+  <p class="fine">Timings, order, messages and file paths come from the sample. Command text was cut to its first letter after <code>cd …/conduit;</code>, so commands are <b>reconstructed from truncated labels</b>. Chapter titles and results are hand-written, standing in for a summariser. Wall-clock start times assume the untracked time between steps is spread evenly.</p>
+</header>
+<nav class="tiers"><div class="in" id="nav"></div></nav>
+<main id="main"></main>
+<aside id="insp" hidden></aside>
+<div id="tip" hidden></div>
+
+<!-- k code ms [text]. k: T thought, R ran, M message, E edited, W wrote. code: first letter the sample kept after `cd …/conduit;` -->
+<script type="text/plain" id="raw">
+R t 24 tail -c 3000 /private/tmp/claude-501/…/tasks/e2e-run.output
+T - 1738
+R g 1283
+T - 1364
+R l 1204
+T - 1675
+R s 1427
+T - 1906
+R s 1320
+T - 2034
+T - 1280
+R s 44
+T - 1534
+R r 42
+R s 91
+T - 4281
+R r 74
+T - 1206
+R r 33
+T - 1800
+T - 713
+R r 40
+R p 1689
+T - 1402
+M - 5 Now rerunning just the failed specs.
+R r 32
+R p 107936
+T - 548
+M - 3 Worse, not better. Checking why.
+R s 1467
+T - 885
+R h 21
+T - 3302
+T - 725
+R r 49
+R s 21
+T - 1599
+R s 1328
+R s 19
+T - 3838
+T - 1459
+R r 1567
+R s 21
+T - 2436
+R r 44
+T - 2530
+R s 46
+R r 36
+R s 1352
+R r 659
+T - 1037
+R r 20
+R r 41
+T - 1995
+M - 10 Adding a `projectSlug` option to the relay socket handler: direct connections announce their project before the relay b…
+R p 1730
+T - 2200
+R r 87
+R r 23
+R s 28
+T - 2624
+E - 11 test/unit/server/effect-ws-handler.test.ts
+R n 9999
+T - 834
+M - 4 Unit tests green (599). Rerunning the failing e2e specs.
+R p 47182
+T - 852
+M - 6 Down to 12. Looking at each group.
+R L 1254
+T - 5764
+R s 29
+T - 1958
+R s 40
+T - 4449
+R p 1333
+R s 50
+R s 141
+T - 2358
+R r 24
+R s 28
+T - 2686
+T - 649
+R s 24
+T - 1133
+R d 1277
+R l 45
+R f 1249
+T - 3576
+R r 1275
+R s 32
+T - 1154
+R s 18
+T - 3520
+R f 1382
+T - 2860
+M - 8 The permission cards and Allow buttons are on the page at failure time, so this looks like a timing flake, not missing …
+R p 48820
+T - 1203
+R s 1225
+R s 1205
+T - 4333
+R f 1382
+T - 6059
+M - 7 The fork test ends with all three messages in the original session. The page switched to the fork's URL but then drifte…
+R r 40
+R s 23
+T - 6292
+M - 8 Adding temporary debug logging to the fork spec to see the URL and socket traffic around the fork.
+R r 44
+T - 5450
+R p 3524
+R s 1282
+R p 39000
+T - 5364
+T - 1426
+R g 12284
+T - 2043
+R x 39623 cd /tmp/conduit-head && pnpm exec playwr…
+T - 1219
+M - 10 Baseline result: the same 7 fail on HEAD without my changes. They're pre-existing, not caused by 17.5. Quick chec…
+R x 1187 sed 's/\x1b\[[0-9;]*m//g' /tmp/head-e2e.…
+T - 801
+M - 8 Identical failures. I'll file those as a separate bug and move on. Removing the debug logging and the temporary worktre…
+R p 1737
+T - 1333
+R l 43
+T - 1485
+M - 7 node_modules intact. Filing the pre-existing failures, then running check and the full e2e suite once more, since the h…
+R b 9219
+R p 120169
+T - 1172
+M - 12 The harness change broke debug-panel (7) and terminal (1). Likely they append `&feats=debug` to the URL, which …
+R r 1329
+R s 1314
+T - 2123
+R p 20220
+T - 692
+M - 7 Debug panel fixed. Terminal tab-switch fails 1 of 2 runs, so it's flaky. Checking whether routing plays a part:
+R s 26
+T - 1672
+M - 11 Unrelated to routing (xterm render timing), and it passed in the first full run. Noting it on the bug and committing 17…
+R b 1610
+T - 2324
+R F 1636
+R F 1649
+R b 1728
+T - 1184
+M - 44 17.5 committed (`1da6b4c2`) and closed. Starting 17.6: on phones the list is a route, not a drawer. First, scopin…
+R b 1592
+T - 5570
+R r 45
+R s 36
+T - 1462
+R r 1280
+R r 26
+T - 1294
+R b 1522
+R b 1794
+T - 9360
+M - 10 Design check before delegating. On a phone, the file browser and terminal also live in the drawer today, so I need to s…
+R s 44
+T - 3321
+R l 1406
+T - 4825
+R r 34
+T - 17631
+R r 42
+R s 38
+T - 3634
+T - 1185
+R x 1194 mktemp -d "${TMPDIR:-/tmp}/codex-impl.XX…
+T - 11257
+M - 36 Starting vik1.17.6 (phone: the session list becomes the `/` route instead of a slide-out drawer). Checking two pieces o…
+R c 57
+R c 30
+T - 1201
+M - 12 Default I'm taking (simplest, noting it rather than asking): on a phone, opening a file or terminal from the list scr…
+W - 1095 /var/folders/w8/…/codex-impl.Heqc1r/prompt.md
+R A 1831008
+R A 1843406
+T - 784
+</script>
+
+<script>
+/* ---------- data ---------- */
+const CAT = {
+  think:{c:'#f4b740',n:'Thinking'}, read:{c:'#8b95a7',n:'Read'}, search:{c:'#5aa9f5',n:'Search'},
+  check:{c:'#2bc4b0',n:'Check'}, test:{c:'#3fd69a',n:'Test run'}, git:{c:'#b48cff',n:'Git'},
+  track:{c:'#d97757',n:'Tracker'}, delegate:{c:'#00e5ff',n:'Delegate'}, say:{c:'#eceef2',n:'Message'},
+  edit:{c:'#fe3781',n:'Edit'},
+};
+const ORDER = ['say','edit','test','check','search','read','git','track','delegate','think'];
+const GLYPH = {think:'◌',read:'▤',search:'⌕',check:'✓',test:'▶',git:'⎇',track:'◆',delegate:'⇉',say:'¶',edit:'✎'};
+const VERB = {T:'Thought',R:'Ran',M:'Said',E:'Edited',W:'Wrote'};
+const PL = {read:['read','reads'],search:['search','searches'],check:['check','checks'],test:['test run','test runs'],git:['git op','git ops'],track:['tracker op','tracker ops'],delegate:['hand-off','hand-offs'],edit:['edit','edits'],say:['message','messages'],think:['thought','thoughts']};
+const OG = {good:'✓',bad:'✕',mid:'~',run:'◷',none:'·'};
+
+// Reconstructed command pools, keyed by the one letter the sample kept.
+const CMD = {
+  t:['read'], x:[null],
+  r:['search',['rg -n "projectSlug" src/lib','rg -n "handleUpgrade|onConnection" src/lib/server','rg -n "/p/\\$\\{slug\\}" src/lib/frontend','rg -ln "feats=" test/e2e','rg -n "forkSession" src/lib','rg -n "waitForURL" test/e2e/helpers','rg -n "permission-card" test/e2e','rg -n "wsUrl" acceptance test/e2e','rg -n "drawer" src/lib/frontend/components','rg -n "isPhone|matchMedia" src/lib/frontend']],
+  s:['read',["sed -n '1,120p' src/lib/server/effect-ws-handler.ts","sed -n '80,160p' src/lib/relay/relay-stack.ts","sed -n '40,110p' test/e2e/helpers/harness.ts","sed -n '1,80p' test/e2e/fork.spec.ts","sed -n '200,260p' src/lib/server/router.ts","sed -n '1,60p' test/e2e/permissions.spec.ts","sed -n '120,190p' src/lib/frontend/routes/+layout.svelte","sed -n '1,90p' src/lib/frontend/components/SessionDrawer.svelte"]],
+  l:['read',['ls test/e2e','ls /tmp/conduit-head/node_modules | head','ls src/lib/frontend/components/layout']],
+  f:['search',['fd -e png test-results','fd trace.zip test-results','fd -e webm test-results']],
+  h:['read',['head -c 4000 test-results/fork-*/error-context.md']],
+  L:['read',['sort -u /tmp/e2e-failures.txt']],
+  d:['read',['git diff --stat']],
+  g:['git',['git status --short','git log --oneline -5']],
+  n:['test',['pnpm test:unit']],
+  F:['git',['FORCE_COLOR=0 git add -A']],
+  b:['track',['bd show vik1.17.5','bd note vik1.17.5 …','bd show vik1.17.6','bd dep list vik1.17.6','bd update vik1.17.6 --claim','bd show vik1.17']],
+  c:['read',['cd …/conduit/src && rg -n "drawer" lib/frontend','cd …/conduit/src && sed -n \'1,60p\' lib/frontend/routes/+page.svelte']],
+  A:['delegate',[]],
+};
+const OVR = {
+  27:'pnpm exec playwright test --last-failed', 63:'pnpm test:unit', 66:'pnpm exec playwright test --last-failed',
+  97:'pnpm exec playwright test permissions.spec.ts fork.spec.ts', 113:'pnpm exec playwright test fork.spec.ts   # with debug logging',
+  116:'git worktree add /tmp/conduit-head HEAD', 129:'bd create "Pre-existing e2e failures on HEAD (7)"', 130:'pnpm test:e2e',
+  136:'pnpm exec playwright test debug-panel terminal --repeat-each=2', 142:'bd note … "terminal tab-switch flaky (xterm render timing)"',
+  144:'FORCE_COLOR=0 git add -A', 145:'FORCE_COLOR=0 git commit -m "vik1.17.5: …"', 146:'bd close vik1.17.5',
+  179:'ART="/var/folders/…" codex exec -m gpt-6-sol … (run 1)', 180:'ART="/var/folders/…" codex exec -m gpt-6-sol … (run 2)',
+};
+const XCAT = {118:'test',121:'read',171:'delegate'};
+// Results are read off the agent's next message; nothing here adds counts it didn't state.
+const RES = {
+  27:['bad','Worse, not better'], 63:['good','599 unit tests green'], 66:['mid','Down to 12 failing'],
+  97:['bad','Fork spec drifts back to the original session'], 113:['mid','Led to a baseline run on HEAD'],
+  118:['good','Same 7 fail on HEAD: pre-existing'], 130:['bad','Broke debug-panel (7) and terminal (1)'],
+  136:['good','Debug panel fixed; terminal flaky 1 in 2'],
+};
+const VER = [27,63,66,97,113,118,130,136];
+const VNAME = {27:'E2E · failed specs',63:'Unit suite',66:'E2E · failed specs',97:'E2E · permissions',113:'E2E · fork + logging',118:'E2E · on HEAD',130:'E2E · full suite',136:'E2E · debug + terminal'};
+const CH = [
+  {a:1,b:24,s:'Orient',t:'Orient: read the failures and the routing code',o:'none'},
+  {a:25,b:54,s:'Rerun: worse',t:'Rerun failed specs: worse, dig in',o:'bad'},
+  {a:55,b:64,s:'projectSlug fix',t:'Add projectSlug to the relay socket handler; 599 unit green',o:'good'},
+  {a:65,b:95,s:'Triage the 12',t:'E2E down to 12; triage by group',o:'mid'},
+  {a:96,b:103,s:'Flake?',t:'Permission failures look like a timing flake',o:'mid'},
+  {a:104,b:119,s:'Fork drift',t:'Fork test drift; debug logging; baseline worktree on HEAD',o:'mid'},
+  {a:120,b:127,s:'Pre-existing',t:'Same 7 fail on HEAD: pre-existing',o:'good'},
+  {a:128,b:147,s:'Commit 17.5',t:'Full e2e, fix harness breakage, commit 17.5 (1da6b4c2)',o:'good'},
+  {a:148,b:172,s:'Scope 17.6',t:'Start 17.6: scope phone list-as-route',o:'none'},
+  {a:173,b:181,s:'Delegate',t:'Delegate 17.6 to Codex: 2 background runs',o:'run'},
+];
+const WALL = 17*60000 + 1000;
+
+const cyc = {};
+const STEPS = document.getElementById('raw').textContent.trim().split('\n').map((line, idx) => {
+  const [, k, code, msS, text] = line.match(/^(\S) (\S) (\d+) ?(.*)$/);
+  const i = idx + 1, ms = +msS;
+  let cat, label = text, recon = false;
+  if (k === 'T') { cat = 'think'; label = ''; }
+  else if (k === 'M') cat = 'say';
+  else if (k === 'E' || k === 'W') cat = 'edit';
+  else if (code === 'x') cat = XCAT[i];
+  else if (code === 'p') cat = ms > 15000 ? 'test' : 'check';
+  else cat = CMD[code][0];
+  if (k === 'R' && !text) {
+    recon = true;
+    const pool = code === 'p' ? (cat === 'test' ? ['pnpm exec playwright test …'] : ['pnpm check','pnpm lint']) : CMD[code][1];
+    const n = (cyc[code + cat] = (cyc[code + cat] ?? -1) + 1);
+    label = OVR[i] ?? pool[n % pool.length];
+  }
+  return { i, k, code, cat, label, ms, recon, bg: code === 'A', res: RES[i] };
+});
+const FG = STEPS.filter(s => !s.bg);
+const FG_SUM = FG.reduce((a, s) => a + s.ms, 0);
+const GAP = Math.max(0, (WALL - FG_SUM) / FG.length);
+{ let cur = 0; for (const s of STEPS) { s.t = cur; s.end = cur + s.ms; if (!s.bg) cur += s.ms + GAP; } }
+const BG_END = Math.max(...STEPS.map(s => s.end));
+const MXL = Math.log10(Math.max(...FG.map(s => s.ms)));
+const amp = s => Math.min(1, Math.log10(s.ms + 1) / MXL);
+CH.forEach((c, ci) => {
+  c.n = ci + 1; c.steps = STEPS.slice(c.a - 1, c.b);
+  c.t0 = c.steps[0].t; c.t1 = ci < CH.length - 1 ? STEPS[CH[ci + 1].a - 1].t : WALL; c.dur = c.t1 - c.t0;
+  c.steps.forEach(s => s.ch = ci);
+});
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k === 'html') el.innerHTML = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+}
+function S(tag, attrs, ...kids) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null) el.setAttribute(k, v);
+  for (const c of kids.flat()) if (c != null) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+}
+const fmt = ms => ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s` : `${Math.floor(ms / 60000)}m ${Math.round(ms % 60000 / 1000)}s`;
+const clk = ms => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const counts = steps => steps.reduce((m, s) => (m[s.cat] = (m[s.cat] || 0) + 1, m), {});
+const timeIn = (steps, cat) => steps.filter(s => s.cat === cat).reduce((a, s) => a + s.ms, 0);
+const pl = (k, n) => `${n} ${PL[k][n === 1 ? 0 : 1]}`;
+const phrase = steps => { const c = counts(steps); return ORDER.filter(k => c[k] && k !== 'think').map(k => pl(k, c[k])).concat(c.think ? [`thought ${fmt(timeIn(steps, 'think'))}`] : []).join(' · '); };
+const span = steps => steps.at(-1).end - steps[0].t;
+const isKey = s => ['say','edit','test','delegate'].includes(s.cat) || s.code === 'F' || (s.cat !== 'think' && s.ms >= 5000);
+const badge = r => h('span', {class: `vb ${r[0]}`}, r[1]);
+const outDot = o => h('span', {class: `od ${o}`}, OG[o]);
+const catBar = (steps, w) => { const c = counts(steps); return h('span', {class: 'cbar', style: `width:${w}px`}, ORDER.filter(k => c[k]).map(k => h('span', {style: `flex:${c[k]};background:${CAT[k].c}`}))); };
+const stepRow = s => h('div', {class: 'row', 'data-i': s.i},
+  h('span', {class: 'g', style: `color:${CAT[s.cat].c}`}, GLYPH[s.cat]),
+  h('span', {class: 'v'}, VERB[s.k]),
+  h('span', {class: 'l' + (s.k === 'M' ? ' msg' : '')}, s.label),
+  s.res && badge(s.res),
+  h('span', {class: 'd'}, s.bg ? `${fmt(s.ms)} bg` : fmt(s.ms)));
+const chList = (box, c) => box.replaceChildren(h('div', {class: 'hdr'}, h('b', {}, `${c.n}. ${c.t}`), `· ${c.steps.length} steps · ${fmt(c.dur)}`), ...c.steps.map(stepRow));
+
+const DESIGNS = [];
+const reg = (id, tier, name, why, trade, render) => DESIGNS.push({id, tier, name, why, trade, render});
+
+/* ---------- today ---------- */
+function renderToday(el) {
+  const w = s => Math.max(300, s.ms);
+  const tot = STEPS.reduce((a, s) => a + w(s), 0);
+  const bgShare = STEPS.filter(s => s.bg).reduce((a, s) => a + w(s), 0) / tot;
+  el.append(
+    h('div', {class: 'hdr'}, h('b', {}, 'Worked for 17m 1s'), '· 2 edits · 93 commands · 181 steps'),
+    h('div', {class: 'cur-bar'}, STEPS.map(s => h('span', {'data-i': s.i, style: `flex-grow:${w(s)};background:${CAT[s.cat].c}`}))),
+    h('p', {class: 'note'}, `The two background Codex runs take `, h('b', {style: 'color:var(--cyan)'}, `${Math.round(bgShare * 100)}%`), ` of this bar. The other 179 steps share the ${Math.round((1 - bgShare) * 100)}% on the left.`),
+    h('div', {class: 'cur-list'}, STEPS.slice(0, 12).map(stepRow), h('div', {class: 'fade'}, '… 169 more rows, one per step')));
+  return bgShare;
+}
+
+/* ---------- best practice ---------- */
+reg('B1', 'best', 'Chapter accordion',
+  'Ten chapters, each a one-line summary with an outcome mark, a step count and a time. Open one to see its raw steps. This is how GitHub Actions and Cursor do it.',
+  '<b>Cost:</b> needs a summariser, either a cheap model call per chapter or a heuristic that splits on the agent\'s messages. The titles here are hand-written stand-ins.',
+  el => {
+    el.append(h('div', {class: 'hdr'}, h('b', {}, 'Worked for 17m 1s'), `· ${CH.length} chapters · 181 steps`));
+    CH.forEach(c => {
+      const body = h('div', {class: 'nest', hidden: true}, c.steps.map(stepRow));
+      const head = h('button', {class: 'acc-head', onclick: () => { body.hidden = !body.hidden; head.classList.toggle('open'); }},
+        h('span', {class: 'caret'}, '▸'), outDot(c.o), h('span', {class: 'acc-t'}, c.t),
+        h('span', {class: 'acc-m'}, `${c.steps.length} steps`), catBar(c.steps, 56), h('span', {class: 'd'}, fmt(c.dur)));
+      el.append(h('div', {class: 'acc'}, head, body));
+    });
+  });
+
+reg('B2', 'best', 'Run-length collapse',
+  'Messages, edits, test runs and hand-offs keep their own rows. Every run of reads, searches and thoughts between them folds into one "Explored" row. Claude Code and Copilot do this.',
+  '<b>Cost:</b> almost free to build, and no model needed. It\'s still one column, so a long turn is still a long list, just a shorter one.',
+  el => {
+    const anchor = s => ['say','edit','test','delegate'].includes(s.cat) || s.code === 'F';
+    const items = []; let run = [];
+    const flush = () => { if (run.length) items.push(run); run = []; };
+    STEPS.forEach(s => { if (anchor(s)) { flush(); items.push(s); } else run.push(s); });
+    flush();
+    const box = h('div', {class: 'scroll'});
+    for (const it of items) {
+      if (!Array.isArray(it) || it.length === 1) { box.append(stepRow(Array.isArray(it) ? it[0] : it)); continue; }
+      const inner = h('div', {class: 'nest', hidden: true}, it.map(stepRow));
+      const head = h('button', {class: 'row', onclick: () => { inner.hidden = !inner.hidden; head.classList.toggle('open'); }},
+        h('span', {class: 'g caret'}, '▸'), h('span', {class: 'v'}, 'Explored'),
+        h('span', {class: 'l', style: 'font-family:var(--sans);font-size:12px;color:var(--mut)'}, phrase(it)),
+        catBar(it, 44), h('span', {class: 'd'}, fmt(span(it))));
+      box.append(head, inner);
+    }
+    el.append(h('div', {class: 'hdr'}, h('b', {}, 'Worked for 17m 1s'), `· 181 steps folded into ${items.length} rows`), box);
+  });
+
+reg('B3', 'best', 'Narration spine',
+  'The agent already narrates its own turn. Its messages become headings, the work under each becomes category chips, and thoughts shrink to a count. Click a chip to see just those steps.',
+  '<b>Cost:</b> only as good as the narration. The 24 silent steps before the first message get a stand-in heading.',
+  el => {
+    const segs = []; let cur = {msg: null, steps: []};
+    STEPS.forEach(s => { if (s.cat === 'say') { segs.push(cur); cur = {msg: s, steps: []}; } else cur.steps.push(s); });
+    segs.push(cur);
+    const wrap = h('div', {class: 'scroll'});
+    segs.forEach(g => {
+      const body = h('div'); const chips = h('div', {class: 'chips'}); let open = null;
+      const show = (cat, chip) => {
+        body.replaceChildren(); chips.querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+        if (open === cat) { open = null; return; }
+        open = cat; chip.classList.add('on');
+        body.append(h('div', {class: 'nest'}, g.steps.filter(s => cat === 'all' || s.cat === cat).map(stepRow)));
+      };
+      const c = counts(g.steps);
+      ORDER.filter(k => c[k]).forEach(k => {
+        const chip = h('button', {class: 'chip'}, h('i', {style: `background:${CAT[k].c}`}), k === 'think' ? `${pl(k, c[k])} · ${fmt(timeIn(g.steps, k))}` : pl(k, c[k]));
+        chip.onclick = () => show(k, chip); chips.append(chip);
+      });
+      if (g.steps.length > 1) { const all = h('button', {class: 'chip'}, `all ${g.steps.length}`); all.onclick = () => show('all', all); chips.append(all); }
+      wrap.append(h('div', {class: 'seg'},
+        h('div', {class: 'seg-h', 'data-i': g.msg?.i}, g.msg ? g.msg.label : h('span', {class: 'dimtxt'}, 'Before the first update'), h('span', {class: 'd'}, clk(g.msg ? g.msg.t : 0))),
+        g.steps.length ? chips : null, body));
+    });
+    el.append(h('div', {class: 'hdr'}, h('b', {}, 'Worked for 17m 1s'), `· ${segs.length - 1} updates from the agent`), wrap);
+  });
+
+reg('B4', 'best', 'Key steps filter',
+  'The full list stays, but it opens filtered to key steps: messages, edits, test runs and anything over 5 s. Each hidden run becomes one "··· N hidden" line you can click open. Category chips and search narrow it further.',
+  '<b>Cost:</b> one more toolbar per turn. Nothing to summarise, so it\'s cheap to build and always accurate.',
+  el => {
+    const st = {mode: 'key', cats: new Set(), q: '', rev: new Set()};
+    const list = h('div', {class: 'scroll'}), count = h('span', {class: 'd'});
+    const seg = h('div', {class: 'segc'}, [['key', 'Key steps'], ['all', 'All']].map(([m, t]) => h('button', {'data-m': m, onclick: () => { st.mode = m; st.rev.clear(); draw(); }}, t)));
+    const q = h('input', {class: 'q', placeholder: 'Search commands and messages…', oninput: e => { st.q = e.target.value.toLowerCase(); draw(); }});
+    const c = counts(STEPS);
+    const chips = h('div', {class: 'chips'}, ORDER.map(k => h('button', {class: 'chip', 'data-k': k, onclick: () => { st.cats.has(k) ? st.cats.delete(k) : st.cats.add(k); draw(); }}, h('i', {style: `background:${CAT[k].c}`}), pl(k, c[k]))));
+    const vis = s => {
+      if (st.rev.has(s.i)) return true;
+      if (st.cats.size && !st.cats.has(s.cat)) return false;
+      if (st.q && !`${s.label} ${s.cat}`.toLowerCase().includes(st.q)) return false;
+      return st.mode === 'all' || st.cats.size > 0 || !!st.q || isKey(s);
+    };
+    function draw() {
+      seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === st.mode));
+      chips.querySelectorAll('.chip').forEach(b => b.classList.toggle('on', st.cats.has(b.dataset.k)));
+      list.replaceChildren(); let hid = [], shown = 0;
+      const flush = () => { if (!hid.length) return; const ids = hid; hid = []; list.append(h('button', {class: 'gap', onclick: () => { ids.forEach(s => st.rev.add(s.i)); draw(); }}, `··· ${ids.length} hidden · ${phrase(ids)}`)); };
+      STEPS.forEach(s => { if (vis(s)) { flush(); list.append(stepRow(s)); shown++; } else hid.push(s); });
+      flush();
+      count.textContent = `showing ${shown} of 181`;
+    }
+    el.append(h('div', {class: 'toolbar'}, seg, q, count), chips, list);
+    draw();
+  });
+
+reg('B5', 'best', 'Wall-clock timeline + brush',
+  'Today\'s bar redrawn in real clock time, with background work on its own lane so it can\'t squash everything else. Drag across it, or click a chapter number, to list just those steps.',
+  '<b>Cost:</b> dragging is awkward on phones (tapping a chapter still works). Sub-second steps are 1 px slivers until you brush over them.',
+  el => {
+    const X = t => `${t / WALL * 100}%`;
+    const list = h('div', {class: 'scroll short'}), info = h('div', {class: 'hdr'});
+    const brush = h('div', {class: 'brush', hidden: true});
+    function setB(a, b) {
+      const [l, r] = a < b ? [a, b] : [b, a];
+      brush.hidden = false; brush.style.left = X(l); brush.style.width = X(Math.max(r - l, 1500));
+      const sel = STEPS.filter(s => s.t <= r && s.end >= l);
+      info.replaceChildren(h('b', {}, `${clk(l)} – ${clk(r)}`), `· ${sel.length} steps`, sel.length ? `· ${phrase(sel)}` : '');
+      list.replaceChildren(...sel.map(stepRow));
+    }
+    const bands = h('div', {class: 'tl-bands'}, CH.map(c => h('button', {class: 'tl-band', title: c.t, style: `left:${X(c.t0)};width:calc(${X(c.dur)} - 2px)`, onclick: () => setB(c.t0, c.t1 - 1)}, c.n)));
+    const area = h('div', {class: 'tl-area'},
+      h('div', {class: 'tl-lane'}, FG.map(s => h('span', {'data-i': s.i, class: 'tk', style: `left:${X(s.t)};width:max(1.5px,${X(s.ms)});background:${CAT[s.cat].c}`}))),
+      h('div', {class: 'tl-lane bg'}, h('span', {class: 'bgnote'}, 'background lane · Codex ×2 start here and run 30m past the right edge →'), STEPS.filter(s => s.bg).map(s => h('span', {'data-i': s.i, class: 'tk bgk', style: `left:${X(s.t)};right:0`}))),
+      brush);
+    let a0 = null;
+    const pos = e => { const r = area.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * WALL; };
+    area.addEventListener('pointerdown', e => { if (e.target.dataset.i) return; a0 = pos(e); area.setPointerCapture(e.pointerId); setB(a0, a0); });
+    area.addEventListener('pointermove', e => { if (a0 != null) setB(a0, pos(e)); });
+    area.addEventListener('pointerup', () => { a0 = null; });
+    const axis = h('div', {class: 'tl-axis'}, Array.from({length: 9}, (_, m) => h('span', {style: `left:${X(m * 120000)}`}, `${m * 2}m`)));
+    el.append(bands, area, axis, info, list);
+    setB(CH[2].t0, CH[2].t1 - 1);
+  });
+
+reg('B6', 'best', 'Outcome card',
+  'Leads with what changed, not how. Outcomes, test runs, files and effort, each linked to the step that proves it. The full history is one click down.',
+  '<b>Cost:</b> needs a summary written when the turn ends. Works best as the collapsed state of another design, not on its own.',
+  el => {
+    const L = i => h('button', {class: 'lnk', 'data-i': i}, `#${i}`);
+    const items = [
+      ['good', ['Added ', h('code', {}, 'projectSlug'), ' to the relay socket handler'], [55, 62]],
+      ['good', ['Unit tests green (599)'], [63]],
+      ['mid', ['7 e2e failures are pre-existing on HEAD; filed separately'], [118, 129]],
+      ['good', ['Fixed the harness change that broke debug-panel'], [136]],
+      ['mid', ['Terminal tab-switch is flaky (xterm timing); noted on the bug'], [141]],
+      ['good', ['Committed 17.5 as ', h('code', {}, '1da6b4c2')], [145, 146]],
+      ['run', ['17.6 handed to Codex; 2 runs still going in the background'], [179, 180]],
+    ];
+    const c = counts(STEPS);
+    el.append(h('div', {class: 'card'},
+      h('div', {class: 'card-h'}, h('b', {}, 'Committed 17.5 · handed 17.6 to Codex'), h('span', {class: 'd'}, '17m 1s · 181 steps')),
+      h('ul', {class: 'outs'}, items.map(([o, t, ids]) => h('li', {}, outDot(o), h('span', {}, t), h('span', {class: 'refs'}, ids.map(L))))),
+      h('div', {class: 'kv'}, h('span', {}, 'Test runs'), h('div', {class: 'chips'}, VER.map(i => h('button', {class: `chip v-${RES[i][0]}`, 'data-i': i}, `${VNAME[i]} · ${fmt(STEPS[i - 1].ms)}`)))),
+      h('div', {class: 'kv'}, h('span', {}, 'Files'), h('div', {class: 'chips'}, STEPS.filter(s => s.cat === 'edit').map(s => h('button', {class: 'chip', 'data-i': s.i}, h('i', {style: 'background:var(--brand)'}), `${VERB[s.k].toLowerCase()} ${s.label.split('/').at(-1)}`)))),
+      h('div', {class: 'kv'}, h('span', {}, 'Effort'), h('div', {class: 'chips'}, ORDER.filter(k => c[k]).map(k => h('span', {class: 'chip'}, h('i', {style: `background:${CAT[k].c}`}), pl(k, c[k]))))),
+      h('details', {class: 'all'}, h('summary', {}, 'Show all 181 steps'), h('div', {class: 'scroll'}, STEPS.map(stepRow)))));
+  });
+
+reg('B7', 'best', 'Dense sortable table',
+  'Every step as a compact, sortable, filterable table row. Sort by time and the Codex runs and test runs rise to the top, so the handful that mattered are one click away.',
+  '<b>Cost:</b> great for looking things up, bad for following the story. Suits a power-user "details" view.',
+  el => {
+    let key = 'i', dir = 1; const on = new Set();
+    const cols = [['i', '#'], ['t', 'At'], ['cat', 'Kind'], ['label', 'Step'], ['ms', 'Time']];
+    const tb = h('tbody');
+    const thead = h('thead', {}, h('tr', {}, cols.map(([k, t]) => h('th', {'data-k': k, onclick: () => { dir = key === k ? -dir : (k === 'ms' ? -1 : 1); key = k; draw(); }}, t))));
+    const c = counts(STEPS);
+    const chips = h('div', {class: 'chips'}, ORDER.map(k => h('button', {class: 'chip', 'data-k': k, onclick: () => { on.has(k) ? on.delete(k) : on.add(k); draw(); }}, h('i', {style: `background:${CAT[k].c}`}), `${CAT[k].n} ${c[k]}`)));
+    function draw() {
+      chips.querySelectorAll('.chip').forEach(b => b.classList.toggle('on', on.has(b.dataset.k)));
+      thead.querySelectorAll('th').forEach(th => th.dataset.s = th.dataset.k === key ? (dir > 0 ? '▲' : '▼') : '');
+      const rows = STEPS.filter(s => !on.size || on.has(s.cat)).sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+      tb.replaceChildren(...rows.map(s => h('tr', {'data-i': s.i},
+        h('td', {class: 'n'}, s.i), h('td', {class: 'n'}, clk(s.t)),
+        h('td', {}, h('span', {style: `color:${CAT[s.cat].c}`}, GLYPH[s.cat]), ` ${CAT[s.cat].n}`),
+        h('td', {class: 'lab' + (s.k === 'M' ? '' : ' mono')}, s.k === 'T' ? '—' : s.label),
+        h('td', {class: 'n'}, h('span', {class: 'mb', style: `width:${Math.max(1, amp(s) * 40)}px;background:${CAT[s.cat].c}`}), fmt(s.ms)))));
+    }
+    el.append(chips, h('div', {class: 'scroll'}, h('table', {class: 'tbl'}, thead, tb)));
+    draw();
+  });
+
+/* ---------- in between ---------- */
+reg('M1', 'mid', 'Chapter sparklines',
+  'One line per chapter, with each step as a bar whose height shows how long it took. You can read each chapter\'s rhythm at a glance: tall green bars are test runs, amber ones are thinking. Hover a bar to see it, click to inspect.',
+  '<b>Cost:</b> 3 px bars work with a mouse and are fiddly on touch. Chapter names still need a summariser.',
+  el => {
+    el.append(h('div', {class: 'hdr'}, h('b', {}, 'Worked for 17m 1s'), '· bar height = log duration · click a name to list its steps'));
+    CH.forEach(c => {
+      const nest = h('div', {class: 'nest', hidden: true}, c.steps.map(stepRow));
+      el.append(h('div', {class: 'spk'},
+        h('button', {class: 'spk-t', title: c.t, onclick: () => nest.hidden = !nest.hidden}, outDot(c.o), h('span', {}, c.s)),
+        h('div', {class: 'spk-b'}, c.steps.map(s => h('span', {'data-i': s.i, style: `height:${s.bg ? 28 : Math.max(2, amp(s) * 28)}px;background:${s.bg ? 'repeating-linear-gradient(var(--cyan) 0 3px,transparent 3px 5px)' : CAT[s.cat].c}`}))),
+        h('span', {class: 'd'}, fmt(c.dur))), nest);
+    });
+  });
+
+reg('M2', 'mid', 'Branch rail',
+  'A git-log style rail. Milestones are dots and the steps between them fold into dotted runs. Side work gets its own branch: the HEAD baseline worktree, and the two Codex runs that carry on after the turn ends.',
+  '<b>Cost:</b> the branch lanes need to know what ran in parallel, which the event store already records. Busier than a flat list.',
+  el => {
+    const lanesAt = i => i >= 179 ? [0, 1, 2] : i >= 116 && i <= 124 ? [0, 1] : [0];
+    const laneOf = s => s.i === 179 ? 1 : s.i === 180 ? 2 : s.i === 116 || s.i === 118 ? 1 : 0;
+    const mile = s => ['say','edit','test','delegate'].includes(s.cat) || s.code === 'F' || s.i === 116 || s.i === 129 || s.i === 146;
+    const gut = (lanes, i, node, lane, dash) => h('div', {class: 'gut'}, [0, 1, 2].map(l =>
+      h('span', {class: `ln l${l}` + (lanes.includes(l) ? ' on' : '') + (i >= 179 ? ' cx' : '') + (dash ? ' dash' : '')},
+        node && l === lane ? h('b', {class: 'nd', style: `background:${node}`}) : null)));
+    const box = h('div', {class: 'scroll'}); let run = [];
+    const flush = () => {
+      if (!run.length) return; const r = run; run = [];
+      const nest = h('div', {hidden: true}, r.map(s => h('div', {class: 'rr'}, gut(lanesAt(s.i), s.i), stepRow(s))));
+      box.append(h('button', {class: 'rr', onclick: () => nest.hidden = !nest.hidden}, gut(lanesAt(r[0].i), r[0].i), h('span', {class: 'grp-t'}, `┄ ${r.length} steps · ${phrase(r)}`)), nest);
+    };
+    STEPS.forEach(s => { if (!mile(s)) { run.push(s); return; } flush(); box.append(h('div', {class: 'rr'}, gut(lanesAt(s.i), s.i, s.res ? `var(--${s.res[0] === 'good' ? 'ok' : s.res[0] === 'bad' ? 'err' : 'warn'})` : CAT[s.cat].c, laneOf(s)), stepRow(s))); });
+    flush();
+    box.append(h('div', {class: 'rr'}, gut([1, 2], 181, null, 0, true), h('span', {class: 'grp-t', style: 'color:var(--cyan)'}, 'turn ends at 17:01 · both Codex lanes keep running (30m 31s, 30m 43s)')));
+    el.append(h('div', {class: 'hdr'}, h('b', {}, 'Worked for 17m 1s'), '· ', h('span', {style: 'color:#b48cff'}, '● HEAD worktree'), ' ', h('span', {style: 'color:var(--cyan)'}, '● Codex runs')), box);
+  });
+
+reg('M3', 'mid', 'Verification scoreboard',
+  'Tells the turn as a chain of test runs. Each result is a card, and the steps between two runs are a "…N steps…" link you can click. You can see the progress: worse, 599 green, down to 12, pre-existing, fixed, committed.',
+  '<b>Cost:</b> great for debugging turns, weak for turns with no tests. Results come from the agent\'s next message, so they rely on it saying what happened.',
+  el => {
+    const panel = h('div', {class: 'scroll short'}), strip = h('div', {class: 'score'});
+    const tally = VER.reduce((m, i) => (m[RES[i][0]] = (m[RES[i][0]] || 0) + 1, m), {});
+    let prev = 0, first = null;
+    [...VER, 145, 179].forEach(i => {
+      const between = STEPS.slice(prev, i - 1); prev = i;
+      if (between.length) {
+        const b = h('button', {class: 'conn'}, h('span', {}, `…${between.length} steps…`), h('span', {}, fmt(span(between))));
+        b.onclick = () => { strip.querySelectorAll('.conn').forEach(x => x.classList.remove('on')); b.classList.add('on'); panel.replaceChildren(h('div', {class: 'hdr'}, h('b', {}, `Steps ${between[0].i}–${between.at(-1).i}`), `· ${phrase(between)}`), ...between.map(stepRow)); };
+        strip.append(b); first ??= b;
+      }
+      const s = STEPS[i - 1];
+      const [o, txt] = s.res || (i === 145 ? ['good', '17.5 committed as 1da6b4c2'] : ['run', 'Codex ×2 still running in the background']);
+      strip.append(h('button', {class: `vcard ${o}`, 'data-i': i}, h('div', {class: 'vn'}, VNAME[i] || (i === 145 ? 'Commit' : 'Hand-off')), h('div', {class: 'vt'}, txt), h('div', {class: 'd'}, `#${i} · ${fmt(s.ms)}`)));
+    });
+    el.append(h('div', {class: 'hdr'}, h('b', {}, `${VER.length} test runs`), `· ${tally.bad} red · ${tally.mid} mixed · ${tally.good} green · then commit and hand-off`), strip, panel);
+    first.click();
+  });
+
+reg('M4', 'mid', 'Waffle grid',
+  'All 181 steps in about the space of a card: one square each, coloured by kind and filled by how long it took. Numbered tiles mark where chapters start. Click a legend item to highlight that kind.',
+  '<b>Cost:</b> shows the shape of the turn, not what it says, so you need hover or the inspector for meaning. Very compact.',
+  el => {
+    const grid = h('div', {class: 'waf'});
+    CH.forEach(c => { grid.append(h('span', {class: 'waf-ch', title: c.t}, c.n)); c.steps.forEach(s => grid.append(h('span', {class: 'cell', 'data-i': s.i, 'data-c': s.cat, style: `--c:${CAT[s.cat].c};--f:${s.bg ? 1 : Math.max(.3, amp(s))}`}))); });
+    const c = counts(STEPS); let hl = null;
+    const leg = h('div', {class: 'chips', style: 'margin-top:12px'}, ORDER.map(k => h('button', {class: 'chip', 'data-k': k, onclick: () => {
+      hl = hl === k ? null : k;
+      grid.querySelectorAll('.cell').forEach(x => x.classList.toggle('dim', !!hl && x.dataset.c !== hl));
+      leg.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x.dataset.k === hl));
+    }}, h('i', {style: `background:${CAT[k].c}`}), pl(k, c[k]))));
+    el.append(h('div', {class: 'hdr'}, h('b', {}, '181 steps'), '· one square each · fill = log duration · pink tile = chapter start'), grid, leg);
+  });
+
+reg('M5', 'mid', 'Swimlanes with a broken axis',
+  'One lane per kind of work, drawn to real time. A break in the time axis lets the background runs carry on past 17 minutes without shrinking the turn.',
+  '<b>Cost:</b> a broken axis takes a moment to learn. Good for "where did the time go?", bad for following the story.',
+  el => {
+    const LANES = [['Think', ['think']], ['Explore', ['read', 'search']], ['Verify', ['test', 'check']], ['Record', ['git', 'track']], ['Say / edit', ['say', 'edit']], ['Hand-off', ['delegate']]];
+    const BR = .8, X = t => t <= WALL ? t / WALL * BR * 100 : (BR + .03 + (t - WALL) / (BG_END - WALL) * (1 - BR - .03)) * 100;
+    el.append(...LANES.map(([n, cats]) => h('div', {class: 'sw-r'}, h('span', {class: 'sw-n'}, n), h('div', {class: 'sw-t'},
+      STEPS.filter(s => cats.includes(s.cat)).map(s => h('span', {'data-i': s.i, class: 'sw-b' + (s.bg ? ' bg' : ''), style: `left:${X(s.t)}%;width:max(1.5px,${X(s.end) - X(s.t)}%);background:${CAT[s.cat].c}`})),
+      h('span', {class: 'sw-brk', style: `left:${BR * 100}%`})))));
+    const ticks = [[0, '0'], [240000, '4m'], [480000, '8m'], [720000, '12m'], [WALL, '17:01'], [BG_END, clk(BG_END)]];
+    el.append(h('div', {class: 'sw-r'}, h('span', {class: 'sw-n'}), h('div', {class: 'sw-ax'}, ticks.map(([t, l]) => h('span', {style: `left:${X(t)}%`}, l)), h('span', {style: `left:${(BR + .015) * 100}%;color:var(--mut)`}, '≈'))),
+      h('p', {class: 'note'}, 'Left of the break: the 17-minute turn, to scale. Right of it: squeezed, where the background runs go after the turn ends.'));
+  });
+
+reg('M6', 'mid', 'Semantic zoom',
+  'One control, four levels of detail: a sentence, the chapters, the key steps, everything. At level 2, click a chapter to zoom straight into it. With the stage focused, + and − work too.',
+  '<b>Cost:</b> the summary has to be written twice, as a sentence and as chapters. The strongest candidate for a default collapsed state that can still reach every step.',
+  el => {
+    let lvl = 2, focus = null;
+    const out = h('div');
+    const L = (i, t) => h('button', {class: 'lnk', 'data-i': i}, t);
+    const range = h('input', {type: 'range', min: 1, max: 4, step: 1, value: 2, class: 'zr', oninput: e => { lvl = +e.target.value; draw(); }});
+    const btns = h('div', {class: 'segc'}, ['Sentence', 'Chapters', 'Key steps', 'Everything'].map((n, k) => h('button', {onclick: () => { lvl = k + 1; draw(); }}, `${k + 1} · ${n}`)));
+    function draw() {
+      range.value = lvl; btns.querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k + 1 === lvl));
+      out.replaceChildren();
+      if (lvl === 1) { out.append(h('p', {class: 'sent'}, 'Proved the last 7 e2e failures were ', L(118, 'pre-existing'), ', fixed ', L(62, 'relay routing'), ' and ', L(136, 'the debug-panel harness'), ', committed ', L(145, '17.5'), ', then scoped 17.6 and ', L(179, 'handed it to Codex'), ', which is still running.')); return; }
+      if (focus != null) out.append(h('button', {class: 'lnk', style: 'margin:0 0 6px 6px', onclick: () => { focus = null; draw(); }}, '← all chapters'));
+      (focus == null ? CH : [CH[focus]]).forEach(c => {
+        out.append(h('button', {class: 'zc', onclick: () => { focus = c.n - 1; lvl = Math.max(3, lvl); draw(); }}, outDot(c.o), h('span', {class: 'zc-t'}, c.t), h('span', {class: 'd'}, `${c.steps.length} steps · ${fmt(c.dur)}`)));
+        if (lvl > 2) out.append(h('div', {class: 'nest'}, c.steps.filter(s => lvl === 4 || isKey(s)).map(stepRow)));
+      });
+    }
+    el.tabIndex = 0;
+    el.addEventListener('keydown', e => { if (e.key === '+' || e.key === '=') { lvl = Math.min(4, lvl + 1); draw(); } if (e.key === '-') { lvl = Math.max(1, lvl - 1); draw(); } });
+    el.append(h('div', {class: 'toolbar'}, range, btns), h('div', {class: 'scroll'}, out));
+    draw();
+  });
+
+reg('M7', 'mid', 'Intent matrix',
+  'Rows are chapters and columns are why the agent acted: explore, change, verify, coordinate. Shading shows time spent, so you can see where it explored and where it tested. Click a cell to get those steps.',
+  '<b>Cost:</b> sorting steps by intent is a judgement call (is a git command coordinating or exploring?). Shows where time went, not the order things happened in.',
+  el => {
+    const INT = [['Explore', ['think', 'read', 'search'], '#f4b740'], ['Change', ['edit'], '#fe3781'], ['Verify', ['test', 'check'], '#3fd69a'], ['Coordinate', ['say', 'git', 'track', 'delegate'], '#00e5ff']];
+    const fgTime = ss => ss.filter(s => !s.bg).reduce((a, s) => a + s.ms, 0);
+    const mxT = Math.max(...CH.flatMap(c => INT.map(([, cs]) => fgTime(c.steps.filter(s => cs.includes(s.cat))))));
+    el.append(h('div', {class: 'mx-r mx-h'}, h('span'), INT.map(([n]) => h('span', {}, n))));
+    CH.forEach(c => {
+      const det = h('div', {class: 'nest', hidden: true}); let open = null;
+      el.append(h('div', {class: 'mx-r'}, h('span', {class: 'mx-c', title: c.t}, outDot(c.o), c.s), INT.map(([n, cs, col]) => {
+        const ss = c.steps.filter(s => cs.includes(s.cat)), t = fgTime(ss), bg = ss.some(s => s.bg);
+        return h('button', {class: 'mx-cell', disabled: !ss.length, style: `background:color-mix(in srgb,${col} ${ss.length ? Math.round(8 + 62 * Math.sqrt(t / mxT)) : 0}%,transparent)`,
+          onclick: () => { if (open === n) { open = null; det.hidden = true; return; } open = n; det.hidden = false; det.replaceChildren(h('div', {class: 'hdr'}, h('b', {}, `${c.s} · ${n}`), `· ${ss.length} steps`), ...ss.map(stepRow)); }},
+          ss.length ? [h('b', {}, ss.length), ` · ${fmt(t)}`, bg ? ' +bg' : ''] : '—');
+      })), det);
+    });
+    el.append(h('div', {class: 'mx-r mx-tot'}, h('span', {style: 'text-align:left'}, 'Total'), INT.map(([, cs]) => { const ss = STEPS.filter(s => cs.includes(s.cat)); return h('span', {}, `${ss.length} · ${fmt(fgTime(ss))}`); })));
+  });
+
+/* ---------- off the wall ---------- */
+reg('X1', 'wild', 'Subway map',
+  'Each chapter is a coloured stretch of line with a named station. Test runs are the big rings, coloured by result. The HEAD baseline is a loop off the line, and the Codex runs branch off as an express that runs past the last stop.',
+  '<b>Cost:</b> stations are spaced by step count, not time. Memorable, but it needs a lot of width.',
+  el => {
+    const W = 700, H = 240, Y = 124, P = 20, x = i => P + (i - 1) * (W - P - 120) / 180;
+    const LC = ['#fe3781', '#f4b740', '#3fd69a', '#5aa9f5', '#b48cff', '#d97757', '#2bc4b0', '#fe3781', '#5aa9f5', '#00e5ff'];
+    const VC = {good: '#3fd69a', bad: '#f4607a', mid: '#f4b740'};
+    const list = h('div', {class: 'scroll short'}, h('div', {class: 'hdr'}, 'Click a station to list its stops. Click a dot to inspect a step.'));
+    const svg = S('svg', {viewBox: `0 0 ${W} ${H}`, class: 'sub'});
+    svg.append(S('path', {d: `M${x(116)} ${Y} C${x(116)} ${Y + 54} ${x(124)} ${Y + 54} ${x(124)} ${Y}`, fill: 'none', stroke: '#b48cff', 'stroke-width': 4, 'stroke-dasharray': '2 3'}),
+      S('text', {x: x(120), y: Y + 56, 'text-anchor': 'middle', style: 'font-size:9.5px;fill:#b48cff'}, 'HEAD baseline loop'));
+    STEPS.filter(s => s.bg).forEach((s, k) => {
+      const yy = Y + 44 + k * 10;
+      svg.append(S('path', {d: `M${x(s.i)} ${Y} C${x(s.i) + 26} ${Y} ${x(s.i) + 14} ${yy} ${x(s.i) + 50} ${yy} L${W - 12} ${yy}`, fill: 'none', stroke: '#00e5ff', 'stroke-width': 3, 'stroke-dasharray': '6 4'}),
+        S('circle', {'data-i': s.i, cx: W - 12, cy: yy, r: 4.5, fill: '#0d0e11', stroke: '#00e5ff', 'stroke-width': 2}));
+    });
+    svg.append(S('text', {x: W - 8, y: Y + 82, 'text-anchor': 'end', style: 'fill:#00e5ff;font-size:10px'}, 'Codex Express ×2 · 30m · still running →'));
+    CH.forEach((c, ci) => svg.append(S('line', {x1: x(c.a), x2: x(Math.min(181, c.b + 1)), y1: Y, y2: Y, stroke: LC[ci], 'stroke-width': 8, 'stroke-linecap': 'round'})));
+    FG.forEach(s => svg.append(s.res
+      ? S('circle', {'data-i': s.i, cx: x(s.i), cy: Y, r: 5.5, fill: '#fff', stroke: VC[s.res[0]], 'stroke-width': 3})
+      : S('circle', {'data-i': s.i, cx: x(s.i), cy: Y, r: s.cat === 'say' ? 2.6 : s.cat === 'edit' ? 3 : 1.4, fill: s.cat === 'edit' ? '#fe3781' : s.cat === 'say' ? '#fff' : '#0d0e11'})));
+    CH.forEach(c => {
+      const g = S('g', {class: 'st'},
+        S('rect', {x: x(c.a) - 5, y: Y - 9, width: 10, height: 18, rx: 5, fill: '#fff', stroke: '#0d0e11', 'stroke-width': 2}),
+        S('text', {x: x(c.a) + 2, y: Y - 16, transform: `rotate(-38 ${x(c.a) + 2} ${Y - 16})`}, `${c.n} ${c.s} ${c.o === 'none' ? '' : OG[c.o]}`));
+      g.addEventListener('click', () => chList(list, c));
+      svg.append(g);
+    });
+    svg.append(S('text', {x: x(181), y: Y + 26, 'text-anchor': 'middle', style: 'font-size:9.5px;fill:#676e79'}, '17:01'));
+    el.append(svg, list);
+  });
+
+reg('X2', 'wild', 'ECG monitor',
+  'The turn as a heartbeat. Thinking makes soft humps, test runs make tall spikes (red when they failed), edits dip below the line. Scrub along it, or press play to hear it: a high beep for each test, a mid one for each message.',
+  '<b>Cost:</b> a gimmick, but you feel the rhythm. Long flat stretches of reading followed by a spike is exactly what debugging looks like.',
+  el => {
+    const SL = 16, HH = 170, BASE = 112, PAD = 20, W = PAD * 2 + STEPS.length * SL;
+    const cv = h('canvas', {width: W * 2, height: HH * 2, style: `width:${W}px;height:${HH}px`});
+    const ctx = cv.getContext('2d'); ctx.scale(2, 2);
+    ctx.fillStyle = '#020a05'; ctx.fillRect(0, 0, W, HH);
+    for (let g = 0; g < W; g += 8) { ctx.strokeStyle = g % 40 ? 'rgba(57,255,136,.05)' : 'rgba(57,255,136,.13)'; ctx.beginPath(); ctx.moveTo(g + .5, 0); ctx.lineTo(g + .5, HH); if (g < HH) { ctx.moveTo(0, g + .5); ctx.lineTo(W, g + .5); } ctx.stroke(); }
+    ctx.font = '10px "JetBrains Mono", monospace';
+    CH.forEach(c => { const x = PAD + (c.a - 1) * SL; ctx.fillStyle = 'rgba(57,255,136,.55)'; ctx.fillText(`${c.n} ${c.s.toUpperCase()}`, x + 4, 12); ctx.strokeStyle = 'rgba(57,255,136,.25)'; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(x + .5, 16); ctx.lineTo(x + .5, HH); ctx.stroke(); ctx.setLineDash([]); });
+    ctx.lineJoin = 'round';
+    STEPS.forEach((s, j) => {
+      const x0 = PAD + j * SL, a = s.bg ? 0 : Math.max(.1, amp(s));
+      const col = s.res?.[0] === 'bad' ? '#ff4d6d' : s.cat === 'edit' ? '#fe3781' : s.cat === 'delegate' ? '#00e5ff' : '#39ff88';
+      ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 6; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x0, BASE);
+      const P = (dx, dy) => ctx.lineTo(x0 + dx, BASE - dy);
+      if (s.cat === 'test' || s.cat === 'check') { P(4, 0); P(6, -8 * a); P(8, 92 * a); P(10, -20 * a); P(12, 0); P(16, 0); }
+      else if (s.cat === 'think') for (let k = 1; k <= 16; k++) P(k, Math.sin(k / 16 * Math.PI) * 16 * a);
+      else if (s.cat === 'say') { P(3, 0); P(6, 12); P(9, 0); P(11, -3); P(13, 0); P(16, 0); }
+      else if (s.cat === 'edit') { P(5, 0); P(8, -44); P(11, 0); P(16, 0); }
+      else if (s.bg) { for (let k = 0; k < 16; k += 4) { P(k, 0); P(k + 1, 10); P(k + 2, 0); } P(16, 0); }
+      else { P(6, 0); P(8, 6 + 22 * a); P(10, 0); P(16, 0); }
+      ctx.stroke(); ctx.shadowBlur = 0; ctx.fillStyle = col; ctx.font = '9px "JetBrains Mono", monospace';
+      if (s.i === 179) ctx.fillText('CODEX ×2 · BG', x0 - 6, BASE - 18);
+      else if (!s.bg && (s.res || s.ms >= 30000)) ctx.fillText(fmt(s.ms), x0 + 12, Math.max(28, BASE - 92 * a + 8));
+    });
+    const cur = h('div', {class: 'ecg-cur', style: 'left:-10px'});
+    const read = h('div', {class: 'ecg-read'}, 'Hover or press play to read the trace. Click a beat to inspect it.');
+    const sc = h('div', {class: 'ecg-sc'}, cv, cur);
+    const at = px => STEPS[Math.max(0, Math.min(STEPS.length - 1, Math.floor((px - PAD) / SL)))];
+    const show = px => { cur.style.left = `${px}px`; const s = at(px); read.textContent = `#${s.i}  ${VERB[s.k].toUpperCase()}  ${CAT[s.cat].n}  ${fmt(s.ms)}  ${s.label}${s.res ? `  → ${s.res[1]}` : ''}`; return s; };
+    let playing = false, px = PAD, ac = null, lastI = 0;
+    cv.addEventListener('mousemove', e => { if (!playing) show(e.offsetX); });
+    cv.addEventListener('click', e => open(at(e.offsetX).i));
+    const beep = f => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; g.gain.setValueAtTime(.05, ac.currentTime); g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + .09); o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + .1); };
+    const btn = h('button', {}, '▶ Play with sound');
+    btn.onclick = () => { playing = !playing; btn.textContent = playing ? '❚❚ Pause' : '▶ Play with sound'; if (playing) { ac ??= new AudioContext(); if (px >= W - PAD) px = PAD; requestAnimationFrame(tick); } };
+    function tick() {
+      if (!playing) return;
+      px += 1.6; const s = show(px); sc.scrollLeft = px - sc.clientWidth / 2;
+      if (s.i !== lastI) { lastI = s.i; if (s.cat === 'test' || s.cat === 'check') beep(s.res?.[0] === 'bad' ? 330 : 990); else if (s.cat === 'say') beep(660); }
+      if (px >= W - PAD) { playing = false; btn.textContent = '▶ Play with sound'; return; }
+      requestAnimationFrame(tick);
+    }
+    const bad = VER.filter(i => RES[i][0] === 'bad').length;
+    el.append(h('div', {class: 'ecg'},
+      h('div', {class: 'ecg-top'},
+        h('span', {}, h('b', {}, (181 / 17).toFixed(1)), 'STEPS / MIN'),
+        h('span', {}, h('b', {}, VER.length), `TEST RUNS · ${bad} ✕`),
+        h('span', {}, h('b', {}, '2'), 'EDITS'),
+        h('span', {style: 'color:#00e5ff'}, h('b', {}, '●●'), 'BG CODEX'), btn),
+      sc, read));
+  });
+
+reg('X3', 'wild', 'Radial clock with an overrun spiral',
+  'The 17 minutes go once round a dial, with each step drawn where it happened and sized by how long it took. The background Codex runs spiral out past the edge for almost two more laps, showing how far they outlast the turn.',
+  '<b>Cost:</b> arcs are hard to compare and labels don\'t fit. Striking as a thumbnail, poor for reading.',
+  el => {
+    const C = 200, R0 = 60, R1 = 118, ang = t => t / WALL * 2 * Math.PI - Math.PI / 2, pt = (r, a) => [C + r * Math.cos(a), C + r * Math.sin(a)];
+    const wedge = (r0, r1, a0, a1) => {
+      if (a1 - a0 < .008) a1 = a0 + .008;
+      const [x0, y0] = pt(r0, a0), [x1, y1] = pt(r1, a0), [x2, y2] = pt(r1, a1), [x3, y3] = pt(r0, a1), L = a1 - a0 > Math.PI ? 1 : 0;
+      return `M${x0} ${y0}L${x1} ${y1}A${r1} ${r1} 0 ${L} 1 ${x2} ${y2}L${x3} ${y3}A${r0} ${r0} 0 ${L} 0 ${x0} ${y0}Z`;
+    };
+    const OC = {good: '#3fd69a', bad: '#f4607a', mid: '#f4b740', run: '#00e5ff', none: '#3a414c'};
+    const list = h('div', {class: 'scroll short'}, h('div', {class: 'hdr'}, 'Click the outer ring to list a chapter.'));
+    const svg = S('svg', {viewBox: '0 0 400 400', class: 'clock'});
+    svg.append(S('circle', {cx: C, cy: C, r: R1, fill: 'none', stroke: '#20242b'}), S('circle', {cx: C, cy: C, r: R0, fill: '#141619'}));
+    for (let m = 0; m <= 17; m++) {
+      const a = ang(m * 60000), [x0, y0] = pt(R1 + 20, a), [x1, y1] = pt(R1 + 25, a);
+      svg.append(S('line', {x1: x0, y1: y0, x2: x1, y2: y1, stroke: '#3a414c'}));
+      if (m % 2 === 0 && m < 17) { const [tx, ty] = pt(R1 + 32, a); svg.append(S('text', {x: tx, y: ty, class: 'ck-l'}, `${m}m`)); }
+    }
+    CH.forEach(c => {
+      const p = S('path', {class: 'chr', d: wedge(R1 + 6, R1 + 14, ang(c.t0) + .004, ang(c.t1) - .004), fill: OC[c.o], opacity: .75}, S('title', {}, `${c.n}. ${c.t}`));
+      p.addEventListener('click', () => chList(list, c)); svg.append(p);
+    });
+    FG.forEach(s => svg.append(S('path', {'data-i': s.i, d: wedge(R0 + 2, R0 + 4 + (R1 - R0 - 6) * amp(s), ang(s.t), ang(s.end)), fill: CAT[s.cat].c, opacity: s.cat === 'think' ? .6 : .92})));
+    STEPS.filter(s => s.bg).forEach((s, k) => {
+      const pts = [];
+      for (let t = s.t; t <= s.end; t += 4000) { const [x, y] = pt(R1 + 42 + k * 6 + (t - s.t) / WALL * 12, ang(t)); pts.push(`${x.toFixed(1)} ${y.toFixed(1)}`); }
+      svg.append(S('path', {'data-i': s.i, d: `M${pts.join('L')}`, fill: 'none', stroke: '#00e5ff', 'stroke-width': 2.5, 'stroke-dasharray': '4 3', opacity: .85}));
+    });
+    const c1 = S('text', {x: C, y: C - 2, class: 'ctr', style: 'font-size:22px;font-weight:600'}, '17:01');
+    const c2 = S('text', {x: C, y: C + 16, class: 'ctr', style: 'font-size:10px;fill:#838b98'}, '181 steps');
+    svg.append(c1, c2);
+    svg.addEventListener('mouseover', e => { const t = e.target.closest('[data-i]'); if (!t) return; const s = STEPS[t.dataset.i - 1]; c1.textContent = `#${s.i}`; c2.textContent = `${CAT[s.cat].n} · ${fmt(s.ms)}`; });
+    svg.addEventListener('mouseleave', () => { c1.textContent = '17:01'; c2.textContent = '181 steps'; });
+    el.append(svg, h('p', {class: 'note', style: 'text-align:center'}, 'Inner wedges: steps, length = log duration. Ring: chapters by outcome. ', h('span', {style: 'color:var(--cyan)'}, 'Cyan spiral: Codex ×2, 1.8 laps of a 17-minute dial.')), list);
+  });
+
+reg('X4', 'wild', 'Screenplay',
+  'Chapters are scenes, messages are the agent\'s lines, and runs of commands become stage directions like "(The agent reads 4 files and thinks for 9 s.)", which you can click open. Test runs are smash cuts.',
+  '<b>Cost:</b> fun to read, but no quicker to skim than a list. The stage-direction wording would work in a plain design too.',
+  el => {
+    const dir = r => {
+      const c = counts(r), p = [];
+      if (c.read) p.push(`reads ${c.read === 1 ? 'a file' : `${c.read} files`}`);
+      if (c.search) p.push(`searches ${c.search === 1 ? 'once' : `${c.search} times`}`);
+      if (c.check) p.push(`runs ${c.check === 1 ? 'a check' : `${c.check} checks`}`);
+      if (c.git) p.push('consults git');
+      if (c.track) p.push('updates the tracker');
+      if (c.delegate) p.push('prepares a hand-off');
+      if (c.think) p.push(`thinks for ${fmt(timeIn(r, 'think'))}`);
+      return `(The agent ${p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p.at(-1)}` : p[0]}.)`;
+    };
+    const pg = h('div', {class: 'script scroll'});
+    CH.forEach(c => {
+      pg.append(h('div', {class: 'sc-h'}, `${c.n}. INT. ${c.t} — ${clk(c.t0)}`));
+      let run = [];
+      const flush = () => { if (!run.length) return; const r = run; run = []; const nest = h('div', {class: 'nest', hidden: true}, r.map(stepRow)); pg.append(h('button', {class: 'sc-a', onclick: () => nest.hidden = !nest.hidden}, dir(r)), nest); };
+      c.steps.forEach(s => {
+        if (s.cat === 'say') { flush(); pg.append(h('div', {class: 'sc-c'}, 'AGENT'), h('div', {class: 'sc-d', 'data-i': s.i}, s.label)); }
+        else if (s.cat === 'test' || s.cat === 'edit' || s.bg) {
+          flush();
+          pg.append(h('div', {class: 'sc-t', 'data-i': s.i}, s.bg ? `CUT TO: CODEX (O.S.), IN ANOTHER ROOM. (${fmt(s.ms)})` : s.cat === 'edit' ? `INSERT: ${s.k === 'W' ? 'A NEW FILE' : 'THE EDIT'}, ${s.label.split('/').at(-1)}` : `SMASH CUT TO: THE TEST RUNNER. (${fmt(s.ms)})`),
+            s.res && h('div', {class: `sc-r ${s.res[0]}`}, `(${s.res[1]}.)`));
+        } else run.push(s);
+      });
+      flush();
+    });
+    pg.append(h('div', {class: 'sc-t'}, 'FADE OUT. (Codex keeps working.)'));
+    el.append(pg);
+  });
+
+reg('X5', 'wild', 'Thermal receipt',
+  'An itemised bill for the turn. Chapters are line items priced in time, thinking and commands are subtotals, and the barcode is the whole turn with one bar per step. The Codex runs are listed but not billed.',
+  '<b>Cost:</b> a novelty. The "where did the time go" subtotals are the part worth keeping.',
+  el => {
+    const dots = (a, b, w = 37) => `${a} ${'.'.repeat(Math.max(2, w - a.length - b.length - 2))} ${b}`;
+    const paper = h('div', {class: 'rcpt'});
+    paper.append(h('div', {class: 'rc-c', style: 'font-weight:700;font-size:14px'}, 'CONDUIT AGENT CO.'), h('div', {class: 'rc-c'}, 'TURN RECEIPT · 26 SEP 2026'), h('div', {class: 'rc-c', style: 'color:#666'}, 'tap a line to itemise'), h('div', {class: 'rc-hr'}));
+    CH.forEach(c => {
+      const it = h('div', {class: 'rc-items', hidden: true}, c.steps.map(s => h('button', {class: 'rc-i', 'data-i': s.i}, dots(`${String(s.i).padStart(3, '0')} ${VERB[s.k].toUpperCase()} ${s.label}`.slice(0, 27).trimEnd(), fmt(s.ms), 44))));
+      paper.append(h('button', {class: 'rc-l', onclick: () => it.hidden = !it.hidden}, dots(`${String(c.n).padStart(2, '0')} ${c.s.toUpperCase()}`, clk(c.dur))), h('div', {class: 'rc-s'}, `   ${c.steps.length} ITEMS ${c.o === 'none' ? '' : OG[c.o]}`), it);
+    });
+    const cmd = FG.filter(s => !['think', 'say', 'edit'].includes(s.cat)).reduce((a, s) => a + s.ms, 0);
+    paper.append(h('div', {class: 'rc-hr'}),
+      h('div', {class: 'rc-l'}, dots('THINKING', clk(timeIn(STEPS, 'think')))),
+      h('div', {class: 'rc-l'}, dots('COMMANDS', clk(cmd))),
+      h('div', {class: 'rc-l'}, dots('BETWEEN STEPS (UNTIMED)', clk(WALL - FG_SUM))),
+      h('div', {class: 'rc-hr'}),
+      h('div', {class: 'rc-t'}, dots('TOTAL', '17:01', 26)),
+      h('div', {class: 'rc-l', style: 'color:#666'}, dots('*CODEX x2 (BACKGROUND)', clk(STEPS.filter(s => s.bg).reduce((a, s) => a + s.ms, 0)))),
+      h('div', {class: 'rc-s'}, '   *not billed to this turn'),
+      h('div', {class: 'rc-hr'}),
+      ...[0, 61, 121].map(a => h('div', {class: 'bc'}, STEPS.slice(a, a + (a === 121 ? 60 : 61)).map(s => h('span', {'data-i': s.i, class: s.cat === 'think' ? 'th' : '', style: `width:${s.bg ? 4 : 1 + amp(s) * 2}px`})))),
+      h('div', {class: 'rc-c', style: 'font-size:10px;letter-spacing:.3em'}, '0001 0181 1DA6B4C2'),
+      h('div', {class: 'rc-c', style: 'margin-top:8px'}, 'THANK YOU FOR DELEGATING'));
+    el.append(h('div', {class: 'rcpt-wrap'}, paper));
+  });
+
+reg('X6', 'wild', 'Skyscraper cross-section',
+  'One floor per chapter, taller the longer it took, with each step a lit window. The Codex runs are shafts dug into the basement, deeper than the tower is tall. Click a floor to walk in.',
+  '<b>Cost:</b> takes a lot of space for what it shows. Good as a one-off overview screen, not inline in chat.',
+  el => {
+    const COLS = 24, WS = 11, BW = COLS * WS + 12, BX = 150, TOP = 46, UG = 150;
+    const fl = CH.map(c => ({c, hgt: Math.max(Math.ceil(c.steps.length / COLS) * WS + 10, c.dur / WALL * 440)}));
+    const GY = TOP + fl.reduce((a, f) => a + f.hgt, 0), H = GY + UG + 24;
+    const list = h('div', {class: 'scroll short'}, h('div', {class: 'hdr'}, 'Click a floor to list its steps.'));
+    const svg = S('svg', {viewBox: `0 0 700 ${H}`, class: 'tower'});
+    svg.append(S('line', {x1: BX + BW / 2, y1: TOP - 30, x2: BX + BW / 2, y2: TOP, stroke: '#3a414c', 'stroke-width': 2}),
+      S('circle', {cx: BX + BW / 2, cy: TOP - 32, r: 3, fill: '#fe3781', class: 'blink'}),
+      S('text', {x: BX + BW / 2 + 10, y: TOP - 26}, '17m 1s · 10 floors · 181 windows'));
+    let y = GY;
+    fl.forEach(({c, hgt}) => {
+      y -= hgt;
+      const g = S('g', {class: 'fl'}, S('rect', {class: 'slab', x: BX, y, width: BW, height: hgt, fill: '#141619', stroke: '#2d323b'}));
+      c.steps.forEach((s, k) => g.append(S('rect', {'data-i': s.i, x: BX + 7 + (k % COLS) * WS, y: y + 5 + Math.floor(k / COLS) * WS, width: WS - 3, height: WS - 4, rx: 1, fill: s.bg ? '#00e5ff' : CAT[s.cat].c, opacity: s.cat === 'think' ? .5 : .95})));
+      g.append(S('text', {x: BX + BW + 12, y: y + hgt / 2 + 4}, `F${c.n}  ${c.s}  ${c.o === 'none' ? '' : OG[c.o]}`), S('text', {x: BX - 10, y: y + hgt / 2 + 4, 'text-anchor': 'end', class: 'dimt'}, clk(c.t0)));
+      g.addEventListener('click', e => { if (!e.target.closest('[data-i]')) chList(list, c); });
+      svg.append(g);
+    });
+    svg.append(S('rect', {x: 0, y: GY, width: 700, height: UG + 24, fill: '#0a0b0d'}), S('line', {x1: 0, x2: 700, y1: GY, y2: GY, stroke: '#6b5a44', 'stroke-width': 2}));
+    STEPS.filter(s => s.bg).forEach((s, k) => {
+      const sx = BX + BW - 64 + k * 28;
+      svg.append(S('rect', {'data-i': s.i, x: sx, y: GY + 2, width: 16, height: UG - 34, fill: 'rgba(0,229,255,.14)', stroke: '#00e5ff', 'stroke-dasharray': '4 3'}),
+        S('path', {d: `M${sx - 4} ${GY + UG - 26} l7 -6 l7 12 l7 -12 l7 6`, fill: 'none', stroke: '#00e5ff'}));
+    });
+    svg.append(S('text', {x: BX + BW + 12, y: GY + 34, style: 'fill:#00e5ff'}, 'Basement: Codex ×2'),
+      S('text', {x: BX + BW + 12, y: GY + 50, class: 'dimt'}, '30m 31s · 30m 43s'),
+      S('text', {x: BX + BW + 12, y: GY + 66, class: 'dimt'}, 'to scale, each is ~1.8× the tower\'s height'),
+      S('text', {x: BX + BW + 12, y: GY + 80, class: 'dimt'}, '(cut off here)'));
+    el.append(svg, list);
+  });
+
+reg('X7', 'wild', 'VCR replay',
+  'Play the turn back as a terminal at 60× (17 minutes in 17 seconds), 300× or 1200×. Scrub, skip to the next chapter, and click any line to inspect it. Watching it happen is often the quickest way to understand it.',
+  '<b>Cost:</b> you have to sit through it; you can\'t skim it. The scrubber with chapter marks is useful even while paused.',
+  el => {
+    let T = CH[2].t0, playing = false, speed = 60, shown = 0, last = 0;
+    const term = h('div', {class: 'term'}), tc = h('span', {class: 'tc'}), cursor = h('span', {class: 't-cur'});
+    const scrub = h('input', {type: 'range', class: 'scrub', min: 0, max: WALL, step: 500, oninput: e => { T = +e.target.value; sync(true); }});
+    const line = s => {
+      const d = h('span', {class: 't-dur'}, `  ${fmt(s.ms)}`);
+      if (s.k === 'T') return h('div', {'data-i': s.i, class: 't-think'}, '  ∴ thinking', d);
+      if (s.k === 'M') return h('div', {'data-i': s.i, class: 't-say'}, `» ${s.label}`);
+      if (s.k === 'E' || s.k === 'W') return h('div', {'data-i': s.i, class: 't-edit'}, `✎ ${VERB[s.k].toLowerCase()} ${s.label}`, d);
+      return h('div', {'data-i': s.i, class: s.bg ? 't-bg' : ''}, `$ ${s.label}${s.bg ? ' &' : ''}`, s.bg ? h('span', {class: 't-dur'}, '  [background]') : d,
+        s.res && h('span', {class: `t-res ${s.res[0]}`}, `  ${OG[s.res[0]]} ${s.res[1]}`));
+    };
+    function sync(rebuild) {
+      const n = STEPS.filter(s => s.t <= T).length;
+      if (rebuild || n < shown) { term.replaceChildren(); shown = 0; }
+      while (shown < n) { const s = STEPS[shown], c = CH.find(c => c.a === s.i); if (c) term.append(h('div', {class: 't-ch'}, `── ${c.n} · ${c.t} ──`)); term.append(line(s)); shown++; }
+      term.append(cursor); term.scrollTop = term.scrollHeight;
+      tc.textContent = `${clk(T)} / 17:01`; scrub.value = T;
+    }
+    const pb = h('button', {class: 'vb-btn'}, '▶');
+    function tick(now) {
+      if (!playing) return;
+      T = Math.min(WALL, T + (now - last) * speed); last = now; sync(false);
+      if (T >= WALL) { playing = false; pb.textContent = '▶'; return; }
+      requestAnimationFrame(tick);
+    }
+    pb.onclick = () => { playing = !playing; pb.textContent = playing ? '❚❚' : '▶'; if (playing) { if (T >= WALL) { T = 0; sync(true); } last = performance.now(); requestAnimationFrame(tick); } };
+    const sp = h('div', {class: 'segc'}, [60, 300, 1200].map(v => h('button', {class: v === speed ? 'on' : null, onclick: e => { speed = v; sp.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.currentTarget)); }}, `${v}×`)));
+    el.append(h('div', {class: 'vcr'}, term,
+      h('div', {style: 'padding:8px 10px 0'}, scrub),
+      h('div', {class: 'marks'}, CH.map(c => h('span', {style: `left:${c.t0 / WALL * 100}%`, title: c.t}, c.n))),
+      h('div', {class: 'vcr-bar'},
+        h('button', {class: 'vb-btn', title: 'Back to start', onclick: () => { T = 0; sync(true); }}, '⏮'), pb,
+        h('button', {class: 'vb-btn', title: 'Next chapter', onclick: () => { const c = CH.find(c => c.t0 > T + 1); T = c ? c.t0 : WALL; sync(false); }}, '⏭'),
+        sp, tc)));
+    sync(true);
+    requestAnimationFrame(() => term.scrollTop = term.scrollHeight);
+  });
+
+/* ---------- inspector + tooltip ---------- */
+const insp = $('#insp'), tip = $('#tip');
+let curI = null;
+function open(i) {
+  curI = i; const s = STEPS[i - 1], c = CH[s.ch];
+  document.querySelectorAll('.sel').forEach(e => e.classList.remove('sel'));
+  document.querySelectorAll(`main [data-i="${i}"]`).forEach(e => e.classList.add('sel'));
+  insp.hidden = false;
+  insp.replaceChildren(
+    h('div', {class: 'ih'}, h('span', {style: `color:${CAT[s.cat].c}`}, GLYPH[s.cat]), h('b', {}, `Step ${i} of 181`), `· ${VERB[s.k]} · ${CAT[s.cat].n}`, h('span', {class: 'sp'}),
+      h('button', {class: 'ib', onclick: () => open(Math.max(1, i - 1))}, '←'), h('button', {class: 'ib', onclick: () => open(Math.min(181, i + 1))}, '→'), h('button', {class: 'ib', onclick: close}, '✕')),
+    h('div', {class: 'il' + (s.k === 'M' ? ' msg' : '')}, s.k === 'T' ? '(Thinking. The sample doesn\'t include thought text, so a real inspector would show it here.)' : s.label),
+    h('dl', {},
+      h('dt', {}, 'Duration'), h('dd', {}, fmt(s.ms), s.bg ? ' · background, outlasted the turn' : ''),
+      h('dt', {}, 'Started'), h('dd', {}, `+${clk(s.t)} into the turn`),
+      h('dt', {}, 'Chapter'), h('dd', {}, `${c.n}. ${c.t}`),
+      s.res && [h('dt', {}, 'Result'), h('dd', {}, badge(s.res))],
+      s.recon && [h('dt', {}, 'Note'), h('dd', {class: 'dimtxt'}, 'Command text reconstructed: the sample kept only its first letter.')]),
+    h('div', {class: 'nb'}, h('div', {class: 'dimtxt', style: 'font-size:11px;margin-bottom:2px'}, 'Around it'), STEPS.slice(Math.max(0, i - 3), Math.min(181, i + 2)).map(n => { const r = stepRow(n); if (n.i === i) r.classList.add('cur'); return r; })),
+    h('div', {class: 'kb dimtxt'}, h('span', {class: 'kbd'}, '←'), ' ', h('span', {class: 'kbd'}, '→'), ' step · ', h('span', {class: 'kbd'}, 'esc'), ' close'));
+}
+function close() { insp.hidden = true; curI = null; document.querySelectorAll('.sel').forEach(e => e.classList.remove('sel')); }
+document.addEventListener('click', e => { const t = e.target.closest('[data-i]'); if (t) open(+t.dataset.i); });
+document.addEventListener('keydown', e => {
+  if (curI == null || e.target.matches('input,textarea')) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); open(Math.max(1, curI - 1)); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); open(Math.min(181, curI + 1)); }
+  if (e.key === 'Escape') close();
+});
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest?.('[data-i]');
+  if (!t || t.closest('#insp') || t.classList.contains('row') || t.closest('.term,.script,.rc-items')) { tip.hidden = true; return; }
+  const s = STEPS[t.dataset.i - 1];
+  tip.replaceChildren(h('b', {}, `#${s.i} ${VERB[s.k]}`), ` · ${CAT[s.cat].n} · ${fmt(s.ms)}`, s.res ? ` · ${s.res[1]}` : '', s.k !== 'T' && h('span', {class: 'mono'}, s.label));
+  tip.hidden = false;
+});
+document.addEventListener('mousemove', e => { if (!tip.hidden) { tip.style.left = `${Math.min(innerWidth - 370, e.clientX + 14)}px`; tip.style.top = `${e.clientY + 16}px`; } });
+
+
+/* ---------- boot ---------- */
+const TIERS = {
+  best: ['Best practice', 'Familiar patterns, ready to ship'],
+  mid: ['In between', 'Proven ideas used in a new way'],
+  wild: ['Off the wall', 'Deliberately strange, to shake loose new ideas'],
+};
+const cmdCount = STEPS.filter(s => !['think', 'say', 'edit'].includes(s.cat)).length;
+$('#st-line').textContent = `${STEPS.length} steps · 17m 1s · ${STEPS.filter(s => s.cat === 'edit').length} edits · ${cmdCount} commands`;
+const main = $('#main'), nav = $('#nav');
+nav.append(h('a', {href: '#now'}, 'Today'));
+const today = h('div', {class: 'stage'});
+const bgShare = renderToday(today);
+$('#insight').innerHTML = `<b>What stands out:</b> the 2 background Codex runs take up <b>${Math.round(bgShare * 100)}%</b> of today's bar, yet they're only 2 of 181 steps and were still running when the turn ended. Every design below separates <b>time the agent spent</b> (17 minutes) from <b>work it handed off</b>, then groups the other 179 steps into 10 chapters.`;
+main.append(h('section', {class: 'design', id: 'now'},
+  h('div', {class: 'meta'}, h('div', {class: 'num'}, 'NOW'), h('h2', {}, 'Today\'s component'), h('p', {}, 'The current design, rebuilt from the pasted HTML for comparison. 181 flat rows, and a bar mostly filled by the two background runs.')),
+  today));
+Object.entries(TIERS).forEach(([tier, [label, sub]]) => {
+  nav.append(h('span', {class: 't'}, label));
+  main.append(h('h3', {class: 'tier-h'}, label, h('span', {}, sub)));
+  DESIGNS.filter(d => d.tier === tier).forEach(d => {
+    nav.append(h('a', {href: `#${d.id}`, title: d.name}, d.id));
+    const stage = h('div', {class: 'stage'});
+    try { d.render(stage); } catch (e) { console.error(d.id, e); stage.append(h('pre', {style: 'color:#f4607a'}, `${d.id} failed: ${e.message}`)); }
+    main.append(h('section', {class: 'design', id: d.id},
+      h('div', {class: 'meta'}, h('div', {class: 'num'}, d.id), h('h2', {}, d.name), h('p', {}, d.why), h('p', {class: 'trade', html: d.trade})),
+      stage));
+  });
+});
+</script>
+</body>
+</html>
