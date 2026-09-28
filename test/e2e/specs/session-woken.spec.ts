@@ -189,9 +189,7 @@ test.describe("Woken badge", () => {
 				},
 			});
 
-			// A Claude ask lives only in memory (PendingInteractionService) and
-			// never appends permission.asked, so it cannot wake a snoozed session.
-			test.fixme("approval wake on a read session stays until the session is opened", async ({
+			test("approval wake on a read session stays until the session is opened", async ({
 				page,
 				harness,
 			}) => {

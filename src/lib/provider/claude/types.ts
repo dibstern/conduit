@@ -89,9 +89,11 @@ export interface ClaudeResumeCursor {
 // ─── Pending Approval / Question ───────────────────────────────────────────
 
 /**
- * An in-flight `canUseTool` callback waiting for a user decision. The
- * permission bridge creates one, emits permission.asked via EventSink, and
- * blocks by awaiting the EventSink Effect until the UI calls resolvePermission().
+ * An in-flight `canUseTool` callback waiting for a user decision.
+ * ClaudePermissionService creates one and blocks on the event sink's
+ * requestPermission(), which records permission.asked, waits for the UI to
+ * call resolvePermission(), and records permission.resolved however the wait
+ * ends.
  */
 export interface PendingApproval {
 	readonly requestId: string;

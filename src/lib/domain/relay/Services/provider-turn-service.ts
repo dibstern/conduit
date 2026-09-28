@@ -400,7 +400,20 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					Effect.provideService(OverridesStateTag, overridesRef),
 				),
 			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
-			...(ingestion ? { ingestion } : {}),
+			// The SDK calls canUseTool from a bare Promise, so the asks this sink
+			// records arrive with no services at all. Fill them in from the relay,
+			// or the commit finds no notifier and the woken session never reaches
+			// the sidebar.
+			ingestion: {
+				ingest: (event) =>
+					ingestion
+						.ingest(event)
+						.pipe(
+							Effect.mapInputContext((caller: Context.Context<never>) =>
+								Context.merge(runtime.context, caller),
+							),
+						),
+			},
 			pendingInteractions: {
 				beginPermissionRequest: (request) =>
 					pendingInteractionService.beginPermissionRequest(request),

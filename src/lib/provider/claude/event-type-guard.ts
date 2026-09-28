@@ -56,10 +56,10 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.unsnoozed", // Relay-owned triage state
 	"session.read", // Retired read state (hk9m.7); kept so historical stores decode
 	"session.unread", // Same
-	"permission.asked", // Interactive asks use requestPermission(); auto-approved asks persist via synthetic sink push (audit)
-	"permission.resolved", // Interactive resolutions use resolvePermission(); auto-approvals persist via synthetic sink push (audit)
-	"question.asked", // Routed through requestQuestion(), not push()
-	"question.resolved", // Routed through resolveQuestion(), not push()
+	"permission.asked", // Recorded by the sink's requestPermission(), not push()
+	"permission.resolved", // Same
+	"question.asked", // Recorded by the sink's requestQuestion(), not push()
+	"question.resolved", // Same, or by the turn that answers a recovered question
 ] as const satisfies readonly CanonicalEventType[];
 
 // ─── Compile-time exhaustiveness check ──────────────────────────────────

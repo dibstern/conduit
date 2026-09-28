@@ -149,7 +149,8 @@ const restartProcessingTimeout = (sessionId: string) =>
  * with the version it projected at, and the seam publishes that advance after
  * COMMIT, which is how a subscriber learns the badge moved.
  *
- * Only the OpenCode REST paths come through here. A question owned by the
+ * The OpenCode REST paths come through here, and so does a recovered question
+ * skipped with no turn left to record it. A live question owned by the
  * provider runtime is resolved through its event sink, which emits
  * `question.resolved` itself; appending a second one would be a duplicate
  * event, not a second fact.
@@ -443,16 +444,14 @@ export const handleAskUserResponse = (
 						);
 					}
 				}
-				if (resolved.question.recovered) {
-					wsHandler.broadcast({
-						type: "ask_user_resolved",
-						toolId,
-						sessionId: questionSessionId,
-					});
-					yield* restartProcessingTimeout(questionSessionId);
-				} else {
-					yield* announceQuestionResolved(questionSessionId, toolId, answers);
-				}
+				// Not announceQuestionResolved: the event sink or the recovered turn
+				// records this resolution, not the handler.
+				wsHandler.broadcast({
+					type: "ask_user_resolved",
+					toolId,
+					sessionId: questionSessionId,
+				});
+				yield* restartProcessingTimeout(questionSessionId);
 				return;
 			}
 		}
@@ -592,7 +591,18 @@ export const handleQuestionReject = (
 						);
 					}
 				}
-				yield* announceQuestionResolved(questionSessionId, toolId, {});
+				// A live question's event sink records the resolution; a recovered
+				// one has no sink left, so it is recorded here.
+				if (resolved.question.recovered) {
+					yield* announceQuestionResolved(questionSessionId, toolId, {});
+				} else {
+					wsHandler.broadcast({
+						type: "ask_user_resolved",
+						toolId,
+						sessionId: questionSessionId,
+					});
+					yield* restartProcessingTimeout(questionSessionId);
+				}
 				return;
 			}
 		}
