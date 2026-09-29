@@ -247,7 +247,10 @@ export const resumeStream = <A extends object>(
 	issue: (
 		resumeFromSequence: number | undefined,
 	) => Stream.Stream<A, WsRpcError | RpcClientError | DetailLengthMismatch>,
-	options: { readonly from?: number | undefined } = {},
+	options: {
+		readonly from?: number | undefined;
+		readonly onTransportDrop?: () => void;
+	} = {},
 ): Stream.Stream<A, WsRpcError> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
@@ -307,6 +310,12 @@ export const resumeStream = <A extends object>(
 						// What is left is transport class. An interruption is the
 						// ambiguous one: a torn-down socket and an unsubscribe look
 						// identical except in who was interrupted.
+						const reissueAfterDrop = (): Stream.Stream<A, WsRpcError> =>
+							Stream.unwrap(
+								Effect.sync(() => options.onTransportDrop?.()).pipe(
+									Effect.as(reissue()),
+								),
+							);
 						return Cause.isInterrupted(cause)
 							? Stream.unwrap(
 									Effect.map(
@@ -314,10 +323,10 @@ export const resumeStream = <A extends object>(
 										(byConsumer): Stream.Stream<A, WsRpcError> =>
 											byConsumer
 												? Stream.failCause(Cause.stripFailures(cause))
-												: reissue(),
+												: reissueAfterDrop(),
 									),
 								)
-							: reissue();
+							: reissueAfterDrop();
 					}),
 				);
 

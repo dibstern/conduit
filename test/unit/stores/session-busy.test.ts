@@ -12,7 +12,7 @@ import {
 	disconnect,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import { applySessionChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
+import { applySessionChange } from "./session-fixtures.js";
 
 beforeEach(() => clearSessionState());
 afterEach(() => {

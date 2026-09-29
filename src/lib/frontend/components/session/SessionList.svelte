@@ -114,6 +114,15 @@
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const filtered = $derived(sessionList.groups.flatMap((group) => group.rows));
+	let feedStale = $state(false);
+	$effect(() => {
+		const staleSince = sessionList.staleSince;
+		feedStale = false;
+		if (staleSince === null) return;
+		const remaining = Math.max(0, staleSince + 3_000 - Date.now());
+		const timer = setTimeout(() => { feedStale = true; }, remaining);
+		return () => clearTimeout(timer);
+	});
 	const statusFilter = $derived(getSessionStatusFilter());
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
@@ -799,6 +808,9 @@
 		{/if}
 	{/snippet}
 
+	{#if feedStale}
+		<div class="px-3.5 py-1 text-xs text-text-dimmer font-brand" data-testid="session-list-stale">May be out of date</div>
+	{/if}
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={() => { heldSessionId = null; }}>
 		{#if isEmpty}

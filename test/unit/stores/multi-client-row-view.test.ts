@@ -12,30 +12,37 @@ it("two client stores render the same row changes from their root snapshots", as
 	const first = await import(
 		"../../../src/lib/frontend/stores/session.svelte.js"
 	);
+	const firstFeed = await import(
+		"../../../src/lib/frontend/transport/session-subscription.svelte.js"
+	);
 	vi.resetModules();
 	const second = await import(
 		"../../../src/lib/frontend/stores/session.svelte.js"
 	);
-	const clients = [first, second];
+	const secondFeed = await import(
+		"../../../src/lib/frontend/transport/session-subscription.svelte.js"
+	);
+	const clients = [
+		{ store: first, feed: firstFeed },
+		{ store: second, feed: secondFeed },
+	];
 
 	for (const client of clients) {
-		client.handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				{ id: "shared", title: "Shared", status: "idle", unread: true },
-			],
+		client.feed.applySessionChange({
+			_tag: "snapshot",
+			sequence: 1,
+			rows: [{ id: "shared", title: "Shared", status: "idle", unread: true }],
 		});
 	}
 	expect(
-		clients.map((client) => client.getSessionIndicator("shared", null)),
+		clients.map((client) => client.store.getSessionIndicator("shared", null)),
 	).toEqual(["done-unviewed", "done-unviewed"]);
 
 	for (const client of clients) {
-		client.handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
+		client.feed.applySessionChange({
+			_tag: "snapshot",
+			sequence: 2,
+			rows: [
 				{
 					id: "shared",
 					title: "Shared",
@@ -47,6 +54,6 @@ it("two client stores render the same row changes from their root snapshots", as
 		});
 	}
 	expect(
-		clients.map((client) => client.getSessionIndicator("shared", null)),
+		clients.map((client) => client.store.getSessionIndicator("shared", null)),
 	).toEqual(["attention", "attention"]);
 });

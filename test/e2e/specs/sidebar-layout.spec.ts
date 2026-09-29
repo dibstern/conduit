@@ -5,10 +5,246 @@
 // Uses real relay backed by MockOpenCodeServer.
 
 import { expect, test } from "../helpers/replay-fixture.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({ recording: "chat-simple" });
+
+test("shell feed adds and removes sidebar roots", async ({
+	page,
+	relayUrl,
+}) => {
+	const rpc = await mockWsRpc(page, {
+		handlers: {
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			ViewSession: () => ({ ok: true }),
+		},
+		streams: {
+			SubscribeShell: () => [
+				{ _tag: "snapshot", sequence: 1, rows: [] },
+				{ _tag: "synchronized" },
+			],
+		},
+	});
+	const relay = await mockRelayWebSocket(page, {
+		initMessages: [
+			{
+				type: "project_list",
+				projects: [
+					{
+						slug: "e2e-replay",
+						title: "e2e-replay",
+						directory: "/tmp/e2e-replay",
+					},
+				],
+				current: "e2e-replay",
+			},
+		],
+		responses: new Map(),
+	});
+	await page.goto(relayUrl);
+	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
+	rpc.sendChunk("SubscribeShell", [
+		{
+			_tag: "upsert",
+			sequence: 2,
+			item: {
+				id: "feed-root",
+				title: "Feed root",
+				status: "idle",
+				updatedAt: new Date().toISOString(),
+			},
+		},
+	]);
+	await expect(
+		page.locator('#session-list [data-session-id="feed-root"]'),
+	).toBeVisible();
+	await page.locator('#session-list [data-session-id="feed-root"]').click();
+	relay.sendMessage({
+		type: "session_switched",
+		id: "feed-root",
+		sessionId: "feed-root",
+		events: [{ type: "user_message", text: "Chat before deletion" }],
+	});
+	await expect(page.locator("#messages")).toContainText("Chat before deletion");
+	rpc.sendChunk("SubscribeShell", [
+		{ _tag: "remove", sequence: 3, id: "feed-root" },
+	]);
+	await expect(
+		page.locator('#session-list [data-session-id="feed-root"]'),
+	).toHaveCount(0);
+	await expect(page.locator("#messages")).not.toContainText(
+		"Chat before deletion",
+	);
+});
+
+test("shell feed warns after a failed grace period and clears on recovery", async ({
+	page,
+	relayUrl,
+}) => {
+	let subscriptions = 0;
+	const rpc = await mockWsRpc(page, {
+		handlers: {
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+		},
+		streams: {
+			SubscribeShell: () =>
+				++subscriptions === 1
+					? [
+							{ _tag: "snapshot", sequence: 1, rows: [] },
+							{ _tag: "synchronized" },
+						]
+					: [],
+		},
+	});
+	await mockRelayWebSocket(page, {
+		initMessages: [
+			{
+				type: "project_list",
+				projects: [
+					{
+						slug: "e2e-replay",
+						title: "e2e-replay",
+						directory: "/tmp/e2e-replay",
+					},
+				],
+				current: "e2e-replay",
+			},
+		],
+		responses: new Map(),
+	});
+	await page.goto(relayUrl);
+	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
+	rpc.failStream("SubscribeShell", "feed unavailable");
+	const warning = page.getByTestId("session-list-stale");
+	await expect(warning).toBeHidden();
+	await expect(warning).toBeVisible({ timeout: 5_000 });
+	await expect
+		.poll(
+			() =>
+				rpc.getRequests().filter((request) => request.tag === "SubscribeShell")
+					.length,
+		)
+		.toBeGreaterThan(1);
+	rpc.sendChunk("SubscribeShell", [{ _tag: "synchronized" }]);
+	await expect(warning).toBeHidden();
+});
+
+test("same-project reconnect keeps a visible stale warning until shell sync", async ({
+	page,
+	relayUrl,
+}) => {
+	let subscriptions = 0;
+	const rpc = await mockWsRpc(page, {
+		handlers: {
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+		},
+		streams: {
+			SubscribeShell: () =>
+				++subscriptions === 1
+					? [
+							{ _tag: "snapshot", sequence: 1, rows: [] },
+							{ _tag: "synchronized" },
+						]
+					: [],
+		},
+	});
+	const relay = await mockRelayWebSocket(page, {
+		initMessages: [
+			{
+				type: "project_list",
+				projects: [
+					{
+						slug: "e2e-replay",
+						title: "e2e-replay",
+						directory: "/tmp/e2e-replay",
+					},
+				],
+				current: "e2e-replay",
+			},
+		],
+		responses: new Map(),
+	});
+	await page.goto(relayUrl);
+	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
+	rpc.failStream("SubscribeShell", "feed unavailable");
+	const warning = page.getByTestId("session-list-stale");
+	await expect(warning).toBeVisible({ timeout: 5_000 });
+	const beforeReconnect = subscriptions;
+	relay.close();
+	await expect.poll(() => subscriptions).toBeGreaterThan(beforeReconnect);
+	await expect(warning).toBeVisible();
+	rpc.sendChunk("SubscribeShell", [{ _tag: "synchronized" }]);
+	await expect(warning).toBeHidden();
+});
+
+test("a promptly resynchronized shell feed does not show the stale line", async ({
+	page,
+	relayUrl,
+}) => {
+	const rpc = await mockWsRpc(page, {
+		handlers: {
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+		},
+		streams: {
+			SubscribeShell: () => [
+				{ _tag: "snapshot", sequence: 1, rows: [] },
+				{ _tag: "synchronized" },
+			],
+		},
+	});
+	await mockRelayWebSocket(page, {
+		initMessages: [
+			{
+				type: "project_list",
+				projects: [
+					{
+						slug: "e2e-replay",
+						title: "e2e-replay",
+						directory: "/tmp/e2e-replay",
+					},
+				],
+				current: "e2e-replay",
+			},
+		],
+		responses: new Map(),
+	});
+	await page.goto(relayUrl);
+	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
+	rpc.closeStreamSocket("SubscribeShell");
+	await expect
+		.poll(
+			() =>
+				rpc.getRequests().filter((request) => request.tag === "SubscribeShell")
+					.length,
+			{ timeout: 5_000 },
+		)
+		.toBeGreaterThan(1);
+	await page.waitForTimeout(3_300);
+	await expect(page.getByTestId("session-list-stale")).toBeHidden();
+});
 
 test.describe("Sidebar Layout — Desktop", () => {
 	test.use({ viewport: { width: 1440, height: 900 } });

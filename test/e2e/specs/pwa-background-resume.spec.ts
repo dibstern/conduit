@@ -15,7 +15,7 @@ const initMessages = [
 	{ type: "status", status: "idle" },
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{

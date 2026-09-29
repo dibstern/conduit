@@ -106,16 +106,15 @@ import {
 } from "./router.svelte.js";
 import {
 	acceptsSessionSwitch,
-	applySessionRemoved,
 	consumeSwitchingFromId,
 	findSession,
 	handleSessionFamily,
 	handleSessionForked,
-	handleSessionList,
 	handleSessionSwitched,
 	isRoutable,
 	observeSessionActivity,
 	parentOf,
+	pruneSessionLists,
 	sessionCreation,
 	sessionState,
 } from "./session.svelte.js";
@@ -255,8 +254,8 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 
 	// ── Unknown-session guard ──────────────────────────────────────────
-	// Background events can arrive before membership. Dropping one here is
-	// safe: its snapshot row and fresh history arrive when that session opens.
+	// The shell feed can announce a row after a background event. Dropping the
+	// event is safe: opening that session loads fresh history after membership.
 	if (!isRoutable(event.sessionId)) {
 		log.debug(
 			"routePerSession: unknown sessionId %s for event %s",
@@ -757,10 +756,6 @@ export function handleMessage(msg: RelayMessage): void {
 	// ── Global events + globally-coordinated per-session events ──────────
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
-		case "session_list": {
-			handleSessionList(msg);
-			break;
-		}
 		case "session_family": {
 			handleSessionFamily(msg);
 			break;
@@ -774,8 +769,8 @@ export function handleMessage(msg: RelayMessage): void {
 		case "session_deleted": {
 			const deletedId =
 				"sessionId" in msg ? (msg.sessionId as string) : undefined;
-			// Drops the row and the per-session chat state hanging off it.
-			if (deletedId) applySessionRemoved(deletedId);
+			// The shell feed owns row removal and chat cleanup.
+			if (deletedId) pruneSessionLists(deletedId);
 			break;
 		}
 		case "session_switched": {

@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import {
+	EnvelopeSchema,
+	SessionInfoSchema,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { RelayMessageSchema } from "../../../src/lib/shared-types.js";
 import * as mockupState from "../../e2e/fixtures/mockup-state.js";
 
@@ -23,16 +27,25 @@ const jsonFiles = (dir: string): string[] =>
 		return path.endsWith(".json") ? [path] : [];
 	});
 
-/** Every `session_list` message anywhere in a fixture, however deeply nested. */
-const sessionLists = (value: unknown): unknown[] => {
-	if (Array.isArray(value)) return value.flatMap(sessionLists);
+/** Every matching message anywhere in a fixture, however deeply nested. */
+const messagesOfType = (
+	value: unknown,
+	type: string,
+): Record<string, unknown>[] => {
+	if (Array.isArray(value))
+		return value.flatMap((item: unknown) => messagesOfType(item, type));
 	if (value === null || typeof value !== "object") return [];
 	const record = value as Record<string, unknown>;
-	const nested = Object.values(record).flatMap(sessionLists);
-	return record["type"] === "session_list" ? [record, ...nested] : nested;
+	const nested = Object.values(record).flatMap((item) =>
+		messagesOfType(item, type),
+	);
+	return record["type"] === type ? [record, ...nested] : nested;
 };
 
 const decode = Schema.decodeUnknownEither(RelayMessageSchema);
+const decodeShell = Schema.decodeUnknownEither(
+	EnvelopeSchema(SessionInfoSchema),
+);
 
 const expectDecodable = (
 	messages: readonly unknown[],
@@ -50,18 +63,27 @@ const expectDecodable = (
 	}
 };
 
-describe("e2e session_list fixtures decode as relay messages", () => {
+describe("e2e session fixtures decode at their wire boundaries", () => {
 	for (const file of jsonFiles(fixturesDir)) {
-		const messages = sessionLists(
-			JSON.parse(readFileSync(file, "utf-8")) as unknown,
-		);
+		const contents: unknown = JSON.parse(readFileSync(file, "utf-8"));
+		const messages = messagesOfType(contents, "session_list");
 		if (messages.length === 0) continue;
 		it(file.slice(fixturesDir.length + 1), () => {
 			expectDecodable(messages, file);
 		});
 	}
 
-	it("mockup-state.ts", () => {
-		expectDecodable(sessionLists(mockupState), "mockup-state.ts");
+	it("mockup-state.ts shell snapshots", () => {
+		const snapshots = messagesOfType(mockupState, "shell_snapshot");
+		expect(snapshots.length).toBeGreaterThan(0);
+		for (const snapshot of snapshots) {
+			const result = decodeShell({
+				_tag: "snapshot",
+				sequence: 1,
+				rows: snapshot["sessions"],
+			});
+			if (Either.isLeft(result))
+				throw new Error(`mockup-state.ts: ${String(result.left)}`);
+		}
 	});
 });

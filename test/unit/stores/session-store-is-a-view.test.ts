@@ -41,19 +41,18 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import {
-	applySessionRemoved,
-	applySessionSnapshot,
-	applySessionUpsert,
 	clearSessionState,
 	findSession,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionSubscription } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
+import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import {
 	applySessionChange,
-	type ShellEnvelope,
-	sessionSubscription,
-} from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
-import type { SessionInfo } from "../../../src/lib/frontend/types.js";
+	applySessionRemoved,
+	applySessionSnapshot,
+	applySessionUpsert,
+} from "./session-fixtures.js";
 
 const session = (id: string, title = id): SessionInfo => ({
 	id,
@@ -99,13 +98,11 @@ describe("the session store", () => {
 	});
 
 	it("takes what the shell subscription delivers", () => {
-		// The annotation is the point: this is the compile-time proof that the
-		// wire envelope fits the applier, before ni8.5.20 wires the stream to it.
-		const envelope: ShellEnvelope = {
+		const envelope = {
 			_tag: "upsert",
 			item: session("s1", "from the wire"),
 			sequence: 7,
-		};
+		} as const;
 		applySessionChange(envelope);
 
 		expect(findSession("s1")?.title).toBe("from the wire");

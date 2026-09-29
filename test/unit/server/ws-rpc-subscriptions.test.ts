@@ -213,29 +213,15 @@ describe("subscription RPC handlers", () => {
 					)?.item,
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const listed = yield* client.ListSessions({ projectSlug: "project-a" });
-				expect(listed.sessions).toEqual(
-					expect.arrayContaining([
-						expect.objectContaining({
-							id: "fork-1",
-							parentID: "parent-1",
-							forkMessageId: "message-1",
-						}),
-					]),
-				);
-				const roots = yield* client.ListSessions({
-					projectSlug: "project-a",
-					roots: true,
-				});
 				const envelopes = yield* Queue.unbounded<unknown>();
 				yield* client.SubscribeShell({ projectSlug: "project-a" }).pipe(
 					Stream.runForEach((envelope) => Queue.offer(envelopes, envelope)),
 					Effect.forkScoped,
 				);
-				expect(yield* Queue.take(envelopes)).toEqual({
+				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "snapshot",
 					sequence: createdVersion,
-					rows: roots.sessions,
+					rows: [expect.objectContaining({ id: "parent-1" })],
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
 				const renamedVersion = yield* commit(
@@ -246,14 +232,10 @@ describe("subscription RPC handlers", () => {
 						{ provider: "opencode", createdAt: 2 },
 					),
 				);
-				const updated = yield* client.ListSessions({
-					projectSlug: "project-a",
-					roots: true,
-				});
-				expect(yield* Queue.take(envelopes)).toEqual({
+				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "upsert",
 					sequence: renamedVersion,
-					item: updated.sessions[0],
+					item: expect.objectContaining({ id: "parent-1" }),
 				});
 				// The shell rebases on resume rather than catching up: a deleted row
 				// leaves no version behind (§8), so the only honest answer to "what
@@ -264,11 +246,11 @@ describe("subscription RPC handlers", () => {
 						resumeFromSequence: createdVersion,
 					})
 					.pipe(Stream.take(2), Stream.runCollect);
-				expect(Array.from(replay)).toEqual([
+				expect(Array.from(replay)).toMatchObject([
 					{
 						_tag: "snapshot",
 						sequence: renamedVersion,
-						rows: updated.sessions,
+						rows: [expect.objectContaining({ id: "parent-1" })],
 					},
 					{ _tag: "synchronized" },
 				]);

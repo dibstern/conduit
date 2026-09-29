@@ -3,14 +3,10 @@
 // the other. The two halves never write each other.
 
 import {
-	applySessionChange,
 	resetSessionSubscription,
 	sessionSubscription,
 } from "../transport/session-subscription.svelte.js";
-import type {
-	ListDaemonSessionsResponse,
-	ListSessionsResponse,
-} from "../transport/ws-rpc.js";
+import type { ListDaemonSessionsResponse } from "../transport/ws-rpc.js";
 import {
 	type CreateSessionRpcInput,
 	createSessionRpc,
@@ -55,13 +51,13 @@ import { getSessionScope } from "./session-scope.js";
 // Every session the server has told us about, keyed by id — one representation,
 // not a map plus two arrays kept in step by hand. The map itself belongs to the
 // subscription that fills it (ni8.5 T-9); this store is a view over it and
-// holds no copy. The `applySession*` functions below are this module's only
-// door into it, and every row they store is a whole `SessionInfo` straight off
-// the wire. Nothing outside can write it: `sessionState` hands it out as a
-// `ReadonlyMap`.
+// holds no copy. Every row is a whole `SessionInfo` straight off the wire.
+// Nothing outside can write it: `sessionState` hands it out as a `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
-let rootSessions = $state.raw<readonly SessionInfo[]>([]);
+const rootSessions = $derived(
+	[...serverSessions.values()].filter((row) => !row.parentID),
+);
 let familySessions = $state.raw<readonly SessionInfo[]>([]);
 
 /** A session can receive events while its row is still arriving. */
@@ -150,8 +146,7 @@ const clientSession = $state({
 /** Read view over both halves. The server half is read-only by type; the
  *  client half is a plain setting. */
 export const sessionState = {
-	/** Server-owned. Write through `applySessionSnapshot`, `applySessionUpsert`
-	 *  or `applySessionRemoved`. */
+	/** Server-owned. The shell feed is its only writer. */
 	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
 		return serverSessions;
 	},
@@ -384,46 +379,8 @@ export function sendNewSession(
 	return requestId;
 }
 
-// ─── Applying server rows ───────────────────────────────────────────────────
-// The only door into the server half.
-
-/** What a snapshot of the session list covers. */
-export type SessionSnapshotScope =
-	/** Every session the server has: a row it omits has been removed. */
-	| "complete"
-	/** Part of the list: a row it omits says nothing. */
-	| "partial";
-
-/** Apply a snapshot of the session list.
- *
- *  Only a `"complete"` snapshot reaps. A roots-only or search snapshot does
- *  not, because a session we hold may be a child that has not learned its
- *  `parentID` yet, and its absence from a roots list is not a deletion. */
-export function applySessionSnapshot(
-	rows: readonly SessionInfo[],
-	scope: SessionSnapshotScope,
-): void {
-	if (scope === "partial") {
-		for (const row of rows) applySessionChange({ _tag: "upsert", item: row });
-		return;
-	}
-	applySessionChange({ _tag: "snapshot", rows });
-	rootSessions = rows.filter((row) => !row.parentID);
-}
-
-/** Apply a single session row the server has created or changed. */
-export function applySessionUpsert(row: SessionInfo): void {
-	applySessionChange({ _tag: "upsert", item: row });
-	if (rootSessions.some((existing) => existing.id === row.id))
-		rootSessions = rootSessions.map((existing) =>
-			existing.id === row.id ? row : existing,
-		);
-}
-
-/** Apply a session the server has deleted. */
-export function applySessionRemoved(id: string): void {
-	applySessionChange({ _tag: "remove", id });
-	rootSessions = rootSessions.filter((row) => row.id !== id);
+/** Prune separate cross-project and search reads after a deletion notice. */
+export function pruneSessionLists(id: string): void {
 	clientSession.daemonSessions = clientSession.daemonSessions.filter(
 		(row) => row.id !== id,
 	);
@@ -675,33 +632,10 @@ function getSessionDate(session: SessionInfo): Date {
 
 // ─── Message handlers ───────────────────────────────────────────────────────
 
-export function handleSessionList(
-	msg: Extract<RelayMessage, { type: "session_list" }>,
-): void {
-	const { sessions, roots } = msg;
-	if (!Array.isArray(sessions)) return;
-	if (roots !== true) return;
-	rootSessions = sessions.filter((row) => !row.parentID);
-	for (const row of rootSessions)
-		applySessionChange({ _tag: "upsert", item: row });
-}
-
 export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
 	familySessions = msg.sessions;
-}
-
-export function applyListSessionsResponse(
-	response: ListSessionsResponse,
-): void {
-	// The RPC decodes into the same session type the WebSocket message carries
-	// (ni8.5 T-1), so the sessions go straight through.
-	handleSessionList({
-		type: "session_list",
-		sessions: [...response.sessions],
-		roots: response.roots,
-	});
 }
 
 /** How many cross-project rows one page asks for. Exported so the caller that
@@ -1029,9 +963,8 @@ export function getFilteredSessions(): SessionInfo[] {
 		scope === null || (session.projectSlug ?? currentSlug) === scope;
 	if (sessionState.searchResults !== null) {
 		const searchSlug = currentSlug;
-		// Root rows carry the subtree rollup, so search hits resolve against
-		// them rather than the membership map, where family rows (individual
-		// state) win.
+		// Root rows carry the subtree rollup, so local search hits use the
+		// current shell row rather than a possibly older search result.
 		const liveRoots = new Map(
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
@@ -1225,7 +1158,6 @@ export function clearSessionState(): void {
 	clientSession.currentId = null;
 	clientSession.announcedParent = null;
 	setSearchQuery("");
-	rootSessions = [];
 	familySessions = [];
 	clientSession.daemonSessions = [];
 	clientSession.daemonUnavailableProjects = [];

@@ -1,6 +1,6 @@
 // ─── Integration: Session Lifecycle ──────────────────────────────────────────
 // Tests session management operations: create, switch, rename, delete, and
-// search sessions through the relay WebSocket interface.
+// manage sessions through the relay WebSocket interface.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -144,46 +144,6 @@ describe("Integration: Session Lifecycle", () => {
 		const sessions = list["sessions"] as Array<{ id: string }>;
 		const found = sessions.find((s) => s.id === sessionId);
 		expect(found).toBeUndefined();
-
-		await client.close();
-	});
-
-	// ── Search ──────────────────────────────────────────────────────────────
-
-	it("search sessions by query", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		// Create a session with a unique, searchable title
-		const uniqueTag = "Searchable-Integration-Test";
-		const switched = await client.createSession(uniqueTag);
-		expect(switched["id"]).toBeTruthy();
-		client.clearReceived();
-
-		// Search for it
-		const msg = await client.searchSessions(uniqueTag);
-		const sessions = msg.sessions;
-		expect(Array.isArray(sessions)).toBe(true);
-
-		const found = sessions.find((s) => s.title?.includes(uniqueTag));
-		expect(found).toBeTruthy();
-
-		await client.close();
-	});
-
-	it("search sessions returns empty for no match", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		// Search for something that should not match anything
-		const msg = await client.searchSessions(
-			"NoMatchWillEverExist-zzz-integration",
-		);
-		const sessions = msg.sessions;
-		expect(Array.isArray(sessions)).toBe(true);
-		expect(sessions).toHaveLength(0);
 
 		await client.close();
 	});

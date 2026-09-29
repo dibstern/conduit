@@ -1,6 +1,7 @@
 import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionList } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import {
+	applySessionRemoved,
 	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
@@ -29,7 +30,6 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
-	applySessionRemoved,
 	clearSessionSearch,
 	DAEMON_SESSION_PAGE_SIZE,
 	getFilteredSessions,

@@ -1,6 +1,11 @@
 import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { seedSearchResults } from "./session-fixtures.js";
-// Direct legacy handler behavior checks are kept deliberately for R4/R6 deletion.
+import {
+	applySessionChange,
+	applySessionRemoved,
+	applySessionSnapshot,
+	applySessionUpsert,
+	seedSearchResults,
+} from "./session-fixtures.js";
 // ─── Session store invariants ────────────────────────────────────────────────
 // The session store is split in two: a server-owned map of `SessionInfo` rows
 // written only by the `applySession*` functions, and a client-owned block
@@ -46,13 +51,8 @@ import {
 	sessionActivity,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applyListSessionsResponse,
-	applySessionRemoved,
-	applySessionSnapshot,
-	applySessionUpsert,
 	clearSessionState,
 	getFilteredSessions,
-	handleSessionList,
 	handleSessionSwitched,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -116,27 +116,24 @@ describe("the server half holds only rows the server sent", () => {
 
 describe("the server half is one representation", () => {
 	it("shows a rename delivered by a new root snapshot", () => {
-		handleSessionList({
-			type: "session_list",
-			sessions: [{ id: "a", title: "Old", status: "idle" }],
-			roots: true,
-		});
-		handleSessionList({
-			type: "session_list",
-			sessions: [{ id: "a", title: "New", status: "idle" }],
-			roots: true,
-		});
+		applySessionSnapshot(
+			[{ id: "a", title: "Old", status: "idle" }],
+			"complete",
+		);
+		applySessionSnapshot(
+			[{ id: "a", title: "New", status: "idle" }],
+			"complete",
+		);
 
 		expect(sessionState.sessions.size).toBe(1);
 		expect(getFilteredSessions().map((s) => s.title)).toEqual(["New"]);
 	});
 
 	it("reads search hits through the server half, so a rename follows", () => {
-		handleSessionList({
-			type: "session_list",
-			sessions: [{ id: "a", title: "Old", status: "idle" }],
-			roots: true,
-		});
+		applySessionSnapshot(
+			[{ id: "a", title: "Old", status: "idle" }],
+			"complete",
+		);
 		seedSearchResults([{ id: "a", title: "Old" }]);
 		applySessionUpsert({ id: "a", title: "Renamed", status: "idle" });
 
@@ -144,14 +141,13 @@ describe("the server half is one representation", () => {
 	});
 
 	it("drops a removed session out of an active search", () => {
-		handleSessionList({
-			type: "session_list",
-			sessions: [
+		applySessionSnapshot(
+			[
 				{ id: "a", title: "A", status: "idle" },
 				{ id: "b", title: "B", status: "idle" },
 			],
-			roots: true,
-		});
+			"complete",
+		);
 		seedSearchResults([
 			{ id: "a", title: "A" },
 			{ id: "b", title: "B" },
@@ -247,11 +243,6 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		expectWireValid(ROWS);
 	});
 
-	it("handleSessionList", () => {
-		handleSessionList({ type: "session_list", sessions: ROWS, roots: false });
-		expectWireValid(ROWS);
-	});
-
 	it("handleSessionSwitched", () => {
 		applySessionSnapshot(ROWS, "complete");
 		handleSessionSwitched({
@@ -283,21 +274,14 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		expectWireValid(ROWS);
 	});
 
-	it("applyListSessionsResponse", () => {
-		applyListSessionsResponse({
-			projectSlug: "p",
-			roots: false,
-			sessions: ROWS,
-		});
-		expectWireValid(ROWS);
-	});
-
-	it("session_deleted through the dispatcher", () => {
+	it("session_deleted leaves membership until the feed removes it", () => {
 		applySessionSnapshot(ROWS, "complete");
 		handleMessage({
 			type: "session_deleted",
 			sessionId: "child",
 		} as RelayMessage);
+		expect(sessionState.sessions.has("child")).toBe(true);
+		applySessionChange({ _tag: "remove", id: "child" });
 		expect(sessionState.sessions.has("child")).toBe(false);
 		expectWireValid(ROWS);
 	});
@@ -343,6 +327,7 @@ describe("deleting the session being viewed", () => {
 				type: "session_deleted",
 				sessionId: "ses_doomed",
 			} as RelayMessage);
+			applySessionChange({ _tag: "remove", id: "ses_doomed" });
 			expect(sessionState.sessions.has("ses_doomed")).toBe(false);
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 

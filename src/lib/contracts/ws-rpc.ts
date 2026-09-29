@@ -379,13 +379,6 @@ export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
 });
 
-export const ListSessionsResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
-	sessions: Schema.Array(SessionInfoSchema),
-	roots: Schema.Boolean,
-	search: Schema.optional(Schema.Boolean),
-});
-
 export const CreateSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -543,7 +536,6 @@ export type ProjectSessionAvailability =
 	typeof ProjectSessionAvailabilitySchema.Type;
 export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
-export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
@@ -1185,19 +1177,6 @@ export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	},
 }) {}
 
-export class ListSessions extends Schema.TaggedRequest<ListSessions>()(
-	"ListSessions",
-	{
-		failure: WsRpcError,
-		success: ListSessionsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			roots: Schema.optional(Schema.Boolean),
-			query: Schema.optional(Schema.String),
-		},
-	},
-) {}
-
 export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>()(
 	"ListDaemonSessions",
 	{
@@ -1487,7 +1466,6 @@ export const WsRpcRequest = Schema.Union(
 	ResizePty,
 	ClosePty,
 	ListDaemonSessions,
-	ListSessions,
 	CreateSession,
 	ViewSession,
 	DeleteSession,
@@ -1584,7 +1562,6 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResizePty),
 	Rpc.fromTaggedRequest(ClosePty),
 	Rpc.fromTaggedRequest(ListDaemonSessions),
-	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
 	Rpc.fromTaggedRequest(DeleteSession),

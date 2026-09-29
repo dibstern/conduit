@@ -592,19 +592,15 @@ describe("family attention before membership", () => {
 				pendingQuestionCount: 1,
 			},
 		]);
-		handleMessage({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				{
-					id: "root",
-					title: "Root",
-					status: "idle",
-					pendingPermissionCount: 2,
-					pendingQuestionCount: 1,
-				},
-			],
-		});
+		seedSessions([
+			{
+				id: "root",
+				title: "Root",
+				status: "idle",
+				pendingPermissionCount: 2,
+				pendingQuestionCount: 1,
+			},
+		]);
 		expect(getSessionIndicator("new-child", null)).toBe("attention");
 		expect(getAttentionSessions(null, () => new Set()).get("root")).toEqual({
 			questions: 1,

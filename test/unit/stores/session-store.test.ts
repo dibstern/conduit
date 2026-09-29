@@ -1,5 +1,4 @@
 // ─── Session Store Tests ─────────────────────────────────────────────────────
-// Direct legacy handler behavior checks are kept deliberately for R4/R6 deletion.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
@@ -25,10 +24,6 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
-	applyListSessionsResponse,
-	applySessionRemoved,
-	applySessionSnapshot,
-	applySessionUpsert,
 	clearSessionState,
 	completeNewSession,
 	ERROR_DISPLAY_MS,
@@ -37,7 +32,6 @@ import {
 	groupSessionsByAttention,
 	groupSessionsByDate,
 	handleSessionFamily,
-	handleSessionList,
 	handleSessionSwitched,
 	isSessionSnoozed,
 	isSessionWoken,
@@ -63,7 +57,13 @@ import type {
 	SessionInfo,
 } from "../../../src/lib/frontend/types.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
-import { seedSearchResults, seedSessions } from "./session-fixtures.js";
+import {
+	applySessionRemoved,
+	applySessionSnapshot,
+	applySessionUpsert,
+	seedSearchResults,
+	seedSessions,
+} from "./session-fixtures.js";
 
 // ─── Helper: cast incomplete test data to the expected type ─────────────────
 function msg<T extends RelayMessage["type"]>(data: {
@@ -119,7 +119,7 @@ beforeEach(() => {
 	attachedProjectState.slug = "project-a";
 });
 
-it("seedSessions settles the versioned map and fills both sidebar lists", () => {
+it("seedSessions settles the versioned map and derives sidebar roots", () => {
 	seedSessions([
 		{ id: "root", title: "Root" },
 		{ id: "child", title: "Child", parentID: "root" },
@@ -128,10 +128,7 @@ it("seedSessions settles the versioned map and fills both sidebar lists", () => 
 	expect([...sessionSubscription.rows.keys()]).toEqual(["root", "child"]);
 	expect(sessionSubscription.settled).toBe(true);
 	expect(sessionState.rootSessions.map((row) => row.id)).toEqual(["root"]);
-	expect(sessionState.familySessions.map((row) => row.id)).toEqual([
-		"root",
-		"child",
-	]);
+	expect(sessionState.familySessions).toEqual([]);
 	applySessionChange({
 		_tag: "upsert",
 		sequence: 0,
@@ -524,13 +521,9 @@ describe("attention placement and daemon rows", () => {
 
 	it("combines local roots with foreign daemon roots without duplicating local rows", () => {
 		projectState.projects = [];
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				makeSession({ id: "local", title: "Warm title", updatedAt: 100 }),
-			],
-		});
+		seedSessions([
+			makeSession({ id: "local", title: "Warm title", updatedAt: 100 }),
+		]);
 		applyListDaemonSessionsResponse({
 			projectSlug: "project-a",
 			sessions: [
@@ -577,7 +570,7 @@ describe("attention placement and daemon rows", () => {
 			title: "Match child",
 			parentID: "root",
 		});
-		handleSessionList({ type: "session_list", roots: true, sessions: [root] });
+		seedSessions([root]);
 		handleSessionFamily({
 			type: "session_family",
 			rootId: "root",
@@ -599,155 +592,6 @@ describe("attention placement and daemon rows", () => {
 		sessionState.searchQuery = "match";
 		seedSearchResults([root, child]);
 		expect(getFilteredSessions().map((row) => row.id)).toEqual(["root"]);
-	});
-});
-
-// ─── handleSessionList ──────────────────────────────────────────────────────
-
-describe("handleSessionList", () => {
-	it("keeps git context through ListSessions RPC responses", () => {
-		applyListSessionsResponse({
-			projectSlug: "project-a",
-			roots: true,
-			sessions: [
-				makeSession({
-					id: "git",
-					git: { branch: "feature", head: "abc1234", merged: false },
-				}),
-			],
-		});
-		expect(sessionState.rootSessions[0]?.git).toEqual({
-			branch: "feature",
-			head: "abc1234",
-			merged: false,
-		});
-	});
-
-	it("keeps pin, settle, snooze and wake fields through ListSessions RPC responses", () => {
-		applyListSessionsResponse({
-			projectSlug: "project-a",
-			roots: true,
-			sessions: [
-				makeSession({ id: "pinned", pinnedAt: 10 }),
-				makeSession({ id: "settled", settledAt: 20 }),
-				makeSession({ id: "snoozed", snoozedAt: 30, snoozedUntil: 40 }),
-				makeSession({ id: "woken", wokenAt: 50, wokeBecause: "approval" }),
-			],
-		});
-		expect(sessionState.rootSessions).toEqual([
-			makeSession({ id: "pinned", pinnedAt: 10 }),
-			makeSession({ id: "settled", settledAt: 20 }),
-			makeSession({ id: "snoozed", snoozedAt: 30, snoozedUntil: 40 }),
-			makeSession({ id: "woken", wokenAt: 50, wokeBecause: "approval" }),
-		]);
-	});
-	it("holds the sessions a roots-only list carries", () => {
-		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
-		handleSessionList({ type: "session_list", sessions, roots: true });
-		expect([...sessionState.sessions.keys()]).toEqual(["a", "b"]);
-	});
-
-	it("ignores the deferred all-session list", () => {
-		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
-		handleSessionList({ type: "session_list", sessions, roots: false });
-		expect([...sessionState.sessions.keys()]).toEqual([]);
-	});
-
-	it("applies ListSessions RPC responses through the same session-list path", () => {
-		const session = {
-			id: "rpc-root",
-			title: "RPC Root",
-			status: "busy",
-			updatedAt: 123,
-		} as const;
-
-		applyListSessionsResponse({
-			projectSlug: "project-a",
-			roots: true,
-			sessions: [session],
-		});
-
-		// Server and browser share one session type (ni8.5 T-1), so what the RPC
-		// decoded is what the store holds — nothing is copied field by field.
-		expect(sessionState.sessions.get("rpc-root")).toEqual(session);
-	});
-
-	it("ignores non-array sessions payload", () => {
-		applySessionSnapshot([makeSession({ id: "existing" })], "complete");
-		handleSessionList(
-			msg({ type: "session_list", sessions: "not-array", roots: true }),
-		);
-		expect(sessionState.sessions.size).toBe(1);
-	});
-
-	it("ignores an untagged list that has no declared scope", () => {
-		const root = makeSession({ id: "root1" });
-		const child = makeSession({ id: "child1", parentID: "root1" });
-		// Simulate an untagged message (no `roots` field) — e.g. from legacy sources
-		handleSessionList(msg({ type: "session_list", sessions: [root, child] }));
-		expect(sessionState.sessions.size).toBe(0);
-		expect(getFilteredSessions()).toEqual([]);
-	});
-
-	it("shows a rename delivered by the root view", () => {
-		handleSessionList({
-			type: "session_list",
-			sessions: [makeSession({ id: "a", title: "Old" })],
-			roots: true,
-		});
-		handleSessionList({
-			type: "session_list",
-			sessions: [makeSession({ id: "a", title: "New" })],
-			roots: true,
-		});
-		expect(getFilteredSessions().map((s) => s.title)).toEqual(["New"]);
-	});
-
-	it("orders the sidebar by last change, newest first", () => {
-		handleSessionList({
-			type: "session_list",
-			sessions: [
-				makeSession({ id: "a", updatedAt: 1000 }),
-				makeSession({ id: "b", updatedAt: 2000 }),
-			],
-			roots: true,
-		});
-		// `a` is used, so the server now reports it as the most recent.
-		handleSessionList({
-			type: "session_list",
-			sessions: [
-				makeSession({ id: "a", updatedAt: 3000 }),
-				makeSession({ id: "b", updatedAt: 2000 }),
-			],
-			roots: true,
-		});
-		expect(getFilteredSessions().map((s) => s.id)).toEqual(["a", "b"]);
-	});
-
-	it("keeps a session omitted from a different list scope", () => {
-		applySessionSnapshot(
-			[makeSession({ id: "a" }), makeSession({ id: "b" })],
-			"complete",
-		);
-		handleSessionList({
-			type: "session_list",
-			sessions: [makeSession({ id: "a" })],
-			roots: false,
-		});
-		expect([...sessionState.sessions.keys()]).toEqual(["a", "b"]);
-	});
-
-	it("keeps a session a roots-only list omits", () => {
-		applySessionSnapshot(
-			[makeSession({ id: "a" }), makeSession({ id: "b" })],
-			"complete",
-		);
-		handleSessionList({
-			type: "session_list",
-			sessions: [makeSession({ id: "a" })],
-			roots: true,
-		});
-		expect([...sessionState.sessions.keys()]).toEqual(["a", "b"]);
 	});
 });
 
@@ -863,7 +707,7 @@ describe("getFilteredSessions root view", () => {
 			parentID: "a",
 			updatedAt: 2000,
 		});
-		handleSessionList({ type: "session_list", roots: true, sessions: [root] });
+		seedSessions([root]);
 		handleSessionFamily({
 			type: "session_family",
 			rootId: "a",

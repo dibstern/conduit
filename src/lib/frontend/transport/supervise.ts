@@ -102,7 +102,7 @@ const nextWake = Effect.async<void>((resume) => {
  * Each restart runs `feed` again from the top, so a resuming subscription asks
  * for a fresh snapshot rather than resuming.
  */
-export const supervise = <A extends { readonly _tag: string }>(
+export const supervise = <A extends object>(
 	feed: Stream.Stream<A, WsRpcError>,
 	onStatus: (status: FeedStatus) => void,
 ): Stream.Stream<A> =>
@@ -119,7 +119,7 @@ export const supervise = <A extends { readonly _tag: string }>(
 
 			const observe = (envelope: A) =>
 				Effect.flatMap(Ref.get(status), (current) =>
-					envelope._tag === "synchronized"
+					"_tag" in envelope && envelope._tag === "synchronized"
 						? Effect.zipRight(
 								Ref.set(failures, 0),
 								current._tag === "live"

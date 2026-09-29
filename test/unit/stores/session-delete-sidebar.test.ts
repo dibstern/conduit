@@ -1,4 +1,8 @@
-import { seedSearchResults, seedSessions } from "./session-fixtures.js";
+import {
+	applySessionChange,
+	seedSearchResults,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
 // A deleted session must leave the sidebar in every UI state, including during
 // an active search. The search query keeps its results separate from live rows;
@@ -66,15 +70,25 @@ const searchFor = (query: string, hits: (typeof VICTIM)[]) => {
 	seedSearchResults(hits);
 };
 
-const deleteVictim = () =>
+const announceDeletion = () =>
 	handleMessage({
 		type: "session_deleted",
 		sessionId: "victim",
 	} as RelayMessage);
+const deleteVictim = () => {
+	announceDeletion();
+	applySessionChange({ _tag: "remove", id: "victim" });
+};
 
 const sidebarIds = () => getFilteredSessions().map((s) => s.id);
 
 describe("deleted sessions leave the sidebar", () => {
+	it("keeps the row until the feed removes it", () => {
+		announceDeletion();
+		expect(sidebarIds()).toEqual(["victim", "keeper"]);
+		applySessionChange({ _tag: "remove", id: "victim" });
+		expect(sidebarIds()).toEqual(["keeper"]);
+	});
 	it("drops the session with no search active", () => {
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
@@ -153,35 +167,23 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("stays dropped after the server's follow-up session_list broadcast", () => {
+	it("stays dropped after the feed synchronizes", () => {
 		searchFor("s", [VICTIM, KEEPER]);
 		deleteVictim();
-		handleMessage({
-			type: "session_list",
-			sessions: [KEEPER],
-			roots: true,
-		} as RelayMessage);
+		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
 	it("drops a stale searched session after an authoritative tagged refresh", () => {
 		searchFor("s", [VICTIM, KEEPER]);
-		handleMessage({
-			type: "session_list",
-			sessions: [KEEPER],
-			roots: true,
-		} as RelayMessage);
+		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
 	it("returns the live renamed session object during an active search", () => {
 		const renamed = { ...VICTIM, title: "Renamed Session" };
 		searchFor("session", [VICTIM]);
-		handleMessage({
-			type: "session_list",
-			sessions: [renamed, KEEPER],
-			roots: true,
-		} as RelayMessage);
+		applySessionChange({ _tag: "upsert", item: renamed });
 		expect(getFilteredSessions()).toEqual([renamed]);
 	});
 
@@ -199,11 +201,7 @@ describe("deleted sessions leave the sidebar", () => {
 describe("root rows keep their subtree rollup", () => {
 	it("ignores the root's individual state from a later family snapshot", () => {
 		const rolled = { ...VICTIM, attention: "needs-approval" as const };
-		handleMessage({
-			type: "session_list",
-			sessions: [rolled, KEEPER],
-			roots: true,
-		} as RelayMessage);
+		applySessionChange({ _tag: "upsert", item: rolled });
 		handleMessage({
 			type: "session_family",
 			rootId: VICTIM.id,

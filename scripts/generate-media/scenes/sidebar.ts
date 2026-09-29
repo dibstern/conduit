@@ -2,6 +2,7 @@
 // Generates GENERATE-SIDEBAR.png — Desktop view showing the sidebar with a
 // populated session list and the main chat area.
 
+import { mockWsRpc } from "../../../test/e2e/helpers/rpc-mock.js";
 import {
 	freezeAnimations,
 	waitForFonts,
@@ -20,15 +21,25 @@ export const sidebarScene: SceneDefinition = {
 	},
 
 	async run({ page, previewUrl, phase, assert }) {
+		let relay: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 		await phase("setup-ws-mock", async () => {
-			await mockRelayWebSocket(page, {
+			await mockWsRpc(page, {
+				handlers: {
+					ListDaemonSessions: () => ({
+						sessions: [],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
+					SendMessage: async () => {
+						await relay.sendMessages(mainUiTurn1);
+						return { ok: true };
+					},
+				},
+			});
+			relay = await mockRelayWebSocket(page, {
 				initMessages: sidebarInit,
-				responses: new Map([
-					[
-						"Build me a landing page with a hero section, features grid, and footer",
-						mainUiTurn1,
-					],
-				]),
+				responses: new Map(),
 			});
 		});
 
@@ -58,8 +69,8 @@ export const sidebarScene: SceneDefinition = {
 
 		await assert("response-rendered", async () => {
 			await page
-				.locator("[data-tool-id]")
-				.first()
+				.locator("#messages")
+				.getByText("I've built the landing page", { exact: false })
 				.waitFor({ state: "visible", timeout: 10_000 });
 			await page.waitForFunction(
 				() => !document.querySelector("[data-status='processing']"),

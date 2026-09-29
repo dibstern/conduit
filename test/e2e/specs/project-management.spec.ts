@@ -124,7 +124,7 @@ async function setupWithProjectManagement(
 	});
 	const control = await mockRelayWebSocket(page, {
 		initMessages: singleInstanceInitMessages.filter(
-			(message) => message.type !== "session_list",
+			(message) => message.type !== "shell_snapshot",
 		),
 		responses: new Map(),
 		initDelay: 0,

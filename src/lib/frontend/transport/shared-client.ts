@@ -64,14 +64,26 @@ const makeSubscriptions = (
 	sockets: { readonly control: WsRpcClient; readonly stream: WsRpcClient },
 ) => ({
 	/** The session list. Low-rate, so it rides the control socket. */
-	shell: (options: { readonly resumeFromSequence?: number } = {}) =>
+	shell: (
+		options: {
+			readonly resumeFromSequence?: number;
+			readonly onTransportDrop?: () => void;
+		} = {},
+	) =>
 		resumeStream(
 			(resumeFromSequence) =>
 				sockets.control.SubscribeShell({
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 				}),
-			{ from: options.resumeFromSequence },
+			{
+				...(options.resumeFromSequence === undefined
+					? {}
+					: { from: options.resumeFromSequence }),
+				...(options.onTransportDrop === undefined
+					? {}
+					: { onTransportDrop: options.onTransportDrop }),
+			},
 		),
 	/** One session's transcript. Hot, so it rides the stream socket. */
 	sessionDetail: (options: {

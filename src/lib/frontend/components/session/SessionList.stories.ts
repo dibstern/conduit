@@ -8,8 +8,6 @@ import {
 import {
 	applyListDaemonSessionsResponse,
 	clearSessionState,
-	handleSessionFamily,
-	handleSessionList,
 	requestNewSession,
 	resetSessionCreation,
 	sessionState,
@@ -29,12 +27,6 @@ function seedSessions(
 	})[],
 ) {
 	const sessions = rows.map((row) => ({ status: "idle" as const, ...row }));
-	handleSessionList({
-		type: "session_list",
-		roots: true,
-		sessions,
-	});
-	handleSessionFamily({ type: "session_family", rootId: "", sessions });
 	applySessionChange({
 		_tag: "snapshot",
 		rows: sessions,

@@ -17,7 +17,6 @@ import {
 	type GetFileTreeResponse,
 	type GetProjectsResponse,
 	type GetTodoResponse,
-	type ListSessionsResponse,
 	type PermissionDecision,
 	type PtyListResponse,
 	WsRpcGroup,
@@ -665,35 +664,6 @@ export class TestWsClient {
 							projectSlug: "integration-test",
 							sessionId,
 							title,
-						});
-					}),
-				).pipe(
-					Effect.provide(RpcClient.layerProtocolSocket()),
-					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
-					Effect.provide(Socket.layerWebSocketConstructorGlobal),
-					Effect.provide(RpcSerialization.layerJson),
-				),
-			);
-		} finally {
-			globalThis.WebSocket = previousWebSocket;
-		}
-	}
-
-	async searchSessions(
-		query: string,
-		roots?: boolean,
-	): Promise<ListSessionsResponse> {
-		const previousWebSocket = globalThis.WebSocket;
-		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-		try {
-			return await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const client = yield* RpcClient.make(WsRpcGroup);
-						return yield* client.ListSessions({
-							projectSlug: "integration-test",
-							query,
-							...(roots !== undefined ? { roots } : {}),
 						});
 					}),
 				).pipe(

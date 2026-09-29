@@ -27,7 +27,7 @@ import type {
 	PermissionId,
 	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
-import { seedSessions } from "./session-fixtures.js";
+import { seedSessionsWithFamily } from "./session-fixtures.js";
 
 /** Cast a plain string to PermissionId for test data. */
 const pid = (s: string) => s as PermissionId;
@@ -779,7 +779,7 @@ describe("getDescendantSessionIds", () => {
 	});
 
 	it("returns direct child sessions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child-1",
@@ -802,7 +802,7 @@ describe("getDescendantSessionIds", () => {
 	});
 
 	it("returns multi-level descendants (grandchildren)", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "root", title: "Root", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -824,7 +824,7 @@ describe("getDescendantSessionIds", () => {
 	});
 
 	it("does not include the parent itself", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -843,7 +843,7 @@ describe("getDescendantSessionIds", () => {
 
 describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes permissions from direct child (subagent) sessions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -868,7 +868,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 
 	it("includes permissions from deeply nested subagent sessions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "root", title: "Root", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -900,7 +900,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 
 	it("includes own permissions alongside descendant permissions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -930,7 +930,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 
 	it("does not include permissions from unrelated sessions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -1037,7 +1037,7 @@ describe("getRemotePermissions with unknown session (sessionId='')", () => {
 
 describe("getRemotePermissions with subagent hierarchy", () => {
 	it("excludes permissions from child (subagent) sessions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -1060,7 +1060,7 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	});
 
 	it("includes permissions from unrelated sessions", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "parent", title: "Parent", status: "idle", updatedAt: 0 },
 			{
 				id: "child",
@@ -1086,7 +1086,7 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 	});
 
 	it("excludes deeply nested descendant permissions from remote", () => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "root", title: "Root", status: "idle", updatedAt: 0 },
 			{
 				id: "child",

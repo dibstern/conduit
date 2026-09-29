@@ -150,9 +150,16 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	clearSessionState: vi.fn(),
 	findSession: vi.fn(),
 	loadDaemonSessions: vi.fn(async () => {}),
-	applyListSessionsResponse: vi.fn(),
 	switchToSession: vi.fn(),
 	sessionCreation: { value: { state: "idle" } },
+}));
+
+vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
+	attachSessionList: vi.fn(),
+	detachSessionList: vi.fn(),
+	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
+	currentSearchQuery: vi.fn(() => null),
+	refreshSessionList: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
@@ -238,11 +245,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		hasMore: false,
 		nextCursor: null,
 	})),
-	listSessionsRpc: vi.fn(async (input: { roots?: boolean }) => ({
-		projectSlug: "test-project",
-		roots: input.roots === true,
-		sessions: [],
-	})),
 	getAgentsRpc: vi.fn(async () => {
 		throw new Error("agents temporarily unavailable");
 	}),
@@ -277,11 +279,13 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	applyListSessionsResponse,
 	clearSessionState,
-	loadDaemonSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	attachSessionList,
+	detachSessionList,
+} from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
@@ -291,7 +295,6 @@ import {
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import {
 	attachProjectRpc,
-	listSessionsRpc,
 	resolveSessionRpc,
 	viewSessionRpc,
 } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
@@ -363,15 +366,11 @@ describe("ChatLayout WS lifecycle", () => {
 		});
 	});
 
-	it("loads both the daemon-wide and the per-project session lists on attach", async () => {
+	it("attaches the shell feed on project attach", async () => {
 		render(ChatLayout);
 
 		attach("test-project");
-		await vi.waitFor(() => {
-			expect(applyListSessionsResponse).toHaveBeenCalledTimes(1);
-		});
-
-		expect(loadDaemonSessions).toHaveBeenCalledTimes(1);
+		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
 	});
 
 	it("keeps one connection when resolving a session within the attached project", async () => {
@@ -410,20 +409,19 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(connect).not.toHaveBeenCalled();
 		expect(disconnect).not.toHaveBeenCalled();
 		expect(clearMessages).not.toHaveBeenCalled();
-		expect(listSessionsRpc).not.toHaveBeenCalled();
+		expect(attachSessionList).not.toHaveBeenCalled();
 		attach("other-project");
 		expect(clearMessages).toHaveBeenCalledTimes(1);
 		expect(clearSessionState).toHaveBeenCalledTimes(1);
-		expect(listSessionsRpc).toHaveBeenCalledExactlyOnceWith({
-			projectSlug: "other-project",
-			roots: true,
-		});
+		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("other-project");
 		expect(
 			vi.mocked(clearSessionState).mock.invocationCallOrder[0],
-		).toBeLessThan(vi.mocked(listSessionsRpc).mock.invocationCallOrder[0] ?? 0);
+		).toBeLessThan(
+			vi.mocked(attachSessionList).mock.invocationCallOrder[0] ?? 0,
+		);
 		flushSync();
 		await tick();
-		expect(listSessionsRpc).toHaveBeenCalledTimes(1);
+		expect(attachSessionList).toHaveBeenCalledTimes(1);
 	});
 
 	it("resolves a cold session link before viewing it", async () => {
@@ -578,8 +576,7 @@ describe("ChatLayout WS lifecycle", () => {
 		vi.clearAllMocks();
 		attach("test-project");
 		expect(clearMessages).not.toHaveBeenCalled();
-		expect(loadDaemonSessions).toHaveBeenCalledTimes(1);
-		expect(listSessionsRpc).toHaveBeenCalledTimes(1);
+		expect(attachSessionList).toHaveBeenCalledTimes(1);
 	});
 
 	it("uses AttachProject for project-only navigation without reconnecting", async () => {
@@ -626,30 +623,10 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
-	it("discards late hydration from the previous project", async () => {
-		let resolveOld:
-			| ((value: Awaited<ReturnType<typeof listSessionsRpc>>) => void)
-			| undefined;
-		vi.mocked(listSessionsRpc).mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					resolveOld = resolve;
-				}),
-		);
-		render(ChatLayout);
-		attach("test-project");
-		attach("other-project");
-		await vi.waitFor(() =>
-			expect(applyListSessionsResponse).toHaveBeenCalledTimes(1),
-		);
-		resolveOld?.({ projectSlug: "test-project", roots: true, sessions: [] });
-		await Promise.resolve();
-		expect(applyListSessionsResponse).toHaveBeenCalledTimes(1);
-	});
-
 	it("disconnects on unmount", () => {
 		const { unmount } = render(ChatLayout);
 		unmount();
+		expect(detachSessionList).toHaveBeenCalledTimes(1);
 		expect(disconnect).toHaveBeenCalledTimes(1);
 		expect(connect).toHaveBeenCalledTimes(1);
 	});

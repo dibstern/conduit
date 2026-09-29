@@ -1,8 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import {
 	clearSessionState,
-	handleSessionFamily,
-	handleSessionList,
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { mockSession, mockSubagentSession } from "../../stories/mocks.js";
@@ -19,8 +17,6 @@ function seedSessions(rows: readonly Row[]): void {
 		status: "idle",
 		...row,
 	}));
-	handleSessionList({ type: "session_list", roots: true, sessions });
-	handleSessionFamily({ type: "session_family", rootId: "", sessions });
 	applySessionChange({
 		_tag: "snapshot",
 		rows: sessions,

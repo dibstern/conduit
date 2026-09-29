@@ -25,10 +25,7 @@ import {
 } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
-import {
-	persistSessionPermissionMode,
-	SessionManagerServiceTag,
-} from "../domain/relay/Services/session-manager-service.js";
+import { persistSessionPermissionMode } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getPermissionMode,
 	setPermissionMode,
@@ -131,8 +128,6 @@ export {
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListPtys,
-	ListSessions,
-	type ListSessionsResponse,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
 	MarkSessionRead,
@@ -1159,36 +1154,6 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				Effect.fail(
 					new WsRpcError({
 						message: `GetModels failed: ${String(error)}`,
-					}),
-				),
-			),
-		),
-	ListSessions: (request) =>
-		Effect.gen(function* () {
-			const sessionManager = yield* SessionManagerServiceTag;
-			const roots = request.roots ?? false;
-			const query = request.query?.trim() ?? "";
-			const normalizedQuery = query.toLowerCase();
-			const sessions = yield* sessionManager.listSessions({ roots });
-			const filtered =
-				normalizedQuery.length === 0
-					? sessions
-					: sessions.filter(
-							(session) =>
-								(session.title ?? "").toLowerCase().includes(normalizedQuery) ||
-								session.id.toLowerCase().includes(normalizedQuery),
-						);
-			return {
-				projectSlug: request.projectSlug,
-				sessions: filtered,
-				roots,
-				...(query.length > 0 ? { search: true } : {}),
-			};
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `ListSessions failed: ${String(error)}`,
 					}),
 				),
 			),

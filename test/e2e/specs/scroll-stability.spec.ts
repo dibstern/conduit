@@ -193,7 +193,7 @@ function createInitMessages(turnCount: number): MockMessage[] {
 		},
 		{ type: "client_count", count: 1 },
 		{
-			type: "session_list",
+			type: "shell_snapshot",
 			roots: true,
 			sessions: [
 				{
@@ -719,7 +719,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					},
 					{ type: "client_count", count: 1 },
 					{
-						type: "session_list",
+						type: "shell_snapshot",
 						roots: true,
 						sessions: [
 							{
@@ -889,7 +889,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 				{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 				{ type: "client_count", count: 1 },
 				{
-					type: "session_list",
+					type: "shell_snapshot",
 					roots: true,
 					sessions: [
 						{
@@ -1124,7 +1124,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					},
 					{ type: "client_count", count: 1 },
 					{
-						type: "session_list",
+						type: "shell_snapshot",
 						roots: true,
 						sessions: [
 							{

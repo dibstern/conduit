@@ -306,31 +306,4 @@ describe("reduce", () => {
 
 		expect(titles(state)).toEqual({ a: "recreated" });
 	});
-
-	describe("the legacy delta arm, which has no sequences", () => {
-		it("always applies", () => {
-			const state = apply(
-				empty,
-				{ _tag: "upsert", item: row("a", "first") },
-				{ _tag: "upsert", item: row("a", "second") },
-				{ _tag: "upsert", item: row("b") },
-				{ _tag: "remove", id: "b" },
-			);
-
-			expect(titles(state)).toEqual({ a: "second" });
-		});
-
-		it("does not invent coverage when an unversioned snapshot replaces membership", () => {
-			// Raw WebSocket list and delta writers in session.svelte.ts:268-284.
-			const state = apply(
-				empty,
-				{ _tag: "upsert", item: row("gone") },
-				{ _tag: "snapshot", rows: [row("a")] },
-				{ _tag: "upsert", item: row("b") },
-			);
-			expect(titles(state)).toEqual({ a: "a", b: "b" });
-			expect(state.floor).toBeUndefined();
-			expect(state.versions.size).toBe(0);
-		});
-	});
 });

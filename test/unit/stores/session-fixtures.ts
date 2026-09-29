@@ -2,9 +2,9 @@ import {
 	applyListDaemonSessionsResponse,
 	applySearchResultsResponse,
 	handleSessionFamily,
-	handleSessionList,
+	pruneSessionLists,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { applySessionChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
+import { applySessionChange as applyFeedChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 export { clearSessionSearch } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -16,28 +16,84 @@ const completeRows = (rows: readonly Row[]): SessionInfo[] =>
 
 let sequence = 0;
 
+type TestChange =
+	| {
+			readonly _tag: "snapshot";
+			readonly rows: readonly SessionInfo[];
+			readonly sequence?: number;
+	  }
+	| {
+			readonly _tag: "upsert";
+			readonly item: SessionInfo;
+			readonly sequence?: number;
+	  }
+	| { readonly _tag: "remove"; readonly id: string; readonly sequence?: number }
+	| { readonly _tag: "synchronized" };
+
+export function applySessionChange(change: TestChange): void {
+	if (change._tag === "synchronized") {
+		applyFeedChange(change);
+		return;
+	}
+	const version = change.sequence ?? ++sequence;
+	sequence = Math.max(sequence, version);
+	switch (change._tag) {
+		case "snapshot":
+			applyFeedChange({
+				_tag: "snapshot",
+				rows: change.rows,
+				sequence: version,
+			});
+			break;
+		case "upsert":
+			applyFeedChange({ _tag: "upsert", item: change.item, sequence: version });
+			break;
+		case "remove":
+			applyFeedChange({ _tag: "remove", id: change.id, sequence: version });
+			break;
+	}
+}
+
 export function seedSessions(rows: readonly Row[]): void {
 	const sessions = completeRows(rows);
-	handleSessionList({ type: "session_list", roots: true, sessions });
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "",
-		sessions,
-	});
-	applySessionChange({
+	applyFeedChange({
 		_tag: "snapshot",
 		rows: sessions,
 		sequence: ++sequence,
 	});
-	applySessionChange({ _tag: "synchronized" });
+	applyFeedChange({ _tag: "synchronized" });
+}
+
+export function seedSessionsWithFamily(rows: readonly Row[]): void {
+	seedSessions(rows);
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "",
+		sessions: completeRows(rows),
+	});
 }
 
 export function seedRootSessions(rows: readonly Row[]): void {
-	handleSessionList({
-		type: "session_list",
-		roots: true,
-		sessions: completeRows(rows),
-	});
+	seedSessions(rows);
+}
+
+export function applySessionSnapshot(
+	rows: readonly SessionInfo[],
+	scope: "complete" | "partial",
+): void {
+	if (scope === "partial") {
+		for (const row of rows)
+			applyFeedChange({ _tag: "upsert", sequence: ++sequence, item: row });
+	} else applyFeedChange({ _tag: "snapshot", sequence: ++sequence, rows });
+}
+
+export function applySessionUpsert(row: SessionInfo): void {
+	applyFeedChange({ _tag: "upsert", sequence: ++sequence, item: row });
+}
+
+export function applySessionRemoved(id: string): void {
+	applyFeedChange({ _tag: "remove", sequence: ++sequence, id });
+	pruneSessionLists(id);
 }
 
 export function seedFamilySessions(rootId: string, rows: readonly Row[]): void {

@@ -27,7 +27,6 @@ import type {
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
 	ListDirectoriesResponse,
-	ListSessionsResponse,
 	LoadMoreHistoryResponse,
 	PermissionDecision,
 	PermissionPersistScope,
@@ -381,12 +380,6 @@ export interface SwitchPermissionModeRpcInput {
 	readonly sessionId: string;
 	readonly mode: SessionPermissionMode;
 	readonly originId?: string;
-}
-
-export interface ListSessionsRpcInput {
-	readonly projectSlug: string;
-	readonly roots?: boolean;
-	readonly query?: string;
 }
 
 export interface ListDaemonSessionsRpcInput {
@@ -807,9 +800,6 @@ const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
 		}),
 	);
 
-const callListSessions = (input: ListSessionsRpcInput) =>
-	callControl(input.projectSlug, (client) => client.ListSessions(input));
-
 const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.ListDaemonSessions(input));
 
@@ -1214,12 +1204,6 @@ export async function switchPermissionModeRpc(
 	input: SwitchPermissionModeRpcInput,
 ): Promise<SwitchPermissionModeResponse> {
 	return await runTransportEffect(callSwitchPermissionMode(input));
-}
-
-export async function listSessionsRpc(
-	input: ListSessionsRpcInput,
-): Promise<ListSessionsResponse> {
-	return await runTransportEffect(callListSessions(input));
 }
 
 export interface ResolveSessionRpcInput {

@@ -39,7 +39,7 @@ const twoSessionInit: MockMessage[] = [
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -122,7 +122,7 @@ function statusWord(page: Page, sessionId: string) {
 
 /** The AttentionBanner component with role="status". */
 function attentionBanner(page: Page) {
-	return page.locator("[role='status']");
+	return page.locator(".permission-notification-enter[role='status']");
 }
 
 async function mockRelayWithViewSessionRpc(
@@ -167,15 +167,15 @@ async function openChat(page: Page, baseURL: string | undefined) {
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
-/** A session_list carrying the notification facts the server derived per row. */
-function sessionListWith(
+/** A shell snapshot carrying the notification facts the server derived per row. */
+function shellSnapshotWith(
 	counts: Record<
 		string,
 		{ questions?: number; permissions?: number; unseen?: boolean }
 	>,
 ): MockMessage {
 	return {
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -209,7 +209,7 @@ test.describe("server-derived notification indicators", () => {
 	}) => {
 		const control = await openChat(page, baseURL);
 		control.sendMessage({
-			...sessionListWith({ [SESS_B]: { questions: 2 } }),
+			...shellSnapshotWith({ [SESS_B]: { questions: 2 } }),
 			sessions: [
 				{
 					id: SESS_A,
@@ -232,7 +232,7 @@ test.describe("server-derived notification indicators", () => {
 		});
 
 		control.sendMessage({
-			...sessionListWith({}),
+			...shellSnapshotWith({}),
 			sessions: [
 				{
 					id: SESS_A,
@@ -264,7 +264,7 @@ test.describe("server-derived notification indicators", () => {
 		await expect(statusWord(page, SESS_B)).toHaveCount(0);
 
 		control.sendMessage({
-			type: "session_list",
+			type: "shell_snapshot",
 			roots: true,
 			sessions: [
 				{
@@ -319,7 +319,7 @@ test.describe("server-derived notification indicators", () => {
 		// into the attention tier on a re-broadcast session list, never as a
 		// notification.
 		control.sendMessage({
-			type: "session_list",
+			type: "shell_snapshot",
 			roots: true,
 			sessions: [
 				{
@@ -353,7 +353,7 @@ test.describe("server-derived notification indicators", () => {
 	}) => {
 		const control = await openChat(page, baseURL);
 
-		control.sendMessage(sessionListWith({ [SESS_B]: { questions: 1 } }));
+		control.sendMessage(shellSnapshotWith({ [SESS_B]: { questions: 1 } }));
 
 		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
 
@@ -376,7 +376,7 @@ test.describe("server-derived notification indicators", () => {
 
 		await expect(attentionBanner(page)).toHaveCount(0);
 
-		control.sendMessage(sessionListWith({ [SESS_B]: { questions: 1 } }));
+		control.sendMessage(shellSnapshotWith({ [SESS_B]: { questions: 1 } }));
 
 		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
 		await expect(attentionBanner(page)).toContainText("Session B", {
@@ -387,21 +387,21 @@ test.describe("server-derived notification indicators", () => {
 		});
 	});
 
-	test("reconcile via session_list corrects stale banner state", async ({
+	test("reconcile via shell snapshot corrects stale banner state", async ({
 		page,
 		baseURL,
 	}) => {
 		const control = await openChat(page, baseURL);
 
-		// No banner initially (initial session_list has no pendingQuestionCount)
+		// No banner initially (initial shell snapshot has no pendingQuestionCount)
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
 		await expect(attentionBanner(page)).toHaveCount(0);
 
-		// Server sends a reconciliation session_list with pendingQuestionCount on B.
-		// This simulates the periodic session list refresh that corrects stale state.
+		// Server sends a reconciliation shell snapshot with pendingQuestionCount on B.
+		// This simulates the shell snapshot that corrects stale state.
 		// The root snapshot replaces the row counts used by the banner.
 		control.sendMessage({
-			type: "session_list",
+			type: "shell_snapshot",
 			roots: true,
 			sessions: [
 				{

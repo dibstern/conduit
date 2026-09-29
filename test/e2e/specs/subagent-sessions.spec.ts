@@ -69,7 +69,7 @@ const allSessions = [
 
 /** Root-only session list (excludes child/subagent sessions). */
 const rootSessionListMsg: MockMessage = {
-	type: "session_list",
+	type: "shell_snapshot",
 	roots: true,
 	sessions: allSessions.filter((s) => !("parentID" in s && s["parentID"])),
 };
@@ -164,6 +164,7 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 
 test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {
+		await mockWsRpc(page, { handlers: {} });
 		await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),

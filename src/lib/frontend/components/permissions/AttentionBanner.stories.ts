@@ -6,8 +6,6 @@ import {
 } from "../../stores/permissions.svelte.js";
 import {
 	clearSessionState,
-	handleSessionFamily,
-	handleSessionList,
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -24,8 +22,6 @@ function seedSessions(rows: readonly Row[]): void {
 		status: "idle",
 		...row,
 	}));
-	handleSessionList({ type: "session_list", roots: true, sessions });
-	handleSessionFamily({ type: "session_family", rootId: "", sessions });
 	applySessionChange({
 		_tag: "snapshot",
 		rows: sessions,

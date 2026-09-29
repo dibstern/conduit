@@ -1,8 +1,12 @@
-import { seedSearchResults, seedSessions } from "./session-fixtures.js";
+import {
+	applySessionChange,
+	seedSearchResults,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Ghost Session Cleanup ────────────────────────────────────────────────────
 // Verifies that clearSessionChatState is wired to:
 // 1. session_deleted relay events
-// 2. handleSessionList drop path (diff logic)
+// 2. shell snapshot omission and its chat cleanup
 // 3. Search query results never trigger cleanup
 // 4. Active-session teardown
 
@@ -51,7 +55,6 @@ import {
 import {
 	clearSessionState,
 	handleSessionFamily,
-	handleSessionList,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
@@ -80,8 +83,8 @@ afterEach(() => {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("clearSessionChatState wired to session_deleted", () => {
-	it("session_deleted event cleans up per-session chat state", () => {
+describe("clearSessionChatState wired to the shell feed", () => {
+	it("feed removal cleans up per-session chat state", () => {
 		// Pre-populate a session slot
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -102,6 +105,8 @@ describe("clearSessionChatState wired to session_deleted", () => {
 			sessionId: "deleted-session",
 		} as RelayMessage);
 
+		expect(sessionState.sessions.has("deleted-session")).toBe(true);
+		applySessionChange({ _tag: "remove", id: "deleted-session" });
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has("deleted-session")).toBe(false);
 		expect(sessionMessages.has("deleted-session")).toBe(false);
@@ -123,9 +128,8 @@ describe("clearSessionChatState wired to session_deleted", () => {
 	});
 });
 
-// Direct legacy handler behavior checks are kept deliberately for R4/R6 deletion.
-describe("handleSessionList drop path", () => {
-	it("removes membership without evicting cached chat state", () => {
+describe("shell snapshot omission", () => {
+	it("removes membership and evicts cached chat state", () => {
 		// Pre-populate sessions map with sessions A, B, C
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -155,20 +159,17 @@ describe("handleSessionList drop path", () => {
 		getOrCreateSessionSlot("session-B");
 		getOrCreateSessionSlot("session-C");
 
-		// A roots snapshot omits B without declaring it deleted.
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
+		applySessionChange({
+			_tag: "snapshot",
+			rows: [
 				{ id: "session-A", title: "A", status: "idle" },
 				{ id: "session-C", title: "C", status: "idle" },
 			],
 		});
 
-		// Omission from this scope does not delete a session or its cache.
-		expect(sessionActivity.has("session-B")).toBe(true);
-		expect(sessionMessages.has("session-B")).toBe(true);
-		expect(sessionState.sessions.has("session-B")).toBe(true);
+		expect(sessionActivity.has("session-B")).toBe(false);
+		expect(sessionMessages.has("session-B")).toBe(false);
+		expect(sessionState.sessions.has("session-B")).toBe(false);
 		expect(
 			sessionState.rootSessions.some((session) => session.id === "session-B"),
 		).toBe(false);
@@ -212,7 +213,7 @@ describe("handleSessionList drop path", () => {
 		]);
 	});
 
-	it("roots=true session_list does not trigger diff cleanup", () => {
+	it("an authoritative snapshot triggers cleanup", () => {
 		// Pre-populate
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -233,22 +234,18 @@ describe("handleSessionList drop path", () => {
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 
-		// roots=true list with only session-A — should NOT clean up session-B
-		// because roots=true is a partial list (only root sessions)
-		handleSessionList({
-			type: "session_list",
-			sessions: [{ id: "session-A", title: "A" }],
-			roots: true,
-		} as Extract<RelayMessage, { type: "session_list" }>);
+		applySessionChange({
+			_tag: "snapshot",
+			rows: [{ id: "session-A", title: "A", status: "idle" }],
+		});
 
-		// session-B should still exist
-		expect(sessionActivity.has("session-B")).toBe(true);
-		expect(sessionMessages.has("session-B")).toBe(true);
+		expect(sessionActivity.has("session-B")).toBe(false);
+		expect(sessionMessages.has("session-B")).toBe(false);
 	});
 });
 
 describe("active-session teardown", () => {
-	it("session_deleted for the active session cleans up state", () => {
+	it("feed removal for the active session cleans up state", () => {
 		const activeId = "active-session";
 		sessionState.currentId = activeId;
 		seedSessions([
@@ -261,6 +258,7 @@ describe("active-session teardown", () => {
 			type: "session_deleted",
 			sessionId: activeId,
 		} as RelayMessage);
+		applySessionChange({ _tag: "remove", id: activeId });
 
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has(activeId)).toBe(false);

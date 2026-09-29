@@ -54,27 +54,21 @@ export interface SubscriptionState<T> {
 }
 
 /**
- * One thing a subscription can say, or the same thing said without a sequence.
- *
- * The sequence is optional for exactly one caller: the legacy WebSocket delta
- * arm, which announces the same changes and has no sequences to announce them
- * with. Its changes are this tab's own and are never replayed, so there is
- * nothing to dedup and they always apply. **conduit-test-ni8.5.20 retires that
- * arm, and takes the optionality with it** — after which this union is the wire
- * envelope union exactly.
+ * One versioned shell envelope. Membership changes arrive only through the
+ * feed, so every change carries its store sequence.
  */
 export type Change<T> =
 	| {
 			readonly _tag: "snapshot";
 			readonly rows: readonly T[];
-			readonly sequence?: number;
+			readonly sequence: number;
 	  }
 	| { readonly _tag: "synchronized" }
-	| { readonly _tag: "upsert"; readonly item: T; readonly sequence?: number }
+	| { readonly _tag: "upsert"; readonly item: T; readonly sequence: number }
 	| {
 			readonly _tag: "remove";
 			readonly id: string;
-			readonly sequence?: number;
+			readonly sequence: number;
 	  };
 
 /** A subscription that has been told nothing yet. */
@@ -85,13 +79,12 @@ export const emptySubscription = <T>(): SubscriptionState<T> => ({
 	settled: false,
 });
 
-/** Whether the map already reflects this change. Unversioned changes never do. */
+/** Whether the map already reflects this change. */
 const covered = <T>(
 	state: SubscriptionState<T>,
 	id: string,
-	sequence: number | undefined,
+	sequence: number,
 ): boolean => {
-	if (sequence === undefined) return false;
 	if (state.floor !== undefined && sequence <= state.floor) return true;
 	const applied = state.versions.get(id);
 	return applied !== undefined && sequence <= applied;
@@ -100,11 +93,8 @@ const covered = <T>(
 const versionsWith = <T>(
 	state: SubscriptionState<T>,
 	id: string,
-	sequence: number | undefined,
-): ReadonlyMap<string, number> =>
-	sequence === undefined
-		? state.versions
-		: new Map(state.versions).set(id, sequence);
+	sequence: number,
+): ReadonlyMap<string, number> => new Map(state.versions).set(id, sequence);
 
 /**
  * Fold one change into a subscription's map.
@@ -137,17 +127,8 @@ export const reduce = <T>(
 
 		case "snapshot": {
 			const sequence = change.sequence;
-			if (
-				sequence !== undefined &&
-				state.floor !== undefined &&
-				sequence <= state.floor
-			)
-				return state;
+			if (state.floor !== undefined && sequence <= state.floor) return state;
 			const rows = new Map(change.rows.map((item) => [identify(item), item]));
-			// An unversioned snapshot is the legacy arm's full session list. It
-			// replaces membership, but it says nothing about the wire's timeline, so
-			// it must not start covering wire changes.
-			if (sequence === undefined) return { ...state, rows };
 			// A delayed snapshot covers only its own sequence. Keep newer live
 			// rows and tombstones, while replacing everything the snapshot covers.
 			const versions = new Map<string, number>();

@@ -29,7 +29,6 @@ import {
 	ListDaemonSessions,
 	ListDirectories,
 	ListPtys,
-	ListSessions,
 	LoadMoreHistory,
 	LoadMoreHistoryResponseSchema,
 	MarkSessionUnread,
@@ -477,14 +476,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						path: "/project/.claude/skills/review/SKILL.md",
 						content: "Review instructions",
 					}),
-				ListSessions: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						sessions: [
-							{ id: "session-1", title: "Session 1", status: "idle" as const },
-						],
-						roots: request.roots ?? false,
-					}),
 				LoadMoreHistory: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -797,7 +788,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetFileContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetToolContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetSkillContent")).toBe(true);
-		expect(WsRpcGroup.requests.has("ListSessions")).toBe(true);
+		expect(WsRpcGroup.requests.has("ListSessions")).toBe(false);
 		expect(WsRpcGroup.requests.has("LoadMoreHistory")).toBe(true);
 		expect(WsRpcGroup.requests.has("RewindSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("SendMessage")).toBe(true);
@@ -1174,11 +1165,6 @@ describe("browser WebSocket RPC contract", () => {
 					content: "Review instructions",
 				});
 
-				const sessions = yield* client.ListSessions({ projectSlug: "demo" });
-				expect(sessions.sessions).toEqual([
-					{ id: "session-1", title: "Session 1", status: "idle" },
-				]);
-
 				const created = yield* client.CreateSession({
 					projectSlug: "demo",
 					originId: "browser-tab-a",
@@ -1540,7 +1526,6 @@ describe("browser WebSocket RPC contract", () => {
 		expect(
 			new GetSkillContent({ projectSlug: "demo", name: "review" })._tag,
 		).toBe("GetSkillContent");
-		expect(new ListSessions({ projectSlug: "demo" })._tag).toBe("ListSessions");
 		expect(
 			new LoadMoreHistory({
 				projectSlug: "demo",

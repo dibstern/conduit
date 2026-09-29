@@ -22,9 +22,7 @@ import type { FeedStatus } from "./supervise.js";
 
 /**
  * One thing `subscriptions.shell()` delivers, typed off the subscription
- * itself rather than restated. ni8.5.20 plugs that stream into
- * `applySessionChange`; until it does, the annotation is what proves the
- * envelope still fits the applier.
+ * itself rather than restated.
  */
 export type ShellEnvelope = Stream.Stream.Success<
 	ReturnType<WsRpcSubscriptions["shell"]>
@@ -36,6 +34,18 @@ const identify = (session: SessionInfo): string => session.id;
 // mutates it, so a deep proxy would cost work to track writes that cannot
 // happen.
 let applied = $state.raw<SubscriptionState<SessionInfo>>(emptySubscription());
+
+let feedStatus = $state<FeedStatus>({ _tag: "cold" });
+let transportFailureSince = $state<number | null>(null);
+
+export function setShellFeedStatus(status: FeedStatus): void {
+	feedStatus = status;
+	if (status._tag === "cold") transportFailureSince = null;
+}
+
+export function noteTransportDrop(): void {
+	transportFailureSince ??= Date.now();
+}
 
 /** Settled reactive state. Envelope vocabulary does not travel past here. */
 export const sessionSubscription = {
@@ -49,18 +59,23 @@ export const sessionSubscription = {
 		return applied.settled;
 	},
 	get status(): FeedStatus {
-		return applied.settled ? { _tag: "live" } : { _tag: "catchingUp" };
+		return transportFailureSince === null
+			? feedStatus
+			: {
+					_tag: "failing",
+					since: transportFailureSince,
+					lastError: "Connection lost",
+				};
 	},
 };
 
 /**
  * Apply one change to the session map. The only writer.
  *
- * Takes the wire envelope, and — until ni8.5.20 retires the legacy WebSocket
- * delta arm — the same changes without a sequence, so both delivery paths land
- * in one map through one applier.
+ * Takes only the versioned shell envelope.
  */
 export function applySessionChange(change: Change<SessionInfo>): void {
+	if (change._tag === "synchronized") transportFailureSince = null;
 	const next = reduce(applied, change, identify);
 	if (next === applied) return;
 	const receivedSequence = sessionActivityBridge.observe();
@@ -92,4 +107,6 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 export function resetSessionSubscription(): void {
 	sessionActivityBridge.clear();
 	applied = emptySubscription();
+	feedStatus = { _tag: "cold" };
+	transportFailureSince = null;
 }

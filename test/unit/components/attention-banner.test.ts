@@ -1,4 +1,4 @@
-import { seedSessions } from "../stores/session-fixtures.js";
+import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 // ─── AttentionBanner Merge Logic Test ──────────────────────────────────────────
 // Verifies that AttentionBanner correctly merges two data sources:
 // 1. Local pending permissions (from permissions store)
@@ -70,7 +70,7 @@ function setSessionTitles(
 	titles: Record<string, string>,
 	counts: Record<string, { questions?: number; permissions?: number }> = {},
 ) {
-	seedSessions(
+	seedSessionsWithFamily(
 		Object.entries(titles).map(([id, title]) => ({
 			id,
 			title,
@@ -222,7 +222,7 @@ describe("AttentionBanner merge logic", () => {
 
 	it("excludes descendant sessions from display", async () => {
 		// Set up parent/child relationship: ses_current → ses_child1
-		seedSessions([
+		seedSessionsWithFamily([
 			{
 				id: "ses_current",
 				title: "Parent",

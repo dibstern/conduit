@@ -5,6 +5,7 @@
 
 import type { Page, WebSocketRoute } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
+import { sendMockShellSnapshot } from "./rpc-mock.js";
 
 export interface WsMockOptions {
 	/** Messages to send immediately on WebSocket connect */
@@ -124,7 +125,13 @@ export async function mockRelayWebSocket(
 	page: Page,
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
-	const control = new WsMockControl();
+	const control = new WsMockControl(page);
+	// Mock-only input: deliver roots through SubscribeShell, never through /ws.
+	const initialShell = options.initMessages.find(
+		(message) => message.type === "shell_snapshot" && message["roots"] === true,
+	);
+	if (Array.isArray(initialShell?.["sessions"]))
+		sendMockShellSnapshot(page, initialShell["sessions"]);
 	const initDelay = options.initDelay ?? 0;
 	const msgDelay = options.messageDelay ?? 0;
 
@@ -146,12 +153,14 @@ export async function mockRelayWebSocket(
 		ws.send(JSON.stringify({ type: "project_attached", slug }));
 
 		// Send init messages on connect (instant by default)
-		const initMessages = params.has("session")
-			? options.initMessages
-			: options.initMessages.filter(
-					(message) => !SESSION_SCOPED_MESSAGE_TYPES.has(message.type),
-				);
-		void sendSequence(ws, initMessages, initDelay, control._context);
+		const initMessages = (
+			params.has("session")
+				? options.initMessages
+				: options.initMessages.filter(
+						(message) => !SESSION_SCOPED_MESSAGE_TYPES.has(message.type),
+					)
+		).filter((message) => message.type !== "shell_snapshot");
+		void sendSequence(control, initMessages, initDelay);
 
 		// Listen for frontend messages and respond
 		ws.onMessage((data) => {
@@ -168,7 +177,7 @@ export async function mockRelayWebSocket(
 				if (parsed.type === "message" && typeof parsed.text === "string") {
 					const response = options.responses.get(parsed.text);
 					if (response) {
-						void sendSequence(ws, response, msgDelay, control._context);
+						void sendSequence(control, response, msgDelay);
 					}
 				}
 
@@ -191,13 +200,12 @@ export async function mockRelayWebSocket(
 
 /** Send messages with delays between them */
 async function sendSequence(
-	ws: WebSocketRoute,
+	control: WsMockControl,
 	messages: MockMessage[],
 	delay: number,
-	context: MockRelayProtocolContext,
 ): Promise<void> {
 	for (const msg of messages) {
-		ws.send(JSON.stringify(normalizeMockRelayMessage(msg, context)));
+		control.sendMessage(msg);
 		if (delay > 0) {
 			await new Promise((r) => setTimeout(r, delay));
 		}
@@ -206,17 +214,16 @@ async function sendSequence(
 
 /** Control object returned by mockRelayWebSocket */
 export class WsMockControl {
+	constructor(private readonly page: Page) {
+		this._routedPromise = new Promise((resolve) => {
+			this._routedResolve = resolve;
+		});
+	}
 	private _routedResolve?: () => void;
 	private _routedPromise: Promise<void>;
 	private _ws?: WebSocketRoute;
 	private _clientMessages: string[] = [];
 	readonly _context = createMockRelayProtocolContext();
-
-	constructor() {
-		this._routedPromise = new Promise((resolve) => {
-			this._routedResolve = resolve;
-		});
-	}
 
 	/** @internal */
 	_onRouted(): void {
@@ -240,6 +247,14 @@ export class WsMockControl {
 
 	/** Send a message to the connected client (for mid-test injections). */
 	sendMessage(msg: MockMessage): void {
+		if (
+			msg.type === "shell_snapshot" &&
+			msg["roots"] === true &&
+			Array.isArray(msg["sessions"])
+		) {
+			sendMockShellSnapshot(this.page, msg["sessions"]);
+			return;
+		}
 		if (!this._ws) throw new Error("WebSocket not connected yet");
 		this._ws.send(
 			JSON.stringify(normalizeMockRelayMessage(msg, this._context)),

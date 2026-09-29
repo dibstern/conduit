@@ -21,7 +21,7 @@ const PROJECT_URL = "/s/sess-pm-001";
 const BASE = "http://localhost:4173";
 
 const sessionList: MockMessage = {
-	type: "session_list",
+	type: "shell_snapshot",
 	roots: true,
 	sessions: [
 		{

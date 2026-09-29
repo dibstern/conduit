@@ -76,16 +76,6 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	it("ListSessions RPC returns filtered results", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		const result = await client.searchSessions("Integration");
-		expect(Array.isArray(result.sessions)).toBe(true);
-		await client.close();
-	});
-
 	// ── Agent/model switching ───────────────────────────────────────────────
 
 	it("SwitchAgent RPC does not error", async () => {

@@ -39,8 +39,6 @@ export {
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListPtys,
-	ListSessions,
-	type ListSessionsResponse,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
 	type ModelInfo,

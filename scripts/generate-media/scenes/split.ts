@@ -5,6 +5,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { WebSocketRoute } from "@playwright/test";
+import {
+	mockWsRpc,
+	sendMockShellSnapshot,
+} from "../../../test/e2e/helpers/rpc-mock.js";
 import { splitInit, splitResponse } from "../fixtures/media-state.js";
 import type { SceneDefinition } from "../scene-runner.js";
 
@@ -64,13 +68,29 @@ export const splitScene: SceneDefinition = {
 
 		// ── Phase 2: Set up WS mock on context (not page!) ──────────────
 		await phase("setup-ws-mock", async () => {
+			const shellSnapshot = splitInit.find(
+				(message) => message.type === "shell_snapshot",
+			);
+			if (!shellSnapshot || !Array.isArray(shellSnapshot.sessions))
+				throw new Error("Split scene needs a shell snapshot");
+			sendMockShellSnapshot(page, shellSnapshot.sessions);
+			await mockWsRpc(page, {
+				handlers: {
+					ListDaemonSessions: () => ({
+						sessions: [],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
+				},
+			});
 			await context.routeWebSocket(/\/ws/, (ws: WebSocketRoute) => {
 				ws.send(
 					JSON.stringify({ type: "project_attached", slug: "saas-landing" }),
 				);
 				// Send all init messages on connect
 				for (const msg of splitInit) {
-					ws.send(JSON.stringify(msg));
+					if (msg.type !== "shell_snapshot") ws.send(JSON.stringify(msg));
 				}
 
 				ws.onMessage((data) => {
@@ -99,14 +119,6 @@ export const splitScene: SceneDefinition = {
 						if (parsed.type === "get_agents") {
 							const agentList = splitInit.find((m) => m.type === "agent_list");
 							if (agentList) ws.send(JSON.stringify(agentList));
-							return;
-						}
-
-						if (parsed.type === "list_sessions") {
-							const sessionList = splitInit.find(
-								(m) => m.type === "session_list",
-							);
-							if (sessionList) ws.send(JSON.stringify(sessionList));
 							return;
 						}
 

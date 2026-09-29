@@ -6,7 +6,7 @@ import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.sv
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
-import { seedSessions } from "../stores/session-fixtures.js";
+import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/components/chat/HistoryLoader.svelte",
@@ -175,7 +175,7 @@ describe("MessageList pending questions", () => {
 	});
 
 	beforeEach(() => {
-		seedSessions([
+		seedSessionsWithFamily([
 			{ id: "root-a", title: "A", status: "idle" },
 			{ id: "child-a", title: "A child", status: "idle", parentID: "root-a" },
 		]);
@@ -190,7 +190,7 @@ describe("MessageList pending questions", () => {
 	afterEach(() => {
 		cleanup();
 		permissionsState.pendingQuestions = [];
-		seedSessions([]);
+		seedSessionsWithFamily([]);
 	});
 
 	it("shows questions from the viewed session's family", () => {
@@ -208,7 +208,7 @@ describe("MessageList pending questions", () => {
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");
 
-		seedSessions([{ id: "root-b", title: "B", status: "idle" }]);
+		seedSessionsWithFamily([{ id: "root-b", title: "B", status: "idle" }]);
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");
 	});

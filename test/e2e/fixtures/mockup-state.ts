@@ -39,7 +39,7 @@ export const initMessages: MockMessage[] = [
 		count: 2,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -652,7 +652,7 @@ export const noInstanceInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -688,7 +688,7 @@ export const multiInstanceInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -724,7 +724,7 @@ export const singleInstanceInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -800,7 +800,7 @@ export const variantInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -848,7 +848,7 @@ export const noVariantInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -926,7 +926,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
@@ -977,7 +977,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 		count: 1,
 	},
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
