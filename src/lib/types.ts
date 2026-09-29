@@ -300,7 +300,7 @@ export interface ProjectRelayConfig {
 	/**
 	 * Abort signal for cancelling relay creation mid-flight.
 	 *
-	 * Optional because standalone/skeleton mode callers and tests don't need
+	 * Optional because standalone callers and tests don't need
 	 * cancellation — only the daemon passes a signal (via ProjectRegistry)
 	 * so it can abort in-flight relay creation when a project is removed.
 	 */
@@ -323,8 +323,8 @@ export interface ProjectRelayConfig {
 	 * Default: 750ms. Tests can use a shorter interval for faster feedback.
 	 */
 	messagePollerInterval?: number;
-	/** Optional: SQLite event-store path for Effect-native persistence services. */
-	persistenceDbPath?: string;
+	/** SQLite event-store path for Effect-native persistence services. */
+	persistenceDbPath: string;
 	/**
 	 * Test seam: replaces every Claude Agent SDK `query()` this relay makes —
 	 * session turns and session-title generation — so E2E replay never reaches

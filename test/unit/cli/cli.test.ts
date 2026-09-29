@@ -288,6 +288,8 @@ describe("internal --daemon child", () => {
 			process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS] = JSON.stringify(["-dims"]);
 			process.env[RELAY_ENV_KEYS.TLS] = "1";
 			process.env[RELAY_ENV_KEYS.OC_URL] = "http://opencode:4096";
+			// Shells launched by ccs export this; the expectation below assumes it is unset.
+			delete process.env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR];
 
 			await run(
 				["--daemon", "--log-level", "debug", "--log-format", "pretty"],

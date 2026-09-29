@@ -26,8 +26,6 @@ import { createReplayHarness, type ReplayHarness } from "./e2e-harness.js";
 interface ReplayOptions {
 	/** Name of the .opencode.json.gz recording to use (default: "chat-simple") */
 	recording: string;
-	/** Give the relay a temp SQLite event store (default: false) */
-	persistence: boolean;
 	/** Claude lane: open a Claude session replaying these SDK traces, one per
 	 *  sent turn. The test fails unless exactly the planned turns are sent. */
 	claudeReplay: ClaudeReplayPlan | undefined;
@@ -46,13 +44,11 @@ interface ReplayFixtures {
 export const test = base.extend<ReplayFixtures & ReplayOptions>({
 	// Default recording — override per-describe with test.use({ recording: "..." })
 	recording: ["chat-simple", { option: true }],
-	persistence: [false, { option: true }],
 	claudeReplay: [undefined, { option: true }],
 
 	// Per-test harness lifecycle
-	harness: async ({ recording, persistence, claudeReplay }, use) => {
+	harness: async ({ recording, claudeReplay }, use) => {
 		const harness = await createReplayHarness(recording, {
-			persistence,
 			...(claudeReplay ? { claudeReplay } : {}),
 		});
 		try {

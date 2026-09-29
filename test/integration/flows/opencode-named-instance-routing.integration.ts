@@ -108,7 +108,6 @@ describe("Integration: named OpenCode instance routing", () => {
 		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(daemonConfig));
 		harness = await createRelayHarness("chat-simple", {
 			configDir: tempDir,
-			persistenceDbPath: join(tempDir, "events.sqlite"),
 		});
 	}, 30_000);
 

@@ -39,6 +39,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 
 function mockWsHandler(
 	sessionId = "session-provider-state",
@@ -146,6 +147,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					opencodeUrl: "http://127.0.0.1:1",
 					projectDir: "/tmp/project",
 					slug: "provider-state-test",
+					persistenceDbPath: tempEventsDbPath(),
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
 				PendingSendOwnershipLive,
@@ -232,6 +234,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				opencodeUrl: "http://127.0.0.1:1",
 				projectDir: "/tmp/project",
 				slug: "history-test",
+				persistenceDbPath: tempEventsDbPath(),
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
 			PendingSendOwnershipLive,
@@ -330,6 +333,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				opencodeUrl: "http://127.0.0.1:1",
 				projectDir: "/tmp/project",
 				slug: "claude-user-effect-test",
+				persistenceDbPath: tempEventsDbPath(),
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
 			PendingSendOwnershipLive,
@@ -438,6 +442,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					opencodeUrl: "http://127.0.0.1:1",
 					projectDir: "/tmp/project",
 					slug: "claude-sink-effect-test",
+					persistenceDbPath: tempEventsDbPath(),
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
 				PendingSendOwnershipLive,
@@ -572,6 +577,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				opencodeUrl: "http://127.0.0.1:1",
 				projectDir: "/tmp/project",
 				slug: "claude-child-sink-test",
+				persistenceDbPath: tempEventsDbPath(),
 			} satisfies ProjectRelayConfig),
 			PendingInteractionServiceLive,
 			PendingSendOwnershipLive,

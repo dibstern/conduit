@@ -4,8 +4,7 @@ import type { RelayMessage } from "../shared-types.js";
 // The complete relay wiring: OpenCode client, SSE consumer, event translator,
 // WebSocket handler, session manager, and Effect-owned relay services.
 //
-// Extracted from skeleton.ts so integration tests exercise the exact same
-// wiring as production. skeleton.ts is now a thin CLI wrapper around this.
+// Shared relay wiring for daemon projects and standalone integration harnesses.
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -115,10 +114,7 @@ import {
 	LocalPtyServiceLive,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
-import {
-	ToolContentServiceLive,
-	ToolContentServiceNoop,
-} from "../domain/relay/Services/tool-content-service.js";
+import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
 import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
@@ -643,9 +639,8 @@ export interface RelayStackConfig {
 	statusPollerInterval?: number;
 	/** Override the message polling interval in milliseconds (default: 750). */
 	messagePollerInterval?: number;
-	/** SQLite event-store path — enables the durable persistence pipeline
-	 *  (same wiring the daemon passes to createProjectRelay). */
-	persistenceDbPath?: string;
+	/** SQLite event-store path for the durable persistence pipeline. */
+	persistenceDbPath: string;
 	/** Test seam forwarded to createProjectRelay (E2E Claude trace replay). */
 	claudeSdk?: ProjectRelayConfig["claudeSdk"];
 }
@@ -681,7 +676,7 @@ export interface RelayStack {
  * session manager, WebSocket handler, and Effect-owned services) and wires the full event
  * pipeline. Does NOT create or manage an HTTP server — the caller owns it.
  *
- * Used by both `createRelayStack()` (for standalone/skeleton mode) and the
+ * Used by both `createRelayStack()` (for standalone mode) and the
  * daemon (which has its own HTTP server).
  */
 export async function createProjectRelay(
@@ -753,53 +748,46 @@ export async function createProjectRelay(
 	const configLayer = makeProjectRelayConfigLive(config);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
-	const persistenceEffectLayer =
-		config.persistenceDbPath != null
-			? makePersistenceEffectLayer(
-					config.persistenceDbPath,
-					undefined,
-					// Same shared bus the ingestion layer merges below, so Claude
-					// persist writes (user messages) reach live detail subscriptions.
-					SessionEventBusLive,
-				)
-			: undefined;
-	const alertLedgerLayer =
-		persistenceEffectLayer == null
-			? undefined
-			: AlertLedgerLive.pipe(Layer.provide(persistenceEffectLayer));
-	const providerRuntimeIngestionLayer =
-		persistenceEffectLayer != null && alertLedgerLayer != null
-			? Layer.unwrapEffect(
-					Effect.gen(function* () {
-						const ledger = yield* AlertLedgerTag;
-						const sql = yield* SqlClient.SqlClient;
-						return makeProviderRuntimeIngestionLive({
-							relayPublisher: {
-								publish: (msg) =>
-									publishProviderRelayMessage(msg, {
-										wsHandler,
-										log,
-										slug: config.slug,
-										...(config.pushManager
-											? { pushManager: config.pushManager }
-											: {}),
-									}).pipe(
-										Effect.provideService(SqlClient.SqlClient, sql),
-										Effect.provideService(AlertLedgerTag, ledger),
-									),
-							},
-						});
-					}),
-				).pipe(
-					Layer.provide(
-						Layer.mergeAll(
-							persistenceEffectLayer,
-							SessionEventBusLive,
-							alertLedgerLayer,
+	const persistenceEffectLayer = makePersistenceEffectLayer(
+		config.persistenceDbPath,
+		undefined,
+		// Same shared bus the ingestion layer merges below, so Claude
+		// persist writes (user messages) reach live detail subscriptions.
+		SessionEventBusLive,
+	);
+	const alertLedgerLayer = AlertLedgerLive.pipe(
+		Layer.provide(persistenceEffectLayer),
+	);
+	const providerRuntimeIngestionLayer = Layer.unwrapEffect(
+		Effect.gen(function* () {
+			const ledger = yield* AlertLedgerTag;
+			const sql = yield* SqlClient.SqlClient;
+			return makeProviderRuntimeIngestionLive({
+				relayPublisher: {
+					publish: (msg) =>
+						publishProviderRelayMessage(msg, {
+							wsHandler,
+							log,
+							slug: config.slug,
+							...(config.pushManager
+								? { pushManager: config.pushManager }
+								: {}),
+						}).pipe(
+							Effect.provideService(SqlClient.SqlClient, sql),
+							Effect.provideService(AlertLedgerTag, ledger),
 						),
-					),
-				)
-			: undefined;
+				},
+			});
+		}),
+	).pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				persistenceEffectLayer,
+				SessionEventBusLive,
+				alertLedgerLayer,
+			),
+		),
+	);
 	// Named OpenCode instance clients (Phase 4.4): one shared layer reference
 	// (Effect memoizes it) so orchestration wiring, the session manager, and
 	// the startup SSE wiring all see the same lazy per-instance client cache.
@@ -812,15 +800,12 @@ export async function createProjectRelay(
 	// ingestion pipeline — no duplicate event append. Likewise the shared
 	// persistenceEffectLayer reference gives orchestration (session bindings,
 	// durable command receipts) the relay's one SqlClient connection.
-	const providerOrchestrationDeps =
-		persistenceEffectLayer != null && providerRuntimeIngestionLayer != null
-			? Layer.mergeAll(
-					openCodeApiLayer,
-					persistenceEffectLayer,
-					providerRuntimeIngestionLayer,
-					openCodeInstanceClientsLayer,
-				)
-			: Layer.mergeAll(openCodeApiLayer, openCodeInstanceClientsLayer);
+	const providerOrchestrationDeps = Layer.mergeAll(
+		openCodeApiLayer,
+		persistenceEffectLayer,
+		providerRuntimeIngestionLayer,
+		openCodeInstanceClientsLayer,
+	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
 	);
@@ -849,7 +834,7 @@ export async function createProjectRelay(
 				configLayer,
 				loggerLayer,
 				SessionEventBusLive,
-				persistenceEffectLayer ?? Layer.empty,
+				persistenceEffectLayer,
 			),
 		),
 	);
@@ -881,10 +866,9 @@ export async function createProjectRelay(
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
-	const toolContentServiceLayer =
-		persistenceEffectLayer != null
-			? ToolContentServiceLive.pipe(Layer.provideMerge(persistenceEffectLayer))
-			: ToolContentServiceNoop;
+	const toolContentServiceLayer = ToolContentServiceLive.pipe(
+		Layer.provideMerge(persistenceEffectLayer),
+	);
 
 	const coreBridgeLayers = Layer.mergeAll(
 		openCodeApiLayer,
@@ -907,18 +891,9 @@ export async function createProjectRelay(
 		loggerLayer,
 		providerOrchestrationLayer,
 		openCodeInstanceClientsLayer,
-		// The alert ledger retains pending and delivered claims (ni8.23). It
-		// needs the store, so without persistence there is none — and the push
-		// path says so out loud rather than quietly dinging twice.
-		...(persistenceEffectLayer != null
-			? [
-					persistenceEffectLayer,
-					...(alertLedgerLayer != null ? [alertLedgerLayer] : []),
-				]
-			: []),
-		...(providerRuntimeIngestionLayer != null
-			? [providerRuntimeIngestionLayer]
-			: []),
+		persistenceEffectLayer,
+		alertLedgerLayer,
+		providerRuntimeIngestionLayer,
 	);
 
 	// Optional bridge layers (only included when deps are present)
@@ -1122,6 +1097,9 @@ export async function createProjectRelay(
 						),
 					);
 				}
+				if (defaultModel) {
+					yield* setDefaultModel(defaultModel);
+				}
 				const sessionManagerService = yield* SessionManagerServiceTag;
 				const runFork = Runtime.runFork(
 					yield* Effect.runtime<SessionManagerServiceTag>(),
@@ -1161,9 +1139,6 @@ export async function createProjectRelay(
 				const orchestration = yield* getOrchestrationLayer;
 				yield* PollerStateTag;
 				yield* PollerPubSubTag;
-				if (defaultModel) {
-					yield* setDefaultModel(defaultModel);
-				}
 				if (initialDefaultVariant) {
 					yield* setDefaultVariant(initialDefaultVariant);
 				}
@@ -1172,12 +1147,9 @@ export async function createProjectRelay(
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
-				const opencodeRuntimeIngress =
-					persistenceEffectLayer != null
-						? yield* makeEffectOpenCodeRuntimeIngress(
-								log.child("opencode-runtime-ingress"),
-							)
-						: undefined;
+				const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
+					log.child("opencode-runtime-ingress"),
+				);
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(
 						new RelayCreationAbortedError({ slug: config.slug }),
@@ -1427,7 +1399,7 @@ export async function createProjectRelay(
  *
  * Creates an Effect-backed HTTP server, registers the project, starts the server, then
  * delegates to `createProjectRelay()` for all relay wiring. Used by
- * skeleton.ts for standalone operation.
+ * standalone harnesses.
  */
 export async function createRelayStack(
 	config: RelayStackConfig,
@@ -1535,6 +1507,7 @@ export async function createRelayStack(
 				projectDir: directory,
 				slug,
 				noServer: true,
+				persistenceDbPath: config.persistenceDbPath,
 				...(config.sessionTitle != null && {
 					sessionTitle: config.sessionTitle,
 				}),
@@ -1594,9 +1567,7 @@ export async function createRelayStack(
 		...(config.messagePollerInterval != null && {
 			messagePollerInterval: config.messagePollerInterval,
 		}),
-		...(config.persistenceDbPath != null && {
-			persistenceDbPath: config.persistenceDbPath,
-		}),
+		persistenceDbPath: config.persistenceDbPath,
 		...(config.claudeSdk != null && { claudeSdk: config.claudeSdk }),
 	});
 	relays.set(config.slug, relay);

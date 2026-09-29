@@ -157,7 +157,7 @@ test.describe("Woken badge", () => {
 	test.describe.configure({ timeout: 60_000 });
 
 	test.describe("OpenCode", () => {
-		test.use({ recording: "chat-simple", persistence: true });
+		test.use({ recording: "chat-simple" });
 
 		for (const reason of ["time", "approval", "question"] as const)
 			test(`${reason} wake on a read session stays until the session is opened`, async ({

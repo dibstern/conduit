@@ -115,6 +115,7 @@ import {
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 
 function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 	return {
@@ -228,6 +229,7 @@ function makeRelayConfig(configDir: string): ProjectRelayConfig {
 		opencodeUrl: "http://localhost:4096",
 		projectDir: "/tmp/project",
 		slug: "project",
+		persistenceDbPath: tempEventsDbPath(),
 		configDir,
 	};
 }
@@ -904,6 +906,7 @@ describe("SessionManagerService", () => {
 				opencodeUrl: "http://localhost:4096",
 				projectDir: "/tmp/project",
 				slug: "project",
+				persistenceDbPath: tempEventsDbPath(),
 				configDir: tmpDir,
 			};
 			const api = makeMockOpenCodeAPI();

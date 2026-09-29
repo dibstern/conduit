@@ -3,6 +3,9 @@
 // Integration tests use this to exercise the exact same wiring as production,
 // without requiring a live OpenCode instance.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createRelayStack,
@@ -18,6 +21,7 @@ export interface RelayHarness {
 	mock: MockOpenCodeServer;
 	relayPort: number;
 	relayBaseUrl: string;
+	eventsDbPath: string;
 
 	/** Connect a test WebSocket client to the relay */
 	connectWsClient(): Promise<TestWsClient>;
@@ -33,7 +37,6 @@ export interface RelayHarness {
 export async function createRelayHarness(
 	recordingName: string | OpenCodeRecording = "chat-simple",
 	options: {
-		readonly persistenceDbPath?: string;
 		/** Config directory holding daemon.json (named provider instances). */
 		readonly configDir?: string;
 	} = {},
@@ -44,6 +47,8 @@ export async function createRelayHarness(
 			: recordingName;
 	const mock = new MockOpenCodeServer(recording);
 	await mock.start();
+	const dbDir = mkdtempSync(join(tmpdir(), "conduit-relay-integration-"));
+	const eventsDbPath = join(dbDir, "events.db");
 
 	const stack = await createRelayStack({
 		port: 0,
@@ -53,10 +58,8 @@ export async function createRelayHarness(
 		slug: "integration-test",
 		sessionTitle: "Integration Test Session",
 		log: createSilentLogger(),
-		...(options.persistenceDbPath != null
-			? { persistenceDbPath: options.persistenceDbPath }
-			: {}),
-		...(options.configDir != null ? { configDir: options.configDir } : {}),
+		persistenceDbPath: eventsDbPath,
+		configDir: options.configDir ?? dbDir,
 	});
 
 	const relayPort = stack.getPort();
@@ -68,6 +71,7 @@ export async function createRelayHarness(
 		mock,
 		relayPort,
 		relayBaseUrl,
+		eventsDbPath,
 
 		async connectWsClient(): Promise<TestWsClient> {
 			const client = new TestWsClient(
@@ -84,6 +88,7 @@ export async function createRelayHarness(
 			}
 			await stack.stop();
 			await mock.stop();
+			rmSync(dbDir, { recursive: true, force: true });
 			// Allow OS to fully release ports and file descriptors
 			await new Promise((r) => setTimeout(r, 100));
 		},

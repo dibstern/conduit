@@ -9,10 +9,10 @@ import {
 	InstanceManagementServiceTag,
 } from "../../../src/lib/domain/relay/Services/instance-management-service.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
-
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 
 const makeInstance = (
 	overrides: Partial<OpenCodeInstance> = {},
@@ -73,6 +73,7 @@ const makeConfigLayer = (instanceMgmt: InstanceManagementDeps) =>
 				opencodeUrl: "http://127.0.0.1:4096",
 				projectDir: process.cwd(),
 				slug: "test-project",
+				persistenceDbPath: tempEventsDbPath(),
 				getInstances: instanceMgmt.getInstances,
 				addInstance: instanceMgmt.addInstance,
 				removeInstance: instanceMgmt.removeInstance,

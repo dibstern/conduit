@@ -1,3 +1,4 @@
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 // ─── E2E: Per-Tab Session Routing (Mock OpenCode) ────────────────────────────
 // Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
 // real WebSocket clients to verify SSE events route only to session viewers.
@@ -235,6 +236,7 @@ async function createTestHarness(): Promise<TestHarness> {
 	const relayPort = (relayServer.address() as { port: number }).port;
 
 	const relay = await createProjectRelay({
+		persistenceDbPath: tempEventsDbPath(),
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),

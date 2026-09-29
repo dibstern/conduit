@@ -7,7 +7,7 @@
 // Both serve the built frontend from dist/frontend/ via the relay's static
 // file server, so Playwright can navigate directly to the relay URL.
 
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Socket } from "@effect/platform";
@@ -70,6 +70,7 @@ export async function createE2EHarness(opts?: {
 	const opencodeUrl = opts?.opencodeUrl ?? OPENCODE_URL;
 
 	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
+	const dbDir = mkdtempSync(path.join(tmpdir(), "e2e-live-relay-"));
 
 	const startStack = (port: number) =>
 		createRelayStack({
@@ -80,6 +81,7 @@ export async function createE2EHarness(opts?: {
 			slug: "e2e-test",
 			sessionTitle: "E2E Test Session",
 			staticDir,
+			persistenceDbPath: path.join(dbDir, "events.db"),
 			log: createSilentLogger(),
 		});
 	const stack = await startStack(0);
@@ -109,6 +111,7 @@ export async function createE2EHarness(opts?: {
 				}
 			}
 			await stack.stop();
+			rmSync(dbDir, { recursive: true, force: true });
 		},
 		trackSession(id: string): void {
 			createdSessionIds.push(id);
@@ -128,8 +131,8 @@ export interface ReplayHarness {
 	projectUrl: string;
 	/** Present when the harness was created with a Claude replay plan. */
 	claudeReplayer?: ClaudeTraceReplayer;
-	/** The fresh per-run SQLite event store, when persistence is on. */
-	eventsDbPath?: string;
+	/** The fresh per-run SQLite event store. */
+	eventsDbPath: string;
 	/** Stop the relay and start a fresh one on the same port, config dir and
 	 *  event store, as a daemon restart would. Open pages reconnect on their own.
 	 *  `whileStopped` runs between the two, e.g. to rewrite the event store. */
@@ -174,10 +177,8 @@ async function createClaudeSession(relayPort: number): Promise<string> {
 export async function createReplayHarness(
 	recordingName: string,
 	options: {
-		persistence?: boolean;
 		/** Claude lane: open a Claude session whose SDK turns replay these
-		 *  committed traces (implies persistence — Claude sessions are
-		 *  relay-owned). No live model call is possible. */
+		 *  committed traces. No live model call is possible. */
 		claudeReplay?: ClaudeReplayPlan;
 	} = {},
 ): Promise<ReplayHarness> {
@@ -193,15 +194,16 @@ export async function createReplayHarness(
 
 	const claudeReplayer =
 		options.claudeReplay && createClaudeTraceReplayer(options.claudeReplay);
-	const eventsDbPath =
-		options.persistence || claudeReplayer
-			? path.join(configDir, "events.db")
-			: undefined;
+	const eventsDbPath = path.join(configDir, "events.db");
+	saveRelaySettings(
+		{
+			defaultModel: claudeReplayer
+				? `claude/${CLAUDE_TRACE_MODEL}`
+				: "opencode/big-pickle",
+		},
+		configDir,
+	);
 	if (claudeReplayer) {
-		saveRelaySettings(
-			{ defaultModel: `claude/${CLAUDE_TRACE_MODEL}` },
-			configDir,
-		);
 		// Capability discovery would otherwise spawn the real Claude CLI.
 		__setProbeOverrideForTesting(async () => ({
 			models: [
@@ -226,9 +228,7 @@ export async function createReplayHarness(
 			sessionTitle: "E2E Replay Session",
 			staticDir,
 			configDir,
-			// Off by default: durable per-session state (settle, pin, read) only
-			// exists with an event store, and most replay specs predate it.
-			...(eventsDbPath ? { persistenceDbPath: eventsDbPath } : {}),
+			persistenceDbPath: eventsDbPath,
 			...(claudeReplayer ? { claudeSdk: claudeReplayer.sdk } : {}),
 			log: createSilentLogger(),
 		});
@@ -249,7 +249,7 @@ export async function createReplayHarness(
 		relayBaseUrl,
 		projectUrl: `/s/${encodeURIComponent(sessionId)}`,
 		...(claudeReplayer ? { claudeReplayer } : {}),
-		...(eventsDbPath ? { eventsDbPath } : {}),
+		eventsDbPath,
 		async restart(whileStopped?: () => void): Promise<void> {
 			await stack.stop();
 			whileStopped?.();
@@ -259,6 +259,7 @@ export async function createReplayHarness(
 			await stack.stop();
 			await mock.stop();
 			if (claudeReplayer) __setProbeOverrideForTesting(undefined);
+			rmSync(configDir, { recursive: true, force: true });
 		},
 	};
 }

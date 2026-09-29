@@ -1,3 +1,4 @@
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 // ─── Permission Rehydration Wiring ───────────────────────────────────────────
 // Verifies that createProjectRelay wires listPendingPermissions into the SSE
 // consumer, so pending permissions are rehydrated from the OpenCode API on
@@ -210,6 +211,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		relayPort = (relayServer.address() as { port: number }).port;
 
 		relay = await createProjectRelay({
+			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),

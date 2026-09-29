@@ -792,7 +792,7 @@ test.describe("Session unread dot", () => {
 	});
 
 	test.describe("OpenCode", () => {
-		test.use({ recording: "chat-multi-turn", persistence: true });
+		test.use({ recording: "chat-multi-turn" });
 
 		test("turn end, pick, reload, reconnect and restart across two windows", async ({
 			page,

@@ -45,6 +45,7 @@ describe("Integration: Initial State on Connect", () => {
 	it("sends agent_list on connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.waitFor("agent_list");
 		const msg = client.getReceivedOfType("agent_list");
 		expect(msg.length).toBeGreaterThan(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -63,6 +64,7 @@ describe("Integration: Initial State on Connect", () => {
 	it("sends model_list on connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.waitFor("model_list");
 		const msg = client.getReceivedOfType("model_list");
 		expect(msg.length).toBeGreaterThan(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion

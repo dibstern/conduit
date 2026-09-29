@@ -63,7 +63,7 @@ export interface RelayEventSinkDeps {
 	readonly applyReportedPermissionMode?: (
 		mode: SessionPermissionMode,
 	) => Effect.Effect<void, unknown>;
-	/** Optional: persist events to SQLite for session history survival. */
+	/** Persistence callback for sink users without the relay's ingestion service. */
 	readonly persist?: RelayEventSinkPersist;
 	/** Optional durable runtime ingestion owner. When present, push() delegates provider output to this path. */
 	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;

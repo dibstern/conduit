@@ -9,9 +9,6 @@
 //    OpenCode providerId, the session_list broadcast that follows must
 //    include the new session (read-model projection race).
 
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
@@ -248,7 +245,7 @@ async function bindOpenCodeSession(
 	const model = provider.models[0];
 	if (!model) throw new Error("OpenCode provider has no models");
 
-	const created = await client.createSession(title, { providerId: "claude" });
+	const created = await client.createSession(title, { instanceId: "claude" });
 	const localId = created["id"] as string;
 	if (!localId) throw new Error("createSession returned no id");
 	await client.switchModel(model.id, provider.id, localId);
@@ -279,11 +276,8 @@ async function runPaginationDifferential(count: number) {
 		`pagination-${count}`,
 		(sessionId) => paginationSse(sessionId, count),
 	);
-	const dir = mkdtempSync(join(tmpdir(), `conduit-repro-page-${count}-`));
-	const dbPath = join(dir, "events.sqlite");
-	const paginationHarness = await createRelayHarness(synthetic.recording, {
-		persistenceDbPath: dbPath,
-	});
+	const paginationHarness = await createRelayHarness(synthetic.recording);
+	const dbPath = paginationHarness.eventsDbPath;
 	let client1: TestWsClient | undefined;
 	let client2: TestWsClient | undefined;
 	try {
@@ -348,12 +342,9 @@ async function runPaginationDifferential(count: number) {
 
 describe("Integration: Session Visibility Repros", () => {
 	let harness: RelayHarness;
-	let persistenceDbPath: string;
 
 	beforeAll(async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-"));
-		persistenceDbPath = join(dir, "events.sqlite");
-		harness = await createRelayHarness("chat-simple", { persistenceDbPath });
+		harness = await createRelayHarness("chat-simple");
 	}, 30_000);
 
 	afterAll(async () => {
@@ -421,7 +412,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// 1. New session → local claude placeholder row.
 		const created = await client1.createSession("Materialize Repro", {
-			providerId: "claude",
+			instanceId: "claude",
 		});
 		const localId = created["id"] as string;
 		expect(localId).toBeTruthy();
@@ -528,11 +519,8 @@ describe("Integration: Session Visibility Repros", () => {
 		// Own harness: the projection can only contain what actually streamed
 		// through this relay, so the turn must not race other tests' replay
 		// queue consumption on the shared recording session.
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-text-"));
-		const textDbPath = join(dir, "events.sqlite");
-		const textHarness = await createRelayHarness("chat-simple", {
-			persistenceDbPath: textDbPath,
-		});
+		const textHarness = await createRelayHarness("chat-simple");
+		const textDbPath = textHarness.eventsDbPath;
 		const client1 = await textHarness.connectWsClient();
 		await client1.waitForInitialState();
 		const localId = await bindOpenCodeSession(client1, "Text Differential");
@@ -606,11 +594,8 @@ describe("Integration: Session Visibility Repros", () => {
 	}, 45_000);
 
 	it("projected history matches REST for a tool-call turn", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-tool-"));
-		const toolDbPath = join(dir, "events.sqlite");
-		const toolHarness = await createRelayHarness("chat-tool-call", {
-			persistenceDbPath: toolDbPath,
-		});
+		const toolHarness = await createRelayHarness("chat-tool-call");
+		const toolDbPath = toolHarness.eventsDbPath;
 		try {
 			const client1 = await toolHarness.connectWsClient();
 			await client1.waitForInitialState();
@@ -767,11 +752,8 @@ describe("Integration: Session Visibility Repros", () => {
 				}),
 			],
 		);
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-metadata-"));
-		const dbPath = join(dir, "events.sqlite");
-		const metadataHarness = await createRelayHarness(synthetic.recording, {
-			persistenceDbPath: dbPath,
-		});
+		const metadataHarness = await createRelayHarness(synthetic.recording);
+		const dbPath = metadataHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -886,11 +868,8 @@ describe("Integration: Session Visibility Repros", () => {
 				}),
 			],
 		);
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-file-"));
-		const dbPath = join(dir, "events.sqlite");
-		const fileHarness = await createRelayHarness(synthetic.recording, {
-			persistenceDbPath: dbPath,
-		});
+		const fileHarness = await createRelayHarness(synthetic.recording);
+		const dbPath = fileHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -957,11 +936,8 @@ describe("Integration: Session Visibility Repros", () => {
 	}, 45_000);
 
 	it("REPRO-I: permission-gated history matches REST and persists permission events", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-permission-"));
-		const dbPath = join(dir, "events.sqlite");
-		const permissionHarness = await createRelayHarness("permissions-bash", {
-			persistenceDbPath: dbPath,
-		});
+		const permissionHarness = await createRelayHarness("permissions-bash");
+		const dbPath = permissionHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
