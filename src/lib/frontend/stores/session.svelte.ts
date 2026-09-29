@@ -2,7 +2,6 @@
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
-import { busySessionIds as propagateBusySessions } from "../../session-busy.js";
 import {
 	applySessionChange,
 	resetSessionSubscription,
@@ -64,11 +63,41 @@ import { getSessionScope } from "./session-scope.js";
 const serverSessions = $derived(sessionSubscription.rows);
 let rootSessions = $state.raw<readonly SessionInfo[]>([]);
 let familySessions = $state.raw<readonly SessionInfo[]>([]);
-const busySessionIds = $derived.by(() => {
-	return propagateBusySessions(
-		serverSessions,
-		sessionActivityBridge.pending.keys(),
+
+/** A session can receive events while its row is still arriving. */
+export function isRoutable(id: string): boolean {
+	return (
+		id === clientSession.currentId ||
+		serverSessions.has(id) ||
+		familySessions.some((row) => row.id === id)
 	);
+}
+
+/** Prefer the versioned row when a family message carries older metadata. */
+export function parentOf(id: string): string | null {
+	return (
+		serverSessions.get(id)?.parentID ??
+		familySessions.find((row) => row.id === id)?.parentID ??
+		(clientSession.announcedParent?.sessionId === id
+			? clientSession.announcedParent.parentId
+			: null)
+	);
+}
+
+const busySessionIds = $derived.by(() => {
+	const busy = new Set(sessionActivityBridge.pending.keys());
+	for (const row of serverSessions.values()) {
+		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
+	}
+	for (const family of familySessions) {
+		const row = serverSessions.get(family.id) ?? family;
+		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
+	}
+	for (const id of busy) {
+		const parent = parentOf(id);
+		if (parent && isRoutable(parent)) busy.add(parent);
+	}
+	return busy;
 });
 
 /** The session view's single busy decision, shared by every sidebar row. */
@@ -80,7 +109,7 @@ export function isSessionBusy(id: string): boolean {
 export function observeSessionActivity(event: RelayMessage): void {
 	if (!("sessionId" in event) || !event.sessionId) return;
 	const id = event.sessionId;
-	if (id !== clientSession.currentId && !serverSessions.has(id)) return;
+	if (!isRoutable(id)) return;
 	// Legacy `status` hints may come from the poller. Only the shell's
 	// accepted row can retire activity or supply a status for this view.
 	switch (event.type) {
@@ -99,7 +128,12 @@ export function observeSessionActivity(event: RelayMessage): void {
 
 const clientSession = $state({
 	currentId: null as string | null,
-	announcedParent: null as { sessionId: string; parentId: string } | null,
+	announcedParent: null as {
+		sessionId: string;
+		parentId: string;
+		forkMessageId?: string;
+		forkPointTimestamp?: number;
+	} | null,
 	searchQuery: "",
 	daemonSessions: [] as SessionInfo[],
 	daemonUnavailableProjects: [] as string[],
@@ -169,13 +203,12 @@ export const sessionState = {
 	},
 	get currentParentId(): string | null {
 		const id = clientSession.currentId;
-		if (!id) return null;
-		return (
-			serverSessions.get(id)?.parentID ??
-			(clientSession.announcedParent?.sessionId === id
-				? clientSession.announcedParent.parentId
-				: null)
-		);
+		return id ? parentOf(id) : null;
+	},
+	get currentFork() {
+		return clientSession.announcedParent?.sessionId === clientSession.currentId
+			? clientSession.announcedParent
+			: null;
 	},
 	set currentId(id: string | null) {
 		clientSession.currentId = id;
@@ -374,12 +407,8 @@ export function applySessionSnapshot(
 		for (const row of rows) applySessionChange({ _tag: "upsert", item: row });
 		return;
 	}
-	const incoming = new Set(rows.map((row) => row.id));
-	const reaped = [...serverSessions.keys()].filter((id) => !incoming.has(id));
 	applySessionChange({ _tag: "snapshot", rows });
 	rootSessions = rows.filter((row) => !row.parentID);
-	familySessions = rows;
-	for (const id of reaped) forgetSession(id);
 }
 
 /** Apply a single session row the server has created or changed. */
@@ -389,17 +418,12 @@ export function applySessionUpsert(row: SessionInfo): void {
 		rootSessions = rootSessions.map((existing) =>
 			existing.id === row.id ? row : existing,
 		);
-	if (familySessions.some((existing) => existing.id === row.id))
-		familySessions = familySessions.map((existing) =>
-			existing.id === row.id ? row : existing,
-		);
 }
 
 /** Apply a session the server has deleted. */
 export function applySessionRemoved(id: string): void {
 	applySessionChange({ _tag: "remove", id });
 	rootSessions = rootSessions.filter((row) => row.id !== id);
-	familySessions = familySessions.filter((row) => row.id !== id);
 	clientSession.daemonSessions = clientSession.daemonSessions.filter(
 		(row) => row.id !== id,
 	);
@@ -407,11 +431,10 @@ export function applySessionRemoved(id: string): void {
 		clientSession.searchResults = clientSession.searchResults.filter(
 			(row) => row.id !== id,
 		);
-	forgetSession(id);
 }
 
 /** Drop the state this tab keeps for a session the map no longer holds. */
-function forgetSession(id: string): void {
+export function forgetSession(id: string): void {
 	clearSessionChatState(id);
 	// A session that is gone cannot still be the one we are looking at. The
 	// selection is what makes a session routable before its row arrives, so
@@ -667,12 +690,6 @@ export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
 	familySessions = msg.sessions;
-	const rootIds = new Set(rootSessions.map((root) => root.id));
-	for (const row of familySessions) {
-		if (!rootIds.has(row.id)) {
-			applySessionChange({ _tag: "upsert", item: row });
-		}
-	}
 }
 
 export function applyListSessionsResponse(
@@ -884,10 +901,15 @@ export function handleSessionSwitched(
 	if (id) {
 		clientSession.currentId = id;
 		// A switch can precede the family row. Keep only this selection's
-		// announced lineage; a server row takes precedence when it arrives.
+		// announced lineage (including fork points from session_forked, which
+		// arrives first); a server row takes precedence when it arrives.
+		const announced =
+			clientSession.announcedParent?.sessionId === id
+				? clientSession.announcedParent
+				: null;
 		clientSession.announcedParent = msg.parentID
-			? { sessionId: id, parentId: msg.parentID }
-			: null;
+			? { ...announced, sessionId: id, parentId: msg.parentID }
+			: announced;
 		// A permission mode selected before any session was bound can only be
 		// delivered now that we know the session id.
 		const slug = getCurrentSlug();
@@ -904,11 +926,25 @@ export function handleSessionSwitched(
 	}
 }
 
-/** Handle a session_forked message — the server created a new session. */
+/** Keep fork lineage with this tab's selection until the family row arrives. */
 export function handleSessionForked(
 	msg: Extract<RelayMessage, { type: "session_forked" }>,
 ): void {
-	applySessionUpsert(msg.session);
+	if (
+		clientSession.announcedParent?.sessionId === clientSession.currentId &&
+		clientSession.currentId !== msg.parentId
+	)
+		return;
+	clientSession.announcedParent = {
+		sessionId: msg.session.id,
+		parentId: msg.parentId,
+		...(msg.session.forkMessageId && {
+			forkMessageId: msg.session.forkMessageId,
+		}),
+		...(msg.session.forkPointTimestamp != null && {
+			forkPointTimestamp: msg.session.forkPointTimestamp,
+		}),
+	};
 }
 
 // ─── Reading the session list ───────────────────────────────────────────────
@@ -917,9 +953,9 @@ export function handleSessionForked(
 /** Find a session by id. */
 export function findSession(id: string): Immutable<SessionInfo> | undefined {
 	return (
+		serverSessions.get(id) ??
 		familySessions.find((row) => row.id === id) ??
-		rootSessions.find((row) => row.id === id) ??
-		serverSessions.get(id)
+		rootSessions.find((row) => row.id === id)
 	);
 }
 
@@ -942,7 +978,8 @@ export function getSessionIndicator(
 	if (sessionId === currentSessionId) return null;
 	const session =
 		rootSessions.find((row) => row.id === sessionId) ??
-		serverSessions.get(sessionId);
+		serverSessions.get(sessionId) ??
+		familySessions.find((row) => row.id === sessionId);
 	if (session === undefined) return null;
 	if (
 		(session.pendingQuestionCount ?? 0) > 0 ||

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { sessionMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearSessionState,
+	handleSessionFamily,
 	isSessionBusy,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -18,6 +20,25 @@ afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
+});
+
+it("routes family-only child activity and propagates busy to its parent", () => {
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "root",
+		sessions: [
+			{ id: "root", title: "Root", status: "idle" },
+			{ id: "child", title: "Child", status: "idle", parentID: "root" },
+		],
+	});
+	sessionState.currentId = "root";
+	handleMessage({ type: "delta", sessionId: "child", text: "working" });
+
+	expect(sessionMessages.has("child")).toBe(true);
+	expect(isSessionBusy("child")).toBe(true);
+	expect(isSessionBusy("root")).toBe(true);
+	sessionState.currentId = "child";
+	expect(sessionState.currentParentId).toBe("root");
 });
 
 it.each([
@@ -41,7 +62,7 @@ it.each([
 	expect(isSessionBusy("s")).toBe(false);
 });
 
-it("retires snapshot omissions without tombstoning later activity or reappearance", () => {
+it("drops late activity after snapshot omission and accepts it after reappearance", () => {
 	vi.useFakeTimers();
 	sessionState.currentId = "s";
 	applySessionChange({
@@ -53,7 +74,7 @@ it("retires snapshot omissions without tombstoning later activity or reappearanc
 	applySessionChange({ _tag: "snapshot", rows: [] });
 	expect(isSessionBusy("s")).toBe(false);
 	handleMessage({ type: "delta", sessionId: "s", text: "still working" });
-	expect(isSessionBusy("s")).toBe(true);
+	expect(isSessionBusy("s")).toBe(false);
 	applySessionChange({
 		_tag: "snapshot",
 		rows: [{ id: "s", title: "s", status: "idle" }],

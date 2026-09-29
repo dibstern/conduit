@@ -8,6 +8,7 @@
 // notification reducer established.
 
 import type { Stream } from "effect";
+import { forgetSession } from "../stores/session.svelte.js";
 import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
@@ -67,15 +68,19 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	// envelope must not affect client state independently of the row applier.
 	if (change._tag === "upsert")
 		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
-	if (change._tag === "remove")
+	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
+		forgetSession(change.id);
+	}
 	if (change._tag === "snapshot") {
 		for (const id of new Set([
 			...applied.rows.keys(),
 			...sessionActivityBridge.pending.keys(),
 		])) {
-			if (!next.rows.has(id))
+			if (!next.rows.has(id)) {
 				sessionActivityBridge.retire(id, receivedSequence, "omission");
+				if (applied.rows.has(id)) forgetSession(id);
+			}
 		}
 		for (const row of next.rows.values())
 			sessionActivityBridge.retire(row.id, receivedSequence, "row");

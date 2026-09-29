@@ -52,7 +52,6 @@ import {
 	applySessionUpsert,
 	clearSessionState,
 	getFilteredSessions,
-	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
 	sessionState,
@@ -264,7 +263,7 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		expectWireValid(ROWS);
 	});
 
-	it("handleSessionForked", () => {
+	it("session_forked preserves the versioned row set", () => {
 		const forked: SessionInfo = {
 			id: "forked",
 			title: "Forked",
@@ -273,14 +272,15 @@ describe("every mutation path leaves the server half wire-valid", () => {
 			updatedAt: 4000,
 		};
 		applySessionSnapshot(ROWS, "complete");
-		handleSessionForked({
+		handleMessage({
 			type: "session_forked",
 			sessionId: "root",
 			session: forked,
 			parentId: "root",
 			parentTitle: "Root",
 		});
-		expectWireValid([...ROWS, forked]);
+		expect(sessionState.sessions.has("forked")).toBe(false);
+		expectWireValid(ROWS);
 	});
 
 	it("applyListSessionsResponse", () => {

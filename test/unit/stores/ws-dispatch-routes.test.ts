@@ -123,8 +123,21 @@ describe("session_switched routes", () => {
 		expect(sessionState.currentId).toBe("fork");
 	});
 
-	it("opens a fork whose lineage only its session_forked row carries", () => {
+	it("opens a fork whose family arrives before the switch", () => {
 		routerState.path = "/s/parent";
+		handleMessage({
+			type: "session_family",
+			rootId: "parent",
+			sessions: [
+				{ id: "parent", title: "Parent", status: "idle" },
+				{
+					id: "fork",
+					title: "Parent (fork)",
+					status: "idle",
+					parentID: "parent",
+				},
+			],
+		});
 		handleMessage({
 			type: "session_forked",
 			sessionId: "fork",
@@ -141,6 +154,48 @@ describe("session_switched routes", () => {
 		handleMessage({ type: "session_switched", id: "fork", sessionId: "fork" });
 		expect(routerState.path).toBe("/s/fork");
 		expect(sessionState.currentId).toBe("fork");
+	});
+
+	it("opens a fork from its notice before a family row arrives", () => {
+		routerState.path = "/s/parent";
+		handleMessage({
+			type: "session_forked",
+			sessionId: "fork",
+			session: {
+				id: "fork",
+				title: "Parent (fork)",
+				status: "idle",
+				parentID: "parent",
+				forkMessageId: "message-1",
+			},
+			parentId: "parent",
+			parentTitle: "Parent",
+		});
+		handleMessage({ type: "session_switched", id: "fork", sessionId: "fork" });
+
+		expect(routerState.path).toBe("/s/fork");
+		expect(sessionState.currentId).toBe("fork");
+		expect(sessionState.currentParentId).toBe("parent");
+		expect(sessionState.sessions.has("fork")).toBe(false);
+	});
+
+	it("an unrelated fork notice preserves the selected child's announced parent", () => {
+		routerState.path = "/s/child";
+		handleMessage({
+			type: "session_switched",
+			id: "child",
+			sessionId: "child",
+			parentID: "root",
+		});
+		handleMessage({
+			type: "session_forked",
+			sessionId: "other-fork",
+			session: { id: "other-fork", title: "Other fork", status: "idle" },
+			parentId: "other",
+			parentTitle: "Other",
+		});
+
+		expect(sessionState.currentParentId).toBe("root");
 	});
 
 	// OpenCode materialization: sending on a local row with an OpenCode model

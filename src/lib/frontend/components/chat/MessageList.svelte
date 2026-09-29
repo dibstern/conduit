@@ -219,18 +219,20 @@
 
 	// Fork context: detect if current session is a user fork
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
-	const isFork = $derived(!!activeSession?.forkMessageId || !!activeSession?.forkPointTimestamp);
+	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? sessionState.currentFork?.forkMessageId);
+	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? sessionState.currentFork?.forkPointTimestamp);
+	const isFork = $derived(!!forkMessageId || !!forkPointTimestamp);
 	const forkSplit = $derived(
 		isFork
 			? splitAtForkPoint(
 					currentChat().messages,
-					activeSession?.forkPointMessageId ?? activeSession?.forkMessageId,
-					activeSession?.forkPointTimestamp,
+					forkMessageId,
+					forkPointTimestamp,
 				)
 			: null,
 	);
 	const parentSession = $derived(
-		activeSession?.parentID ? findSession(activeSession.parentID) : null,
+		sessionState.currentParentId ? findSession(sessionState.currentParentId) : null,
 	);
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(

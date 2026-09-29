@@ -26,7 +26,9 @@ import {
 import {
 	applyListDaemonSessionsResponse,
 	applyListSessionsResponse,
+	applySessionRemoved,
 	applySessionSnapshot,
+	applySessionUpsert,
 	clearSessionState,
 	completeNewSession,
 	ERROR_DISPLAY_MS,
@@ -35,7 +37,6 @@ import {
 	groupSessionsByAttention,
 	groupSessionsByDate,
 	handleSessionFamily,
-	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
 	isSessionSnoozed,
@@ -50,6 +51,7 @@ import {
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
 	applySessionChange,
 	sessionSubscription,
@@ -136,6 +138,109 @@ it("seedSessions settles the versioned map and fills both sidebar lists", () => 
 		item: { id: "stale", title: "Stale", status: "idle" },
 	});
 	expect(sessionSubscription.rows.has("stale")).toBe(false);
+});
+
+it("keeps a newer root row when an older family arrives", () => {
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [{ id: "root", title: "New title", status: "busy" }],
+	});
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "root",
+		sessions: [
+			{ id: "root", title: "Old title", status: "idle" },
+			{ id: "child", title: "Child", status: "idle", parentID: "root" },
+		],
+	});
+
+	expect(sessionState.sessions.get("root")?.title).toBe("New title");
+	expect(sessionState.sessions.get("root")?.status).toBe("busy");
+	expect(sessionState.sessions.has("child")).toBe(false);
+	expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+		"root",
+		"child",
+	]);
+});
+
+it("forgets chat and selection when the subscription snapshot omits a session", () => {
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [{ id: "gone", title: "Gone", status: "idle" }],
+	});
+	getOrCreateSessionSlot("gone");
+	sessionState.currentId = "gone";
+
+	applySessionChange({ _tag: "snapshot", sequence: 11, rows: [] });
+
+	expect(sessionState.sessions.has("gone")).toBe(false);
+	expect(sessionActivity.has("gone")).toBe(false);
+	expect(sessionMessages.has("gone")).toBe(false);
+	expect(sessionState.currentId).toBeNull();
+});
+
+it("forgets chat and selection when the subscription removes a session", () => {
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 10,
+		item: { id: "gone", title: "Gone", status: "idle" },
+	});
+	getOrCreateSessionSlot("gone");
+	sessionState.currentId = "gone";
+
+	applySessionChange({ _tag: "remove", sequence: 11, id: "gone" });
+
+	expect(sessionState.sessions.has("gone")).toBe(false);
+	expect(sessionActivity.has("gone")).toBe(false);
+	expect(sessionMessages.has("gone")).toBe(false);
+	expect(sessionState.currentId).toBeNull();
+});
+
+it("does not write a row from a fork notice", () => {
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [{ id: "ses_original", title: "Original", status: "idle" }],
+	});
+	handleMessage({
+		type: "session_forked",
+		sessionId: "ses_original",
+		session: {
+			id: "fork",
+			title: "Forked",
+			status: "idle",
+			parentID: "ses_original",
+		},
+		parentId: "ses_original",
+		parentTitle: "Original",
+	});
+
+	expect(sessionState.sessions.has("fork")).toBe(false);
+	expect(sessionState.sessions.get("ses_original")?.title).toBe("Original");
+});
+
+it("keeps the family list owned by session_family messages", () => {
+	const original = {
+		id: "root",
+		title: "Family title",
+		status: "idle",
+	} as const;
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "root",
+		sessions: [original],
+	});
+	applySessionSnapshot(
+		[{ id: "root", title: "Snapshot title", status: "idle" }],
+		"complete",
+	);
+	expect(sessionState.familySessions).toEqual([original]);
+	applySessionUpsert({ id: "root", title: "Upsert title", status: "idle" });
+	expect(sessionState.familySessions).toEqual([original]);
+	applySessionRemoved("root");
+	expect(sessionState.familySessions).toEqual([original]);
 });
 
 describe("clearSessionState", () => {
@@ -747,113 +852,6 @@ describe("setCurrentSession", () => {
 	});
 });
 
-// ─── handleSessionForked (ticket 5.3) ───────────────────────────────────────
-
-describe("handleSessionForked (ticket 5.3)", () => {
-	it("does not insert a fork outside the supplied family", () => {
-		const root = makeSession({ id: "parent" });
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "parent",
-			sessions: [root],
-		});
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "fork",
-			session: makeSession({ id: "fork", parentID: "parent" }),
-			parentId: "parent",
-			parentTitle: "Parent",
-		});
-		expect(sessionState.sessions.has("fork")).toBe(true);
-		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
-			"parent",
-		]);
-	});
-	it("adds the forked session to the session list", () => {
-		applySessionSnapshot(
-			[
-				{
-					id: "ses_original",
-					title: "Original",
-					status: "idle",
-					updatedAt: 1000,
-				},
-			],
-			"complete",
-		);
-
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "s1",
-			session: {
-				id: "ses_forked",
-				title: "Forked from Original",
-				status: "idle",
-				updatedAt: 2000,
-				parentID: "ses_original",
-			},
-			parentId: "ses_original",
-			parentTitle: "Original",
-		});
-
-		expect(sessionState.sessions.size).toBe(2);
-		expect(sessionState.sessions.get("ses_forked")?.parentID).toBe(
-			"ses_original",
-		);
-	});
-
-	it("replaces the row when the session is already known", () => {
-		applySessionSnapshot(
-			[
-				{
-					id: "ses_forked",
-					title: "Already Here",
-					status: "idle",
-					updatedAt: 1000,
-				},
-			],
-			"complete",
-		);
-
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "s1",
-			session: {
-				id: "ses_forked",
-				title: "Forked from Original",
-				status: "idle",
-				updatedAt: 2000,
-				parentID: "ses_original",
-			},
-			parentId: "ses_original",
-			parentTitle: "Original",
-		});
-
-		expect(sessionState.sessions.size).toBe(1);
-		expect(sessionState.sessions.get("ses_forked")?.title).toBe(
-			"Forked from Original",
-		);
-	});
-
-	it("preserves forkMessageId on forked session", () => {
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "s1",
-			session: {
-				id: "fork-1",
-				title: "Forked",
-				status: "idle",
-				updatedAt: Date.now(),
-				parentID: "parent-1",
-				forkMessageId: "msg_42",
-			},
-			parentId: "parent-1",
-			parentTitle: "Parent",
-		});
-		expect(sessionState.sessions.get("fork-1")?.forkMessageId).toBe("msg_42");
-	});
-});
-
 // ─── Root subscription view ──────────────────────────────────────────────────
 
 describe("getFilteredSessions root view", () => {
@@ -878,7 +876,7 @@ describe("getFilteredSessions root view", () => {
 		]);
 	});
 
-	it("an omitted family member remains in the canonical session map", () => {
+	it("an omitted family member does not leave a row in the session map", () => {
 		const root = makeSession({ id: "a" });
 		const child = makeSession({ id: "b", parentID: "a" });
 		handleSessionFamily({
@@ -894,7 +892,7 @@ describe("getFilteredSessions root view", () => {
 		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
 			"a",
 		]);
-		expect(sessionState.sessions.has("b")).toBe(true);
+		expect(sessionState.sessions.has("b")).toBe(false);
 	});
 });
 

@@ -113,7 +113,9 @@ import {
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
+	isRoutable,
 	observeSessionActivity,
+	parentOf,
 	sessionCreation,
 	sessionState,
 } from "./session.svelte.js";
@@ -253,12 +255,9 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 
 	// ── Unknown-session guard ──────────────────────────────────────────
-	// The session we are viewing is always routable — it is this tab's own
-	// selection, and its row can land after the switch that selected it.
-	if (
-		event.sessionId !== sessionState.currentId &&
-		!sessionState.sessions.has(event.sessionId)
-	) {
+	// Background events can arrive before membership. Dropping one here is
+	// safe: its snapshot row and fresh history arrive when that session opens.
+	if (!isRoutable(event.sessionId)) {
 		log.debug(
 			"routePerSession: unknown sessionId %s for event %s",
 			event.sessionId,
@@ -792,7 +791,7 @@ export function handleMessage(msg: RelayMessage): void {
 			// user selection. This tab's own creation response is correlated, so
 			// it may leave whichever session is open. A child of the open session
 			// (a fork) may too; its lineage is on the switch or, when the relay
-			// has no read model to announce it, on the row session_forked sent.
+			// has no read model to announce it, on the fork notice's lineage.
 			// So may a session that replaces the open one.
 			if (
 				!requestedCreation &&
@@ -800,7 +799,7 @@ export function handleMessage(msg: RelayMessage): void {
 				msg.id &&
 				route.sessionId !== msg.id &&
 				route.sessionId !== msg.replacesSessionId &&
-				route.sessionId !== (msg.parentID ?? findSession(msg.id)?.parentID) &&
+				route.sessionId !== (msg.parentID ?? parentOf(msg.id)) &&
 				(sessionState.currentId !== null || (!msg.events && !msg.history))
 			)
 				break;

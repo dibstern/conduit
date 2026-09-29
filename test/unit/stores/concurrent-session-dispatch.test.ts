@@ -54,6 +54,7 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
+import { featureFlags } from "../../../src/lib/frontend/stores/feature-flags.svelte.js";
 import {
 	clearAllPermissions,
 	permissionsState,
@@ -62,6 +63,7 @@ import {
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
+	isSessionBusy,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -369,6 +371,34 @@ describe("Missing sessionId — dev throws, prod drops", () => {
 });
 
 describe("Unknown-session guard — drops events silently", () => {
+	it("logs and drops an unknown event without replaying it after the snapshot", () => {
+		clearSessionState();
+		sessionState.currentId = "viewed";
+		featureFlags.debug = true;
+		const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+		try {
+			handleMessage({
+				type: "delta",
+				sessionId: "background",
+				text: "dropped before membership",
+			});
+			expect(debug).toHaveBeenCalledWith(
+				"[ws]",
+				"routePerSession: unknown sessionId %s for event %s",
+				"background",
+				"delta",
+			);
+			expect(sessionMessages.has("background")).toBe(false);
+
+			seedSessions([{ id: "background", title: "Background", status: "busy" }]);
+			expect(isSessionBusy("background")).toBe(true);
+			expect(sessionMessages.has("background")).toBe(false);
+		} finally {
+			featureFlags.debug = false;
+			debug.mockRestore();
+		}
+	});
+
 	it("drops events for unknown sessionId without throwing", () => {
 		// "unknown-session" is not in sessionState.sessions
 		expect(() => {

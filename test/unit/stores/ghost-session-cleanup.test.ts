@@ -303,6 +303,9 @@ it("switching families preserves the target transcript and removes old family me
 	expect(
 		sessionState.familySessions.some((session) => session.id === "old-child"),
 	).toBe(false);
-	expect(sessionState.sessions.has("old-child")).toBe(true);
-	expect(sessionState.sessions.get("new-child")?.title).toBe("Target");
+	expect(sessionState.sessions.has("old-child")).toBe(false);
+	expect(sessionState.sessions.has("new-child")).toBe(false);
+	expect(
+		sessionState.familySessions.find((row) => row.id === "new-child")?.title,
+	).toBe("Target");
 });

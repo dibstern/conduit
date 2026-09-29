@@ -90,7 +90,7 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops the session from the family cache too", () => {
+	it("keeps family rows until the next family message", () => {
 		const child = {
 			id: "child",
 			title: "Child",
@@ -103,11 +103,20 @@ describe("deleted sessions leave the sidebar", () => {
 			sessions: [VICTIM, child],
 		});
 		deleteVictim();
-		expect(sessionState.familySessions.map((row) => row.id)).toEqual(["child"]);
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"victim",
+			"child",
+		]);
 		expect(sidebarIds()).toEqual(["keeper"]);
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [],
+		});
+		expect(sessionState.familySessions).toEqual([]);
 	});
 
-	it("drops a visible subagent from the family when it is deleted", () => {
+	it("removes a deleted subagent when the family message arrives", () => {
 		const child = {
 			id: "child",
 			title: "Child",
@@ -122,8 +131,17 @@ describe("deleted sessions leave the sidebar", () => {
 		handleMessage({ type: "session_deleted", sessionId: "child" });
 		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
 			"victim",
+			"child",
 		]);
 		expect(sidebarIds()).toEqual(["victim", "keeper"]);
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM],
+		});
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"victim",
+		]);
 	});
 
 	// Regression: search hits used to be a snapshot of rows that took priority in
