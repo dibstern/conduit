@@ -1,8 +1,10 @@
 import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionList } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import {
 	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
+	seedSessions,
 } from "./session-fixtures.js";
 // ─── Cross-project session paging and search (store level) ──────────────────
 // These assert over the store's data, not over rendering: paging and ordering
@@ -93,6 +95,19 @@ beforeEach(() => {
 	routerState.path = "/";
 	attachedProjectState.slug = "project-a";
 	routerState.search = "";
+});
+
+it("keeps search results separate from live session rows", async () => {
+	seedSessions([{ id: "local", title: "Live", projectSlug: "project-a" }]);
+	rpc.mockResolvedValueOnce(
+		page([1], { hasMore: false, projectSlug: "project-b" }),
+	);
+
+	const query = sessionList.search("match");
+	await query.ready;
+	expect(query.results.map((row) => row.id)).toEqual(["s1"]);
+	expect(sessionState.sessions.has("s1")).toBe(false);
+	expect(sessionState.rootSessions.map((row) => row.id)).toEqual(["local"]);
 });
 
 describe("cross-project browse paging", () => {

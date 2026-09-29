@@ -17,6 +17,7 @@ import {
 	reduce,
 	type SubscriptionState,
 } from "./subscription-state.js";
+import type { FeedStatus } from "./supervise.js";
 
 /**
  * One thing `subscriptions.shell()` delivers, typed off the subscription
@@ -45,6 +46,9 @@ export const sessionSubscription = {
 	 *  switching state off this. */
 	get settled(): boolean {
 		return applied.settled;
+	},
+	get status(): FeedStatus {
+		return applied.settled ? { _tag: "live" } : { _tag: "catchingUp" };
 	},
 };
 

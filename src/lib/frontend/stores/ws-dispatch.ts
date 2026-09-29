@@ -113,11 +113,11 @@ import {
 	handleSessionForked,
 	handleSessionList,
 	handleSessionSwitched,
-	loadDaemonSessions,
 	observeSessionActivity,
 	sessionCreation,
 	sessionState,
 } from "./session.svelte.js";
+import { refreshSessionList } from "./session-list.svelte.js";
 import {
 	handlePtyCreated,
 	handlePtyDeleted,
@@ -1081,7 +1081,7 @@ export function handleMessage(msg: RelayMessage): void {
 			for (const fn of projectListeners) fn(msg);
 			break;
 		case "daemon_sessions_changed":
-			void loadDaemonSessions();
+			void refreshSessionList();
 			break;
 
 		// ─── Todo ────────────────────────────────────────────────────────

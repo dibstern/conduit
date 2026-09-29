@@ -4,12 +4,12 @@ import {
 	navigate,
 	previousHistoryEntryIsSessionList,
 } from "../stores/router.svelte.js";
+import { isSessionSnoozed, sessionState } from "../stores/session.svelte.js";
 import {
-	isSessionSnoozed,
-	loadDaemonSessions,
-	searchSessions,
-	sessionState,
-} from "../stores/session.svelte.js";
+	currentSearchQuery,
+	refreshSessionList,
+	sessionList,
+} from "../stores/session-list.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
 import { setSidebarPanel, showToast } from "../stores/ui.svelte.js";
 import {
@@ -34,9 +34,9 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 	if (!projectSlug) return;
 	const foreign = projectSlug !== getCurrentSlug();
 	const refreshForeign = () =>
-		sessionState.searchResults === null
-			? loadDaemonSessions()
-			: searchSessions(sessionState.searchQuery, true);
+		currentSearchQuery() === null
+			? refreshSessionList()
+			: sessionList.search(sessionState.searchQuery).ready;
 	const input = {
 		projectSlug,
 		sessionId: session.id,

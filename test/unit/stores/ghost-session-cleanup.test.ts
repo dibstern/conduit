@@ -1,9 +1,9 @@
-import { seedSessions } from "./session-fixtures.js";
+import { seedSearchResults, seedSessions } from "./session-fixtures.js";
 // ─── Ghost Session Cleanup ────────────────────────────────────────────────────
 // Verifies that clearSessionChatState is wired to:
 // 1. session_deleted relay events
 // 2. handleSessionList drop path (diff logic)
-// 3. Search-payload guard (search results don't trigger cleanup)
+// 3. Search query results never trigger cleanup
 // 4. Active-session teardown
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -178,7 +178,7 @@ describe("handleSessionList drop path", () => {
 		expect(sessionState.sessions.has("session-C")).toBe(true);
 	});
 
-	it("search-payload guard: search results do not trigger cleanup", () => {
+	it("search query results do not trigger cleanup", () => {
 		// Pre-populate sessions map
 		seedSessions([
 			...sessionState.sessions.values(),
@@ -200,19 +200,16 @@ describe("handleSessionList drop path", () => {
 		getOrCreateSessionSlot("session-B");
 
 		// Search results only contain session-A — session-B should NOT be cleaned up
-		handleSessionList({
-			type: "session_list",
-			sessions: [{ id: "session-A", title: "A" }],
-			search: true,
-		} as Extract<RelayMessage, { type: "session_list" }>);
+		seedSearchResults([{ id: "session-A", title: "A" }]);
 
 		// session-B should still exist (search results are filtered, not authoritative)
 		expect(sessionActivity.has("session-B")).toBe(true);
 		expect(sessionMessages.has("session-B")).toBe(true);
 		expect(sessionState.sessions.has("session-B")).toBe(true);
 
-		// The search hits should be recorded
-		expect(sessionState.searchMatchIds).toEqual(["session-A"]);
+		expect(sessionState.searchResults?.map((row) => row.id)).toEqual([
+			"session-A",
+		]);
 	});
 
 	it("roots=true session_list does not trigger diff cleanup", () => {

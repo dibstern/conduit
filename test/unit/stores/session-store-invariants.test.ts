@@ -253,17 +253,6 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		expectWireValid(ROWS);
 	});
 
-	it("handleSessionList (search)", () => {
-		handleSessionList({
-			type: "session_list",
-			sessions: ROWS,
-			roots: false,
-			search: true,
-		});
-		expect(sessionState.searchMatchIds).toEqual(["root", "child"]);
-		expectWireValid(ROWS);
-	});
-
 	it("handleSessionSwitched", () => {
 		applySessionSnapshot(ROWS, "complete");
 		handleSessionSwitched({

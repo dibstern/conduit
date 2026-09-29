@@ -6,11 +6,8 @@
 
 <script lang="ts">
 	import { onDestroy, onMount } from "svelte";
-	import {
-		loadMoreDaemonSessions,
-		loadMoreSearchResults,
-		sessionState,
-	} from "../../stores/session.svelte.js";
+	import { currentSearchQuery, sessionList } from "../../stores/session-list.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 
 	let {
 		sentinelEl,
@@ -44,10 +41,11 @@
 	// their own end and while a page is in flight, so a sentinel that stays
 	// visible does not spin.
 	function loadMore() {
-		if (sessionState.searchResults !== null) {
-			void loadMoreSearchResults();
+		const query = currentSearchQuery();
+		if (query !== null) {
+			void query.loadMore();
 			return;
 		}
-		void loadMoreDaemonSessions();
+		void sessionList.loadMore(getCurrentSlug() ?? "");
 	}
 </script>

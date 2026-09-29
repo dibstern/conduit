@@ -1,10 +1,8 @@
 import { seedSearchResults, seedSessions } from "./session-fixtures.js";
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
-// The sidebar (SessionList.svelte) renders getAttentionGroups() -> getFilteredSessions().
-// A deleted session must leave that list in every UI state, including during an
-// active search. The store holds server search hits as ids, not rows, so the
-// search view reads through the one server-owned map and a removal there is
-// immediately visible — there is no second copy to prune.
+// A deleted session must leave the sidebar in every UI state, including during
+// an active search. The search query keeps its results separate from live rows;
+// deletion prunes both the query and the current project's roots.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,15 +60,10 @@ beforeEach(() => {
 	seedSessions([VICTIM, KEEPER]);
 });
 
-/** Seed an active server search the way SessionList does: the query is the
- *  client's, the hits arrive as a searched session_list. */
+/** Seed the server query result independently of the live session rows. */
 const searchFor = (query: string, hits: (typeof VICTIM)[]) => {
 	sessionState.searchQuery = query;
-	handleMessage({
-		type: "session_list",
-		sessions: hits,
-		search: true,
-	} as RelayMessage);
+	seedSearchResults(hits);
 };
 
 const deleteVictim = () =>

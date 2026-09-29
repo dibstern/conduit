@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
@@ -53,7 +53,8 @@
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, findSession, getFilteredSessions, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { attachSessionList, detachSessionList, sessionList } from "../../stores/session-list.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
@@ -65,7 +66,6 @@
 	import type { RelayMessage } from "../../types.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import {
-		flushPendingSeen,
 		observeOpenSession,
 		trackSeen,
 	} from "../../utils/attention.js";
@@ -369,16 +369,7 @@
 			// Request initial state from server
 			// First page only. The cross-project read is keyset-paged now; the
 			// sidebar's scroll sentinel asks for the rest.
-			void loadDaemonSessions();
-			void listSessionsRpc({ projectSlug: slug, roots: true })
-				.then((response) => {
-					if (generation !== attachGeneration) return;
-					applyListSessionsResponse(response);
-					flushPendingSeen(slug);
-				})
-				.catch(() => {
-					if (generation === attachGeneration) showToast("Failed to load sessions", { variant: "error" });
-				});
+			attachSessionList(slug);
 			const routeSessionId = getCurrentSessionId();
 			// With no session in the route, scope the agent fetch to the
 			// client-persisted harness draft so the agent list matches the
@@ -439,6 +430,7 @@
 		connect();
 		return () => {
 			attachGeneration++;
+			detachSessionList();
 			unsubscribe();
 			clearNavigateToSession();
 			interruptStream();
@@ -628,7 +620,7 @@
 			if (target.closest("input, textarea, [contenteditable]:not([contenteditable='false'])")) return;
 			const rowId = target.closest("#session-list .session-item")?.getAttribute("data-session-id");
 			const session = rowId
-				? getFilteredSessions().find((candidate) => candidate.id === rowId)
+				? sessionList.groups.flatMap((group) => group.rows).find((candidate) => candidate.id === rowId)
 				: target.closest("#messages") && sessionState.currentId
 					? findSession(sessionState.currentId)
 					: undefined;

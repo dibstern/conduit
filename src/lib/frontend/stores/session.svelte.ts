@@ -101,10 +101,6 @@ const clientSession = $state({
 	currentId: null as string | null,
 	announcedParent: null as { sessionId: string; parentId: string } | null,
 	searchQuery: "",
-	/** Ids the last server search matched, or null when no search is running.
-	 *  Ids rather than rows, so a session renamed or deleted mid-search follows
-	 *  the server half instead of a snapshot that nothing updates. */
-	searchMatchIds: null as string[] | null,
 	daemonSessions: [] as SessionInfo[],
 	daemonUnavailableProjects: [] as string[],
 	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
@@ -189,9 +185,6 @@ export const sessionState = {
 	},
 	set searchQuery(query: string) {
 		setSearchQuery(query);
-	},
-	get searchMatchIds(): readonly string[] | null {
-		return clientSession.searchMatchIds;
 	},
 };
 
@@ -662,14 +655,8 @@ function getSessionDate(session: SessionInfo): Date {
 export function handleSessionList(
 	msg: Extract<RelayMessage, { type: "session_list" }>,
 ): void {
-	const { sessions, roots, search } = msg;
+	const { sessions, roots } = msg;
 	if (!Array.isArray(sessions)) return;
-
-	if (search) {
-		applySessionSnapshot(sessions, "partial");
-		clientSession.searchMatchIds = sessions.map((s) => s.id);
-		return;
-	}
 	if (roots !== true) return;
 	rootSessions = sessions.filter((row) => !row.parentID);
 	for (const row of rootSessions)
@@ -697,7 +684,6 @@ export function applyListSessionsResponse(
 		type: "session_list",
 		sessions: [...response.sessions],
 		roots: response.roots,
-		...(response.search ? { search: true } : {}),
 	});
 }
 
@@ -1084,11 +1070,9 @@ export function groupSessionsByDate(
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-/** Set the sidebar filter. Clearing it also drops any server search matches —
- *  an empty query has nothing to match. */
+/** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
-	if (!query.trim()) clientSession.searchMatchIds = null;
 }
 
 export function setCurrentSession(id: string | null): void {

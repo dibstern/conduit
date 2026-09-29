@@ -7,7 +7,6 @@
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
-		getFilteredSessions,
 		projectSessionList,
 		sessionMatchesStatus,
 		isSessionSnoozed,
@@ -17,10 +16,8 @@
 		switchToSession,
 		sendNewSession,
 		sessionCreation,
-		clearSessionSearch,
-		loadDaemonSessions,
-		searchSessions,
 	} from "../../stores/session.svelte.js";
+	import { currentSearchQuery, refreshSessionList, sessionList } from "../../stores/session-list.svelte.js";
 	import {
 		getSessionGrouping,
 		getSessionScope,
@@ -116,7 +113,7 @@
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
-	const filtered = $derived(getFilteredSessions());
+	const filtered = $derived(sessionList.groups.flatMap((group) => group.rows));
 	const statusFilter = $derived(getSessionStatusFilter());
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
@@ -167,15 +164,16 @@
 	// least this many" and never claims to be the size of the whole match set.
 	// Counting the full set is exactly what this list must never do.
 	const searchSummary = $derived.by(() => {
-		if (sessionState.searchResults === null) return null;
-		if (sessionState.searchHasMore) return `${filtered.length}+ matches`;
+		const query = currentSearchQuery();
+		if (query === null) return null;
+		if (query.hasMore) return `${filtered.length}+ matches`;
 		return filtered.length === 1 ? "1 match" : `${filtered.length} matches`;
 	});
 
 	const pagerLoading = $derived(
-		sessionState.searchResults === null
+		currentSearchQuery() === null
 			? sessionState.daemonLoading
-			: sessionState.searchLoading,
+			: currentSearchQuery()?.loading,
 	);
 
 	const selectionCount = $derived(selectedSessionIds.size);
@@ -216,7 +214,7 @@
 	$effect(() => {
 		if (scope === loadedScope) return;
 		loadedScope = scope;
-		void loadDaemonSessions();
+		void refreshSessionList();
 		const query = untrack(() => localSearchValue);
 		if (query.trim()) requestRemoteSearch(query);
 	});
@@ -261,7 +259,7 @@
 	// the matches. The store drops responses for a superseded query, so the
 	// debounce does not need to re-check what was typed since.
 	function requestRemoteSearch(query: string) {
-		void searchSessions(query, true);
+		sessionList.search(query);
 	}
 
 	// A session belonging to a project other than the one this socket is attached
@@ -304,7 +302,7 @@
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 		localSearchValue = "";
 		setSearchQuery("");
-		clearSessionSearch();
+		sessionList.search("");
 	}
 
 	function handleSearchInput(text: string) {
