@@ -279,6 +279,9 @@ describe("internal --daemon child", () => {
 			| Parameters<NonNullable<CLIOptions["startDaemonChildProcess"]>>[0]
 			| null = null;
 		try {
+			// Start from no relay env at all, so a variable exported by the shell
+			// (CLAUDE_CONFIG_DIR under a custom Claude Code instance) cannot leak in.
+			for (const key of Object.values(RELAY_ENV_KEYS)) delete process.env[key];
 			process.env[RELAY_ENV_KEYS.PORT] = "3456";
 			process.env[RELAY_ENV_KEYS.HOST] = "0.0.0.0";
 			process.env[RELAY_ENV_KEYS.CONFIG_DIR] = "/tmp/conduit-cli-daemon";
@@ -288,6 +291,7 @@ describe("internal --daemon child", () => {
 			process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS] = JSON.stringify(["-dims"]);
 			process.env[RELAY_ENV_KEYS.TLS] = "1";
 			process.env[RELAY_ENV_KEYS.OC_URL] = "http://opencode:4096";
+			process.env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR] = "/tmp/conduit-cli-claude";
 
 			await run(
 				["--daemon", "--log-level", "debug", "--log-format", "pretty"],
@@ -308,6 +312,7 @@ describe("internal --daemon child", () => {
 				keepAwakeArgs: ["-dims"],
 				tlsEnabled: true,
 				opencodeUrl: "http://opencode:4096",
+				claudeConfigDir: "/tmp/conduit-cli-claude",
 				logLevel: "debug",
 				logFormat: "pretty",
 			});
