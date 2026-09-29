@@ -15,7 +15,6 @@
  */
 import { Effect, Layer } from "effect";
 import { vi } from "vitest";
-import type { ClientInitDeps } from "../../src/lib/bridges/client-init.js";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type DaemonState,
@@ -241,19 +240,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	} as unknown as HandlerDeps["sessionMgr"];
 }
 
-function createMockClientInitOverrideState(): ClientInitDeps["overrideState"] {
-	return {
-		getModel: vi.fn().mockResolvedValue(undefined),
-		getDefaultModel: vi.fn().mockResolvedValue(undefined),
-		getVariant: vi.fn().mockResolvedValue(""),
-		getDefaultVariant: vi.fn().mockResolvedValue(""),
-		getContextWindow: vi.fn().mockResolvedValue(""),
-		getDefaultContextWindow: vi.fn().mockResolvedValue(""),
-		setDefaultModel: vi.fn().mockResolvedValue(undefined),
-		hasActiveProcessingTimeout: vi.fn().mockResolvedValue(false),
-	};
-}
-
 function createMockPtyManager(): HandlerDeps["ptyManager"] {
 	return {
 		sendInput: vi.fn(),
@@ -361,66 +347,6 @@ export function createMockSSEWiringDeps(
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
 		slug: "test-project",
-		...overrides,
-	};
-}
-
-export function createMockClientInitDeps(
-	overrides?: Partial<ClientInitDeps>,
-): ClientInitDeps {
-	const sessionService =
-		createMockSessionMgr() as unknown as ClientInitDeps["sessionService"];
-	sessionService.getSessionFamily = vi.fn(async (sessionId) => ({
-		type: "session_family" as const,
-		rootId: sessionId,
-		sessions: [],
-	}));
-	sessionService.resolveSessionHistory = vi.fn(async (sessionId) => ({
-		kind: "rest-history" as const,
-		history: await sessionService.loadPreRenderedHistory(sessionId),
-	}));
-	return {
-		wsHandler: {
-			broadcast: vi.fn(),
-			sendTo: vi.fn(),
-			setClientSession: vi.fn(),
-			markClientBootstrapped: vi.fn(),
-		},
-		client: createMockClient() as unknown as ClientInitDeps["client"],
-		sessionService,
-		overrideState: createMockClientInitOverrideState(),
-		terminal: {
-			replay: vi.fn(async () => undefined),
-		},
-		agentService: {
-			listAgents: vi.fn(async () => ({
-				providerScope: { id: "opencode" as const, name: "OpenCode" as const },
-				agents: [],
-			})),
-		},
-		modelService: {
-			getSession: vi.fn(async () => ({
-				id: "s1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Session 1",
-				version: "1.0.0",
-				time: { created: 0, updated: 0 },
-				modelID: "gpt-4",
-				providerID: "openai",
-			})),
-			listProviders: vi.fn(async () => ({
-				providers: [],
-				defaults: {},
-				connected: [],
-			})),
-		},
-		pendingInteractions: {
-			listPendingPermissions: vi.fn().mockResolvedValue([]),
-			recoverPendingPermissions: vi.fn().mockResolvedValue([]),
-			listPendingQuestions: vi.fn().mockResolvedValue([]),
-		},
-		log: createSilentLogger(),
 		...overrides,
 	};
 }

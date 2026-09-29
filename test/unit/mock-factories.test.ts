@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../src/lib/logger.js";
 import {
-	createMockClientInitDeps,
 	createMockHandlerDeps,
 	createMockSSEWiringDeps,
 } from "../helpers/mock-factories.js";
@@ -62,29 +61,6 @@ describe("mock-factories", () => {
 		it("accepts overrides", () => {
 			const customLog = createSilentLogger();
 			const deps = createMockSSEWiringDeps({ log: customLog });
-			expect(deps.log).toBe(customLog);
-		});
-	});
-
-	describe("createMockClientInitDeps", () => {
-		it("returns a fully-typed ClientInitDeps object", () => {
-			const deps = createMockClientInitDeps();
-			expect(deps.wsHandler.broadcast).toBeDefined();
-			expect(deps.wsHandler.sendTo).toBeDefined();
-			expect(deps.wsHandler.setClientSession).toBeDefined();
-			expect(deps.client).toBeDefined();
-			expect(deps.sessionService).toBeDefined();
-			expect(deps.overrideState.hasActiveProcessingTimeout).toBeDefined();
-			expect(deps.terminal.replay).toBeDefined();
-			expect(deps.modelService.getSession).toBeDefined();
-			expect(deps.modelService.listProviders).toBeDefined();
-			expect(deps.pendingInteractions.listPendingPermissions).toBeDefined();
-			expect(deps.log).toBeDefined();
-		});
-
-		it("accepts overrides", () => {
-			const customLog = createSilentLogger();
-			const deps = createMockClientInitDeps({ log: customLog });
 			expect(deps.log).toBe(customLog);
 		});
 	});
