@@ -5,6 +5,7 @@
 // must not throw away text the user has typed.
 
 import type { Page } from "@playwright/test";
+import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
@@ -52,6 +53,35 @@ async function foreground(page: Page): Promise<void> {
 
 test.describe("PWA background/resume", () => {
 	test.describe.configure({ timeout: 45_000 });
+
+	test("prompts a stale tab to reload after a daemon upgrade", async ({
+		page,
+		relayUrl,
+	}) => {
+		const ws = await mockRelayWebSocket(page, {
+			initMessages,
+			responses: new Map(),
+		});
+
+		await page.goto(relayUrl);
+		await page.locator("#layout").waitFor({ state: "attached" });
+		await page
+			.locator("#connect-overlay")
+			.waitFor({ state: "hidden", timeout: 15_000 });
+		ws.sendMessage({ type: "client_count", count: 7 });
+		await expect(page.locator("#client-count-badge")).toHaveText("7");
+		ws.sendMessage({
+			type: "protocol_version",
+			version: WS_PROTOCOL_VERSION + 1,
+		});
+		const banner = page.locator('[data-banner-id="stale-page"]');
+		await expect(banner).toContainText(
+			"Conduit was updated. Reload this tab to keep things working.",
+		);
+		await expect(
+			banner.getByRole("button", { name: "Reload" }),
+		).toHaveAttribute("data-testid", "banner-action");
+	});
 
 	test("keeps handling relay messages after a background/foreground cycle", async ({
 		page,

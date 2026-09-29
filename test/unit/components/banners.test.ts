@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Banners from "../../../src/lib/frontend/components/overlays/Banners.svelte";
 import {
@@ -9,7 +9,10 @@ import {
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { instanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import {
+	showBanner,
+	uiState,
+} from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type {
 	OpenCodeInstance,
 	ProviderInfo,
@@ -89,5 +92,28 @@ describe("Banners", () => {
 		await renderBanners();
 
 		expect(screen.getByText("No healthy OpenCode instances")).toBeTruthy();
+	});
+
+	it("renders a banner action after the banner arrives", async () => {
+		await renderBanners();
+		const run = vi.fn();
+		showBanner({
+			id: "stale-page",
+			variant: "update",
+			icon: "refresh-cw",
+			text: "Conduit was updated. Reload this tab to keep things working.",
+			dismissible: true,
+			action: { label: "Reload", run },
+		});
+		await tick();
+
+		expect(
+			screen.getByText(
+				"Conduit was updated. Reload this tab to keep things working.",
+			),
+		).toBeTruthy();
+		expect(screen.getByTestId("banner-action").textContent).toBe("Reload");
+		await fireEvent.click(screen.getByTestId("banner-action"));
+		expect(run).toHaveBeenCalledOnce();
 	});
 });

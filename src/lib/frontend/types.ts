@@ -334,6 +334,7 @@ export interface BannerConfig {
 	text: string;
 	dismissible: boolean;
 	link?: string;
+	action?: { label: string; run: () => void };
 }
 
 // ─── Info Panel Types ────────────────────────────────────────────────────────

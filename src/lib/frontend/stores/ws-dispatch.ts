@@ -1383,11 +1383,11 @@ function handleConnectionStatus(
 	}
 }
 
-/** Stale-daemon detection: the daemon sends protocol_version on connect.
- *  A different version — or none at all, which marks a daemon predating the
- *  handshake — means the daemon and this frontend disagree on wire semantics
- *  (e.g. what a permission-mode literal grants), so warn until it restarts. */
+/** The daemon sends protocol_version on connect. An older daemon needs a
+ *  restart; an older page needs a reload. No message within the grace window
+ *  still marks a daemon predating the handshake. */
 const STALE_DAEMON_BANNER_ID = "stale-daemon";
+const STALE_PAGE_BANNER_ID = "stale-page";
 const PROTOCOL_VERSION_GRACE_MS = 10_000;
 let protocolVersionTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1422,8 +1422,20 @@ function handleProtocolVersion(version: number): void {
 	disarmProtocolVersionCheck();
 	if (version === WS_PROTOCOL_VERSION) {
 		removeBanner(STALE_DAEMON_BANNER_ID);
-	} else {
+		removeBanner(STALE_PAGE_BANNER_ID);
+	} else if (version < WS_PROTOCOL_VERSION) {
+		removeBanner(STALE_PAGE_BANNER_ID);
 		showStaleDaemonBanner();
+	} else {
+		removeBanner(STALE_DAEMON_BANNER_ID);
+		showBanner({
+			id: STALE_PAGE_BANNER_ID,
+			variant: "update",
+			icon: "refresh-cw",
+			text: "Conduit was updated. Reload this tab to keep things working.",
+			dismissible: true,
+			action: { label: "Reload", run: () => location.reload() },
+		});
 	}
 }
 
