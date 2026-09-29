@@ -829,22 +829,7 @@ export function makeMockSessionManagerService(
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
-		sendSessionLists: vi.fn((send) =>
-			Effect.sync(() => {
-				send({
-					type: "session_list",
-					sessions: [
-						{
-							id: "s1",
-							title: "Session 1",
-							updatedAt: 0,
-							messageCount: 0,
-						},
-					],
-					roots: true,
-				});
-			}),
-		),
+		pushViewerFamilies: vi.fn(() => Effect.void),
 		...overrides,
 	} as unknown as SessionManagerService;
 }

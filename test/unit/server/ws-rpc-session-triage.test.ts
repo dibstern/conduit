@@ -13,7 +13,7 @@ import {
 
 describe("session triage RPCs", () => {
 	it.scoped(
-		"routes both setters by projectSlug and broadcasts refreshed lists",
+		"routes both setters by projectSlug and refreshes viewed families",
 		() =>
 			Effect.gen(function* () {
 				const { wsHandler, calls } = makeRecordingWebSocketHandler();
@@ -22,11 +22,7 @@ describe("session triage RPCs", () => {
 					setSessionPinned: vi.fn(() => Effect.succeed(true)),
 					snoozeSession: vi.fn(() => Effect.succeed(true)),
 					unsnoozeSession: vi.fn(() => Effect.succeed(true)),
-					sendSessionLists: vi.fn((send) =>
-						Effect.sync(() =>
-							send({ type: "session_list", sessions: [], roots: true }),
-						),
-					),
+					pushViewerFamilies: vi.fn(() => Effect.void),
 				});
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({ wsHandler, sessionManagerService: service }),
@@ -73,13 +69,8 @@ describe("session triage RPCs", () => {
 				expect(resolve.mock.calls.every(([slug]) => slug === "project-b")).toBe(
 					true,
 				);
-				expect(calls.map((call) => call.message)).toEqual(
-					Array.from({ length: 6 }, () => ({
-						type: "session_list",
-						sessions: [],
-						roots: true,
-					})),
-				);
+				expect(service.pushViewerFamilies).toHaveBeenCalledTimes(6);
+				expect(calls).toEqual([]);
 			}),
 	);
 
@@ -121,7 +112,7 @@ describe("session triage RPCs", () => {
 						message: expect.stringMatching(/pinned.*unpinned first/),
 					});
 				expect(calls).toEqual([]);
-				expect(service.sendSessionLists).not.toHaveBeenCalled();
+				expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 			}),
 	);
 
@@ -160,7 +151,7 @@ describe("session triage RPCs", () => {
 			expect(
 				yield* client.UnsnoozeSession({ projectSlug: "a", sessionId: "s" }),
 			).toEqual({ ok: true });
-			expect(service.sendSessionLists).not.toHaveBeenCalled();
+			expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 		}),
 	);
 
@@ -203,7 +194,7 @@ describe("session triage RPCs", () => {
 						_tag: "WsRpcError",
 						message: expect.stringContaining(message),
 					});
-				expect(service.sendSessionLists).not.toHaveBeenCalled();
+				expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 			}),
 		);
 	}

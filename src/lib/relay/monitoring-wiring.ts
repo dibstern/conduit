@@ -68,14 +68,7 @@ interface MonitoringWsHandlerLike {
 
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
-	sendSessionLists(
-		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
-		options?: {
-			statuses?:
-				| Record<string, import("../instance/sdk-types.js").SessionStatus>
-				| undefined;
-		},
-	): Promise<void>;
+	pushViewerFamilies(): Promise<void>;
 	getSessionParentMap(): Map<string, string>;
 }
 
@@ -513,13 +506,10 @@ export function wireMonitoring(
 		// ── Session list broadcast (only when statuses actually changed) ────
 		if (statusesChanged) {
 			try {
-				await sessionService.sendSessionLists(
-					(msg) => wsHandler.broadcast(msg),
-					{ statuses },
-				);
+				await sessionService.pushViewerFamilies();
 			} catch (err) {
 				statusLog.warn(
-					`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
+					`Failed to push viewed families: ${err instanceof Error ? err.message : err}`,
 				);
 			}
 		}
@@ -637,14 +627,12 @@ export const wireMonitoringEffect = (
 
 					if (statusesChanged) {
 						yield* sessionService
-							.sendSessionLists((msg) => wsHandler.broadcast(msg), {
-								statuses,
-							})
+							.pushViewerFamilies()
 							.pipe(
 								Effect.catchAll((err) =>
 									Effect.sync(() =>
 										statusLog.warn(
-											`Failed to broadcast session list: ${err instanceof Error ? err.message : err}`,
+											`Failed to push viewed families: ${err instanceof Error ? err.message : err}`,
 										),
 									),
 								),

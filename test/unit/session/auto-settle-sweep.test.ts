@@ -102,12 +102,12 @@ describe("relay automatic settlement sweep", () => {
 					kind: "snapshot",
 					taskIds: ["task1"],
 				});
-				const broadcast = vi.fn();
+				const broadcast = vi.fn(() => service.pushViewerFamilies());
 				const ports = {
 					hasViewer: (id: string) => viewers.has(id),
 					hasLiveBackgroundWork: background.hasLiveWork,
 					setSettled: (id: string) => service.setSessionSettled(id, true, true),
-					broadcastSessionList: () => service.sendSessionLists(broadcast),
+					broadcastSessionList: broadcast,
 				};
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(2);
 				expect(

@@ -79,7 +79,7 @@ function addProjectedModelExecution(
 }
 
 /**
- * Send metadata (model info, permissions, questions, session list) to a client.
+ * Send metadata (model info, permissions, questions, viewed family) to a client.
  * Independent of session_switched delivery — these are supplementary data.
  */
 const sendSessionMetadata = (clientId: string, id: string) =>
@@ -235,14 +235,14 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					),
 				),
 
-				// Session list
+				// Viewed family
 				sessionManagerService
-					.sendSessionLists((msg) => wsHandler.sendTo(clientId, msg))
+					.pushViewerFamilies()
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.sync(() =>
 								log.warn(
-									`Failed to send session list to ${clientId}: ${err instanceof Error ? err.message : err}`,
+									`Failed to push viewed family to ${clientId}: ${err instanceof Error ? err.message : err}`,
 								),
 							),
 						),
@@ -492,12 +492,12 @@ export const createSessionForClient = ({
 
 		yield* Effect.forkDaemon(
 			sessionManagerService
-				.sendSessionLists((msg) => wsHandler.broadcast(msg))
+				.pushViewerFamilies()
 				.pipe(
 					Effect.catchAll((err) =>
 						Effect.sync(() =>
 							log.warn(
-								`Failed to broadcast session list after CreateSession: ${err}`,
+								`Failed to push viewed families after CreateSession: ${err}`,
 							),
 						),
 					),
@@ -565,12 +565,10 @@ export const deleteSessionForClient = ({
 			}
 		}
 
-		// Broadcast session_deleted so all clients know this session is gone
+		// Id only, no row: tabs prune the daemon-wide list and search results,
+		// which the per-project shell feed does not cover.
 		wsHandler.broadcast({ type: "session_deleted", sessionId: id });
-
-		yield* sessionManagerService.sendSessionLists((msg) =>
-			wsHandler.broadcast(msg),
-		);
+		yield* sessionManagerService.pushViewerFamilies();
 		log.info(`client=${clientId} Deleted: ${id}`);
 	});
 
@@ -600,9 +598,7 @@ export const renameSessionForClient = ({
 		const id = sessionId;
 		if (id && title) {
 			yield* sessionManagerService.renameSession(id, title);
-			yield* sessionManagerService.sendSessionLists((msg) =>
-				wsHandler.broadcast(msg),
-			);
+			yield* sessionManagerService.pushViewerFamilies();
 			log.info(`client=${clientId} Renamed: ${id} → ${title}`);
 		}
 	});
@@ -621,7 +617,7 @@ export const setSessionSettledForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, settled)) {
-			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			yield* service.pushViewerFamilies();
 			const config = yield* Effect.serviceOption(ConfigTag);
 			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
 				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
@@ -646,7 +642,7 @@ export const setSessionPinnedForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionPinned(sessionId, pinned)) {
-			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			yield* service.pushViewerFamilies();
 			log.info(`client=${clientId} Set pinned=${pinned}: ${sessionId}`);
 		}
 	});
@@ -665,7 +661,7 @@ export const setSessionAutoSettleForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
-			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			yield* service.pushViewerFamilies();
 			const config = yield* Effect.serviceOption(ConfigTag);
 			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
 				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
@@ -692,7 +688,7 @@ export const snoozeSessionForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.snoozeSession(sessionId, until)) {
-			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			yield* service.pushViewerFamilies();
 			log.info(`client=${clientId} Snoozed: ${sessionId}`);
 		}
 	});
@@ -709,7 +705,7 @@ export const unsnoozeSessionForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.unsnoozeSession(sessionId)) {
-			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
+			yield* service.pushViewerFamilies();
 			log.info(`client=${clientId} Unsnoozed: ${sessionId}`);
 		}
 	});
@@ -728,9 +724,7 @@ export const markSessionUnreadForClient = ({
 
 		if (sessionId) {
 			yield* sessionManagerService.markSessionUnread(sessionId);
-			yield* sessionManagerService.sendSessionLists((msg) =>
-				wsHandler.broadcast(msg),
-			);
+			yield* sessionManagerService.pushViewerFamilies();
 			wsHandler.sendToSession(
 				sessionId,
 				yield* sessionManagerService.getSessionFamily(sessionId),
@@ -768,11 +762,7 @@ export const markSessionSeenForClient = ({
 				),
 			);
 		if (changed) {
-			// Interim cross-window sync: the stamp's advance is published, but the
-			// sidebar still renders from full lists (ni8.5.20).
-			yield* sessionManagerService.sendSessionLists((msg) =>
-				wsHandler.broadcast(msg),
-			);
+			yield* sessionManagerService.pushViewerFamilies();
 			log.info(`client=${clientId} Marked seen: ${sessionId} up to ${upTo}`);
 		}
 	});
@@ -791,9 +781,7 @@ export const markSessionReadForClient = ({
 
 		if (sessionId) {
 			yield* sessionManagerService.markSessionRead(sessionId);
-			yield* sessionManagerService.sendSessionLists((msg) =>
-				wsHandler.broadcast(msg),
-			);
+			yield* sessionManagerService.pushViewerFamilies();
 			wsHandler.sendToSession(
 				sessionId,
 				yield* sessionManagerService.getSessionFamily(sessionId),
@@ -884,24 +872,21 @@ export const forkSessionForClient = ({
 		// Find the parent title for the notification
 		const sessions = yield* sessionManagerService.listSessions();
 		const parent = sessions.find((s) => s.id === sessionId);
+		const persistedFork = sessions.find((s) => s.id === forked.id);
+		const forkMessageId = persistedFork?.forkMessageId ?? forked.forkMessageId;
+		const forkPointTimestamp =
+			persistedFork?.forkPointTimestamp ??
+			("forkPointTimestamp" in forked &&
+			typeof forked.forkPointTimestamp === "number"
+				? forked.forkPointTimestamp
+				: undefined);
 
 		// Broadcast the fork notification
 		wsHandler.broadcast({
 			type: "session_forked",
 			sessionId: forked.id,
-			session: sessions.find((session) => session.id === forked.id) ?? {
-				id: forked.id,
-				title: forked.title ?? "Forked Session",
-				// A fork starts life idle; the projection takes over from here.
-				status: "idle",
-				updatedAt: forked.time?.updated ?? forked.time?.created ?? 0,
-				parentID: sessionId,
-				...(forked.forkMessageId && { forkMessageId: forked.forkMessageId }),
-				...("forkPointTimestamp" in forked &&
-					forked.forkPointTimestamp != null && {
-						forkPointTimestamp: forked.forkPointTimestamp,
-					}),
-			},
+			...(forkMessageId && { forkMessageId }),
+			...(forkPointTimestamp != null && { forkPointTimestamp }),
 			parentId: sessionId,
 			parentTitle: parent?.title ?? "Unknown",
 		});
@@ -909,10 +894,8 @@ export const forkSessionForClient = ({
 		// Switch client to forked session with full history
 		yield* handleViewSession(clientId, { sessionId: forked.id });
 
-		// Broadcast updated session list
-		yield* sessionManagerService.sendSessionLists((msg) =>
-			wsHandler.broadcast(msg),
-		);
+		// Refresh the viewed family after the fork.
+		yield* sessionManagerService.pushViewerFamilies();
 
 		log.info(
 			`client=${clientId} Forked: ${sessionId} → ${forked.id}${messageId ? ` at ${messageId}` : ""}`,

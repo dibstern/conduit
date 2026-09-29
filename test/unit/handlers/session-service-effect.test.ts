@@ -177,15 +177,11 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 
 describe("session handlers with Effect-native model service", () => {
 	for (const changed of [true, false]) {
-		it.effect(`broadcasts triage lists only when changed=${changed}`, () => {
+		it.effect(`refreshes viewed families only when changed=${changed}`, () => {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: vi.fn(() => Effect.succeed(changed)),
 				setSessionPinned: vi.fn(() => Effect.succeed(changed)),
-				sendSessionLists: vi.fn((send) =>
-					Effect.sync(() =>
-						send({ type: "session_list", sessions: [], roots: true }),
-					),
-				),
+				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const { wsHandler, layer } = makeSessionMetadataLayer({
 				sessionManagerService: service,
@@ -203,7 +199,10 @@ describe("session handlers with Effect-native model service", () => {
 				});
 				expect(service.setSessionSettled).toHaveBeenCalledWith("s1", true);
 				expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
-				expect(wsHandler.broadcast).toHaveBeenCalledTimes(changed ? 2 : 0);
+				expect(service.pushViewerFamilies).toHaveBeenCalledTimes(
+					changed ? 2 : 0,
+				);
+				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		});
 	}
@@ -840,7 +839,7 @@ describe("session handlers with Effect-native model service", () => {
 				throw new Error("legacy session manager sendDual should not be called");
 			});
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists: vi.fn(() => Effect.void),
+				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const logger = makeMockLogger();
 			const modelService: OpenCodeModelService = {
@@ -875,7 +874,7 @@ describe("session handlers with Effect-native model service", () => {
 						provider: "openai",
 					});
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(sessionManagerService.sendSessionLists).toHaveBeenCalled();
+					expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalled();
 				}),
 			);
 		},
@@ -938,7 +937,7 @@ describe("viewing a session", () => {
 			Effect.tap(() => {
 				expect(markSessionRead).not.toHaveBeenCalled();
 				expect(markSessionSeen).not.toHaveBeenCalled();
-				expect(service.sendSessionLists).not.toHaveBeenCalled();
+				expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 				expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
 					expect.objectContaining({ type: "session_list", roots: false }),
 				);

@@ -385,9 +385,7 @@ export const makeSessionTitleServiceLive = (
 					if (!applied) return false;
 
 					if (wsHandlerOption._tag === "Some") {
-						yield* sessionManagerService.sendSessionLists((message) =>
-							wsHandlerOption.value.broadcast(message),
-						);
+						yield* sessionManagerService.pushViewerFamilies();
 					}
 					return true;
 				});

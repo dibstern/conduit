@@ -57,21 +57,6 @@
 				"sessionId": "new-session",
 				"status": "idle"
 			}
-		},
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_list",
-				"sessions": [
-					{
-						"id": "new-session",
-						"title": "New Session",
-						"updatedAt": 300,
-						"messageCount": 0
-					}
-				],
-				"roots": true
-			}
 		}
 	],
 	"delete_session_success": [
@@ -80,21 +65,6 @@
 			"message": {
 				"type": "session_deleted",
 				"sessionId": "deleted-session"
-			}
-		},
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_list",
-				"sessions": [
-					{
-						"id": "remaining-session",
-						"title": "Remaining Session",
-						"updatedAt": 400,
-						"messageCount": 1
-					}
-				],
-				"roots": true
 			}
 		}
 	]

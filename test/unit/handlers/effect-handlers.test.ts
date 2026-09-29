@@ -1514,7 +1514,7 @@ describe("handleForkSession", () => {
 		() => {
 			const establishOpenCodeSession = vi.fn(() => Effect.void);
 			const setForkEntry = vi.fn(() => Effect.void);
-			const sendSessionLists = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
 			const client = {
 				session: {
@@ -1535,7 +1535,7 @@ describe("handleForkSession", () => {
 				sessionManagerService: makeMockSessionManagerService({
 					establishOpenCodeSession,
 					setForkEntry,
-					sendSessionLists,
+					pushViewerFamilies,
 				}),
 			});
 
@@ -1557,7 +1557,7 @@ describe("handleForkSession", () => {
 					"client-1",
 					expect.objectContaining({ type: "session_switched" }),
 				);
-				expect(sendSessionLists).toHaveBeenCalled();
+				expect(pushViewerFamilies).toHaveBeenCalled();
 			});
 		},
 	);
@@ -1566,7 +1566,7 @@ describe("handleForkSession", () => {
 		"does not expose a fork when the canonical upstream fork fails",
 		() => {
 			const setForkEntry = vi.fn(() => Effect.void);
-			const sendSessionLists = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
 			const client = {
 				session: {
@@ -1584,7 +1584,7 @@ describe("handleForkSession", () => {
 				ws,
 				sessionManagerService: makeMockSessionManagerService({
 					setForkEntry,
-					sendSessionLists,
+					pushViewerFamilies,
 				}),
 			});
 
@@ -1599,7 +1599,7 @@ describe("handleForkSession", () => {
 					expect(setForkEntry).not.toHaveBeenCalled();
 					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(ws.sendTo).not.toHaveBeenCalled();
-					expect(sendSessionLists).not.toHaveBeenCalled();
+					expect(pushViewerFamilies).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -1637,7 +1637,7 @@ describe("handleForkSession", () => {
 		() => {
 			const legacySetForkEntry = vi.fn();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -1663,22 +1663,7 @@ describe("handleForkSession", () => {
 				]),
 			);
 			const serviceSetForkEntry = vi.fn(() => Effect.void);
-			const serviceSendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "ses-parent",
-								title: "Parent Session",
-								updatedAt: 100,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const serviceSendSessionLists = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
 			const sessionMgr = mockSessionManager({
 				listSessions: legacyListSessions,
@@ -1690,7 +1675,7 @@ describe("handleForkSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions: serviceListSessions,
 				setForkEntry: serviceSetForkEntry,
-				sendSessionLists: serviceSendSessionLists,
+				pushViewerFamilies: serviceSendSessionLists,
 			});
 			const layer = makeForkSessionLayer({
 				sessionMgr,
@@ -1711,15 +1696,8 @@ describe("handleForkSession", () => {
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_forked",
 						sessionId: "ses-child",
-						session: {
-							id: "ses-child",
-							title: "Forked Session",
-							status: "idle" as const,
-							updatedAt: 201,
-							parentID: "ses-parent",
-							forkMessageId: "msg-1",
-							forkPointTimestamp: 456,
-						},
+						forkMessageId: "msg-1",
+						forkPointTimestamp: 456,
 						parentId: "ses-parent",
 						parentTitle: "Parent Session",
 					});
@@ -1739,18 +1717,7 @@ describe("handleForkSession", () => {
 					});
 					expect(serviceSendSessionLists).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "ses-parent",
-								title: "Parent Session",
-								updatedAt: 100,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).toHaveBeenCalledTimes(1);
 				}),
 			);
 		},
@@ -2561,12 +2528,12 @@ describe("handleAskUserResponse", () => {
 
 describe("handleNewSession", () => {
 	it.effect(
-		"creates and switches before broadcasting lists through SessionManagerService",
+		"creates and switches before refreshing viewed families through SessionManagerService",
 		() => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyCreateSession = vi.fn(async () => {
 				throw new Error("legacy createSession should not be used");
@@ -2585,26 +2552,10 @@ describe("handleNewSession", () => {
 					time: { created: 100, updated: 200 },
 				}),
 			);
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "new-session-1",
-								title: "New Session",
-								status: "idle" as const,
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -2636,21 +2587,9 @@ describe("handleNewSession", () => {
 						sessionId: "new-session-1",
 						status: "idle",
 					});
-					expect(sendSessionLists).toHaveBeenCalled();
+					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "new-session-1",
-								title: "New Session",
-								status: "idle" as const,
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
 					);
@@ -2659,7 +2598,7 @@ describe("handleNewSession", () => {
 		},
 	);
 
-	it.effect("does not wait for session list refresh before completing", () => {
+	it.effect("does not wait for viewed family refresh before completing", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
 		const serviceCreateSession = vi.fn(() =>
@@ -2672,10 +2611,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendSessionLists = vi.fn(() => Effect.never);
+		const pushViewerFamilies = vi.fn(() => Effect.never);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2698,7 +2637,7 @@ describe("handleNewSession", () => {
 				sessionId: "new-session-fast",
 				requestId: "request-fast",
 			});
-			expect(sendSessionLists).toHaveBeenCalled();
+			expect(pushViewerFamilies).toHaveBeenCalled();
 		});
 	});
 
@@ -2715,10 +2654,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -3101,11 +3040,11 @@ describe("handleNewSession", () => {
 		},
 	);
 
-	it.effect("logs and completes when the service list broadcast fails", () => {
+	it.effect("logs and completes when the viewed family refresh fails", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
 		const legacySendSessionLists = vi.fn(async () => {
-			throw new Error("legacy sendSessionLists should not be used");
+			throw new Error("legacy pushViewerFamilies should not be used");
 		});
 		const legacyCreateSession = vi.fn(async () => {
 			throw new Error("legacy createSession should not be used");
@@ -3124,17 +3063,17 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendSessionLists = vi.fn(() =>
+		const pushViewerFamilies = vi.fn(() =>
 			Effect.fail(
 				new SessionManagerError({
-					operation: "sendSessionLists",
+					operation: "pushViewerFamilies",
 					cause: new Error("service unavailable"),
 				}),
 			),
 		);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -3152,11 +3091,11 @@ describe("handleNewSession", () => {
 				);
 				expect(serviceCreateSession).toHaveBeenCalledWith(undefined);
 				expect(legacyCreateSession).not.toHaveBeenCalled();
-				expect(sendSessionLists).toHaveBeenCalled();
+				expect(pushViewerFamilies).toHaveBeenCalled();
 				expect(legacySendSessionLists).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining(
-						"Failed to broadcast session list after CreateSession",
+						"Failed to push viewed families after CreateSession",
 					),
 				);
 				expect(log.info).toHaveBeenCalledWith(
@@ -3187,11 +3126,11 @@ describe("handleDeleteSession", () => {
 					},
 				]),
 			);
-			const sendSessionLists = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession,
 				listSessions,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -3209,7 +3148,7 @@ describe("handleDeleteSession", () => {
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(ws.sendTo).not.toHaveBeenCalled();
 					expect(ws.broadcast).not.toHaveBeenCalled();
-					expect(sendSessionLists).not.toHaveBeenCalled();
+					expect(pushViewerFamilies).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
 				}),
 			);
@@ -3217,14 +3156,14 @@ describe("handleDeleteSession", () => {
 	);
 
 	it.effect(
-		"deletes and broadcasts lists through SessionManagerService",
+		"deletes and refreshes viewed families through SessionManagerService",
 		() => {
 			const ws = mockWsHandler({
 				getClientsForSession: vi.fn(() => []),
 			});
 			const log = mockLogger();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -3239,19 +3178,11 @@ describe("handleDeleteSession", () => {
 				listSessions: legacyListSessions,
 				sendSessionLists: legacySendSessionLists,
 			});
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -3272,17 +3203,13 @@ describe("handleDeleteSession", () => {
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
 					expect(legacyListSessions).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledTimes(1);
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",
 						sessionId: "deleted-session",
 					});
-					expect(sendSessionLists).toHaveBeenCalled();
+					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [],
-						roots: true,
-					});
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Deleted: deleted-session",
 					);
@@ -3292,14 +3219,14 @@ describe("handleDeleteSession", () => {
 	);
 
 	it.effect(
-		"switches every viewer and replays metadata before the service list broadcast",
+		"switches every viewer and replays metadata before the family refresh",
 		() => {
 			const ws = mockWsHandler({
 				getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
 			});
 			const log = mockLogger();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -3328,27 +3255,11 @@ describe("handleDeleteSession", () => {
 				})),
 				sendSessionLists: legacySendSessionLists,
 			});
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "remaining-session",
-								title: "Remaining Session",
-								status: "idle" as const,
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const client = {
 				session: {
@@ -3421,27 +3332,14 @@ describe("handleDeleteSession", () => {
 					});
 					// Two viewers get reassigned, and each reassignment goes through
 					// the same view path a human click does -- so each also records
-					// the session read and re-broadcasts the list, which is how the
-					// One roots/family update per reassigned viewer, then the delete update.
-					expect(sendSessionLists).toHaveBeenCalledTimes(3);
+					// the session read and refreshes its viewed family.
+					expect(pushViewerFamilies).toHaveBeenCalledTimes(3);
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",
 						sessionId: "deleted-session",
 					});
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "remaining-session",
-								title: "Remaining Session",
-								status: "idle" as const,
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).toHaveBeenCalledTimes(1);
 				}),
 			);
 		},
@@ -3450,7 +3348,7 @@ describe("handleDeleteSession", () => {
 
 describe("renameSessionForClient", () => {
 	it.effect(
-		"renames through SessionManagerService and broadcasts lists",
+		"renames through SessionManagerService and refreshes viewed families",
 		() => {
 			const log = mockLogger();
 			const legacyRenameSession = vi.fn(async () => {
@@ -3466,27 +3364,12 @@ describe("renameSessionForClient", () => {
 					calls.push("rename");
 				}),
 			);
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					calls.push("broadcast");
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "session-1",
-								title: "New Title",
-								status: "idle" as const,
-								updatedAt: 100,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
+			const pushViewerFamilies = vi.fn(() =>
+				Effect.sync(() => calls.push("broadcast")),
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				renameSession,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 
 			const layer = Layer.mergeAll(
@@ -3504,21 +3387,9 @@ describe("renameSessionForClient", () => {
 				Effect.tap(() => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
-					expect(sendSessionLists).toHaveBeenCalled();
+					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(calls).toEqual(["rename", "broadcast"]);
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "session-1",
-								title: "New Title",
-								status: "idle" as const,
-								updatedAt: 100,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalled();
 				}),
 			);
@@ -3530,10 +3401,10 @@ describe("renameSessionForClient", () => {
 		const _sessionMgr = mockSessionManager();
 		const ws = mockWsHandler();
 		const renameSession = vi.fn(() => Effect.void);
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 
 		const layer = Layer.mergeAll(
@@ -3550,7 +3421,7 @@ describe("renameSessionForClient", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendSessionLists).not.toHaveBeenCalled();
+				expect(pushViewerFamilies).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -3877,20 +3748,7 @@ describe("sendMessageToSession", () => {
 						text: "Continue",
 						commandId: "cmd1",
 					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
-					expect(ws.broadcast).toHaveBeenCalledTimes(
-						settled || snoozed ? 1 : 0,
-					);
-					if (settled || snoozed)
-						expect(ws.broadcast).toHaveBeenCalledWith(
-							expect.objectContaining({
-								type: "session_list",
-								sessions: [
-									expect.not.objectContaining({
-										settledAt: expect.any(Number),
-									}),
-								],
-							}),
-						);
+					expect(ws.broadcast).not.toHaveBeenCalled();
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(
@@ -4870,27 +4728,11 @@ describe("handleMessage", () => {
 				]),
 			);
 			const renameSession = vi.fn(() => Effect.void);
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "session-1",
-								title: "First prompt",
-								status: "idle" as const,
-								updatedAt: 200,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions,
 				renameSession,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -4926,7 +4768,7 @@ describe("handleMessage", () => {
 
 				expect(listSessions).not.toHaveBeenCalled();
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendSessionLists).not.toHaveBeenCalled();
+				expect(pushViewerFamilies).not.toHaveBeenCalled();
 				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
@@ -4953,11 +4795,11 @@ describe("handleMessage", () => {
 			]),
 		);
 		const renameSession = vi.fn(() => Effect.void);
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions,
 			renameSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
@@ -4993,7 +4835,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-			expect(sendSessionLists).not.toHaveBeenCalled();
+			expect(pushViewerFamilies).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -5018,7 +4860,7 @@ describe("handleMessage", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendSessionLists: vi.fn(() => Effect.void),
+				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;

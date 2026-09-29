@@ -150,8 +150,6 @@ export type ListSessionsOptions = {
 	hasLiveBackgroundWork?: (sessionId: string) => boolean;
 };
 
-type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
-
 export interface CreateSessionOptions {
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
@@ -1401,19 +1399,6 @@ export const setForkEntry = (sessionId: string, entry: ForkEntry) =>
 		Effect.withSpan("session.setForkEntry"),
 	);
 
-/** Send the roots-only sidebar snapshot. */
-export const sendSessionLists = (
-	send: (msg: SessionListMessage) => void,
-	options?: { statuses?: Record<string, SessionStatus> | undefined },
-) =>
-	Effect.gen(function* () {
-		const roots = yield* listSessions({
-			roots: true,
-			statuses: options?.statuses,
-		});
-		send({ type: "session_list", sessions: roots, roots: true });
-	});
-
 export interface SessionManagerService {
 	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
 	getDefaultSessionId(
@@ -1490,10 +1475,7 @@ export interface SessionManagerService {
 		sessionId: string,
 		entry: ForkEntry,
 	): Effect.Effect<void, SessionManagerError>;
-	sendSessionLists(
-		send: (msg: SessionListMessage) => void,
-		options?: { statuses?: Record<string, SessionStatus> | undefined },
-	): Effect.Effect<void, SessionManagerError>;
+	pushViewerFamilies(): Effect.Effect<void, SessionManagerError>;
 }
 
 // ─── Service Tag ────────────────────────────────────────────────────────────
@@ -2210,15 +2192,29 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
 				}),
-			sendSessionLists: (send, options) =>
+			pushViewerFamilies: () =>
 				Effect.gen(function* () {
-					const roots = yield* serviceListSessions({
-						roots: true,
-						statuses: options?.statuses,
-					});
-					send({ type: "session_list", sessions: roots, roots: true });
 					if (wsHandlerOption._tag === "None") return;
 					const ws = wsHandlerOption.value;
+					if (readQueryEffectOption._tag === "Some") {
+						const lineage = yield* readQueryEffectOption.value
+							.getSessionLineage()
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "pushViewerFamilies",
+											cause,
+										}),
+								),
+							);
+						yield* Ref.update(stateRef, (current) => ({
+							...current,
+							cachedParentMap: sessionRowsParentMap(lineage.rows),
+							lastKnownSessionCount: lineage.count,
+						}));
+						yield* updateRelaySessionCountSnapshot(lineage.count);
+					}
 					const parentMap = (yield* Ref.get(stateRef)).cachedParentMap;
 					const families = new Map<string, string[]>();
 					for (const clientId of ws.getClientIds()) {

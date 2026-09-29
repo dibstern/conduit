@@ -1020,7 +1020,7 @@ describe("Group 6: Retry status and cycling", () => {
 		await client.close();
 	}, 5_000);
 
-	it("Scenario 18: Steady-state (no status changes) → no session_list spam", async () => {
+	it("Scenario 18: Steady-state (no status changes) → no family push spam", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
 		const client = await connectAndView(harness, "sess-1");
 
@@ -1030,9 +1030,8 @@ describe("Group 6: Retry status and cycling", () => {
 		// Wait several status poll cycles in steady state
 		await wait(TEST_STATUS_POLL_MS * 6);
 
-		// Count session_list messages — should be 0 or very few
-		const sessionListMsgs = client.getReceivedOfType("session_list");
-		// The statusesChanged flag gates broadcast: no status changes → no session_list spam
+		const sessionListMsgs = client.getReceivedOfType("session_family");
+		// The statusesChanged flag gates family pushes in steady state.
 		expect(sessionListMsgs.length).toBeLessThanOrEqual(2);
 
 		await client.close();

@@ -59,7 +59,6 @@ import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 	seedPaginationCursor,
-	sendSessionLists,
 	setForkEntry,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -378,15 +377,10 @@ describe("SessionManagerService", () => {
 
 		return Effect.gen(function* () {
 			const service = yield* SessionManagerServiceTag;
-			const messages: Extract<RelayMessage, { type: "session_list" }>[] = [];
-
 			// Deleting the root takes the whole lineage with it, so nothing about
 			// a descendant may outlive it.
 			yield* service.deleteSession("parent-1");
 			expect([...(yield* service.getSessionParentMap())]).toEqual([]);
-			yield* service.sendSessionLists((msg) => messages.push(msg));
-
-			expect(messages[0]?.sessions).toEqual([]);
 			expect([...(yield* service.getSessionParentMap())]).toEqual([]);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
@@ -2752,46 +2746,6 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.effect("sends only roots without requesting the all-session list", () => {
-		const api = makeMockOpenCodeAPI();
-		const list = vi
-			.spyOn(api.session, "list")
-			.mockImplementation(async (options) => {
-				if (!options?.roots)
-					throw new Error("unfiltered list must not be fetched");
-				return [
-					{
-						id: "root-1",
-						projectID: "project-1",
-						directory: "/tmp/project",
-						title: "Root",
-						version: "1.0.0",
-						time: { created: 1, updated: 1 },
-					},
-				];
-			});
-		const messages: unknown[] = [];
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			makeSessionManagerStateLive(),
-		);
-		return Effect.gen(function* () {
-			yield* sendSessionLists((msg) => messages.push(msg));
-			expect(messages).toEqual([
-				{
-					type: "session_list",
-					roots: true,
-					sessions: [
-						{ id: "root-1", title: "Root", status: "idle", updatedAt: 1 },
-					],
-				},
-			]);
-			expect(list).toHaveBeenCalledTimes(1);
-			expect(list).toHaveBeenCalledWith({ roots: true });
-		}).pipe(Effect.provide(layer));
-	});
-
 	it.effect(
 		"refreshes lineage and sends one family query to its viewers",
 		() => {
@@ -2833,18 +2787,11 @@ describe("SessionManagerService", () => {
 			);
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
-				const send = vi.fn();
-				yield* service.sendSessionLists(send);
-				expect(readQuery.listSessionInfos).toHaveBeenCalledWith(
-					expect.objectContaining({ roots: true }),
-				);
+				yield* service.pushViewerFamilies();
+				expect(readQuery.listSessionInfos).not.toHaveBeenCalled();
 				expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
 				expect(readQuery.getSessionFamily).toHaveBeenCalledTimes(1);
 				expect(readQuery.getSessionFamily).toHaveBeenCalledWith("root");
-				expect(send).toHaveBeenCalledTimes(1);
-				expect(send).toHaveBeenCalledWith(
-					expect.objectContaining({ type: "session_list", roots: true }),
-				);
 				for (const client of ["root-viewer", "child-viewer"]) {
 					expect(ws.sendTo).toHaveBeenCalledWith(
 						client,

@@ -83,22 +83,7 @@ describe("session handler wire snapshots", () => {
 					time: { created: 300, updated: 300 },
 				}),
 			),
-			sendSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "new-session",
-								title: "New Session",
-								updatedAt: 300,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			),
+			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		await Effect.runPromise(
@@ -118,22 +103,7 @@ describe("session handler wire snapshots", () => {
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession: vi.fn(() => Effect.succeed(true)),
-			sendSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "remaining-session",
-								title: "Remaining Session",
-								updatedAt: 400,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
-				}),
-			),
+			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		await Effect.runPromise(

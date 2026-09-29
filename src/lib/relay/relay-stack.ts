@@ -1285,12 +1285,12 @@ export async function createProjectRelay(
 					broadcastBackgroundSessionLists: () => {
 						runFork(
 							sessionManagerService
-								.sendSessionLists((msg) => wsHandler.broadcast(msg))
+								.pushViewerFamilies()
 								.pipe(
 									Effect.catchAllCause((cause) =>
 										Effect.sync(() =>
 											log.warn(
-												`Failed to broadcast background session list: ${Cause.pretty(cause)}`,
+												`Failed to push background viewed families: ${Cause.pretty(cause)}`,
 											),
 										),
 									),
@@ -1350,9 +1350,7 @@ export async function createProjectRelay(
 							setSettled: (id) =>
 								startup.sessionManagerService.setSessionSettled(id, true, true),
 							broadcastSessionList: () =>
-								startup.sessionManagerService.sendSessionLists((msg) =>
-									wsHandler.broadcast(msg),
-								),
+								startup.sessionManagerService.pushViewerFamilies(),
 						},
 						idleWindowMs,
 						now,

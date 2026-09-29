@@ -19,15 +19,15 @@ describe("Integration: Multi-Client", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("both clients receive session_list on connect", async () => {
+	it("both clients receive their viewed session family on connect", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		const list1 = client1.getReceivedOfType("session_list");
-		const list2 = client2.getReceivedOfType("session_list");
+		const list1 = client1.getReceivedOfType("session_family");
+		const list2 = client2.getReceivedOfType("session_family");
 
 		expect(list1.length).toBeGreaterThan(0);
 		expect(list2.length).toBeGreaterThan(0);
@@ -75,23 +75,9 @@ describe("Integration: Multi-Client", () => {
 		const newSessionId = switched1["id"] as string;
 		expect(newSessionId).toBeTruthy();
 
-		// The other client receives session_list broadcast (not session_switched)
-		// since CreateSession only switches the requesting client's tab.
-		// sendSessionLists sends roots then all — use a predicate to wait
-		// for the list that actually contains the new session ID.
-		const list2 = await client2.waitFor("session_list", {
-			timeout: 5000,
-			predicate: (m) => {
-				const sessions = m["sessions"] as Array<{ id?: string }> | undefined;
-				return (
-					Array.isArray(sessions) && sessions.some((s) => s.id === newSessionId)
-				);
-			},
-		});
-		expect(Array.isArray(list2["sessions"])).toBe(true);
-		const sessions = list2["sessions"] as Array<{ id?: string }>;
-		const newSession = sessions.find((s) => s.id === newSessionId);
-		expect(newSession).toBeTruthy();
+		// CreateSession does not switch another tab.
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(client2.getReceivedOfType("session_switched")).toHaveLength(0);
 
 		await client1.close();
 		await client2.close();

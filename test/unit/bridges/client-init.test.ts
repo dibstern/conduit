@@ -186,13 +186,13 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 				const loadPreRenderedHistory = vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false }),
 				);
-				const sendSessionLists = vi.fn<
-					SessionManagerService["sendSessionLists"]
+				const pushViewerFamilies = vi.fn<
+					SessionManagerService["pushViewerFamilies"]
 				>(() => Effect.void);
 				const { wsHandler, layer } = makeClientInitEffectLayer(
 					makeEmptyHistoryReadQuery("opencode"),
 					loadPreRenderedHistory,
-					{ getDefaultSessionId, createSession, sendSessionLists },
+					{ getDefaultSessionId, createSession, pushViewerFamilies },
 				);
 				yield* handleClientConnectedEffect("client-1", undefined, {
 					skipDefaultSession: true,
@@ -205,7 +205,7 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 					"client-1",
 					expect.objectContaining({ type: "session_switched" }),
 				);
-				expect(sendSessionLists).toHaveBeenCalledOnce();
+				expect(pushViewerFamilies).toHaveBeenCalledOnce();
 				expect(wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 					"client-1",
 				);
@@ -675,7 +675,7 @@ describe("handleClientConnected — session list", () => {
 		expect(sessionListOrder).toBeLessThan(bootstrappedOrder);
 	});
 
-	it("sends INIT_FAILED when sendSessionLists throws", async () => {
+	it("sends INIT_FAILED when pushViewerFamilies throws", async () => {
 		const deps = createMockClientInitDeps();
 		vi.mocked(deps.sessionService.sendSessionLists).mockRejectedValue(
 			new Error("list fail"),
@@ -2016,7 +2016,7 @@ describe("handleClientConnected — processing status on connect", () => {
 
 		await handleClientConnected(deps, "client-1");
 
-		// sessionService.sendSessionLists should have been called with statuses
+		// sessionService.pushViewerFamilies should have been called with statuses
 		expect(deps.sessionService.sendSessionLists).toHaveBeenCalledWith(
 			expect.any(Function),
 			{ statuses: { s1: { type: "busy" } } },

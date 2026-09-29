@@ -896,7 +896,8 @@ const SessionFamilySchema = Schema.Struct({
 const SessionForkedSchema = Schema.Struct({
 	type: Schema.Literal("session_forked"),
 	sessionId: Schema.String,
-	session: SessionInfoSchema,
+	forkMessageId: Schema.optional(Schema.String),
+	forkPointTimestamp: Schema.optional(Schema.Number),
 	parentId: Schema.String,
 	parentTitle: Schema.String,
 });
@@ -1143,7 +1144,7 @@ const ClientCountSchema = Schema.Struct({
  *  frontend can detect a stale daemon that predates the change. The daemon
  *  sends this to each client on connect; the frontend warns on mismatch —
  *  and on absence, which marks a daemon older than the handshake itself. */
-export const WS_PROTOCOL_VERSION = 1;
+export const WS_PROTOCOL_VERSION = 2;
 
 const ProtocolVersionSchema = Schema.Struct({
 	type: Schema.Literal("protocol_version"),
@@ -1561,8 +1562,8 @@ export type RelayMessage =
 	| {
 			type: "session_forked";
 			sessionId: string;
-			/** The newly created forked session. */
-			session: SessionInfo;
+			forkMessageId?: string;
+			forkPointTimestamp?: number;
 			/** The session this was forked from. */
 			parentId: string;
 			/** Title of the parent session. */

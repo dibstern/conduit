@@ -879,12 +879,12 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			});
 			yield* Effect.forkDaemon(
 				sessionManagerService
-					.sendSessionLists((msg) => wsHandler.broadcast(msg))
+					.pushViewerFamilies()
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.sync(() =>
 								log.warn(
-									`Failed to broadcast session list after OpenCode materialization: ${err}`,
+									`Failed to push viewed families after OpenCode materialization: ${err}`,
 								),
 							),
 						),

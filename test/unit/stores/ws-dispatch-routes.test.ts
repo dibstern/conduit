@@ -141,13 +141,6 @@ describe("session_switched routes", () => {
 		handleMessage({
 			type: "session_forked",
 			sessionId: "fork",
-			session: {
-				id: "fork",
-				title: "Parent (fork)",
-				status: "idle",
-				updatedAt: 0,
-				parentID: "parent",
-			},
 			parentId: "parent",
 			parentTitle: "Parent",
 		});
@@ -161,13 +154,7 @@ describe("session_switched routes", () => {
 		handleMessage({
 			type: "session_forked",
 			sessionId: "fork",
-			session: {
-				id: "fork",
-				title: "Parent (fork)",
-				status: "idle",
-				parentID: "parent",
-				forkMessageId: "message-1",
-			},
+			forkMessageId: "message-1",
 			parentId: "parent",
 			parentTitle: "Parent",
 		});
@@ -190,7 +177,6 @@ describe("session_switched routes", () => {
 		handleMessage({
 			type: "session_forked",
 			sessionId: "other-fork",
-			session: { id: "other-fork", title: "Other fork", status: "idle" },
 			parentId: "other",
 			parentTitle: "Other",
 		});

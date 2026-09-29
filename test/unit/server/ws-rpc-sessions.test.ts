@@ -70,19 +70,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 				title: "New Session",
 			} as unknown as SessionDetail),
 		);
-		const sendSessionLists = vi.fn((send) =>
-			Effect.sync(() => {
-				send({
-					type: "session_list" as const,
-					sessions: [{ id: "session-new", title: "New Session" }],
-					roots: true,
-				});
-			}),
-		);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -116,7 +108,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					requestId: "request-1",
 				}),
 			);
-			expect(sendSessionLists).toHaveBeenCalled();
+			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -167,21 +159,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("deletes a session through the shared session handler", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(true));
-		const sendSessionLists = vi.fn((send) =>
-			Effect.sync(() => {
-				send({
-					type: "session_list" as const,
-					sessions: [],
-					roots: true,
-				});
-			}),
-		);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -195,11 +179,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
+			expect(wsHandler.broadcast).toHaveBeenCalledTimes(1);
 			expect(wsHandler.broadcast).toHaveBeenCalledWith({
 				type: "session_deleted",
 				sessionId: "session-1",
 			});
-			expect(sendSessionLists).toHaveBeenCalled();
+			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -214,13 +199,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("returns ok for a coalesced delete without rebroadcasting", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(false));
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -235,7 +220,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
 			expect(wsHandler.broadcast).not.toHaveBeenCalled();
-			expect(sendSessionLists).not.toHaveBeenCalled();
+			expect(pushViewerFamilies).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -261,15 +246,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		} as unknown as Awaited<ReturnType<typeof api.session.message>>);
 		const setForkEntry = vi.fn(() => Effect.void);
 		const clearPaginationCursor = vi.fn(() => Effect.void);
-		const sendSessionLists = vi.fn((send) =>
-			Effect.sync(() => {
-				send({
-					type: "session_list" as const,
-					sessions: [{ id: "session-forked", title: "Forked Session" }],
-					roots: true,
-				});
-			}),
-		);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions: vi.fn(() =>
@@ -283,7 +260,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			),
 			clearPaginationCursor,
 			setForkEntry,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -328,18 +305,15 @@ describe("WsRpcServerLayer ListSessions", () => {
 					sessionId: "session-forked",
 					parentId: "session-1",
 					parentTitle: "Original Session",
-					session: expect.objectContaining({
-						parentID: "session-1",
-						forkMessageId: "message-1",
-						forkPointTimestamp: 9,
-					}),
+					forkMessageId: "message-1",
+					forkPointTimestamp: 9,
 				}),
 			);
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
 				"session-forked",
 			);
-			expect(sendSessionLists).toHaveBeenCalled();
+			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -610,10 +584,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 				expect(forkNotice).toMatchObject({
 					parentId: "ses-parent",
 					sessionId: result.sessionId,
-					session: {
-						forkMessageId: "api-first",
-						forkPointTimestamp: expect.any(Number),
-					},
+					forkMessageId: "api-first",
+					forkPointTimestamp: expect.any(Number),
 				});
 				expect(setForkEntry).not.toHaveBeenCalled();
 				const history = yield* readQuery.getSessionMessagesWithParts(
@@ -652,7 +624,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					})),
 				);
 				if (forkNotice?.type === "session_forked") {
-					expect(forkNotice.session.forkPointTimestamp).toBe(
+					expect(forkNotice.forkPointTimestamp).toBe(
 						parentHistory.find((message) => message.id === "api-first")
 							?.created_at,
 					);

@@ -127,7 +127,8 @@ describe("daemon shared RPC routing", () => {
 									wsHandler.setClientSession(clientId, requestedSessionId);
 								}
 								wsHandler.sendTo(clientId, {
-									type: "session_list",
+									type: "session_family",
+									rootId: requestedSessionId ?? `${slug}-default`,
 									sessions: [
 										{
 											id: requestedSessionId ?? `${slug}-default`,
@@ -135,7 +136,6 @@ describe("daemon shared RPC routing", () => {
 											status: "idle",
 										},
 									],
-									roots: true,
 								});
 							},
 						);
@@ -220,7 +220,7 @@ describe("daemon shared RPC routing", () => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "session_list" &&
+								message["type"] === "session_family" &&
 								JSON.stringify(message).includes("project-a bootstrap"),
 						),
 					).toBe(true);
@@ -232,7 +232,7 @@ describe("daemon shared RPC routing", () => {
 				);
 				const bootstrapA = eventMessages.findIndex(
 					(message) =>
-						message["type"] === "session_list" &&
+						message["type"] === "session_family" &&
 						JSON.stringify(message).includes("project-a bootstrap"),
 				);
 				expect(attachedA).toBeGreaterThanOrEqual(0);
@@ -266,7 +266,7 @@ describe("daemon shared RPC routing", () => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "session_list" &&
+								message["type"] === "session_family" &&
 								JSON.stringify(message).includes("project-b bootstrap"),
 						),
 					).toBe(true);
@@ -278,24 +278,28 @@ describe("daemon shared RPC routing", () => {
 				);
 				const bootstrapB = eventMessages.findIndex(
 					(message) =>
-						message["type"] === "session_list" &&
+						message["type"] === "session_family" &&
 						JSON.stringify(message).includes("project-b bootstrap"),
 				);
 				expect(bootstrapB).toBeGreaterThan(attachedB);
 				expect(attachedB).toBeGreaterThan(bootstrapA);
 				expect(eventSocket.readyState).toBe(WebSocket.OPEN);
 				expect(
-					eventMessages.filter((message) => message["type"] === "session_list"),
+					eventMessages.filter(
+						(message) => message["type"] === "session_family",
+					),
 				).toEqual([
 					{
-						type: "session_list",
+						type: "session_family",
+						rootId: "session-a",
 						sessions: [
 							{ id: "session-a", title: "project-a bootstrap", status: "idle" },
 						],
-						roots: true,
 					},
 					{
-						type: "session_list",
+						type: "session_family",
+						rootId:
+							operation === "ViewSession" ? "session-b" : "project-b-default",
 						sessions: [
 							{
 								id:
@@ -306,7 +310,6 @@ describe("daemon shared RPC routing", () => {
 								status: "idle",
 							},
 						],
-						roots: true,
 					},
 				]);
 

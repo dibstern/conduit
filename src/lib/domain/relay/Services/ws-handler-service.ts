@@ -52,7 +52,7 @@ export interface ClientState {
 	/** The session this client is currently viewing (if any). */
 	sessionId: string | undefined;
 	/**
-	 * Whether this client has completed bootstrap (received session_list).
+	 * Whether this client has completed bootstrap.
 	 * Until true, per-session events are buffered in `bootstrapQueue`.
 	 */
 	bootstrapped: boolean;
@@ -332,7 +332,7 @@ export const broadcastPerSessionEvent = (
 /**
  * Phase 0b: mark a client as having completed its initial handshake.
  *
- * Called AFTER the initial session_list has been sent. Flushes any
+ * Called after initial state has been sent. Flushes any
  * per-session events buffered in the client's bootstrapQueue, preserving
  * the order they were produced.
  *

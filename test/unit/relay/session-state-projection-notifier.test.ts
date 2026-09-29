@@ -50,7 +50,7 @@ describe("SessionStateProjectionNotifier", () => {
 			const order: string[] = [];
 			const wsHandler = makeMockWebSocketHandler();
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists: () =>
+				pushViewerFamilies: () =>
 					Effect.sync(() => {
 						order.push("broadcast");
 					}),
@@ -82,11 +82,11 @@ describe("SessionStateProjectionNotifier", () => {
 				let branch = "before";
 				const wsHandler = makeMockWebSocketHandler();
 				const sessionManagerService = makeMockSessionManagerService({
-					sendSessionLists: (send) =>
+					pushViewerFamilies: () =>
 						Effect.sync(() =>
-							send({
-								type: "session_list",
-								roots: true,
+							wsHandler.sendTo("viewer", {
+								type: "session_family",
+								rootId: "session-1",
 								sessions: [
 									{
 										id: "session-1",
@@ -112,9 +112,9 @@ describe("SessionStateProjectionNotifier", () => {
 					const notifier = yield* SessionStateProjectionNotifierTag;
 					yield* notifier.sessionStateProjected("session-1", "turn.completed");
 					yield* TestClock.adjust("150 millis");
-					expect(wsHandler.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						roots: true,
+					expect(wsHandler.sendTo).toHaveBeenCalledWith("viewer", {
+						type: "session_family",
+						rootId: "session-1",
 						sessions: [
 							{
 								id: "session-1",
@@ -130,9 +130,9 @@ describe("SessionStateProjectionNotifier", () => {
 	it.effect("broadcasts after a git refresh failure", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
-			const sendSessionLists = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionStateProjectionNotifierLive(async () => {
 				throw new Error("git unavailable");
@@ -148,20 +148,16 @@ describe("SessionStateProjectionNotifier", () => {
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				yield* notifier.sessionStateProjected("session-1", "turn.error");
 				yield* TestClock.adjust("150 millis");
-				expect(sendSessionLists).toHaveBeenCalledTimes(1);
+				expect(pushViewerFamilies).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(layer));
 		}),
 	);
 	it.effect("coalesces a burst of projected events into one broadcast", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() =>
-					send({ type: "session_list", sessions: [], roots: true }),
-				),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
@@ -179,8 +175,8 @@ describe("SessionStateProjectionNotifier", () => {
 				}
 				yield* TestClock.adjust("150 millis");
 
-				expect(sendSessionLists).toHaveBeenCalledTimes(1);
-				expect(wsHandler.broadcast).toHaveBeenCalledTimes(1);
+				expect(pushViewerFamilies).toHaveBeenCalledTimes(1);
+				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		}),
 	);
@@ -196,13 +192,13 @@ describe("SessionStateProjectionNotifier", () => {
 				const started = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
 				const wsHandler = makeMockWebSocketHandler();
-				const sendSessionLists = vi.fn(() =>
+				const pushViewerFamilies = vi.fn(() =>
 					Deferred.succeed(started, undefined).pipe(
 						Effect.zipRight(Deferred.await(release)),
 					),
 				);
 				const sessionManagerService = makeMockSessionManagerService({
-					sendSessionLists,
+					pushViewerFamilies,
 				});
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
@@ -226,7 +222,7 @@ describe("SessionStateProjectionNotifier", () => {
 					// Under a real clock that gap is microseconds against 150ms.
 					yield* Effect.yieldNow();
 					yield* TestClock.adjust("150 millis");
-					expect(sendSessionLists).toHaveBeenCalledTimes(2);
+					expect(pushViewerFamilies).toHaveBeenCalledTimes(2);
 
 					yield* Deferred.succeed(release, undefined);
 				}).pipe(Effect.provide(layer));

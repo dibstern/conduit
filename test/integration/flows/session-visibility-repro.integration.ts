@@ -6,7 +6,7 @@
 //    populated session_switched (events or history), not an empty one.
 //
 //  Bug B ("new session missing from sidebar"): after CreateSession with an
-//    OpenCode providerId, the session_list broadcast that follows must
+//    OpenCode providerId, the viewed family that follows must
 //    include the new session (read-model projection race).
 
 import { SqlClient } from "@effect/sql";
@@ -395,9 +395,12 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.close();
 	}, 20_000);
 
-	it("materialized session: first send keeps message visible, lists session, and survives a second tab", async () => {
+	it("materialized session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
+		const detourId = (await client1.waitFor("session_switched"))[
+			"id"
+		] as string;
 
 		// Providers come from the init model_list broadcast.
 		const modelList = await client1.waitFor("model_list");
@@ -451,10 +454,9 @@ describe("Integration: Session Visibility Repros", () => {
 		);
 		expect(userMsg["originId"]).toBeUndefined();
 
-		// Bug 2: the session_list broadcast after materialization must include
-		// the materialized session.
-		const list = await client1.waitFor("session_list", {
-			predicate: (m) => m["roots"] === true,
+		// Bug 2: the viewed family after materialization includes the session.
+		const list = await client1.waitFor("session_family", {
+			predicate: (m) => m["rootId"] === newId,
 		});
 		const ids = (list["sessions"] as Array<{ id: string }>).map((s) => s.id);
 		// eslint-disable-next-line no-console
@@ -490,13 +492,9 @@ describe("Integration: Session Visibility Repros", () => {
 		// Same-client navigate away and back (the ViewSession path): the
 		// history must still carry the sent message, and the switch must not
 		// surface error frames.
-		const detourId = (list["sessions"] as Array<{ id: string }>).find(
-			(s) => s.id !== newId,
-		)?.id;
-		expect(detourId).toBeTruthy();
+		expect(detourId).not.toBe(newId);
 		client1.clearReceived();
-		// biome-ignore lint/style/noNonNullAssertion: guarded above
-		await client1.viewSession(detourId!);
+		await client1.viewSession(detourId);
 		client1.clearReceived();
 		const back = await client1.viewSession(newId);
 		// eslint-disable-next-line no-console
@@ -1046,7 +1044,7 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(result.projectedHasMore).toBe(false);
 	}, 45_000);
 
-	it("session created with OpenCode providerId appears in the session_list broadcast", async () => {
+	it("session created with OpenCode providerId appears in its viewed family", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		client1.clearReceived();
@@ -1057,9 +1055,8 @@ describe("Integration: Session Visibility Repros", () => {
 		const newId = switched["id"] as string;
 		expect(newId).toBeTruthy();
 
-		// The creating flow broadcasts session_list (roots) after create.
-		const list = await client1.waitFor("session_list", {
-			predicate: (m) => m["roots"] === true,
+		const list = await client1.waitFor("session_family", {
+			predicate: (m) => m["rootId"] === newId,
 		});
 		const ids = (list["sessions"] as Array<{ id: string }>).map((s) => s.id);
 		// eslint-disable-next-line no-console

@@ -46,7 +46,7 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "recordMessageActivity"
 	| "addToParentMap"
 	| "getSessionParentMap"
-	| "sendSessionLists"
+	| "pushViewerFamilies"
 	| "getSessionFamily"
 >;
 

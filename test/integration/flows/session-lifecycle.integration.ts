@@ -33,17 +33,22 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("created session appears in session_list", async () => {
+	it("created session appears in the viewed family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
 		// Create a session with a deterministic title
-		const title = "Lifecycle-List-Test";
+		const title = "Lifecycle-Family-Test";
 		const switched = await client.createSession(title);
 		const newId = switched["id"] as string;
-		// Verify the broadcast session list includes the new session.
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		const list = await client.waitFor("session_family", {
+			timeout: 5000,
+			predicate: (message) =>
+				(message["sessions"] as Array<{ id: string }>).some(
+					(row) => row.id === newId,
+				),
+		});
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		expect(Array.isArray(sessions)).toBe(true);
 
@@ -94,8 +99,7 @@ describe("Integration: Session Lifecycle", () => {
 		const newTitle = "Renamed-Session-Test";
 		await client.renameSession(sessionId, newTitle);
 
-		// Verify the broadcast session list includes the new title.
-		const list = await client.waitFor("session_list", {
+		const list = await client.waitFor("session_family", {
 			timeout: 5000,
 			predicate: (msg) => {
 				const sessions = msg["sessions"] as
@@ -131,26 +135,18 @@ describe("Integration: Session Lifecycle", () => {
 		// Delete it
 		await client.deleteSession(sessionId);
 
-		// Verify the broadcast session list no longer includes it.
-		const list = await client.waitFor("session_list", {
+		const switchedAfterDelete = await client.waitFor("session_switched", {
 			timeout: 5000,
-			predicate: (msg) => {
-				const sessions = msg["sessions"] as Array<{ id: string }> | undefined;
-				return (
-					Array.isArray(sessions) && !sessions.some((s) => s.id === sessionId)
-				);
-			},
+			predicate: (message) => message["id"] !== sessionId,
 		});
-		const sessions = list["sessions"] as Array<{ id: string }>;
-		const found = sessions.find((s) => s.id === sessionId);
-		expect(found).toBeUndefined();
+		expect(switchedAfterDelete["id"]).not.toBe(sessionId);
 
 		await client.close();
 	});
 
 	// ── State reset on switch ───────────────────────────────────────────────
 
-	it("switching session broadcasts session_switched and session_list", async () => {
+	it("switching session sends session_switched and its family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -164,13 +160,15 @@ describe("Integration: Session Lifecycle", () => {
 		const switchMsg = await client.createSession("Reset State Test");
 		expect(switchMsg["id"]).toBeTruthy();
 
-		// Now switch back — should get session_switched + session_list
+		// Now switch back to the first session.
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
 
-		// After switching, verify we also get an updated session list
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		const list = await client.waitFor("session_family", {
+			timeout: 5000,
+			predicate: (message) => message["rootId"] === firstId,
+		});
 		expect(Array.isArray(list["sessions"])).toBe(true);
 
 		await client.close();

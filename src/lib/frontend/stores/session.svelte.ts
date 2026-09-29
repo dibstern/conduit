@@ -870,13 +870,13 @@ export function handleSessionForked(
 	)
 		return;
 	clientSession.announcedParent = {
-		sessionId: msg.session.id,
+		sessionId: msg.sessionId,
 		parentId: msg.parentId,
-		...(msg.session.forkMessageId && {
-			forkMessageId: msg.session.forkMessageId,
+		...(msg.forkMessageId && {
+			forkMessageId: msg.forkMessageId,
 		}),
-		...(msg.session.forkPointTimestamp != null && {
-			forkPointTimestamp: msg.session.forkPointTimestamp,
+		...(msg.forkPointTimestamp != null && {
+			forkPointTimestamp: msg.forkPointTimestamp,
 		}),
 	};
 }

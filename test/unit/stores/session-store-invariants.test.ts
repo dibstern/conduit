@@ -255,18 +255,10 @@ describe("every mutation path leaves the server half wire-valid", () => {
 	});
 
 	it("session_forked preserves the versioned row set", () => {
-		const forked: SessionInfo = {
-			id: "forked",
-			title: "Forked",
-			status: "idle",
-			parentID: "root",
-			updatedAt: 4000,
-		};
 		applySessionSnapshot(ROWS, "complete");
 		handleMessage({
 			type: "session_forked",
-			sessionId: "root",
-			session: forked,
+			sessionId: "forked",
 			parentId: "root",
 			parentTitle: "Root",
 		});

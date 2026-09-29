@@ -203,13 +203,7 @@ it("does not write a row from a fork notice", () => {
 	});
 	handleMessage({
 		type: "session_forked",
-		sessionId: "ses_original",
-		session: {
-			id: "fork",
-			title: "Forked",
-			status: "idle",
-			parentID: "ses_original",
-		},
+		sessionId: "fork",
 		parentId: "ses_original",
 		parentTitle: "Original",
 	});

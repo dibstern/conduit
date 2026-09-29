@@ -80,7 +80,7 @@ function git(args) {
 // prevent, arriving by the other door.
 const RECIPE_PATH = /-(?:styles|recipes)\.ts$/;
 const RECIPE_DECLARATION =
-	/\bconst\s+[A-Z][A-Z0-9_]*_(?:CLASSES|VARIANTS|RECIPES)\b|Record<[^>]*,\s*string>/;
+	/\bconst\s+[A-Z][A-Z0-9_]*_(?:CLASSES|VARIANTS|RECIPES)\b/;
 const recipeFileCache = new Map();
 function declaresRecipes(file) {
 	if (RECIPE_PATH.test(file)) return true;
@@ -104,7 +104,7 @@ function classStrings(line, keyedValues = false) {
 		out.push(m[1] ?? m[2] ?? m[3] ?? m[4]);
 	}
 	// Recipe constants and the `"a " + "b"` continuation lines they wrap onto.
-	if (/^[+-]\s*(?:"[^"]*"|`[^`]*`)\s*[+,]?\s*$/.test(line)) {
+	if (keyedValues && /^[+-]\s*(?:"[^"]*"|`[^`]*`)\s*[+,]?\s*$/.test(line)) {
 		const quoted = line.match(/"([^"]*)"|`([^`]*)`/);
 		if (quoted) out.push(quoted[1] ?? quoted[2]);
 	}
@@ -116,10 +116,7 @@ function classStrings(line, keyedValues = false) {
 		);
 	if (property) {
 		const value = property[1] ?? property[2] ?? property[3];
-		// A colour literal is never a utility. The xterm palette satisfies
-		// `Record<string, string>` and so reads as a recipe file, which made every
-		// hex it changed look like a dropped class -- the renamed-label false
-		// positive this check's own comment warns about, arriving as a colour.
+		// A colour literal is never a utility.
 		if (value !== undefined && !COLOUR_LITERAL.test(value)) out.push(value);
 	}
 	return out;

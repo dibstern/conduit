@@ -35,15 +35,11 @@ export const makeSessionStateProjectionNotifierLive = (
 				// duplicate list is invisible, a missing one is the bug.
 				Effect.zipRight(Ref.set(broadcastPending, false)),
 				// Suspended so each broadcast builds its own effect. The same effect
-				// value is forked repeatedly, and sendSessionLists happens to be
+				// value is forked repeatedly, and pushViewerFamilies happens to be
 				// lazy today; relying on that would make a future eager read here
 				// publish one frozen snapshot forever.
 				Effect.zipRight(
-					Effect.suspend(() =>
-						sessionManagerService.sendSessionLists((message) =>
-							wsHandler.broadcast(message),
-						),
-					),
+					Effect.suspend(() => sessionManagerService.pushViewerFamilies()),
 				),
 				Effect.catchAllCause((cause) =>
 					logFailure("Failed to broadcast projected session state", cause),

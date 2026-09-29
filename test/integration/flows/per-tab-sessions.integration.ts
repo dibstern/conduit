@@ -67,19 +67,15 @@ describe("Integration: Per-Tab Sessions", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		// Use the initial session list from the connect handshake.
-		const list = await client.waitFor("session_list");
-		const sessions = list["sessions"] as Array<{ id: string }>;
-		expect(sessions.length).toBeGreaterThan(0);
+		const initial = await client.waitFor("session_switched");
+		const sessionId = initial["id"] as string;
 
 		client.clearReceived();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		await client.viewSession(sessions[0]!.id);
+		await client.viewSession(sessionId);
 
 		// Should receive session_switched AND status
 		const switched = await client.waitFor("session_switched");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(switched["id"]).toBe(sessions[0]!.id);
+		expect(switched["id"]).toBe(sessionId);
 
 		const status = await client.waitFor("status");
 		expect(status["status"]).toBe("idle");
@@ -109,11 +105,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		const switched1 = await client1.waitFor("session_switched");
 		expect(switched1["id"]).toBeTruthy();
 
-		// Client2 should get session_list (broadcast) but NOT session_switched
-		const list2 = await client2.waitFor("session_list");
-		expect(Array.isArray(list2["sessions"])).toBe(true);
-
-		// Wait a moment then verify client2 did NOT get session_switched
+		// Client2 remains on its current session.
 		await new Promise((r) => setTimeout(r, 500));
 		const switches2 = client2.getReceivedOfType("session_switched");
 		expect(switches2).toHaveLength(0);
@@ -122,9 +114,9 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	// ── Session List Broadcasts to All ───────────────────────────────────────
+	// ── Viewed Family Updates ────────────────────────────────────────────────
 
-	it("session list updates reach all clients regardless of viewed session", async () => {
+	it("family updates reach clients viewing the renamed session", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -139,24 +131,28 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.viewSession(a["id"] as string);
 		await client2.waitFor("session_switched");
 
-		// Now create another session from client1 — both should get updated list
+		// Renaming the viewed session refreshes both viewers' family.
 		client1.clearReceived();
 		client2.clearReceived();
-		await client1.createSession("List-Broadcast-B");
-		const b = await client1.waitFor("session_switched");
+		const sessionId = a["id"] as string;
+		await client1.renameSession(sessionId, "Renamed for both tabs");
 
-		// Both clients should get session_list containing the new session.
-		// Use predicate to avoid matching a stale session_list from before B was created.
-		const bId = b["id"] as string;
-		const containsB = (m: Record<string, unknown>) => {
-			const sessions = m["sessions"] as Array<{ id: string }> | undefined;
-			return Array.isArray(sessions) && sessions.some((s) => s.id === bId);
+		const containsRenamed = (m: Record<string, unknown>) => {
+			const sessions = m["sessions"] as
+				| Array<{ id: string; title?: string }>
+				| undefined;
+			return (
+				Array.isArray(sessions) &&
+				sessions.some(
+					(s) => s.id === sessionId && s.title === "Renamed for both tabs",
+				)
+			);
 		};
-		const list1 = await client1.waitFor("session_list", {
-			predicate: containsB,
+		const list1 = await client1.waitFor("session_family", {
+			predicate: containsRenamed,
 		});
-		const list2 = await client2.waitFor("session_list", {
-			predicate: containsB,
+		const list2 = await client2.waitFor("session_family", {
+			predicate: containsRenamed,
 		});
 
 		expect(Array.isArray(list1["sessions"])).toBe(true);
@@ -275,18 +271,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		const redirected = await client1.waitFor("session_switched");
 		expect(redirected["id"]).toBeTruthy();
 		expect(redirected["id"]).not.toBe(deleteId);
-
-		// Both should get updated session_list
-		const list1 = await client1.waitFor("session_list");
-		const list2 = await client2.waitFor("session_list");
-		expect(Array.isArray(list1["sessions"])).toBe(true);
-		expect(Array.isArray(list2["sessions"])).toBe(true);
-
-		// Deleted session should not appear in either list
-		const sessions1 = list1["sessions"] as Array<{ id: string }>;
-		const sessions2 = list2["sessions"] as Array<{ id: string }>;
-		expect(sessions1.find((s) => s.id === deleteId)).toBeUndefined();
-		expect(sessions2.find((s) => s.id === deleteId)).toBeUndefined();
 
 		await client1.close();
 		await client2.close();

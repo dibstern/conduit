@@ -344,7 +344,7 @@ it("the auto-title rename advances the version of the session it renames", async
 	await withTempDb(async (dbPath) => {
 		const renamed = await Effect.runPromise(Deferred.make<void>());
 		const sessionManager = makeMockSessionManagerService({
-			sendSessionLists: vi.fn(() => Deferred.succeed(renamed, undefined)),
+			pushViewerFamilies: vi.fn(() => Deferred.succeed(renamed, undefined)),
 		});
 		const bus = makeSessionEventBusLive();
 		const layer = Layer.provideMerge(

@@ -117,9 +117,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				false,
 			);
 			if (unsnoozed || unsettled) {
-				yield* sessionManagerService.sendSessionLists((msg) =>
-					wsHandler.broadcast(msg),
-				);
+				yield* sessionManagerService.pushViewerFamilies();
 			}
 		}).pipe(
 			Effect.catchAll((error) =>

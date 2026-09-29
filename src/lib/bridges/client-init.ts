@@ -481,18 +481,14 @@ export const handleClientConnectedEffect = (
 			}
 		}
 
-		yield* sessionService
-			.sendSessionLists((msg) => wsHandler.sendTo(clientId, msg), {
-				statuses: yield* statusPoller.getCurrentStatuses(),
-			})
-			.pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to list sessions"),
-				),
-				Effect.ensuring(
-					Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
-				),
-			);
+		yield* sessionService.pushViewerFamilies().pipe(
+			Effect.catchAll((err) =>
+				sendInitErrorEffect(clientId, err, "Failed to push viewed families"),
+			),
+			Effect.ensuring(
+				Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
+			),
+		);
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
 		const sentPermissionIds = new Set<string>();

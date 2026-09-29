@@ -297,14 +297,11 @@ describe("Integration: Session Switch History", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		const sessionA = initial1[0]!["id"] as string;
 
-		// client1 creates session B (only client1 gets session_switched;
-		// both get session_list broadcast)
+		// client1 creates session B; only client1 gets session_switched.
 		client1.clearReceived();
 		client2.clearReceived();
 		await client1.createSession("Multi-Client History Test");
 		const switchedB = await client1.waitFor("session_switched");
-		// client2 receives session_list (not session_switched)
-		await client2.waitFor("session_list");
 		expect(switchedB["id"]).toBeTruthy();
 		client1.clearReceived();
 		client2.clearReceived();
