@@ -251,11 +251,13 @@ test.describe("Mermaid Expand", () => {
 		await chat.waitForAssistantMessage();
 		await chat.waitForStreamingComplete();
 
-		// Wait for mermaid rendering (async SVG generation)
-		await page.waitForTimeout(2000);
-
 		// Check if any mermaid diagrams were rendered
 		const diagrams = page.locator(".mermaid-diagram");
+		await page.waitForFunction(() =>
+			[...document.querySelectorAll("code.language-mermaid")].every((code) =>
+				code.parentElement?.classList.contains("mermaid-rendered"),
+			),
+		);
 		const count = await diagrams.count();
 
 		if (count === 0) {

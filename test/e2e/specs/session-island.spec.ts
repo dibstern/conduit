@@ -28,7 +28,6 @@ async function pinToBottom(page: Page): Promise<void> {
 			),
 		)
 		.toBeLessThanOrEqual(1);
-	await page.waitForTimeout(100);
 	await messages.evaluate((scroller) => {
 		scroller.scrollTop -= 120;
 	});
@@ -111,6 +110,7 @@ test.describe("phone session island", () => {
 			.click();
 		await page.getByTestId("session-bar-views-button").tap();
 		await expect(page.getByTestId("session-bar-views-sheet")).toBeVisible();
+		// The views sheet must stay open through this observation window.
 		await page.waitForTimeout(100);
 		await expect(page.getByTestId("session-bar-views-sheet")).toBeVisible();
 		await page.keyboard.press("Escape");
@@ -119,6 +119,7 @@ test.describe("phone session island", () => {
 		await page.getByTestId("session-bar-island-overflow").tap();
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
+		// The overflow sheet must stay open through this observation window.
 		await page.waitForTimeout(100);
 		await expect(sheet).toBeVisible();
 		for (const view of ["chat", "terminal", "diff", "files"]) {

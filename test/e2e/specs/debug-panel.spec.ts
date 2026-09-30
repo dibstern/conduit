@@ -190,13 +190,12 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Should have logged some connection events (connect, ws:open, etc.)
 		// Event entries are rows inside the scrollable log container
-		// Wait briefly for events to populate
-		await page.waitForTimeout(500);
 		const logContainer = panel.locator(".overflow-y-auto");
 		await expect(logContainer).toBeVisible();
 
 		// Either there are event rows or "No events yet" — assert events exist
 		const noEvents = panel.getByText("No events yet");
+		await expect(noEvents).toBeHidden();
 		const hasNoEvents = await noEvents.isVisible().catch(() => false);
 		expect(hasNoEvents).toBe(false);
 	});
@@ -209,7 +208,7 @@ test.describe("Debug Panel — Panel Content", () => {
 		await expect(panel).toBeVisible({ timeout: 5_000 });
 
 		// Wait for at least one event to be logged
-		await page.waitForTimeout(500);
+		await expect(panel.getByText("No events yet")).toBeHidden();
 
 		// Click clear
 		await page.locator(CLEAR_BTN).click();
@@ -231,7 +230,7 @@ test.describe("Debug Panel — Panel Content", () => {
 		await app.waitForConnected();
 
 		// Wait for messages to flow through the WebSocket
-		await page.waitForTimeout(1_000);
+		await expect(panel.getByText("No events yet")).toBeHidden();
 
 		// Verbose toggle should show "msgs:100" (throttled mode)
 		const verboseBtn = page.locator(VERBOSE_BTN);
