@@ -192,11 +192,8 @@ test.describe("Question/Answer Flow", () => {
 			answers: { "0": "PostgreSQL" },
 		});
 
-		// The card stays pending until the relay sends ask_user_resolved and
-		// follow-up tool/result events.
-		await expect(questionCard.locator(".question-submit-btn")).toContainText(
-			"Submitting",
-		);
+		// The server's acknowledgement of AnswerQuestion marks the card answered.
+		await expect(questionCard).toContainText("Answered");
 	});
 
 	test("agent continues responding after user answers a question", async ({

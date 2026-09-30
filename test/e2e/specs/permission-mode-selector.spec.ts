@@ -118,7 +118,11 @@ async function setup(
 				permissionMode: serverModes.get(String(params["sessionId"])) ?? "ask",
 			}),
 			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
-			GetProjects: () => ({ projects: [] }),
+			// The attached project must be listed, or the frontend treats it as
+			// removed and returns to the session list, unbinding the session.
+			GetProjects: () => ({
+				projects: [{ slug: "myapp", name: "myapp", path: "/tmp/myapp" }],
+			}),
 			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
 			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},

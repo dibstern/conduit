@@ -122,7 +122,8 @@ function statusWord(page: Page, sessionId: string) {
 
 /** The AttentionBanner component with role="status". */
 function attentionBanner(page: Page) {
-	return page.locator("[role='status']");
+	// Other live regions (connection dot, composer menu) also use role=status.
+	return page.getByRole("status").filter({ hasText: /needs? attention/ });
 }
 
 async function mockRelayWithViewSessionRpc(

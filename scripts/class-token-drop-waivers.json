@@ -1,4 +1,5 @@
 {
+	"test/e2e/specs/question-flow.spec.ts :: Submitting": "Not a class: this was the submit button's text in a Playwright toContainText assertion. The card is now marked answered on the server's acknowledgement of AnswerQuestion, so the test asserts the answered state instead.",
 	"test/unit/components/Menu.test.ts :: data-dropdown-menu-content]": "Not a class: this was a DOM selector in a jsdom assertion that a menu opened inside a native dialog was portaled outside it. The assertion was replaced by a browser story that selects modal menu items by keyboard and pointer.",
 	"test/unit/components/Popover.test.ts :: data-popover-content]": "Not a class: this was a DOM selector in a jsdom assertion that a popover opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
 	"test/unit/components/Tooltip.test.ts :: data-tooltip-content]": "Not a class: this was a DOM selector in a jsdom assertion that a tooltip opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
