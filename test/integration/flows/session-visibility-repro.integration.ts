@@ -225,6 +225,10 @@ async function projectedHistory(
 	return resolveSessionHistoryFromRows(rows, { pageSize });
 }
 
+// These repros model a user whose default is a Claude model: sessions start
+// as local Claude rows and materialize into OpenCode on the first send.
+const CLAUDE_DEFAULT_MODEL = "claude/opus[1m]";
+
 /**
  * Bind a fresh session to the OpenCode engine (REPRO-C's materialization
  * pattern). Without this the default session runs on the Claude provider and
@@ -283,6 +287,7 @@ async function runPaginationDifferential(count: number) {
 	const dbPath = join(dir, "events.sqlite");
 	const paginationHarness = await createRelayHarness(synthetic.recording, {
 		persistenceDbPath: dbPath,
+		defaultModel: CLAUDE_DEFAULT_MODEL,
 	});
 	let client1: TestWsClient | undefined;
 	let client2: TestWsClient | undefined;
@@ -353,7 +358,10 @@ describe("Integration: Session Visibility Repros", () => {
 	beforeAll(async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-"));
 		persistenceDbPath = join(dir, "events.sqlite");
-		harness = await createRelayHarness("chat-simple", { persistenceDbPath });
+		harness = await createRelayHarness("chat-simple", {
+			persistenceDbPath,
+			defaultModel: CLAUDE_DEFAULT_MODEL,
+		});
 	}, 30_000);
 
 	afterAll(async () => {
@@ -529,6 +537,7 @@ describe("Integration: Session Visibility Repros", () => {
 		const textDbPath = join(dir, "events.sqlite");
 		const textHarness = await createRelayHarness("chat-simple", {
 			persistenceDbPath: textDbPath,
+			defaultModel: CLAUDE_DEFAULT_MODEL,
 		});
 		const client1 = await textHarness.connectWsClient();
 		await client1.waitForInitialState();
@@ -607,6 +616,7 @@ describe("Integration: Session Visibility Repros", () => {
 		const toolDbPath = join(dir, "events.sqlite");
 		const toolHarness = await createRelayHarness("chat-tool-call", {
 			persistenceDbPath: toolDbPath,
+			defaultModel: CLAUDE_DEFAULT_MODEL,
 		});
 		try {
 			const client1 = await toolHarness.connectWsClient();
@@ -768,6 +778,7 @@ describe("Integration: Session Visibility Repros", () => {
 		const dbPath = join(dir, "events.sqlite");
 		const metadataHarness = await createRelayHarness(synthetic.recording, {
 			persistenceDbPath: dbPath,
+			defaultModel: CLAUDE_DEFAULT_MODEL,
 		});
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
@@ -887,6 +898,7 @@ describe("Integration: Session Visibility Repros", () => {
 		const dbPath = join(dir, "events.sqlite");
 		const fileHarness = await createRelayHarness(synthetic.recording, {
 			persistenceDbPath: dbPath,
+			defaultModel: CLAUDE_DEFAULT_MODEL,
 		});
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
@@ -958,6 +970,7 @@ describe("Integration: Session Visibility Repros", () => {
 		const dbPath = join(dir, "events.sqlite");
 		const permissionHarness = await createRelayHarness("permissions-bash", {
 			persistenceDbPath: dbPath,
+			defaultModel: CLAUDE_DEFAULT_MODEL,
 		});
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;

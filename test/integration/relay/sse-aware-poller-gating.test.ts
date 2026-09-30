@@ -249,6 +249,8 @@ async function createTestHarness(
 		projectDir: process.cwd(),
 		slug: `test-sse-gating-${relayPort}`,
 		persistenceDbPath,
+		// Keep the real ~/.config/conduit settings out of the relay.
+		configDir: persistenceDir,
 		noServer: true,
 		log: createSilentLogger(),
 		pollerGatingConfig: {
@@ -293,14 +295,23 @@ async function createTestHarness(
 	// The poller reads projected SQLite status, so mirror the mock's status
 	// mutations into the per-harness store without emitting SSE coverage.
 	const db = new Database(persistenceDbPath);
-	const upsertStatus = db.prepare(`
-		INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-		VALUES (?, 'opencode', 'Untitled', ?, ?, ?)
+	// parent_id matters: notification routing treats a session without one as top-level.
+	const upsertRow = db.prepare(`
+		INSERT INTO sessions (id, provider, title, parent_id, status, created_at, updated_at)
+		VALUES (?, 'opencode', 'Untitled', ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET status = excluded.status,
 			updated_at = excluded.updated_at
 	`);
+	const upsertStatus = (sessionId: string, status: string, now: number) =>
+		upsertRow.run(
+			sessionId,
+			mock.sessionList.find((s) => s.id === sessionId)?.parentID ?? null,
+			status,
+			now,
+			now,
+		);
 	for (const [sessionId, status] of Object.entries(mock.sessionStatuses)) {
-		upsertStatus.run(sessionId, status.type, Date.now(), Date.now());
+		upsertStatus(sessionId, status.type, Date.now());
 	}
 	mock.sessionStatuses = new Proxy(mock.sessionStatuses, {
 		set(target, sessionId, value: unknown) {
@@ -311,7 +322,7 @@ async function createTestHarness(
 				"type" in value &&
 				typeof value.type === "string"
 			) {
-				upsertStatus.run(sessionId, value.type, Date.now(), Date.now());
+				upsertStatus(sessionId, value.type, Date.now());
 			}
 			return Reflect.set(target, sessionId, value);
 		},

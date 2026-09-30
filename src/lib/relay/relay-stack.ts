@@ -957,6 +957,16 @@ export async function createProjectRelay(
 					}
 				}
 
+				// Before initialize: the default model picks the first session's provider.
+				if (defaultModel) {
+					yield* setDefaultModel(defaultModel);
+				}
+				if (initialDefaultVariant) {
+					yield* setDefaultVariant(initialDefaultVariant);
+				}
+				if (relaySettings.defaultPermissionMode !== undefined) {
+					yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
+				}
 				const sessionManagerService = yield* SessionManagerServiceTag;
 				const runFork = Runtime.runFork(
 					yield* Effect.runtime<SessionManagerServiceTag>(),
@@ -1001,15 +1011,6 @@ export async function createProjectRelay(
 				const orchestration = yield* getOrchestrationLayer;
 				yield* PollerStateTag;
 				yield* PollerPubSubTag;
-				if (defaultModel) {
-					yield* setDefaultModel(defaultModel);
-				}
-				if (initialDefaultVariant) {
-					yield* setDefaultVariant(initialDefaultVariant);
-				}
-				if (relaySettings.defaultPermissionMode !== undefined) {
-					yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
-				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
 				const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(

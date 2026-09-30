@@ -3,7 +3,7 @@
 // Integration tests use this to exercise the exact same wiring as production,
 // without requiring a live OpenCode instance.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -39,6 +39,8 @@ export async function createRelayHarness(
 		readonly persistenceDbPath?: string;
 		/** Config directory holding daemon.json (named provider instances). */
 		readonly configDir?: string;
+		/** Relay default model ("provider/model"); it decides the provider of new sessions. */
+		readonly defaultModel?: string;
 	} = {},
 ): Promise<RelayHarness> {
 	const recording =
@@ -48,6 +50,14 @@ export async function createRelayHarness(
 	const mock = new MockOpenCodeServer(recording);
 	await mock.start();
 	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-relay-harness-"));
+	// Default to the recording's OpenCode model so the first session talks to the mock.
+	writeFileSync(
+		join(persistenceDir, "settings.jsonc"),
+		JSON.stringify({
+			defaultModel:
+				options.defaultModel ?? "anthropic/claude-opus-4-5-20251101",
+		}),
+	);
 
 	const stack = await createRelayStack({
 		port: 0,
@@ -59,7 +69,8 @@ export async function createRelayHarness(
 		log: createSilentLogger(),
 		persistenceDbPath:
 			options.persistenceDbPath ?? join(persistenceDir, "events.db"),
-		...(options.configDir != null ? { configDir: options.configDir } : {}),
+		// Never fall back to the real ~/.config/conduit: its default model decides session routing.
+		configDir: options.configDir ?? persistenceDir,
 	});
 
 	const relayPort = stack.getPort();
