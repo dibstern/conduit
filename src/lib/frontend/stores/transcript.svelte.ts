@@ -465,6 +465,9 @@ export function viewTranscript(
 			};
 			slot.messages.loadLifecycle = "loading";
 		} else {
+			// The cached copy is only as current as the feed that stopped when we
+			// left; it is not live again until the new feed synchronizes.
+			slot.messages.transcript.status = { _tag: "cold" };
 			install(sessionId, slot);
 		}
 	}
@@ -570,6 +573,16 @@ export function viewTranscript(
 
 export function transcriptStatus(sessionId: string): FeedStatus {
 	return sessionMessages.get(sessionId)?.transcript?.status ?? { _tag: "cold" };
+}
+
+/** What a transcript view shows about its feed. Cold and catching up look the
+ *  same to a reader: rows may be on screen but are not current yet. No
+ *  transcript at all (no session open) has nothing to wait for. */
+export function transcriptFeed(
+	entry: Pick<TranscriptEntry, "status"> | null,
+): "live" | "catchingUp" | "failing" {
+	if (!entry || entry.status._tag === "live") return "live";
+	return entry.status._tag === "failing" ? "failing" : "catchingUp";
 }
 
 export function loadOlderTranscript(sessionId: string): Promise<void> {

@@ -68,8 +68,13 @@ export class RpcMockControl {
 			);
 	}
 
+	/** How the detail feed answers a new subscription: synchronize (default),
+	 *  stall after the snapshot, hold with no frames, or fail the stream. */
+	detailFeed: "synchronize" | "stall" | "hold" | "fail" = "synchronize";
+
 	initialDetailFrames(sessionId: string): readonly unknown[] {
-		return [
+		if (this.detailFeed === "hold" || this.detailFeed === "fail") return [];
+		const frames = [
 			this.detailRows.has(sessionId)
 				? {
 						_tag: "snapshot",
@@ -80,6 +85,7 @@ export class RpcMockControl {
 				: mockDetailSnapshot(this.page, sessionId),
 			{ _tag: "synchronized" },
 		];
+		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
 	}
 
 	setShellRows(rows: readonly unknown[]): void {
@@ -259,6 +265,8 @@ async function handleMessage(
 			control.registerStream(raw.tag, ws, raw.id, sessionId);
 			const values = stream(raw.payload ?? {});
 			if (values.length > 0) control.sendChunk(raw.tag, values, sessionId);
+			if (raw.tag === "SubscribeSessionDetail" && control.detailFeed === "fail")
+				control.failStream(raw.tag, "detail feed unavailable", sessionId);
 			return;
 		}
 		const handler = handlers[raw.tag];

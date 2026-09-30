@@ -34,6 +34,9 @@
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import { retryFeedsNow } from "../../transport/supervise.js";
+	import { transcriptFeed } from "../../stores/transcript.svelte.js";
 
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let sentinelEl: HTMLElement | undefined = $state();
@@ -243,6 +246,12 @@
 	const currentTurns = $derived(
 		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
 	);
+	const transcript = $derived(currentChat().transcript);
+	const feed = $derived(transcriptFeed(transcript));
+	const hasRows = $derived((transcript?.rows.length ?? 0) > 0);
+	// A cold pane has not heard from the feed, so it cannot yet claim the start.
+	const startConfirmed = $derived(transcript != null && transcript.hwm !== null);
+
 	// A touch on the view marks the session seen only while this turn's end is
 	// on screen (utils/attention.ts).
 	const newestEndedTurnId = $derived(
@@ -269,8 +278,30 @@
 	<!-- Headless loader (no visual output) -->
 	<HistoryLoader {sentinelEl} />
 
+	<!-- Zero-height sticky rail so the pill floats over the transcript without
+	     pushing it down; the lift parks it in the top padding so at rest
+	     it clears the first row. The pill fades in late, so fast switches never show it. -->
+	{#if feed !== "live" && (hasRows || feed === "failing")}
+		<div class="sticky top-4 z-10 h-0 flex items-start justify-center">
+			<div
+				class="feed-pill -translate-y-3 flex items-center gap-2 bg-bg-alt border border-border rounded-full px-3 py-0.5 text-xs text-text-secondary font-sans shadow-sm"
+				class:feed-pill-delayed={feed !== "failing"}
+				role="status"
+				data-testid="transcript-feed-pill"
+			>
+				{#if feed === "failing"}
+					<span>Couldn't refresh</span>
+					<span aria-hidden="true" class="text-text-dimmer">·</span>
+					<TextButton tone="accent" onclick={retryFeedsNow}>Retry</TextButton>
+				{:else}
+					<span>Catching up</span>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	<!-- Beginning of session marker (was in HistoryView) -->
-	{#if !currentChat().historyHasMore && !currentChat().historyLoading && !isFork}
+	{#if startConfirmed && !currentChat().historyHasMore && !currentChat().historyLoading && !isFork}
 		<div class="history-beginning flex flex-col items-center py-4 text-text-dimmer text-xs">
 			<div class="w-8 h-px bg-border mb-2"></div>
 			<span>Beginning of session</span>
@@ -340,7 +371,9 @@
 	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div onclick={uiState.rewindActive ? handleRewindClick : undefined}>
+	<!-- Inert until synchronized: answering, forking or rewinding against a
+	     transcript that is still catching up would act on stale content. -->
+	<div onclick={uiState.rewindActive ? handleRewindClick : undefined} inert={feed !== "live"}>
 	{#if forkSplit && forkSplit.inherited.length > 0}
 		<ForkContextBlock>
 			{#each inheritedTurns as turn (turn.id)}
@@ -362,6 +395,19 @@
 		{/each}
 	{/if}
 	</div>
+
+	<!-- Cold open: message-shaped placeholders where the newest messages land. -->
+	{#if feed === "catchingUp" && !hasRows}
+		<div
+			class="transcript-skeleton absolute inset-x-0 bottom-3 max-w-[760px] mx-auto px-5 flex flex-col gap-3"
+			aria-hidden="true"
+			data-testid="transcript-skeleton"
+		>
+			<div class="h-14 rounded-lg border border-border bg-bg-alt motion-safe:animate-pulse"></div>
+			<div class="h-4 w-4/5 rounded-md bg-border motion-safe:animate-pulse"></div>
+			<div class="h-4 w-3/5 rounded-md bg-border motion-safe:animate-pulse"></div>
+		</div>
+	{/if}
 
 	<!-- Pending permission requests (only for current session) -->
 	{#each localPermissions as perm (perm.id)}
@@ -392,3 +438,15 @@
 		{scrollButtonText}
 	</Button>
 </div>
+
+<style>
+	/* The delays are the whole point: a switch that synchronizes first never
+	   shows either element. 250ms for a warm pane's pill, 150ms for a cold
+	   pane's skeleton, per the switching-visuals decision (3A). */
+	.feed-pill-delayed {
+		animation: session-fade-in 150ms ease-out 250ms both;
+	}
+	.transcript-skeleton {
+		animation: session-fade-in 150ms ease-out 150ms both;
+	}
+</style>

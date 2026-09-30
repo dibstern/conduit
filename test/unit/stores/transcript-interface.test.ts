@@ -220,11 +220,14 @@ describe("transcript feed interface", () => {
 		expect(getOrCreateSessionSlot("A").messages.messages[0]).toMatchObject({
 			text: "cached",
 		});
+		// Cached rows are not live until the resumed feed synchronizes.
+		expect(transcriptStatus("A")._tag).toBe("cold");
 		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
-		expect(requestFor(wire.requests, "A", 1)?.payload).toHaveProperty(
-			"resumeFromSequence",
-			9,
-		);
+		const resumed = requestFor(wire.requests, "A", 1);
+		expect(resumed?.payload).toHaveProperty("resumeFromSequence", 9);
+		if (!resumed) throw new Error("missing resumed request");
+		await wire.emit(resumed, { _tag: "synchronized" });
+		await settled(() => transcriptStatus("A")._tag === "live");
 	});
 
 	it("interrupts outgoing A and B feeds during A→B→A", async () => {
