@@ -10,6 +10,7 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
@@ -27,6 +28,8 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -276,6 +279,10 @@ describe("SessionManager read-your-writes parity", () => {
 						),
 						DaemonEventBusLive,
 						persistenceLayer,
+						Layer.succeed(
+							OrchestrationEngineTag,
+							new OrchestrationEngine({ registry: new ProviderRegistry() }),
+						),
 					),
 				);
 

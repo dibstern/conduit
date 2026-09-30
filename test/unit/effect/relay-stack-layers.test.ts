@@ -3,12 +3,18 @@ import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { OverridesStateTag } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { SessionRegistryStateTag } from "../../../src/lib/domain/relay/Services/session-registry-state.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { WsHandlerStateTag } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -19,6 +25,11 @@ const relayStateTestLayer = RelayStateLive.pipe(
 		Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(
+				OrchestrationEngineTag,
+				new OrchestrationEngine({ registry: new ProviderRegistry() }),
+			),
+			makePersistenceEffectLayer(":memory:"),
 		),
 	),
 );

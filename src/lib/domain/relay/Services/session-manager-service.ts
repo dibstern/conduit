@@ -17,7 +17,6 @@ import {
 	Layer,
 	Option,
 	Ref,
-	Schedule,
 	Schema,
 } from "effect";
 import {
@@ -49,7 +48,6 @@ import {
 	pendingApprovalCountsByType,
 	sessionRowsToSessionInfoList,
 } from "../../../persistence/session-list-adapter.js";
-import { toSessionInfoList } from "../../../session/session-info-list.js";
 import {
 	type HistoryMessage,
 	type SessionPermissionMode,
@@ -81,12 +79,6 @@ import {
 	OverridesStateTag,
 	setPermissionMode,
 } from "./session-overrides-state.js";
-
-// ─── Retry policy ──────────────────────────────────────────────────────────
-
-const retryPolicy = Schedule.exponential("500 millis").pipe(
-	Schedule.intersect(Schedule.recurs(3)),
-);
 
 const DEFAULT_HISTORY_PAGE_SIZE = 50;
 const CURSOR_SCAN_LIMIT = 10_000;
@@ -215,90 +207,50 @@ const incrementLastKnownSessionCount = () =>
  */
 export const listSessions = (options?: ListSessionsOptions) =>
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
-		const readQueryEffectOption =
-			yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		const sqOpts =
 			options?.roots !== undefined ? { roots: options.roots } : undefined;
 		const state = yield* Ref.get(stateRef);
 
-		if (readQueryEffectOption._tag === "Some") {
-			const [rows, pendingApprovals, lineage, projectedStatuses] =
-				yield* Effect.all([
-					readQueryEffectOption.value.listSessions(sqOpts),
-					readQueryEffectOption.value.countPendingApprovalsBySession(),
-					readQueryEffectOption.value.getSessionLineage(),
-					readQueryEffectOption.value.getAllSessionStatuses(),
-				]).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({ operation: "listSessions", cause }),
-					),
-				);
-			const parentMap = sessionRowsParentMap(lineage.rows);
-			yield* Ref.update(stateRef, (s) => ({
-				...s,
-				cachedParentMap: parentMap,
-				lastKnownSessionCount: lineage.count,
-			}));
-			yield* updateRelaySessionCountSnapshot(lineage.count);
-			// The durable table wins outright here, with no fallback to the relay's
-			// in-memory map. The map is only correct for a relay that saw the events
-			// live, and a permission decision decrements it even though only a
-			// question increments it, so falling back would reintroduce the skew the
-			// projection exists to avoid.
-			const statuses: Record<string, SessionStatus> = {};
-			for (const [id, status] of Object.entries(projectedStatuses)) {
-				statuses[id] =
-					status === "busy" || status === "retry"
-						? { type: "busy" }
-						: { type: "idle" };
-			}
-			Object.assign(statuses, options?.statuses);
-			return sessionRowsToInfo(
-				rows,
-				{ ...options, statuses },
-				state,
-				pendingApprovalCountsByType(pendingApprovals),
-				toReadonlyMap(parentMap),
+		const [rows, pendingApprovals, lineage, projectedStatuses] =
+			yield* Effect.all([
+				readQuery.listSessions(sqOpts),
+				readQuery.countPendingApprovalsBySession(),
+				readQuery.getSessionLineage(),
+				readQuery.getAllSessionStatuses(),
+			]).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "listSessions", cause }),
+				),
 			);
+		const parentMap = sessionRowsParentMap(lineage.rows);
+		yield* Ref.update(stateRef, (s) => ({
+			...s,
+			cachedParentMap: parentMap,
+			lastKnownSessionCount: lineage.count,
+		}));
+		yield* updateRelaySessionCountSnapshot(lineage.count);
+		// The durable table wins outright here, with no fallback to the relay's
+		// in-memory map. The map is only correct for a relay that saw the events
+		// live, and a permission decision decrements it even though only a
+		// question increments it, so falling back would reintroduce the skew the
+		// projection exists to avoid.
+		const statuses: Record<string, SessionStatus> = {};
+		for (const [id, status] of Object.entries(projectedStatuses)) {
+			statuses[id] =
+				status === "busy" || status === "retry"
+					? { type: "busy" }
+					: { type: "idle" };
 		}
-
-		const clientOptions = {
-			...(options?.limit !== undefined && { limit: options.limit }),
-			...(options?.roots !== undefined && { roots: options.roots }),
-		};
-
-		const sessions = yield* Effect.tryPromise(() =>
-			api.session.list(
-				Object.keys(clientOptions).length > 0 ? clientOptions : undefined,
-			),
-		).pipe(
-			Effect.retry(retryPolicy),
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "listSessions", cause }),
-			),
-		);
-
-		// Only rebuild from unfiltered fetches. Roots-only responses omit children
-		// and would wipe the parent map used by status propagation.
-		if (!options?.roots) {
-			yield* Ref.update(stateRef, (s) => ({
-				...s,
-				cachedParentMap: sessionDetailsParentMap(sessions),
-				lastKnownSessionCount: sessions.length,
-			}));
-			yield* updateRelaySessionCountSnapshot(sessions.length);
-		}
-
-		return toSessionInfoList(
-			sessions,
-			options?.statuses,
-			toReadonlyMap(state.lastMessageAt),
-			toReadonlyMap(state.forkMeta),
-			toReadonlyMap(state.pendingQuestionCounts),
+		Object.assign(statuses, options?.statuses);
+		return sessionRowsToInfo(
+			rows,
+			{ ...options, statuses },
+			state,
+			pendingApprovalCountsByType(pendingApprovals),
+			toReadonlyMap(parentMap),
 		);
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
@@ -308,33 +260,16 @@ export const listSessions = (options?: ListSessionsOptions) =>
 /** Whether this relay's project has the requested session. */
 export const sessionExists = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQuery._tag === "Some") {
-			const session = yield* readQuery.value
-				.getSession(sessionId)
-				.pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({ operation: "sessionExists", cause }),
-					),
-				);
-			return session !== undefined;
-		}
-
-		const api = yield* OpenCodeAPITag;
-		return yield* Effect.tryPromise({
-			try: () => api.session.get(sessionId),
-			catch: (cause) => cause,
-		}).pipe(
-			Effect.as(true),
-			Effect.catchAll((cause) =>
-				cause instanceof OpenCodeApiError && cause.responseStatus === 404
-					? Effect.succeed(false)
-					: Effect.fail(
-							new SessionManagerError({ operation: "sessionExists", cause }),
-						),
-			),
-		);
+		const readQuery = yield* ReadQueryEffectTag;
+		const session = yield* readQuery
+			.getSession(sessionId)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "sessionExists", cause }),
+				),
+			);
+		return session !== undefined;
 	}).pipe(
 		Effect.annotateLogs({ operation: "sessionExists", sessionId }),
 		Effect.withSpan("session.sessionExists"),
@@ -430,28 +365,7 @@ const createLocalSession = (
 	selectedInstanceId?: ProviderInstanceId,
 ) =>
 	Effect.gen(function* () {
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
-
-		// applySessionCommand skips the local write when any of these is missing.
-		// A locally-created session that is never recorded exists nowhere, so the
-		// precondition is checked here instead of failing silently.
-		if (
-			eventStoreOption._tag === "None" ||
-			projectionRunnerOption._tag === "None" ||
-			readQueryOption._tag === "None" ||
-			sqlOption._tag === "None"
-		) {
-			return yield* new SessionManagerError({
-				operation: "createLocalSession",
-				cause: "SQLite event-store services are unavailable",
-			});
-		}
 
 		const provider =
 			selectedInstanceId === undefined
@@ -538,23 +452,9 @@ export const persistSessionPermissionMode = (
 	mode: SessionPermissionMode,
 ) =>
 	Effect.gen(function* () {
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-
-		if (
-			eventStoreOption._tag === "None" ||
-			projectionRunnerOption._tag === "None" ||
-			sqlOption._tag === "None"
-		) {
-			return yield* Effect.void;
-		}
-
-		const eventStore = eventStoreOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 
 		const withSql = <A, E>(
 			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
@@ -611,23 +511,9 @@ export const persistSessionPermissionMode = (
 
 export const restoreSessionPermissionModes = () =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-
-		if (
-			readQueryOption._tag === "None" ||
-			projectionRunnerOption._tag === "None" ||
-			sqlOption._tag === "None"
-		) {
-			return yield* Effect.succeed(0);
-		}
-
-		const readQuery = readQueryOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
+		const readQuery = yield* ReadQueryEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 
 		const withSql = <A, E>(
 			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
@@ -711,20 +597,15 @@ export const markSessionUnread = (sessionId: string) =>
 
 const readSessionForTriage = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQuery._tag === "None") return undefined;
-		const runner = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
-		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
-		if (
-			runner._tag === "Some" &&
-			sql._tag === "Some" &&
-			!(yield* runner.value.isRecovered())
-		) {
-			yield* runner.value
+		const readQuery = yield* ReadQueryEffectTag;
+		const runner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
+		if (!(yield* runner.isRecovered())) {
+			yield* runner
 				.recover()
-				.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
+				.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 		}
-		return yield* readQuery.value.getSession(sessionId);
+		return yield* readQuery.getSession(sessionId);
 	});
 
 export const setSessionSettled = (
@@ -826,12 +707,10 @@ export const snoozeSession = (sessionId: string, until: number | null) =>
 		if (row.settled_at !== null) {
 			return yield* Effect.fail(new Error("Un-settle the session first"));
 		}
-		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQuery._tag === "Some") {
-			const pending = yield* readQuery.value.countPendingApprovalsBySession();
-			if (pending.some((approval) => approval.session_id === sessionId)) {
-				return yield* Effect.fail(new Error("Session is waiting on you"));
-			}
+		const readQuery = yield* ReadQueryEffectTag;
+		const pending = yield* readQuery.countPendingApprovalsBySession();
+		if (pending.some((approval) => approval.session_id === sessionId)) {
+			return yield* Effect.fail(new Error("Session is waiting on you"));
 		}
 		if (until !== null && (!Number.isFinite(until) || until <= Date.now())) {
 			return yield* Effect.fail(new Error("Snooze time must be in the future"));
@@ -1334,7 +1213,15 @@ export class SessionManagerServiceTag extends Context.Tag(
 export const SessionManagerServiceLive: Layer.Layer<
 	SessionManagerServiceTag,
 	never,
-	OpenCodeAPITag | SessionManagerStateTag | LoggerTag | DaemonEventBusTag
+	| OpenCodeAPITag
+	| SessionManagerStateTag
+	| LoggerTag
+	| DaemonEventBusTag
+	| OrchestrationEngineTag
+	| ReadQueryEffectTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
 > = Layer.effect(
 	SessionManagerServiceTag,
 	Effect.gen(function* () {
@@ -1345,15 +1232,11 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		const readQueryEffectOption =
-			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreEffectOption =
-			yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerEffectOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const engine = yield* OrchestrationEngineTag;
+		const readQuery = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		const backgroundLivenessOption = yield* Effect.serviceOption(
 			BackgroundLivenessTag,
@@ -1398,15 +1281,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(OpenCodeAPITag, api),
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				);
-				const withEffectRead =
-					readQueryEffectOption._tag === "Some"
-						? base.pipe(
-								Effect.provideService(
-									ReadQueryEffectTag,
-									readQueryEffectOption.value,
-								),
-							)
-						: base;
+				const withEffectRead = base.pipe(
+					Effect.provideService(ReadQueryEffectTag, readQuery),
+				);
 				return yield* snapshotOption._tag === "Some"
 					? withEffectRead.pipe(
 							Effect.provideService(
@@ -1420,16 +1297,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 			sessionId,
 		) =>
 			Effect.gen(function* () {
-				if (readQueryEffectOption._tag === "None") {
-					return {
-						type: "session_family" as const,
-						rootId: sessionId,
-						sessions: [],
-					};
-				}
 				const [rows, approvals, state] = yield* Effect.all([
-					readQueryEffectOption.value.getSessionFamily(sessionId),
-					readQueryEffectOption.value.countPendingApprovalsBySession(),
+					readQuery.getSessionFamily(sessionId),
+					readQuery.countPendingApprovalsBySession(),
 					Ref.get(stateRef),
 				]).pipe(
 					Effect.mapError(
@@ -1474,9 +1344,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					providerId: string,
 				) =>
 					Effect.sync(() => {
-						if (engineOption._tag === "Some") {
-							engineOption.value.bindSession(session.id, providerId);
-						}
+						engine.bindSession(session.id, providerId);
 					});
 				const resolveSelectedDriver = (
 					instanceId: ProviderInstanceId,
@@ -1523,6 +1391,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 								instanceId ?? "opencode",
 							).pipe(
 								Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
+								Effect.provideService(ReadQueryEffectTag, readQuery),
+								Effect.provideService(EventStoreEffectTag, eventStore),
+								Effect.provideService(
+									ProjectionRunnerEffectTag,
+									projectionRunner,
+								),
+								Effect.provideService(SqlClient.SqlClient, sql),
 								Effect.mapError(
 									(cause) =>
 										new SessionManagerError({
@@ -1534,7 +1409,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 						}),
 					);
 				const createViaLocal = (instanceId?: ProviderInstanceId) =>
-					Effect.either(createLocalSession(title, instanceId));
+					Effect.either(
+						createLocalSession(title, instanceId).pipe(
+							Effect.provideService(ReadQueryEffectTag, readQuery),
+							Effect.provideService(EventStoreEffectTag, eventStore),
+							Effect.provideService(
+								ProjectionRunnerEffectTag,
+								projectionRunner,
+							),
+							Effect.provideService(SqlClient.SqlClient, sql),
+						),
+					);
 
 				const selectedInstanceId = options?.instanceId;
 				if (selectedInstanceId !== undefined) {
@@ -1642,52 +1527,24 @@ export const SessionManagerServiceLive: Layer.Layer<
 				});
 			});
 
-		/**
-		 * Hand a mutating session command whatever persistence services this relay
-		 * actually has.
-		 *
-		 * Every one is conditional because a provider-API-only relay, and most unit
-		 * harnesses, wire none of them. `applySessionCommand` reads them all through
-		 * `Effect.serviceOption`, so a service that is absent from the context
-		 * quietly disables the durable half instead of failing — which is exactly
-		 * why this has to be assembled by hand rather than declared as a
-		 * requirement, and exactly why it must not be duplicated: a copy that
-		 * forgot one service would look like a command that silently never persists.
-		 */
 		const withSessionCommandServices = <A, E>(
-			effect: Effect.Effect<A, E>,
+			effect: Effect.Effect<
+				A,
+				E,
+				| OpenCodeAPITag
+				| ReadQueryEffectTag
+				| EventStoreEffectTag
+				| ProjectionRunnerEffectTag
+				| SqlClient.SqlClient
+			>,
 		): Effect.Effect<A, E> => {
-			let provided = effect.pipe(Effect.provideService(OpenCodeAPITag, api));
-			if (readQueryEffectOption._tag === "Some") {
-				provided = provided.pipe(
-					Effect.provideService(
-						ReadQueryEffectTag,
-						readQueryEffectOption.value,
-					),
-				);
-			}
-			if (eventStoreEffectOption._tag === "Some") {
-				provided = provided.pipe(
-					Effect.provideService(
-						EventStoreEffectTag,
-						eventStoreEffectOption.value,
-					),
-				);
-			}
-			if (projectionRunnerEffectOption._tag === "Some") {
-				provided = provided.pipe(
-					Effect.provideService(
-						ProjectionRunnerEffectTag,
-						projectionRunnerEffectOption.value,
-					),
-				);
-			}
-			if (sqlOption._tag === "Some") {
-				provided = provided.pipe(
-					Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-				);
-			}
-			return provided;
+			return effect.pipe(
+				Effect.provideService(OpenCodeAPITag, api),
+				Effect.provideService(ReadQueryEffectTag, readQuery),
+				Effect.provideService(EventStoreEffectTag, eventStore),
+				Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+				Effect.provideService(SqlClient.SqlClient, sql),
+			);
 		};
 
 		const triageLock = yield* Effect.makeSemaphore(1);
@@ -1729,19 +1586,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			listSessions: serviceListSessions,
-			sessionExists: (sessionId) => {
-				const base = sessionExists(sessionId).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-				);
-				return readQueryEffectOption._tag === "Some"
-					? base.pipe(
-							Effect.provideService(
-								ReadQueryEffectTag,
-								readQueryEffectOption.value,
-							),
-						)
-					: base;
-			},
+			sessionExists: (sessionId) =>
+				sessionExists(sessionId).pipe(
+					Effect.provideService(ReadQueryEffectTag, readQuery),
+				),
 			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
@@ -1759,6 +1607,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 					yield* deleteSession(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(ReadQueryEffectTag, readQuery),
+						Effect.provideService(EventStoreEffectTag, eventStore),
+						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+						Effect.provideService(SqlClient.SqlClient, sql),
 					);
 					yield* publishSessionDeleted(sessionId).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),
@@ -1834,6 +1686,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 				Effect.gen(function* () {
 					yield* setForkEntry(sessionId, entry, configDir).pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(ReadQueryEffectTag, readQuery),
+						Effect.provideService(EventStoreEffectTag, eventStore),
+						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+						Effect.provideService(SqlClient.SqlClient, sql),
 					);
 				}),
 			sendSessionLists: (send, options) =>

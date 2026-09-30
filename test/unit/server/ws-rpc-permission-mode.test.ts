@@ -122,6 +122,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							persistenceLayer: makePersistenceEffectLayer(":memory:"),
 							wsHandler,
 							log: makeMockLogger(),
 						}),
@@ -173,6 +174,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							persistenceLayer: makePersistenceEffectLayer(":memory:"),
 							wsHandler,
 							log: makeMockLogger(),
 						}),
@@ -181,7 +183,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					Layer.provideMerge(
 						Layer.succeed(ProviderRegistryTag, providerRegistry),
 					),
-					Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
 				),
 			),
 		);
@@ -242,6 +243,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(
 							makeTestHandlerLayer({
+								persistenceLayer: makePersistenceEffectLayer(":memory:"),
 								wsHandler,
 								log: makeMockLogger(),
 							}),
@@ -250,7 +252,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 						Layer.provideMerge(
 							Layer.succeed(ProviderRegistryTag, providerRegistry),
 						),
-						Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
 					),
 				),
 			);

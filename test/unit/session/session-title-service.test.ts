@@ -104,6 +104,7 @@ function makeTestLayer(input: {
 			input.sessionManager ?? makeMockSessionManagerService(),
 		),
 		...(input.config ? [Layer.succeed(ConfigTag, input.config)] : []),
+		makePersistenceEffectLayer(":memory:"),
 	);
 	return Layer.provideMerge(
 		makeSessionTitleServiceLive({

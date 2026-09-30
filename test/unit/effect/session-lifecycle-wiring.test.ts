@@ -11,6 +11,7 @@ import {
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	LoggerTag,
+	OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -21,6 +22,9 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
 	handleSessionCreated,
@@ -133,6 +137,11 @@ function makeServiceLifecycleTestLayer(
 		Layer.succeed(LoggerTag, services.log),
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
+		makePersistenceEffectLayer(":memory:"),
+		Layer.succeed(
+			OrchestrationEngineTag,
+			new OrchestrationEngine({ registry: new ProviderRegistry() }),
+		),
 	);
 
 	return Layer.mergeAll(wiringLayer, SessionManagerServiceLive).pipe(
@@ -244,7 +253,9 @@ describe("SessionLifecycleWiringLive", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				yield* flushSubscribers;
-				yield* service.createSession("Service Created");
+				yield* service.createSession("Service Created", {
+					providerId: "opencode",
+				});
 				yield* waitForAssertion(() =>
 					expect(services.pollerManager.startPolling).toHaveBeenCalled(),
 				);

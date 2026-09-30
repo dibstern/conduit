@@ -10,6 +10,7 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
@@ -48,6 +49,8 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -67,6 +70,7 @@ describe("SessionManager Effect", () => {
 		Layer.mergeAll(
 			makeSessionManagerStateLive(),
 			Layer.succeed(OpenCodeAPITag, mockApi as unknown as OpenCodeAPI),
+			makePersistenceEffectLayer(":memory:"),
 		);
 
 	const makeLiveServiceLayer = (
@@ -91,6 +95,10 @@ describe("SessionManager Effect", () => {
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				DaemonEventBusLive,
 				persistenceLayer,
+				Layer.succeed(
+					OrchestrationEngineTag,
+					new OrchestrationEngine({ registry: new ProviderRegistry() }),
+				),
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
 					: []),
@@ -101,31 +109,6 @@ describe("SessionManager Effect", () => {
 			),
 		);
 	};
-
-	it.effect("listSessions fetches from API and caches parent map", () => {
-		const mockApi = makeMockApi();
-		// Return sessions with a parentID to verify parent-map caching
-		mockApi.session.list.mockResolvedValue([
-			{ id: "child1", title: "Child", parentID: "parent1" },
-			{ id: "parent1", title: "Parent" },
-			// biome-ignore lint/suspicious/noExplicitAny: test mock with extra parentID field
-		] as any);
-
-		return Effect.gen(function* () {
-			const result = yield* listSessions();
-
-			expect(result).toHaveLength(2);
-			expect(mockApi.session.list).toHaveBeenCalled();
-
-			// Verify parent map was cached
-			const ref = yield* SessionManagerStateTag;
-			const state = yield* Ref.get(ref);
-			const parentId = HashMap.get(state.cachedParentMap, "child1").pipe(
-				Option.getOrNull,
-			);
-			expect(parentId).toBe("parent1");
-		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
-	});
 
 	it.effect("recordMessageActivity updates timestamp", () => {
 		const mockApi = makeMockApi();
@@ -584,16 +567,6 @@ describe("SessionManager Effect", () => {
 				),
 			);
 		},
-	);
-
-	it.effect(
-		"permission mode persistence is a no-op without persistence services",
-		() =>
-			Effect.gen(function* () {
-				expect(
-					yield* persistSessionPermissionMode("ses-no-persistence", "auto"),
-				).toBeUndefined();
-			}),
 	);
 
 	it.effect(

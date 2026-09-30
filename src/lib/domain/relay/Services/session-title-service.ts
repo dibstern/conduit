@@ -216,7 +216,12 @@ export const makeSessionTitleServiceLive = (
 ): Layer.Layer<
 	SessionTitleServiceTag,
 	never,
-	LoggerTag | SessionManagerServiceTag
+	| LoggerTag
+	| SessionManagerServiceTag
+	| ReadQueryEffectTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
 > =>
 	Layer.scoped(
 		SessionTitleServiceTag,
@@ -226,12 +231,10 @@ export const makeSessionTitleServiceLive = (
 			const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
 			const sessionManagerService = yield* SessionManagerServiceTag;
 			const configOption = yield* Effect.serviceOption(ConfigTag);
-			const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-			const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-			const projectionRunnerOption = yield* Effect.serviceOption(
-				ProjectionRunnerEffectTag,
-			);
-			const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+			const readQuery = yield* ReadQueryEffectTag;
+			const eventStore = yield* EventStoreEffectTag;
+			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			const sql = yield* SqlClient.SqlClient;
 			const inFlight = yield* Ref.make(HashSet.empty<string>());
 			const queryFactory =
 				options.queryFactory ?? ((params) => sdkQuery(params));
@@ -338,10 +341,8 @@ export const makeSessionTitleServiceLive = (
 
 			const applyTitleIfStillDefault = (sessionId: string, title: string) =>
 				Effect.gen(function* () {
-					if (readQueryOption._tag === "None") return false;
-
 					const currentResult = yield* Effect.either(
-						readQueryOption.value.getSession(sessionId),
+						readQuery.getSession(sessionId),
 					);
 					if (currentResult._tag === "Left") return false;
 
@@ -349,18 +350,6 @@ export const makeSessionTitleServiceLive = (
 					if (!current) return false;
 					if (!isClaudeSessionProvider(current.provider)) return false;
 					if (!isDefaultSessionTitle(current.title)) return false;
-					if (
-						eventStoreOption._tag === "None" ||
-						projectionRunnerOption._tag === "None" ||
-						sqlOption._tag === "None"
-					) {
-						return false;
-					}
-
-					const eventStore = eventStoreOption.value;
-					const projectionRunner = projectionRunnerOption.value;
-					const sql = sqlOption.value;
-
 					const recovered = yield* projectionRunner.isRecovered();
 					if (!recovered) {
 						yield* withSql(projectionRunner.recover(), sql).pipe(Effect.asVoid);

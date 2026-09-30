@@ -10,6 +10,7 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SessionManagerServiceLive,
@@ -21,6 +22,8 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import {
@@ -48,6 +51,10 @@ describe("relay automatic settlement sweep", () => {
 					),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(join(dir, "events.db")),
+					Layer.succeed(
+						OrchestrationEngineTag,
+						new OrchestrationEngine({ registry: new ProviderRegistry() }),
+					),
 				),
 			);
 			return Effect.gen(function* () {

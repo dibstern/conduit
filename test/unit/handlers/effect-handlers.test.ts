@@ -1370,6 +1370,7 @@ function makeForkSessionLayer(options?: {
 			notifySSEEvent: vi.fn(),
 		}),
 		makeOverridesStateLive(),
+		makePersistenceEffectLayer(":memory:"),
 	);
 }
 
@@ -3652,6 +3653,10 @@ describe("sendMessageToSession", () => {
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile),
+						Layer.succeed(
+							OrchestrationEngineTag,
+							new OrchestrationEngine({ registry: new ProviderRegistry() }),
+						),
 					),
 				);
 				return Effect.gen(function* () {

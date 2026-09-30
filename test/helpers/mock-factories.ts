@@ -84,8 +84,13 @@ import type {
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
-import type { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
+import {
+	makePersistenceEffectLayer,
+	type PersistenceEffectError,
+} from "../../src/lib/persistence/effect/live.js";
+import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
+import { ProviderRegistry } from "../../src/lib/provider/provider-registry.js";
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
@@ -839,6 +844,7 @@ export interface TestHandlerLayerOptions {
 	sessionTitleService?: SessionTitleService;
 	instanceMgmt?: InstanceManagementDeps;
 	orchestrationEngine?: OrchestrationEngine;
+	persistenceLayer?: ReturnType<typeof makePersistenceEffectLayer>;
 }
 
 /**
@@ -853,8 +859,8 @@ export interface TestHandlerLayerOptions {
  */
 export function makeTestHandlerLayer(
 	opts?: TestHandlerLayerOptions,
-	// biome-ignore lint/suspicious/noExplicitAny: Layer type union is too wide to spell out
-): Layer.Layer<any> {
+	// biome-ignore lint/suspicious/noExplicitAny: existing broad test Layer output; the persistence layer now has a typed failure channel
+): Layer.Layer<any, PersistenceEffectError> {
 	const api = opts?.api ?? makeMockOpenCodeAPI();
 	const wsHandler = opts?.wsHandler ?? makeMockWebSocketHandler();
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
@@ -905,6 +911,13 @@ export function makeTestHandlerLayer(
 		opts?.orchestrationEngine == null
 			? Layer.empty
 			: Layer.succeed(OrchestrationEngineTag, opts.orchestrationEngine);
+	const sessionManagerOrchestrationLayer = Layer.succeed(
+		OrchestrationEngineTag,
+		opts?.orchestrationEngine ??
+			new OrchestrationEngine({ registry: new ProviderRegistry() }),
+	);
+	const persistenceLayer =
+		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -966,6 +979,8 @@ export function makeTestHandlerLayer(
 						Layer.succeed(LoggerTag, log),
 						Layer.succeed(StatusPollerTag, statusPoller),
 						DaemonEventBusLive,
+						sessionManagerOrchestrationLayer,
+						persistenceLayer,
 					),
 				),
 			);
@@ -1006,6 +1021,7 @@ export function makeTestHandlerLayer(
 		PendingInteractionServiceLive,
 		providerTurnServiceLayer,
 		sessionManagerServiceLayer,
+		...(opts?.persistenceLayer ? [persistenceLayer] : []),
 		wsHandlerLayer,
 		overridesStateLayer,
 		ptyManagerLayer,
@@ -1074,8 +1090,8 @@ export function makeTestDaemonStateLayer(
  */
 export function makeTestFullLayer(
 	opts?: TestHandlerLayerOptions & TestDaemonStateLayerOptions,
-	// biome-ignore lint/suspicious/noExplicitAny: Layer type union is too wide to spell out
-): Layer.Layer<any> {
+	// biome-ignore lint/suspicious/noExplicitAny: existing broad test Layer output; the persistence layer now has a typed failure channel
+): Layer.Layer<any, PersistenceEffectError> {
 	return Layer.merge(
 		makeTestHandlerLayer(opts),
 		makeTestDaemonStateLayer(opts),

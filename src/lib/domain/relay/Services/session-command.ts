@@ -155,9 +155,6 @@ export const isClaudeSessionRow = (
  * does this effect, because a user told the session was deleted must not find
  * it still listed. Upstream sync is best-effort and cannot fail the command.
  *
- * When the SQLite services are absent (relay stacks that run without an event
- * store) the local write is skipped and only upstream sync runs, which is the
- * behaviour every mutating method had before this module existed.
  */
 export const applySessionCommand = (command: SessionCommand) =>
 	Effect.gen(function* () {
@@ -167,96 +164,83 @@ export const applySessionCommand = (command: SessionCommand) =>
 		const apiOption = yield* Effect.serviceOption(OpenCodeAPITag);
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const readQuery = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 
 		const { sessionId } = command.data;
-		let row: SessionRow | undefined;
 
-		if (
-			readQueryOption._tag === "Some" &&
-			eventStoreOption._tag === "Some" &&
-			projectionRunnerOption._tag === "Some" &&
-			sqlOption._tag === "Some"
-		) {
-			const eventStore = eventStoreOption.value;
-			const projectionRunner = projectionRunnerOption.value;
-			const sql = sqlOption.value;
-			const withSql = <A, E>(
-				effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-			): Effect.Effect<A, E> =>
-				effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+		const withSql = <A, E>(
+			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+		): Effect.Effect<A, E> =>
+			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
-			const recovered = yield* projectionRunner.isRecovered();
-			if (!recovered) {
-				yield* withSql(projectionRunner.recover()).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({
-								operation: `${command.type}.recover`,
-								cause,
-							}),
-					),
-					Effect.asVoid,
-				);
-			}
-
-			row = yield* readQueryOption.value.getSession(sessionId).pipe(
+		const recovered = yield* projectionRunner.isRecovered();
+		if (!recovered) {
+			yield* withSql(projectionRunner.recover()).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({
-							operation: `${command.type}.getSession`,
+							operation: `${command.type}.recover`,
+							cause,
+						}),
+				),
+				Effect.asVoid,
+			);
+		}
+
+		const row = yield* readQuery.getSession(sessionId).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionCommandError({
+						operation: `${command.type}.getSession`,
+						cause,
+					}),
+			),
+		);
+
+		// session.created is the one command that does not require an existing
+		// row — it is what brings the row into being, and its payload names the
+		// provider. Every other command describes a change to a row that must
+		// already be there: no row is not an error (it may already be gone, and
+		// upstream may still hold it), there is simply nothing to record.
+		// This is why forkOpenCodeSession applies session.created before any
+		// session.forked can land: an UPDATE onto a row that is not there yet
+		// writes nothing and reports success.
+		const appendProvider =
+			command.type === "session.created"
+				? command.data.provider
+				: row?.provider;
+
+		if (appendProvider !== undefined) {
+			const stored = yield* eventStore
+				.append(
+					canonicalEvent(command.type, sessionId, command.data, {
+						provider: appendProvider,
+						createdAt: Date.now(),
+						metadata: { source: "relay" },
+					}),
+				)
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionCommandError({
+								operation: `${command.type}.append`,
+								cause,
+							}),
+					),
+				);
+
+			yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionCommandError({
+							operation: `${command.type}.project`,
 							cause,
 						}),
 				),
 			);
-
-			// session.created is the one command that does not require an existing
-			// row — it is what brings the row into being, and its payload names the
-			// provider. Every other command describes a change to a row that must
-			// already be there: no row is not an error (it may already be gone, and
-			// upstream may still hold it), there is simply nothing to record.
-			// This is why forkOpenCodeSession applies session.created before any
-			// session.forked can land: an UPDATE onto a row that is not there yet
-			// writes nothing and reports success.
-			const appendProvider =
-				command.type === "session.created"
-					? command.data.provider
-					: row?.provider;
-
-			if (appendProvider !== undefined) {
-				const stored = yield* eventStore
-					.append(
-						canonicalEvent(command.type, sessionId, command.data, {
-							provider: appendProvider,
-							createdAt: Date.now(),
-							metadata: { source: "relay" },
-						}),
-					)
-					.pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionCommandError({
-									operation: `${command.type}.append`,
-									cause,
-								}),
-						),
-					);
-
-				yield* withSql(projectionRunner.projectEvent(stored)).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({
-								operation: `${command.type}.project`,
-								cause,
-							}),
-					),
-				);
-			}
 		}
 
 		// No adapter means no upstream to sync: the relay has no OpenCode API
@@ -369,7 +353,7 @@ export const forkOpenCodeSession = (
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 
 		// No retry: fork is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
@@ -386,15 +370,10 @@ export const forkOpenCodeSession = (
 			),
 		);
 
-		// A fork inherits its parent's provider. Forking is an OpenCode
-		// operation, so an unreadable parent can only mean the read model is not
-		// wired here at all — in which case nothing is projected anyway.
-		const parent =
-			readQueryOption._tag === "Some"
-				? yield* readQueryOption.value
-						.getSession(parentSessionId)
-						.pipe(Effect.orElseSucceed(() => undefined))
-				: undefined;
+		// A fork inherits its parent's provider when the row is readable.
+		const parent = yield* readQuery
+			.getSession(parentSessionId)
+			.pipe(Effect.orElseSucceed(() => undefined));
 
 		yield* applySessionCommand({
 			type: "session.created",
@@ -414,20 +393,18 @@ export const forkOpenCodeSession = (
 
 const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		const providerStateOption = yield* Effect.serviceOption(
 			ProviderStateEffectTag,
 		);
 		const persistOption = yield* Effect.serviceOption(
 			ClaudeEventPersistEffectTag,
 		);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const eventStore = yield* EventStoreEffectTag;
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		if (
-			readQueryOption._tag === "None" ||
 			providerStateOption._tag === "None" ||
 			persistOption._tag === "None" ||
-			eventStoreOption._tag === "None" ||
 			configOption._tag === "None"
 		) {
 			return yield* Effect.fail(
@@ -438,10 +415,8 @@ const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 				}),
 			);
 		}
-		const readQuery = readQueryOption.value;
 		const providerState = providerStateOption.value;
 		const persist = persistOption.value;
-		const eventStore = eventStoreOption.value;
 		const config = configOption.value;
 		const parent = yield* readQuery.getSession(parentSessionId);
 		if (!parent) {
@@ -551,14 +526,11 @@ const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 
 export const forkSession = (parentSessionId: string, messageId?: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const parent =
-			readQueryOption._tag === "Some"
-				? yield* readQueryOption.value
-						.getSession(parentSessionId)
-						.pipe(Effect.orElseSucceed(() => undefined))
-				: undefined;
+		const parent = yield* readQuery
+			.getSession(parentSessionId)
+			.pipe(Effect.orElseSucceed(() => undefined));
 		if (
 			parent &&
 			isClaudeSessionRow(
