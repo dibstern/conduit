@@ -845,7 +845,6 @@ export function handleMessage(msg: RelayMessage): void {
 				// Capture slot at start so commits go to the correct session.
 				const historyMsgs = msg.history.messages;
 				const hasMore = msg.history.hasMore;
-				const msgCount = historyMsgs.length;
 				const capturedSlot = getOrCreateSessionSlot(msg.id);
 				const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
 				capturedSlot.messages.historyLoading = true;
@@ -866,9 +865,7 @@ export function handleMessage(msg: RelayMessage): void {
 							);
 							restoreContextFromMessages(capturedSlot.messages);
 							capturedSlot.messages.historyHasMore = hasMore;
-							capturedSlot.messages.historyMessageCount = msgCount;
 							historyState.hasMore = hasMore;
-							historyState.messageCount = msgCount;
 							// Transition loadLifecycle so the scroll controller
 							// exits "loading" state and scrolls to bottom.
 							capturedSlot.messages.loadLifecycle = "ready";
@@ -1017,12 +1014,10 @@ export function handleMessage(msg: RelayMessage): void {
 								chatMsgs,
 							);
 							hpCapturedSlot.messages.historyHasMore = hasMore;
-							hpCapturedSlot.messages.historyMessageCount += rawMessages.length;
 						}
 						if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
 						if (stillCurrent) {
 							historyState.hasMore = hasMore;
-							historyState.messageCount += rawMessages.length;
 						}
 					}
 					if (stillCurrent) historyState.loading = false;

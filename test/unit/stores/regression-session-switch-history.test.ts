@@ -686,9 +686,8 @@ describe("Combined protocol: REST API fallback (history in session_switched)", (
 
 		const messages = getOrCreateSessionMessages("session-w");
 		expect(historyState.hasMore).toBe(true);
-		expect(historyState.messageCount).toBe(1);
+		expect(chatState.messages).toHaveLength(1);
 		expect(messages.historyHasMore).toBe(true);
-		expect(messages.historyMessageCount).toBe(1);
 		expect(messages.historyLoading).toBe(false);
 	});
 });
@@ -728,7 +727,6 @@ describe("history_page for history pagination", () => {
 		const messages = getOrCreateSessionMessages("session-c");
 		messages.historyLoading = true;
 		messages.historyHasMore = true;
-		messages.historyMessageCount = 50;
 
 		handleMessage({
 			type: "history_page",
@@ -746,7 +744,7 @@ describe("history_page for history pagination", () => {
 
 		expect(messages.historyLoading).toBe(false);
 		expect(messages.historyHasMore).toBe(false);
-		expect(messages.historyMessageCount).toBe(51);
+		expect(chatState.messages).toHaveLength(1);
 	});
 
 	it("multiple rapid session switches only keep last session's state", async () => {

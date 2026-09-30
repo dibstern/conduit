@@ -9,6 +9,7 @@
 	import {
 		consumeReplayBuffer,
 		currentChat,
+		getMessages,
 		getOrCreateSessionSlot,
 		getReplayBuffer,
 		prependMessages,
@@ -81,23 +82,23 @@
 			// at MAX_EVENTS, relay started after session creation, missed SSE
 			// events, etc.). The server is the source of truth: it will return
 			// { messages: [], hasMore: false } when this truly is the beginning.
-			// Ensure offset > 0 so the server uses cursor-based pagination
-			// rather than returning the most recent page (already displayed).
-			if (slot.messages.historyMessageCount === 0) {
-				slot.messages.historyMessageCount = 1;
-			}
 		}
 
 		// Server request for older messages.
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		slot.messages.historyLoading = true;
-		// offset = number of messages already loaded (tracked by ws-dispatch).
-		// For cache→server transitions, messageCount was seeded above.
+		const oldest = getMessages(slot.messages).find(
+			(message) =>
+				message.messageOrder?.id ||
+				("messageId" in message && message.messageId),
+		);
+		const before = oldest?.messageOrder?.id ??
+			(oldest && "messageId" in oldest ? oldest.messageId : undefined);
 		void loadMoreHistoryRpc({
 			projectSlug,
 			sessionId,
-			offset: slot.messages.historyMessageCount,
+			...(before ? { before } : {}),
 		})
 			.then((response) => {
 				handleMessage({
@@ -105,7 +106,6 @@
 					sessionId: response.sessionId,
 					messages: response.messages,
 					hasMore: response.hasMore,
-					...(response.total != null ? { total: response.total } : {}),
 				} as Extract<RelayMessage, { type: "history_page" }>);
 			})
 			.catch(() => {

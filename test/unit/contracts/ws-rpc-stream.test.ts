@@ -107,6 +107,10 @@ const makeLayer = (options: {
 					getSessionFamily: () => Effect.succeed([]),
 					countPendingApprovalsBySession: () => Effect.succeed([]),
 					getSessionMessagesWithParts: () => Effect.succeed([]),
+					readSessionTranscriptPage: () =>
+						options.failRead
+							? Effect.fail(readFailure)
+							: Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 					// The catch-up read answers from its floor, so the version it
 					// reports is the one the caller will next carry — stateless, and
 					// identical for every subscriber that asks the same question.
@@ -201,10 +205,6 @@ const makeObservedClient = (
 		return client;
 	});
 
-const initial = [
-	{ _tag: "snapshot", rows: [], sequence: 0 },
-	{ _tag: "synchronized" },
-];
 const deltas = (member: Member) =>
 	member === "SubscribeShell"
 		? [
@@ -224,6 +224,15 @@ const deltas = (member: Member) =>
 
 describe("RpcTest subscription stream semantics", () => {
 	for (const member of ["SubscribeShell", "SubscribeSessionDetail"] as const) {
+		const initial = [
+			{
+				_tag: "snapshot",
+				rows: [],
+				sequence: 0,
+				...(member === "SubscribeSessionDetail" ? { hasMore: false } : {}),
+			},
+			{ _tag: "synchronized" },
+		];
 		// Both handlers preserve the source's opening pair and subsequent chunks.
 		const handlerChunks = [
 			initial,

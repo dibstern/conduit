@@ -579,7 +579,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 		//   offset=0  → most recent pageSize messages
 		//   offset=50 → the 50 messages before those
 
-		it("property: first page returns most recent pageSize messages", async () => {
+		it("property: initial REST history returns most recent pageSize messages", async () => {
 			const client = createMockClient([
 				{
 					id: "ses_h",
@@ -587,43 +587,18 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					time: { created: 1000, updated: 1000 },
 				},
 			]);
-
-			// Add 120 messages (msg_0 oldest, msg_119 newest)
 			const msgs: Message[] = Array.from({ length: 120 }, (_, i) => ({
 				id: `msg_${i}`,
 				role: i % 2 === 0 ? "user" : "assistant",
 				sessionID: "ses_h",
 			})) as Message[];
 			client._messages.set("ses_h", msgs);
-
 			const mgr = new SessionManager({ client, historyPageSize: 50 });
-
-			// offset=0: most recent 50 (msg_70..msg_119)
-			const page1 = await mgr.loadHistory("ses_h", 0);
-			expect(page1.messages.length).toBe(50);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(page1.messages[0]!.id).toBe("msg_70");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(page1.messages[49]!.id).toBe("msg_119");
-			expect(page1.hasMore).toBe(true);
-
-			// offset=50: next older 50 (msg_20..msg_69) via cursor
-			const page2 = await mgr.loadHistory("ses_h", 50);
-			expect(page2.messages.length).toBe(50);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(page2.messages[0]!.id).toBe("msg_20");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(page2.messages[49]!.id).toBe("msg_69");
-			expect(page2.hasMore).toBe(true);
-
-			// offset=100: oldest 20 (msg_0..msg_19) via cursor
-			const page3 = await mgr.loadHistory("ses_h", 100);
-			expect(page3.messages.length).toBe(20);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(page3.messages[0]!.id).toBe("msg_0");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(page3.messages[19]!.id).toBe("msg_19");
-			expect(page3.hasMore).toBe(false);
+			const page = await mgr.loadHistory("ses_h");
+			expect(page.messages.map((message) => message.id)).toEqual(
+				Array.from({ length: 50 }, (_, i) => `msg_${i + 70}`),
+			);
+			expect(page.hasMore).toBe(true);
 		});
 
 		it("property: pageSize configurable", async () => {
@@ -651,7 +626,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 							historyPageSize: pageSize,
 						});
 						// offset=0: most recent pageSize messages
-						const page = await mgr.loadHistory("ses_p", 0);
+						const page = await mgr.loadHistory("ses_p");
 
 						expect(page.messages.length).toBe(Math.min(pageSize, msgCount));
 						// Cursor-based pagination: hasMore = page.length >= pageSize,

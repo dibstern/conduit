@@ -52,18 +52,11 @@ export interface SwitchClientOptions {
 /** Narrowed deps for switchClientToSession — only what's needed, nothing more. */
 export interface SessionSwitchDeps {
 	readonly sessionMgr: {
-		loadPreRenderedHistory(
-			sessionId: string,
-			offset?: number,
-		): Promise<{
+		loadPreRenderedHistory(sessionId: string): Promise<{
 			messages: HistoryMessage[];
 			hasMore: boolean;
 			total?: number;
 		}>;
-		seedPaginationCursor(
-			sessionId: string,
-			messageId: string,
-		): void | Promise<void>;
 		getLastMessageAtMap?(): ReadonlyMap<string, number>;
 	};
 	readonly wsHandler: {
@@ -129,27 +122,6 @@ export function countUniqueMessages(events: readonly RelayMessage[]): number {
 		}
 	}
 	return messageIds.size + userMessageCount;
-}
-
-/**
- * Extract the oldest OpenCode message ID from cached events.
- *
- * Iterates events in chronological order, returning the first `messageId`
- * found. This is used to seed the pagination cursor so that server-based
- * history loading can pick up where the event cache leaves off.
- *
- * Returns undefined if no events carry a messageId (e.g. only user_message
- * events with no assistant responses).
- */
-export function extractOldestMessageId(
-	events: readonly RelayMessage[],
-): string | undefined {
-	for (const e of events) {
-		if ("messageId" in e && typeof e.messageId === "string" && e.messageId) {
-			return e.messageId;
-		}
-	}
-	return undefined;
 }
 
 /**
@@ -254,7 +226,7 @@ export function buildSessionSwitchedMessage(
 
 export function resolveSessionHistoryFromRows(
 	rows: MessageWithParts[],
-	opts: { pageSize: number },
+	opts: { pageSize: number; hasMore?: boolean },
 ): SessionHistorySource {
 	if (rows.length === 0) {
 		return { kind: "empty" };
@@ -266,7 +238,7 @@ export function resolveSessionHistoryFromRows(
 
 	return {
 		kind: "rest-history",
-		history: { messages, hasMore },
+		history: { messages, hasMore: opts.hasMore ?? hasMore },
 	};
 }
 
@@ -326,7 +298,7 @@ export async function switchClientToSession(
 
 	deps.wsHandler.setClientSession(clientId, sessionId);
 
-	// Resolve history source — cache-first, paginated REST fallback, no full-fetch
+	// Resolve history source for the selected session.
 	const source: SessionHistorySource = options?.skipHistory
 		? { kind: "empty" }
 		: await resolveSessionHistory(sessionId, deps);
@@ -339,24 +311,6 @@ export async function switchClientToSession(
 	const patchedSource = patchMissingDone(source, deps.statusPoller, sessionId, {
 		hasActiveProcessingTimeout: () => hasActiveTimeout,
 	});
-
-	// Seed pagination cursor only when the returned history is incomplete
-	// (hasMore=true). Complete histories cover the full session — no server
-	// fallback needed.
-	if (patchedSource.kind === "cached-events" && patchedSource.hasMore) {
-		const oldestMsgId = extractOldestMessageId(patchedSource.events);
-		if (oldestMsgId) {
-			await deps.sessionMgr.seedPaginationCursor(sessionId, oldestMsgId);
-		}
-	} else if (
-		patchedSource.kind === "rest-history" &&
-		patchedSource.history.hasMore
-	) {
-		const oldestMsgId = patchedSource.history.messages[0]?.id;
-		if (oldestMsgId) {
-			await deps.sessionMgr.seedPaginationCursor(sessionId, oldestMsgId);
-		}
-	}
 
 	// Build and send session_switched
 	const draft = deps.getInputDraft(sessionId);

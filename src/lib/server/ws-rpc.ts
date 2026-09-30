@@ -1295,14 +1295,13 @@ export const wsRpcHandlers = WsRpcGroup.of({
 	LoadMoreHistory: (request) =>
 		loadMoreHistoryForSession({
 			sessionId: request.sessionId,
-			offset: request.offset,
+			...(request.before ? { before: request.before } : {}),
 		}).pipe(
 			Effect.map((page) => ({
 				projectSlug: request.projectSlug,
 				sessionId: page.sessionId,
 				messages: page.messages,
 				hasMore: page.hasMore,
-				...(page.total != null ? { total: page.total } : {}),
 			})),
 			Effect.catchAll((error) =>
 				Effect.fail(

@@ -54,7 +54,6 @@ export type SessionMessages = {
 	loadLifecycle: LoadLifecycle;
 	contextPercent: number;
 	historyHasMore: boolean;
-	historyMessageCount: number;
 	historyLoading: boolean;
 	toolRegistry: ToolRegistry;
 	/** Working copy of messages during replay. Null when not replaying.
@@ -96,7 +95,6 @@ export function createEmptySessionMessages(): SessionMessages {
 		loadLifecycle: "empty",
 		contextPercent: 0,
 		historyHasMore: false,
-		historyMessageCount: 0,
 		historyLoading: false,
 		toolRegistry: createToolRegistry(),
 		replayBatch: null,
@@ -475,12 +473,10 @@ export function phaseEndReplay(
 export const historyState = $state({
 	/** Whether there are more history pages to fetch from the server.
 	 *  Defaults to false (disarmed). Set to true only when the server
-	 *  explicitly says there are more pages (REST fallback with hasMore). */
+	 *  explicitly says there are more pages. */
 	hasMore: false,
 	/** Whether a history page request is in-flight. */
 	loading: false,
-	/** Count of REST-level messages loaded via history (for pagination offset). */
-	messageCount: 0,
 });
 
 // ─── Input Sync State ───────────────────────────────────────────────────────
@@ -1692,7 +1688,6 @@ export function activateSessionChatState(sessionId: string): void {
 
 	historyState.hasMore = messages?.historyHasMore ?? false;
 	historyState.loading = messages?.historyLoading ?? false;
-	historyState.messageCount = messages?.historyMessageCount ?? 0;
 }
 
 export function clearMessages(): void {
@@ -1732,7 +1727,6 @@ export function clearMessages(): void {
 	}
 	historyState.hasMore = false;
 	historyState.loading = false;
-	historyState.messageCount = 0;
 }
 
 // ─── Part/message removal handlers ───────────────────────────────────────────

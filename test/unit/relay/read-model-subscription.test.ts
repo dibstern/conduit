@@ -148,6 +148,63 @@ const withBus = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.provide(effect, SessionEventBusLive);
 
 describe("ReadModelSubscription", () => {
+	it.scoped("preserves page info on cold and overflow snapshots", () =>
+		withBus(
+			Effect.gen(function* () {
+				const bus = yield* SessionEventBusTag;
+				const droppedBus: SessionEventBus = {
+					...bus,
+					subscribeAdvances: () =>
+						Effect.map(bus.subscribeAdvances(), (advances) =>
+							Stream.map(advances, (advance) => ({
+								...advance,
+								dropped: true,
+							})),
+						),
+				};
+				const fake = yield* makeFakeSource<Row>();
+				yield* fake.commit(1, row("old"));
+				const source: SubscriptionSource<Row> = {
+					...fake.source,
+					read: (range) =>
+						Effect.map(fake.source.read(range), (result) =>
+							range === undefined
+								? {
+										...result,
+										hasMore: true,
+										...(result.rows[0] === undefined
+											? {}
+											: { cursor: result.rows[0].item.title }),
+									}
+								: result,
+						),
+				};
+
+				const { queue } = yield* subscribe({ source, bus: droppedBus });
+				expect(yield* Queue.take(queue)).toEqual({
+					_tag: "snapshot",
+					rows: [{ title: "old" }],
+					sequence: 1,
+					hasMore: true,
+					cursor: "old",
+				});
+				expect(yield* Queue.take(queue)).toEqual({ _tag: "synchronized" });
+
+				yield* fake.commit(2, row("new"));
+				yield* bus.publishAdvance(advance(2));
+				expect(yield* Queue.take(queue)).toEqual({
+					_tag: "snapshot",
+					rows: [{ title: "old" }, { title: "new" }],
+					sequence: 2,
+					hasMore: true,
+					cursor: "old",
+				});
+				expect(yield* Queue.take(queue)).toEqual({ _tag: "synchronized" });
+				expect(yield* Ref.get(fake.calls)).toEqual([undefined, undefined]);
+			}),
+		),
+	);
+
 	it.scoped("cold start emits snapshot, synchronized, then re-queries", () =>
 		withBus(
 			Effect.gen(function* () {

@@ -397,7 +397,7 @@ export interface ListDaemonSessionsRpcInput {
 export interface LoadMoreHistoryRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
-	readonly offset: number;
+	readonly before?: string;
 }
 
 export interface RewindSessionRpcInput {

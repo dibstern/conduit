@@ -175,6 +175,13 @@ export class ReadQueryEffectError extends Data.TaggedError(
 	readonly cause: unknown;
 }> {}
 
+export class TranscriptPageCursorNotFoundError extends Data.TaggedError(
+	"TranscriptPageCursorNotFoundError",
+)<{
+	readonly sessionId: string;
+	readonly before: string;
+}> {}
+
 export interface ReadQueryEffect {
 	readonly getToolContent: (
 		toolId: string,
@@ -254,6 +261,17 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+	readonly readSessionTranscriptPage: (
+		sessionId: string,
+		options: { readonly before?: string; readonly limit: number },
+	) => Effect.Effect<
+		{
+			readonly messages: MessageWithParts[];
+			readonly hasMore: boolean;
+			readonly version: number;
+		},
+		ReadQueryEffectError | SqlError | TranscriptPageCursorNotFoundError
+	>;
 
 	/**
 	 * The session-list rows that moved inside `range`, each with the version it
@@ -330,6 +348,49 @@ function groupMessagesWithParts(
 		...message,
 		parts: partsByMessage.get(message.id) ?? [],
 	}));
+}
+
+type MessageWithTurnModelRow = MessageRow & {
+	turn_requested_model: string | null;
+	turn_expected_model: string | null;
+	turn_actual_model: string | null;
+};
+
+function groupMessagesWithPartsAndTurnModels(
+	messages: readonly MessageWithTurnModelRow[],
+	parts: readonly MessagePartRow[],
+): MessageWithParts[] {
+	const partsByMessage = new Map<string, MessagePartRow[]>();
+	for (const part of parts) {
+		const existing = partsByMessage.get(part.message_id) ?? [];
+		existing.push(part);
+		partsByMessage.set(part.message_id, existing);
+	}
+	return messages.map((message) => {
+		const {
+			turn_requested_model,
+			turn_expected_model,
+			turn_actual_model,
+			...messageRow
+		} = message;
+		return {
+			...messageRow,
+			parts: partsByMessage.get(message.id) ?? [],
+			...(turn_actual_model === null
+				? {}
+				: {
+						modelExecution: {
+							...(turn_requested_model === null
+								? {}
+								: { requestedModel: turn_requested_model }),
+							...(turn_expected_model === null
+								? {}
+								: { expectedModel: turn_expected_model }),
+							actualModel: turn_actual_model,
+						},
+					}),
+		};
+	});
 }
 
 export const makeReadQueryEffect = Effect.gen(function* () {
@@ -621,13 +682,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		sessionId: string,
 	): Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const messages = yield* sql<
-				MessageRow & {
-					turn_requested_model: string | null;
-					turn_expected_model: string | null;
-					turn_actual_model: string | null;
-				}
-			>`
+			const messages = yield* sql<MessageWithTurnModelRow>`
 				SELECT messages.*,
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
@@ -648,41 +703,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
-			const partsByMessage = new Map<string, MessagePartRow[]>();
-			for (const part of parts) {
-				let existing = partsByMessage.get(part.message_id);
-				if (!existing) {
-					existing = [];
-					partsByMessage.set(part.message_id, existing);
-				}
-				existing.push(part);
-			}
-
-			return messages.map((message) => {
-				const {
-					turn_requested_model,
-					turn_expected_model,
-					turn_actual_model,
-					...messageRow
-				} = message;
-				return {
-					...messageRow,
-					parts: partsByMessage.get(message.id) ?? [],
-					...(turn_actual_model === null
-						? {}
-						: {
-								modelExecution: {
-									...(turn_requested_model === null
-										? {}
-										: { requestedModel: turn_requested_model }),
-									...(turn_expected_model === null
-										? {}
-										: { expectedModel: turn_expected_model }),
-									actualModel: turn_actual_model,
-								},
-							}),
-				};
-			});
+			return groupMessagesWithPartsAndTurnModels(messages, parts);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -713,6 +734,81 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			SELECT value FROM read_model_counter WHERE id = 1`;
 		return rows[0]?.value ?? 0;
 	});
+
+	const readSessionTranscriptPage = (
+		sessionId: string,
+		options: { readonly before?: string; readonly limit: number },
+	): Effect.Effect<
+		{
+			readonly messages: MessageWithParts[];
+			readonly hasMore: boolean;
+			readonly version: number;
+		},
+		ReadQueryEffectError | SqlError | TranscriptPageCursorNotFoundError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const cursor =
+						options.before !== undefined
+							? (yield* sql<{ created_at: number; id: string }>`
+									SELECT created_at, id FROM messages
+									WHERE session_id = ${sessionId} AND id = ${options.before}`)[0]
+							: undefined;
+					if (options.before !== undefined && !cursor) {
+						return yield* new TranscriptPageCursorNotFoundError({
+							sessionId,
+							before: options.before,
+						});
+					}
+					const rows = cursor
+						? yield* sql<MessageWithTurnModelRow>`
+								SELECT messages.*,
+									turns.requested_model AS turn_requested_model,
+									turns.expected_model AS turn_expected_model,
+									turns.actual_model AS turn_actual_model
+								FROM messages
+								LEFT JOIN turns ON turns.id = messages.turn_id
+								WHERE messages.session_id = ${sessionId}
+									AND (messages.created_at < ${cursor.created_at}
+										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
+								ORDER BY messages.created_at DESC, messages.id DESC
+								LIMIT ${options.limit + 1}`
+						: yield* sql<MessageWithTurnModelRow>`
+								SELECT messages.*,
+									turns.requested_model AS turn_requested_model,
+									turns.expected_model AS turn_expected_model,
+									turns.actual_model AS turn_actual_model
+								FROM messages
+								LEFT JOIN turns ON turns.id = messages.turn_id
+								WHERE messages.session_id = ${sessionId}
+								ORDER BY messages.created_at DESC, messages.id DESC
+								LIMIT ${options.limit + 1}`;
+					const page = rows.slice(0, options.limit).reverse();
+					const parts = page.length
+						? yield* sql<MessagePartRow>`
+								SELECT * FROM message_parts
+								WHERE message_id IN ${sql.in(page.map((message) => message.id))}
+								ORDER BY message_id, sort_order`
+						: [];
+					return {
+						messages: groupMessagesWithPartsAndTurnModels(page, parts),
+						hasMore: rows.length > options.limit,
+						version,
+					};
+				}),
+			)
+			.pipe(
+				Effect.mapError((cause) =>
+					cause instanceof TranscriptPageCursorNotFoundError
+						? cause
+						: new ReadQueryEffectError({
+								operation: "readSessionTranscriptPage",
+								cause,
+							}),
+				),
+			);
 
 	const readSessionList = (range?: {
 		readonly after?: number;
@@ -890,6 +986,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listPendingClaudeQuestionTools,
 		getPendingClaudeQuestionTool,
 		getSessionMessagesWithParts,
+		readSessionTranscriptPage,
 		readSessionList,
 		readSessionTranscript,
 		getLatestTurnModelExecution,

@@ -1264,16 +1264,13 @@ describe("historyState", () => {
 	it("defaults hasMore to false and loading to false after clearMessages", () => {
 		expect(historyState.hasMore).toBe(false);
 		expect(historyState.loading).toBe(false);
-		expect(historyState.messageCount).toBe(0);
 	});
 
 	it("clearMessages resets historyState", () => {
 		historyState.hasMore = true;
 		historyState.loading = true;
-		historyState.messageCount = 42;
 		clearMessages();
 		expect(historyState.hasMore).toBe(false);
 		expect(historyState.loading).toBe(false);
-		expect(historyState.messageCount).toBe(0);
 	});
 });

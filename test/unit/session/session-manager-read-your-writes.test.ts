@@ -40,8 +40,6 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "getDefaultSessionId"
 	| "getLastKnownSessionCount"
 	| "listSessions"
-	| "clearPaginationCursor"
-	| "seedPaginationCursor"
 	| "loadPreRenderedHistory"
 	| "recordMessageActivity"
 	| "addToParentMap"

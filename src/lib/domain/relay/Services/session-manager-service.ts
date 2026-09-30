@@ -37,7 +37,7 @@ import {
 	resolveInstanceDriver,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
-import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
+import { formatErrorDetail } from "../../../errors.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import type {
 	SessionDetail,
@@ -695,7 +695,6 @@ export const deleteSession = (sessionId: string) =>
 		const deleted = new Set([sessionId, ...childSessionIds]);
 		yield* Ref.update(stateRef, (s) => {
 			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
-			const paginationCursors = HashMap.remove(s.paginationCursors, sessionId);
 
 			const cachedParentMap = HashMap.filter(
 				s.cachedParentMap,
@@ -705,7 +704,6 @@ export const deleteSession = (sessionId: string) =>
 			return {
 				cachedParentMap,
 				lastMessageAt,
-				paginationCursors,
 				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
 		});
@@ -1114,165 +1112,21 @@ export const unsnoozeSession = (sessionId: string) =>
 		Effect.withSpan("session.unsnoozeSession", { attributes: { sessionId } }),
 	);
 
-/**
- * Clear the stored pagination cursor for a session.
- */
-export const clearPaginationCursor = (sessionId: string) =>
-	Effect.gen(function* () {
-		const stateRef = yield* SessionManagerStateTag;
-		yield* Ref.update(stateRef, (s) => ({
-			...s,
-			paginationCursors: HashMap.remove(s.paginationCursors, sessionId),
-		}));
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.clearPaginationCursor", {
-			attributes: { sessionId },
-		}),
-	);
-
-/**
- * Seed a pagination cursor without overwriting a cursor already advanced by load-more.
- */
-export const seedPaginationCursor = (sessionId: string, messageId: string) =>
-	Effect.gen(function* () {
-		const stateRef = yield* SessionManagerStateTag;
-		yield* Ref.update(stateRef, (s) => {
-			if (HashMap.has(s.paginationCursors, sessionId)) {
-				return s;
-			}
-			return {
-				...s,
-				paginationCursors: HashMap.set(
-					s.paginationCursors,
-					sessionId,
-					messageId,
-				),
-			};
-		});
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.seedPaginationCursor", {
-			attributes: { sessionId },
-		}),
-	);
-
-const loadHistoryByCursorScan = (sessionId: string, cursorId: string) =>
+/** Load the newest REST page for initial OpenCode history while backfill runs. */
+export const loadHistory = (sessionId: string, options?: LoadHistoryOptions) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
-		const all = yield* Effect.tryPromise({
+		const historyPageSize =
+			options?.historyPageSize ?? DEFAULT_HISTORY_PAGE_SIZE;
+		const page = yield* Effect.tryPromise({
 			try: () =>
-				api.session.messagesPage(sessionId, { limit: CURSOR_SCAN_LIMIT }),
+				api.session.messagesPage(sessionId, { limit: historyPageSize }),
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "loadHistoryByCursorScan",
-						cause,
-					}),
+				(cause) => new SessionManagerError({ operation: "loadHistory", cause }),
 			),
 		);
-
-		const cursorIdx = all.findIndex((message) => message.id === cursorId);
-		if (cursorIdx <= 0) {
-			return { messages: [], hasMore: false } satisfies HistoryPage;
-		}
-
-		return {
-			messages: all.slice(0, cursorIdx) as unknown as HistoryMessage[],
-			hasMore: false,
-		} satisfies HistoryPage;
-	});
-
-/**
- * Load one page of session history and maintain the service-owned pagination cursor.
- */
-export const loadHistory = (
-	sessionId: string,
-	offset = 0,
-	options?: LoadHistoryOptions,
-) =>
-	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
-		const stateRef = yield* SessionManagerStateTag;
-		const log = yield* LoggerTag;
-		const historyPageSize =
-			options?.historyPageSize ?? DEFAULT_HISTORY_PAGE_SIZE;
-		const state = yield* Ref.get(stateRef);
-		const cursorOption =
-			offset > 0 ? HashMap.get(state.paginationCursors, sessionId) : undefined;
-		const before =
-			cursorOption?._tag === "Some" ? cursorOption.value : undefined;
-
-		if (offset > 0 && !before) {
-			return { messages: [], hasMore: false } satisfies HistoryPage;
-		}
-
-		const fetchPage = (requestOptions: { limit: number; before?: string }) =>
-			Effect.tryPromise({
-				try: () => api.session.messagesPage(sessionId, requestOptions),
-				catch: (cause) => cause,
-			});
-
-		const page = yield* fetchPage({
-			limit: historyPageSize,
-			...(before ? { before } : {}),
-		}).pipe(
-			Effect.catchAll((cause) => {
-				if (
-					before &&
-					cause instanceof OpenCodeApiError &&
-					cause.responseStatus === 400
-				) {
-					return Effect.gen(function* () {
-						log.warn(
-							`Pagination cursor failed for ${sessionId.slice(0, 12)} — falling back to full fetch`,
-						);
-						yield* clearPaginationCursor(sessionId);
-
-						if (offset > 0) {
-							return yield* loadHistoryByCursorScan(sessionId, before);
-						}
-
-						const retryPage = yield* fetchPage({ limit: historyPageSize }).pipe(
-							Effect.mapError(
-								(retryCause) =>
-									new SessionManagerError({
-										operation: "loadHistory",
-										cause: retryCause,
-									}),
-							),
-						);
-						return {
-							messages: retryPage as unknown as HistoryMessage[],
-							hasMore: retryPage.length >= historyPageSize,
-						} satisfies HistoryPage;
-					});
-				}
-
-				return Effect.fail(
-					new SessionManagerError({ operation: "loadHistory", cause }),
-				);
-			}),
-		);
-
-		if ("messages" in page) {
-			return page;
-		}
-
-		const oldest = page[0];
-		if (oldest) {
-			yield* Ref.update(stateRef, (s) => ({
-				...s,
-				paginationCursors: HashMap.set(
-					s.paginationCursors,
-					sessionId,
-					oldest.id,
-				),
-			}));
-		}
-
 		return {
 			messages: page as unknown as HistoryMessage[],
 			hasMore: page.length >= historyPageSize,
@@ -1287,11 +1141,10 @@ export const loadHistory = (
  */
 export const loadPreRenderedHistory = (
 	sessionId: string,
-	offset?: number,
 	options?: LoadHistoryOptions,
 ) =>
 	Effect.gen(function* () {
-		const page = yield* loadHistory(sessionId, offset, options);
+		const page = yield* loadHistory(sessionId, options);
 		const renderer = yield* Effect.tryPromise(
 			() => import("../../../relay/markdown-renderer.js"),
 		).pipe(
@@ -1456,14 +1309,8 @@ export interface SessionManagerService {
 		sessionId: string,
 		upTo: number,
 	): Effect.Effect<boolean, SessionManagerError>;
-	clearPaginationCursor(sessionId: string): Effect.Effect<void>;
-	seedPaginationCursor(
-		sessionId: string,
-		messageId: string,
-	): Effect.Effect<void>;
 	loadPreRenderedHistory(
 		sessionId: string,
-		offset?: number,
 	): Effect.Effect<HistoryPage, SessionManagerError>;
 	recordMessageActivity(
 		sessionId: string,
@@ -2160,15 +2007,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				triageLock.withPermits(1)(
 					withSessionCommandServices(unsnoozeSession(sessionId)),
 				),
-			clearPaginationCursor: (sessionId) =>
-				clearPaginationCursor(sessionId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			seedPaginationCursor: (sessionId, messageId) =>
-				seedPaginationCursor(sessionId, messageId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			loadPreRenderedHistory: (sessionId, offset) =>
+			loadPreRenderedHistory: (sessionId) =>
 				Effect.gen(function* () {
 					const sessionResult =
 						readQueryEffectOption._tag === "Some"
@@ -2197,7 +2036,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								)
 							: undefined;
-					return yield* loadPreRenderedHistory(sessionId, offset).pipe(
+					return yield* loadPreRenderedHistory(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
 						Effect.provideService(LoggerTag, log),

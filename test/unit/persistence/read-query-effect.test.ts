@@ -847,6 +847,170 @@ describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
 	);
 });
 
+describe("ReadQueryEffect.readSessionTranscriptPage", () => {
+	it.effect("pages across messages with the same timestamp without gaps", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES
+				('m-a', 's1', 'user', 'a', 1, 1),
+				('m-b', 's1', 'user', 'b', 2, 2),
+				('m-c', 's1', 'user', 'c', 2, 2),
+				('m-d', 's1', 'user', 'd', 2, 2),
+				('m-e', 's1', 'user', 'e', 3, 3)`;
+			const readQuery = yield* makeReadQueryEffect;
+			const first = yield* readQuery.readSessionTranscriptPage("s1", {
+				limit: 2,
+			});
+			const firstCursor = first.messages[0];
+			if (!firstCursor) throw new Error("expected newest page");
+			const second = yield* readQuery.readSessionTranscriptPage("s1", {
+				before: firstCursor.id,
+				limit: 2,
+			});
+			expect(first.messages.map((message) => message.id)).toEqual([
+				"m-d",
+				"m-e",
+			]);
+			expect(first.hasMore).toBe(true);
+			expect(second.messages.map((message) => message.id)).toEqual([
+				"m-b",
+				"m-c",
+			]);
+			expect(second.hasMore).toBe(true);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("ends at the first message with its parts and turn model", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO turns
+				(id, session_id, state, user_message_id, requested_at,
+				 requested_model, expected_model, actual_model)
+				VALUES ('turn-1', 's1', 'completed', 'm-a', 1,
+				 'sonnet', 'claude-sonnet-5', 'claude-sonnet-5')`;
+			yield* sql`
+				INSERT INTO messages
+				(id, session_id, turn_id, role, text, created_at, updated_at)
+				VALUES
+				('m-a', 's1', 'turn-1', 'user', 'a', 1, 1),
+				('m-b', 's1', NULL, 'assistant', 'b', 2, 2)`;
+			yield* sql`
+				INSERT INTO message_parts
+				(id, message_id, type, text, sort_order, created_at, updated_at)
+				VALUES ('part-a', 'm-a', 'text', 'part text', 0, 1, 1)`;
+			yield* sql`UPDATE read_model_counter SET value = 7 WHERE id = 1`;
+			const readQuery = yield* makeReadQueryEffect;
+			const newest = yield* readQuery.readSessionTranscriptPage("s1", {
+				limit: 1,
+			});
+			const newestCursor = newest.messages[0];
+			if (!newestCursor) throw new Error("expected newest message");
+			const oldest = yield* readQuery.readSessionTranscriptPage("s1", {
+				before: newestCursor.id,
+				limit: 1,
+			});
+			expect(newest.hasMore).toBe(true);
+			expect(oldest.hasMore).toBe(false);
+			expect(oldest.version).toBe(7);
+			expect(oldest.messages).toMatchObject([
+				{
+					id: "m-a",
+					parts: [{ id: "part-a", text: "part text" }],
+					modelExecution: {
+						requestedModel: "sonnet",
+						expectedModel: "claude-sonnet-5",
+						actualModel: "claude-sonnet-5",
+					},
+				},
+			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("rejects a cursor absent from this session", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			yield* seedSession("s2");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES ('other-message', 's2', 'user', 'other', 1, 1)`;
+			const readQuery = yield* makeReadQueryEffect;
+			for (const before of ["missing", "other-message"]) {
+				const result = yield* Effect.either(
+					readQuery.readSessionTranscriptPage("s1", { before, limit: 50 }),
+				);
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "TranscriptPageCursorNotFoundError",
+						sessionId: "s1",
+						before,
+					},
+				});
+			}
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("keeps older pages stable when newer messages arrive", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			yield* seedSession("s1");
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`
+				INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES
+				('m-a', 's1', 'user', 'a', 1, 1),
+				('m-b', 's1', 'user', 'b', 2, 2),
+				('m-c', 's1', 'user', 'c', 2, 2),
+				('m-d', 's1', 'user', 'd', 2, 2),
+				('m-e', 's1', 'user', 'e', 3, 3)`;
+			const readQuery = yield* makeReadQueryEffect;
+			const first = yield* readQuery.readSessionTranscriptPage("s1", {
+				limit: 2,
+			});
+			const firstCursor = first.messages[0];
+			if (!firstCursor) throw new Error("expected newest page");
+			yield* sql`
+				INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES
+				('m-f', 's1', 'user', 'newer', 4, 4),
+				('m-z', 's1', 'user', 'same timestamp, larger id', 2, 2)`;
+			const second = yield* readQuery.readSessionTranscriptPage("s1", {
+				before: firstCursor.id,
+				limit: 2,
+			});
+			const secondCursor = second.messages[0];
+			if (!secondCursor) throw new Error("expected second page");
+			const third = yield* readQuery.readSessionTranscriptPage("s1", {
+				before: secondCursor.id,
+				limit: 2,
+			});
+			expect(
+				[...third.messages, ...second.messages, ...first.messages].map(
+					(message) => message.id,
+				),
+			).toEqual(["m-a", "m-b", "m-c", "m-d", "m-e"]);
+			expect([first.hasMore, second.hasMore, third.hasMore]).toEqual([
+				true,
+				true,
+				false,
+			]);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
 // ─── The session list reads (ni8.5 T-1) ─────────────────────────────────────
 // These two reads are the only producers of the single session type, so the
 // `sessions` projection reaches the wire and the browser already shaped for

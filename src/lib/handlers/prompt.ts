@@ -273,7 +273,6 @@ export const rewindSessionToMessage = ({
 }) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		const messages = yield* Effect.tryPromise(() =>
@@ -291,7 +290,6 @@ export const rewindSessionToMessage = ({
 		yield* Effect.tryPromise(() =>
 			client.session.revert(sessionId, { messageID: messageId }),
 		);
-		yield* sessionManagerService.clearPaginationCursor(sessionId);
 		log.info(
 			`client=${clientId} session=${sessionId} Reverted to message: ${messageId}`,
 		);

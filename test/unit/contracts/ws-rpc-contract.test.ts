@@ -1234,7 +1234,7 @@ describe("browser WebSocket RPC contract", () => {
 				const history = yield* client.LoadMoreHistory({
 					projectSlug: "demo",
 					sessionId: "session-1",
-					offset: 50,
+					before: "message-1",
 				});
 				expect(history).toEqual({
 					projectSlug: "demo",
@@ -1530,7 +1530,7 @@ describe("browser WebSocket RPC contract", () => {
 			new LoadMoreHistory({
 				projectSlug: "demo",
 				sessionId: "session-1",
-				offset: 50,
+				before: "message-1",
 			})._tag,
 		).toBe("LoadMoreHistory");
 		expect(

@@ -646,8 +646,6 @@ async function createEffectHarness(
 			setSessionPinned: unused,
 			snoozeSession: unused,
 			unsnoozeSession: unused,
-			clearPaginationCursor: unused,
-			seedPaginationCursor: unused,
 			loadPreRenderedHistory: unused,
 			recordMessageActivity: unused,
 			addToParentMap: unused,

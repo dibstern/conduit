@@ -86,9 +86,9 @@ describe("HistoryLoader component", () => {
 		// Reset state — use per-session slot (need both activity + messages for currentChat())
 		sessionState.currentId = "test-session";
 		const { messages: sm } = getOrCreateSessionSlot("test-session");
+		getMessages(sm).length = 0;
 		sm.historyHasMore = false;
 		sm.historyLoading = false;
-		sm.historyMessageCount = 0;
 	});
 
 	afterEach(() => {
@@ -118,7 +118,6 @@ describe("HistoryLoader component", () => {
 		const sentinel = document.createElement("div");
 		const sm = getOrCreateSessionMessages("test-session");
 		sm.historyHasMore = true;
-		sm.historyMessageCount = 50;
 
 		render(HistoryLoader, { props: { sentinelEl: sentinel } });
 		flushSync();
@@ -131,7 +130,6 @@ describe("HistoryLoader component", () => {
 		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledWith({
 			projectSlug: "test-project",
 			sessionId: "test-session",
-			offset: 50,
 		});
 		expect(sm.historyLoading).toBe(true);
 	});
@@ -199,11 +197,24 @@ describe("HistoryLoader component", () => {
 		expect(observedElements).toHaveLength(0);
 	});
 
-	it("uses correct offset from per-session historyMessageCount", async () => {
+	it("uses the oldest held message id as the cursor", async () => {
 		const sentinel = document.createElement("div");
 		const sm = getOrCreateSessionMessages("test-session");
 		sm.historyHasMore = true;
-		sm.historyMessageCount = 150; // 3 pages loaded already
+		getMessages(sm).push(
+			{
+				type: "user",
+				uuid: "older",
+				text: "older",
+				messageOrder: { id: "m-old", createdAt: 1 },
+			},
+			{
+				type: "user",
+				uuid: "newer",
+				text: "newer",
+				messageOrder: { id: "m-new", createdAt: 2 },
+			},
+		);
 
 		render(HistoryLoader, { props: { sentinelEl: sentinel } });
 		flushSync();
@@ -212,7 +223,7 @@ describe("HistoryLoader component", () => {
 		observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
 
 		expect(loadMoreHistoryRpcSpy).toHaveBeenCalledWith(
-			expect.objectContaining({ offset: 150 }),
+			expect.objectContaining({ before: "m-old" }),
 		);
 	});
 
@@ -220,7 +231,6 @@ describe("HistoryLoader component", () => {
 		const sentinel = document.createElement("div");
 		const sm = getOrCreateSessionMessages("test-session");
 		sm.historyHasMore = true;
-		sm.historyMessageCount = 50;
 		loadMoreHistoryRpcSpy.mockResolvedValueOnce({
 			projectSlug: "test-project",
 			sessionId: "test-session",
@@ -232,7 +242,6 @@ describe("HistoryLoader component", () => {
 				},
 			],
 			hasMore: false,
-			total: 51,
 		});
 
 		render(HistoryLoader, { props: { sentinelEl: sentinel } });
@@ -243,7 +252,6 @@ describe("HistoryLoader component", () => {
 
 		await waitFor(() => expect(sm.historyLoading).toBe(false));
 		expect(sm.historyHasMore).toBe(false);
-		expect(sm.historyMessageCount).toBe(51);
 		expect(getMessages(sm)).toEqual([
 			expect.objectContaining({ type: "user", text: "older message" }),
 		]);
@@ -278,7 +286,6 @@ describe("HistoryLoader buffer → server fallback", () => {
 		tm = slot.messages;
 		tm.historyHasMore = false;
 		tm.historyLoading = false;
-		tm.historyMessageCount = 0;
 	});
 
 	afterEach(() => {

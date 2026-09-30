@@ -60,7 +60,6 @@ function snapMessages(m: SessionMessages) {
 		loadLifecycle: m.loadLifecycle,
 		contextPercent: m.contextPercent,
 		historyHasMore: m.historyHasMore,
-		historyMessageCount: m.historyMessageCount,
 		historyLoading: m.historyLoading,
 		replayBatch: m.replayBatch,
 		replayBuffer: m.replayBuffer,

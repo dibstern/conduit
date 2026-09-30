@@ -24,7 +24,6 @@ import {
 	setDefaultVariant,
 	setPermissionMode,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { loadMoreHistoryForSession } from "../../../src/lib/handlers/session.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -146,6 +145,9 @@ function makeEmptyHistoryReadQuery(
 		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+		readSessionTranscriptPage: vi.fn(() =>
+			Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+		),
 	};
 }
 
@@ -154,30 +156,34 @@ function makeOpenCodeHistoryReadQuery(
 	count = 1,
 	provider = "opencode",
 ): ReadQueryEffect {
+	const rows = Array.from({ length: count }, (_, index) => ({
+		id: `projected-${index + 1}`,
+		session_id: "requested-session",
+		turn_id: "turn-1",
+		role: "user",
+		text: "Projected prompt",
+		cost: null,
+		tokens_in: null,
+		tokens_out: null,
+		tokens_cache_read: null,
+		tokens_cache_write: null,
+		context_window: null,
+		version: 0,
+		is_streaming: 0,
+		is_backfilled: 1,
+		created_at: 1,
+		updated_at: 1,
+		parts: [],
+	}));
 	return {
 		...makeEmptyHistoryReadQuery(provider, null, historyComplete),
-		getSessionMessagesWithParts: vi.fn(() =>
-			Effect.succeed(
-				Array.from({ length: count }, (_, index) => ({
-					id: `projected-${index + 1}`,
-					session_id: "requested-session",
-					turn_id: "turn-1",
-					role: "user",
-					text: "Projected prompt",
-					cost: null,
-					tokens_in: null,
-					tokens_out: null,
-					tokens_cache_read: null,
-					tokens_cache_write: null,
-					context_window: null,
-					version: 0,
-					is_streaming: 0,
-					is_backfilled: 1,
-					created_at: 1,
-					updated_at: 1,
-					parts: [],
-				})),
-			),
+		getSessionMessagesWithParts: vi.fn(() => Effect.succeed(rows)),
+		readSessionTranscriptPage: vi.fn((_sessionId, { limit }) =>
+			Effect.succeed({
+				messages: rows.slice(-limit),
+				hasMore: rows.length > limit,
+				version: 0,
+			}),
 		),
 	};
 }
@@ -213,46 +219,14 @@ function makeClientInitEffectLayer(
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
-	it("continues before the oldest projected page after switching to REST", async () => {
-		let historyComplete = true;
-		let cursor: string | undefined;
-		const complete = makeOpenCodeHistoryReadQuery(1, 120);
-		const incomplete = makeOpenCodeHistoryReadQuery(0, 120);
-		const readQuery: ReadQueryEffect = {
-			...complete,
-			getSession: () =>
-				historyComplete
-					? complete.getSession("requested-session")
-					: incomplete.getSession("requested-session"),
-		};
-		const loadPreRenderedHistory = vi.fn((_sessionId: string, offset = 0) =>
-			Effect.sync(() => {
-				const end = offset === 0 ? 120 : Number(cursor?.split("-")[1]) - 1;
-				const start = Math.max(1, end - 49);
-				const messages = Array.from(
-					{ length: end - start + 1 },
-					(_, index) => ({
-						id: `projected-${start + index}`,
-						role: "user" as const,
-					}),
-				);
-				cursor = messages[0]?.id;
-				return { messages, hasMore: start > 1 };
-			}),
+	it("reads only the newest projected page on connect", async () => {
+		const readQuery = makeOpenCodeHistoryReadQuery(1, 120);
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.fail(new Error("projection should serve initial history")),
 		);
 		const { wsHandler, layer } = makeClientInitEffectLayer(
 			readQuery,
 			loadPreRenderedHistory,
-			{
-				clearPaginationCursor: () =>
-					Effect.sync(() => {
-						cursor = undefined;
-					}),
-				seedPaginationCursor: (_sessionId, messageId) =>
-					Effect.sync(() => {
-						cursor ??= messageId;
-					}),
-			},
 		);
 		await Effect.runPromise(
 			handleClientConnectedEffect("client-1", "requested-session").pipe(
@@ -269,59 +243,13 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 		expect(initial.history?.messages.map((message) => message.id)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `projected-${index + 71}`),
 		);
-		const older = await Effect.runPromise(
-			loadMoreHistoryForSession({
-				sessionId: "requested-session",
-				offset: 50,
-			}).pipe(Effect.provide(layer)),
-		);
-		expect(older.messages.map((message) => message.id)).toEqual(
-			Array.from({ length: 50 }, (_, index) => `projected-${index + 21}`),
-		);
-		historyComplete = false;
-		const oldest = await Effect.runPromise(
-			loadMoreHistoryForSession({
-				sessionId: "requested-session",
-				offset: 100,
-			}).pipe(Effect.provide(layer)),
-		);
-		expect(oldest.messages.map((message) => message.id)).toEqual(
-			Array.from({ length: 20 }, (_, index) => `projected-${index + 1}`),
-		);
-	});
-	it("resets an old REST cursor to the projected first-page boundary", async () => {
-		let cursor: string | undefined = "rest-oldest";
-		const clearPaginationCursor = vi.fn(() =>
-			Effect.sync(() => {
-				cursor = undefined;
-			}),
-		);
-		const seedPaginationCursor = vi.fn(
-			(_sessionId: string, messageId: string) =>
-				Effect.sync(() => {
-					cursor ??= messageId;
-				}),
-		);
-		const loadPreRenderedHistory = vi.fn(() =>
-			Effect.fail(new Error("projection should serve initial history")),
-		);
-		const { layer } = makeClientInitEffectLayer(
-			makeOpenCodeHistoryReadQuery(1, 100),
-			loadPreRenderedHistory,
-			{ clearPaginationCursor, seedPaginationCursor },
-		);
-		await Effect.runPromise(
-			handleClientConnectedEffect("client-1", "requested-session").pipe(
-				Effect.provide(layer),
-			),
-		);
-		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-		expect(cursor).toBe("projected-51");
-		expect(clearPaginationCursor).toHaveBeenCalledWith("requested-session");
-		expect(seedPaginationCursor).toHaveBeenCalledWith(
+		expect(initial.history?.hasMore).toBe(true);
+		expect(readQuery.readSessionTranscriptPage).toHaveBeenCalledWith(
 			"requested-session",
-			"projected-51",
+			{ limit: 50 },
 		);
+		expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
+		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
 	});
 
 	for (const historyComplete of [1, 0]) {

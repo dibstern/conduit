@@ -213,18 +213,21 @@ async function projectedHistory(
 	dbPath: string,
 	sessionId: string,
 	pageSize = 50,
-	offset = 0,
+	before?: string,
 ) {
-	const rows = await readStore(
+	const page = await readStore(
 		dbPath,
 		Effect.flatMap(makeReadQueryEffect, (readQuery) =>
-			readQuery.getSessionMessagesWithParts(sessionId),
+			readQuery.readSessionTranscriptPage(sessionId, {
+				limit: pageSize,
+				...(before ? { before } : {}),
+			}),
 		),
 	);
-	return resolveSessionHistoryFromRows(
-		rows.slice(0, Math.max(0, rows.length - offset)),
-		{ pageSize },
-	);
+	return resolveSessionHistoryFromRows(page.messages, {
+		pageSize,
+		hasMore: page.hasMore,
+	});
 }
 
 /**
@@ -312,13 +315,16 @@ async function runPaginationDifferential(count: number) {
 			client: paginationHarness.stack.client,
 		});
 		const rest = await providerHistory.loadPreRenderedHistory(sessionId);
-		const olderRest = await providerHistory.loadPreRenderedHistory(
+		const projected = await projectedHistory(dbPath, sessionId, 50);
+		const before = served.messages[0]?.id;
+		if (!before) throw new Error("served page has no cursor");
+		const older = await client2.loadMoreHistory(sessionId, before);
+		const projectedOlder = await projectedHistory(
+			dbPath,
 			sessionId,
 			50,
+			before,
 		);
-		const projected = await projectedHistory(dbPath, sessionId, 50);
-		const older = await client2.loadMoreHistory(sessionId, 50);
-		const projectedOlder = await projectedHistory(dbPath, sessionId, 50, 50);
 		expect(projected.kind).toBe("rest-history");
 		const projectedRest =
 			projected.kind === "rest-history"
@@ -357,10 +363,8 @@ async function runPaginationDifferential(count: number) {
 			restHasMore: rest.hasMore,
 			servedHasMore: served.hasMore,
 			projectedHasMore: projectedRest.hasMore,
-			olderRestSummary: summarize(olderRest.messages),
 			olderSummary: summarize(older.messages),
 			projectedOlderSummary: summarize(projectedOlderRest.messages),
-			olderRestHasMore: olderRest.hasMore,
 			olderHasMore: older.hasMore,
 			projectedOlderHasMore: projectedOlderRest.hasMore,
 			// The REST timestamp proves this comparison uses provider data; the
@@ -1072,12 +1076,10 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(result.servedHasMore).toBe(true);
 		expect(result.projectedHasMore).toBe(true);
 		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
-		expect(result.olderRestSummary).toEqual(result.projectedOlderSummary);
 		expect(result.olderSummary).toHaveLength(6);
 		expect(result.olderSummary[0]?.id).toBe("msg-001");
 		expect(result.olderSummary[5]?.id).toBe("msg-006");
 		expect(result.olderHasMore).toBe(false);
-		expect(result.olderRestHasMore).toBe(false);
 		expect(result.projectedOlderHasMore).toBe(false);
 	}, 45_000);
 
@@ -1097,7 +1099,6 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(result.servedHasMore).toBe(false);
 		expect(result.projectedHasMore).toBe(false);
 		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
-		expect(result.olderRestSummary).toEqual(result.projectedOlderSummary);
 		expect(result.olderSummary).toHaveLength(0);
 	}, 45_000);
 

@@ -963,6 +963,9 @@ describe("switchModelForSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
@@ -1313,7 +1316,6 @@ function mockSessionManager(
 		})),
 		sendSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
-		clearPaginationCursor: vi.fn(),
 		...overrides,
 	} as unknown as SessionManagerShape;
 }
@@ -1451,6 +1453,9 @@ describe("handleGetToolContent", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -2730,6 +2735,9 @@ describe("handleNewSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
@@ -2844,33 +2852,38 @@ describe("handleNewSession", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() =>
-					Effect.succeed([
-						{
-							id: "user-1",
-							session_id: "session-1",
-							turn_id: "turn-1",
-							role: "user",
-							text: "",
-							cost: null,
-							tokens_in: null,
-							tokens_out: null,
-							tokens_cache_read: null,
-							tokens_cache_write: null,
-							context_window: null,
-							version: 0,
-							is_streaming: 0,
-							is_backfilled: 0,
-							created_at: 1,
-							updated_at: 1,
-							parts: [],
-							modelExecution: {
-								requestedModel: "sonnet",
-								expectedModel: "claude-sonnet-5",
-								actualModel: "claude-fable-4-0",
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({
+						messages: [
+							{
+								id: "user-1",
+								session_id: "session-1",
+								turn_id: "turn-1",
+								role: "user",
+								text: "",
+								cost: null,
+								tokens_in: null,
+								tokens_out: null,
+								tokens_cache_read: null,
+								tokens_cache_write: null,
+								context_window: null,
+								version: 0,
+								is_streaming: 0,
+								is_backfilled: 0,
+								created_at: 1,
+								updated_at: 1,
+								parts: [],
+								modelExecution: {
+									requestedModel: "sonnet",
+									expectedModel: "claude-sonnet-5",
+									actualModel: "claude-fable-4-0",
+								},
 							},
-						},
-					]),
+						],
+						hasMore: false,
+						version: 0,
+					}),
 				),
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
@@ -2976,6 +2989,9 @@ describe("handleNewSession", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -3470,6 +3486,38 @@ describe("loadMoreHistoryForSession", () => {
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
+			readSessionTranscriptPage: vi.fn(() =>
+				Effect.succeed({
+					messages: [
+						{
+							id: "user-1",
+							session_id: "session-1",
+							turn_id: "turn-1",
+							role: "user" as const,
+							text: "Earlier prompt",
+							cost: null,
+							tokens_in: null,
+							tokens_out: null,
+							tokens_cache_read: null,
+							tokens_cache_write: null,
+							context_window: null,
+							version: 0,
+							is_streaming: 0,
+							is_backfilled: 0,
+							created_at: 1,
+							updated_at: 1,
+							parts: [],
+							modelExecution: {
+								requestedModel: "sonnet",
+								expectedModel: "claude-sonnet-5",
+								actualModel: "claude-fable-4-0",
+							},
+						},
+					],
+					hasMore: false,
+					version: 0,
+				}),
+			),
 			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			getSessionFamily: () => Effect.succeed([]),
@@ -3511,7 +3559,6 @@ describe("loadMoreHistoryForSession", () => {
 
 		return loadMoreHistoryForSession({
 			sessionId: "session-1",
-			offset: 0,
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap((result) => {
@@ -3521,159 +3568,9 @@ describe("loadMoreHistoryForSession", () => {
 					actualModel: "claude-fable-4-0",
 					drifted: true,
 				});
-				expect(result).toMatchObject({ hasMore: false, total: 1 });
+				expect(result).toMatchObject({ hasMore: false });
+				expect(result).not.toHaveProperty("total");
 				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-			}),
-		);
-	});
-
-	it.effect("adds projected model execution to OpenCode history", () => {
-		const loadPreRenderedHistory = vi.fn(() =>
-			Effect.succeed({
-				messages: [
-					{
-						id: "user-1",
-						role: "user" as const,
-						text: "Earlier prompt",
-						parts: [],
-					},
-				],
-				hasMore: false,
-				total: 1,
-			}),
-		);
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory,
-		});
-		const readQuery = {
-			getToolContent: vi.fn(() => Effect.succeed(undefined)),
-			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-			getSession: vi.fn(() =>
-				Effect.succeed({
-					id: "session-1",
-					provider: "opencode",
-					provider_sid: "provider-session-1",
-					version: 0,
-					title: "OpenCode",
-					status: "idle",
-					parent_id: null,
-					fork_point_event: null,
-					last_message_at: 1,
-					last_turn_error_at: null,
-					permission_mode: null,
-					read_at: null,
-					settled_at: null,
-					pinned_at: null,
-					snoozed_at: null,
-					snoozed_until: null,
-					woken_at: null,
-					woken_reason: null,
-					created_at: 1,
-					updated_at: 1,
-				}),
-			),
-			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-			getSessionsForReconciliation: () => Effect.succeed([]),
-			listSessions: vi.fn(() => Effect.succeed([])),
-			listSessionInfos: vi.fn(() => Effect.succeed([])),
-			readSessionTranscript: vi.fn(() =>
-				Effect.succeed({ messages: [], version: 0 }),
-			),
-			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
-			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-			getSessionFamily: () => Effect.succeed([]),
-			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-			getSessionMessagesWithParts: vi.fn(() =>
-				Effect.succeed([
-					{
-						id: "user-1",
-						session_id: "session-1",
-						turn_id: "turn-1",
-						role: "user",
-						text: "",
-						cost: null,
-						tokens_in: null,
-						tokens_out: null,
-						tokens_cache_read: null,
-						tokens_cache_write: null,
-						context_window: null,
-						version: 0,
-						is_streaming: 0,
-						is_backfilled: 0,
-						created_at: 1,
-						updated_at: 1,
-						parts: [],
-						modelExecution: {
-							requestedModel: "sonnet",
-							expectedModel: "claude-sonnet-5",
-							actualModel: "claude-fable-4-0",
-						},
-					},
-				]),
-			),
-		} satisfies ReadQueryEffect;
-		const layer = Layer.merge(
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
-		);
-
-		return loadMoreHistoryForSession({
-			sessionId: "session-1",
-			offset: 0,
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap((result) => {
-				expect(result.messages[0]).toMatchObject({
-					id: "user-1",
-					text: "Earlier prompt",
-					modelExecution: {
-						requestedModel: "sonnet",
-						expectedModel: "claude-sonnet-5",
-						actualModel: "claude-fable-4-0",
-						drifted: true,
-					},
-				});
-				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 0);
-			}),
-		);
-	});
-
-	it.effect("loads history page through SessionManagerService", () => {
-		const page = {
-			messages: [
-				{
-					id: "msg-1",
-					role: "assistant" as const,
-					parts: [{ id: "part-1", type: "text" as const, text: "hello" }],
-				},
-			],
-			hasMore: true,
-			total: 10,
-		};
-		const loadPreRenderedHistory = vi.fn(() => Effect.succeed(page));
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory,
-		});
-
-		const layer = Layer.succeed(
-			SessionManagerServiceTag,
-			sessionManagerService,
-		);
-
-		return loadMoreHistoryForSession({
-			sessionId: "session-1",
-			offset: 50,
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap((result) => {
-				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 50);
-				expect(result).toEqual({
-					sessionId: "session-1",
-					messages: page.messages,
-					hasMore: true,
-					total: 10,
-				});
 			}),
 		);
 	});
@@ -4225,18 +4122,8 @@ describe("syncInputDraftForSession", () => {
 });
 
 describe("rewindSessionToMessage", () => {
-	it.effect("reverts to a specific message and clears cursor", () => {
+	it.effect("reverts to a specific message", () => {
 		const log = mockLogger();
-		const legacyClearPaginationCursor = vi.fn(() => {
-			throw new Error("legacy clearPaginationCursor should not be used");
-		});
-		const _sessionMgr = mockSessionManager({
-			clearPaginationCursor: legacyClearPaginationCursor,
-		});
-		const clearPaginationCursor = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			clearPaginationCursor,
-		});
 		const client = {
 			session: {
 				messages: vi.fn(async () => [{ id: "msg-1" }]),
@@ -4246,7 +4133,6 @@ describe("rewindSessionToMessage", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(LoggerTag, log),
 		);
 
@@ -4260,8 +4146,6 @@ describe("rewindSessionToMessage", () => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
 					messageID: "msg-1",
 				});
-				expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
-				expect(legacyClearPaginationCursor).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalled();
 			}),
 		);
@@ -4513,6 +4397,9 @@ describe("handleMessage", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -4901,6 +4788,9 @@ describe("handleMessage", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),

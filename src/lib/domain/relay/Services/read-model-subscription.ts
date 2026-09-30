@@ -75,13 +75,17 @@ export interface SubscriptionSource<T, E = never> {
 	/**
 	 * The rows this subscription serves that moved inside `range`, each with the
 	 * version it moved at, and the read-model version the answer is current
-	 * through. Omit `range` for the full set. Rows and version must be read
+	 * through. Omit `range` for a base read; a source may bound that base and
+	 * return page information for snapshots. Rows and version must be read
 	 * coherently: the version is what the subscriber will resume from.
 	 */
-	readonly read: (
-		range?: VersionRange,
-	) => Effect.Effect<
-		{ readonly rows: readonly VersionedRow<T>[]; readonly version: number },
+	readonly read: (range?: VersionRange) => Effect.Effect<
+		{
+			readonly rows: readonly VersionedRow<T>[];
+			readonly version: number;
+			readonly hasMore?: boolean;
+			readonly cursor?: string;
+		},
 		E
 	>;
 	/** Route one advance. Called for every advance; must not touch the store. */
@@ -159,6 +163,8 @@ export const stream = <T, E = never>(options: {
 							_tag: "snapshot" as const,
 							rows: base.rows.map(({ item }) => item),
 							sequence: base.version,
+							...(base.hasMore === undefined ? {} : { hasMore: base.hasMore }),
+							...(base.cursor === undefined ? {} : { cursor: base.cursor }),
 						},
 					];
 			opening.push({ _tag: "synchronized" as const });
@@ -178,6 +184,12 @@ export const stream = <T, E = never>(options: {
 									_tag: "snapshot",
 									rows: replacement.rows.map(({ item }) => item),
 									sequence: replacement.version,
+									...(replacement.hasMore === undefined
+										? {}
+										: { hasMore: replacement.hasMore }),
+									...(replacement.cursor === undefined
+										? {}
+										: { cursor: replacement.cursor }),
 								},
 								{ _tag: "synchronized" },
 							];

@@ -180,10 +180,10 @@ describe("Regression: no dual-render duplication", () => {
 	});
 });
 
-// ─── messageCount accumulation and offset correctness ───────────────────────
+// ─── History page accumulation ───────────────────────────────────────────────
 
-describe("messageCount tracking for pagination offset", () => {
-	it("REST fallback sets messageCount to initial page size", async () => {
+describe("history page accumulation", () => {
+	it("REST fallback displays the initial page", async () => {
 		routerState.path = "/s/s1";
 		handleMessage({
 			type: "session_switched",
@@ -212,11 +212,11 @@ describe("messageCount tracking for pagination offset", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		expect(historyState.messageCount).toBe(3);
+		expect(chatState.messages).toHaveLength(3);
 		expect(historyState.hasMore).toBe(true);
 	});
 
-	it("history_page increments messageCount (not resets)", async () => {
+	it("history_page prepends each older page without dropping messages", async () => {
 		// Initial page: 3 messages
 		routerState.path = "/s/s2";
 		handleMessage({
@@ -245,7 +245,7 @@ describe("messageCount tracking for pagination offset", () => {
 			},
 		});
 		await vi.runAllTimersAsync();
-		expect(historyState.messageCount).toBe(3);
+		expect(chatState.messages).toHaveLength(3);
 
 		// Second page: 2 more messages
 		handleMessage({
@@ -267,8 +267,7 @@ describe("messageCount tracking for pagination offset", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		// Should accumulate: 3 + 2 = 5
-		expect(historyState.messageCount).toBe(5);
+		expect(chatState.messages).toHaveLength(5);
 		expect(historyState.hasMore).toBe(true);
 
 		// Third page: final 1 message
@@ -286,12 +285,11 @@ describe("messageCount tracking for pagination offset", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		// Should accumulate: 5 + 1 = 6
-		expect(historyState.messageCount).toBe(6);
+		expect(chatState.messages).toHaveLength(6);
 		expect(historyState.hasMore).toBe(false);
 	});
 
-	it("session switch resets messageCount to 0", async () => {
+	it("session switch clears the visible history", async () => {
 		// Load with history
 		routerState.path = "/s/s3";
 		handleMessage({
@@ -310,17 +308,17 @@ describe("messageCount tracking for pagination offset", () => {
 			},
 		});
 		await vi.runAllTimersAsync();
-		expect(historyState.messageCount).toBe(1);
+		expect(chatState.messages).toHaveLength(1);
 
-		// Switch away — must reset (clearMessages resets synchronously)
+		// Switch away — the old session's messages must leave the visible list.
 		routerState.path = "/s/s4";
 		handleMessage({ type: "session_switched", id: "s4", sessionId: "s4" });
-		expect(historyState.messageCount).toBe(0);
+		expect(chatState.messages).toHaveLength(0);
 		expect(historyState.hasMore).toBe(false);
 		expect(historyState.loading).toBe(false);
 	});
 
-	it("events cache path leaves messageCount at 0", async () => {
+	it("events cache path does not offer older pages", async () => {
 		routerState.path = "/s/s5";
 		handleMessage({
 			type: "session_switched",
@@ -334,8 +332,6 @@ describe("messageCount tracking for pagination offset", () => {
 		});
 		await vi.runAllTimersAsync();
 
-		// Events path doesn't use REST-level message counting
-		expect(historyState.messageCount).toBe(0);
 		expect(historyState.hasMore).toBe(false);
 	});
 

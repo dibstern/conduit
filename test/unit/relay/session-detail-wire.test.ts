@@ -64,6 +64,49 @@ const testLayer = () => {
 };
 
 describe("session detail wire", () => {
+	it.effect(
+		"an upsert outside the bounded snapshot sends a whole message",
+		() =>
+			Effect.gen(function* () {
+				const outside: SessionDetailItem = {
+					_tag: "transcriptMessage",
+					message: {
+						id: "old",
+						role: "assistant",
+						text: "Older text",
+						parts: [{ id: "old-part", type: "text", text: "Older text" }],
+					},
+				};
+				const input: SessionDetailEnvelope[] = [
+					{
+						_tag: "snapshot",
+						rows: [row("Newer")],
+						sequence: 1,
+						hasMore: true,
+						cursor: "m",
+					},
+					{ _tag: "synchronized" },
+					{ _tag: "upsert", item: outside, sequence: 2 },
+				];
+				const wire = Chunk.toReadonlyArray(
+					yield* Stream.fromIterable(input).pipe(
+						encodeSessionDetail,
+						Stream.map(wireRoundTrip),
+						Stream.runCollect,
+					),
+				);
+				expect(wire[2]).toEqual(input[2]);
+				expect(
+					Chunk.toReadonlyArray(
+						yield* Stream.fromIterable(wire).pipe(
+							decodeSessionDetail,
+							Stream.runCollect,
+						),
+					),
+				).toEqual(input);
+			}),
+	);
+
 	for (const seed of ["snapshot", "replay", "live"] as const) {
 		it.effect(
 			`caps retained prefixes at eight with ${seed} seeding and decodes evicted rows`,

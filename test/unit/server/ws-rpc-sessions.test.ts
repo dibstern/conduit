@@ -12,7 +12,6 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
-import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
@@ -245,7 +244,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			time: { created: 9 },
 		} as unknown as Awaited<ReturnType<typeof api.session.message>>);
 		const setForkEntry = vi.fn(() => Effect.void);
-		const clearPaginationCursor = vi.fn(() => Effect.void);
 		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
@@ -258,7 +256,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 					},
 				]),
 			),
-			clearPaginationCursor,
 			setForkEntry,
 			pushViewerFamilies,
 		});
@@ -285,7 +282,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(api.session.fork).toHaveBeenCalledWith("session-1", {
 				messageID: "message-1",
 			});
-			expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
 			// The fork command commits its boundary with creation. The handler
 			// must not recompute it and append a second lineage event.
 			expect(setForkEntry).not.toHaveBeenCalled();
@@ -835,31 +831,30 @@ describe("WsRpcServerLayer ListSessions", () => {
 		);
 	});
 
-	it.effect("returns older history pages", () => {
-		const loadPreRenderedHistory = vi.fn(() =>
-			Effect.succeed({
-				messages: [
-					{
-						id: "message-1",
-						role: "assistant" as const,
-						parts: [{ id: "part-1", type: "text" as const, text: "older" }],
-					},
-				],
-				hasMore: true,
-				total: 125,
-			}),
-		);
-
+	it.effect("returns older history pages from SQLite", () => {
 		return Effect.gen(function* () {
+			const projections = yield* ProjectionRunnerEffectTag;
+			yield* projections.recover();
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+				VALUES ('session-1', 'claude', 'Session', 1, 1)`;
+			yield* sql`INSERT INTO messages
+				(id, session_id, role, text, created_at, updated_at)
+				VALUES
+				('message-1', 'session-1', 'assistant', 'older', 1, 1),
+				('message-2', 'session-1', 'user', 'newer', 2, 2)`;
+			yield* sql`INSERT INTO message_parts
+				(id, message_id, type, text, sort_order, created_at, updated_at)
+				VALUES ('part-1', 'message-1', 'text', 'older', 0, 1, 1)`;
 			const client = yield* rpcClient;
 
 			const response = yield* client.LoadMoreHistory({
 				projectSlug: "project-a",
 				sessionId: "session-1",
-				offset: 50,
+				before: "message-2",
 			});
 
-			expect(response).toEqual({
+			expect(response).toMatchObject({
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				messages: [
@@ -869,21 +864,14 @@ describe("WsRpcServerLayer ListSessions", () => {
 						parts: [{ id: "part-1", type: "text", text: "older" }],
 					},
 				],
-				hasMore: true,
-				total: 125,
+				hasMore: false,
 			});
-			expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 50);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({
-							sessionManagerService: {
-								loadPreRenderedHistory,
-							} as unknown as SessionManagerService,
-						}),
-					),
+					Layer.provideMerge(makeTestHandlerLayer()),
+					Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
 				),
 			),
 		);

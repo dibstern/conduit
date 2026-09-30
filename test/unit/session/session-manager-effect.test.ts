@@ -144,7 +144,7 @@ describe("SessionManager Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 
-	it.effect("deleteSession clears all state maps", () => {
+	it.effect("deleteSession clears session activity and parent mappings", () => {
 		const mockApi = makeMockApi();
 
 		return Effect.gen(function* () {
@@ -154,7 +154,6 @@ describe("SessionManager Effect", () => {
 			yield* Ref.update(ref, (s) => ({
 				...s,
 				cachedParentMap: HashMap.make(["child1", "s1"]),
-				paginationCursors: HashMap.make(["s1", "cursor-1"]),
 			}));
 
 			// Delete
@@ -163,13 +162,11 @@ describe("SessionManager Effect", () => {
 			const state = yield* Ref.get(ref);
 			const result = {
 				hasActivity: HashMap.has(state.lastMessageAt, "s1"),
-				hasCursor: HashMap.has(state.paginationCursors, "s1"),
 				// child1's parent was s1, so it should be removed from parent map
 				hasChildInParentMap: HashMap.has(state.cachedParentMap, "child1"),
 			};
 
 			expect(result.hasActivity).toBe(false);
-			expect(result.hasCursor).toBe(false);
 			expect(result.hasChildInParentMap).toBe(false);
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
@@ -525,6 +522,9 @@ describe("SessionManager Effect", () => {
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
 			};
 			const layer = makeLiveServiceLayer(mockApi, filename, readQuery);
 

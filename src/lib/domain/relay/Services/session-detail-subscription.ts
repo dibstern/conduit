@@ -2,13 +2,12 @@
 // The concrete SubscriptionSource for a session's detail view — the transcript
 // of messages, streamed text, thinking, and tool activity.
 //
-// Its rows are `messages`, which carry a read-model version, so the base read
-// and every live re-query are one query: `WHERE session_id = ? AND version > ?`,
-// the index 0012 created for exactly this. A message part carries no version of
-// its own, so a part write advances the message that owns it and the whole
-// current message comes back — which is why a delta here is a projected
-// transcript message and not the raw event that caused it. The transcript is
-// durable, so it also outlives event eviction.
+// Its rows are `messages`, which carry a read-model version. The base reads
+// the newest transcript page; live and resume queries use a version window.
+// A message part carries no version of its own, so a part write advances the
+// message that owns it and the whole current message comes back — which is why
+// a delta here is a projected transcript message and not the raw event that
+// caused it. The transcript is durable, so it also outlives event eviction.
 //
 // Detail is APPEND-ONLY: it emits `upsert` only, never `remove`. Its rows are
 // keyed by message id and an advance speaks in sessions, so a removal has no id
@@ -22,6 +21,7 @@ import type { SessionDetailItemSchema } from "../../../contracts/ws-rpc.js";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
@@ -38,7 +38,10 @@ import { SessionEventBusTag } from "./session-event-bus.js";
  */
 export type SessionDetailItem = typeof SessionDetailItemSchema.Type;
 
-export type SessionDetailSubscriptionError = ReadQueryEffectError | SqlError;
+export type SessionDetailSubscriptionError =
+	| ReadQueryEffectError
+	| SqlError
+	| TranscriptPageCursorNotFoundError;
 
 // ─── Public entry point ──────────────────────────────────────────────────────
 
@@ -68,24 +71,46 @@ export const subscribeSessionDetail = (options: {
 				bus,
 				source: {
 					read: (range) =>
-						readQuery.readSessionTranscript(options.sessionId, range).pipe(
-							Effect.map(({ messages, version }) => ({
-								// A whole page: `hasMore` is false, so the adapter maps
-								// every row in order and index `i` is still row `i`.
+						Effect.gen(function* () {
+							const page =
+								range === undefined
+									? yield* readQuery.readSessionTranscriptPage(
+											options.sessionId,
+											{
+												limit: 50,
+											},
+										)
+									: undefined;
+							const result =
+								page ??
+								(yield* readQuery.readSessionTranscript(
+									options.sessionId,
+									range,
+								));
+							return {
+								// The adapter gets exactly these rows, so index `i` is still row `i`.
 								// That is what lets each item keep the version its row
 								// carries instead of borrowing the read's counter.
-								rows: messageRowsToHistory(messages, {
-									pageSize: messages.length,
+								rows: messageRowsToHistory(result.messages, {
+									pageSize: result.messages.length,
 								}).messages.map((message, index) => ({
 									item: {
 										_tag: "transcriptMessage" as const,
 										message,
 									} satisfies SessionDetailItem,
-									version: messages[index]?.version ?? version,
+									version: result.messages[index]?.version ?? result.version,
 								})),
-								version,
-							})),
-						),
+								version: result.version,
+								...(page === undefined
+									? {}
+									: {
+											hasMore: page.hasMore,
+											...(page.messages[0] === undefined
+												? {}
+												: { cursor: page.messages[0].id }),
+										}),
+							};
+						}),
 					// A message is stored against the session that owns it — a subagent
 					// message against the subagent session — and the projector reports
 					// that owner, so naming this session is the whole routing test.

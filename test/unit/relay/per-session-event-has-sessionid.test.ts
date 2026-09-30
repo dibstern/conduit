@@ -272,7 +272,6 @@ describe("session-switch synthesized events have sessionId", () => {
 					messages: [],
 					hasMore: false,
 				}),
-				seedPaginationCursor: vi.fn(),
 			},
 			wsHandler: {
 				sendTo: vi.fn(),

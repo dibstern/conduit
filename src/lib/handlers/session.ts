@@ -28,7 +28,6 @@ import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
 	buildSessionSwitchedMessage,
-	extractOldestMessageId,
 	patchMissingDoneForProcessingState,
 	resolveSessionHistoryFromRows,
 	type SessionHistorySource,
@@ -267,9 +266,14 @@ const resolveSessionHistory = (sessionId: string) =>
 		let projectedMessages: readonly HistoryMessage[] = [];
 		let reconcileOpenCode = false;
 		if (readQueryOption._tag === "Some") {
-			const rows =
-				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+			const page = yield* readQueryOption.value.readSessionTranscriptPage(
+				sessionId,
+				{ limit: 50 },
+			);
+			projectedSource = resolveSessionHistoryFromRows(page.messages, {
+				pageSize: 50,
+				hasMore: page.hasMore,
+			});
 			if (projectedSource.kind === "rest-history") {
 				projectedMessages = projectedSource.history.messages;
 			}
@@ -329,29 +333,6 @@ const resolveSessionHistory = (sessionId: string) =>
 		return { kind: "empty" } satisfies SessionHistorySource;
 	});
 
-const seedPaginationCursorFromHistory = (
-	sessionId: string,
-	source: SessionHistorySource,
-) =>
-	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		let oldestMessageId: string | undefined;
-
-		if (source.kind === "cached-events" && source.hasMore) {
-			oldestMessageId = extractOldestMessageId(source.events);
-		} else if (source.kind === "rest-history" && source.history.hasMore) {
-			oldestMessageId = source.history.messages[0]?.id;
-		}
-
-		yield* sessionManagerService.clearPaginationCursor(sessionId);
-		if (oldestMessageId) {
-			yield* sessionManagerService.seedPaginationCursor(
-				sessionId,
-				oldestMessageId,
-			);
-		}
-	});
-
 const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
@@ -401,8 +382,6 @@ const switchClientToSession = (
 				parentID = sessionRowResult.right?.parent_id ?? undefined;
 			}
 		}
-
-		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
 
 		const sessionService = yield* SessionManagerServiceTag;
 		wsHandler.sendTo(
@@ -816,75 +795,21 @@ export const markSessionReadForClient = ({
 
 export const loadMoreHistoryForSession = ({
 	sessionId,
-	offset,
+	before,
 }: {
 	readonly sessionId: string;
-	readonly offset: number;
+	readonly before?: string;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		let projectedMessages: readonly HistoryMessage[] = [];
-
-		if (readQueryOption._tag === "Some") {
-			const sessionResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (sessionResult._tag === "Right" && sessionResult.right != null) {
-				const configOption = yield* Effect.serviceOption(ConfigTag);
-				const isOpenCodeSession =
-					resolveProviderRoutingDriver(
-						loadDaemonConfig(
-							configOption._tag === "Some"
-								? configOption.value.configDir
-								: undefined,
-						),
-						sessionResult.right.provider,
-					) === "opencode";
-				const rowsResult = yield* Effect.either(
-					readQueryOption.value.getSessionMessagesWithParts(sessionId),
-				);
-				if (rowsResult._tag === "Right") {
-					const rows = rowsResult.right;
-					if (
-						!isOpenCodeSession ||
-						sessionResult.right.history_complete === 1
-					) {
-						const end = Math.max(0, rows.length - Math.max(0, offset));
-						const start = Math.max(0, end - 50);
-						const page = messageRowsToHistory(rows.slice(start, end), {
-							pageSize: 50,
-						});
-						if (page.messages[0]) {
-							yield* sessionManagerService.clearPaginationCursor(sessionId);
-							yield* sessionManagerService.seedPaginationCursor(
-								sessionId,
-								page.messages[0].id,
-							);
-						}
-						return {
-							sessionId,
-							messages: page.messages,
-							hasMore: start > 0,
-							total: rows.length,
-						};
-					}
-					projectedMessages = messageRowsToHistory(rows, {
-						pageSize: Number.MAX_SAFE_INTEGER,
-					}).messages;
-				}
-			}
-		}
-
-		const page = yield* sessionManagerService.loadPreRenderedHistory(
-			sessionId,
-			offset,
-		);
+		const readQuery = yield* ReadQueryEffectTag;
+		const page = yield* readQuery.readSessionTranscriptPage(sessionId, {
+			...(before ? { before } : {}),
+			limit: 50,
+		});
 		return {
 			sessionId,
-			messages: addProjectedModelExecution(page.messages, projectedMessages),
+			messages: messageRowsToHistory(page.messages, { pageSize: 50 }).messages,
 			hasMore: page.hasMore,
-			...(page.total != null && { total: page.total }),
 		};
 	});
 
@@ -911,7 +836,6 @@ export const forkSessionForClient = ({
 		const forked = yield* forkSession(sessionId, messageId);
 
 		yield* clearEffectOverrideSession(sessionId);
-		yield* sessionManagerService.clearPaginationCursor(sessionId);
 
 		// Find the parent title for the notification
 		const sessions = yield* sessionManagerService.listSessions();

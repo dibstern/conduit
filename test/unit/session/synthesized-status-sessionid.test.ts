@@ -24,7 +24,6 @@ function createFullDeps(
 				messages: [],
 				hasMore: false,
 			}),
-			seedPaginationCursor: vi.fn(),
 		},
 		wsHandler: {
 			sendTo: vi.fn(),

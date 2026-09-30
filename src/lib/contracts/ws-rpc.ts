@@ -30,6 +30,8 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			_tag: Schema.Literal("snapshot"),
 			rows: Schema.Array(itemSchema),
 			sequence: Schema.Number,
+			hasMore: Schema.optional(Schema.Boolean),
+			cursor: Schema.optional(NonEmptyString),
 		}),
 		Schema.Struct({ _tag: Schema.Literal("synchronized") }),
 		Schema.Struct({
@@ -390,7 +392,6 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	sessionId: Schema.String,
 	messages: Schema.Array(HistoryMessageSchema),
 	hasMore: Schema.Boolean,
-	total: Schema.optional(Schema.Number),
 });
 
 export const ForkSessionResponseSchema = Schema.Struct({
@@ -1320,7 +1321,7 @@ export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
-			offset: Schema.Number,
+			before: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}

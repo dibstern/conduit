@@ -346,6 +346,28 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 				"reconciliation after REST-served open",
 			);
 			expect((await projectedTexts(dbPath))["msg_u2"]).toBe("second question");
+			const projectionPage = await readStore(
+				dbPath,
+				Effect.flatMap(makeReadQueryEffect, (readQuery) =>
+					readQuery.readSessionTranscriptPage(SESSION_ID, {
+						before: "msg_u2",
+						limit: 50,
+					}),
+				),
+			);
+			const older = await client.loadMoreHistory(
+				SESSION_ID,
+				"msg_u2",
+				"iea-backfill",
+			);
+			expect(older.messages.map((message) => message.id)).toEqual(
+				projectionPage.messages.map((message) => message.id),
+			);
+			expect(older.messages.map((message) => message.id)).toEqual([
+				"msg_u1",
+				"msg_a1",
+			]);
+			expect(older.hasMore).toBe(false);
 		} finally {
 			await client.close();
 		}

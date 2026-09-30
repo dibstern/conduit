@@ -246,6 +246,42 @@ const runtimeEvent = (event: Record<string, unknown>): ProviderRuntimeEvent =>
 	decodeProviderRuntimeEvent({ ...RUNTIME_BASE, ...event });
 
 describe("subscribeSessionDetail", () => {
+	it.scoped(
+		"cold start includes only the newest 50 messages and a paging cursor",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated(SID),
+					...Array.from({ length: 55 }, (_, index) =>
+						messageCreated(
+							SID,
+							`m${String(index).padStart(2, "0")}`,
+							"assistant",
+						),
+					),
+				]);
+
+				const { q } = yield* openDetail({ sessionId: SID });
+				const snapshot = yield* Queue.take(q);
+				if (snapshot._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(snapshot.rows).toHaveLength(50);
+				expect(
+					snapshot.rows.map((row) =>
+						row._tag === "transcriptMessage" ? row.message.id : "event",
+					),
+				).toEqual(
+					Array.from(
+						{ length: 50 },
+						(_, index) => `m${String(index + 5).padStart(2, "0")}`,
+					),
+				);
+				expect(snapshot.hasMore).toBe(true);
+				expect(snapshot.cursor).toBe("m05");
+				expect(yield* Queue.take(q)).toEqual({ _tag: "synchronized" });
+			}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
 	it.scoped("cold start emits the transcript snapshot then synchronized", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
@@ -266,6 +302,8 @@ describe("subscribeSessionDetail", () => {
 			// number a live delta or a resume will speak in.
 			expect(snapshot.sequence).toBe(yield* readModelVersion);
 			expect(snapshot.rows).toHaveLength(1);
+			expect(snapshot.hasMore).toBe(false);
+			expect(snapshot.cursor).toBe("m1");
 			const [row] = snapshot.rows;
 			if (row?._tag !== "transcriptMessage")
 				throw new Error("expected message");
@@ -680,7 +718,11 @@ describe("subscribeSessionDetail", () => {
 				yield* recoverProjections;
 				yield* establishSession(SID);
 				const { q } = yield* openDetail({ sessionId: SID });
-				yield* takeN(q, 2); // snapshot(empty) + synchronized
+				const [snapshot] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(snapshot.rows).toEqual([]);
+				expect(snapshot.hasMore).toBe(false);
+				expect(snapshot.cursor).toBeUndefined();
 
 				const persist = yield* ClaudeEventPersistEffectTag;
 				yield* persist.persistUserMessage(SID, "hello from user");

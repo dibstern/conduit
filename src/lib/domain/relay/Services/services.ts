@@ -88,10 +88,7 @@ export interface SessionManagerShape {
 		query: string,
 		options?: { roots?: boolean },
 	): Promise<SessionInfo[]>;
-	loadPreRenderedHistory(
-		sessionId: string,
-		offset?: number,
-	): Promise<{
+	loadPreRenderedHistory(sessionId: string): Promise<{
 		messages: HistoryMessage[];
 		hasMore: boolean;
 		total?: number;
@@ -111,10 +108,6 @@ export interface SessionManagerShape {
 	initialize(title?: string): Promise<string>;
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	addToParentMap(childId: string, parentId: string): void;
-
-	// ── Pagination ─────────────────────────────────────────────────────
-	clearPaginationCursor(sessionId: string): void;
-	seedPaginationCursor(sessionId: string, messageId: string): void;
 
 	// ── Pending questions ──────────────────────────────────────────────
 

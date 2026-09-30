@@ -252,7 +252,8 @@ export class TestWsClient {
 
 	async loadMoreHistory(
 		sessionId: string,
-		offset: number,
+		before?: string,
+		projectSlug = "integration-test",
 	): Promise<LoadMoreHistoryResponse> {
 		const previousWebSocket = globalThis.WebSocket;
 		Reflect.set(globalThis, "WebSocket", WebSocket);
@@ -262,9 +263,9 @@ export class TestWsClient {
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
 						return yield* client.LoadMoreHistory({
-							projectSlug: "integration-test",
+							projectSlug,
 							sessionId,
-							offset,
+							...(before ? { before } : {}),
 						});
 					}),
 				).pipe(

@@ -64,7 +64,6 @@ export function testMessages(sessionId?: string): SessionMessages {
 		loadLifecycle: "empty",
 		contextPercent: 0,
 		historyHasMore: false,
-		historyMessageCount: 0,
 		historyLoading: false,
 		toolRegistry: createToolRegistry(),
 		replayBatch: null,

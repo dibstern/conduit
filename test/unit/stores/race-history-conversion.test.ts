@@ -135,7 +135,7 @@ describe("Race: session_switched history .then() fires after session switch", ()
 
 		// historyState should reflect the second session's values, not the first
 		expect(historyState.hasMore).toBe(false);
-		expect(historyState.messageCount).toBe(2);
+		expect(chatState.messages).toHaveLength(2);
 	});
 
 	it("three rapid session_switched — only the last session wins", async () => {

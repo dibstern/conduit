@@ -100,7 +100,6 @@ describe("getOrCreateSessionSlot", () => {
 		expect(messages.loadLifecycle).toBe("empty");
 		expect(messages.contextPercent).toBe(0);
 		expect(messages.historyHasMore).toBe(false);
-		expect(messages.historyMessageCount).toBe(0);
 		expect(messages.historyLoading).toBe(false);
 		expect(messages.toolRegistry).toBeDefined();
 	});

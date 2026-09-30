@@ -134,7 +134,7 @@ describe("convertHistoryAsync per-slot", () => {
 
 		// hasMore should be set from the history response
 		expect(historyState.hasMore).toBe(true);
-		expect(historyState.messageCount).toBe(3);
+		expect(chatState.messages).toHaveLength(3);
 	});
 
 	it("history_page pagination commits to captured session slot", async () => {
@@ -163,8 +163,7 @@ describe("convertHistoryAsync per-slot", () => {
 		expect(historyState.loading).toBe(false);
 		// hasMore should reflect the page response
 		expect(historyState.hasMore).toBe(true);
-		// messageCount should be updated
-		expect(historyState.messageCount).toBe(10);
+		expect(chatState.messages).toHaveLength(10);
 	});
 
 	it("session switch mid-history-conversion aborts via generation check", async () => {

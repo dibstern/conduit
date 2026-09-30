@@ -232,8 +232,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 		incrementPendingQuestionCount: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
 		setPendingQuestionCounts: vi.fn(),
-		clearPaginationCursor: vi.fn(),
-		seedPaginationCursor: vi.fn(),
 		addToParentMap: vi.fn(),
 		on: vi.fn().mockReturnThis(),
 	} as unknown as HandlerDeps["sessionMgr"];
@@ -778,8 +776,6 @@ export function makeMockSessionManagerShape(
 		incrementPendingQuestionCount: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
 		setPendingQuestionCounts: vi.fn(),
-		clearPaginationCursor: vi.fn(),
-		seedPaginationCursor: vi.fn(),
 		addToParentMap: vi.fn(),
 		on: vi.fn().mockReturnThis(),
 		...overrides,
@@ -817,8 +813,6 @@ export function makeMockSessionManagerService(
 		setSessionPinned: vi.fn(() => Effect.succeed(false)),
 		snoozeSession: vi.fn(() => Effect.succeed(false)),
 		unsnoozeSession: vi.fn(() => Effect.succeed(false)),
-		clearPaginationCursor: vi.fn(() => Effect.void),
-		seedPaginationCursor: vi.fn(() => Effect.void),
 		loadPreRenderedHistory: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false }),
 		),

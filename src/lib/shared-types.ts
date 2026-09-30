@@ -910,7 +910,6 @@ const HistoryPageSchema = Schema.Struct({
 	sessionId: Schema.String,
 	messages: Schema.Array(HistoryMessageSchema),
 	hasMore: Schema.Boolean,
-	total: Schema.optional(Schema.Number),
 });
 
 // ── Model / Agent / Commands ───────────────────────────────────────────
@@ -1577,7 +1576,6 @@ export type RelayMessage =
 			sessionId: string;
 			messages: HistoryMessage[];
 			hasMore: boolean;
-			total?: number;
 	  }
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; sessionId?: string; model: string; provider: string }

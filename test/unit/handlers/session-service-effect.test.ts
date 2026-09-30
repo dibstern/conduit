@@ -46,10 +46,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type {
-	PermissionId,
-	RelayMessage,
-} from "../../../src/lib/shared-types.js";
+import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -175,6 +172,9 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 		listSessionInfos: vi.fn(() => Effect.succeed([])),
 		readSessionTranscript: vi.fn(() =>
 			Effect.succeed({ messages: [], version: 0 }),
+		),
+		readSessionTranscriptPage: vi.fn(() =>
+			Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 		),
 		readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -321,45 +321,50 @@ describe("session handlers with Effect-native model service", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() =>
-					Effect.succeed([
-						{
-							id: "msg-sqlite-1",
-							session_id: "session-1",
-							turn_id: "turn-1",
-							role: "user",
-							text: "Earlier prompt",
-							cost: null,
-							tokens_in: null,
-							tokens_out: null,
-							tokens_cache_read: null,
-							tokens_cache_write: null,
-							context_window: null,
-							version: 0,
-							is_streaming: 0,
-							is_backfilled: 0,
-							created_at: 10,
-							updated_at: 11,
-							parts: [
-								{
-									id: "part-sqlite-1",
-									message_id: "msg-sqlite-1",
-									type: "text",
-									text: "Earlier prompt",
-									tool_name: null,
-									call_id: null,
-									input: null,
-									result: null,
-									metadata: null,
-									duration: null,
-									status: null,
-									sort_order: 0,
-									created_at: 10,
-									updated_at: 11,
-								},
-							],
-						},
-					]),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({
+						messages: [
+							{
+								id: "msg-sqlite-1",
+								session_id: "session-1",
+								turn_id: "turn-1",
+								role: "user",
+								text: "Earlier prompt",
+								cost: null,
+								tokens_in: null,
+								tokens_out: null,
+								tokens_cache_read: null,
+								tokens_cache_write: null,
+								context_window: null,
+								version: 0,
+								is_streaming: 0,
+								is_backfilled: 0,
+								created_at: 10,
+								updated_at: 11,
+								parts: [
+									{
+										id: "part-sqlite-1",
+										message_id: "msg-sqlite-1",
+										type: "text",
+										text: "Earlier prompt",
+										tool_name: null,
+										call_id: null,
+										input: null,
+										result: null,
+										metadata: null,
+										duration: null,
+										status: null,
+										sort_order: 0,
+										created_at: 10,
+										updated_at: 11,
+									},
+								],
+							},
+						],
+						hasMore: false,
+						version: 0,
+					}),
 				),
 			} satisfies ReadQueryEffect;
 			const { wsHandler, layer } = makeSessionMetadataLayer({
@@ -379,8 +384,11 @@ describe("session handlers with Effect-native model service", () => {
 				),
 				Effect.tap(() => {
 					expect(
+						readQueryEffect.readSessionTranscriptPage,
+					).toHaveBeenCalledWith("session-1", { limit: 50 });
+					expect(
 						readQueryEffect.getSessionMessagesWithParts,
-					).toHaveBeenCalledWith("session-1");
+					).not.toHaveBeenCalled();
 					expect(loadPreRenderedHistory).not.toHaveBeenCalled();
 					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "session_switched",
@@ -456,8 +464,27 @@ describe("session handlers with Effect-native model service", () => {
 		historyComplete: number,
 		count = 1,
 		provider = "opencode",
-	) =>
-		({
+	) => {
+		const projectedRows = Array.from({ length: count }, (_, index) => ({
+			id: `msg-projected-${index + 1}`,
+			session_id: "session-1",
+			turn_id: "turn-1",
+			role: "assistant",
+			text: `Projected message ${index + 1}`,
+			cost: null,
+			tokens_in: null,
+			tokens_out: null,
+			tokens_cache_read: null,
+			tokens_cache_write: null,
+			context_window: null,
+			version: 0,
+			is_streaming: 0,
+			is_backfilled: index === 0 ? 1 : 0,
+			created_at: 10,
+			updated_at: 11,
+			parts: [],
+		}));
+		return {
 			getToolContent: vi.fn(() => Effect.succeed(undefined)),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSession: vi.fn(() =>
@@ -497,31 +524,27 @@ describe("session handlers with Effect-native model service", () => {
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
-			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
-			getSessionMessagesWithParts: vi.fn(() =>
-				Effect.succeed(
-					Array.from({ length: count }, (_, index) => ({
-						id: `msg-projected-${index + 1}`,
-						session_id: "session-1",
-						turn_id: "turn-1",
-						role: "assistant",
-						text: `Projected message ${index + 1}`,
-						cost: null,
-						tokens_in: null,
-						tokens_out: null,
-						tokens_cache_read: null,
-						tokens_cache_write: null,
-						context_window: null,
+			readSessionTranscriptPage: vi.fn(
+				(
+					_sessionId: string,
+					options: { readonly before?: string; readonly limit: number },
+				) => {
+					const beforeIndex =
+						options.before === undefined
+							? projectedRows.length
+							: projectedRows.findIndex((row) => row.id === options.before);
+					const older = projectedRows.slice(0, Math.max(beforeIndex, 0));
+					return Effect.succeed({
+						messages: older.slice(-options.limit),
+						hasMore: older.length > options.limit,
 						version: 0,
-						is_streaming: 0,
-						is_backfilled: index === 0 ? 1 : 0,
-						created_at: 10,
-						updated_at: 11,
-						parts: [],
-					})),
-				),
+					});
+				},
 			),
-		}) satisfies ReadQueryEffect;
+			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			getSessionMessagesWithParts: vi.fn(() => Effect.succeed(projectedRows)),
+		} satisfies ReadQueryEffect;
+	};
 
 	for (const historyComplete of [1, 0]) {
 		it.effect(
@@ -593,7 +616,7 @@ describe("session handlers with Effect-native model service", () => {
 
 	for (const historyComplete of [1, 0]) {
 		it.effect(
-			`serves ${historyComplete === 1 ? "projection" : "REST"} older page for OpenCode history_complete=${historyComplete}`,
+			`serves SQLite older page for OpenCode history_complete=${historyComplete}`,
 			() => {
 				const loadPreRenderedHistory = vi.fn(() =>
 					Effect.succeed({
@@ -611,7 +634,7 @@ describe("session handlers with Effect-native model service", () => {
 				const readQueryEffect = makeOpenCodeRowsReadQuery(historyComplete, 51);
 				return loadMoreHistoryForSession({
 					sessionId: "session-1",
-					offset: 50,
+					before: "msg-projected-2",
 				}).pipe(
 					Effect.provide(
 						Layer.merge(
@@ -620,29 +643,19 @@ describe("session handlers with Effect-native model service", () => {
 						),
 					),
 					Effect.tap((result) => {
-						if (historyComplete === 1) {
-							expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-							expect(result).toMatchObject({
-								messages: [{ id: "msg-projected-1", isBackfilled: true }],
-								hasMore: false,
-								total: 51,
-							});
-						} else {
-							expect(loadPreRenderedHistory).toHaveBeenCalledWith(
-								"session-1",
-								50,
-							);
-							expect(result.messages).toEqual([
-								{ id: "rest-older", role: "user", text: "REST older" },
-							]);
-						}
+						expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+						expect(result).toMatchObject({
+							messages: [{ id: "msg-projected-1", isBackfilled: true }],
+							hasMore: false,
+						});
+						expect(result).not.toHaveProperty("total");
 					}),
 				);
 			},
 		);
 	}
 
-	it("serves REST for initial and older history on an incomplete named OpenCode instance", async () => {
+	it("serves REST initially and SQLite older history on an incomplete named OpenCode instance", async () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-named-history-"));
 		await saveDaemonConfig(
 			{
@@ -693,14 +706,14 @@ describe("session handlers with Effect-native model service", () => {
 			}),
 		);
 		const older = await Effect.runPromise(
-			loadMoreHistoryForSession({ sessionId: "session-1", offset: 50 }).pipe(
-				Effect.provide(historyLayer),
-			),
+			loadMoreHistoryForSession({
+				sessionId: "session-1",
+				before: "msg-projected-2",
+			}).pipe(Effect.provide(historyLayer)),
 		);
-		expect(older.messages).toEqual([
-			{ id: "rest-1", role: "user", text: "REST" },
-		]);
-		expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 50);
+		expect(older.messages).toMatchObject([{ id: "msg-projected-1" }]);
+		expect(loadPreRenderedHistory).toHaveBeenCalledTimes(1);
+		expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
 	});
 
 	it.effect("serves Claude projection for initial and older history", () => {
@@ -733,7 +746,7 @@ describe("session handlers with Effect-native model service", () => {
 			);
 			const older = yield* loadMoreHistoryForSession({
 				sessionId: "session-1",
-				offset: 50,
+				before: "msg-projected-2",
 			});
 			expect(older.messages).toMatchObject([{ id: "msg-projected-1" }]);
 			expect(loadPreRenderedHistory).not.toHaveBeenCalled();
@@ -741,61 +754,7 @@ describe("session handlers with Effect-native model service", () => {
 	});
 
 	it.effect(
-		"resets an old REST cursor to the projected first-page boundary",
-		() => {
-			let cursor: string | undefined = "msg-rest-1";
-			const clearPaginationCursor = vi.fn(() =>
-				Effect.sync(() => {
-					cursor = undefined;
-				}),
-			);
-			const seedPaginationCursor = vi.fn(
-				(_sessionId: string, messageId: string) =>
-					Effect.sync(() => {
-						cursor ??= messageId;
-					}),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				clearPaginationCursor,
-				seedPaginationCursor,
-				loadPreRenderedHistory: vi.fn(() =>
-					Effect.fail(
-						new SessionManagerError({
-							operation: "loadPreRenderedHistory",
-							cause: "projection should serve initial history",
-						}),
-					),
-				),
-			});
-			const { layer } = makeSessionMetadataLayer({ sessionManagerService });
-			return handleViewSession(
-				"client-1",
-				{ sessionId: "session-1" },
-				/* skipMetadata */ true,
-			).pipe(
-				Effect.provide(
-					Layer.merge(
-						layer,
-						Layer.succeed(
-							ReadQueryEffectTag,
-							makeOpenCodeRowsReadQuery(1, 100),
-						),
-					),
-				),
-				Effect.tap(() => {
-					expect(cursor).toBe("msg-projected-51");
-					expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
-					expect(seedPaginationCursor).toHaveBeenCalledWith(
-						"session-1",
-						"msg-projected-51",
-					);
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"fails an older page when OpenCode REST fails with an incomplete projection",
+		"serves an older SQLite page when OpenCode REST is unavailable",
 		() => {
 			const loadPreRenderedHistory = vi.fn(() =>
 				Effect.fail(
@@ -812,7 +771,7 @@ describe("session handlers with Effect-native model service", () => {
 			});
 			return loadMoreHistoryForSession({
 				sessionId: "session-1",
-				offset: 50,
+				before: "msg-projected-2",
 			}).pipe(
 				Effect.provide(
 					Layer.merge(
@@ -820,13 +779,9 @@ describe("session handlers with Effect-native model service", () => {
 						Layer.succeed(ReadQueryEffectTag, makeOpenCodeRowsReadQuery(0, 60)),
 					),
 				),
-				Effect.either,
 				Effect.tap((result) => {
-					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 50);
-					expect(result).toMatchObject({
-						_tag: "Left",
-						left: { operation: "loadPreRenderedHistory" },
-					});
+					expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+					expect(result.messages).toMatchObject([{ id: "msg-projected-1" }]);
 				}),
 			);
 		},
