@@ -407,7 +407,7 @@ function sameStrings(
 
 const executeSqlStatements = (
 	sqlText: string,
-): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		for (const statement of splitSqlStatements(sqlText)) {
@@ -419,7 +419,7 @@ const runAddColumnMigrationIfMissing = (
 	tableName: string,
 	columnName: string,
 	sqlText: string,
-): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql.unsafe<{ name: string }>(
@@ -437,7 +437,7 @@ const failSchemaMismatch = (
 
 const verifyExistingBaselineSchema: Effect.Effect<
 	void,
-	unknown,
+	SqlError | Migrator.MigrationError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -532,7 +532,7 @@ const verifyExistingBaselineSchema: Effect.Effect<
 
 const runBaselineEventStoreMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError | Migrator.MigrationError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -586,7 +586,7 @@ const runMessagesContextWindowMigration = runAddColumnMigrationIfMissing(
 
 const runTurnModelExecutionMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -635,7 +635,7 @@ const runSessionsSnoozedMigration = runAddColumnMigrationIfMissing(
 
 const runSessionsAutoSettleMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -670,7 +670,7 @@ export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
 /** Ids matching the legacy-skeleton predicate. Shared by the migration and the boot diagnostic. */
 export const selectLegacySkeletonSessionIds: Effect.Effect<
 	readonly string[],
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -718,7 +718,7 @@ export const selectLegacySkeletonSessionIds: Effect.Effect<
 
 const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -786,7 +786,7 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
  */
 const runBackfillCompactionMessagesMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -821,7 +821,10 @@ export const effectMigrationEntries = {
 	"0019_sessions_forked_from": executeSqlStatements(
 		sessionsForkedFromMigrationSql,
 	),
-} satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
+} satisfies Record<
+	string,
+	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
+>;
 
 export function makeEffectMigrationLoader(
 	entries: Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>,

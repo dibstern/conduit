@@ -19,6 +19,7 @@ import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
@@ -30,6 +31,7 @@ import type {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import type { SessionManagerError } from "../domain/relay/Services/session-manager-error.js";
 import {
 	type OverridesStateTag,
 	setDefaultAgent,
@@ -269,7 +271,7 @@ export interface ProjectRelay {
 	settleIdleSessions(
 		idleWindowMs: number,
 		now: number,
-	): Effect.Effect<number, unknown>;
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;

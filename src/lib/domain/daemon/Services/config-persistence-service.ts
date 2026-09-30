@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import type { DaemonConfig } from "../../../daemon/config-persistence.js";
 
 export interface ConfigSnapshot {
-	readonly build: Effect.Effect<DaemonConfig, unknown>;
+	readonly build: Effect.Effect<DaemonConfig, Error>;
 }
 
 export class ConfigSnapshotTag extends Context.Tag("ConfigSnapshot")<
@@ -12,7 +12,7 @@ export class ConfigSnapshotTag extends Context.Tag("ConfigSnapshot")<
 
 export interface ConfigPersistence {
 	readonly requestSave: Effect.Effect<void>;
-	readonly flush: Effect.Effect<void, unknown>;
+	readonly flush: Effect.Effect<void, Error>;
 }
 
 export class ConfigPersistenceTag extends Context.Tag("ConfigPersistence")<

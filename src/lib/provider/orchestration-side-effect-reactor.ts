@@ -46,7 +46,7 @@ class UnknownProviderCommandEffect extends Data.TaggedError(
 	}
 }
 
-class ProviderCommandStoreFailure extends Data.TaggedError(
+export class ProviderCommandStoreFailure extends Data.TaggedError(
 	"ProviderCommandStoreFailure",
 )<{
 	readonly operation: string;
@@ -94,6 +94,14 @@ class ProviderCommandNotExecutable extends Data.TaggedError(
 	}
 }
 
+type ProviderCommandExecutionError =
+	| ProviderCommandStoreFailure
+	| ProviderCommandNotExecutable
+	| ProviderCommandPayloadParseFailed
+	| UnknownProviderCommandEffect
+	| ProviderNotRegistered
+	| ProviderInstanceFailure;
+
 export interface ProviderSideEffectReactorOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
@@ -138,7 +146,7 @@ const storeFailure =
 export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
-	drain(): Effect.Effect<void, unknown> {
+	drain(): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return Effect.gen(this, function* () {
 			while (true) {
 				const processed = yield* this.runOnce();
@@ -147,7 +155,7 @@ export class ProviderSideEffectReactor {
 		});
 	}
 
-	runOnce(): Effect.Effect<number, unknown> {
+	runOnce(): Effect.Effect<number, ProviderCommandStoreFailure> {
 		return Effect.gen(this, function* () {
 			const now = yield* this.currentTimeMillis();
 			const row = yield* this.nextPendingRequest(now);
@@ -176,7 +184,7 @@ export class ProviderSideEffectReactor {
 	runCommand(
 		commandId: string,
 		interactions?: EventSink,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen(this, function* () {
 			const row = yield* this.pendingRequestForCommand(commandId);
 			if (row) return yield* this.executeRow(row, interactions);
@@ -193,7 +201,7 @@ export class ProviderSideEffectReactor {
 	private executeRow(
 		row: ProviderCommandOutboxRow,
 		interactions?: EventSink,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen(this, function* () {
 			const startedAt = yield* this.currentTimeMillis();
 			// The `pending -> running` update is the exclusive execution claim.
@@ -235,7 +243,10 @@ export class ProviderSideEffectReactor {
 	 */
 	private durableOutcome(
 		commandId: string,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<
+		TurnResult,
+		ProviderCommandStoreFailure | ProviderCommandNotExecutable
+	> {
 		return Effect.gen(this, function* () {
 			const pollInterval = clampPollDuration(
 				this.options.outcomePollInterval ?? defaultOutcomePollInterval,
@@ -334,7 +345,13 @@ export class ProviderSideEffectReactor {
 	private runProviderEffect(
 		row: ProviderCommandOutboxRow,
 		interactions?: EventSink,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<
+		TurnResult,
+		| ProviderCommandPayloadParseFailed
+		| UnknownProviderCommandEffect
+		| ProviderNotRegistered
+		| ProviderInstanceFailure
+	> {
 		return Effect.gen(this, function* () {
 			const driver = this.options.resolveProviderDriver
 				? this.options.resolveProviderDriver(row.provider_id)

@@ -5,11 +5,13 @@
 // Manages session-to-provider mapping.
 
 import type { SqlClient } from "@effect/sql";
-import { Deferred, Effect } from "effect";
+import type { SqlError } from "@effect/sql/SqlError";
+import { Data, Deferred, Effect } from "effect";
 
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
+import type { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	CommandFingerprintMismatch,
 	CommandIdGenerationFailed,
@@ -32,7 +34,10 @@ import {
 	type CommandReadModelSnapshot,
 	isCommandScopeTombstoned,
 } from "./orchestration-read-model.js";
-import { ProviderSideEffectReactor } from "./orchestration-side-effect-reactor.js";
+import {
+	type ProviderCommandStoreFailure,
+	ProviderSideEffectReactor,
+} from "./orchestration-side-effect-reactor.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import {
 	InMemoryProviderSessionBindingReadModel,
@@ -47,6 +52,16 @@ import type {
 } from "./types.js";
 
 const log = createLogger("orchestration-engine");
+
+class CommandPayloadSerializationFailed extends Data.TaggedError(
+	"CommandPayloadSerializationFailed",
+)<{ readonly commandId: string; readonly cause: unknown }> {
+	get message(): string {
+		return this.cause instanceof Error
+			? this.cause.message
+			: String(this.cause);
+	}
+}
 
 // ─── Command Types ──────────────────────────────────────────────────────────
 
@@ -482,7 +497,10 @@ export class OrchestrationEngine {
 		fingerprintHashValue: string,
 		dispatchId: string,
 		nowMs: number,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<
+		void,
+		SqlError | EventStoreError | Error | CommandPayloadSerializationFailed
+	> {
 		// The request-sequence read shares the commit transaction so concurrent
 		// dispatches cannot allocate the same sequence.
 		return durable.sql.withTransaction(
@@ -497,7 +515,11 @@ export class OrchestrationEngine {
 				} = command.input;
 				const payloadJson = yield* Effect.try({
 					try: () => JSON.stringify({ ...payload, dispatchId }),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new CommandPayloadSerializationFailed({
+							commandId: command.commandId,
+							cause,
+						}),
 				});
 				yield* durable.commit.commit(
 					decideDurableSendTurnCommand({
@@ -748,7 +770,7 @@ export class OrchestrationEngine {
 	 * already awaits its own execution; this is the deterministic quiescence
 	 * seam for tests and startup recovery. No-op when durable commands are off.
 	 */
-	drainSideEffects(): Effect.Effect<void, unknown> {
+	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return this.durable ? this.durable.reactor.drain() : Effect.void;
 	}
 

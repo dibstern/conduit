@@ -107,7 +107,7 @@ export class ProjectApiDelegateProvider extends Context.Tag(
 			slug: string,
 			subPath: string,
 			req: HttpServerRequest.HttpServerRequest,
-		) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
+		) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
 	}
 >() {}
 

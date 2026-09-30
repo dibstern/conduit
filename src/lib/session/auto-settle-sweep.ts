@@ -1,4 +1,5 @@
 import type { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import {
 	type AutoSettleFacts,
@@ -6,18 +7,24 @@ import {
 } from "./auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 
-export interface AutoSettleSweepPorts {
+export interface AutoSettleSweepPorts<SettleError, BroadcastError> {
 	readonly hasViewer: (sessionId: string) => boolean;
 	readonly hasLiveBackgroundWork: (sessionId: string) => boolean;
-	readonly setSettled: (sessionId: string) => Effect.Effect<boolean, unknown>;
-	readonly broadcastSessionList: () => Effect.Effect<void, unknown>;
+	readonly setSettled: (
+		sessionId: string,
+	) => Effect.Effect<boolean, SettleError>;
+	readonly broadcastSessionList: () => Effect.Effect<void, BroadcastError>;
 }
 
-export const settleIdleSessions = (
-	ports: AutoSettleSweepPorts,
+export const settleIdleSessions = <SettleError, BroadcastError>(
+	ports: AutoSettleSweepPorts<SettleError, BroadcastError>,
 	idleWindowMs: number,
 	now: number,
-): Effect.Effect<number, unknown, SqlClient.SqlClient> =>
+): Effect.Effect<
+	number,
+	SqlError | SettleError | BroadcastError,
+	SqlClient.SqlClient
+> =>
 	Effect.gen(function* () {
 		const decide = (sessionId: string, facts: AutoSettleFacts) =>
 			shouldSettleIdleSession(

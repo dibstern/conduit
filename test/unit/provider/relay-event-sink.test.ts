@@ -1,3 +1,4 @@
+import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -7,7 +8,6 @@ import type {
 	EventPayloadMap,
 } from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
-import { EventSinkIngestionError } from "../../../src/lib/provider/event-sink-errors.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 
@@ -301,10 +301,7 @@ describe("createRelayEventSink — persistence", () => {
 			partId: "part_1",
 			text: "Hello",
 		});
-		const ingestionError = {
-			_tag: "TestIngestionFailure",
-			message: "ingestion failed",
-		};
+		const ingestionError = new SqlError({ message: "ingestion failed" });
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send,
@@ -317,9 +314,7 @@ describe("createRelayEventSink — persistence", () => {
 
 		expect(result._tag).toBe("Left");
 		if (result._tag === "Left") {
-			expect(result.left).toBeInstanceOf(EventSinkIngestionError);
-			expect(result.left.message).toBe(String(ingestionError));
-			expect(result.left).toMatchObject({ cause: ingestionError });
+			expect(result.left).toBe(ingestionError);
 		}
 		expect(send).not.toHaveBeenCalled();
 	});

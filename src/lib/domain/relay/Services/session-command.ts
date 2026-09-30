@@ -12,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Data, Effect } from "effect";
+import { type Cause, Data, Effect } from "effect";
 import {
 	loadDaemonConfig,
 	resolveClaudeInstanceConfigDir,
@@ -87,7 +87,9 @@ export type SessionCommand = {
  */
 export interface SessionUpstreamAdapter {
 	readonly provider: "opencode" | "claude";
-	readonly sync: (command: SessionCommand) => Effect.Effect<void, unknown>;
+	readonly sync: (
+		command: SessionCommand,
+	) => Effect.Effect<void, Cause.UnknownException>;
 }
 
 export const openCodeUpstreamAdapter = (

@@ -1,6 +1,6 @@
 // ─── Model Handlers ──────────────────────────────────────────────────────────
 
-import { Data, Effect } from "effect";
+import { type Cause, Data, Effect } from "effect";
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
@@ -300,7 +300,7 @@ export const getModelsResponse = (
 	} = {},
 ): Effect.Effect<
 	GetModelsResponse,
-	unknown,
+	Cause.UnknownException,
 	| LoggerTag
 	| ConfigTag
 	| OpenCodeModelServiceTag
@@ -347,8 +347,7 @@ export const getModelsResponse = (
 			instanceDriver === undefined || instanceDriver === selectedDriver;
 
 		const providers: ProviderInfo[] = [];
-		let openCodeDiscoveryFailed = false;
-		let openCodeFailure: unknown;
+		let openCodeFailure: Cause.UnknownException | undefined;
 		if (instanceDriver === undefined || instanceDriver === "opencode") {
 			const openCodeProviderResult = yield* Effect.either(
 				modelService.listProviders(),
@@ -383,7 +382,6 @@ export const getModelsResponse = (
 						.filter((p) => p.configured),
 				);
 			} else {
-				openCodeDiscoveryFailed = true;
 				openCodeFailure = openCodeProviderResult.left;
 				log.warn(
 					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
@@ -437,7 +435,7 @@ export const getModelsResponse = (
 		}
 		if (
 			instanceId === undefined &&
-			openCodeDiscoveryFailed &&
+			openCodeFailure !== undefined &&
 			claudeDiscoveryFailed &&
 			providers.length === 0
 		) {
@@ -562,7 +560,7 @@ export const sendModelsStateToClient = (
 	instanceId?: string,
 ): Effect.Effect<
 	void,
-	unknown,
+	Cause.UnknownException,
 	| LoggerTag
 	| ConfigTag
 	| OpenCodeModelServiceTag

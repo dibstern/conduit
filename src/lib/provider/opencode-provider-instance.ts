@@ -176,7 +176,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	private sendTurnLocalEffect(
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, Error> {
 		const { sessionId, prompt, model, images, agent, variant, abortSignal } =
 			input;
 

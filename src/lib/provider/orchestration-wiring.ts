@@ -31,6 +31,7 @@ import {
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
+import type { ProviderCommandStoreFailure } from "./orchestration-side-effect-reactor.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
 	type ProviderSessionBindingReadModel,
@@ -78,7 +79,7 @@ export interface OrchestrationLayer {
 	 * side effects through the reactor (crash recovery / test flush). Same-process
 	 * dispatch already awaits its own execution.
 	 */
-	drainSideEffects(): Effect.Effect<void, unknown>;
+	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure>;
 }
 
 const TURN_COMPLETE_RESULT: TurnResult = {

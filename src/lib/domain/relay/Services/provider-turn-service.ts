@@ -65,13 +65,24 @@ export interface ProviderTurnService {
 	readonly completeRecoveredQuestion?: (
 		question: PendingQuestion,
 		result: string | null,
-	) => Effect.Effect<void, unknown>;
+	) => Effect.Effect<
+		void,
+		Effect.Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
+	>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
-	) => Effect.Effect<string, unknown, OverridesStateTag>;
+	) => Effect.Effect<
+		string,
+		Effect.Effect.Error<ReturnType<typeof prepareTurnSession>>,
+		OverridesStateTag
+	>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
-	) => Effect.Effect<void, unknown, OverridesStateTag>;
+	) => Effect.Effect<
+		void,
+		Effect.Effect.Error<ReturnType<typeof sendTurn>>,
+		OverridesStateTag
+	>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
 	) => Effect.Effect<void, never, OverridesStateTag>;

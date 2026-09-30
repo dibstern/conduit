@@ -3726,7 +3726,7 @@ describe("sendMessageToSession", () => {
 								expect(
 									events.filter((e) => e.type === "session.unsnoozed"),
 								).toHaveLength(snoozed ? 1 : 0);
-							}),
+							}).pipe(Effect.orDie),
 						interruptTurn: () => Effect.void,
 					};
 					yield* sendMessageToSession({
