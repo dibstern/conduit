@@ -1,4 +1,8 @@
 {
+	"src/lib/relay/relay-stack.ts :: API,Config,OpenCode,Restored,Session,background,broadcast,config:,down:,list,list:,modes,permission,session(s),unavailable:,while": {
+		"movedTo": "src/lib/relay/project-relay-startup.ts",
+		"reason": "Not classes: words from startup log and error strings. createProjectRelay's startup body moved verbatim into startProjectRelay."
+	},
 	"test/unit/effect/session-manager-service.test.ts :: absent,as,treats": "Not classes: words from the title of a deleted test for session existence without an event store. Persistence is now required, so that path no longer exists.",
 	"test/unit/server/ws-rpc-sessions.test.ts :: s,store": "Not classes: words from a deleted test.each title parameterised on whether a store was present. Persistence is now required.",
 	"test/unit/session/session-manager-effect.test.ts :: is,no-op,services,without": "Not classes: words from the title of a deleted test for permission-mode persistence without persistence services. Persistence is now required.",

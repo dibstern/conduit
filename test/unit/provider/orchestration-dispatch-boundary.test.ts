@@ -55,10 +55,12 @@ describe("orchestration dispatch boundary", () => {
 	});
 
 	it("relay stop lets the scoped runtime own orchestration shutdown", () => {
-		const source = readFileSync(
-			join(REPO_ROOT, "src/lib/relay/relay-stack.ts"),
-			"utf8",
-		);
+		const source = [
+			"src/lib/relay/relay-stack.ts",
+			"src/lib/relay/project-relay-layers.ts",
+		]
+			.map((path) => readFileSync(join(REPO_ROOT, path), "utf8"))
+			.join("\n");
 
 		expect(source).not.toContain("orchestration.engine.shutdown");
 		expect(source).not.toContain("orchestration.engine.shutdownEffect");

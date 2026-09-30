@@ -181,7 +181,12 @@ async function eventually<T>(
 
 describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 	it("does not construct the legacy OpenCodeRuntimeIngress fallback", () => {
-		const source = readFileSync("src/lib/relay/relay-stack.ts", "utf8");
+		const source = [
+			"src/lib/relay/project-relay-layers.ts",
+			"src/lib/relay/project-relay-startup.ts",
+		]
+			.map((path) => readFileSync(path, "utf8"))
+			.join("\n");
 
 		expect(source).not.toContain("new OpenCodeRuntimeIngress");
 		expect(source).toContain("makeEffectOpenCodeRuntimeIngress");

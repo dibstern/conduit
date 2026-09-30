@@ -1,4 +1,4 @@
-import { type Context, Effect } from "effect";
+import { type Context, Effect, type Layer } from "effect";
 import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { filesHandlers } from "./ws-rpc/files.js";
@@ -125,7 +125,10 @@ export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
 
 export type ResolveRpcContext = (
 	projectSlug: string,
-) => Effect.Effect<Context.Context<unknown>, WsRpcError>;
+) => Effect.Effect<
+	Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+	WsRpcError
+>;
 
 export type ReattachDaemonViewSession = (payload: {
 	readonly projectSlug: string;
