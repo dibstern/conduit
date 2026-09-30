@@ -18,8 +18,8 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
-	SessionManagerError,
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";

@@ -5,7 +5,7 @@ import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../../domain/relay/Services/services.js";
-import { persistSessionPermissionMode } from "../../domain/relay/Services/session-manager-service.js";
+import { persistSessionPermissionMode } from "../../domain/relay/Services/session-manager-permission-mode.js";
 import {
 	getPermissionMode,
 	setPermissionMode,

@@ -2188,6 +2188,42 @@ describe("Effect runtime boundary grep", () => {
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
+				path: "src/lib/domain/relay/Services/session-manager-list.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-history.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-triage.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-state-operations.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-error.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
 				path: "src/lib/bridges/client-init.ts",
 				pattern: /\b(?:ReadQueryService|readQuery\?:|deps\.readQuery)\b/,
 				reason:
@@ -2355,6 +2391,42 @@ describe("Effect runtime boundary grep", () => {
 			},
 			{
 				path: "src/lib/domain/relay/Services/session-manager-service.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-list.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-history.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-triage.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-state-operations.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-error.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",

@@ -1,4 +1,16 @@
 {
+	"src/lib/domain/relay/Services/session-manager-service.ts :: Pagination,cursor,fetch,full": {
+		"movedTo": "src/lib/domain/relay/Services/session-manager-history.ts",
+		"reason": "Not classes: words from the pagination-cursor fallback log string, moved verbatim with history loading into session-manager-history.ts."
+	},
+	"src/lib/domain/relay/Services/session-manager-service.ts :: SessionManagerError": {
+		"movedTo": "src/lib/domain/relay/Services/session-manager-error.ts",
+		"reason": "Not a class: the tagged error's name, moved with its declaration into session-manager-error.ts."
+	},
+	"src/lib/domain/relay/Services/session-manager-service.ts :: session.permission_mode_changed": {
+		"movedTo": "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+		"reason": "Not a class: the event type string, moved with permission-mode persistence into session-manager-permission-mode.ts."
+	},
 	"src/lib/relay/relay-stack.ts :: API,Config,OpenCode,Restored,Session,background,broadcast,config:,down:,list,list:,modes,permission,session(s),unavailable:,while": {
 		"movedTo": "src/lib/relay/project-relay-startup.ts",
 		"reason": "Not classes: words from startup log and error strings. createProjectRelay's startup body moved verbatim into startProjectRelay."

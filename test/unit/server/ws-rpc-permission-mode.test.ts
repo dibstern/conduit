@@ -8,7 +8,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { restoreSessionPermissionModes } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { restoreSessionPermissionModes } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import {
 	getDefaultPermissionMode,
 	getPermissionMode,

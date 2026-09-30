@@ -14,10 +14,8 @@ import {
 	SessionStateProjectionNotifierLive,
 } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	SessionManagerError,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import {
 	makeMockSessionManagerService,

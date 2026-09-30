@@ -13,13 +13,14 @@ import {
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
+import {
+	persistSessionPermissionMode,
+	restoreSessionPermissionModes,
+} from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import {
 	deleteSession,
-	listSessions,
-	persistSessionPermissionMode,
-	recordMessageActivity,
-	restoreSessionPermissionModes,
-	SessionManagerError,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -27,6 +28,7 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { recordMessageActivity } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
 import {
 	getPermissionMode,
 	makeOverridesStateLive,

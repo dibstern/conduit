@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { SessionTitleService } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";

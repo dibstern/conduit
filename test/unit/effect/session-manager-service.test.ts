@@ -33,27 +33,33 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	addToParentMap,
 	clearPaginationCursor,
-	decrementPendingQuestionCount,
-	getSessionParentMap,
-	incrementPendingQuestionCount,
-	listSessions,
 	loadHistory,
 	loadPreRenderedHistory,
-	recordMessageActivity,
-	renameSession,
+	seedPaginationCursor,
+} from "../../../src/lib/domain/relay/Services/session-manager-history.js";
+import {
+	listSessions,
+	sendSessionLists,
+} from "../../../src/lib/domain/relay/Services/session-manager-list.js";
+import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
-	seedPaginationCursor,
-	sendSessionLists,
-	setForkEntry,
-	setPendingQuestionCounts,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	addToParentMap,
+	decrementPendingQuestionCount,
+	getSessionParentMap,
+	incrementPendingQuestionCount,
+	recordMessageActivity,
+	setForkEntry,
+	setPendingQuestionCounts,
+} from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
+import { renameSession } from "../../../src/lib/domain/relay/Services/session-manager-triage.js";
 import {
 	makeOverridesStateLive,
 	setDefaultModel,

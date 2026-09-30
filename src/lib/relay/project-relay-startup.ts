@@ -11,10 +11,8 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import {
-	restoreSessionPermissionModes,
-	SessionManagerServiceTag,
-} from "../domain/relay/Services/session-manager-service.js";
+import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
+import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	setDefaultModel,
 	setDefaultPermissionMode,
