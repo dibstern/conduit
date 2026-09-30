@@ -63,7 +63,7 @@
 		{#if variant === "rail"}
 			<Tooltip side="left" delayDuration={300}>
 				{#snippet trigger({ props })}{@render item(props)}{/snippet}
-				{#snippet children()}{option.label}{/snippet}
+				{#snippet children()}{option.label}{#if option.shortcut}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{option.shortcut}</span>{/if}{/snippet}
 			</Tooltip>
 		{:else}
 			{@render item()}

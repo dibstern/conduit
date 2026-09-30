@@ -48,13 +48,72 @@ export type SessionVerb = {
 		| "share"
 		| "settings"
 		| "bug";
-	hint?: string;
+	keys?: SessionVerbKeys;
 	disabledReason?: string | null;
 	checked?: boolean;
 	danger?: boolean;
 	run(returnFocus?: () => HTMLElement | null): void;
 };
 export type SessionVerbEntry = SessionVerb | { divider: true };
+
+/**
+ * Each verb's keys, defined once. `key` acts on the focused list row, or on the
+ * open session from the transcript; `global` works anywhere with ⌘⇧ (Ctrl+Shift).
+ */
+export type SessionVerbKeys = { key: string; global?: string };
+export const sessionVerbKeys = {
+	settle: { key: "s", global: "e" },
+	snooze: { key: "z" },
+	pin: { key: "p" },
+	read: { key: "u", global: "u" },
+	rename: { key: "r" },
+} as const satisfies Record<string, SessionVerbKeys>;
+
+export function globalKeyHint(global: string): string {
+	return `⌘⇧${global.toUpperCase()}`;
+}
+
+export function sessionVerbKeysHint({ key, global }: SessionVerbKeys): string {
+	return global ? `${key} · ${globalKeyHint(global)}` : key;
+}
+
+type ShortcutEvent = Pick<
+	KeyboardEvent,
+	"key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "repeat"
+>;
+
+/** The verb among `entries` that `event` triggers, if any. */
+export function findSessionVerbForKey(
+	entries: readonly SessionVerbEntry[],
+	event: ShortcutEvent,
+): SessionVerb | undefined {
+	if (event.repeat || event.altKey) return undefined;
+	const command = event.metaKey || event.ctrlKey;
+	const global = command && event.shiftKey;
+	if (!global && (command || event.shiftKey)) return undefined;
+	const key = event.key.toLowerCase();
+	return entries.find(
+		(entry): entry is SessionVerb =>
+			"keys" in entry &&
+			(global ? entry.keys?.global : entry.keys?.key) === key,
+	);
+}
+
+/**
+ * Runs the verb `event` triggers, or shows why it is unavailable. A dialog the
+ * verb opens returns focus to where the key was pressed.
+ */
+export function runSessionVerbShortcut(
+	event: ShortcutEvent & Pick<KeyboardEvent, "preventDefault" | "target">,
+	entries: readonly SessionVerbEntry[],
+): void {
+	const verb = findSessionVerbForKey(entries, event);
+	if (!verb) return;
+	event.preventDefault();
+	const origin = event.target;
+	if (verb.disabledReason) showToast(verb.disabledReason, { variant: "warn" });
+	else verb.run(() => (origin instanceof HTMLElement ? origin : null));
+}
 
 export function isForeignSession(session: SessionInfo): boolean {
 	return (
@@ -250,7 +309,7 @@ export function getSettleVerb(
 			session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle",
 		label: session.settledAt != null ? "Un-settle" : "Settle",
 		icon: session.settledAt != null ? "undo" : "check",
-		hint: "s",
+		keys: sessionVerbKeys.settle,
 		disabledReason: actions.settleDisabledReason,
 		run: () => {
 			void settle(session, !actions.settled);
@@ -282,7 +341,7 @@ export function getSessionVerbs(
 				testId: "session-ctx-snooze",
 				label: actions.snoozed ? "Change snooze…" : "Snooze…",
 				icon: "moon",
-				hint: "z",
+				...(actions.snoozed ? {} : { keys: sessionVerbKeys.snooze }),
 				disabledReason: actions.snoozeDisabledReason,
 				run: (returnFocus) =>
 					openSnoozePicker(session, snoozePlacement, returnFocus),
@@ -292,7 +351,7 @@ export function getSessionVerbs(
 					testId: "session-ctx-unsnooze",
 					label: "Unsnooze",
 					icon: "undo",
-					hint: "z",
+					keys: sessionVerbKeys.snooze,
 					run: () => {
 						void unsnooze(session);
 					},
@@ -303,7 +362,7 @@ export function getSessionVerbs(
 				session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin",
 			label: session.pinnedAt != null ? "Unpin" : "Pin to top",
 			icon: session.pinnedAt != null ? "star-off" : "star",
-			hint: "p",
+			keys: sessionVerbKeys.pin,
 			run: () => {
 				void pin(session, !actions.pinned);
 			},
@@ -316,7 +375,7 @@ export function getSessionVerbs(
 				: "session-ctx-mark-unread",
 			label: session.unread ? "Mark read" : "Mark unread",
 			icon: session.unread ? "circle" : "circle-dot",
-			hint: "u · ⌘⇧U",
+			keys: sessionVerbKeys.read,
 			run: () => {
 				void toggleSessionRead(session);
 			},
@@ -338,7 +397,7 @@ export function getSessionVerbs(
 				testId: "session-ctx-rename",
 				label: "Rename",
 				icon: "pencil",
-				hint: "r",
+				keys: sessionVerbKeys.rename,
 				run: host.rename,
 			},
 			{

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	activeSessionView,
+	matchSessionViewShortcut,
 	sessionViews,
+	viewShortcutHint,
 } from "../../../src/lib/frontend/components/layout/session-views.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { terminalState } from "../../../src/lib/frontend/stores/terminal.svelte.js";
@@ -18,6 +20,39 @@ beforeEach(() => {
 });
 
 describe("session view registry", () => {
+	it("matches option digits by code regardless of the character produced", () => {
+		for (const [index, view] of sessionViews.entries()) {
+			const event = {
+				code: `Digit${index + 1}`,
+				altKey: true,
+				ctrlKey: false,
+				metaKey: false,
+				shiftKey: false,
+				repeat: false,
+			};
+			expect(matchSessionViewShortcut(event)).toBe(view);
+			expect(viewShortcutHint(view)).toBe(`⌥${index + 1}`);
+			for (const modifier of [
+				"ctrlKey",
+				"metaKey",
+				"shiftKey",
+				"repeat",
+			] as const)
+				expect(
+					matchSessionViewShortcut({ ...event, [modifier]: true }),
+				).toBeUndefined();
+		}
+		expect(
+			matchSessionViewShortcut({
+				code: "Numpad1",
+				altKey: true,
+				ctrlKey: false,
+				metaKey: false,
+				shiftKey: false,
+				repeat: false,
+			}),
+		).toBeUndefined();
+	});
 	it("keeps Chat on and toggles Files independently on desktop", () => {
 		expect(chat?.isOn()).toBe(true);
 		files?.select();

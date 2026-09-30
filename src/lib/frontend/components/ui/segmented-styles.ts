@@ -116,6 +116,7 @@ export const SEGMENTED_VARIANT_NAMES = Object.keys(
 export type SegmentedOption<T extends string = string> = {
 	value: T;
 	label: string;
+	shortcut?: string;
 	/** Forwarded as `data-testid`; several call sites' e2e page objects need it. */
 	testId?: string;
 	disabled?: boolean;

@@ -2,13 +2,14 @@
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import ToggleGroup from "../ui/ToggleGroup.svelte";
-	import { sessionViews } from "./session-views.js";
+	import { sessionViews, viewShortcutHint } from "./session-views.js";
 
 	// Chat is always visible on desktop, so the rail only toggles side views.
 	const railViews = sessionViews.filter((view) => view.id !== "chat");
 	const options = railViews.map((view) => ({
 		value: view.id,
 		label: view.label,
+		shortcut: viewShortcutHint(view),
 		disabled: view.disabled === true,
 		testId: `views-rail-${view.id}`,
 	}));

@@ -403,7 +403,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const titleMenu = page.getByTestId("session-action-sheet");
 		await expect(titleMenu).toBeVisible();
 		await expect(titleMenu.getByTestId("session-ctx-settle")).toBeVisible();
-		await expect(titleMenu).not.toContainText(/[⌘⇧]/);
+		await expect(titleMenu.locator(".shortcut-hint").first()).toBeVisible();
 		await page.keyboard.press("Escape");
 		await expect(titleMenu).toBeHidden();
 		await expect(titleChevron).toBeFocused();
@@ -646,7 +646,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const titleMenuButton = page.getByTestId("session-bar-title-menu");
 		await titleMenuButton.click();
 		const actions = page.getByTestId("session-action-sheet");
-		await expect(actions).not.toContainText(/[⌘⇧]/);
+		await expect(actions.locator(".shortcut-hint").first()).toBeVisible();
 		await actions.getByTestId("session-ctx-rename").click();
 		const longTitle =
 			"Investigate the long running terminal session across every project";
