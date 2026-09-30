@@ -277,24 +277,15 @@ const switchClientToSessionForInitEffect = (
 		return family;
 	});
 
-/**
- * Effect-owned production client bootstrap. This is the canonical relay path.
- */
-export const handleClientConnectedEffect = (
+const resolveAndReplaySessionEffect = (
 	clientId: string,
-	requestedSessionId?: string,
-	options: ClientInitEffectOptions = {},
+	requestedSessionId: string | undefined,
+	options: ClientInitEffectOptions,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const client = yield* OpenCodeAPITag;
 		const sessionService = yield* SessionManagerServiceTag;
 		const modelService = yield* OpenCodeModelServiceTag;
-		const agentService = yield* AgentServiceTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const terminal = yield* OpenCodeTerminalServiceTag;
-		const statusPoller = yield* StatusPollerTag;
-		const engine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 
 		// An unknown requested id selects no session, never the default: a
@@ -388,6 +379,24 @@ export const handleClientConnectedEffect = (
 			}
 		}
 
+		return {
+			activeId,
+			validatedRequestedSessionId,
+			familyIds,
+			activeSessionModel,
+		};
+	});
+
+const sendSessionListsAndRecordViewEffect = (
+	clientId: string,
+	validatedRequestedSessionId: string | undefined,
+	options: ClientInitEffectOptions,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const sessionService = yield* SessionManagerServiceTag;
+		const statusPoller = yield* StatusPollerTag;
+
 		yield* sessionService
 			.sendSessionLists((msg) => wsHandler.sendTo(clientId, msg), {
 				statuses: yield* statusPoller.getCurrentStatuses(),
@@ -405,6 +414,14 @@ export const handleClientConnectedEffect = (
 				skipMarkRead: options.skipMarkRead === true,
 			});
 		}
+	});
+
+const replayPendingPermissionsEffect = (clientId: string) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const client = yield* OpenCodeAPITag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const log = yield* LoggerTag;
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
 		const sentPermissionIds = new Set<string>();
@@ -465,6 +482,18 @@ export const handleClientConnectedEffect = (
 				`Failed to fetch pending permissions from API: ${formatErrorDetail(apiPermissionsResult.left)}`,
 			);
 		}
+	});
+
+const replayPendingQuestionsEffect = (
+	clientId: string,
+	activeId: string | undefined,
+	familyIds: ReadonlySet<string>,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const client = yield* OpenCodeAPITag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const log = yield* LoggerTag;
 
 		const questionReplayResult = yield* Effect.either(
 			Effect.gen(function* () {
@@ -540,6 +569,12 @@ export const handleClientConnectedEffect = (
 				`Failed to replay pending questions: ${formatErrorDetail(questionReplayResult.left)}`,
 			);
 		}
+	});
+
+const sendAgentListEffect = (clientId: string, activeId: string | undefined) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const agentService = yield* AgentServiceTag;
 
 		const agentResult = yield* Effect.either(agentService.listAgents(activeId));
 		if (agentResult._tag === "Right") {
@@ -558,6 +593,18 @@ export const handleClientConnectedEffect = (
 				"Failed to list agents",
 			);
 		}
+	});
+
+const sendProvidersAndSettingsEffect = (
+	clientId: string,
+	activeId: string | undefined,
+	activeSessionModel: ModelOverride | undefined,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const modelService = yield* OpenCodeModelServiceTag;
+		const engine = yield* OrchestrationEngineTag;
+		const log = yield* LoggerTag;
 
 		const providerResult = yield* Effect.either(
 			Effect.gen(function* () {
@@ -716,6 +763,15 @@ export const handleClientConnectedEffect = (
 				"Failed to list providers",
 			);
 		}
+	});
+
+const replayTerminalsInstancesAndUpdateEffect = (
+	clientId: string,
+	options: ClientInitEffectOptions,
+) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const terminal = yield* OpenCodeTerminalServiceTag;
 
 		yield* terminal
 			.replay(clientId)
@@ -754,4 +810,39 @@ export const handleClientConnectedEffect = (
 				wsHandler.sendTo(clientId, { type: "update_available", version });
 			}
 		}
+	});
+
+/**
+ * Effect-owned production client bootstrap. This is the canonical relay path.
+ */
+export const handleClientConnectedEffect = (
+	clientId: string,
+	requestedSessionId?: string,
+	options: ClientInitEffectOptions = {},
+) =>
+	Effect.gen(function* () {
+		const {
+			activeId,
+			validatedRequestedSessionId,
+			familyIds,
+			activeSessionModel,
+		} = yield* resolveAndReplaySessionEffect(
+			clientId,
+			requestedSessionId,
+			options,
+		);
+		yield* sendSessionListsAndRecordViewEffect(
+			clientId,
+			validatedRequestedSessionId,
+			options,
+		);
+		yield* replayPendingPermissionsEffect(clientId);
+		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
+		yield* sendAgentListEffect(clientId, activeId);
+		yield* sendProvidersAndSettingsEffect(
+			clientId,
+			activeId,
+			activeSessionModel,
+		);
+		yield* replayTerminalsInstancesAndUpdateEffect(clientId, options);
 	});
