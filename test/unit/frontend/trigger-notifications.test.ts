@@ -163,8 +163,11 @@ describe("triggerNotifications", () => {
 
 		mod.triggerNotifications({
 			type: "ask_user",
+			sessionId: "test-session",
 			toolId: "q-456",
-			questions: [{ question: "What?", header: "" }],
+			questions: [
+				{ question: "What?", header: "", options: [], multiSelect: false },
+			],
 		} as RelayMessage);
 
 		expect(notificationInstances).toHaveLength(1);

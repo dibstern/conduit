@@ -110,9 +110,9 @@ export function handleScanResult(
 	msg: Extract<RelayMessage, { type: "scan_result" }>,
 ): void {
 	lastScanResult = {
-		discovered: msg.discovered,
-		lost: msg.lost,
-		active: msg.active,
+		discovered: [...msg.discovered],
+		lost: [...msg.lost],
+		active: [...msg.active],
 	};
 	scanInFlight = false;
 }

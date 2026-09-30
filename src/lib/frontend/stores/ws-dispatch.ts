@@ -5,22 +5,19 @@
 // Two-tier dispatcher routes per-session events by event.sessionId
 // via routePerSession. Global events handled by handleMessage directly.
 
+import { Schema } from "effect";
 import { notificationContent } from "../../notification-content.js";
 import {
 	type PerSessionEvent,
 	type PerSessionEventType,
+	RelayMessageSchema,
 	WS_PROTOCOL_VERSION,
 } from "../../shared-types.js";
 import type {
 	GetFileContentResponse,
 	GetFileListResponse,
 } from "../transport/ws-rpc.js";
-import type {
-	ChatMessage,
-	HistoryMessage,
-	RelayMessage,
-	ToolMessage,
-} from "../types.js";
+import type { ChatMessage, RelayMessage, ToolMessage } from "../types.js";
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { renderMarkdown } from "../utils/markdown.js";
@@ -206,7 +203,7 @@ function isDev(): boolean {
 
 function shouldIgnoreOwnUserMessage(event: {
 	type: string;
-	originId?: string;
+	originId?: string | undefined;
 }): boolean {
 	return event.type === "user_message" && isOwnBrowserClientId(event.originId);
 }
@@ -396,6 +393,7 @@ function isLlmContentStart(type: string): boolean {
 
 // replayGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
 const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
+const isRelayMessage = Schema.is(RelayMessageSchema);
 
 function yieldToEventLoop(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
@@ -464,7 +462,7 @@ registerClearMessagesHook((sessionId: string | null) => {
  * ghost-write guard. Session switches bump generation via clearMessages.
  */
 async function convertHistoryAsync(
-	messages: HistoryMessage[],
+	messages: Extract<RelayMessage, { type: "history_page" }>["messages"],
 	render: (text: string) => string,
 	capturedActivity?: SessionActivity,
 ): Promise<ChatMessage[] | null> {
@@ -1186,7 +1184,7 @@ export function handleMessage(msg: RelayMessage): void {
 // that appears while llmActive is true was queued behind an in-progress turn.
 
 export async function replayEvents(
-	events: RelayMessage[],
+	events: readonly unknown[],
 	sessionId: string,
 	eventsHasMore = false,
 ): Promise<void> {
@@ -1220,6 +1218,12 @@ export async function replayEvents(
 
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
 			const event = events[i]!;
+			// Cached events skip the WS boundary decoder, so validate here and
+			// drop invalid ones the same way the live path does.
+			if (!isRelayMessage(event)) {
+				log.warn("Replay skipped an invalid cached event:", event);
+				continue;
+			}
 
 			// ── LLM activity tracking (before handler, so user_message reads it) ──
 			if (isLlmContentStart(event.type)) llmActive = true;

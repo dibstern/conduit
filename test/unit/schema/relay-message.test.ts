@@ -29,6 +29,24 @@ describe("RelayMessage Schema", () => {
 		expect(Either.isRight(result)).toBe(true);
 	});
 
+	it("keeps history token context_window and part timings through decode", () => {
+		const raw = {
+			type: "history_page",
+			sessionId: "s1",
+			hasMore: false,
+			messages: [
+				{
+					id: "m1",
+					role: "assistant",
+					parts: [{ id: "p1", type: "text", time: { start: 1, end: 2 } }],
+					tokens: { input: 10, output: 5, context_window: 200_000 },
+				},
+			],
+		};
+		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
+		expect(result).toEqual(Either.right(raw));
+	});
+
 	it("rejects unknown message type", () => {
 		const raw = { type: "not_a_real_type", sessionId: "s1" };
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);

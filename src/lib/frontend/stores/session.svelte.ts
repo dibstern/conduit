@@ -603,7 +603,7 @@ export function handleSessionList(
 export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
-	sessionState.familySessions = msg.sessions;
+	sessionState.familySessions = [...msg.sessions];
 	for (const session of msg.sessions)
 		noteSessionSnapshot(session.id, session.unread);
 	syncSessionMembership();

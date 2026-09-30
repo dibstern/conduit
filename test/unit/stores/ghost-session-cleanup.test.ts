@@ -139,9 +139,10 @@ describe("handleSessionList drop path", () => {
 		getOrCreateSessionSlot("session-C");
 
 		// Incoming session_list with only A and C (B was deleted)
-		// roots=undefined means untagged list (backward-compat), triggers diff
+		// A root-session list is authoritative for membership.
 		handleSessionList({
 			type: "session_list",
+			roots: true,
 			sessions: [
 				{ id: "session-A", title: "A" },
 				{ id: "session-C", title: "C" },
@@ -174,6 +175,7 @@ describe("handleSessionList drop path", () => {
 		// Search results only contain session-A — session-B should NOT be cleaned up
 		handleSessionList({
 			type: "session_list",
+			roots: true,
 			sessions: [{ id: "session-A", title: "A" }],
 			search: true,
 		} as Extract<RelayMessage, { type: "session_list" }>);

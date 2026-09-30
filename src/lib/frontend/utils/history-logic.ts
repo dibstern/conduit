@@ -7,7 +7,7 @@ import type {
 	AssistantMessage,
 	ChatMessage,
 	HistoryMessage,
-	HistoryMessagePart,
+	RelayMessage,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
@@ -21,6 +21,12 @@ import { createToolMessage } from "./tool-message-factory.js";
 
 // Re-export types for convenience
 export type { HistoryMessage, Turn };
+
+/** A history message as decoded off the wire by RelayMessageSchema. */
+type WireHistoryMessage = Extract<
+	RelayMessage,
+	{ type: "history_page" }
+>["messages"][number];
 
 /**
  * Group a flat list of messages into user+assistant turn pairs.
@@ -155,7 +161,7 @@ function mapToolStatus(
  *   If not provided, html is set to rawText (no markdown rendering).
  */
 function convertAssistantParts(
-	parts: HistoryMessagePart[],
+	parts: NonNullable<WireHistoryMessage["parts"]>,
 	renderHtml?: (text: string) => string,
 	messageId?: string,
 	createdAt?: number,
@@ -289,7 +295,7 @@ function convertAssistantParts(
  *   assistant message html is set to the raw text (no markdown rendering).
  */
 export function historyToChatMessages(
-	messages: HistoryMessage[],
+	messages: readonly WireHistoryMessage[],
 	renderHtml?: (text: string) => string,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];

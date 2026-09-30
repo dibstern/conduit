@@ -164,9 +164,9 @@ export function handlePermissionRequest(
 		sessionId: msg.sessionId,
 		toolName,
 		toolInput,
-		...(msg.always != null && { always: msg.always }),
+		...(msg.always != null && { always: [...msg.always] }),
 		...(msg.permissionSuggestions != null && {
-			permissionSuggestions: msg.permissionSuggestions,
+			permissionSuggestions: [...msg.permissionSuggestions],
 		}),
 		...(msg.permissionTitle != null && {
 			permissionTitle: msg.permissionTitle,

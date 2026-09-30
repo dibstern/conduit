@@ -446,8 +446,8 @@ export const inputSyncState = $state({
 
 /** Handle an incoming input_sync message from another tab. */
 export function handleInputSyncReceived(msg: {
-	text?: string;
-	from?: string;
+	text?: string | undefined;
+	from?: string | undefined;
 }): void {
 	inputSyncState.text = msg.text ?? "";
 	inputSyncState.lastFrom = msg.from ?? "";
@@ -1083,7 +1083,7 @@ function updateContextFromTokens(
 				output?: number;
 				cache_read?: number;
 				cache_creation?: number;
-				context_window?: number;
+				context_window?: number | undefined;
 		  }
 		| undefined,
 ): void {

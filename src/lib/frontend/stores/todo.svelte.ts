@@ -16,7 +16,7 @@ export const todoState = $state({
 export function handleTodoState(
 	msg: Extract<RelayMessage, { type: "todo_state" }>,
 ): void {
-	todoState.items = msg.items ?? [];
+	todoState.items = [...msg.items];
 }
 
 /**

@@ -64,14 +64,14 @@
 			});
 	}
 
-	function sortEntries(fileEntries: FileEntry[]): FileEntry[] {
+	function sortEntries(fileEntries: readonly FileEntry[]): FileEntry[] {
 		return [...fileEntries].sort((a, b) => {
 			if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
 			return a.name.localeCompare(b.name);
 		});
 	}
 
-	function handleFileList(path: string, fileEntries: FileEntry[]) {
+	function handleFileList(path: string, fileEntries: readonly FileEntry[]) {
 		const sorted = sortEntries(fileEntries);
 		fileTreeState.browserCache = new Map([...fileTreeState.browserCache, [path, sorted]]);
 

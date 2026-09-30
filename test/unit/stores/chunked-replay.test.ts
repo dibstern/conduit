@@ -80,7 +80,11 @@ describe("Async chunked replayEvents", () => {
 		// an actual yield point where replaying is still true mid-flight.
 		const events: RelayMessage[] = [];
 		for (let i = 0; i < 100; i++) {
-			events.push({ type: "user_message", text: `msg-${i}` } as RelayMessage);
+			events.push({
+				type: "user_message",
+				sessionId: "test-session",
+				text: `msg-${i}`,
+			});
 		}
 
 		const promise = replayEvents(events, "test-session");
@@ -96,13 +100,13 @@ describe("Async chunked replayEvents", () => {
 	it("all events are processed after replay completes", async () => {
 		const promise = replayEvents(
 			[
-				{ type: "user_message", text: "first" },
-				{ type: "delta", text: "response one" },
-				{ type: "done", code: 0 },
-				{ type: "user_message", text: "second" },
-				{ type: "delta", text: "response two" },
-				{ type: "done", code: 0 },
-			] as RelayMessage[],
+				{ type: "user_message", sessionId: "test-session", text: "first" },
+				{ type: "delta", sessionId: "test-session", text: "response one" },
+				{ type: "done", sessionId: "test-session", code: 0 },
+				{ type: "user_message", sessionId: "test-session", text: "second" },
+				{ type: "delta", sessionId: "test-session", text: "response two" },
+				{ type: "done", sessionId: "test-session", code: 0 },
+			],
 			"test-session",
 		);
 
@@ -123,10 +127,14 @@ describe("Async chunked replayEvents", () => {
 		// Start first replay
 		const firstPromise = replayEvents(
 			[
-				{ type: "user_message", text: "from session A" },
-				{ type: "delta", text: "response A" },
-				{ type: "done", code: 0 },
-			] as RelayMessage[],
+				{
+					type: "user_message",
+					sessionId: "test-session",
+					text: "from session A",
+				},
+				{ type: "delta", sessionId: "test-session", text: "response A" },
+				{ type: "done", sessionId: "test-session", code: 0 },
+			],
 			"test-session",
 		);
 
@@ -135,10 +143,14 @@ describe("Async chunked replayEvents", () => {
 
 		const secondPromise = replayEvents(
 			[
-				{ type: "user_message", text: "from session B" },
-				{ type: "delta", text: "response B" },
-				{ type: "done", code: 0 },
-			] as RelayMessage[],
+				{
+					type: "user_message",
+					sessionId: "test-session",
+					text: "from session B",
+				},
+				{ type: "delta", sessionId: "test-session", text: "response B" },
+				{ type: "done", sessionId: "test-session", code: 0 },
+			],
 			"test-session",
 		);
 
@@ -155,10 +167,10 @@ describe("Async chunked replayEvents", () => {
 		// Start replay
 		const promise = replayEvents(
 			[
-				{ type: "user_message", text: "hello" },
-				{ type: "delta", text: "world" },
-				{ type: "done", code: 0 },
-			] as RelayMessage[],
+				{ type: "user_message", sessionId: "test-session", text: "hello" },
+				{ type: "delta", sessionId: "test-session", text: "world" },
+				{ type: "done", sessionId: "test-session", code: 0 },
+			],
 			"test-session",
 		);
 

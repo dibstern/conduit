@@ -550,7 +550,7 @@ export function handleVariantInfo(
 	msg: Extract<RelayMessage, { type: "variant_info" }>,
 ): void {
 	discoveryState.currentVariant = msg.variant ?? "";
-	discoveryState.availableVariants = msg.variants ?? [];
+	discoveryState.availableVariants = [...(msg.variants ?? [])];
 }
 
 // ─── Context-window handler ─────────────────────────────────────────────────

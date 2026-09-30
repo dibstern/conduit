@@ -2,10 +2,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
-import {
-	type ClaudeSettingsOverrides,
-	ClaudeSettingsOverridesSchema,
-} from "./contracts/claude-settings.js";
+import { ClaudeSettingsOverridesSchema } from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 // SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -121,7 +118,7 @@ export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export interface TodoItem {
 	id: string;
 	subject: string;
-	description?: string;
+	description?: string | undefined;
 	status: TodoStatus;
 }
 
@@ -169,7 +166,7 @@ export interface ProviderInfo {
 export interface ContextWindowOption {
 	value: string;
 	label: string;
-	isDefault?: boolean;
+	isDefault?: boolean | undefined;
 }
 
 export function findContextWindowOptions(
@@ -212,8 +209,8 @@ export interface CommandInfo {
 export interface FileEntry {
 	name: string;
 	type: "file" | "directory";
-	size?: number;
-	modified?: number;
+	size?: number | undefined;
+	modified?: number | undefined;
 }
 
 // ─── Session ────────────────────────────────────────────────────────────────
@@ -261,19 +258,19 @@ export interface SessionInfo {
 	title: string;
 	/** Registered project that owns this session in daemon-wide listings. */
 	projectSlug?: string;
-	createdAt?: string | number;
-	updatedAt?: string | number;
-	messageCount?: number;
-	processing?: boolean;
+	createdAt?: string | number | undefined;
+	updatedAt?: string | number | undefined;
+	messageCount?: number | undefined;
+	processing?: boolean | undefined;
 	/** Subagent parent session ID. */
-	parentID?: string;
+	parentID?: string | undefined;
 	/** Session this top-level fork originated from. */
-	forkedFrom?: string;
+	forkedFrom?: string | undefined;
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
-	forkMessageId?: string;
+	forkMessageId?: string | undefined;
 	/** Unix-ms timestamp of the fork-point message. Messages created before
 	 *  this time are inherited context from the parent session. */
-	forkPointTimestamp?: number;
+	forkPointTimestamp?: number | undefined;
 	/**
 	 * Sessions waiting on someone. Both are projected from the event log rather
 	 * than read out of a relay's memory, so they are populated for a project
@@ -281,20 +278,20 @@ export interface SessionInfo {
 	 * Separate because "approve this command" and "answer this question" are
 	 * different asks and the row says which.
 	 */
-	pendingQuestionCount?: number;
-	pendingPermissionCount?: number;
+	pendingQuestionCount?: number | undefined;
+	pendingPermissionCount?: number | undefined;
 	/** The adapter is the only producer; tier order is also the sort order. */
-	attention?: SessionAttention;
-	unread?: boolean;
-	settledAt?: number;
-	settledAutomatically?: boolean;
-	autoSettleDisabled?: boolean;
-	pinnedAt?: number;
-	snoozedAt?: number;
-	git?: SessionGit;
-	snoozedUntil?: number;
-	wokenAt?: number;
-	wokeBecause?: "time" | "approval" | "question" | "error" | "turn";
+	attention?: SessionAttention | undefined;
+	unread?: boolean | undefined;
+	settledAt?: number | undefined;
+	settledAutomatically?: boolean | undefined;
+	autoSettleDisabled?: boolean | undefined;
+	pinnedAt?: number | undefined;
+	snoozedAt?: number | undefined;
+	git?: SessionGit | undefined;
+	snoozedUntil?: number | undefined;
+	wokenAt?: number | undefined;
+	wokeBecause?: "time" | "approval" | "question" | "error" | "turn" | undefined;
 }
 
 export interface DaemonSessionQueryOptions {
@@ -347,7 +344,7 @@ export interface UsageInfo {
 	output: number;
 	cache_read: number;
 	cache_creation: number;
-	context_window?: number;
+	context_window?: number | undefined;
 }
 
 // ─── PTY / Terminal ─────────────────────────────────────────────────────────
@@ -413,10 +410,10 @@ export interface HistoryMessagePart {
 }
 
 export interface ModelExecution {
-	requestedModel?: string;
-	expectedModel?: string;
+	requestedModel?: string | undefined;
+	expectedModel?: string | undefined;
 	actualModel: string;
-	drifted?: boolean;
+	drifted?: boolean | undefined;
 }
 
 /**
@@ -508,7 +505,12 @@ const HistoryMessagePartSchema = Schema.Struct({
 	state: Schema.optional(ToolStateSchema),
 	callID: Schema.optional(Schema.String),
 	tool: Schema.optional(Schema.String),
-	time: Schema.optional(Schema.Unknown),
+	time: Schema.optional(
+		Schema.Struct({
+			start: Schema.optional(Schema.Number),
+			end: Schema.optional(Schema.Number),
+		}),
+	),
 	preTokens: Schema.optional(Schema.Number),
 	postTokens: Schema.optional(Schema.Number),
 });
@@ -557,6 +559,7 @@ const HistoryMessageSchema = Schema.Struct({
 					write: Schema.optional(Schema.Number),
 				}),
 			),
+			context_window: Schema.optional(Schema.Number),
 		}),
 	),
 	modelExecution: Schema.optional(ModelExecutionSchema),
@@ -884,10 +887,9 @@ const DoneSchema = Schema.Struct({
 	code: Schema.Number,
 });
 
-// session_switched: events are RelayMessage[] at the type level (see manual
-// union below).  We use Schema.Unknown for array elements here to avoid a
-// circular Schema.suspend reference that causes TS7022 implicit-any errors.
-// Individual events are validated independently when they arrive over WS.
+// Keep cached events unknown here to avoid a circular Schema.suspend reference
+// that causes TS7022 implicit-any errors. Replay validates each event against
+// RelayMessageSchema before dispatching it.
 const SessionSwitchedSchema = Schema.Struct({
 	type: Schema.Literal("session_switched"),
 	id: Schema.String,
@@ -1355,399 +1357,14 @@ export const RelayMessageSchema = Schema.Union(
 	NotificationEventSchema,
 );
 
-export const RELAY_MESSAGE_TYPES = [
-	"delta",
-	"thinking_start",
-	"thinking_delta",
-	"thinking_stop",
-	"tool_start",
-	"tool_executing",
-	"tool_result",
-	"tool_content",
-	"permission_request",
-	"permission_resolved",
-	"ask_user",
-	"ask_user_resolved",
-	"ask_user_error",
-	"result",
-	"status",
-	"compaction",
-	"done",
-	"session_switched",
-	"session_list",
-	"session_family",
-	"session_forked",
-	"history_page",
-	"model_info",
-	"default_model_info",
-	"default_permission_mode_info",
-	"model_list",
-	"agent_list",
-	"visibility_info",
-	"claude_settings_info",
-	"command_list",
-	"project_list",
-	"daemon_sessions_changed",
-	"project_attached",
-	"file_list",
-	"file_content",
-	"file_tree",
-	"file_changed",
-	"part_removed",
-	"message_removed",
-	"pty_created",
-	"pty_output",
-	"pty_exited",
-	"pty_deleted",
-	"pty_list",
-	"todo_state",
-	"connection_status",
-	"plan_enter",
-	"plan_exit",
-	"plan_content",
-	"plan_approval",
-	"skip_permissions",
-	"banner",
-	"file_history_result",
-	"rewind_result",
-	"user_message",
-	"session_deleted",
-	"error",
-	"system_error",
-	"client_count",
-	"protocol_version",
-	"input_sync",
-	"update_available",
-	"instance_list",
-	"instance_status",
-	"instance_update",
-	"provider_session_reloaded",
-	"variant_info",
-	"context_window_info",
-	"permission_mode_info",
-	"proxy_detected",
-	"scan_result",
-	"notification_event",
-] as const satisfies readonly RelayMessage["type"][];
+export type RelayMessage = typeof RelayMessageSchema.Type;
 
-type MissingRelayMessageType = Exclude<
-	RelayMessage["type"],
-	(typeof RELAY_MESSAGE_TYPES)[number]
->;
-type ExtraRelayMessageType = Exclude<
-	(typeof RELAY_MESSAGE_TYPES)[number],
-	RelayMessage["type"]
->;
-type AssertNever<T extends never> = T;
-type _RelayMessageTypesIncludeAllRelayMessages =
-	AssertNever<MissingRelayMessageType>;
-type _RelayMessageTypesContainOnlyRelayMessages =
-	AssertNever<ExtraRelayMessageType>;
+export const RELAY_MESSAGE_TYPES: ReadonlyArray<RelayMessage["type"]> =
+	RelayMessageSchema.members.map((member) => member.fields.type.literals[0]);
 
 export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 	RELAY_MESSAGE_TYPES,
 );
-
-// ─── Relay WebSocket messages ───────────────────────────────────────────────
-// The manual union below is the primary type used throughout the codebase.
-// RelayMessageSchema (above) provides runtime validation and is exported
-// alongside for consumers that want schema-based decoding.
-
-export type RelayMessage =
-	// ── Streaming ──────────────────────────────────────────────────────────
-	| {
-			type: "delta";
-			sessionId: string;
-			text: string;
-			messageId?: string;
-			partId?: string;
-	  }
-	| { type: "thinking_start"; sessionId: string; messageId?: string }
-	| {
-			type: "thinking_delta";
-			sessionId: string;
-			text: string;
-			messageId?: string;
-	  }
-	| { type: "thinking_stop"; sessionId: string; messageId?: string }
-	// ── Tools ──────────────────────────────────────────────────────────────
-	| {
-			type: "tool_start";
-			sessionId: string;
-			id: string;
-			name: string;
-			messageId?: string;
-	  }
-	| {
-			type: "tool_executing";
-			sessionId: string;
-			id: string;
-			name: string;
-			input: Record<string, unknown> | undefined;
-			/** Tool part metadata — carries sessionId for Task/subagent tools. */
-			metadata?: Record<string, unknown>;
-			messageId?: string;
-	  }
-	| {
-			type: "tool_result";
-			sessionId: string;
-			id: string;
-			content: string;
-			is_error: boolean;
-			isTruncated?: boolean;
-			fullContentLength?: number;
-			messageId?: string;
-	  }
-	| { type: "tool_content"; sessionId: string; toolId: string; content: string }
-	// ── Permissions / Questions ────────────────────────────────────────────
-	| {
-			type: "permission_request";
-			sessionId: string;
-			requestId: PermissionId;
-			toolName: string;
-			toolInput: Record<string, unknown>;
-			toolUseId?: string;
-			always?: string[];
-			permissionSuggestions?: ProviderPermissionUpdate[];
-			permissionTitle?: string;
-			permissionDisplayName?: string;
-			permissionDescription?: string;
-	  }
-	| {
-			type: "permission_resolved";
-			sessionId: string;
-			requestId: PermissionId;
-			decision: string;
-	  }
-	| {
-			type: "ask_user";
-			sessionId: string;
-			toolId: string;
-			questions: AskUserQuestion[];
-			toolUseId?: string;
-			providerId?: string;
-	  }
-	| { type: "ask_user_resolved"; toolId: string; sessionId: string }
-	| {
-			type: "ask_user_error";
-			sessionId: string;
-			toolId: string;
-			message: string;
-	  }
-	// ── Session lifecycle ──────────────────────────────────────────────────
-	| {
-			type: "result";
-			usage: UsageInfo;
-			cost: number;
-			duration: number;
-			sessionId: string;
-			messageId?: string;
-	  }
-	| { type: "status"; sessionId: string; status: string }
-	| {
-			type: "compaction";
-			sessionId: string;
-			state: "started" | "completed" | "failed";
-			detail: string;
-			preTokens?: number;
-			postTokens?: number;
-	  }
-	| { type: "done"; sessionId: string; code: number }
-	| {
-			type: "session_switched";
-			id: string;
-			sessionId: string;
-			parentID?: string;
-			forkedFrom?: string;
-			/** Correlation ID echoed from CreateSession request. */
-			requestId?: RequestId;
-			/** Raw events for client replay (cache hit). */
-			events?: RelayMessage[];
-			/** When true, the event cache does not cover the full session
-			 *  (eviction or late start) and the frontend should fall through
-			 *  to server-based pagination when the replay buffer is exhausted. */
-			eventsHasMore?: boolean;
-			/** Structured messages for REST API fallback (converted to ChatMessages and prepended to the session's message list). */
-			history?: {
-				messages: HistoryMessage[];
-				hasMore: boolean;
-				total?: number;
-			};
-			/** Current input draft text for this session (from input_sync). */
-			inputText?: string;
-	  }
-	| { type: "session_family"; rootId: string; sessions: SessionInfo[] }
-	| {
-			type: "session_list";
-			sessions: SessionInfo[];
-			roots: boolean;
-			search?: boolean;
-	  }
-	| {
-			type: "session_forked";
-			sessionId: string;
-			/** The newly created forked session. */
-			session: SessionInfo;
-			/** The session this was forked from. */
-			forkedFrom: string;
-			/** Title of the parent session. */
-			parentTitle: string;
-	  }
-	| {
-			type: "history_page";
-			sessionId: string;
-			messages: HistoryMessage[];
-			hasMore: boolean;
-			total?: number;
-	  }
-	// ── Model / Agent / Commands ───────────────────────────────────────────
-	| { type: "model_info"; model: string; provider: string }
-	| {
-			type: "default_model_info";
-			model: string;
-			provider: string;
-			variant: string;
-	  }
-	| { type: "default_permission_mode_info"; mode: SessionPermissionMode }
-	| { type: "model_list"; instanceId?: string; providers: ProviderInfo[] }
-	| {
-			type: "agent_list";
-			instanceId?: string;
-			providerScope: AgentProviderScope;
-			agents: AgentInfo[];
-			activeAgentId?: string;
-	  }
-	| { type: "visibility_info"; hiddenModels: string[]; hiddenAgents: string[] }
-	| { type: "claude_settings_info"; overrides: ClaudeSettingsOverrides }
-	| { type: "command_list"; commands: CommandInfo[] }
-	// ── Projects ───────────────────────────────────────────────────────────
-	| {
-			type: "project_list";
-			projects: readonly ProjectInfo[];
-			current?: string;
-			addedSlug?: string;
-	  }
-	| { type: "project_attached"; slug: string }
-	| { type: "daemon_sessions_changed" }
-	// ── File browser ───────────────────────────────────────────────────────
-	| { type: "file_list"; path: string; entries: FileEntry[] }
-	| { type: "file_content"; path: string; content: string; binary?: boolean }
-	| { type: "file_tree"; entries: string[] }
-	| { type: "file_changed"; path: string; changeType: "edited" | "external" }
-	// ── Part lifecycle ─────────────────────────────────────────────────────
-	| {
-			type: "part_removed";
-			sessionId: string;
-			partId: string;
-			messageId: string;
-	  }
-	| { type: "message_removed"; sessionId: string; messageId: string }
-	// ── PTY / Terminal ─────────────────────────────────────────────────────
-	| { type: "pty_created"; pty: PtyInfo }
-	| { type: "pty_output"; ptyId: string; data: string }
-	| { type: "pty_exited"; ptyId: string; exitCode: number }
-	| { type: "pty_deleted"; ptyId: string }
-	| { type: "pty_list"; ptys: PtyInfo[] }
-	// ── Todo ────────────────────────────────────────────────────────────────
-	| { type: "todo_state"; items: TodoItem[] }
-	// ── Connection status (for frontend reconnection UI) ────────────────
-	| {
-			type: "connection_status";
-			status: "disconnected" | "reconnecting" | "connected";
-	  }
-	// ── Plan mode (unused) ────────────────────────────────────────────────
-	// Plan approval rides the permission channel: the SDK asks for its
-	// `ExitPlanMode` tool through canUseTool, so it arrives as a normal
-	// permission_request and inherits that path's durable audit and reload
-	// survival. These four have no server-side emitter.
-	| { type: "plan_enter" }
-	| { type: "plan_exit" }
-	| { type: "plan_content"; content: string }
-	| { type: "plan_approval" }
-	// ── Banners ────────────────────────────────────────────────────────────
-	| { type: "skip_permissions" }
-	| {
-			type: "banner";
-			config: {
-				id?: string;
-				variant?: string;
-				icon?: string;
-				text?: string;
-				dismissible?: boolean;
-			};
-	  }
-	// ── File history / Rewind (future feature) ────────────────────────────
-	| { type: "file_history_result"; path: string; versions: FileVersion[] }
-	| { type: "rewind_result"; mode: string }
-	// ── Cache / Replay ────────────────────────────────────────────────────
-	| { type: "user_message"; sessionId: string; text: string; originId?: string }
-	// ── Session deletion ──────────────────────────────────────────────────
-	| { type: "session_deleted"; sessionId: string }
-	// ── Misc ────────────────────────────────────────────────────────────────
-	| {
-			type: "error";
-			sessionId: string;
-			code: string;
-			message: string;
-			statusCode?: number;
-			details?: Record<string, unknown>;
-	  }
-	| {
-			type: "system_error";
-			code: string;
-			message: string;
-			statusCode?: number;
-			details?: Record<string, unknown>;
-	  }
-	| { type: "client_count"; count: number }
-	| { type: "protocol_version"; version: number }
-	| { type: "input_sync"; text: string; from?: string }
-	| { type: "update_available"; version?: string }
-	// ── Instance Management ──────────────────────────────────────────────
-	| { type: "instance_list"; instances: readonly OpenCodeInstance[] }
-	| {
-			type: "instance_status";
-			instanceId: string;
-			status: InstanceStatus;
-	  }
-	| {
-			type: "instance_update";
-			instanceId: string;
-			name?: string;
-			env?: Record<string, string>;
-			port?: number;
-	  }
-	// ── Provider session reload ─────────────────────────────────────────
-	| { type: "provider_session_reloaded"; sessionId: string }
-	// ── Variant / thinking level ────────────────────────────────────────
-	| { type: "variant_info"; variant?: string; variants?: string[] }
-	| { type: "permission_mode_info"; mode: SessionPermissionMode }
-	| {
-			type: "context_window_info";
-			contextWindow: string;
-			options: readonly ContextWindowOption[];
-	  }
-	| { type: "proxy_detected"; found: boolean; port: number }
-	| {
-			type: "scan_result";
-			discovered: number[];
-			lost: number[];
-			active: number[];
-	  }
-	// ── Cross-session notifications ──────────────────────────────────────
-	// Broadcast to ALL clients when a notification-worthy event (done, error)
-	// is dropped by the pipeline because no viewers are on that session.
-	// The frontend triggers sound/browser notifications without updating
-	// chat state. See ws-dispatch.ts and event-pipeline.ts.
-	| {
-			type: "notification_event";
-			/** The original event type (done, error, etc.) */
-			eventType: string;
-			/** Error message (for error events) */
-			message?: string;
-			/** Session that triggered the event (for notification click routing) */
-			sessionId?: string;
-	  };
 
 // ─── Per-session / Global event discriminators ────────────────────────────
 // These types let code distinguish per-session events (which always carry

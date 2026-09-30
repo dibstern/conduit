@@ -140,7 +140,9 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 			type: "ask_user",
 			sessionId: "test-session",
 			toolId: "q-1",
-			questions: [{ question: "What?", header: "" }],
+			questions: [
+				{ question: "What?", header: "", options: [], multiSelect: false },
+			],
 		} as RelayMessage;
 		handleMessage(msg);
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
