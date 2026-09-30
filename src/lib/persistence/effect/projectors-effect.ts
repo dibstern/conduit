@@ -267,6 +267,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 	name: "message",
 	handles: [
 		"message.created",
+		"message.snapshot",
 		"text.delta",
 		"thinking.start",
 		"thinking.delta",
@@ -282,14 +283,111 @@ export const makeMessageProjector = (): EffectProjector => ({
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (
+				"messageId" in event.data &&
+				event.metadata.rawSource !== "opencode.rest"
+			) {
+				const rows = yield* sql<{
+					rest_digest: string | null;
+					session_id: string;
+				}>`
+						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
+				if (rows[0]?.rest_digest != null) {
+					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
+					return [];
+				}
+			}
+
+			if (isEventType(event, "message.snapshot")) {
+				const { message, digest } = event.data;
+				const created = message.time?.created ?? event.createdAt;
+				const completed = message.time?.completed ?? created;
+				const text = message.parts
+					.filter(
+						(part) => part.type === "text" && typeof part["text"] === "string",
+					)
+					.map((part) => part["text"])
+					.join("");
+				const existing = yield* sql<{ is_backfilled: number }>`
+					SELECT is_backfilled FROM messages WHERE id = ${message.id}`;
+				const written = yield* sql<{ id: string }>`
+					INSERT INTO messages
+					(id, session_id, role, text, cost, tokens_in, tokens_out,
+					 tokens_cache_read, tokens_cache_write, context_window,
+					 is_streaming, is_backfilled, created_at, updated_at,
+					 rest_digest, rest_event_id, rest_payload, finish, error)
+					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
+					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
+					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
+					 ${message.tokens?.cache?.write ?? null}, ${message.tokens?.contextWindow ?? null},
+					 0, ${existing.length === 0 ? 1 : (existing[0]?.is_backfilled ?? 0)},
+					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(message)},
+					 ${message.finish ?? null},
+					 ${message.error === undefined ? null : encodeJson(message.error)})
+					ON CONFLICT (id) DO UPDATE SET
+					 role = excluded.role, text = excluded.text, cost = excluded.cost,
+					 tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out,
+					 tokens_cache_read = excluded.tokens_cache_read,
+					 tokens_cache_write = excluded.tokens_cache_write,
+					 context_window = excluded.context_window, is_streaming = 0,
+					 created_at = excluded.created_at, updated_at = excluded.updated_at,
+					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
+					 rest_payload = excluded.rest_payload,
+					 finish = excluded.finish, error = excluded.error
+				RETURNING id`;
+				yield* sql`DELETE FROM message_parts WHERE message_id = ${message.id}`;
+				for (const [index, part] of message.parts.entries()) {
+					const partTime = part["time"];
+					const time =
+						typeof partTime === "object" &&
+						partTime !== null &&
+						!Array.isArray(partTime)
+							? partTime
+							: undefined;
+					const start =
+						time && "start" in time && typeof time.start === "number"
+							? time.start
+							: created;
+					const end =
+						time && "end" in time && typeof time.end === "number"
+							? time.end
+							: start;
+					const state = part["state"];
+					const toolState =
+						typeof state === "object" && state !== null && !Array.isArray(state)
+							? state
+							: undefined;
+					yield* sql`
+						INSERT INTO message_parts
+						(id, message_id, type, text, tool_name, call_id, input, result,
+						 status, sort_order, created_at, updated_at, metadata, rest_payload)
+						VALUES (${part.id}, ${message.id}, ${part.type},
+						 ${typeof part["text"] === "string" ? part["text"] : ""},
+						 ${typeof part["tool"] === "string" ? part["tool"] : null},
+						 ${typeof part["callID"] === "string" ? part["callID"] : null},
+						 ${toolState && "input" in toolState ? encodeJson(toolState.input) : null},
+						 ${toolState && "output" in toolState ? encodeJson(toolState.output) : null},
+						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
+						 ${index}, ${start}, ${end},
+						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
+						 ${encodeJson(part)})`;
+				}
+				return written.map((row) => row.id);
+			}
 
 			if (isEventType(event, "message.created")) {
-				const isStreaming = event.data.role === "assistant" ? 1 : 0;
+				if (event.metadata.rawSource !== "opencode.rest") {
+					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${event.sessionId}`;
+				}
+				// A backfilled message is settled history: it never streams here.
+				const isBackfilled = event.data.backfilled ? 1 : 0;
+				const isStreaming =
+					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
 				return ids(
 					yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, created_at, updated_at)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${event.createdAt}, ${event.createdAt})
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null})
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END
@@ -569,6 +667,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
 	handles: [
 		"message.created",
+		"message.snapshot",
 		"tool.started",
 		"session.status",
 		"turn.completed",
@@ -579,6 +678,103 @@ export const makeTurnProjector = (): EffectProjector => ({
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (
+				event.metadata.rawSource !== "opencode.rest" &&
+				"messageId" in event.data
+			) {
+				const rows = yield* sql<{
+					rest_digest: string | null;
+					session_id: string;
+				}>`
+						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
+				if (rows[0]?.rest_digest != null) {
+					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
+					return [];
+				}
+			}
+
+			if (isEventType(event, "message.snapshot")) {
+				const { message } = event.data;
+				const parentId = message.parentID;
+				// The message projector leaves the previous ownership in this row
+				// until it can be captured here, before applying the new parent.
+				const [previous] = yield* sql<{
+					turn_id: string | null;
+					parent_id: string | null;
+				}>`SELECT turn_id, parent_id FROM messages WHERE id = ${message.id}`;
+				const affected = new Set(
+					[previous?.turn_id, previous?.parent_id].filter(
+						(owner): owner is string => owner != null,
+					),
+				);
+				const displayOwners = yield* sql<{ id: string }>`
+					SELECT id FROM turns WHERE assistant_message_id = ${message.id}
+					AND session_id = ${event.sessionId}`;
+				for (const owner of displayOwners) affected.add(owner.id);
+				if (message.role === "user") {
+					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					VALUES (${message.id}, ${event.sessionId}, 'pending', ${message.id}, ${message.time?.created ?? event.createdAt})
+					ON CONFLICT (id) DO UPDATE SET requested_at = excluded.requested_at`;
+					const children = yield* sql<{ turn_id: string | null }>`
+						SELECT DISTINCT turn_id FROM messages WHERE session_id = ${event.sessionId}
+						AND parent_id = ${message.id}
+						AND role = 'assistant'`;
+					for (const child of children) {
+						if (child.turn_id) affected.add(child.turn_id);
+					}
+					yield* sql`UPDATE messages SET turn_id = ${message.id}
+						WHERE session_id = ${event.sessionId} AND parent_id = ${message.id}
+						AND role = 'assistant'`;
+				} else if (parentId) {
+					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					SELECT id, session_id, 'pending', id, created_at FROM messages
+					WHERE id = ${parentId} AND session_id = ${event.sessionId} AND role = 'user'
+					ON CONFLICT (id) DO NOTHING`;
+				}
+				const turn = parentId
+					? yield* sql<{
+							id: string;
+						}>`SELECT id FROM turns WHERE id = ${parentId} AND session_id = ${event.sessionId}`
+					: [];
+				if (message.role === "assistant") {
+					yield* sql`UPDATE messages SET parent_id = ${parentId ?? null},
+						turn_id = ${turn.length ? parentId : null} WHERE id = ${message.id}`;
+				}
+				if (message.role === "user") affected.add(message.id);
+				if (turn.length && parentId) affected.add(parentId);
+				for (const turnId of affected) {
+					const [totals] = yield* sql<{
+						cost: number | null;
+						tokens_in: number | null;
+						tokens_out: number | null;
+						started_at: number | null;
+						completed_at: number | null;
+					}>`SELECT SUM(cost) AS cost, SUM(tokens_in) AS tokens_in,
+						SUM(tokens_out) AS tokens_out, MIN(created_at) AS started_at,
+						MAX(updated_at) AS completed_at FROM messages
+						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
+						AND role = 'assistant'`;
+					const [latest] = yield* sql<{ id: string; is_streaming: number }>`
+						SELECT id, is_streaming FROM messages
+						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
+						AND role = 'assistant'
+						ORDER BY created_at DESC, id DESC LIMIT 1`;
+					if (latest) {
+						yield* sql`UPDATE turns SET assistant_message_id = ${latest.id},
+							state = ${latest.is_streaming ? "running" : "completed"},
+							started_at = ${totals?.started_at ?? null},
+							completed_at = ${latest.is_streaming ? null : (totals?.completed_at ?? null)},
+							cost = ${totals?.cost ?? null}, tokens_in = ${totals?.tokens_in ?? null},
+							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId}`;
+					} else {
+						yield* sql`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
+							started_at = NULL, completed_at = NULL, cost = NULL,
+							tokens_in = NULL, tokens_out = NULL WHERE id = ${turnId}
+						AND assistant_message_id IS NOT NULL`;
+					}
+				}
+				return affected.size > 0 ? [event.sessionId] : [];
+			}
 
 			if (isEventType(event, "message.created")) {
 				if (event.data.role === "user") {
@@ -600,15 +796,32 @@ export const makeTurnProjector = (): EffectProjector => ({
 					event.data.role === "assistant") ||
 				isEventType(event, "tool.started")
 			) {
-				const [turn] = yield* sql<{
-					id: string;
-					state: string;
-					assistant_message_id: string | null;
-				}>`
+				const parentTurn =
+					isEventType(event, "message.created") && event.data.parentID
+						? yield* sql<{
+								id: string;
+								state: string;
+								assistant_message_id: string | null;
+							}>`SELECT id, state, assistant_message_id FROM turns
+							WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId}`
+						: [];
+				const [turn] = parentTurn.length
+					? parentTurn
+					: yield* sql<{
+							id: string;
+							state: string;
+							assistant_message_id: string | null;
+						}>`
 					SELECT id, state, assistant_message_id FROM turns
 					WHERE session_id = ${event.sessionId}
+					AND requested_at <= ${event.createdAt}
 					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
 				if (!turn) return [];
+				if (isEventType(event, "message.created")) {
+					yield* sql`UPDATE messages SET turn_id = ${turn.id},
+						parent_id = COALESCE(parent_id, ${turn.id})
+						WHERE id = ${event.data.messageId}`;
+				}
 				const reopening = turn.state !== "pending" && turn.state !== "running";
 				const assistantMessageId = reopening ? null : turn.assistant_message_id;
 				return owners(

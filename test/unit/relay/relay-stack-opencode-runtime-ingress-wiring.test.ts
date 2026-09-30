@@ -31,6 +31,9 @@ interface MockOpenCode {
 	readonly injectSSE: (
 		events: readonly { type: string; properties: Record<string, unknown> }[],
 	) => void;
+	readonly disconnectSse: () => void;
+	readonly sseConnectionCount: () => number;
+	readonly historyRequestCount: () => number;
 	readonly close: () => Promise<void>;
 }
 
@@ -42,6 +45,8 @@ const closeServer = (server: ReturnType<typeof createServer>) =>
 
 async function createMockOpenCode(): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
+	let sseConnections = 0;
+	let historyRequests = 0;
 	let resolveSseClient: (() => void) | undefined;
 	const sseClientConnected = new Promise<void>((resolve) => {
 		resolveSseClient = resolve;
@@ -51,6 +56,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
 		if (url.pathname === "/event") {
+			sseConnections++;
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
@@ -117,6 +123,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			url.pathname.match(/^\/session\/[\w-]+\/message$/) &&
 			req.method === "GET"
 		) {
+			historyRequests++;
 			res.end(JSON.stringify([]));
 			return;
 		}
@@ -165,6 +172,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 				}
 			}
 		},
+		disconnectSse() {
+			for (const client of sseClients) client.end();
+		},
+		sseConnectionCount: () => sseConnections,
+		historyRequestCount: () => historyRequests,
 		async close() {
 			for (const client of sseClients) client.end();
 			sseClients.clear();
@@ -452,6 +464,30 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 					binding_provider: "work-oc",
 				},
 			]);
+			const historyBeforeReconnect = workMock.historyRequestCount();
+			const connectsBeforeReconnect = workMock.sseConnectionCount();
+			workMock.disconnectSse();
+			await eventually(
+				async () => workMock.sseConnectionCount(),
+				(count) => count > connectsBeforeReconnect,
+				10_000,
+			);
+			workMock.injectSSE([
+				{
+					type: "message.created",
+					properties: {
+						sessionID: workSessionId,
+						messageID: "msg-relay-work-after-reconnect",
+						info: { role: "assistant", parts: [] },
+					},
+				},
+			]);
+			expect(
+				await eventually(
+					async () => workMock.historyRequestCount(),
+					(count) => count > historyBeforeReconnect,
+				),
+			).toBeGreaterThan(historyBeforeReconnect);
 		} finally {
 			if (relay != null) await relay.stop();
 			await closeServer(relayServer);

@@ -21,7 +21,7 @@ const MIGRATIONS_DIR = join(
 	"../../../src/lib/persistence/migrations",
 );
 
-const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
+const SHIPPED_MIGRATION_HASHES = {
 	"0001_current_event_store.sql":
 		"2758f4b08c34b1acab9c151b2e80daf94e2e85bd802e0a8464ef15b6b1d78d1b",
 	"0002_message_part_metadata.sql":
@@ -72,7 +72,11 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"2f5154cc5928c3df40633d9526c6ae22d1d28f33aed616f7b3d11082d1b81d98",
 	"0025_sessions_forked_from.sql":
 		"6ad03148727ef382f1f8d3958910ada6eadf2bce56987ad173eace9b8ba7d32c",
-};
+	"0026_messages_backfilled.sql":
+		"5249e2f101d80480898a842eb7ef27c824071ce4507fcb9610e99763f9c5aba9",
+	"0027_sessions_history_complete.sql":
+		"7b07ce8f2b5f7224574acecced69d6241df2e7d4bf2d92a55907589ef41a1198",
+} satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {
 	it("every shipped migration file matches its pinned hash", () => {

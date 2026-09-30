@@ -25,6 +25,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.status",
 		"session.compaction",
 		"message.created",
+		"message.snapshot",
 		"session.created",
 		"session.renamed",
 		"session.deleted",

@@ -76,10 +76,12 @@ export interface MessageCreatedEvent extends SSEEventBase {
 		messageID?: string;
 		info?: {
 			role?: string;
+			parentID?: string;
 			parts?: Array<{ type?: string; text?: string }>;
 		};
 		message?: {
 			role?: string;
+			parentID?: string;
 			parts?: Array<{ type?: string; text?: string }>;
 		};
 	};

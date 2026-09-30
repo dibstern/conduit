@@ -172,6 +172,7 @@ export interface ProviderListResult {
  * `opencode-client.ts`.
  */
 export interface Message {
+	[key: string]: unknown;
 	id: string;
 	role: string;
 	sessionID: string;

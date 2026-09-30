@@ -60,6 +60,8 @@ const expectedNames = [
 	"session_attention",
 	"read_state_to_turn_ends",
 	"sessions_forked_from",
+	"messages_backfilled",
+	"sessions_history_complete",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -446,7 +448,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(15);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(17);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -590,6 +592,8 @@ describe("Effect migration lineage", () => {
 				[24, "session_attention"],
 				[25, "read_state_to_turn_ends"],
 				[26, "sessions_forked_from"],
+				[27, "messages_backfilled"],
+				[28, "sessions_history_complete"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -653,6 +657,8 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[25, "read_state_to_turn_ends"],
 					[26, "sessions_forked_from"],
+					[27, "messages_backfilled"],
+					[28, "sessions_history_complete"],
 				]);
 				const rows = yield* sql<{
 					id: string;

@@ -327,6 +327,7 @@ describe("session handlers with Effect-native model service", () => {
 							context_window: null,
 							version: 0,
 							is_streaming: 0,
+							is_backfilled: 0,
 							created_at: 10,
 							updated_at: 11,
 							parts: [
@@ -499,6 +500,7 @@ describe("session handlers with Effect-native model service", () => {
 						context_window: null,
 						version: 0,
 						is_streaming: 0,
+						is_backfilled: 0,
 						created_at: 10,
 						updated_at: 11,
 						parts: [],

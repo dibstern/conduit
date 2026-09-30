@@ -36,6 +36,18 @@ function comparable(events: readonly CanonicalEvent[]) {
 }
 
 describe("OpenCodeRuntimeEventTranslator", () => {
+	it("carries assistant parentID from message.created into the canonical event", () => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const event = makeSSEEvent("message.created", {
+			sessionID: "ses-opencode",
+			messageID: "msg-assistant-1",
+			info: { role: "assistant", parentID: "msg-user-1" },
+		});
+		expect(
+			runtimeToDomain(translator, event, "ses-opencode")[0]?.data,
+		).toMatchObject({ parentID: "msg-user-1" });
+	});
+
 	it("matches legacy OpenCode SSE domain translation for message and text deltas", () => {
 		const legacy = new CanonicalEventTranslator();
 		const runtime = new OpenCodeRuntimeEventTranslator();
@@ -313,6 +325,7 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 				info: {
 					id: "msg-assistant-1",
 					role: "assistant",
+					parentID: "msg-user-1",
 					time: { created: 1000 },
 				},
 			}),
@@ -320,6 +333,7 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 		);
 
 		expect(result?.map((event) => event.type)).toEqual(["message.created"]);
+		expect(result?.[0]?.data).toMatchObject({ parentID: "msg-user-1" });
 	});
 
 	it("attaches plain-object tool metadata to running and completed events", () => {

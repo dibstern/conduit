@@ -417,6 +417,8 @@ export interface ModelExecution {
 export interface HistoryMessage {
 	id: string;
 	role: "user" | "assistant";
+	/** True when reconstructed from provider REST history rather than observed live. */
+	isBackfilled?: boolean;
 	parts?: HistoryMessagePart[];
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
@@ -533,6 +535,7 @@ const ModelExecutionSchema = Schema.Struct({
 const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
+	isBackfilled: Schema.optional(Schema.Boolean),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
 	time: Schema.optional(
 		Schema.Struct({

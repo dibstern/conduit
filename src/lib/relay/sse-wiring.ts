@@ -3,6 +3,7 @@
 // OpenCode, translates them, filters by session, records to cache, broadcasts
 // to browser clients, and sends push notifications.
 
+import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Data, Effect, Either, Option, Runtime, Schema } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
@@ -175,7 +176,7 @@ export type EffectSSEWiringDeps = Omit<
 			sessionId: string | undefined,
 			providerInstanceId: string,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
-		onReconnect(): void;
+		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 	};
 };
 
@@ -1376,7 +1377,20 @@ export const wireSSEConsumerEffect = (
 					);
 				},
 				onReconnect: () => {
-					deps.opencodeRuntimeIngress?.onReconnect();
+					if (deps.opencodeRuntimeIngress)
+						runFork(
+							deps.opencodeRuntimeIngress
+								.onReconnect(deps.providerInstanceId)
+								.pipe(
+									Effect.catchAllCause((cause) =>
+										Effect.sync(() =>
+											deps.log.warn(
+												`OpenCode reconnect backfill scheduling failed: ${Cause.pretty(cause)}`,
+											),
+										),
+									),
+								),
+						);
 				},
 				reconcileOnConnected: () => {
 					if (deps.statusPoller?.reconcileNow) {

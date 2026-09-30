@@ -13,6 +13,8 @@ export function translateDomainEventToRelay(
 	event: CanonicalEvent,
 ): DomainEventRelayTranslation {
 	switch (event.type) {
+		case "message.snapshot":
+			return silent("REST snapshot is read-model-only");
 		case "text.delta":
 			return emit({
 				type: "delta",

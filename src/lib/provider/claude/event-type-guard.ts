@@ -39,6 +39,7 @@ const CLAUDE_PRODUCED_TYPES = [
  * comment explaining why it's excluded.
  */
 const CLAUDE_NOT_APPLICABLE_TYPES = [
+	"message.snapshot", // OpenCode REST reconciliation only
 	"file.attached", // OpenCode REST/SSE file part transport; Claude attachments use a different provider path
 	"tool.input_updated", // Historical event — no longer emitted after Phase 2 (buffered tool.started replaces it)
 	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator

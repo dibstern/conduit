@@ -41,6 +41,9 @@ export const SESSION_ATTENTION_MIGRATION = "0023_session_attention.sql";
 export const READ_STATE_TO_TURN_ENDS_MIGRATION =
 	"0024_read_state_to_turn_ends.sql";
 export const SESSIONS_FORKED_FROM_MIGRATION = "0025_sessions_forked_from.sql";
+export const MESSAGES_BACKFILLED_MIGRATION = "0026_messages_backfilled.sql";
+export const SESSIONS_HISTORY_COMPLETE_MIGRATION =
+	"0027_sessions_history_complete.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

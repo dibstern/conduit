@@ -1,4 +1,5 @@
 import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Effect, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
@@ -22,6 +23,7 @@ export interface ProviderRuntimeIngestion {
 		options?: {
 			readonly publishToBus?: boolean;
 			readonly publishToRelay?: boolean;
+			readonly beforeCommit?: Effect.Effect<void, SqlError>;
 			/** Run at the durable boundary: inside the same uninterruptible region
 			 *  as append+project, after COMMIT returns and before anything is
 			 *  published. This is where a caller records state that only makes
@@ -67,6 +69,7 @@ export const makeProviderRuntimeIngestionLive = (
 				ingestOptions: {
 					readonly publishToBus?: boolean;
 					readonly publishToRelay?: boolean;
+					readonly beforeCommit?: Effect.Effect<void, SqlError>;
 					readonly afterCommit?: Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, unknown> =>
@@ -146,6 +149,9 @@ export const makeProviderRuntimeIngestionLive = (
 
 						yield* commitAndSignal(persistentEvents, {
 							publish: ingestOptions.publishToBus ?? true,
+							...(ingestOptions.beforeCommit
+								? { beforeCommit: ingestOptions.beforeCommit }
+								: {}),
 							afterCommit: Effect.zipRight(
 								Ref.set(mapperStateRef, nextState),
 								ingestOptions.afterCommit ?? Effect.void,

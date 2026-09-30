@@ -61,7 +61,10 @@ import {
 	OpenCodeInstanceClientsLive,
 	OpenCodeInstanceClientsTag,
 } from "../domain/relay/Services/opencode-instance-clients.js";
-import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
+import {
+	type EffectOpenCodeRuntimeIngressPort,
+	makeEffectOpenCodeRuntimeIngress,
+} from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
@@ -979,6 +982,7 @@ export async function createProjectRelay(
 	let stopMonitoring = () => {};
 	let startup: {
 		sql: SqlClient.SqlClient | undefined;
+		opencodeRuntimeIngress: EffectOpenCodeRuntimeIngressPort | undefined;
 		sessionManagerService: typeof SessionManagerServiceTag.Service;
 		broadcastBackgroundSessionLists: () => void;
 		api: OpenCodeAPI;
@@ -1147,8 +1151,17 @@ export async function createProjectRelay(
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
+				const instanceClients = yield* OpenCodeInstanceClientsTag;
 				const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 					log.child("opencode-runtime-ingress"),
+					(sessionId, instanceId, signal) =>
+						Effect.gen(function* () {
+							const client =
+								(yield* instanceClients.clientFor(instanceId)) ?? api;
+							return yield* Effect.tryPromise(() =>
+								client.session.messages(sessionId, { signal }),
+							);
+						}),
 				);
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(
@@ -1241,10 +1254,7 @@ export async function createProjectRelay(
 					// completion via wireSSEToInstance, streaming/persistence via
 					// wireSSEConsumerEffect. Pending permission/question recovery
 					// lists stay on the default api (accepted degradation), and the
-					// ingress translator reset stays owned by the default stream's
-					// reconnects so a named stream's (re)connect cannot reset
-					// in-flight default-session ingestion state.
-					const instanceClients = yield* OpenCodeInstanceClientsTag;
+					// each stream invalidates its own history sync on reconnect.
 					yield* instanceClients.registerStreamWirer((stream, instanceId) =>
 						Effect.gen(function* () {
 							yield* Effect.sync(() =>
@@ -1256,21 +1266,6 @@ export async function createProjectRelay(
 								{
 									...sseConsumerDeps,
 									providerInstanceId: instanceId,
-									...(opencodeRuntimeIngress != null && {
-										opencodeRuntimeIngress: {
-											onSSEEventEffect: (
-												event,
-												sessionId,
-												providerInstanceId,
-											) =>
-												opencodeRuntimeIngress.onSSEEventEffect(
-													event,
-													sessionId,
-													providerInstanceId,
-												),
-											onReconnect: () => {},
-										},
-									}),
 								},
 								stream,
 							);
@@ -1281,6 +1276,7 @@ export async function createProjectRelay(
 				yield* gate.markReady();
 				return {
 					sql: sql._tag === "Some" ? sql.value : undefined,
+					opencodeRuntimeIngress,
 					sessionManagerService,
 					broadcastBackgroundSessionLists: () => {
 						runFork(
@@ -1382,6 +1378,7 @@ export async function createProjectRelay(
 			// Quiesce monitoring before runtime disposal so late status changes
 			// cannot restart message pollers during scoped shutdown.
 			stopMonitoring();
+			startup.opencodeRuntimeIngress?.shutdown();
 			await rpcWsHandler.drain();
 			// Scoped finalizers own SSE drain, command-gate stop, provider instance
 			// shutdown, status-poller drain, and other Effect-managed resources.

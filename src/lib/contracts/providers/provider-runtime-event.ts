@@ -21,6 +21,7 @@ const hasOwnKey = (value: object, key: string) => Object.hasOwn(value, key);
 
 export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"message.created",
+	"message.snapshot",
 	"text.delta",
 	"thinking.start",
 	"thinking.delta",

@@ -132,6 +132,7 @@ describe("MessageProjector", () => {
 		expect(projector.name).toBe("message");
 		expect(projector.handles).toEqual([
 			"message.created",
+			"message.snapshot",
 			"text.delta",
 			"thinking.start",
 			"thinking.delta",
@@ -144,6 +145,79 @@ describe("MessageProjector", () => {
 			"turn.error",
 			"session.compaction",
 		]);
+	});
+
+	it.each([
+		false,
+		true,
+	])("ignores a late reasoning delta for settled backfill (replay=%s)", async (replaying) => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, is_streaming, rest_digest, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 0, 'digest', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p1', 'a1', 'thinking', 'reason', 0, 1, 1)",
+		);
+		await project(
+			makeStored(
+				"thinking.delta",
+				"s1",
+				{
+					messageId: "a1",
+					partId: "p1",
+					text: "reason",
+				} satisfies ThinkingDeltaPayload,
+				2,
+			),
+			{ replaying, version: 1 },
+		);
+		expect(
+			await queryOne<{ text: string }>(
+				"SELECT text FROM message_parts WHERE id = 'p1'",
+			),
+		).toEqual({ text: "reason" });
+	});
+
+	it.each([
+		false,
+		true,
+	])("invalidates complete history when a late text update targets an imported message (replay=%s)", async (replaying) => {
+		await harness.query(
+			"UPDATE sessions SET history_complete = 1 WHERE id = 's1'",
+		);
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, text, is_streaming, rest_digest, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 'hello', 0, 'digest', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p1', 'a1', 'text', 'hello', 0, 1, 1)",
+		);
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "a1",
+					partId: "p1",
+					text: "hello world",
+				} satisfies TextDeltaPayload,
+				2,
+			),
+			{ replaying, version: 1 },
+		);
+		expect(
+			await queryOne<{ text: string }>(
+				"SELECT text FROM messages WHERE id = 'a1'",
+			),
+		).toEqual({ text: "hello" });
+		expect(
+			await queryOne<{ text: string }>(
+				"SELECT text FROM message_parts WHERE id = 'p1'",
+			),
+		).toEqual({ text: "hello" });
+		expect(
+			await queryOne<{ history_complete: number }>(
+				"SELECT history_complete FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ history_complete: 0 });
 	});
 
 	describe("message.created", () => {

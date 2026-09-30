@@ -11,6 +11,7 @@ import {
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
@@ -22,6 +23,7 @@ import {
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
+	SESSIONS_HISTORY_COMPLETE_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
@@ -1018,6 +1020,22 @@ export const effectMigrationEntries = {
 			readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION),
 		);
 	}),
+	"0027_messages_backfilled": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
+		if (columns.some((column) => column.name === "is_backfilled")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(MESSAGES_BACKFILLED_MIGRATION),
+		);
+	}),
+	"0028_sessions_history_complete": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "history_complete")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSIONS_HISTORY_COMPLETE_MIGRATION),
+		);
+	}),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 /**
@@ -1027,6 +1045,7 @@ export const effectMigrationEntries = {
  */
 export const DURABLE_SESSION_COLUMNS = {
 	seen_version: "0024_session_attention",
+	history_complete: "0028_sessions_history_complete",
 } as const satisfies Record<string, keyof typeof effectMigrationEntries>;
 
 export function makeEffectMigrationLoader(

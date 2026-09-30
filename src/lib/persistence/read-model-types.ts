@@ -7,6 +7,7 @@ export interface SessionRow {
 	provider_sid: string | null;
 	title: string;
 	status: string;
+	history_complete?: number;
 	parent_id: string | null;
 	fork_point_event: string | null;
 	fork_point_timestamp?: number | null;
@@ -60,6 +61,13 @@ export interface MessageRow {
 	tokens_cache_write: number | null;
 	context_window: number | null;
 	is_streaming: number;
+	is_backfilled: number;
+	rest_digest?: string | null;
+	rest_event_id?: string | null;
+	rest_payload?: string | null;
+	parent_id?: string | null;
+	finish?: string | null;
+	error?: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -79,6 +87,7 @@ export interface MessagePartRow {
 	sort_order: number;
 	created_at: number;
 	updated_at: number;
+	rest_payload?: string | null;
 }
 
 export interface MessageWithParts extends MessageRow {

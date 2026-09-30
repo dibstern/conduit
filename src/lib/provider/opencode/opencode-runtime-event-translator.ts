@@ -36,6 +36,7 @@ const defaultLog = createLogger("opencode-runtime-event-translator");
  *  a caller can translate into a fork and keep the fork only once the events it
  *  produced are durable — a batch that rolled back must translate again. */
 export interface SessionTranslation {
+	droppedRewrite: boolean;
 	/** The reconnect generation this copy was forked from. A fork translated
 	 *  before a reconnect may not restore the announcements that reconnect
 	 *  deliberately discarded. */
@@ -75,6 +76,7 @@ export class OpenCodeRuntimeEventTranslator {
 	forkSession(sessionId: string): SessionTranslation {
 		const committed = this.committed.get(sessionId);
 		return {
+			droppedRewrite: false,
 			epoch: this.epoch,
 			parts: new Map(committed?.parts),
 			seenMessages: new Set(committed?.seenMessages),
@@ -92,6 +94,7 @@ export class OpenCodeRuntimeEventTranslator {
 			state.epoch === this.epoch
 				? state
 				: {
+						droppedRewrite: false,
 						epoch: this.epoch,
 						parts: new Map(),
 						seenMessages: new Set(),
@@ -166,6 +169,7 @@ export class OpenCodeRuntimeEventTranslator {
 		this.epoch++;
 		for (const [sessionId, state] of this.committed) {
 			this.committed.set(sessionId, {
+				droppedRewrite: false,
 				epoch: this.epoch,
 				parts: new Map(),
 				seenMessages: new Set(),
@@ -188,6 +192,7 @@ export class OpenCodeRuntimeEventTranslator {
 		const offer = state.emitted.offer(partId, partText);
 		if (offer.kind === "emit") return offer.suffix;
 		if (offer.kind === "diverged") {
+			state.droppedRewrite = true;
 			this.log.warn(
 				`opencode ${kind} part no longer extends the text already sent; dropping it`,
 				{
@@ -220,6 +225,7 @@ export class OpenCodeRuntimeEventTranslator {
 		const msg = props.info ?? props.message;
 		const role = msg?.role;
 		if (role !== "user" && role !== "assistant") return null;
+		const parentID = role === "assistant" ? msg?.parentID : undefined;
 
 		const messageId = props.messageID ?? "";
 		if (!this.markMessageSeen(state, messageId)) return null;
@@ -228,6 +234,7 @@ export class OpenCodeRuntimeEventTranslator {
 				messageId,
 				role,
 				sessionId,
+				...(parentID ? { parentID } : {}),
 			}),
 		];
 	}
@@ -452,7 +459,21 @@ export class OpenCodeRuntimeEventTranslator {
 					rawPart.time?.end && rawPart.time?.start
 						? rawPart.time.end - rawPart.time.start
 						: 0;
+				// First seen already settled (attached mid-tool, or a backfill of
+				// final state): announce it like the running branch does, or the
+				// domain mapper invents an orphan "Unknown" tool.started.
 				return [
+					...(existing
+						? []
+						: [
+								opencodeRuntimeEvent("tool.started", sessionId, event, {
+									messageId,
+									partId,
+									toolName,
+									callId,
+									input: normalizeToolInput(toolName, rawPart.state?.input),
+								}),
+							]),
 					opencodeRuntimeEvent("tool.completed", sessionId, event, {
 						messageId,
 						partId,
@@ -507,6 +528,9 @@ export class OpenCodeRuntimeEventTranslator {
 					messageId,
 					role: msg.role,
 					sessionId,
+					...(msg.role === "assistant" && msg.parentID
+						? { parentID: msg.parentID }
+						: {}),
 				}),
 			);
 		}

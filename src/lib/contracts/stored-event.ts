@@ -38,6 +38,7 @@ export type MessageRole = (typeof MESSAGE_ROLES)[number];
 
 export const CANONICAL_EVENT_TYPES = [
 	"message.created",
+	"message.snapshot",
 	"text.delta",
 	"thinking.start",
 	"thinking.delta",
@@ -83,7 +84,40 @@ export interface MessageCreatedPayload {
 	readonly messageId: string;
 	readonly role: MessageRole;
 	readonly sessionId: string;
+	readonly parentID?: string;
 	readonly turnId?: string;
+	/** Imported from the provider's own record rather than observed streaming
+	 *  (OpenCode history backfill, conduit-test-iea). */
+	readonly backfilled?: true;
+}
+
+/** A settled OpenCode REST message, including its ordered provider parts. */
+export interface MessageSnapshotPayload {
+	readonly messageId: string;
+	readonly digest: string;
+	readonly supersedesEventId?: string;
+	readonly message: {
+		readonly id: string;
+		readonly sessionID: string;
+		readonly role: string;
+		readonly parentID?: string;
+		readonly time?: { readonly created?: number; readonly completed?: number };
+		readonly cost?: number;
+		readonly tokens?: {
+			readonly input?: number;
+			readonly output?: number;
+			readonly cache?: { readonly read?: number; readonly write?: number };
+			readonly contextWindow?: number;
+		};
+		readonly finish?: string;
+		readonly error?: unknown;
+		readonly parts: readonly {
+			readonly id: string;
+			readonly type: string;
+			readonly [key: string]: unknown;
+		}[];
+		readonly [key: string]: unknown;
+	};
 }
 
 export interface TextDeltaPayload {
@@ -349,6 +383,7 @@ export interface QuestionResolvedPayload {
  */
 export interface EventPayloadMap {
 	"message.created": MessageCreatedPayload;
+	"message.snapshot": MessageSnapshotPayload;
 	"text.delta": TextDeltaPayload;
 	"thinking.start": ThinkingStartPayload;
 	"thinking.delta": ThinkingDeltaPayload;
@@ -489,7 +524,39 @@ const MessageCreatedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	role: MessageRoleSchema,
 	sessionId: Schema.String,
+	parentID: Schema.optionalWith(Schema.String, { exact: true }),
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
+	backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+});
+
+const MessageSnapshotPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	digest: Schema.String,
+	supersedesEventId: Schema.optionalWith(Schema.String, { exact: true }),
+	message: Schema.Unknown.pipe(
+		Schema.filter(
+			(value) =>
+				typeof value === "object" &&
+				value !== null &&
+				"id" in value &&
+				typeof value.id === "string" &&
+				"sessionID" in value &&
+				typeof value.sessionID === "string" &&
+				"role" in value &&
+				(value.role === "user" || value.role === "assistant") &&
+				"parts" in value &&
+				Array.isArray(value.parts) &&
+				value.parts.every(
+					(part: unknown) =>
+						typeof part === "object" &&
+						part !== null &&
+						"id" in part &&
+						typeof part.id === "string" &&
+						"type" in part &&
+						typeof part.type === "string",
+				),
+		),
+	),
 });
 
 const TextDeltaPayloadSchema = Schema.Struct({
@@ -808,6 +875,10 @@ const MessageCreatedEventSchema = eventEnvelope(
 	"message.created",
 	MessageCreatedPayloadSchema,
 );
+const MessageSnapshotEventSchema = eventEnvelope(
+	"message.snapshot",
+	MessageSnapshotPayloadSchema,
+);
 const TextDeltaEventSchema = eventEnvelope(
 	"text.delta",
 	TextDeltaPayloadSchema,
@@ -953,6 +1024,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
+	MessageSnapshotEventSchema,
 	TextDeltaEventSchema,
 	ThinkingStartEventSchema,
 	ThinkingDeltaEventSchema,

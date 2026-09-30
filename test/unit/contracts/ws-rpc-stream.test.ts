@@ -67,6 +67,7 @@ const messageRow = (id: string, version = 0): MessageWithParts => ({
 	tokens_cache_write: null,
 	context_window: null,
 	is_streaming: 0,
+	is_backfilled: 0,
 	created_at: 1,
 	updated_at: 1,
 	parts: [],
