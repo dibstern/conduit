@@ -17,6 +17,7 @@ export default defineConfig({
 		"advanced-ui.spec.ts",
 		"smoke.spec.ts",
 		"sessions.spec.ts",
+		"session-navigation-rpc.spec.ts",
 		"session-triage.spec.ts",
 		"session-select-mode.spec.ts",
 		"session-auto-settle.spec.ts",

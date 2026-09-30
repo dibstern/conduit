@@ -134,7 +134,7 @@ describe("routed RPC server", () => {
 						sessionId: "session-b",
 						originId: "daemon-client",
 					}),
-				).toEqual({ ok: true });
+				).toEqual({ ok: true, draft: "" });
 				expect(reattach).toHaveBeenCalledWith(
 					expect.objectContaining({
 						projectSlug: "project-b",
@@ -165,7 +165,7 @@ describe("routed RPC server", () => {
 						sessionId: "session-a",
 						originId: "relay-client",
 					}),
-				).toEqual({ ok: true });
+				).toEqual({ ok: true, draft: "" });
 				expect(reattach).toHaveBeenCalledTimes(1);
 				expect(resolve).toHaveBeenCalledWith("project-a");
 			}),

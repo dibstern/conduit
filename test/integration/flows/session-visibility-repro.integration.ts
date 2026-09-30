@@ -1,9 +1,8 @@
 // ─── Integration: Session Visibility Repros ─────────────────────────────────
 // Reproduces two reported bugs at the relay-harness seam:
 //
-//  Bug A ("two tabs, one empty"): a fresh client connecting with
-//    ?session=<id> for a session that already has messages must receive a
-//    populated session_switched (events or history), not an empty one.
+//  Bug A ("two tabs, one empty"): a fresh client opening a session with
+//    messages must be able to load a populated transcript page.
 //
 //  Bug B ("new session missing from sidebar"): after CreateSession with an
 //    OpenCode providerId, the viewed family that follows must
@@ -14,8 +13,8 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
-import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import type {
 	OpenCodeInteraction,
 	OpenCodeRecording,
@@ -30,24 +29,24 @@ import { TestWsClient } from "../helpers/test-ws-client.js";
 type DifferentialPart = {
 	id: string;
 	type: string;
-	text?: string;
-	tool?: string;
-	mime?: string;
-	filename?: string;
-	url?: string;
-	state?: { metadata?: Record<string, unknown> };
+	text?: string | undefined;
+	tool?: string | undefined;
+	mime?: string | undefined;
+	filename?: string | undefined;
+	url?: string | undefined;
+	state?: { metadata?: Record<string, unknown> } | undefined;
 };
 
 type DifferentialMessage = {
 	id: string;
-	role?: string;
-	text?: string;
-	time?: { created?: number };
-	parts?: DifferentialPart[];
+	role?: string | undefined;
+	text?: string | undefined;
+	time?: { created?: number | undefined } | undefined;
+	parts?: readonly DifferentialPart[] | undefined;
 };
 
 type DifferentialHistory = {
-	messages: DifferentialMessage[];
+	messages: readonly DifferentialMessage[];
 	hasMore: boolean;
 };
 
@@ -187,12 +186,7 @@ async function waitForProjectedMessage(
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
 		const projected = await projectedHistory(dbPath, sessionId, 200);
-		if (
-			projected.kind === "rest-history" &&
-			(projected.history as DifferentialHistory).messages.some(
-				(message) => message.id === messageId,
-			)
-		)
+		if (projected.history.messages.some((message) => message.id === messageId))
 			return;
 		if (Date.now() > deadline)
 			throw new Error(`projection never ingested ${messageId}`);
@@ -224,10 +218,13 @@ async function projectedHistory(
 			}),
 		),
 	);
-	return resolveSessionHistoryFromRows(page.messages, {
-		pageSize,
-		hasMore: page.hasMore,
-	});
+	return {
+		kind: "rest-history" as const,
+		history: {
+			messages: messageRowsToHistory(page.messages, { pageSize }).messages,
+			hasMore: page.hasMore,
+		},
+	};
 }
 
 /**
@@ -235,7 +232,7 @@ async function projectedHistory(
  * pattern). Without this the default session runs on the Claude provider and
  * never touches the mock — the "differential" would silently compare the
  * projection with itself. Returns the local session id; the first sendMessage
- * to it materializes an OpenCode session (session_switched with a new id).
+ * to it materializes an OpenCode session returned by SendMessage.
  */
 async function bindOpenCodeSession(
 	client: TestWsClient,
@@ -268,15 +265,12 @@ async function materializeOpenCodeTurn(
 	localId: string,
 	prompt: string,
 ): Promise<string> {
-	await client.sendMessage(prompt, {
+	const dispatchedId = await client.sendMessage(prompt, {
 		sessionId: localId,
 		originId: client.getClientId(),
 	});
-	const switched = await client.waitFor("session_switched", {
-		timeout: 15_000,
-		predicate: (message) => message["id"] !== localId,
-	});
-	return switched["id"] as string;
+	expect(dispatchedId).not.toBe(localId);
+	return dispatchedId;
 }
 
 async function runPaginationDifferential(count: number) {
@@ -307,10 +301,9 @@ async function runPaginationDifferential(count: number) {
 			`ws://127.0.0.1:${paginationHarness.relayPort}/ws?session=${sessionId}`,
 		);
 		await client2.waitForOpen();
-		const switched = await client2.waitFor("session_switched", {
-			predicate: (message) => message["id"] === sessionId,
-		});
-		const served = switched["history"] as DifferentialHistory;
+		await client2.waitForInitialState();
+		await client2.viewSession(sessionId);
+		const served = await client2.loadMoreHistory(sessionId);
 		const providerHistory = new SessionManager({
 			client: paginationHarness.stack.client,
 		});
@@ -413,21 +406,13 @@ describe("Integration: Session Visibility Repros", () => {
 			`ws://127.0.0.1:${harness.relayPort}/ws?session=${sessionId}`,
 		);
 		await client2.waitForOpen();
-		const switched = await client2.waitFor("session_switched", {
-			predicate: (m) => m["id"] === sessionId,
-		});
-
-		const events = switched["events"] as unknown[] | undefined;
-		const history = switched["history"] as { messages: unknown[] } | undefined;
-		const payloadSize = events?.length ?? history?.messages.length ?? 0;
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-A] session_switched kind=${events ? "events" : history ? "history" : "EMPTY"} size=${payloadSize}`,
-		);
-		expect(payloadSize).toBeGreaterThan(0);
+		await client2.waitForInitialState();
+		await client2.viewSession(sessionId as string);
+		const history = await client2.loadMoreHistory(sessionId as string);
+		expect(history.messages.length).toBeGreaterThan(0);
 		// The history must carry actual content — a skeleton of empty
 		// messages reproduces the "navigate back and the message is gone" bug.
-		expect(JSON.stringify(switched)).toContain("pong");
+		expect(JSON.stringify(history.messages)).toContain("pong");
 
 		await client2.close();
 		await client1.close();
@@ -436,9 +421,8 @@ describe("Integration: Session Visibility Repros", () => {
 	it("materialized session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
-		const detourId = (await client1.waitFor("session_switched"))[
-			"id"
-		] as string;
+		const detourId = client1.getActiveSessionId();
+		if (!detourId) throw new Error("No initial session");
 
 		// Providers come from the init model_list broadcast.
 		const modelList = await client1.waitFor("model_list");
@@ -465,20 +449,16 @@ describe("Integration: Session Visibility Repros", () => {
 		client1.clearReceived();
 
 		// 3. First message → prepareTurnSession materializes an OpenCode session.
-		await client1.sendMessage("Reply with just the word 'pong'.", {
-			sessionId: localId,
-			originId: client1.getClientId(),
-		});
-
-		const switched = await client1.waitFor("session_switched", {
-			predicate: (m) => m["id"] !== localId,
-		});
-		const newId = switched["id"] as string;
+		const newId = await client1.sendMessage(
+			"Reply with just the word 'pong'.",
+			{
+				sessionId: localId,
+				originId: client1.getClientId(),
+			},
+		);
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-C] materialized ${localId} -> ${newId}`);
-		// The switch is uncorrelated, so it must name the row it replaces for
-		// the sender's session_switched guard to accept it.
-		expect(switched["replacesSessionId"]).toBe(localId);
+		expect(newId).not.toBe(localId);
 
 		// Bug 1 (server contract): the echo for the materialized session must be
 		// renderable by the sender — the optimistic copy lives in the OLD slot,
@@ -511,21 +491,12 @@ describe("Integration: Session Visibility Repros", () => {
 			`ws://127.0.0.1:${harness.relayPort}/ws?session=${newId}`,
 		);
 		await client2.waitForOpen();
-		const switched2 = await client2.waitFor("session_switched", {
-			predicate: (m) => m["id"] === newId,
-		});
-		const events2 = switched2["events"] as unknown[] | undefined;
-		const history2 = switched2["history"] as
-			| { messages: unknown[] }
-			| undefined;
-		const size2 = events2?.length ?? history2?.messages.length ?? 0;
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-C] second-tab kind=${events2 ? "events" : history2 ? "history" : "EMPTY"} size=${size2}`,
-		);
-		expect(size2).toBeGreaterThan(0);
+		await client2.waitForInitialState();
+		await client2.viewSession(newId);
+		const history2 = await client2.loadMoreHistory(newId);
+		expect(history2.messages.length).toBeGreaterThan(0);
 		// Content, not just structure — the user's message text must survive.
-		expect(JSON.stringify(switched2)).toContain("pong");
+		expect(JSON.stringify(history2.messages)).toContain("pong");
 
 		// Same-client navigate away and back (the ViewSession path): the
 		// history must still carry the sent message, and the switch must not
@@ -534,12 +505,9 @@ describe("Integration: Session Visibility Repros", () => {
 		client1.clearReceived();
 		await client1.viewSession(detourId);
 		client1.clearReceived();
-		const back = await client1.viewSession(newId);
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-D] navigate-back kind=${back["events"] ? "events" : back["history"] ? "history" : "EMPTY"}`,
-		);
-		expect(JSON.stringify(back)).toContain("pong");
+		await client1.viewSession(newId);
+		const back = await client1.loadMoreHistory(newId);
+		expect(JSON.stringify(back.messages)).toContain("pong");
 		const errorFrames = client1
 			.getReceived()
 			.filter((m) => m.type === "error" || m.type === "system_error");
@@ -568,22 +536,14 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.waitFor("done");
 		await new Promise((r) => setTimeout(r, 750));
 
-		// REST-served history: what a fresh client currently receives.
+		// A fresh client requests its own transcript page.
 		const client2 = new TestWsClient(
 			`ws://127.0.0.1:${textHarness.relayPort}/ws?session=${sessionId}`,
 		);
 		await client2.waitForOpen();
-		const switched = await client2.waitFor("session_switched", {
-			predicate: (m) => m["id"] === sessionId,
-		});
-		const restHistory = switched["history"] as {
-			messages: Array<{
-				id: string;
-				role: string;
-				text?: string;
-				parts?: Array<{ type: string; text?: string }>;
-			}>;
-		};
+		await client2.waitForInitialState();
+		await client2.viewSession(sessionId);
+		const restHistory = await client2.loadMoreHistory(sessionId);
 
 		// Projection-served history: the exact adapter chain the resolvers use
 		// when falling back to (or preferring) the read model.
@@ -591,9 +551,11 @@ describe("Integration: Session Visibility Repros", () => {
 
 		const summarize = (
 			msgs: readonly {
-				role?: string;
-				text?: string;
-				parts?: readonly { type: string; text?: string }[];
+				role?: string | undefined;
+				text?: string | undefined;
+				parts?:
+					| readonly { type: string; text?: string | undefined }[]
+					| undefined;
 			}[],
 		) =>
 			msgs.map((m) => ({
@@ -651,23 +613,22 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${toolHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (m) => m["id"] === sessionId,
-			});
-			const restHistory = switched["history"] as {
-				messages: Array<{
-					role: string;
-					text?: string;
-					parts?: Array<{ type: string; text?: string; tool?: string }>;
-				}>;
-			};
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const restHistory = await client2.loadMoreHistory(sessionId);
 
 			const projected = await projectedHistory(toolDbPath, sessionId, 50);
 
 			type Msg = {
-				role?: string;
-				text?: string;
-				parts?: readonly { type: string; text?: string; tool?: string }[];
+				role?: string | undefined;
+				text?: string | undefined;
+				parts?:
+					| readonly {
+							type: string;
+							text?: string | undefined;
+							tool?: string | undefined;
+					  }[]
+					| undefined;
 			};
 			// Documented, frontend-equivalent divergences between REST and the
 			// projection (both sides render identically — see history-logic.ts):
@@ -808,16 +769,15 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${metadataHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (message) => message["id"] === sessionId,
-			});
-			const served = switched["history"] as DifferentialHistory;
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
 				client: metadataHarness.stack.client,
 			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
-			const summarize = (messages: DifferentialMessage[]) =>
+			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
 					text:
@@ -930,16 +890,15 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${fileHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (message) => message["id"] === sessionId,
-			});
-			const served = switched["history"] as DifferentialHistory;
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
 				client: fileHarness.stack.client,
 			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
-			const summarize = (messages: DifferentialMessage[]) =>
+			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
 					parts: (message.parts ?? []).map((part) =>
@@ -1007,13 +966,12 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${permissionHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (message) => message["id"] === sessionId,
-			});
-			const rest = switched["history"] as DifferentialHistory;
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const rest = await client2.loadMoreHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId as string);
 			expect(projected.kind).toBe("rest-history");
-			const summarize = (messages: DifferentialMessage[]) =>
+			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
 					text:

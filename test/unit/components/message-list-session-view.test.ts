@@ -73,12 +73,12 @@ describe("MessageList session-view publication", () => {
 		expect(sessionViewState.atBottom).toBe(false);
 	});
 
-	it("counts loading and settling as at-bottom even after detaching", () => {
+	it("counts loading as at-bottom even after detaching", () => {
 		const { transcript } = mountTranscript();
 		scrollTo(transcript, 200);
 		expect(sessionViewState.atBottom).toBe(false);
 
-		for (const lifecycle of ["empty", "loading", "committed"] as const) {
+		for (const lifecycle of ["empty", "loading"] as const) {
 			getOrCreateSessionSlot("session-view-first").messages.loadLifecycle =
 				lifecycle;
 			flushSync();

@@ -66,18 +66,13 @@ describe("Integration: Multi-Client", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 
-		await client1.createSession("Multi-Client Test Session");
-
-		// The creating client should get session_switched
-		const switched1 = await client1.waitFor("session_switched", {
-			timeout: 5000,
-		});
-		const newSessionId = switched1["id"] as string;
+		const created = await client1.createSession("Multi-Client Test Session");
+		const newSessionId = created["id"] as string;
 		expect(newSessionId).toBeTruthy();
 
 		// CreateSession does not switch another tab.
 		await new Promise((resolve) => setTimeout(resolve, 100));
-		expect(client2.getReceivedOfType("session_switched")).toHaveLength(0);
+		expect(client2.getActiveSessionId()).not.toBe(newSessionId);
 
 		await client1.close();
 		await client2.close();

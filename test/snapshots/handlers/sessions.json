@@ -43,16 +43,6 @@
 			"channel": "sendTo",
 			"clientId": "client-1",
 			"message": {
-				"type": "session_switched",
-				"id": "new-session",
-				"sessionId": "new-session",
-				"requestId": "req-1"
-			}
-		},
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
 				"type": "status",
 				"sessionId": "new-session",
 				"status": "idle"

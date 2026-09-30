@@ -19,11 +19,10 @@ describe("Integration: Initial State on Connect", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("sends session_switched on connect", async () => {
+	it("sends the initial session family on connect", async () => {
 		const client = await harness.connectWsClient();
-		const msg = await client.waitFor("session_switched");
-		expect(msg["id"]).toBeTruthy();
-		expect(typeof msg["id"]).toBe("string");
+		await client.waitFor("session_family");
+		expect(client.getActiveSessionId()).toBeTruthy();
 		await client.close();
 	});
 
@@ -88,7 +87,6 @@ describe("Integration: Initial State on Connect", () => {
 		await client2.waitForInitialState();
 
 		const types2 = client2.getReceived().map((m) => m.type);
-		expect(types2).toContain("session_switched");
 		expect(types2).toContain("status");
 		expect(types2).toContain("session_family");
 

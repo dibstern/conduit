@@ -371,10 +371,6 @@ export function createMockClientInitDeps(
 		rootId: sessionId,
 		sessions: [],
 	}));
-	sessionService.resolveSessionHistory = vi.fn(async (sessionId) => ({
-		kind: "rest-history" as const,
-		history: await sessionService.loadPreRenderedHistory(sessionId),
-	}));
 	return {
 		wsHandler: {
 			broadcast: vi.fn(),

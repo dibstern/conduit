@@ -70,7 +70,7 @@
 	$effect(() => {
 		const state = scrollCtrl.state;
 		publishAtBottom(
-			state === "following" || state === "settling" || state === "loading",
+			state === "following" || state === "loading",
 		);
 	});
 
@@ -81,10 +81,7 @@
 		scrollCtrl.onContainerResize();
 	});
 
-	// Scroll to bottom when loadLifecycle transitions to "ready" after settling.
-	// This handles the case where deferred markdown rendering adds height after
-	// the settle loop completes. The settle loop scrolls during "committed",
-	// but the final scroll-to-bottom on "ready" ensures we're at the very bottom.
+	// Scroll to bottom when the transcript becomes ready.
 	$effect(() => {
 		if (currentChat().loadLifecycle === "ready") {
 			scrollCtrl.onNewContent();
@@ -95,8 +92,7 @@
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
 	// - Only auto-scroll when session is actively producing content
-	//   (processing or streaming) OR when the scroll controller is settling
-	//   (post-replay, deferred markdown rendering) OR when an explicit
+	//   (processing or streaming) OR when an explicit
 	//   scroll request was made (e.g. error messages set this before
 	//   phaseToIdle kills the isProcessing guard). On inactive sessions,
 	//   background events (cross-tab user_message, permission state) must
@@ -110,9 +106,8 @@
 		const _latest = currentChat().messages.at(-1);
 		const _permLen = permissionsState.pendingPermissions.length;
 		const isActive = untrack(() => isProcessing());
-		const isSettling = untrack(() => scrollCtrl.state === "settling");
 		const scrollRequested = untrack(() => consumeScrollRequest());
-		if (!awaitingPrepend && (isActive || isSettling || scrollRequested)) {
+		if (!awaitingPrepend && (isActive || scrollRequested)) {
 			scrollCtrl.onNewContent();
 		}
 	});

@@ -237,7 +237,7 @@ function doConnect(
 	let url = `${protocol}//${window.location.host}/ws`;
 
 	// If the URL has a session ID, pass it as a query param so the server
-	// sends the correct session_switched on init (no flash of wrong session).
+	// binds the session named by the URL on init (no flash of another session).
 	if (sessionId) {
 		params.set("session", sessionId);
 	}

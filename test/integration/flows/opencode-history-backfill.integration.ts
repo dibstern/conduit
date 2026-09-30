@@ -18,11 +18,11 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import {
 	createRelayStack,
 	type RelayStack,
 } from "../../../src/lib/relay/relay-stack.js";
-import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import { TestWsClient } from "../helpers/test-ws-client.js";
@@ -135,12 +135,11 @@ async function projectedTexts(dbPath: string): Promise<Record<string, string>> {
 	const rows = await readStore(
 		dbPath,
 		Effect.flatMap(makeReadQueryEffect, (readQuery) =>
-			readQuery.getSessionMessagesWithParts(SESSION_ID),
+			readQuery.readSessionTranscriptPage(SESSION_ID, { limit: 200 }),
 		),
 	);
-	const resolved = resolveSessionHistoryFromRows(rows, { pageSize: 200 });
-	if (resolved.kind !== "rest-history") return {};
-	const messages = resolved.history.messages as ReadonlyArray<{
+	const messages = messageRowsToHistory(rows.messages, { pageSize: 200 })
+		.messages as ReadonlyArray<{
 		id: string;
 		parts?: ReadonlyArray<{ type: string; text?: string; tool?: string }>;
 	}>;
@@ -308,7 +307,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		});
 	}
 
-	it("serves new REST history after restart without an SSE event, then reconciles it", async () => {
+	it("reconciles new REST history after restart without an SSE event", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-stale-proof-")),
 			"events.sqlite",
@@ -332,19 +331,20 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		);
 		try {
 			await client.waitForOpen();
-			const switched = await client.waitFor("session_switched", {
-				predicate: (message) => message["id"] === SESSION_ID,
-			});
-			const history = switched["history"] as { messages: { id: string }[] };
+			await client.waitFor("session_family");
+			await client.viewSession(SESSION_ID, "iea-backfill");
+			await client.loadTranscriptSnapshot(SESSION_ID, "iea-backfill");
+			await waitFor(() => historyComplete(dbPath), "reconciliation after open");
+			const history = await client.loadMoreHistory(
+				SESSION_ID,
+				undefined,
+				"iea-backfill",
+			);
 			expect(history.messages.map((message) => message.id)).toEqual([
 				"msg_u1",
 				"msg_a1",
 				"msg_u2",
 			]);
-			await waitFor(
-				() => historyComplete(dbPath),
-				"reconciliation after REST-served open",
-			);
 			expect((await projectedTexts(dbPath))["msg_u2"]).toBe("second question");
 			const projectionPage = await readStore(
 				dbPath,
@@ -423,10 +423,18 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		);
 		try {
 			await client.waitForOpen();
-			const switched = await client.waitFor("session_switched", {
-				predicate: (message) => message["id"] === SESSION_ID,
-			});
-			const history = switched["history"] as { messages: { id: string }[] };
+			await client.waitFor("session_family");
+			await client.viewSession(SESSION_ID, "iea-backfill");
+			await client.loadTranscriptSnapshot(SESSION_ID, "iea-backfill");
+			await waitFor(
+				() => historyComplete(dbPath),
+				"named instance reconciliation",
+			);
+			const history = await client.loadMoreHistory(
+				SESSION_ID,
+				undefined,
+				"iea-backfill",
+			);
 			expect(history.messages.map((message) => message.id)).toEqual([
 				"msg_u1",
 				"msg_a1",
@@ -440,10 +448,6 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 							entry.detail?.startsWith(`GET ${restPath}`),
 					) ?? false,
 				"named instance REST reconciliation",
-			);
-			await waitFor(
-				() => historyComplete(dbPath),
-				"named instance reconciliation",
 			);
 			expect((await projectedTexts(dbPath))["msg_u2"]).toBe("second question");
 		} finally {
@@ -540,24 +544,20 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		const servedRows = await readStore(
 			dbPath,
 			Effect.flatMap(makeReadQueryEffect, (readQuery) =>
-				readQuery.getSessionMessagesWithParts(SESSION_ID),
+				readQuery.readSessionTranscriptPage(SESSION_ID, { limit: 200 }),
 			),
 		);
-		const served = resolveSessionHistoryFromRows(servedRows, { pageSize: 200 });
-		expect(served.kind).toBe("rest-history");
-		if (served.kind === "rest-history") {
-			expect(
-				served.history.messages.map((message) => [
-					message.id,
-					message.isBackfilled,
-				]),
-			).toEqual([
-				["msg_u1", true],
-				["msg_a1", true],
-				["msg_u2", true],
-				["msg_a2", undefined],
-			]);
-		}
+		expect(
+			servedRows.messages.map((message) => [
+				message.id,
+				message.is_backfilled === 1 ? true : undefined,
+			]),
+		).toEqual([
+			["msg_u1", true],
+			["msg_a1", true],
+			["msg_u2", true],
+			["msg_a2", undefined],
+		]);
 
 		// ── Restart: the turn finished and another began while Conduit was down
 		await stack.stop();

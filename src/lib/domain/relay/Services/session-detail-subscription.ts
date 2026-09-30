@@ -16,12 +16,18 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Stream } from "effect";
 import type { SessionDetailItemSchema } from "../../../contracts/ws-rpc.js";
 import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../../daemon/config-persistence.js";
+import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
 	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
+import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
+import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -64,6 +70,29 @@ export const subscribeSessionDetail = (options: {
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
+			const sessionRow = yield* Effect.either(
+				readQuery.getSession(options.sessionId),
+			);
+			if (
+				sessionRow._tag === "Right" &&
+				sessionRow.right?.history_complete === 0
+			) {
+				const config = yield* Effect.serviceOption(ConfigTag);
+				if (
+					resolveProviderRoutingDriver(
+						loadDaemonConfig(
+							config._tag === "Some" ? config.value.configDir : undefined,
+						),
+						sessionRow.right.provider,
+					) === "opencode"
+				) {
+					const ingress = yield* Effect.serviceOption(
+						OpenCodeHistoryReconcileTag,
+					);
+					if (ingress._tag === "Some")
+						yield* ingress.value.reconcileSession(options.sessionId);
+				}
+			}
 			return stream<SessionDetailItem, SessionDetailSubscriptionError>({
 				bus,
 				source: {

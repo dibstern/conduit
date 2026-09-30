@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const wsSendSpy = vi.fn();
 const viewSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (_input: unknown) => undefined),
+	vi.fn(async (_input: unknown) => ({ ok: true as const })),
 );
 
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
@@ -33,6 +33,10 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		throw new Error("models unavailable in test");
 	}),
 	viewSessionRpc: (input: unknown) => viewSessionRpcSpy(input),
+	switchPermissionModeRpc: vi.fn(async () => ({
+		projectSlug: "project-a",
+		mode: "ask",
+	})),
 }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
@@ -261,7 +265,7 @@ describe("AttentionBanner merge logic", () => {
 		expect(status.textContent).not.toContain("Child session");
 	});
 
-	it("switches session on click — the server records the view", async () => {
+	it("switches session on click through ViewSession", async () => {
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
 		setSessionTitles({ ses_other1: "Clickable session" });
 
@@ -274,9 +278,6 @@ describe("AttentionBanner merge logic", () => {
 			projectSlug: "project-a",
 			sessionId: "ses_other1",
 			originId: expect.any(String),
-			requestId: expect.stringMatching(
-				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-			),
 		});
 	});
 

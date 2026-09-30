@@ -15,18 +15,9 @@ import type {
 	GetFileContentResponse,
 	GetFileListResponse,
 } from "../transport/ws-rpc.js";
-import type {
-	ChatMessage,
-	HistoryMessage,
-	RelayMessage,
-	ToolMessage,
-} from "../types.js";
-import { historyToChatMessages } from "../utils/history-logic.js";
+import type { RelayMessage, ToolMessage } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { renderMarkdown } from "../utils/markdown.js";
 import {
-	activateSessionChatState,
-	clearMessages,
 	findMessage,
 	getMessages,
 	getOrCreateSessionSlot,
@@ -37,11 +28,8 @@ import {
 	handleStatus,
 	handleThinkingStop,
 	handleToolExecuting,
-	historyState,
-	prependMessages,
 	type SessionActivity,
 	type SessionMessages,
-	seedRegistryFromMessages,
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
@@ -79,21 +67,17 @@ import {
 	attachedProjectState,
 	getCurrentRoute,
 	replaceRoute,
-	routerState,
 } from "./router.svelte.js";
 import {
-	acceptsSessionSwitch,
-	consumeSwitchingFromId,
 	findSession,
+	getFilteredSessions,
 	handleSessionFamily,
 	handleSessionForked,
-	handleSessionSwitched,
 	isRoutable,
 	observeSessionActivity,
-	parentOf,
 	pruneSessionLists,
-	sessionCreation,
 	sessionState,
+	switchToSession,
 } from "./session.svelte.js";
 import { refreshSessionList } from "./session-list.svelte.js";
 import {
@@ -156,9 +140,7 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"ask_user_error",
 		"permission_request",
 		"permission_resolved",
-		"session_switched",
 		"session_forked",
-		"history_page",
 		"provider_session_reloaded",
 		"session_deleted",
 	]);
@@ -171,9 +153,7 @@ export function isPerSessionEvent(msg: RelayMessage): msg is PerSessionEvent {
 /** Per-session event types that still require global coordination in handleMessage.
  *  These are NOT routed through routePerSession. */
 const GLOBALLY_COORDINATED_TYPES: ReadonlySet<string> = new Set([
-	"session_switched",
 	"session_forked",
-	"history_page",
 	"session_deleted",
 ]);
 
@@ -279,16 +259,8 @@ function routePerSession(event: PerSessionEvent): void {
 		case "tool_content":
 			handleToolContentResponse(messages, event);
 			break;
-		case "session_switched":
-			// Handled in handleMessage — session_switched requires global
-			// coordination (URL updates, message clearing, replay).
-			// This should not be reached via routePerSession.
-			break;
 		case "session_forked":
 			// Handled in handleMessage — requires global toast.
-			break;
-		case "history_page":
-			// Handled in handleMessage — requires async history conversion.
 			break;
 		case "provider_session_reloaded":
 			log.debug("Provider session reloaded:", event.sessionId);
@@ -299,50 +271,6 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 }
 
-function yieldToEventLoop(): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-// ─── Async history conversion ───────────────────────────────────────────────
-
-/**
- * Convert history messages in yielding chunks.
- * historyToChatMessages stays synchronous (pure, well-tested).
- * This wrapper yields between chunks to avoid blocking the main thread.
- *
- * Captures the target slot at start and uses its replayGeneration for
- * ghost-write guard. Session switches bump generation via clearMessages.
- */
-async function convertHistoryAsync(
-	messages: HistoryMessage[],
-	render: (text: string) => string,
-	capturedActivity?: SessionActivity,
-): Promise<ChatMessage[] | null> {
-	const CHUNK = 50;
-	const activityGen = capturedActivity?.replayGeneration; // per-session snapshot
-	const result: ChatMessage[] = [];
-
-	for (let i = 0; i < messages.length; i += CHUNK) {
-		const slice = messages.slice(i, i + CHUNK);
-		// The whole list, so a turn cut by a chunk still bills every step.
-		const converted = historyToChatMessages(slice, render, messages);
-		result.push(...converted);
-
-		if (i + CHUNK < messages.length) {
-			await yieldToEventLoop();
-			// Ghost-write guard: abort if generation changed
-			if (
-				capturedActivity &&
-				activityGen !== undefined &&
-				capturedActivity.replayGeneration !== activityGen
-			)
-				return null;
-		}
-	}
-
-	return result;
-}
-
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
 /**
@@ -350,9 +278,6 @@ async function convertHistoryAsync(
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
-	if (msg.type === "session_switched" && !acceptsSessionSwitch(msg.requestId)) {
-		return;
-	}
 	observeSessionActivity(msg);
 	if (msg.type === "project_attached") {
 		if (attachedProjectState.slug !== msg.slug)
@@ -390,75 +315,32 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_deleted": {
-			const deletedId =
-				"sessionId" in msg ? (msg.sessionId as string) : undefined;
+			const deletedId = msg.sessionId;
 			// The shell feed owns row removal and chat cleanup.
-			if (deletedId) pruneSessionLists(deletedId);
-			break;
-		}
-		case "session_switched": {
+			pruneSessionLists(deletedId);
 			const route = getCurrentRoute();
-			const requestedCreation =
-				sessionCreation.value.phase === "creating" &&
-				sessionCreation.value.requestId === msg.requestId;
-			// Only this tab's creation request may leave the session list.
-			if (route.page !== "chat" || (!route.sessionId && !requestedCreation))
-				break;
-			// An initial replay may name the provider's session after the URL was
-			// formed. Keep unrelated, uncorrelated switches from replacing a later
-			// user selection. This tab's own creation response is correlated, so
-			// it may leave whichever session is open. A child of the open session
-			// (a fork) may too; its lineage is on the switch or, when the relay
-			// has no read model to announce it, on the fork notice's lineage.
-			// So may a session that replaces the open one.
 			if (
-				!requestedCreation &&
-				route.sessionId &&
-				msg.id &&
-				route.sessionId !== msg.id &&
-				route.sessionId !== msg.replacesSessionId &&
-				route.sessionId !== (msg.parentID ?? parentOf(msg.id)) &&
-				// A switch carrying a transcript is the initial replay naming the
-				// provider's session; R12 retires the payload and this signal.
-				(sessionState.currentId !== null || (!msg.events && !msg.history))
-			)
-				break;
-			if (!msg.id) {
-				handleSessionSwitched(msg);
-				clearMessages();
-				break;
+				(sessionState.currentId === deletedId ||
+					sessionState.currentId === null) &&
+				route.page === "chat" &&
+				route.sessionId === deletedId
+			) {
+				const survivor = getFilteredSessions().find(
+					(row) => row.id !== deletedId,
+				);
+				if (survivor)
+					switchToSession(survivor.id, survivor.projectSlug, undefined, {
+						replace: true,
+					});
+				else {
+					const activity = sessionActivity.get(deletedId);
+					if (activity) activity.replayGeneration++;
+					updateContextPercent(0);
+					clearTodoState();
+					replaceRoute("/");
+					sessionState.currentId = null;
+				}
 			}
-			// Use the ID captured by switchToSession() before it changed currentId.
-			// Falls back to sessionState.currentId for server-initiated switches
-			// (e.g. CreateSession flow) where switchToSession() wasn't called.
-			// consumeSwitchingFromId() reads and clears the value in one call to
-			// prevent stale IDs from leaking into future server-initiated switches.
-			const previousSessionId =
-				consumeSwitchingFromId() ?? sessionState.currentId;
-			handleSessionSwitched(msg);
-
-			// Update URL to reflect the new session. Skip it when the URL already
-			// names it: a same-path replace is taken literally and would drop the
-			// list's query (scope, filter, grouping) on every reload.
-			if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
-
-			// Invalidate an in-flight history page for the outgoing session.
-			if (previousSessionId) {
-				const activity = sessionActivity.get(previousSessionId);
-				if (activity) activity.replayGeneration++;
-			}
-
-			activateSessionChatState(msg.id);
-			updateContextPercent(0);
-			clearTodoState();
-
-			// Apply server-provided input draft for this session.
-			// This uses the input_sync mechanism so InputArea picks it up
-			// via the existing $effect (server value overrides local draft).
-			if (msg.inputText != null) {
-				handleInputSyncReceived({ text: msg.inputText });
-			}
-
 			break;
 		}
 
@@ -542,66 +424,6 @@ export function handleMessage(msg: RelayMessage): void {
 			if (isOwnBrowserClientId(msg.from)) break;
 			handleInputSyncReceived(msg);
 			break;
-
-		// ─── History ─────────────────────────────────────────────────────
-		case "history_page": {
-			// Convert and prepend older messages into the session's message list.
-			// Fire-and-forget — handleMessage stays synchronous.
-			// Capture slot at start so commits go to the correct session.
-			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
-			const rawMessages = historyMsg.messages ?? [];
-			const hasMore = historyMsg.hasMore ?? false;
-			const hpSessionId = historyMsg.sessionId ?? sessionState.currentId;
-			const hpCapturedSlot = hpSessionId
-				? getOrCreateSessionSlot(hpSessionId)
-				: null;
-			const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
-			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
-				.then((chatMsgs) => {
-					const stillCurrent =
-						hpCapturedSlot !== null &&
-						hpSessionId === sessionState.currentId &&
-						hpCapturedSlot.activity.replayGeneration === hpActGen;
-					if (
-						chatMsgs &&
-						(!hpCapturedSlot ||
-							hpCapturedSlot.activity.replayGeneration === hpActGen)
-					) {
-						// Commit to the slot captured when the page was requested,
-						// never to whatever session happens to be current now.
-						if (hpCapturedSlot) {
-							prependMessages(
-								hpCapturedSlot.activity,
-								hpCapturedSlot.messages,
-								chatMsgs,
-							);
-							seedRegistryFromMessages(
-								hpCapturedSlot.activity,
-								hpCapturedSlot.messages,
-								chatMsgs,
-							);
-							hpCapturedSlot.messages.historyHasMore = hasMore;
-						}
-						if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-						if (stillCurrent) {
-							historyState.hasMore = hasMore;
-						}
-					}
-					if (stillCurrent) historyState.loading = false;
-				})
-				.catch((err) => {
-					log.warn("History page conversion error:", err);
-					if (
-						hpCapturedSlot &&
-						hpCapturedSlot.activity.replayGeneration !== hpActGen
-					)
-						return;
-					if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-					if (hpSessionId === sessionState.currentId)
-						historyState.loading = false;
-				});
-			break;
-		}
 
 		// ─── Plan Mode ───────────────────────────────────────────────────
 		case "plan_enter":

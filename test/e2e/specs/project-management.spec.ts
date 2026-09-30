@@ -46,6 +46,7 @@ async function setupWithProjectManagement(
 		{
 			id: "sess-si-001",
 			title: "Test session",
+			status: "idle",
 			projectSlug: "myapp",
 			updatedAt: Date.now(),
 			messageCount: 0,
@@ -53,6 +54,7 @@ async function setupWithProjectManagement(
 		{
 			id: "sess-library-001",
 			title: "Library session",
+			status: "idle",
 			projectSlug: "mylib",
 			updatedAt: Date.now(),
 			messageCount: 0,
@@ -122,6 +124,13 @@ async function setupWithProjectManagement(
 			}),
 		},
 	});
+	rpc.setShellRows(
+		sessions.filter(
+			(session) =>
+				session.projectSlug ===
+				new URL(path, baseURL ?? "http://localhost:4173").searchParams.get("p"),
+		),
+	);
 	const control = await mockRelayWebSocket(page, {
 		initMessages: singleInstanceInitMessages.filter(
 			(message) => message.type !== "shell_snapshot",
@@ -220,6 +229,16 @@ test("direct project URL scopes the list and another URL switches projects", asy
 	await expect(sessions.filter({ hasText: "Test session" })).toHaveCount(1);
 	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
 
+	control.rpc.setShellRows([
+		{
+			id: "sess-si-001",
+			title: "Test session",
+			status: "idle",
+			projectSlug: "myapp",
+			updatedAt: Date.now(),
+			messageCount: 0,
+		},
+	]);
 	await page.goto(`${baseURL ?? "http://localhost:4173"}/?p=myapp`);
 	await waitForChatReady(page);
 	await control.rpc.waitForRequest(

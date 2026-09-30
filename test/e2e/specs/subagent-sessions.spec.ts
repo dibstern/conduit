@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
+import { projectLegacyRelayMessage } from "../helpers/detail-projection-mock.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import {
 	createMockRelayProtocolContext,
@@ -111,7 +112,7 @@ const agentListMsg: MockMessage = {
 const initMessages: MockMessage[] = [
 	familyMsg,
 	{
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: snapshot.parentSession.id,
 		history: snapshot.parentHistory,
 	},
@@ -128,7 +129,7 @@ const initMessages: MockMessage[] = [
 const childSwitchMessages: MockMessage[] = [
 	familyMsg,
 	{
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: snapshot.childSession.id,
 		history: snapshot.childHistory,
 	},
@@ -141,7 +142,7 @@ const childSwitchMessages: MockMessage[] = [
 /** Messages to send when switching back to parent session */
 const parentSwitchMessages: MockMessage[] = [
 	{
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: snapshot.parentSession.id,
 		history: snapshot.parentHistory,
 	},
@@ -197,7 +198,7 @@ test.describe("Subagent navigation", () => {
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
-				type: "session_switched",
+				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
 				history: snapshot.childHistory,
 			},
@@ -227,10 +228,25 @@ test.describe("Subagent navigation", () => {
 				},
 			},
 		});
+		// This navigation scenario targets a tool step near the start of the
+		// recorded conversation, so expose its full fixture through the detail feed.
+		rpc.setDetailRows(
+			snapshot.parentSession.id,
+			snapshot.parentHistory.messages.map((message) => ({
+				_tag: "transcriptMessage",
+				message,
+			})),
+		);
 
 		await page.routeWebSocket(/\/ws/, (ws) => {
-			const protocolContext = createMockRelayProtocolContext();
+			const protocolContext = createMockRelayProtocolContext(
+				new URL(page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null,
+			);
 			sendMockRelayMessage = (msg: MockMessage) => {
+				if (msg.type === "mock_transcript_snapshot") {
+					projectLegacyRelayMessage(page, msg);
+					return;
+				}
 				ws.send(
 					JSON.stringify(normalizeMockRelayMessage(msg, protocolContext)),
 				);
@@ -299,7 +315,7 @@ test.describe("Subagent navigation", () => {
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
-				type: "session_switched",
+				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
 				history: snapshot.childHistory,
 			},
@@ -339,7 +355,7 @@ test.describe("Subagent navigation", () => {
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
-				type: "session_switched",
+				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
 				history: snapshot.childHistory,
 			},

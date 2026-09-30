@@ -145,7 +145,7 @@ export class MessagePoller {
 			// No seed provided — first poll will build a baseline snapshot from
 			// REST instead of synthesizing events. This prevents re-emitting
 			// the entire history as duplicate events when the client already
-			// has cached events from session_switched.
+			// has its transcript from the event store.
 			this.needsSeedOnFirstPoll = true;
 			this.log.info(
 				`START session=${sessionId.slice(0, 12)} interval=${this.interval}ms`,

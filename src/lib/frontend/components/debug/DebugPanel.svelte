@@ -168,8 +168,6 @@
 				return `[${p["code"]}] ${p["message"]}`;
 
 			// ── Session management ───────────────────────────────────────────
-			case "session_switched":
-				return `id=${id(p["id"])}${p["requestId"] ? ` req=${id(p["requestId"])}` : ""}${Array.isArray(p["events"]) ? ` +${p["events"].length} cached` : ""}`;
 			case "session_list":
 				return Array.isArray(p["sessions"]) ? `${p["sessions"].length} sessions` : "";
 

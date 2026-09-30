@@ -12,7 +12,6 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 const SESSION_ID = "sess-pwa";
 
 const initMessages = [
-	{ type: "session_switched", id: SESSION_ID, events: [] },
 	{ type: "status", status: "idle" },
 	{ type: "client_count", count: 1 },
 	{
@@ -63,7 +62,7 @@ test.describe("PWA background/resume", () => {
 			responses: new Map(),
 		});
 
-		await page.goto(relayUrl);
+		await page.goto(new URL(`/s/${SESSION_ID}`, relayUrl).href);
 		await page.locator("#layout").waitFor({ state: "attached" });
 		await page
 			.locator("#connect-overlay")
@@ -92,7 +91,7 @@ test.describe("PWA background/resume", () => {
 			responses: new Map(),
 		});
 
-		await page.goto(relayUrl);
+		await page.goto(new URL(`/s/${SESSION_ID}`, relayUrl).href);
 		await page
 			.locator("#connect-overlay")
 			.waitFor({ state: "hidden", timeout: 15_000 });
@@ -120,7 +119,7 @@ test.describe("PWA background/resume", () => {
 			responses: new Map(),
 		});
 
-		await page.goto(relayUrl);
+		await page.goto(new URL(`/s/${SESSION_ID}`, relayUrl).href);
 		await page
 			.locator("#connect-overlay")
 			.waitFor({ state: "hidden", timeout: 15_000 });

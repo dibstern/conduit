@@ -34,7 +34,6 @@ const SESS_B = "sess-indicator-B";
 
 /** Init messages with two sessions, starting on session A. */
 const twoSessionInit: MockMessage[] = [
-	{ type: "session_switched", id: SESS_A, sessionId: SESS_A },
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	{ type: "client_count", count: 1 },
@@ -129,29 +128,13 @@ async function mockRelayWithViewSessionRpc(
 	page: Page,
 	options: Omit<WsMockOptions, "onClientMessage">,
 ): Promise<WsMockControl> {
-	let control!: WsMockControl;
 	await mockWsRpc(page, {
 		handlers: {
 			ResolveSession: () => ({ projectSlug: PROJECT_SLUG }),
-			ViewSession: (params) => {
-				const sessionId = String(params["sessionId"] ?? "");
-				control.sendMessage({
-					type: "session_switched",
-					id: sessionId,
-					sessionId,
-				});
-				control.sendMessage({
-					type: "history_page",
-					sessionId,
-					messages: [],
-					hasMore: false,
-				});
-				return { ok: true };
-			},
+			ViewSession: () => ({ ok: true }),
 		},
 	});
-	control = await mockRelayWebSocket(page, options);
-	return control;
+	return mockRelayWebSocket(page, options);
 }
 
 async function openChat(page: Page, baseURL: string | undefined) {

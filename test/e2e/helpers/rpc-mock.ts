@@ -43,6 +43,7 @@ export interface RecordedRpcRequest {
 
 export class RpcMockControl {
 	constructor(private readonly page: Page) {}
+	projectSlug = "myapp";
 	private readonly requests: RecordedRpcRequest[] = [];
 	private readonly streams = new Map<
 		string,
@@ -216,6 +217,13 @@ const sendJson = (ws: WebSocketRoute, message: unknown) => {
 
 const controls = new WeakMap<Page, RpcMockControl>();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
+const pendingProjectSlugs = new WeakMap<Page, string>();
+
+export function setMockRpcProjectSlug(page: Page, slug: string): void {
+	const control = controls.get(page);
+	if (control) control.projectSlug = slug;
+	else pendingProjectSlugs.set(page, slug);
+}
 
 export function sendMockShellSnapshot(
 	page: Page,
@@ -269,7 +277,13 @@ async function handleMessage(
 				control.failStream(raw.tag, "detail feed unavailable", sessionId);
 			return;
 		}
-		const handler = handlers[raw.tag];
+		const handler =
+			handlers[raw.tag] ??
+			(raw.tag === "ResolveSession"
+				? () => ({ projectSlug: control.projectSlug })
+				: raw.tag === "ViewSession"
+					? () => ({ ok: true })
+					: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
@@ -321,6 +335,7 @@ export async function mockWsRpc(
 ): Promise<RpcMockControl> {
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
+	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);

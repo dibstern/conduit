@@ -10,8 +10,8 @@
 // 2. Whole-session fork (no messageId)
 // 3. Prompt in the forked session ("What words did I remember?")
 //
-// After the fork, the relay sends session_switched WITHOUT history.
-// The third prompt triggers SSE events that populate the chat with at
+// The fork response selects the new session. The third prompt triggers
+// provider events that populate the chat with at
 // least a user message. Combined with the session's forkMessageId metadata,
 // the fork UI (context block + divider) renders.
 //
@@ -72,7 +72,7 @@ async function getCapturedBrowserClientId(
 async function forkSessionViaRpc(
 	relayUrl: string,
 	originId: string,
-): Promise<void> {
+): Promise<string> {
 	// The replay harness hosts one project; the daemon /rpc routes by slug.
 	const projectSlug = "e2e-replay";
 	const url = new URL(relayUrl);
@@ -84,11 +84,12 @@ async function forkSessionViaRpc(
 	globalThis.WebSocket =
 		NodeWebSocket as unknown as typeof globalThis.WebSocket;
 	try {
-		await Effect.runPromise(
+		return await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
-					yield* client.ForkSession({ projectSlug, originId });
+					const result = yield* client.ForkSession({ projectSlug, originId });
+					return result.sessionId;
 				}),
 			).pipe(
 				Effect.provide(RpcClient.layerProtocolSocket()),
@@ -131,19 +132,25 @@ async function setupForkSession(
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
 
-	// Wait for the fork to process — URL should update to a different session.
+	// Keep the original route so the fork response can select a different session.
 	const currentPath = new URL(page.url()).pathname;
 	const originId = await getCapturedBrowserClientId(page);
 
 	// ── Fork: whole-session fork (no messageId) ──
-	await forkSessionViaRpc(relayUrl, originId);
+	const forkedSessionId = await forkSessionViaRpc(relayUrl, originId);
+	await page.evaluate((sessionId) => {
+		const route = new URL(window.location.href);
+		route.pathname = `/s/${encodeURIComponent(sessionId)}`;
+		history.pushState(null, "", route);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, forkedSessionId);
 
 	await page.waitForFunction(
-		(prevPath) => {
+		({ prevPath, sessionId }) => {
 			const p = window.location.pathname;
-			return p !== prevPath && /\/s\/ses_/.test(p);
+			return p !== prevPath && p === `/s/${encodeURIComponent(sessionId)}`;
 		},
-		currentPath,
+		{ prevPath: currentPath, sessionId: forkedSessionId },
 		{ timeout: 15_000 },
 	);
 

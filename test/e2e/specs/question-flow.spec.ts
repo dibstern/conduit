@@ -192,11 +192,8 @@ test.describe("Question/Answer Flow", () => {
 			answers: { "0": "PostgreSQL" },
 		});
 
-		// The card stays pending until the relay sends ask_user_resolved and
-		// follow-up tool/result events.
-		await expect(questionCard.locator(".question-submit-btn")).toContainText(
-			"Submitting",
-		);
+		// The successful AnswerQuestion RPC clears the pending question.
+		await expect(questionCard).toHaveCount(0);
 	});
 
 	test("agent continues responding after user answers a question", async ({

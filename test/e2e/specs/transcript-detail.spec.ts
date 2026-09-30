@@ -20,14 +20,10 @@ test("detail feed renders streamed text once and resumes cached content across s
 	page,
 	harness,
 }) => {
-	let relay!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			ResolveSession: () => ({ projectSlug: project }),
-			ViewSession: ({ sessionId }) => {
-				relay.sendMessage({ type: "session_switched", id: String(sessionId) });
-				return { ok: true };
-			},
+			ViewSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
@@ -45,9 +41,8 @@ test("detail feed renders streamed text once and resumes cached content across s
 					: [{ _tag: "synchronized" }],
 		},
 	});
-	relay = await mockRelayWebSocket(page, {
+	await mockRelayWebSocket(page, {
 		initMessages: [
-			{ type: "session_switched", id: a },
 			{
 				type: "project_list",
 				projects: [
@@ -135,14 +130,10 @@ test("detail catch-up removes a message after returning to a session", async ({
 	page,
 	harness,
 }) => {
-	let relay!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			ResolveSession: () => ({ projectSlug: project }),
-			ViewSession: ({ sessionId }) => {
-				relay.sendMessage({ type: "session_switched", id: String(sessionId) });
-				return { ok: true };
-			},
+			ViewSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
@@ -173,9 +164,8 @@ test("detail catch-up removes a message after returning to a session", async ({
 							],
 		},
 	});
-	relay = await mockRelayWebSocket(page, {
+	await mockRelayWebSocket(page, {
 		initMessages: [
-			{ type: "session_switched", id: a },
 			{
 				type: "project_list",
 				projects: [

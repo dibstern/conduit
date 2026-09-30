@@ -73,7 +73,7 @@ export type ConnectPtyUpstreamShape = (
 
 /**
  * Shape for the sessionMgr field — all SessionManager capabilities used
- * by handlers, session-switch, and wiring modules.
+ * by handlers and wiring modules.
  *
  * Replaces the concrete SessionManager class import so consumers depend
  * on a structural interface, not the implementation.

@@ -70,8 +70,7 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		await client.createSession("Integration Test New");
-		const msg = await client.waitFor("session_switched", { timeout: 5000 });
+		const msg = await client.createSession("Integration Test New");
 		expect(msg["id"]).toBeTruthy();
 		await client.close();
 	});

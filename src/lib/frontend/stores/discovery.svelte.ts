@@ -713,7 +713,7 @@ export function handleVisibilityInfo(
 
 /**
  * Flush a permission mode that was selected while no session was bound
- * (e.g. cold start before session_switched). Called when a session binds so
+ * (e.g. cold start before a session is selected). Called when a session binds so
  * the user's pre-bind selection actually reaches the server instead of being
  * silently dropped (the first turn would still ask, and any re-sync would
  * flip the pill back to "Ask").

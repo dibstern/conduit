@@ -50,7 +50,7 @@ import { sessionActivity } from "../../../src/lib/frontend/stores/chat.svelte.js
 import {
 	clearSessionState,
 	getFilteredSessions,
-	handleSessionSwitched,
+	handleSessionForked,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
@@ -73,13 +73,8 @@ beforeEach(() => {
 // ─── Loop 1: no invented rows ───────────────────────────────────────────────
 
 describe("the server half holds only rows the server sent", () => {
-	it("does not synthesize a row for a session_switched the list has not caught up with", () => {
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "ses_child",
-			sessionId: "ses_child",
-			parentID: "ses_parent",
-		} as Extract<RelayMessage, { type: "session_switched" }>);
+	it("does not synthesize a row for a selected session whose list has not caught up", () => {
+		sessionState.currentId = "ses_child";
 
 		expect(sessionState.currentId).toBe("ses_child");
 		expect(sessionState.sessions.has("ses_child")).toBe(false);
@@ -93,12 +88,13 @@ describe("the server half holds only rows the server sent", () => {
 			[{ id: "ses_child", title: "Child", status: "idle" }],
 			"complete",
 		);
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "ses_child",
+		handleSessionForked({
+			type: "session_forked",
 			sessionId: "ses_child",
-			parentID: "ses_parent",
-		} as Extract<RelayMessage, { type: "session_switched" }>);
+			parentId: "ses_parent",
+			parentTitle: "Parent",
+		});
+		sessionState.currentId = "ses_child";
 
 		expect(sessionState.sessions.get("ses_child")).toEqual({
 			id: "ses_child",
@@ -240,14 +236,9 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		expectWireValid(ROWS);
 	});
 
-	it("handleSessionSwitched", () => {
+	it("client selection", () => {
 		applySessionSnapshot(ROWS, "complete");
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "child",
-			sessionId: "child",
-			parentID: "root",
-		} as Extract<RelayMessage, { type: "session_switched" }>);
+		sessionState.currentId = "child";
 		expectWireValid(ROWS);
 	});
 
@@ -343,11 +334,7 @@ describe("event routing for the session being viewed", () => {
 		vi.useFakeTimers();
 		try {
 			routerState.path = "/s/ses_new";
-			handleMessage({
-				type: "session_switched",
-				id: "ses_new",
-				sessionId: "ses_new",
-			} as RelayMessage);
+			sessionState.currentId = "ses_new";
 			expect(sessionState.sessions.has("ses_new")).toBe(false);
 
 			handleMessage({

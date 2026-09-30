@@ -48,7 +48,7 @@ describe("Scroll lifecycle integration", () => {
 		tm = testMessages();
 	});
 
-	it("full flow: empty -> loading -> committed -> ready -> detach -> follow", () => {
+	it("full flow: empty -> loading -> ready -> detach -> follow", () => {
 		const ctrl = createScrollController(() => tm.loadLifecycle);
 		const div = document.createElement("div");
 		ctrl.attach(div);
@@ -60,15 +60,11 @@ describe("Scroll lifecycle integration", () => {
 		tm.loadLifecycle = "loading";
 		expect(ctrl.state).toBe("loading");
 
-		// 3. A page is available while layout settles
-		tm.loadLifecycle = "committed";
-		expect(ctrl.state).toBe("settling");
-
-		// 4. The transcript is ready
+		// 3. The transcript is ready
 		tm.loadLifecycle = "ready";
 		expect(ctrl.state).toBe("following");
 
-		// 5. User scrolls up (position-based detach)
+		// 4. User scrolls up (position-based detach)
 		Object.defineProperty(div, "scrollHeight", {
 			value: 2000,
 			configurable: true,
@@ -86,7 +82,7 @@ describe("Scroll lifecycle integration", () => {
 		expect(ctrl.state).toBe("detached");
 		expect(ctrl.isDetached).toBe(true);
 
-		// 6. User clicks scroll-to-bottom
+		// 5. User clicks scroll-to-bottom
 		ctrl.requestFollow();
 		expect(ctrl.state).toBe("following");
 		expect(ctrl.isDetached).toBe(false);

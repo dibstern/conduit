@@ -1,6 +1,6 @@
 // src/lib/persistence/session-history-adapter.ts
 // ─── Session History Adapter ────────────────────────────────────────────────
-// Converts SQLite MessageWithParts[] → HistoryMessage[] for session_switched messages.
+// Converts SQLite MessageWithParts[] → HistoryMessage[] for transcript consumers.
 // Pure conversion with no I/O.
 
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
@@ -169,8 +169,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 
 /**
  * Convert message rows (with pre-loaded parts) from the SQLite projection
- * into the HistoryMessage format expected by the frontend's session_switched
- * handler.
+ * into the HistoryMessage format used by transcript consumers.
  *
  * Uses all ascending rows from the read model to detect exact `hasMore`, then
  * keeps the newest `pageSize` rows while preserving ascending display order.

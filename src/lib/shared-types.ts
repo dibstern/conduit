@@ -353,8 +353,8 @@ export interface PtyInfo {
 }
 
 // ─── History Types ──────────────────────────────────────────────────────────
-// These are relay-specific transport types for the session_switched / history_page
-// WebSocket messages. They represent a loose superset of the SDK's Part and Message
+// These are relay-specific history types for paged transcript RPC responses.
+// They represent a loose superset of the SDK's Part and Message
 // types with relay-specific extensions (renderedHtml, index signatures).
 //
 // SDK type mapping (Task 10):
@@ -470,97 +470,6 @@ export interface FileVersion {
 // to provide runtime validation and type derivation.
 
 // -- Helper schemas for embedded types --
-
-const ToolStateSchema = Schema.Struct({
-	status: Schema.optional(
-		Schema.Literal("pending", "running", "completed", "error"),
-	),
-	input: Schema.optional(Schema.Unknown),
-	output: Schema.optional(Schema.String),
-	error: Schema.optional(Schema.String),
-});
-
-const PartTypeSchema = Schema.Literal(
-	"text",
-	"reasoning",
-	"file",
-	"tool",
-	"step-start",
-	"step-finish",
-	"snapshot",
-	"patch",
-	"agent",
-	"retry",
-	"compaction",
-	"subtask",
-	"thinking",
-);
-
-const HistoryMessagePartSchema = Schema.Struct({
-	id: Schema.String,
-	type: PartTypeSchema,
-	text: Schema.optional(Schema.String),
-	renderedHtml: Schema.optional(Schema.String),
-	state: Schema.optional(ToolStateSchema),
-	callID: Schema.optional(Schema.String),
-	tool: Schema.optional(Schema.String),
-	time: Schema.optional(Schema.Unknown),
-	preTokens: Schema.optional(Schema.Number),
-	postTokens: Schema.optional(Schema.Number),
-});
-
-const ModelExecutionSchema = Schema.Struct({
-	requestedModel: Schema.optional(Schema.String),
-	expectedModel: Schema.optional(Schema.String),
-	actualModel: Schema.String,
-	drifted: Schema.optional(Schema.Boolean),
-}).pipe(
-	Schema.filter(
-		(execution) =>
-			execution.drifted === undefined ||
-			(execution.expectedModel !== undefined &&
-				(execution.drifted === false ||
-					execution.actualModel !== execution.expectedModel)),
-		{
-			// Not a biconditional: two ids that differ only by the `[1m]`
-			// context-window suffix name the same model, so equal-identity /
-			// unequal-string is a legitimate `drifted: false`. Claiming drift
-			// between two identical ids is still nonsense.
-			message: () =>
-				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
-		},
-	),
-);
-
-const HistoryMessageSchema = Schema.Struct({
-	id: Schema.String,
-	role: Schema.Literal("user", "assistant"),
-	isBackfilled: Schema.optional(Schema.Boolean),
-	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
-	time: Schema.optional(
-		Schema.Struct({
-			created: Schema.optional(Schema.Number),
-			completed: Schema.optional(Schema.Number),
-		}),
-	),
-	cost: Schema.optional(Schema.Number),
-	tokens: Schema.optional(
-		Schema.Struct({
-			input: Schema.optional(Schema.Number),
-			output: Schema.optional(Schema.Number),
-			cache: Schema.optional(
-				Schema.Struct({
-					read: Schema.optional(Schema.Number),
-					write: Schema.optional(Schema.Number),
-				}),
-			),
-		}),
-	),
-	parentID: Schema.optional(Schema.String),
-	finish: Schema.optional(Schema.String),
-	error: Schema.optional(Schema.Unknown),
-	modelExecution: Schema.optional(ModelExecutionSchema),
-});
 
 const AskUserQuestionSchema = Schema.Struct({
 	question: Schema.String,
@@ -858,29 +767,6 @@ const DoneSchema = Schema.Struct({
 	code: Schema.Number,
 });
 
-// session_switched: events are RelayMessage[] at the type level (see manual
-// union below).  We use Schema.Unknown for array elements here to avoid a
-// circular Schema.suspend reference that causes TS7022 implicit-any errors.
-// Individual events are validated independently when they arrive over WS.
-const SessionSwitchedSchema = Schema.Struct({
-	type: Schema.Literal("session_switched"),
-	id: Schema.String,
-	sessionId: Schema.String,
-	parentID: Schema.optional(Schema.String),
-	replacesSessionId: Schema.optional(Schema.String),
-	requestId: Schema.optional(RequestId),
-	events: Schema.optional(Schema.Array(Schema.Unknown)),
-	eventsHasMore: Schema.optional(Schema.Boolean),
-	history: Schema.optional(
-		Schema.Struct({
-			messages: Schema.Array(HistoryMessageSchema),
-			hasMore: Schema.Boolean,
-			total: Schema.optional(Schema.Number),
-		}),
-	),
-	inputText: Schema.optional(Schema.String),
-});
-
 const SessionListSchema = Schema.Struct({
 	type: Schema.Literal("session_list"),
 	sessions: Schema.Array(SessionInfoSchema),
@@ -903,13 +789,6 @@ const SessionForkedSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optional(Schema.Number),
 	parentId: Schema.String,
 	parentTitle: Schema.String,
-});
-
-const HistoryPageSchema = Schema.Struct({
-	type: Schema.Literal("history_page"),
-	sessionId: Schema.String,
-	messages: Schema.Array(HistoryMessageSchema),
-	hasMore: Schema.Boolean,
 });
 
 // ── Model / Agent / Commands ───────────────────────────────────────────
@@ -1256,11 +1135,9 @@ export const RelayMessageSchema = Schema.Union(
 	StatusSchema,
 	CompactionSchema,
 	DoneSchema,
-	SessionSwitchedSchema,
 	SessionListSchema,
 	SessionFamilySchema,
 	SessionForkedSchema,
-	HistoryPageSchema,
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
 	DefaultModelInfoSchema,
@@ -1347,11 +1224,9 @@ export const RELAY_MESSAGE_TYPES = [
 	"status",
 	"compaction",
 	"done",
-	"session_switched",
 	"session_list",
 	"session_family",
 	"session_forked",
-	"history_page",
 	"model_info",
 	"default_model_info",
 	"default_permission_mode_info",
@@ -1529,31 +1404,6 @@ export type RelayMessage =
 			postTokens?: number;
 	  }
 	| { type: "done"; sessionId: string; code: number; alertId?: string }
-	| {
-			type: "session_switched";
-			id: string;
-			sessionId: string;
-			parentID?: string;
-			/** The session this one takes over for the recipient, as when a turn
-			 *  on a local row materializes an OpenCode session. */
-			replacesSessionId?: string;
-			/** Correlation ID echoed from CreateSession or ViewSession request. */
-			requestId?: RequestId;
-			/** Raw events for client replay (cache hit). */
-			events?: RelayMessage[];
-			/** When true, the event cache does not cover the full session
-			 *  (eviction or late start) and the frontend should fall through
-			 *  to server-based pagination when the replay buffer is exhausted. */
-			eventsHasMore?: boolean;
-			/** Structured messages for REST API fallback (converted to ChatMessages and prepended to the session's message list). */
-			history?: {
-				messages: HistoryMessage[];
-				hasMore: boolean;
-				total?: number;
-			};
-			/** Current input draft text for this session (from input_sync). */
-			inputText?: string;
-	  }
 	| { type: "session_family"; rootId: string; sessions: SessionInfo[] }
 	| {
 			type: "session_list";
@@ -1570,12 +1420,6 @@ export type RelayMessage =
 			parentId: string;
 			/** Title of the parent session. */
 			parentTitle: string;
-	  }
-	| {
-			type: "history_page";
-			sessionId: string;
-			messages: HistoryMessage[];
-			hasMore: boolean;
 	  }
 	// ── Model / Agent / Commands ───────────────────────────────────────────
 	| { type: "model_info"; sessionId?: string; model: string; provider: string }
@@ -1759,9 +1603,7 @@ export type PerSessionEventType =
 	| "ask_user_error"
 	| "permission_request"
 	| "permission_resolved"
-	| "session_switched"
 	| "session_forked"
-	| "history_page"
 	| "provider_session_reloaded"
 	| "session_deleted";
 

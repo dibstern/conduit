@@ -157,6 +157,11 @@ async function openWindows(page: Page, browser: Browser, relayUrl: string) {
 	});
 	await gotoRelay(page, relayUrl);
 	await gotoRelay(B, relayUrl);
+	const sessionId = decodeURIComponent(
+		new URL(relayUrl).pathname.slice("/s/".length),
+	);
+	for (const window of [page, B])
+		await expect(row(window, sessionId)).toHaveClass(/(?:^|\s)active(?:\s|$)/);
 	const windows: Windows = { A: page, B };
 	return {
 		windows,

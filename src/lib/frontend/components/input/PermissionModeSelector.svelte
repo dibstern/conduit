@@ -69,8 +69,7 @@
 				},
 			);
 		} else {
-			// No session bound yet (e.g. cold start before session_switched):
-			// remember the choice; handleSessionSwitched flushes it on bind.
+			// No session bound yet: remember the choice until the tab selects one.
 			discoveryState.pendingPermissionMode = mode;
 		}
 	}

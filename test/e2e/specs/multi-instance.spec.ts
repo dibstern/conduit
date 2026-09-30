@@ -1034,7 +1034,7 @@ test.describe("Settings: Instance Status Updates", () => {
 		const instanceList = page.locator("#instance-settings-list");
 		const workRow = instanceList.locator("button", { hasText: "Work" });
 		await expect(workRow).toBeVisible();
-		const workDot = workRow.locator("[class*='rounded-full']");
+		const workDot = workRow.locator("span.w-2.h-2.rounded-full");
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// Send instance_status to make Work "starting" (yellow)

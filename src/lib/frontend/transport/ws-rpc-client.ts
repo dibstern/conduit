@@ -38,6 +38,7 @@ import type {
 	RewindSessionResponse,
 	RpcLogLevel,
 	ScanNowResponse,
+	SendMessageResponse,
 	SetDefaultModelResponse,
 	SetDefaultPermissionModeResponse,
 	SetHiddenEntriesResponse,
@@ -45,6 +46,7 @@ import type {
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
 	SwitchVariantResponse,
+	ViewSessionResponse,
 } from "./ws-rpc.js";
 
 export interface CancelSessionRpcInput {
@@ -163,7 +165,6 @@ export interface CreateSessionRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
 	readonly title?: string;
-	readonly requestId?: string;
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
@@ -173,7 +174,6 @@ export interface ViewSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId: string;
-	readonly requestId?: string;
 }
 
 export interface AttachProjectRpcInput {
@@ -530,7 +530,6 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 			projectSlug: input.projectSlug,
 			originId: input.originId,
 			...(input.title != null ? { title: input.title } : {}),
-			...(input.requestId != null ? { requestId: input.requestId } : {}),
 			...(input.instanceId != null
 				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
 				: {}),
@@ -539,9 +538,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 	);
 
 const callViewSession = (input: ViewSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client.ViewSession(input).pipe(Effect.asVoid),
-	);
+	callControl(input.projectSlug, (client) => client.ViewSession(input));
 
 const callAttachProject = (input: AttachProjectRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -811,16 +808,14 @@ const callRewindSession = (input: RewindSessionRpcInput) =>
 
 const callSendMessage = (input: SendMessageRpcInput) =>
 	callControl(input.projectSlug, (client) =>
-		client
-			.SendMessage({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				text: input.text,
-				commandId: input.commandId,
-				...(input.images ? { images: [...input.images] } : {}),
-				...(input.originId ? { originId: input.originId } : {}),
-			})
-			.pipe(Effect.asVoid),
+		client.SendMessage({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			text: input.text,
+			commandId: input.commandId,
+			...(input.images ? { images: [...input.images] } : {}),
+			...(input.originId ? { originId: input.originId } : {}),
+		}),
 	);
 
 const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
@@ -968,8 +963,8 @@ export async function createSessionRpc(
 
 export async function viewSessionRpc(
 	input: ViewSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callViewSession(input));
+): Promise<ViewSessionResponse> {
+	return await runTransportEffect(callViewSession(input));
 }
 
 export async function attachProjectRpc(
@@ -1239,8 +1234,8 @@ export async function rewindSessionRpc(
 
 export async function sendMessageRpc(
 	input: SendMessageRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSendMessage(input));
+): Promise<SendMessageResponse> {
+	return await runTransportEffect(callSendMessage(input));
 }
 
 export async function syncInputDraftRpc(

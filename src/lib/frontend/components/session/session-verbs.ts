@@ -203,9 +203,7 @@ function fork(session: SessionInfo) {
 	if (!input) return;
 	void forkSessionRpc(input)
 		.then((response) => {
-			// The relay's switch to a fork of a session that is not open is
-			// uncorrelated, so the session_switched guard ignores it. Open the
-			// fork here unless that switch already did.
+			// The fork response selects the new session in this tab.
 			if (sessionState.currentId !== response.sessionId)
 				switchToSession(response.sessionId, response.projectSlug);
 		})

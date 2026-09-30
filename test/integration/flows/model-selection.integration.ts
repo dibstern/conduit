@@ -171,7 +171,6 @@ describe("Integration: Model Selection", () => {
 
 		// Create a new session — should reset model selection
 		await client.createSession("Model Reset Test");
-		await client.waitFor("session_switched");
 
 		// Let the session fully initialize before sending a message
 		await new Promise((r) => setTimeout(r, 1000));

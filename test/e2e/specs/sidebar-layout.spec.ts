@@ -68,7 +68,7 @@ test("shell feed adds and removes sidebar roots", async ({
 	).toBeVisible();
 	await page.locator('#session-list [data-session-id="feed-root"]').click();
 	relay.sendMessage({
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: "feed-root",
 		sessionId: "feed-root",
 		events: [{ type: "user_message", text: "Chat before deletion" }],

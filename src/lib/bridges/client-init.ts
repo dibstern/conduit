@@ -1,6 +1,6 @@
 // ─── Client Init (Ticket 3.6) ────────────────────────────────────────────────
 // Handles the initial handshake when a browser client connects via WebSocket.
-// Sends session info (with cached events or REST API history), model info,
+// Sends session info, model info,
 // agent list, provider/model list, and PTY replay to the new client.
 //
 // Extracted from relay-stack.ts's `client_connected` handler so the logic is
@@ -8,14 +8,9 @@
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import type { AgentList } from "../domain/relay/Services/agent-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { OpenCodeHistoryReconcileTag } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingQuestion,
@@ -26,7 +21,6 @@ import type {
 	OpenCodeSessionDetail,
 } from "../domain/relay/Services/services.js";
 import {
-	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
@@ -49,19 +43,9 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
-import { getSessionInputDraft } from "../handlers/index.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Logger } from "../logger.js";
-import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { ProviderCapabilities } from "../provider/types.js";
-import {
-	buildSessionSwitchedMessage,
-	patchMissingDoneForProcessingState,
-	resolveSessionHistoryFromRows,
-	type SessionHistorySource,
-	type SessionSwitchDeps,
-	switchClientToSession,
-} from "../session/session-switch.js";
 import type { ContextWindowOption } from "../shared-types.js";
 import type {
 	OpenCodeInstance,
@@ -86,12 +70,6 @@ export interface ClientInitSessionService {
 				| undefined;
 		},
 	): Promise<void>;
-	resolveSessionHistory(sessionId: string): Promise<SessionHistorySource>;
-	loadPreRenderedHistory(sessionId: string): Promise<{
-		messages: import("../shared-types.js").HistoryMessage[];
-		hasMore: boolean;
-		total?: number;
-	}>;
 	getLastMessageAtMap?(): ReadonlyMap<string, number>;
 }
 
@@ -254,74 +232,6 @@ const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
 		);
 	});
 
-const resolveClientInitHistoryEffect = (sessionId: string) =>
-	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		let projectedSource: SessionHistorySource = { kind: "empty" };
-		let reconcileOpenCode = false;
-		if (readQueryOption._tag === "Some") {
-			const page = yield* readQueryOption.value.readSessionTranscriptPage(
-				sessionId,
-				{ limit: 50 },
-			);
-			projectedSource = resolveSessionHistoryFromRows(page.messages, {
-				pageSize: 50,
-				hasMore: page.hasMore,
-			});
-
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			const configOption = yield* Effect.serviceOption(ConfigTag);
-			const isOpenCodeSession =
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				resolveProviderRoutingDriver(
-					loadDaemonConfig(
-						configOption._tag === "Some"
-							? configOption.value.configDir
-							: undefined,
-					),
-					sessionRowResult.right.provider,
-				) === "opencode";
-			reconcileOpenCode =
-				isOpenCodeSession && sessionRowResult.right.history_complete === 0;
-			if (
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				(!isOpenCodeSession || sessionRowResult.right.history_complete === 1)
-			) {
-				return projectedSource;
-			}
-		}
-
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		const historyResult = yield* Effect.either(
-			sessionManagerService.loadPreRenderedHistory(sessionId),
-		);
-		if (historyResult._tag === "Right") {
-			if (reconcileOpenCode) {
-				const ingress = yield* Effect.serviceOption(
-					OpenCodeHistoryReconcileTag,
-				);
-				if (ingress._tag === "Some")
-					yield* ingress.value.reconcileSession(sessionId);
-			}
-			return {
-				kind: "rest-history",
-				history: historyResult.right,
-			} satisfies SessionHistorySource;
-		}
-
-		if (projectedSource.kind !== "empty") return projectedSource;
-
-		const logger = yield* LoggerTag;
-		logger.warn(
-			`Failed to load client init history for ${sessionId}: ${formatErrorDetail(historyResult.left)}`,
-		);
-		return { kind: "empty" } satisfies SessionHistorySource;
-	});
-
 const switchClientToSessionForInitEffect = (
 	clientId: string,
 	sessionId: string,
@@ -335,47 +245,10 @@ const switchClientToSessionForInitEffect = (
 
 		wsHandler.setClientSession(clientId, sessionId);
 
-		const sourceResult = yield* Effect.either(
-			resolveClientInitHistoryEffect(sessionId),
-		);
-		const source =
-			sourceResult._tag === "Right"
-				? sourceResult.right
-				: ({ kind: "empty" } satisfies SessionHistorySource);
-		if (sourceResult._tag === "Left") {
-			const log = yield* LoggerTag;
-			log.warn(
-				`Failed to load history for ${sessionId}: ${formatErrorDetail(sourceResult.left)}`,
-			);
-		}
-
 		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
-		const patchedSource = patchMissingDoneForProcessingState(
-			source,
-			sessionId,
-			pollerIsProcessing || hasActiveTimeout,
-		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		let parentID: string | undefined;
-		if (readQueryOption._tag === "Some") {
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (sessionRowResult._tag === "Right") {
-				parentID = sessionRowResult.right?.parent_id ?? undefined;
-			}
-		}
 		const sessionService = yield* SessionManagerServiceTag;
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
-		const draft = getSessionInputDraft(sessionId);
-		wsHandler.sendTo(
-			clientId,
-			buildSessionSwitchedMessage(sessionId, patchedSource, {
-				...(draft ? { draft } : {}),
-				...(parentID != null ? { parentID } : {}),
-			}),
-		);
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
@@ -402,7 +275,6 @@ export const handleClientConnectedEffect = (
 		const agentService = yield* AgentServiceTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const terminal = yield* OpenCodeTerminalServiceTag;
-		const statusPoller = yield* StatusPollerTag;
 		const engine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 
@@ -841,7 +713,7 @@ export const handleClientConnectedEffect = (
 
 /**
  * Handle a newly connected browser client. Sends all initial state:
- * - Active session with cached events or REST API history
+ * - Active session metadata
  * - Session list
  * - Model info (from session or overrides)
  * - Agent list (filtered)
@@ -870,7 +742,7 @@ export async function handleClientConnected(
 		);
 	};
 
-	// ── Active session with event replay ─────────────────────────────────
+	// ── Active session metadata ───────────────────────────────────────────
 	// Use the requested session (from ?session= query param) if provided,
 	// otherwise compute the default (most recent or newly created).
 	const activeId =
@@ -878,29 +750,18 @@ export async function handleClientConnected(
 	const familyIds = new Set<string>(activeId ? [activeId] : []);
 	let activeSessionModel: ModelOverride | undefined;
 	if (activeId) {
-		// pollerManager intentionally omitted — not available in ClientInitDeps.
-		// skipPollerSeed: true ensures switchClientToSession never accesses it.
-		// The `satisfies` check guarantees a compile error if SessionSwitchDeps
-		// adds new required fields that this object doesn't provide.
 		const family = await sessionService.getSessionFamily(activeId);
 		for (const session of family.sessions) familyIds.add(session.id);
 		wsHandler.sendTo(clientId, family);
-		await switchClientToSession(
-			{
-				sessionMgr: sessionService,
-				wsHandler,
-				...(deps.statusPoller != null && { statusPoller: deps.statusPoller }),
-				processingTimeouts: {
-					hasActiveProcessingTimeout: overrideState.hasActiveProcessingTimeout,
-				},
-				log: deps.log,
-				getInputDraft: getSessionInputDraft,
-				resolveSessionHistory: sessionService.resolveSessionHistory,
-			} satisfies SessionSwitchDeps,
-			clientId,
-			activeId,
-			{ skipPollerSeed: true },
-		);
+		wsHandler.setClientSession(clientId, activeId);
+		const isProcessing =
+			deps.statusPoller?.isProcessing(activeId) ||
+			(await overrideState.hasActiveProcessingTimeout(activeId));
+		wsHandler.sendTo(clientId, {
+			type: "status",
+			sessionId: activeId,
+			status: isProcessing ? "processing" : "idle",
+		});
 
 		// Send model/agent info from the active session
 		try {

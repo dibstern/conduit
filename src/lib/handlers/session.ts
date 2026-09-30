@@ -4,11 +4,6 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
-import { OpenCodeHistoryReconcileTag } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
@@ -26,30 +21,17 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
-import {
-	buildSessionSwitchedMessage,
-	patchMissingDoneForProcessingState,
-	resolveSessionHistoryFromRows,
-	type SessionHistorySource,
-	type SwitchClientOptions,
-} from "../session/session-switch.js";
-import type {
-	HistoryMessage,
-	PermissionId,
-	RequestId,
-} from "../shared-types.js";
+import type { PermissionId } from "../shared-types.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 const SESSION_METADATA_FANOUT = 4;
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
-	readonly requestId?: string;
 }
 
 interface NewSessionPayload {
 	readonly title?: string;
-	readonly requestId?: RequestId;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }
@@ -63,28 +45,9 @@ interface ForkSessionPayload {
 	readonly messageId?: string;
 }
 
-function addProjectedModelExecution(
-	messages: readonly HistoryMessage[],
-	projectedMessages: readonly HistoryMessage[],
-): HistoryMessage[] {
-	const executionByMessageId = new Map(
-		projectedMessages.flatMap((message) =>
-			message.role === "user" && message.modelExecution
-				? [[message.id, message.modelExecution] as const]
-				: [],
-		),
-	);
-	return messages.map((message) => {
-		const modelExecution = executionByMessageId.get(message.id);
-		return message.role === "user" && modelExecution
-			? { ...message, modelExecution }
-			: message;
-	});
-}
-
 /**
  * Send metadata (model info, permissions, questions, viewed family) to a client.
- * Independent of session_switched delivery — these are supplementary data.
+ * These are supplementary data to the transcript and selection RPCs.
  */
 const sendSessionMetadata = (clientId: string, id: string) =>
 	Effect.gen(function* () {
@@ -256,83 +219,6 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		);
 	});
 
-const resolveSessionHistory = (sessionId: string) =>
-	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		const log = yield* LoggerTag;
-
-		let projectedSource: SessionHistorySource = { kind: "empty" };
-		let projectedMessages: readonly HistoryMessage[] = [];
-		let reconcileOpenCode = false;
-		if (readQueryOption._tag === "Some") {
-			const page = yield* readQueryOption.value.readSessionTranscriptPage(
-				sessionId,
-				{ limit: 50 },
-			);
-			projectedSource = resolveSessionHistoryFromRows(page.messages, {
-				pageSize: 50,
-				hasMore: page.hasMore,
-			});
-			if (projectedSource.kind === "rest-history") {
-				projectedMessages = projectedSource.history.messages;
-			}
-
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			const configOption = yield* Effect.serviceOption(ConfigTag);
-			const isOpenCodeSession =
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				resolveProviderRoutingDriver(
-					loadDaemonConfig(
-						configOption._tag === "Some"
-							? configOption.value.configDir
-							: undefined,
-					),
-					sessionRowResult.right.provider,
-				) === "opencode";
-			reconcileOpenCode =
-				isOpenCodeSession && sessionRowResult.right.history_complete === 0;
-			if (
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				(!isOpenCodeSession || sessionRowResult.right.history_complete === 1)
-			) {
-				return projectedSource;
-			}
-		}
-
-		const historyResult = yield* Effect.either(
-			sessionManagerService.loadPreRenderedHistory(sessionId),
-		);
-		if (historyResult._tag === "Right") {
-			if (reconcileOpenCode) {
-				const ingress = yield* Effect.serviceOption(
-					OpenCodeHistoryReconcileTag,
-				);
-				if (ingress._tag === "Some")
-					yield* ingress.value.reconcileSession(sessionId);
-			}
-			return {
-				kind: "rest-history",
-				history: {
-					...historyResult.right,
-					messages: addProjectedModelExecution(
-						historyResult.right.messages,
-						projectedMessages,
-					),
-				},
-			} satisfies SessionHistorySource;
-		}
-
-		if (projectedSource.kind !== "empty") return projectedSource;
-
-		log.warn(`Failed to load history for ${sessionId}: ${historyResult.left}`);
-		return { kind: "empty" } satisfies SessionHistorySource;
-	});
-
 const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
@@ -350,7 +236,7 @@ const shouldStartOpenCodePoller = (sessionId: string) =>
 const switchClientToSession = (
 	clientId: string,
 	sessionId: string,
-	options?: SwitchClientOptions,
+	options?: { skipPollerSeed?: boolean },
 ) =>
 	Effect.gen(function* () {
 		if (!sessionId) return;
@@ -362,40 +248,11 @@ const switchClientToSession = (
 
 		wsHandler.setClientSession(clientId, sessionId);
 
-		const source: SessionHistorySource = options?.skipHistory
-			? { kind: "empty" }
-			: yield* resolveSessionHistory(sessionId);
-		// Completion is subtree-aware even though the sidebar receives raw rows.
 		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
-		const patchedSource = patchMissingDoneForProcessingState(
-			source,
-			sessionId,
-			pollerIsProcessing || hasActiveTimeout,
-		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		let parentID: string | undefined;
-		if (readQueryOption._tag === "Some") {
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (sessionRowResult._tag === "Right") {
-				parentID = sessionRowResult.right?.parent_id ?? undefined;
-			}
-		}
-
 		const sessionService = yield* SessionManagerServiceTag;
 		wsHandler.sendTo(
 			clientId,
 			yield* sessionService.getSessionFamily(sessionId),
-		);
-		const draft = getSessionInputDraft(sessionId);
-		wsHandler.sendTo(
-			clientId,
-			buildSessionSwitchedMessage(sessionId, patchedSource, {
-				...(draft ? { draft } : {}),
-				...(parentID != null ? { parentID } : {}),
-				...(options?.requestId != null ? { requestId: options.requestId } : {}),
-			}),
 		);
 
 		const isProcessing = pollerIsProcessing || hasActiveTimeout;
@@ -418,64 +275,50 @@ const switchClientToSession = (
 export const viewSessionForClient = ({
 	clientId,
 	sessionId,
-	requestId,
-	skipMetadata,
 }: {
 	readonly clientId: string;
 	readonly sessionId: string;
-	readonly requestId?: string;
-	readonly skipMetadata?: boolean;
 }) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 
 		const id = sessionId;
-		if (!id) return;
+		if (!id) return { draft: "" };
 
-		yield* switchClientToSession(clientId, id, {
-			...(requestId != null && { requestId: requestId as RequestId }),
-		});
+		yield* switchClientToSession(clientId, id);
 
 		// No read state here: a switch also fires on restore, reload and
 		// reconnect. The browser reports a user's sidebar pick through
 		// session.mark_seen instead (ADR-0004, Scope; conduit-test-hk9m.3).
 
-		// Fire-and-forget metadata (unless skipMetadata is set)
-		if (!skipMetadata) {
-			// Run metadata send as a forked fiber — non-blocking
-			yield* Effect.either(sendSessionMetadata(clientId, id));
-		}
+		// Run metadata send as a forked fiber — non-blocking
+		yield* Effect.either(sendSessionMetadata(clientId, id));
 
 		log.info(`client=${clientId} Viewing: ${id}`);
+		return { draft: getSessionInputDraft(id) };
 	});
 
 export const handleViewSession = (
 	clientId: string,
 	payload: ViewSessionPayload,
-	skipMetadata?: boolean,
 ) =>
 	viewSessionForClient({
 		clientId,
 		sessionId: payload.sessionId,
-		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
-		...(skipMetadata != null ? { skipMetadata } : {}),
 	});
 
 export const createSessionForClient = ({
 	clientId,
 	title,
-	requestId,
 	instanceId,
 	providerId,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
-	readonly requestId?: string;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -488,8 +331,6 @@ export const createSessionForClient = ({
 				: yield* sessionManagerService.createSession(title);
 
 		yield* switchClientToSession(clientId, session.id, {
-			...(requestId != null && { requestId: requestId as RequestId }),
-			skipHistory: true,
 			skipPollerSeed: true,
 		});
 
@@ -518,7 +359,6 @@ export const handleNewSession = (
 	createSessionForClient({
 		clientId,
 		...(payload.title != null ? { title: payload.title } : {}),
-		...(payload.requestId != null ? { requestId: payload.requestId } : {}),
 		...(payload.instanceId != null ? { instanceId: payload.instanceId } : {}),
 		...(payload.providerId != null ? { providerId: payload.providerId } : {}),
 	}).pipe(Effect.asVoid);
@@ -543,30 +383,8 @@ export const deleteSessionForClient = ({
 		const id = sessionId;
 		if (!id) return;
 
-		// Find ALL clients viewing this session before deletion
-		const viewers = wsHandler.getClientsForSession(id);
-
 		const didDelete = yield* sessionManagerService.deleteSession(id);
 		if (!didDelete) return;
-
-		const sessions =
-			viewers.length > 0 ? yield* sessionManagerService.listSessions() : [];
-
-		// Switch ALL viewers to the next session
-		if (sessions.length > 0) {
-			for (const viewerClientId of viewers) {
-				yield* handleViewSession(
-					viewerClientId,
-					{
-						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by sessions.length > 0
-						sessionId: sessions[0]!.id,
-					},
-					/* skipMetadata */ true,
-				);
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by sessions.length > 0
-				yield* sendSessionMetadata(viewerClientId, sessions[0]!.id);
-			}
-		}
 
 		// Id only, no row: tabs prune the daemon-wide list and search results,
 		// which the per-project shell feed does not cover.
@@ -594,7 +412,6 @@ export const renameSessionForClient = ({
 	readonly title: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -616,7 +433,6 @@ export const setSessionSettledForClient = ({
 	readonly settled: boolean;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, settled)) {
@@ -641,7 +457,6 @@ export const setSessionPinnedForClient = ({
 	readonly pinned: boolean;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionPinned(sessionId, pinned)) {
@@ -660,7 +475,6 @@ export const setSessionAutoSettleForClient = ({
 	readonly disabled: boolean;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
@@ -687,7 +501,6 @@ export const snoozeSessionForClient = ({
 	readonly until: number | null;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.snoozeSession(sessionId, until)) {
@@ -704,7 +517,6 @@ export const unsnoozeSessionForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.unsnoozeSession(sessionId)) {
@@ -746,7 +558,6 @@ export const markSessionSeenForClient = ({
 	readonly upTo: number;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -858,9 +669,6 @@ export const forkSessionForClient = ({
 			parentId: sessionId,
 			parentTitle: parent?.title ?? "Unknown",
 		});
-
-		// Switch client to forked session with full history
-		yield* handleViewSession(clientId, { sessionId: forked.id });
 
 		// Refresh the viewed family after the fork.
 		yield* sessionManagerService.pushViewerFamilies();

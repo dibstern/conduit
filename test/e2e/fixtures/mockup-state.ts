@@ -22,10 +22,6 @@ export interface MockMessage {
 
 export const initMessages: MockMessage[] = [
 	{
-		type: "session_switched",
-		id: "sess-mockup-001",
-	},
-	{
 		type: "status",
 		status: "idle",
 	},
@@ -194,15 +190,12 @@ export const openCodeAgentList: MockMessage = {
 	agents: openCodeInstanceAgents,
 };
 
-/** Connected-but-unbound init: like initMessages but WITHOUT session_switched.
+/** Connected init without a selected session.
  *  No session is bound, so the harness rail is fully interactive and the
  *  composer's first send creates the session (CreateSession + instanceId). */
 export const unboundInitMessages: MockMessage[] = [
 	...initMessages.filter(
-		(m) =>
-			m.type !== "session_switched" &&
-			m.type !== "model_list" &&
-			m.type !== "agent_list",
+		(m) => m.type !== "model_list" && m.type !== "agent_list",
 	),
 	dualDriverModelList,
 	openCodeAgentList,
@@ -263,7 +256,7 @@ function modelExecutionInitMessages(
 ): MockMessage[] {
 	return [
 		{
-			type: "session_switched",
+			type: "mock_transcript_snapshot",
 			id: "sess-mockup-001",
 			history: {
 				messages: [
@@ -346,7 +339,6 @@ export const modelExecutionMockups = {
 
 /** Bind an existing session to the Claude harness (locked-rail mode). */
 export const claudeBoundSessionMessages: MockMessage[] = [
-	{ type: "session_switched", id: "sess-bound-claude" },
 	{
 		type: "model_info",
 		sessionId: "sess-bound-claude",
@@ -358,7 +350,6 @@ export const claudeBoundSessionMessages: MockMessage[] = [
 
 /** Bind an existing session to the OpenCode harness (locked-rail mode). */
 export const openCodeBoundSessionMessages: MockMessage[] = [
-	{ type: "session_switched", id: "sess-bound-opencode" },
 	{
 		type: "model_info",
 		sessionId: "sess-bound-opencode",
@@ -635,10 +626,6 @@ export const emptyInstanceList: MockMessage = {
 /** Init messages with no instances (for Getting Started panel tests) */
 export const noInstanceInitMessages: MockMessage[] = [
 	{
-		type: "session_switched",
-		id: "sess-ni-001",
-	},
-	{
 		type: "status",
 		status: "idle",
 	},
@@ -671,10 +658,6 @@ export const noInstanceInitMessages: MockMessage[] = [
 /** Init messages for multi-instance testing (session + model + instances + projects) */
 export const multiInstanceInitMessages: MockMessage[] = [
 	{
-		type: "session_switched",
-		id: "sess-mi-001",
-	},
-	{
 		type: "status",
 		status: "idle",
 	},
@@ -706,10 +689,6 @@ export const multiInstanceInitMessages: MockMessage[] = [
 
 /** Init messages for single-instance testing */
 export const singleInstanceInitMessages: MockMessage[] = [
-	{
-		type: "session_switched",
-		id: "sess-si-001",
-	},
 	{
 		type: "status",
 		status: "idle",
@@ -783,10 +762,6 @@ const variantProjectList: MockMessage = {
 /** Init messages for variant testing — model with thinking-level variants. */
 export const variantInitMessages: MockMessage[] = [
 	{
-		type: "session_switched",
-		id: "sess-var-001",
-	},
-	{
 		type: "status",
 		status: "idle",
 	},
@@ -830,10 +805,6 @@ export const variantInitMessages: MockMessage[] = [
 
 /** Init messages for variant testing — model WITHOUT thinking-level variants. */
 export const noVariantInitMessages: MockMessage[] = [
-	{
-		type: "session_switched",
-		id: "sess-novar-001",
-	},
 	{
 		type: "status",
 		status: "idle",
@@ -909,10 +880,6 @@ export const contextWindowModelList: MockMessage = {
 /** Init messages for context-window testing — Sonnet model with options. */
 export const contextWindowInitMessages: MockMessage[] = [
 	{
-		type: "session_switched",
-		id: "sess-context-001",
-	},
-	{
 		type: "status",
 		status: "idle",
 	},
@@ -959,10 +926,6 @@ export const contextWindowInitMessages: MockMessage[] = [
 
 /** Init messages for context-window testing — model with no selector options. */
 export const noContextWindowInitMessages: MockMessage[] = [
-	{
-		type: "session_switched",
-		id: "sess-context-none-001",
-	},
 	{
 		type: "status",
 		status: "idle",

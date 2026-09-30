@@ -871,12 +871,6 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			}
 			orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
 			wsHandler.setClientSession(input.clientId, session.id);
-			wsHandler.sendTo(input.clientId, {
-				type: "session_switched",
-				id: session.id,
-				sessionId: session.id,
-				replacesSessionId: input.sessionId,
-			});
 			yield* Effect.forkDaemon(
 				sessionManagerService
 					.pushViewerFamilies()

@@ -129,13 +129,17 @@ function thresholdExampleValue(
 	return threshold;
 }
 
-// The frontend only honours a session_switched for the session its route
-// names, so a step that switches sessions first moves the route there.
-const openSessionRoute = (page: Page, sessionId: string) =>
-	page.evaluate((id) => {
-		history.pushState(null, "", `/s/${encodeURIComponent(id)}`);
-		window.dispatchEvent(new PopStateEvent("popstate"));
-	}, sessionId);
+// Route changes select the viewed session in the browser.
+const openSessionRoute = async (page: Page, sessionId: string) => {
+	await page.goto(
+		new URL(`/s/${encodeURIComponent(sessionId)}`, page.url()).toString(),
+	);
+	await requireRpcControl(page).waitForRequest(
+		(request) =>
+			request.tag === "ViewSession" &&
+			request.payload["sessionId"] === sessionId,
+	);
+};
 
 export const conduitVisualHandlers: StepHandler[] = [
 	{
@@ -547,7 +551,10 @@ export const conduitVisualHandlers: StepHandler[] = [
 						mockInstances.set(page, next);
 						return { projectSlug: "myapp", instances: next };
 					},
-					SendMessage: async () => undefined,
+					SendMessage: async (payload) => ({
+						ok: true,
+						sessionId: payload["sessionId"],
+					}),
 					SyncInputDraft: async () => undefined,
 					SwitchPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
@@ -596,9 +603,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";
-			const initialSession = modelExecutionMockup?.initMessages.find(
-				(message) => message.type === "session_switched",
-			)?.["id"];
+			const initialShell = modelExecutionMockup?.initMessages.find(
+				(message) => message.type === "shell_snapshot",
+			);
+			const shellSessions = initialShell?.["sessions"];
+			const initialSession = Array.isArray(shellSessions)
+				? shellSessions[0]?.id
+				: undefined;
 			const initialPath =
 				typeof initialSession === "string"
 					? `/s/${encodeURIComponent(initialSession)}`
@@ -806,8 +817,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "replay sent message after session switch",
-		match: /^the mock relay replays the sent message in a new session$/,
+		name: "replay sent message for selected session",
+		match: /^the mock relay replays the sent message for the selected session$/,
 		run: async ({ world }) => {
 			const message = composerMessages.get(world.page);
 			const rpcControl = rpcControls.get(world.page);
@@ -823,7 +834,6 @@ export const conduitVisualHandlers: StepHandler[] = [
 			// Echo the sender's originId like the real relay: the sending tab
 			// ignores its own broadcast and keeps its local echo (no duplicate).
 			await relayControl.sendMessages([
-				{ type: "session_switched", id: "sess-first-send" },
 				{
 					type: "user_message",
 					text: message,
@@ -833,16 +843,24 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "replay subagent session switch",
-		match: /^the mock relay replays a session switch with parentID$/,
+		name: "replay subagent family",
+		match: /^the mock relay replays a session family with a parent$/,
 		run: async ({ world }) => {
 			const relayControl = relayControls.get(world.page);
 			if (!relayControl) throw new Error("Mock relay was not initialised");
 			await openSessionRoute(world.page, "sess-subagent");
 			relayControl.sendMessage({
-				type: "session_switched",
-				id: "sess-subagent",
-				parentID: "sess-mockup-001",
+				type: "session_family",
+				rootId: "sess-mockup-001",
+				sessions: [
+					{ id: "sess-mockup-001", title: "Parent session", status: "idle" },
+					{
+						id: "sess-subagent",
+						title: "Subagent session",
+						status: "idle",
+						parentID: "sess-mockup-001",
+					},
+				],
 			});
 		},
 	},
@@ -1160,10 +1178,6 @@ export const conduitVisualHandlers: StepHandler[] = [
 		match: /^the Claude settings session is active$/,
 		run: async ({ world }) => {
 			await openSessionRoute(world.page, claudeSettingsSessionId);
-			requireRelayControl(world.page).sendMessage({
-				type: "session_switched",
-				id: claudeSettingsSessionId,
-			});
 		},
 	},
 	{

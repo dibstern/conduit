@@ -86,6 +86,7 @@
 				// Restore draft for the session we're entering
 				inputText = inputDrafts.get(currentId ?? "") ?? "";
 				previousSessionId = currentId;
+				lastLocalEditAt = 0;
 				// Cancel any pending outgoing sync from the previous session
 				if (inputSyncTimer) {
 					clearTimeout(inputSyncTimer);
@@ -369,14 +370,18 @@
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
 		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		const sentToSessionId = sid;
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
 				projectSlug,
-				sessionId: sid,
+				sessionId: sentToSessionId,
 				text: messageText,
 				commandId: crypto.randomUUID(),
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
+			}).then((response) => {
+				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
+					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 			}).catch(() => {
 				showToast("Failed to send message", { variant: "error" });
 			});

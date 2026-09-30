@@ -6,9 +6,7 @@ import type { RelayMessage } from "../shared-types.js";
  */
 const METADATA_TYPES: ReadonlySet<string> = new Set([
 	"session_list",
-	"session_switched",
 	"session_forked",
-	"history_page",
 	"model_info",
 	"default_model_info",
 	"model_list",

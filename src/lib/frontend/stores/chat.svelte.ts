@@ -312,7 +312,7 @@ export function findMessage<T extends ChatMessage["type"]>(
  *  Impossible boolean combinations are unrepresentable. */
 export type ChatPhase = "idle" | "processing" | "streaming";
 
-export type LoadLifecycle = "empty" | "loading" | "committed" | "ready";
+export type LoadLifecycle = "empty" | "loading" | "ready";
 
 /** The six fields the legacy global mirror ever exposed. */
 type ChatMirror = Readonly<
@@ -1075,7 +1075,7 @@ export function addUserMessage(
 	// action, never a background event. When the session is idle (e.g.
 	// between turns), isProcessing() is false and the content-change
 	// effect guard would skip the scroll without this request.
-	// Skip during replay — the settle loop handles replay scrolling.
+	// Skip while the transcript is loading; its ready transition handles scrolling.
 	if (messages.loadLifecycle !== "loading") {
 		requestScrollOnNextContent();
 	}

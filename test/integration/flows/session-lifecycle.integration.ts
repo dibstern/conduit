@@ -21,7 +21,7 @@ describe("Integration: Session Lifecycle", () => {
 
 	// ── Create ──────────────────────────────────────────────────────────────
 
-	it("create session and receive session_switched", async () => {
+	it("create session and receive its id from RPC", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
@@ -65,10 +65,9 @@ describe("Integration: Session Lifecycle", () => {
 		await client.waitForInitialState();
 
 		// Record the initial session ID
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		expect(initialSwitched.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const firstId = initialSwitched[0]!["id"] as string;
+		const firstId = client.getActiveSessionId();
+		expect(firstId).toBeTruthy();
+		if (!firstId) throw new Error("No initial session");
 
 		// Create a second session (this switches to it automatically)
 		client.clearReceived();
@@ -135,25 +134,26 @@ describe("Integration: Session Lifecycle", () => {
 		// Delete it
 		await client.deleteSession(sessionId);
 
-		const switchedAfterDelete = await client.waitFor("session_switched", {
+		const deleted = await client.waitFor("session_deleted", {
 			timeout: 5000,
-			predicate: (message) => message["id"] !== sessionId,
+			predicate: (message) => message["sessionId"] === sessionId,
 		});
-		expect(switchedAfterDelete["id"]).not.toBe(sessionId);
+		expect(deleted["sessionId"]).toBe(sessionId);
 
 		await client.close();
 	});
 
 	// ── State reset on switch ───────────────────────────────────────────────
 
-	it("switching session sends session_switched and its family", async () => {
+	it("switching session returns its draft and family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
 		// Record the initial session
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const firstId = initialSwitched[0]!["id"] as string;
+		const firstId = client.getActiveSessionId();
+		expect(firstId).toBeTruthy();
+		if (!firstId) throw new Error("No initial session");
+		await client.syncInputDraft("Unsent draft", { sessionId: firstId });
 
 		// Create a new session (auto-switches)
 		client.clearReceived();
@@ -164,6 +164,7 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
+		expect(switched["draft"]).toBe("Unsent draft");
 
 		const list = await client.waitFor("session_family", {
 			timeout: 5000,

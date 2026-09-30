@@ -30,6 +30,7 @@ import type {
 import {
 	activateSessionChatState,
 	clearSessionChatState,
+	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
 } from "./chat.svelte.js";
@@ -41,10 +42,17 @@ import {
 	flushPendingPermissionMode,
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
-import { getCurrentSlug, navigate } from "./router.svelte.js";
+import {
+	getCurrentSessionId,
+	getCurrentSlug,
+	navigate,
+	replaceRoute,
+} from "./router.svelte.js";
 import { sessionActivityBridge } from "./session-activity.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
+import { clearTodoState } from "./todo.svelte.js";
+import { updateContextPercent } from "./ui.svelte.js";
 
 // ─── Server-owned state ─────────────────────────────────────────────────────
 // Every session the server has told us about, keyed by id — one representation,
@@ -255,20 +263,13 @@ function clearTimers(): void {
 
 /**
  * Create a branded RequestId from crypto.randomUUID().
- * Frontend-only — the server receives and echoes RequestIds, never creates them.
+ * Frontend-only correlation for the creation state machine.
  */
 function createRequestId(): RequestId {
 	return crypto.randomUUID() as RequestId;
 }
 
 let selectionGeneration = 0;
-let pendingSelectionRequestId: RequestId | undefined;
-
-export function acceptsSessionSwitch(
-	requestId: RequestId | undefined,
-): boolean {
-	return requestId === undefined || requestId === pendingSelectionRequestId;
-}
 
 /**
  * Transition idle -> creating. Returns the requestId, or null if not idle.
@@ -278,7 +279,6 @@ export function requestNewSession(): RequestId | null {
 	if (sessionCreation.value.phase !== "idle") return null;
 	const requestId = createRequestId();
 	selectionGeneration++;
-	pendingSelectionRequestId = requestId;
 	sessionCreation.value = {
 		phase: "creating",
 		requestId,
@@ -348,10 +348,11 @@ export function resetSessionCreation(): void {
  * shape so they can't diverge.
  */
 export function sendNewSession(
-	start?: (input: CreateSessionRpcInput) => void,
+	start?: (input: CreateSessionRpcInput) => ReturnType<typeof createSessionRpc>,
 ): RequestId | null {
 	const requestId = requestNewSession();
 	if (!requestId) return null;
+	const generation = selectionGeneration;
 	const projectSlug = getCurrentSlug();
 	if (!projectSlug) {
 		failNewSession(requestId, "No active project");
@@ -359,22 +360,23 @@ export function sendNewSession(
 	}
 	const input: CreateSessionRpcInput = {
 		projectSlug,
-		requestId,
 		originId: getBrowserClientId(),
 		// Bind the session to the selected harness instance (replaces the
 		// legacy implicit default-model-provider derivation).
 		instanceId: getEffectiveInstanceId(),
 	};
-	if (start) {
-		start(input);
-	} else {
-		void createSessionRpc(input).catch((error: unknown) =>
+	void (start ?? createSessionRpc)(input)
+		.then((response) => {
+			completeNewSession(requestId);
+			if (generation !== selectionGeneration) return;
+			switchToSession(response.sessionId, response.projectSlug);
+		})
+		.catch((error: unknown) =>
 			failNewSession(
 				requestId,
 				error instanceof Error ? error.message : String(error),
 			),
 		);
-	}
 	return requestId;
 }
 
@@ -825,40 +827,6 @@ export function applySearchResultsResponse(
 	clientSession.searchHasMore = response.hasMore;
 }
 
-export function handleSessionSwitched(
-	msg: Extract<RelayMessage, { type: "session_switched" }>,
-): void {
-	const { id, requestId } = msg;
-	if (requestId === undefined) selectionGeneration++;
-	pendingSelectionRequestId = undefined;
-	if (id) {
-		clientSession.currentId = id;
-		// A switch can precede the family row. Keep only this selection's
-		// announced lineage (including fork points from session_forked, which
-		// arrives first); a server row takes precedence when it arrives.
-		const announced =
-			clientSession.announcedParent?.sessionId === id
-				? clientSession.announcedParent
-				: null;
-		clientSession.announcedParent = msg.parentID
-			? { ...announced, sessionId: id, parentId: msg.parentID }
-			: announced;
-		// A permission mode selected before any session was bound can only be
-		// delivered now that we know the session id.
-		const slug = getCurrentSlug();
-		if (slug) {
-			flushPendingPermissionMode(slug, id, switchPermissionModeRpc);
-		}
-	}
-	// Co-located: complete the creation state machine if this session_switched
-	// is the response to our CreateSession RPC request. This is inside
-	// handleSessionSwitched (not in the dispatch switch) so it can't be
-	// accidentally separated from the state update.
-	if (requestId) {
-		completeNewSession(requestId);
-	}
-}
-
 /** Keep fork lineage with this tab's selection until the family row arrives. */
 export function handleSessionForked(
 	msg: Extract<RelayMessage, { type: "session_forked" }>,
@@ -1049,21 +1017,6 @@ export function setCurrentSession(id: string | null): void {
 }
 
 /**
- * The session ID we are switching *away from*.  Captured here before
- * `currentId` is overwritten so dispatch can abort the outgoing replay
- * when the server confirms the switch.
- */
-let _switchingFromId: string | null = null;
-
-/** Read and clear the switching-from ID. Consuming it prevents stale IDs
- *  from leaking into future server-initiated switches. */
-export function consumeSwitchingFromId(): string | null {
-	const id = _switchingFromId;
-	_switchingFromId = null;
-	return id;
-}
-
-/**
  * Switch this tab to a different session.
  * Updates local state, navigates the URL, and sends `ViewSession` to the server.
  *
@@ -1073,36 +1026,48 @@ export function consumeSwitchingFromId(): string | null {
 export function switchToSession(
 	sessionId: string,
 	projectSlug?: string,
-	view?: (input: ViewSessionRpcInput) => void,
+	view?: typeof viewSessionRpc,
+	options?: { replace?: boolean },
 ): void {
-	// Capture the outgoing session for permission cleanup in ws-dispatch.
 	const generation = ++selectionGeneration;
-	pendingSelectionRequestId = createRequestId();
-	_switchingFromId = clientSession.currentId;
-	if (_switchingFromId && _switchingFromId !== sessionId) {
-		const activity = sessionActivity.get(_switchingFromId);
+	const previousId = clientSession.currentId;
+	if (previousId && previousId !== sessionId) {
+		const activity = sessionActivity.get(previousId);
 		if (activity) activity.replayGeneration++;
 	}
 
 	clientSession.currentId = sessionId;
-	clientSession.announcedParent = null;
+	if (clientSession.announcedParent?.sessionId !== sessionId)
+		clientSession.announcedParent = null;
 	activateSessionChatState(sessionId);
+	if (previousId !== sessionId) {
+		updateContextPercent(0);
+		clearTodoState();
+	}
 
 	const slug = projectSlug ?? getCurrentSlug();
-	clientSession.currentId = sessionId;
-	navigate(`/s/${sessionId}`);
+	if (getCurrentSessionId() !== sessionId) {
+		if (options?.replace) replaceRoute(`/s/${sessionId}`);
+		else navigate(`/s/${sessionId}`);
+	}
 	if (slug) {
+		flushPendingPermissionMode(slug, sessionId, switchPermissionModeRpc);
 		const input: ViewSessionRpcInput = {
 			projectSlug: slug,
 			sessionId,
 			originId: getBrowserClientId(),
-			requestId: pendingSelectionRequestId,
 		};
-		if (view) {
-			view(input);
-		} else {
-			void viewSessionRpc(input).catch(() => undefined);
-		}
+		void (view ?? viewSessionRpc)(input)
+			.then(({ draft }) => {
+				if (
+					draft !== undefined &&
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
+					handleInputSyncReceived({ text: draft });
+			})
+			.catch(() => undefined);
 	}
 	if (slug) {
 		void getAgentsRpc({ projectSlug: slug, sessionId })
@@ -1143,8 +1108,6 @@ export function switchToSession(
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
 	selectionGeneration++;
-	pendingSelectionRequestId = undefined;
-	_switchingFromId = null;
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
 	const held = [...serverSessions.keys()];
 	resetSessionSubscription();

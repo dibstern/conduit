@@ -495,7 +495,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: request.sessionId,
 						messageId: request.messageId,
 					}),
-				SendMessage: () => Effect.succeed({ ok: true as const }),
+				SendMessage: (request) =>
+					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
 				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
 				SetLogLevel: () => Effect.succeed({ ok: true as const }),
@@ -1168,7 +1169,6 @@ describe("browser WebSocket RPC contract", () => {
 				const created = yield* client.CreateSession({
 					projectSlug: "demo",
 					originId: "browser-tab-a",
-					requestId: "request-1",
 				});
 				expect(created).toEqual({
 					projectSlug: "demo",
@@ -1268,7 +1268,7 @@ describe("browser WebSocket RPC contract", () => {
 						text: "hello",
 						commandId: "cmd-send-contract",
 					}),
-				).toEqual({ ok: true });
+				).toEqual({ ok: true, sessionId: "session-1" });
 
 				expect(
 					yield* client.SyncInputDraft({

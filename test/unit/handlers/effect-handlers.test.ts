@@ -133,7 +133,7 @@ import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
 import { diffAndSynthesize } from "../../../src/lib/relay/message-poller.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
-import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
+import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeMockOpenCodeAPI,
@@ -1558,10 +1558,7 @@ describe("handleForkSession", () => {
 				expect(ws.broadcast).toHaveBeenCalledWith(
 					expect.objectContaining({ type: "session_forked" }),
 				);
-				expect(ws.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({ type: "session_switched" }),
-				);
+				expect(ws.setClientSession).not.toHaveBeenCalled();
 				expect(pushViewerFamilies).toHaveBeenCalled();
 			});
 		},
@@ -1706,20 +1703,7 @@ describe("handleForkSession", () => {
 						parentId: "ses-parent",
 						parentTitle: "Parent Session",
 					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "ses-child",
-						sessionId: "ses-child",
-						history: {
-							messages: [],
-							hasMore: false,
-						},
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "status",
-						sessionId: "ses-child",
-						status: "idle",
-					});
+					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(serviceSendSessionLists).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledTimes(1);
@@ -2571,7 +2555,6 @@ describe("handleNewSession", () => {
 
 			return handleNewSession("client-1", {
 				title: "New Session",
-				requestId: "request-1" as RequestId,
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
@@ -2581,12 +2564,10 @@ describe("handleNewSession", () => {
 						"client-1",
 						"new-session-1",
 					);
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "new-session-1",
-						sessionId: "new-session-1",
-						requestId: "request-1",
-					});
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type: "session_family" }),
+					);
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "status",
 						sessionId: "new-session-1",
@@ -2631,17 +2612,14 @@ describe("handleNewSession", () => {
 			const result = yield* Effect.either(
 				handleNewSession("client-1", {
 					title: "New Session",
-					requestId: "request-fast" as RequestId,
 				}).pipe(Effect.timeout(Duration.millis(50)), Effect.provide(layer)),
 			);
 
 			expect(result._tag).toBe("Right");
-			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-				type: "session_switched",
-				id: "new-session-fast",
-				sessionId: "new-session-fast",
-				requestId: "request-fast",
-			});
+			expect(ws.setClientSession).toHaveBeenCalledWith(
+				"client-1",
+				"new-session-fast",
+			);
 			expect(pushViewerFamilies).toHaveBeenCalled();
 		});
 	});
@@ -2672,7 +2650,6 @@ describe("handleNewSession", () => {
 
 		return handleNewSession("client-1", {
 			title: "OpenCode Session",
-			requestId: "request-opencode" as RequestId,
 			providerId: "opencode",
 		}).pipe(
 			Effect.provide(layer),
@@ -2772,172 +2749,14 @@ describe("handleNewSession", () => {
 			return viewSessionForClient({
 				clientId: "client-1",
 				sessionId: "ses-local-placeholder",
-				skipMetadata: true,
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "ses-local-placeholder",
-						sessionId: "ses-local-placeholder",
-					});
-					expect(startPolling).not.toHaveBeenCalled();
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"adds projected model execution to OpenCode history on session view",
-		() => {
-			const ws = mockWsHandler();
-			const log = mockLogger();
-			const client = {
-				session: { get: vi.fn(async () => ({})) },
-				provider: { list: vi.fn(async () => ({ providers: [] })) },
-				permission: { list: vi.fn(async () => []) },
-				question: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory: vi.fn(() =>
-					Effect.succeed({
-						messages: [
-							{
-								id: "user-1",
-								role: "user" as const,
-								text: "Earlier prompt",
-								parts: [],
-							},
-						],
-						hasMore: false,
-					}),
-				),
-			});
-			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
-				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
-				getSession: vi.fn(() =>
-					Effect.succeed({
-						id: "session-1",
-						provider: "opencode",
-						provider_sid: "provider-session-1",
-						version: 0,
-						title: "OpenCode",
-						status: "idle",
-						parent_id: null,
-						fork_point_event: null,
-						last_message_at: 1,
-						last_turn_error_at: null,
-						permission_mode: null,
-						read_at: null,
-						settled_at: null,
-						pinned_at: null,
-						snoozed_at: null,
-						snoozed_until: null,
-						woken_at: null,
-						woken_reason: null,
-						created_at: 1,
-						updated_at: 1,
-					}),
-				),
-				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-				getSessionsForReconciliation: () => Effect.succeed([]),
-				listSessions: vi.fn(() => Effect.succeed([])),
-				listSessionInfos: vi.fn(() => Effect.succeed([])),
-				readSessionTranscript: vi.fn(() =>
-					Effect.succeed({ messages: [], version: 0 }),
-				),
-				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
-				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-				getSessionFamily: () => Effect.succeed([]),
-				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
-				readSessionTranscriptPage: vi.fn(() =>
-					Effect.succeed({
-						messages: [
-							{
-								id: "user-1",
-								session_id: "session-1",
-								turn_id: "turn-1",
-								role: "user",
-								text: "",
-								cost: null,
-								tokens_in: null,
-								tokens_out: null,
-								tokens_cache_read: null,
-								tokens_cache_write: null,
-								context_window: null,
-								version: 0,
-								is_streaming: 0,
-								is_backfilled: 0,
-								created_at: 1,
-								updated_at: 1,
-								parts: [],
-								modelExecution: {
-									requestedModel: "sonnet",
-									expectedModel: "claude-sonnet-5",
-									actualModel: "claude-fable-4-0",
-								},
-							},
-						],
-						hasMore: false,
-						version: 0,
-					}),
-				),
-			} satisfies ReadQueryEffect;
-			const layer = Layer.mergeAll(
-				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
-				Layer.succeed(
-					StatusPollerTag,
-					makeMockStatusPoller({
-						isProcessing: vi.fn(() => Effect.succeed(false)),
-					}),
-				),
-				Layer.succeed(PollerManagerTag, {
-					on: vi.fn(),
-					isPolling: vi.fn(() => true),
-					startPolling: vi.fn(),
-					stopPolling: vi.fn(),
-					notifySSEEvent: vi.fn(),
-				}),
-				makeOverridesStateLive(),
-			);
-
-			return viewSessionForClient({
-				clientId: "client-1",
-				sessionId: "session-1",
-				skipMetadata: true,
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(ws.sendTo).toHaveBeenCalledWith(
 						"client-1",
-						expect.objectContaining({
-							type: "session_switched",
-							history: {
-								messages: [
-									expect.objectContaining({
-										id: "user-1",
-										text: "Earlier prompt",
-										modelExecution: {
-											requestedModel: "sonnet",
-											expectedModel: "claude-sonnet-5",
-											actualModel: "claude-fable-4-0",
-											drifted: true,
-										},
-									}),
-								],
-								hasMore: false,
-							},
-						}),
+						expect.objectContaining({ type: "session_family" }),
 					);
+					expect(startPolling).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -3042,7 +2861,6 @@ describe("handleNewSession", () => {
 			return viewSessionForClient({
 				clientId: "client-1",
 				sessionId: "session-in-flight",
-				skipMetadata: true,
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
@@ -3213,9 +3031,7 @@ describe("handleDeleteSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(ws.getClientsForSession).toHaveBeenCalledWith(
-						"deleted-session",
-					);
+					expect(ws.getClientsForSession).not.toHaveBeenCalled();
 					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
@@ -3235,132 +3051,29 @@ describe("handleDeleteSession", () => {
 		},
 	);
 
-	it.effect(
-		"switches every viewer and replays metadata before the family refresh",
-		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
-			});
-			const log = mockLogger();
-			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy pushViewerFamilies should not be used");
-			});
-			const legacyListSessions = vi.fn(async () => {
-				throw new Error("legacy listSessions should not be used");
-			});
-			const serviceListSessions = vi.fn(() =>
-				Effect.succeed([
-					{
-						id: "remaining-session",
-						title: "Remaining Session",
-						status: "idle" as const,
-						updatedAt: 200,
-						messageCount: 0,
-					},
-				]),
-			);
-			const legacyDeleteSession = vi.fn(async () => {
-				throw new Error("legacy deleteSession should not be used");
-			});
-			const serviceDeleteSession = vi.fn(() => Effect.succeed(true));
-			const sessionMgr = mockSessionManager({
-				deleteSession: legacyDeleteSession,
-				listSessions: legacyListSessions,
-				loadPreRenderedHistory: vi.fn(async () => ({
-					messages: [],
-					hasMore: false,
-				})),
-				sendSessionLists: legacySendSessionLists,
-			});
-			const pushViewerFamilies = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				deleteSession: serviceDeleteSession,
-				listSessions: serviceListSessions,
-				pushViewerFamilies,
-			});
-			const client = {
-				session: {
-					get: vi.fn(async () => ({
-						id: "remaining-session",
-						modelID: "claude-sonnet-4-5",
-						providerID: "anthropic",
-					})),
-				},
-				permission: { list: vi.fn(async () => []) },
-				question: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
-			const layer = makeSessionLifecycleLayer({
-				client,
-				ws,
-				sessionMgr,
-				sessionManagerService,
-				log,
-			});
-
-			return handleDeleteSession("client-1", {
-				sessionId: "deleted-session",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.getClientsForSession).toHaveBeenCalledWith(
-						"deleted-session",
-					);
-					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
-					expect(legacyDeleteSession).not.toHaveBeenCalled();
-					expect(serviceListSessions).toHaveBeenCalledWith();
-					expect(legacyListSessions).not.toHaveBeenCalled();
-					expect(ws.setClientSession).toHaveBeenCalledWith(
-						"client-1",
-						"remaining-session",
-					);
-					expect(ws.setClientSession).toHaveBeenCalledWith(
-						"client-2",
-						"remaining-session",
-					);
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "remaining-session",
-						sessionId: "remaining-session",
-						history: {
-							messages: [],
-							hasMore: false,
-						},
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
-						type: "session_switched",
-						id: "remaining-session",
-						sessionId: "remaining-session",
-						history: {
-							messages: [],
-							hasMore: false,
-						},
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "model_info",
-						sessionId: "remaining-session",
-						model: "claude-sonnet-4-5",
-						provider: "anthropic",
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
-						type: "model_info",
-						sessionId: "remaining-session",
-						model: "claude-sonnet-4-5",
-						provider: "anthropic",
-					});
-					// Two viewers get reassigned, and each reassignment goes through
-					// the same view path a human click does -- so each also records
-					// the session read and refreshes its viewed family.
-					expect(pushViewerFamilies).toHaveBeenCalledTimes(3);
-					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_deleted",
-						sessionId: "deleted-session",
-					});
-					expect(ws.broadcast).toHaveBeenCalledTimes(1);
-				}),
-			);
-		},
-	);
+	it.effect("does not move viewers after deleting their session", () => {
+		const ws = mockWsHandler({
+			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
+		});
+		const sessionManagerService = makeMockSessionManagerService({
+			deleteSession: vi.fn(() => Effect.succeed(true)),
+			listSessions: vi.fn(() => Effect.die("unexpected list")),
+			pushViewerFamilies: vi.fn(() => Effect.void),
+		});
+		return handleDeleteSession("client-1", {
+			sessionId: "deleted-session",
+		}).pipe(
+			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService })),
+			Effect.tap(() => {
+				expect(ws.setClientSession).not.toHaveBeenCalled();
+				expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "session_deleted",
+					sessionId: "deleted-session",
+				});
+			}),
+		);
+	});
 });
 
 describe("renameSessionForClient", () => {
@@ -4830,11 +4543,14 @@ describe("handleMessage", () => {
 					modelID: "big-pickle",
 				});
 
-				yield* handleMessage("client-1", {
+				const dispatchedSessionId = yield* sendMessageToSession({
+					clientId: "client-1",
+					sessionId: "ses-local-placeholder",
 					text: "Test query",
 					commandId: "cmd-materialize-opencode",
 				});
 				yield* flushDispatchContinuation();
+				expect(dispatchedSessionId).toBe("ses-opencode-created");
 
 				expect(serviceCreateSession).toHaveBeenCalledWith("Untitled", {
 					providerId: "opencode",
@@ -4847,12 +4563,6 @@ describe("handleMessage", () => {
 					"client-1",
 					"ses-opencode-created",
 				);
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "session_switched",
-					id: "ses-opencode-created",
-					sessionId: "ses-opencode-created",
-					replacesSessionId: "ses-local-placeholder",
-				});
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",

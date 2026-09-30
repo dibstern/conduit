@@ -52,6 +52,7 @@ import {
 } from "../handlers/permissions.js";
 import {
 	cancelSessionById,
+	getSessionInputDraft,
 	rewindSessionToMessage,
 	sendMessageToSession,
 	syncInputDraftForSession,
@@ -1162,7 +1163,6 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		createSessionForClient({
 			clientId: request.originId,
 			...(request.title != null ? { title: request.title } : {}),
-			...(request.requestId != null ? { requestId: request.requestId } : {}),
 			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
 			...(request.providerId != null ? { providerId: request.providerId } : {}),
 		}).pipe(
@@ -1182,9 +1182,8 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		viewSessionForClient({
 			clientId: request.originId,
 			sessionId: request.sessionId,
-			...(request.requestId != null ? { requestId: request.requestId } : {}),
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.map(({ draft }) => ({ ok: true as const, draft })),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -1345,7 +1344,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					);
 				}
 			}
-			yield* sendMessageToSession({
+			const sessionId = yield* sendMessageToSession({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				text: request.text,
@@ -1354,7 +1353,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.originId ? { originId: request.originId } : {}),
 				errorDelivery: "session",
 			});
-			return { ok: true as const };
+			return { ok: true as const, sessionId: sessionId ?? request.sessionId };
 		}).pipe(
 			Effect.catchAll((error) =>
 				Effect.fail(
@@ -1486,7 +1485,10 @@ export const makeRoutedWsRpcServerLayer = (
 			reattachViewSession(payload).pipe(
 				Effect.flatMap((reattached) =>
 					reattached
-						? Effect.succeed({ ok: true as const })
+						? Effect.succeed({
+								ok: true as const,
+								draft: getSessionInputDraft(payload.sessionId),
+							})
 						: routeViewSession(payload),
 				),
 			);

@@ -4,6 +4,7 @@ import {
 	clearSessionChatState,
 	currentChat,
 	getOrCreateSessionSlot,
+	inputSyncState,
 	sessionActivity,
 	sessionMessages,
 	setMessages,
@@ -29,7 +30,6 @@ import {
 	groupSessionsByAttention,
 	groupSessionsByDate,
 	handleSessionFamily,
-	handleSessionSwitched,
 	isSessionSnoozed,
 	isSessionWoken,
 	NEW_SESSION_TIMEOUT_MS,
@@ -42,17 +42,17 @@ import {
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
+import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
 	applySessionChange,
 	sessionSubscription,
 } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
+import type { CreateSessionResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
-import type {
-	RelayMessage,
-	SessionInfo,
-} from "../../../src/lib/frontend/types.js";
+import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
 import {
 	applySessionRemoved,
@@ -61,14 +61,6 @@ import {
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
-
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
-}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -113,6 +105,7 @@ beforeEach(() => {
 	sessionState.searchQuery = "";
 	clearDiscoveryState();
 	routerState.path = "/s/old-session";
+	routerState.search = "";
 	attachedProjectState.slug = "project-a";
 });
 
@@ -232,6 +225,24 @@ it("keeps the family list owned by session_family messages", () => {
 });
 
 describe("switchToSession", () => {
+	it("keeps the list query when the URL already names the session", () => {
+		const pushState = vi.fn();
+		vi.stubGlobal("window", { history: { pushState } });
+		try {
+			routerState.path = "/s/current";
+			routerState.search = "?group=project";
+			switchToSession(
+				"current",
+				"project-a",
+				vi.fn().mockResolvedValue({ ok: true }),
+			);
+			expect(routerState.search).toBe("?group=project");
+			expect(pushState).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it("ignores session discovery returned after attaching another project", async () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		let finish: (
@@ -245,7 +256,11 @@ describe("switchToSession", () => {
 		);
 		try {
 			attachedProjectState.slug = "project-a";
-			switchToSession("session-a", undefined, vi.fn());
+			switchToSession(
+				"session-a",
+				undefined,
+				vi.fn().mockResolvedValue({ ok: true }),
+			);
 			attachedProjectState.slug = "project-b";
 			clearSessionState();
 			applyGetAgentsResponse({
@@ -270,7 +285,7 @@ describe("switchToSession", () => {
 	it("builds the session route and RPC from the attached project", () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		try {
-			const viewSession = vi.fn();
+			const viewSession = vi.fn().mockResolvedValue({ ok: true });
 			attachedProjectState.slug = "attached-project";
 			routerState.path = "/";
 			switchToSession("new-session", undefined, viewSession);
@@ -279,7 +294,6 @@ describe("switchToSession", () => {
 				projectSlug: "attached-project",
 				sessionId: "new-session",
 				originId: expect.any(String),
-				requestId: expect.any(String),
 			});
 		} finally {
 			vi.unstubAllGlobals();
@@ -289,20 +303,19 @@ describe("switchToSession", () => {
 	it("views a foreign row through its explicit project", () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		try {
-			const viewSession = vi.fn();
+			const viewSession = vi.fn().mockResolvedValue({ ok: true });
 			switchToSession("foreign", "project-b", viewSession);
 			expect(viewSession).toHaveBeenCalledWith({
 				projectSlug: "project-b",
 				sessionId: "foreign",
 				originId: expect.any(String),
-				requestId: expect.any(String),
 			});
 		} finally {
 			vi.unstubAllGlobals();
 		}
 	});
 	it("views the session through RPC after changing local state", () => {
-		const viewSession = vi.fn();
+		const viewSession = vi.fn().mockResolvedValue({ ok: true });
 		sessionState.currentId = "old-session";
 		routerState.path = "/s/new-session";
 		attachedProjectState.slug = "project-a";
@@ -313,12 +326,11 @@ describe("switchToSession", () => {
 			projectSlug: "project-a",
 			sessionId: "new-session",
 			originId: expect.any(String),
-			requestId: expect.any(String),
 		});
 	});
 
 	it("keeps cached target session messages visible while loading fresh history", () => {
-		const viewSession = vi.fn();
+		const viewSession = vi.fn().mockResolvedValue({ ok: true });
 		const target = getOrCreateSessionSlot("parent-with-subagents");
 		setMessages(target.messages, [
 			createToolMessage({
@@ -343,6 +355,56 @@ describe("switchToSession", () => {
 
 		clearSessionChatState("parent-with-subagents");
 		clearSessionChatState("child-subagent");
+	});
+
+	it("applies the returned draft and flushes a pending permission mode", async () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		const sendMode = vi
+			.spyOn(sessionRpc, "switchPermissionModeRpc")
+			.mockResolvedValue({ projectSlug: "project-a", mode: "acceptEdits" });
+		try {
+			discoveryState.pendingPermissionMode = "acceptEdits";
+			switchToSession("draft-session", "project-a", () =>
+				Promise.resolve({ ok: true, draft: "saved text" }),
+			);
+			await Promise.resolve();
+			expect(inputSyncState.text).toBe("saved text");
+			expect(discoveryState.pendingPermissionMode).toBeNull();
+			expect(sendMode).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: "draft-session",
+					projectSlug: "project-a",
+					mode: "acceptEdits",
+				}),
+			);
+		} finally {
+			sendMode.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("replaces a superseded session URL and resets session chrome", () => {
+		const replaceState = vi.fn();
+		vi.stubGlobal("window", { history: { replaceState, pushState: vi.fn() } });
+		try {
+			sessionState.currentId = "old-session";
+			routerState.path = "/s/old-session";
+			uiState.contextPercent = 70;
+			todoState.items = [{ id: "one", subject: "old", status: "pending" }];
+			switchToSession(
+				"replacement",
+				"project-a",
+				() => Promise.resolve({ ok: true }),
+				{ replace: true },
+			);
+			expect(sessionState.currentId).toBe("replacement");
+			expect(routerState.path).toBe("/s/replacement");
+			expect(replaceState).toHaveBeenCalledTimes(1);
+			expect(uiState.contextPercent).toBe(0);
+			expect(todoState.items).toEqual([]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });
 
@@ -544,77 +606,6 @@ describe("attention placement and daemon rows", () => {
 		sessionState.searchQuery = "match";
 		seedSearchResults([root, child]);
 		expect(getFilteredSessions().map((row) => row.id)).toEqual(["root"]);
-	});
-});
-
-// ─── handleSessionSwitched ──────────────────────────────────────────────────
-
-describe("handleSessionSwitched", () => {
-	it("sets currentId from message id field (server sends 'id')", () => {
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "abc",
-			sessionId: "abc",
-		});
-		expect(sessionState.currentId).toBe("abc");
-	});
-
-	it("does not invent a session row for a session the server never listed", () => {
-		handleSessionSwitched(
-			msg({
-				type: "session_switched",
-				id: "child-session",
-				sessionId: "child-session",
-				parentID: "parent-session",
-			}),
-		);
-
-		expect(sessionState.sessions.has("child-session")).toBe(false);
-		expect(sessionState.familySessions).toEqual([]);
-		expect(getFilteredSessions()).toEqual([]);
-		expect(sessionState.currentParentId).toBe("parent-session");
-	});
-
-	it("uses announced lineage only for the current unlisted session, then yields to a row", () => {
-		handleSessionSwitched(
-			msg({ type: "session_switched", id: "child", parentID: "first-parent" }),
-		);
-		expect(sessionState.currentParentId).toBe("first-parent");
-		applySessionSnapshot(
-			[makeSession({ id: "child", parentID: "row-parent" })],
-			"complete",
-		);
-		expect(sessionState.currentParentId).toBe("row-parent");
-		handleSessionSwitched(msg({ type: "session_switched", id: "other" }));
-		expect(sessionState.currentParentId).toBeNull();
-	});
-
-	it("uses the announced parent without rewriting a listed row", () => {
-		applySessionSnapshot(
-			[makeSession({ id: "child-session", title: "Child" })],
-			"complete",
-		);
-		handleSessionSwitched(
-			msg({
-				type: "session_switched",
-				id: "child-session",
-				sessionId: "child-session",
-				parentID: "parent-session",
-			}),
-		);
-
-		expect(sessionState.sessions.get("child-session")).toEqual({
-			id: "child-session",
-			title: "Child",
-			status: "idle",
-		});
-		expect(sessionState.currentParentId).toBe("parent-session");
-	});
-
-	it("ignores missing id", () => {
-		sessionState.currentId = "existing";
-		handleSessionSwitched(msg({ type: "session_switched" }));
-		expect(sessionState.currentId).toBe("existing");
 	});
 });
 
@@ -852,9 +843,11 @@ describe("SessionCreationStatus state machine", () => {
 // ─── sendNewSession (centralized guard + send) ──────────────────────────────
 
 describe("sendNewSession", () => {
-	let sent: Record<string, unknown>[];
-	const mockStart = (data: CreateSessionRpcInput) =>
-		sent.push(data as unknown as Record<string, unknown>);
+	let sent: CreateSessionRpcInput[];
+	const mockStart = (data: CreateSessionRpcInput) => {
+		sent.push(data);
+		return new Promise<CreateSessionResponse>(() => {});
+	};
 
 	beforeEach(() => {
 		sent = [];
@@ -862,13 +855,12 @@ describe("sendNewSession", () => {
 		discoveryState.selectedInstanceId = null;
 	});
 
-	it("sends CreateSession input with requestId and returns requestId", () => {
+	it("sends CreateSession input and returns a local requestId", () => {
 		const requestId = sendNewSession(mockStart);
 		expect(requestId).not.toBeNull();
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toEqual({
 			projectSlug: "project-a",
-			requestId,
 			originId: expect.any(String),
 			instanceId: expect.any(String),
 		});
@@ -884,7 +876,6 @@ describe("sendNewSession", () => {
 		expect(sent).toEqual([
 			{
 				projectSlug: "project-a",
-				requestId,
 				originId: expect.any(String),
 				instanceId: "claude",
 			},
@@ -901,7 +892,6 @@ describe("sendNewSession", () => {
 		expect(sent).toEqual([
 			{
 				projectSlug: "project-a",
-				requestId,
 				originId: expect.any(String),
 				instanceId: "opencode",
 			},
@@ -911,6 +901,28 @@ describe("sendNewSession", () => {
 	it("transitions to creating phase", () => {
 		sendNewSession(mockStart);
 		expect(sessionCreation.value.phase).toBe("creating");
+	});
+
+	it("completes creation and selects the session returned by the callback", async () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		try {
+			let finish: (response: CreateSessionResponse) => void = () => {};
+			const start = vi.fn(
+				() =>
+					new Promise<CreateSessionResponse>((resolve) => {
+						finish = resolve;
+					}),
+			);
+			const requestId = sendNewSession(start);
+			expect(requestId).not.toBeNull();
+			finish({ sessionId: "created", projectSlug: "project-a" });
+			await Promise.resolve();
+			expect(sessionCreation.value.phase).toBe("idle");
+			expect(sessionState.currentId).toBe("created");
+			expect(routerState.path).toBe("/s/created");
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it("returns null and sends nothing when already creating", () => {
@@ -940,74 +952,5 @@ describe("sendNewSession", () => {
 		sent = [];
 		expect(sendNewSession(mockStart)).not.toBeNull();
 		expect(sent).toHaveLength(1);
-	});
-});
-
-// ─── handleSessionSwitched — requestId completion (co-located) ──────────────
-
-describe("handleSessionSwitched — requestId completion", () => {
-	beforeEach(() => {
-		resetSessionCreation();
-		sessionState.currentId = null;
-	});
-
-	it("completes session creation when requestId matches", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "new-sess",
-			sessionId: "new-sess",
-			requestId,
-		});
-
-		expect(sessionState.currentId).toBe("new-sess");
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	it("leaves creation state alone when requestId is absent", () => {
-		requestNewSession();
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "other-sess",
-			sessionId: "other-sess",
-		});
-
-		expect(sessionState.currentId).toBe("other-sess");
-		expect(sessionCreation.value.phase).toBe("creating"); // NOT completed
-	});
-
-	it("leaves creation state alone when requestId doesn't match", () => {
-		requestNewSession();
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "other-sess",
-			sessionId: "other-sess",
-			requestId:
-				"wrong-id" as import("../../../src/lib/shared-types.js").RequestId,
-		});
-
-		expect(sessionState.currentId).toBe("other-sess");
-		expect(sessionCreation.value.phase).toBe("creating"); // NOT completed
-	});
-
-	it("is a no-op for creation state when not in creating phase", () => {
-		// Not creating — requestId on msg should be harmless
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "sess-1",
-			sessionId: "sess-1",
-			requestId:
-				"some-id" as import("../../../src/lib/shared-types.js").RequestId,
-		});
-
-		expect(sessionState.currentId).toBe("sess-1");
-		expect(sessionCreation.value.phase).toBe("idle"); // Still idle
 	});
 });

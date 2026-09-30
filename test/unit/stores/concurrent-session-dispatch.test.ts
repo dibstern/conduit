@@ -234,9 +234,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"ask_user_error",
 			"permission_request",
 			"permission_resolved",
-			"session_switched",
 			"session_forked",
-			"history_page",
 			"provider_session_reloaded",
 			"session_deleted",
 		];
@@ -307,7 +305,7 @@ describe("family attention before membership", () => {
 			],
 		});
 		routerState.path = "/s/root";
-		handleMessage({ type: "session_switched", sessionId: "root", id: "root" });
+		sessionState.currentId = "root";
 		expect(
 			permissionsState.pendingQuestions.map((question) => question.toolId),
 		).toEqual(["question-1"]);

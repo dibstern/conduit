@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc } from "../../transport/ws-rpc-client.js";
 	import Header from "./Header.svelte";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
@@ -453,6 +453,7 @@
 	$effect(() => {
 		const route = getCurrentRoute();
 		const projectHint = getCurrentSearchParams().get("p");
+		const attachedSlug = attachedProjectState.slug;
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
@@ -468,9 +469,10 @@
 				}
 				return;
 			}
+			if (!attachedSlug) return;
 			if (route.sessionId === sessionState.currentId) return;
 			const sessionId = route.sessionId;
-			void resolveSessionRpc({ sessionId }).then(({ projectSlug }) => {
+			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
 				if (cancelled) return;
 				if (sessionState.currentId === sessionId) return;
 				if (projectSlug === null) {
@@ -478,7 +480,7 @@
 					replaceRoute("/");
 					return;
 				}
-				return viewSessionRpc({ projectSlug, sessionId, originId: getBrowserClientId() });
+				switchToSession(sessionId, projectSlug);
 			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
 		});
 		return () => { cancelled = true; };

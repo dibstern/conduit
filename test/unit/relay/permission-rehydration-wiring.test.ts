@@ -258,7 +258,6 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		const url = `ws://127.0.0.1:${relayPort}`;
 		const client = new TestWsClient(url);
 		await client.waitForOpen();
-		await client.waitForInitialState();
 
 		// The client-init path replays pending permissions from the shared service.
 		// If rehydration worked, the client should receive a permission_request.

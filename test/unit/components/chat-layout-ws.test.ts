@@ -238,7 +238,6 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	viewSessionRpc: vi.fn(async () => {}),
 	resolveSessionRpc: vi.fn(async () => ({
 		projectSlug: "test-project" as string | null,
 	})),
@@ -285,6 +284,7 @@ import {
 import {
 	clearSessionState,
 	sessionState,
+	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	attachSessionList,
@@ -300,7 +300,6 @@ import {
 import {
 	attachProjectRpc,
 	resolveSessionRpc,
-	viewSessionRpc,
 } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 function attach(slug: string): void {
@@ -387,15 +386,15 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(disconnect).not.toHaveBeenCalled();
 		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "ses_abc123",
-		});
-		expect(viewSessionRpc).toHaveBeenCalledExactlyOnceWith({
 			projectSlug: "test-project",
-			sessionId: "ses_abc123",
-			originId: "browser-client-1",
 		});
+		expect(switchToSession).toHaveBeenCalledExactlyOnceWith(
+			"ses_abc123",
+			"test-project",
+		);
 	});
 
-	it("switches sessions across projects with ViewSession and resets before hydrating the attach", async () => {
+	it("switches sessions across projects and resets before hydrating the attach", async () => {
 		render(ChatLayout);
 		attach("test-project");
 		vi.clearAllMocks();
@@ -405,11 +404,10 @@ describe("ChatLayout WS lifecycle", () => {
 		replaceRoute("/s/session-b");
 		flushSync();
 		await tick();
-		expect(viewSessionRpc).toHaveBeenCalledExactlyOnceWith({
-			projectSlug: "other-project",
-			sessionId: "session-b",
-			originId: "browser-client-1",
-		});
+		expect(switchToSession).toHaveBeenCalledExactlyOnceWith(
+			"session-b",
+			"other-project",
+		);
 		expect(connect).not.toHaveBeenCalled();
 		expect(disconnect).not.toHaveBeenCalled();
 		expect(clearMessages).not.toHaveBeenCalled();
@@ -428,28 +426,29 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(attachSessionList).toHaveBeenCalledTimes(1);
 	});
 
-	it("resolves a cold session link before viewing it", async () => {
+	it("resolves a cold session link before selecting it", async () => {
 		routerState.path = "/s/cold-session";
 		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
 			projectSlug: "other-project",
 		});
 		render(ChatLayout);
+		attach("test-project");
 		await vi.waitFor(() =>
-			expect(viewSessionRpc).toHaveBeenCalledExactlyOnceWith({
-				projectSlug: "other-project",
-				sessionId: "cold-session",
-				originId: "browser-client-1",
-			}),
+			expect(switchToSession).toHaveBeenCalledExactlyOnceWith(
+				"cold-session",
+				"other-project",
+			),
 		);
 		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "cold-session",
+			projectSlug: "test-project",
 		});
 		expect(
 			vi.mocked(resolveSessionRpc).mock.invocationCallOrder[0],
-		).toBeLessThan(vi.mocked(viewSessionRpc).mock.invocationCallOrder[0] ?? 0);
+		).toBeLessThan(vi.mocked(switchToSession).mock.invocationCallOrder[0] ?? 0);
 	});
 
-	it("resolves and views history navigation across projects", async () => {
+	it("resolves and selects history navigation across projects", async () => {
 		render(ChatLayout);
 		attach("test-project");
 		sessionState.currentId = "session-a";
@@ -460,14 +459,13 @@ describe("ChatLayout WS lifecycle", () => {
 		window.dispatchEvent(new PopStateEvent("popstate"));
 		flushSync();
 		await vi.waitFor(() =>
-			expect(viewSessionRpc).toHaveBeenLastCalledWith({
-				projectSlug: "other-project",
-				sessionId: "session-b",
-				originId: "browser-client-1",
-			}),
+			expect(switchToSession).toHaveBeenLastCalledWith(
+				"session-b",
+				"other-project",
+			),
 		);
-		attach("other-project");
 		sessionState.currentId = "session-b";
+		attach("other-project");
 		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
 			projectSlug: "test-project",
 		});
@@ -475,23 +473,22 @@ describe("ChatLayout WS lifecycle", () => {
 		window.dispatchEvent(new PopStateEvent("popstate"));
 		flushSync();
 		await vi.waitFor(() =>
-			expect(viewSessionRpc).toHaveBeenLastCalledWith({
-				projectSlug: "test-project",
-				sessionId: "session-a",
-				originId: "browser-client-1",
-			}),
+			expect(switchToSession).toHaveBeenLastCalledWith(
+				"session-a",
+				"test-project",
+			),
 		);
 		expect(resolveSessionRpc).toHaveBeenCalledTimes(2);
 		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not resolve or view a session at the list front door", async () => {
+	it("does not resolve or select a session at the list front door", async () => {
 		render(ChatLayout);
 		attach("test-project");
 		flushSync();
 		await tick();
 		expect(resolveSessionRpc).not.toHaveBeenCalled();
-		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(switchToSession).not.toHaveBeenCalled();
 		expect(sessionState.currentId).toBeNull();
 	});
 
@@ -540,16 +537,17 @@ describe("ChatLayout WS lifecycle", () => {
 		flushSync();
 		await tick();
 		expect(sessionState.currentId).toBeNull();
-		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(switchToSession).not.toHaveBeenCalled();
 	});
 
 	it("returns an unknown session to the list with a dismissible notice", async () => {
 		routerState.path = "/s/missing-session";
 		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({ projectSlug: null });
 		render(ChatLayout);
+		attach("test-project");
 		await vi.waitFor(() => expect(routerState.path).toBe("/"));
 		expect(routerState.sessionNotFound).toBe(true);
-		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(switchToSession).not.toHaveBeenCalled();
 		expect(sessionState.currentId).toBeNull();
 	});
 
@@ -565,6 +563,9 @@ describe("ChatLayout WS lifecycle", () => {
 		);
 		routerState.path = "/s/missing-session";
 		render(ChatLayout);
+		attach("test-project");
+		flushSync();
+		await vi.waitFor(() => expect(resolveMissing).toBeDefined());
 		replaceRoute("/s/next-session");
 		flushSync();
 		await tick();
@@ -593,7 +594,7 @@ describe("ChatLayout WS lifecycle", () => {
 			projectSlug: "other-project",
 			originId: "browser-client-1",
 		});
-		expect(viewSessionRpc).not.toHaveBeenCalled();
+		expect(switchToSession).not.toHaveBeenCalled();
 		expect(connect).toHaveBeenCalledTimes(1);
 		expect(disconnect).not.toHaveBeenCalled();
 	});

@@ -69,7 +69,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text) return;
+		if (!text) return activeId;
 		if (!activeId) {
 			if (input.missingSessionClientId) {
 				wsHandler.sendTo(
@@ -80,7 +80,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 					).toSystemError(),
 				);
 			}
-			return;
+			return activeId;
 		}
 		const originalActiveId = activeId;
 		const sessionModel = yield* getModel(activeId);
@@ -210,6 +210,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 					}),
 				),
 			);
+		return activeId;
 	});
 
 export const handleMessage = (

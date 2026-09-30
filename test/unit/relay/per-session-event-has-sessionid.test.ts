@@ -6,12 +6,6 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import { handleSSEEvent } from "../../../src/lib/relay/sse-wiring.js";
-import {
-	patchMissingDone,
-	type SessionHistorySource,
-	type SessionSwitchDeps,
-	switchClientToSession,
-} from "../../../src/lib/session/session-switch.js";
 import type {
 	PerSessionEvent,
 	PerSessionEventType,
@@ -59,9 +53,7 @@ describe("PerSessionEvent type discriminator", () => {
 			"ask_user_error",
 			"permission_request",
 			"permission_resolved",
-			"session_switched",
 			"session_forked",
-			"history_page",
 			"provider_session_reloaded",
 			"session_deleted",
 		];
@@ -230,71 +222,5 @@ describe("tool-content handler emits tool_content with sessionId", () => {
 			content: "full content",
 		};
 		expect(msg.sessionId).toBe("ses_tool");
-	});
-});
-
-// ─── Emission site: session-switch — synthesized events have sessionId ─────
-
-describe("session-switch synthesized events have sessionId", () => {
-	it("patchMissingDone synthesized done includes sessionId", () => {
-		const source: SessionHistorySource = {
-			kind: "cached-events",
-			events: [
-				{ type: "user_message", sessionId: "ses_sw", text: "hi" },
-				{ type: "delta", sessionId: "ses_sw", text: "response" },
-			],
-			hasMore: false,
-		};
-
-		const patched = patchMissingDone(source, undefined, "ses_sw");
-		expect(patched.kind).toBe("cached-events");
-		if (patched.kind === "cached-events") {
-			const done = patched.events.find((e) => e.type === "done");
-			expect(done).toBeDefined();
-			expect((done as { sessionId: string }).sessionId).toBe("ses_sw");
-		}
-	});
-
-	it("session_switched message includes sessionId", () => {
-		const _source: SessionHistorySource = { kind: "empty" };
-		const msg = {
-			type: "session_switched" as const,
-			id: "ses_x",
-			sessionId: "ses_x",
-		};
-		expect(msg.sessionId).toBe("ses_x");
-	});
-
-	it("switchClientToSession sends status with sessionId", async () => {
-		const deps: SessionSwitchDeps = {
-			sessionMgr: {
-				loadPreRenderedHistory: vi.fn().mockResolvedValue({
-					messages: [],
-					hasMore: false,
-				}),
-			},
-			wsHandler: {
-				sendTo: vi.fn(),
-				setClientSession: vi.fn(),
-			},
-			statusPoller: { isProcessing: vi.fn().mockReturnValue(false) },
-			pollerManager: {
-				isPolling: vi.fn().mockReturnValue(true),
-				startPolling: vi.fn(),
-			},
-			log: { info: vi.fn(), warn: vi.fn() },
-			getInputDraft: vi.fn().mockReturnValue(undefined),
-		};
-
-		await switchClientToSession(deps, "c1", "ses_target");
-
-		const calls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const statusMsg = calls.find(
-			([, m]) => (m as { type: string }).type === "status",
-		);
-		expect(statusMsg).toBeDefined();
-		expect((statusMsg?.[1] as { sessionId: string }).sessionId).toBe(
-			"ses_target",
-		);
 	});
 });

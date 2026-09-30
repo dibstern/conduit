@@ -82,7 +82,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const result = yield* client.CreateSession({
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
-				requestId: "request-1",
 				instanceId: ProviderInstanceIdSchema.make("opencode"),
 				providerId: "opencode",
 			});
@@ -101,11 +100,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			);
 			expect(wsHandler.sendTo).toHaveBeenCalledWith(
 				"browser-tab-a",
-				expect.objectContaining({
-					type: "session_switched",
-					id: "session-new",
-					requestId: "request-1",
-				}),
+				expect.objectContaining({ type: "session_family" }),
 			);
 			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
@@ -125,26 +120,26 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
+			yield* client.SyncInputDraft({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				text: "saved draft",
+			});
 
 			const result = yield* client.ViewSession({
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
-				requestId: "view-request-1",
 			});
 
-			expect(result).toEqual({ ok: true });
+			expect(result).toEqual({ ok: true, draft: "saved draft" });
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
 				"session-1",
 			);
 			expect(wsHandler.sendTo).toHaveBeenCalledWith(
 				"browser-tab-a",
-				expect.objectContaining({
-					type: "session_switched",
-					id: "session-1",
-					requestId: "view-request-1",
-				}),
+				expect.objectContaining({ type: "session_family" }),
 			);
 		}).pipe(
 			Effect.scoped,
@@ -305,10 +300,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					forkPointTimestamp: 9,
 				}),
 			);
-			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
-				"browser-tab-a",
-				"session-forked",
-			);
+			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
 			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,

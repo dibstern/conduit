@@ -1,12 +1,3 @@
-// ─── Integration: Switch to Streaming Session ────────────────────────────────
-// Verifies that after switching to a session that has been streaming,
-// the client receives the session's streamed content (via cached replay
-// or REST history in the session_switched payload).
-//
-// With a mock server, SSE events fire near-instantly so the stream completes
-// before a session switch can occur mid-stream. The tests verify the relay's
-// cache/history mechanism delivers the content on switch-back.
-
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
@@ -26,126 +17,40 @@ describe("Integration: Switch to Streaming Session", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
+		await new Promise((resolve) => setTimeout(resolve, 500));
 	});
 
-	it("deltas arrive after switching to a session that streamed", async () => {
+	it("returns completed transcript content after switching away and back", async () => {
 		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		try {
+			await client.waitForInitialState();
+			const sessionA = client.getActiveSessionId();
+			expect(sessionA).toBeTruthy();
+			if (!sessionA) throw new Error("No initial session");
 
-		// Record the initial session (Session A)
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		expect(initialSwitched.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const sessionA = initialSwitched[0]!["id"] as string;
-
-		// ── Step 1: Start a prompt on Session A ────────────────────
-		client.clearReceived();
-		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
-
-		// Wait for streaming to start — proof that deltas arrive.
-		const firstDelta = await client.waitForAny(["delta", "thinking_delta"]);
-		expect(firstDelta["text"]).toBeTruthy();
-
-		// Wait for the full cycle to complete
-		await client.waitFor("done");
-
-		// ── Step 2: Switch away to a new Session B ──────────────────
-		client.clearReceived();
-		await client.createSession("Streaming Bug Test - Session B");
-		const switchedToB = await client.waitFor("session_switched");
-		expect(switchedToB["id"]).toBeTruthy();
-
-		// Verify no Session A deltas leak through while B is active
-		const leakedDeltas = client.getReceivedOfType("delta");
-		expect(leakedDeltas.length).toBe(0);
-
-		// ── Step 3: Switch back to Session A ────────────────────────
-		client.clearReceived();
-		await client.switchSession(sessionA);
-
-		// Should receive session_switched for Session A
-		const switchedBack = await client.waitFor("session_switched");
-		expect(switchedBack["id"]).toBe(sessionA);
-
-		// ── Step 4: Verify session content is available after switch ─
-		// The relay provides the session's content via cached events
-		// in the session_switched payload or via REST history.
-		const hasEvents = Array.isArray(
-			(switchedBack as Record<string, unknown>)["events"],
-		);
-		const hasHistory = !!(switchedBack as Record<string, unknown>)["history"];
-
-		expect(hasEvents || hasHistory).toBe(true);
-
-		if (hasEvents) {
-			const events = (
-				switchedBack as unknown as { events: Array<{ type: string }> }
-			).events;
-			const cachedDeltas = events.filter(
-				(e) => e.type === "delta" || e.type === "thinking_delta",
+			client.clearReceived();
+			await client.sendMessage(
+				"Reply with just the word 'pong'. Nothing else.",
 			);
-			expect(cachedDeltas.length).toBeGreaterThan(0);
-		}
+			const firstDelta = await client.waitForAny(["delta", "thinking_delta"]);
+			expect(firstDelta["text"]).toBeTruthy();
+			await client.waitFor("done");
 
-		await client.close();
-	}, 15_000);
-
-	it("cached events replay after switch contains streamed content", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const sessionA = initialSwitched[0]!["id"] as string;
-
-		// ── Start streaming on Session A ────────────────────────────
-		client.clearReceived();
-		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
-
-		// Wait for streaming to start
-		await client.waitForAny(["delta", "thinking_delta"]);
-
-		// Wait for full cycle
-		await client.waitFor("done");
-
-		const cachedDeltaCount = client
-			.getReceived()
-			.filter((m) => m.type === "delta" || m.type === "thinking_delta").length;
-		expect(cachedDeltaCount).toBeGreaterThanOrEqual(1);
-
-		// ── Switch away briefly ─────────────────────────────────────
-		client.clearReceived();
-		await client.createSession("Cache+Live Test - Session B");
-		const switchedToB = await client.waitFor("session_switched");
-		expect(switchedToB["id"]).toBeTruthy();
-
-		// ── Switch back ─────────────────────────────────────────────
-		client.clearReceived();
-		await client.switchSession(sessionA);
-
-		const switchedBack = await client.waitFor("session_switched");
-		expect(switchedBack["id"]).toBe(sessionA);
-
-		// The session_switched message should contain cached events or history
-		const hasEvents = Array.isArray(
-			(switchedBack as Record<string, unknown>)["events"],
-		);
-		const hasHistory = !!(switchedBack as Record<string, unknown>)["history"];
-		expect(hasEvents || hasHistory).toBe(true);
-
-		if (hasEvents) {
-			const events = (
-				switchedBack as unknown as { events: Array<{ type: string }> }
-			).events;
-			// Should include streaming events from the cached stream
-			const cachedDeltas = events.filter(
-				(e) => e.type === "delta" || e.type === "thinking_delta",
+			const created = await client.createSession(
+				"Streaming Bug Test - Session B",
 			);
-			expect(cachedDeltas.length).toBeGreaterThan(0);
-		}
+			expect(created["id"]).not.toBe(sessionA);
+			const viewed = await client.switchSession(sessionA);
+			expect(viewed["id"]).toBe(sessionA);
 
-		await client.close();
+			const page = await client.loadMoreHistory(sessionA);
+			expect(
+				page.messages.some(
+					(message) => message.role === "assistant" && !!message.text,
+				),
+			).toBe(true);
+		} finally {
+			await client.close();
+		}
 	}, 15_000);
 });

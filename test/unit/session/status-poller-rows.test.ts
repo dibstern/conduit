@@ -14,10 +14,6 @@ import {
 	makePollerStateLive,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import {
-	patchMissingDoneForProcessingState,
-	type SessionHistorySource,
-} from "../../../src/lib/session/session-switch.js";
-import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -56,14 +52,6 @@ it("the poller returns source statuses without parent or message-activity augmen
 				});
 				const processing = yield* poller.isProcessing("parent");
 				expect(processing).toBe(true);
-				const history: SessionHistorySource = {
-					kind: "cached-events",
-					hasMore: false,
-					events: [{ type: "delta", sessionId: "parent", text: "working" }],
-				};
-				expect(
-					patchMissingDoneForProcessingState(history, "parent", processing),
-				).toEqual(history);
 				yield* poller.stop();
 				vi.spyOn(api.session, "statuses").mockResolvedValue({
 					parent: { type: "idle" },
@@ -72,15 +60,6 @@ it("the poller returns source statuses without parent or message-activity augmen
 				yield* poller.start();
 				const finished = yield* poller.isProcessing("parent");
 				expect(finished).toBe(false);
-				expect(
-					patchMissingDoneForProcessingState(history, "parent", finished),
-				).toEqual({
-					...history,
-					events: [
-						...history.events,
-						{ type: "done", sessionId: "parent", code: 0 },
-					],
-				});
 			}),
 		).pipe(Effect.provide(layer)),
 	);

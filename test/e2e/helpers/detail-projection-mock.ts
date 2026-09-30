@@ -123,12 +123,13 @@ export function projectLegacyRelayMessage(
 	const sessionId =
 		typeof event["sessionId"] === "string"
 			? event["sessionId"]
-			: event.type === "session_switched" && typeof event["id"] === "string"
+			: event.type === "mock_transcript_snapshot" &&
+					typeof event["id"] === "string"
 				? event["id"]
 				: null;
 	if (!sessionId) return;
 	const state = session(page, sessionId);
-	if (event.type === "session_switched") {
+	if (event.type === "mock_transcript_snapshot") {
 		const listener = listeners.get(page);
 		listeners.delete(page);
 		const history = event["history"];

@@ -35,17 +35,18 @@ export async function switchModelViaWs(
 			try {
 				const message = JSON.parse(data.toString()) as {
 					type?: string;
-					id?: unknown;
-					sessionId?: unknown;
+					sessions?: Array<{ id?: unknown }>;
 				};
-				if (message.type !== "session_switched") return;
+				if (message.type !== "session_family") return;
 				clearTimeout(timer);
 				ws.close();
-				const id = message.sessionId ?? message.id;
+				const id = Array.isArray(message.sessions)
+					? message.sessions[0]?.id
+					: undefined;
 				if (typeof id === "string") {
 					resolve(id);
 				} else {
-					reject(new Error("session_switched did not include a session id"));
+					reject(new Error("session_family did not include a session id"));
 				}
 			} catch {
 				// Ignore non-JSON setup frames.

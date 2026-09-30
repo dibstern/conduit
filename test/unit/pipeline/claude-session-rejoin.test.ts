@@ -278,8 +278,8 @@ describe("Claude session rejoin — delivery-layer specs (TODO)", () => {
 	it.todo("client receives events emitted AFTER rejoin via sendToSession");
 	// After navigate-away and return, new events from the ongoing
 	// Claude turn should stream to the client. Currently they don't.
-	// Root cause TBD — likely in wsHandler delivery, session_switched
-	// replay coordination, or frontend turnEpoch/dedup logic.
+	// Root cause TBD — likely in wsHandler delivery, transcript loading,
+	// or frontend turnEpoch/dedup logic.
 
 	it.todo("thinking block started before navigate-away completes after return");
 	// If a thinking block starts, user navigates away, thinking ends

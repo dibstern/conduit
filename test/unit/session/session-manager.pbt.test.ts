@@ -685,7 +685,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 			await mgr.createSession("Silent", { silent: true });
 
-			// No broadcasts at all (no session_switched, no session_list)
+			// No broadcasts at all.
 			expect(broadcasts.length).toBe(0);
 		});
 

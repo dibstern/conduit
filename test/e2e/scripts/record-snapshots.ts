@@ -46,7 +46,7 @@ interface RecordedScenario {
 	model: string;
 	/** ISO timestamp of when this was recorded */
 	recordedAt: string;
-	/** Messages sent on WS connect (session_switched, status, model_info, session_list, etc.) */
+	/** Messages sent on WS connect (status, model_info, session_list, etc.) */
 	initMessages: MockMessage[];
 	/** Sequence of prompt → response event sequences */
 	turns: RecordedTurn[];
@@ -264,37 +264,6 @@ function connectWs(relayPort: number): Promise<RecordingWebSocket> {
 	});
 }
 
-function waitForWsMessage<T>(
-	ws: RecordingWebSocket,
-	predicate: (msg: MockMessage) => T | undefined,
-	timeoutMessage: string,
-	timeoutMs = 15_000,
-): Promise<T> {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ws.off("message", handler);
-			reject(new Error(timeoutMessage));
-		}, timeoutMs);
-
-		const handler = (data: WebSocket.RawData) => {
-			try {
-				const msg = JSON.parse(String(data)) as MockMessage;
-				rememberActiveSession(ws, msg);
-				const result = predicate(msg);
-				if (result !== undefined) {
-					clearTimeout(timer);
-					ws.off("message", handler);
-					resolve(result);
-				}
-			} catch {
-				// Ignore
-			}
-		};
-
-		ws.on("message", handler);
-	});
-}
-
 async function runRecordingRpc<T>(
 	ws: RecordingWebSocket,
 	call: (client: RecordingRpcClient) => Effect.Effect<T, unknown>,
@@ -320,14 +289,6 @@ async function runRecordingRpc<T>(
 	}
 }
 
-function rememberActiveSession(ws: RecordingWebSocket, msg: MockMessage): void {
-	if (msg.type !== "session_switched") return;
-	const sessionId = msg["sessionId"] ?? msg["id"];
-	if (typeof sessionId === "string") {
-		ws.activeSessionId = sessionId;
-	}
-}
-
 /** Collect all WS messages arriving within a time window. */
 function collectMessages(
 	ws: RecordingWebSocket,
@@ -338,7 +299,6 @@ function collectMessages(
 		const handler = (data: WebSocket.RawData) => {
 			try {
 				const msg = JSON.parse(String(data)) as MockMessage;
-				rememberActiveSession(ws, msg);
 				messages.push(msg);
 			} catch {
 				// Ignore unparseable frames
@@ -383,7 +343,6 @@ function recordTurn(
 			if (resolved) return;
 			try {
 				const msg = JSON.parse(String(data)) as MockMessage;
-				rememberActiveSession(ws, msg);
 				events.push(msg);
 
 				// Auto-approve permission requests after a short delay.
@@ -471,7 +430,7 @@ function recordTurn(
 		const sessionId = ws.activeSessionId;
 		if (!sessionId) {
 			cleanup();
-			reject(new Error("Cannot record turn before session_switched"));
+			reject(new Error("Cannot record turn before session creation"));
 			return;
 		}
 
@@ -494,51 +453,32 @@ function recordTurn(
 }
 
 /**
- * Request a new session via RPC and wait for session_switched confirmation.
+ * Request a new session via RPC and retain its ID for subsequent turns.
  */
 async function requestNewSession(ws: RecordingWebSocket): Promise<void> {
-	const switched = waitForWsMessage(
-		ws,
-		(msg) => (msg.type === "session_switched" ? true : undefined),
-		"Timeout waiting for new session",
-	);
-	await runRecordingRpc(ws, (client) =>
+	const response = await runRecordingRpc(ws, (client) =>
 		client.CreateSession({
 			projectSlug: ws.projectSlug,
 			originId: ws.clientId,
 		}),
 	);
-	await switched;
+	ws.activeSessionId = response.sessionId;
 }
 
 /**
- * Fork the current session via RPC and wait for session_forked + session_switched.
+ * Fork the current session via RPC and retain the fork's ID.
  * Returns the forked session's ID.
  */
 async function requestForkSession(ws: RecordingWebSocket): Promise<string> {
-	const forked = waitForWsMessage(
-		ws,
-		(msg) => {
-			const session = msg["session"] as { id?: string } | undefined;
-			return msg.type === "session_forked" ? session?.id : undefined;
-		},
-		"Timeout waiting for fork",
-	);
-	const switched = waitForWsMessage(
-		ws,
-		(msg) => (msg.type === "session_switched" ? true : undefined),
-		"Timeout waiting for fork switch",
-	);
-
-	await runRecordingRpc(ws, (client) =>
+	const response = await runRecordingRpc(ws, (client) =>
 		client.ForkSession({
 			projectSlug: ws.projectSlug,
 			originId: ws.clientId,
+			sessionId: ws.activeSessionId,
 		}),
 	);
-	const forkedId = await forked;
-	await switched;
-	return forkedId;
+	ws.activeSessionId = response.sessionId;
+	return response.sessionId;
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -660,14 +600,13 @@ async function main(): Promise<void> {
 					// Collect init messages
 					const initMessages = await collectMessages(ws, INIT_SETTLE_MS);
 					console.log(`  Init messages: ${initMessages.length}`);
+					await requestNewSession(ws);
 
 					const turns: RecordedTurn[] = [];
 
 					if (scenario.multiTurn) {
 						// Multi-turn: all prompts in the same session.
-						// The relay's init session is guaranteed fresh by
-						// inter-scenario session cleanup — no need to create
-						// a second session.
+						// The explicit CreateSession response selected a fresh session.
 
 						for (let i = 0; i < scenario.prompts.length; i++) {
 							// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
@@ -690,7 +629,7 @@ async function main(): Promise<void> {
 							const forkedId = await requestForkSession(ws);
 							console.log(`  Forked to: ${forkedId}`);
 
-							// Wait for fork to settle (session switch, list updates)
+							// Wait for fork metadata and list updates.
 							await collectMessages(ws, 1_500);
 
 							console.log(
@@ -712,8 +651,7 @@ async function main(): Promise<void> {
 
 							if (i > 0) {
 								// Create a new session for each prompt after the first.
-								// The first prompt uses the relay's init session, which is
-								// guaranteed fresh by inter-scenario session cleanup.
+								// The first prompt uses the explicitly created session.
 								await requestNewSession(ws);
 								await collectMessages(ws, 1_000);
 							}

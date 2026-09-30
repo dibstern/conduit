@@ -6,7 +6,11 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { projectLegacyRelayMessage } from "./detail-projection-mock.js";
-import { ensureMockTranscriptRpc, sendMockShellSnapshot } from "./rpc-mock.js";
+import {
+	ensureMockTranscriptRpc,
+	sendMockShellSnapshot,
+	setMockRpcProjectSlug,
+} from "./rpc-mock.js";
 
 export interface WsMockOptions {
 	/** Messages to send immediately on WebSocket connect */
@@ -47,7 +51,6 @@ const SESSION_SCOPED_MESSAGE_TYPES = new Set([
 	"delta",
 	"done",
 	"error",
-	"history_page",
 	"message_removed",
 	"part_removed",
 	"permission_request",
@@ -56,7 +59,6 @@ const SESSION_SCOPED_MESSAGE_TYPES = new Set([
 	"result",
 	"session_deleted",
 	"session_forked",
-	"session_switched",
 	"status",
 	"thinking_delta",
 	"thinking_start",
@@ -83,27 +85,14 @@ export function normalizeMockRelayMessage(
 		typeof normalized["sessionId"] === "string"
 			? normalized["sessionId"]
 			: null;
-	const switchedSessionId =
-		normalized.type === "session_switched" &&
-		typeof normalized["id"] === "string"
-			? normalized["id"]
-			: null;
-	const sessionId =
-		explicitSessionId ?? switchedSessionId ?? context.activeSessionId;
+	const sessionId = explicitSessionId ?? context.activeSessionId;
 
-	if (SESSION_SCOPED_MESSAGE_TYPES.has(normalized.type) && sessionId) {
+	if (
+		(SESSION_SCOPED_MESSAGE_TYPES.has(normalized.type) ||
+			normalized.type === "model_info") &&
+		sessionId
+	) {
 		normalized["sessionId"] = sessionId;
-	}
-
-	if (normalized.type === "session_switched" && sessionId) {
-		context.activeSessionId = sessionId;
-		const events = Array.isArray(normalized["events"])
-			? (normalized["events"] as MockMessage[])
-			: null;
-		if (events) {
-			const eventContext = createMockRelayProtocolContext(sessionId);
-			normalized["events"] = normalizeMockRelayMessages(events, eventContext);
-		}
 	}
 
 	return normalized;
@@ -126,9 +115,6 @@ export async function mockRelayWebSocket(
 	page: Page,
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
-	const cachedTranscript = options.initMessages.some(
-		(message) => message.type === "session_switched",
-	);
 	const streamedTranscript = [...options.responses.values()].some((messages) =>
 		messages.some((message) =>
 			[
@@ -141,13 +127,23 @@ export async function mockRelayWebSocket(
 			].includes(message.type),
 		),
 	);
-	if (cachedTranscript || streamedTranscript)
+	if (
+		streamedTranscript ||
+		options.initMessages.some((message) =>
+			["shell_snapshot", "mock_transcript_snapshot"].includes(message.type),
+		)
+	)
 		await ensureMockTranscriptRpc(page);
 	const control = new WsMockControl(page);
 	// Mock-only input: deliver roots through SubscribeShell, never through /ws.
 	const initialShell = options.initMessages.find(
 		(message) => message.type === "shell_snapshot" && message["roots"] === true,
 	);
+	const initialProject = options.initMessages.find(
+		(message) => message.type === "project_list",
+	);
+	if (typeof initialProject?.["current"] === "string")
+		setMockRpcProjectSlug(page, initialProject["current"]);
 	if (Array.isArray(initialShell?.["sessions"]))
 		sendMockShellSnapshot(page, initialShell["sessions"]);
 	const initDelay = options.initDelay ?? 0;
@@ -156,6 +152,8 @@ export async function mockRelayWebSocket(
 	await page.routeWebSocket(/\/ws/, (ws: WebSocketRoute) => {
 		control._onRouted();
 		control._setWs(ws);
+		control._context.activeSessionId =
+			new URL(page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null;
 
 		// The daemon socket announces its project before the relay bootstrap;
 		// the frontend hydrates on this message.
@@ -265,6 +263,10 @@ export class WsMockControl {
 
 	/** Send a message to the connected client (for mid-test injections). */
 	sendMessage(msg: MockMessage): void {
+		if (msg.type === "mock_transcript_snapshot") {
+			projectLegacyRelayMessage(this.page, msg);
+			return;
+		}
 		if (
 			msg.type === "shell_snapshot" &&
 			msg["roots"] === true &&
@@ -274,6 +276,8 @@ export class WsMockControl {
 			return;
 		}
 		if (!this._ws) throw new Error("WebSocket not connected yet");
+		this._context.activeSessionId =
+			new URL(this.page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null;
 		const normalized = normalizeMockRelayMessage(msg, this._context);
 		projectLegacyRelayMessage(this.page, normalized);
 		this._ws.send(JSON.stringify(normalized));

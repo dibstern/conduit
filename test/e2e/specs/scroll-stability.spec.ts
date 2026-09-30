@@ -181,7 +181,7 @@ function createInitMessages(turnCount: number): MockMessage[] {
 	const events = generateConversationEvents(turnCount);
 	return [
 		{
-			type: "session_switched",
+			type: "mock_transcript_snapshot",
 			id: "sess-scroll-001",
 			events,
 		},
@@ -707,7 +707,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			{
 				initMessages: [
 					{
-						type: "session_switched",
+						type: "mock_transcript_snapshot",
 						id: "sess-switch-A",
 						events: sessionAEvents,
 					},
@@ -774,7 +774,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					"sess-switch-B",
 					[
 						{
-							type: "session_switched",
+							type: "mock_transcript_snapshot",
 							id: "sess-switch-B",
 							events: sessionBEvents,
 						},
@@ -881,7 +881,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		const wsMock = await mockRelayWebSocket(page, {
 			initMessages: [
 				{
-					type: "session_switched",
+					type: "mock_transcript_snapshot",
 					id: "sess-empty-001",
 					// No events — empty session
 				},
@@ -1110,7 +1110,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			{
 				initMessages: [
 					{
-						type: "session_switched",
+						type: "mock_transcript_snapshot",
 						id: "sess-scrollup-A",
 						events: sessionAEvents,
 					},
@@ -1177,7 +1177,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					"sess-scrollup-B",
 					[
 						{
-							type: "session_switched",
+							type: "mock_transcript_snapshot",
 							id: "sess-scrollup-B",
 							events: sessionBEvents,
 						},

@@ -14,6 +14,7 @@ test("status filter and grouping survive reload and follow browser history", asy
 	await gotoRelay(page, relayUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
+	await expect(rows.first()).toHaveClass(/(?:^|\s)active(?:\s|$)/);
 	await new SidebarPage(page).createNewSession();
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 	const originalCount = await rows.count();

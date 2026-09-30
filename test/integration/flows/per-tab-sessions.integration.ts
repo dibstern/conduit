@@ -36,25 +36,19 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create two sessions via client1
 		client1.clearReceived();
-		await client1.createSession("Tab-A Session");
-		const switchedA = await client1.waitFor("session_switched");
+		const switchedA = await client1.createSession("Tab-A Session");
 		const sessionA = switchedA["id"] as string;
 
 		client1.clearReceived();
-		await client1.createSession("Tab-B Session");
-		const switchedB = await client1.waitFor("session_switched");
+		const switchedB = await client1.createSession("Tab-B Session");
 		const sessionB = switchedB["id"] as string;
 
 		// Client1 views session A, Client2 views session B
 		client1.clearReceived();
 		client2.clearReceived();
 
-		await client1.viewSession(sessionA);
-		await client2.viewSession(sessionB);
-
-		// Each client gets its own session_switched for the session it viewed
-		const view1 = await client1.waitFor("session_switched");
-		const view2 = await client2.waitFor("session_switched");
+		const view1 = await client1.viewSession(sessionA);
+		const view2 = await client2.viewSession(sessionB);
 
 		expect(view1["id"]).toBe(sessionA);
 		expect(view2["id"]).toBe(sessionB);
@@ -67,14 +61,11 @@ describe("Integration: Per-Tab Sessions", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		const initial = await client.waitFor("session_switched");
-		const sessionId = initial["id"] as string;
+		const sessionId = client.getActiveSessionId();
+		if (!sessionId) throw new Error("No initial session");
 
 		client.clearReceived();
-		await client.viewSession(sessionId);
-
-		// Should receive session_switched AND status
-		const switched = await client.waitFor("session_switched");
+		const switched = await client.viewSession(sessionId);
 		expect(switched["id"]).toBe(sessionId);
 
 		const status = await client.waitFor("status");
@@ -92,23 +83,19 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.waitForInitialState();
 
 		// Record client2's initial session
-		const initial2 = client2.getReceivedOfType("session_switched");
-		expect(initial2.length).toBeGreaterThan(0);
+		const initial2 = client2.getActiveSessionId();
+		expect(initial2).toBeTruthy();
 
 		client1.clearReceived();
 		client2.clearReceived();
 
 		// Client1 creates a new session
-		await client1.createSession("Per-Tab New Session");
-
-		// Client1 should get session_switched with the new ID
-		const switched1 = await client1.waitFor("session_switched");
+		const switched1 = await client1.createSession("Per-Tab New Session");
 		expect(switched1["id"]).toBeTruthy();
 
 		// Client2 remains on its current session.
 		await new Promise((r) => setTimeout(r, 500));
-		const switches2 = client2.getReceivedOfType("session_switched");
-		expect(switches2).toHaveLength(0);
+		expect(client2.getActiveSessionId()).toBe(initial2);
 
 		await client1.close();
 		await client2.close();
@@ -124,12 +111,10 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Have them view different sessions first
 		client1.clearReceived();
-		await client1.createSession("List-Broadcast-A");
-		const a = await client1.waitFor("session_switched");
+		const a = await client1.createSession("List-Broadcast-A");
 
 		client2.clearReceived();
 		await client2.viewSession(a["id"] as string);
-		await client2.waitFor("session_switched");
 
 		// Renaming the viewed session refreshes both viewers' family.
 		client1.clearReceived();
@@ -172,14 +157,12 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create a shared session
 		client1.clearReceived();
-		await client1.createSession("Sync-Session");
-		const switched = await client1.waitFor("session_switched");
+		const switched = await client1.createSession("Sync-Session");
 		const sharedId = switched["id"] as string;
 
 		// Both clients view the same session
 		client2.clearReceived();
 		await client2.viewSession(sharedId);
-		await client2.waitFor("session_switched");
 
 		// Clear and send input_sync from client1
 		client1.clearReceived();
@@ -206,20 +189,16 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create two sessions
 		client1.clearReceived();
-		await client1.createSession("Input-Sync-A");
-		const a = await client1.waitFor("session_switched");
+		const a = await client1.createSession("Input-Sync-A");
 
 		client1.clearReceived();
-		await client1.createSession("Input-Sync-B");
-		const b = await client1.waitFor("session_switched");
+		const b = await client1.createSession("Input-Sync-B");
 
 		// Client1 views session A, Client2 views session B
 		client1.clearReceived();
 		client2.clearReceived();
 		await client1.viewSession(a["id"] as string);
 		await client2.viewSession(b["id"] as string);
-		await client1.waitFor("session_switched");
-		await client2.waitFor("session_switched");
 
 		// Send input_sync from client1 (session A)
 		client1.clearReceived();
@@ -238,44 +217,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	// ── Delete Session Scoping ───────────────────────────────────────────────
-
-	// Skip: mock's POST /session queue returns the same canned ID after exhaustion,
-	// so the redirect-after-delete gets the same ID as the deleted session.
-	// Needs a stateful mock or live OpenCode to test properly.
-	it.skip("deleting the viewed session only switches the requesting client", async () => {
-		const client1 = await harness.connectWsClient();
-		const client2 = await harness.connectWsClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-
-		// Create a session for client1 to delete
-		client1.clearReceived();
-		await client1.createSession("To-Delete-PerTab");
-		const created = await client1.waitFor("session_switched");
-		const deleteId = created["id"] as string;
-
-		// Client1 views the session-to-delete
-		client1.clearReceived();
-		await client1.viewSession(deleteId);
-		await client1.waitFor("session_switched");
-
-		// Client2 views a different session (the initial one)
-		client2.clearReceived();
-
-		// Delete from client1
-		client1.clearReceived();
-		await client1.deleteSession(deleteId);
-
-		// Client1 should be redirected to another session
-		const redirected = await client1.waitFor("session_switched");
-		expect(redirected["id"]).toBeTruthy();
-		expect(redirected["id"]).not.toBe(deleteId);
-
-		await client1.close();
-		await client2.close();
-	});
-
 	// ── Model Switch Per-Session ─────────────────────────────────────────────
 
 	it("model switch broadcasts model_info to clients on the same session", async () => {
@@ -286,14 +227,12 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Create a shared session
 		client1.clearReceived();
-		await client1.createSession("Model-Switch-PerTab");
-		const created = await client1.waitFor("session_switched");
+		const created = await client1.createSession("Model-Switch-PerTab");
 		const sharedId = created["id"] as string;
 
 		// Both clients view the same session
 		client2.clearReceived();
 		await client2.viewSession(sharedId);
-		await client2.waitFor("session_switched");
 
 		// Switch model from client1
 		client1.clearReceived();

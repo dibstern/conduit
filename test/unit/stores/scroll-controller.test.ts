@@ -94,7 +94,7 @@ describe("ScrollController", () => {
 	});
 
 	// Found in the real app, not in a test: the session bar arrived collapsed on
-	// load because a coalesced scroll event from the settle loop's own re-pin was
+	// load because a coalesced scroll event from a programmatic re-pin was
 	// delivered after the programmatic counter's safety reset had zeroed its
 	// slot, and so read as a user scroll. Every such stray lands at the bottom,
 	// which is what tells it apart from a real scroll.
@@ -115,7 +115,6 @@ describe("ScrollController", () => {
 	it.each([
 		"empty",
 		"loading",
-		"committed",
 	] as const)("onUserScroll does not fire while the transcript is hydrating (%s)", (lc) => {
 		const onUserScroll = vi.fn();
 		const ctrl = makeController(onUserScroll);
@@ -173,7 +172,6 @@ describe("ScrollController", () => {
 	it.each([
 		"empty",
 		"loading",
-		"committed",
 	] as const)("onContainerResize does nothing during %s", (nextLifecycle) => {
 		const ctrl = makeController();
 		lifecycle = nextLifecycle;
@@ -187,12 +185,6 @@ describe("ScrollController", () => {
 	it("starts in 'loading' state when lifecycle is 'empty'", () => {
 		const ctrl = makeController();
 		expect(ctrl.state).toBe("loading");
-	});
-
-	it("transitions to 'settling' when lifecycle becomes 'committed'", () => {
-		const ctrl = makeController();
-		lifecycle = "committed";
-		expect(ctrl.state).toBe("settling");
 	});
 
 	it("transitions to 'following' when lifecycle becomes 'ready'", () => {

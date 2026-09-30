@@ -387,6 +387,16 @@ export const CreateSessionResponseSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
 
+export const ViewSessionResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	draft: Schema.optional(Schema.String),
+});
+
+export const SendMessageResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	sessionId: Schema.String,
+});
+
 export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
@@ -539,6 +549,8 @@ export type ProjectSessionAvailability =
 export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
+export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
+export type SendMessageResponse = typeof SendMessageResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
@@ -1204,7 +1216,6 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			projectSlug: NonEmptyString,
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
-			requestId: Schema.optional(NonEmptyString),
 			instanceId: Schema.optional(
 				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
 			),
@@ -1217,12 +1228,11 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 	"ViewSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: ViewSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
-			requestId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1351,7 +1361,7 @@ export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
 	"SendMessage",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: SendMessageResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
