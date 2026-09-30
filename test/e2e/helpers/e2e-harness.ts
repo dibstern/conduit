@@ -7,7 +7,7 @@
 // Both serve the built frontend from dist/frontend/ via the relay's static
 // file server, so Playwright can navigate directly to the relay URL.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -138,6 +138,12 @@ export async function createReplayHarness(
 	// Use an isolated temp dir for config/cache to avoid stale JSONL files
 	// from previous runs polluting the MessageCache.
 	const configDir = mkdtempSync(path.join(tmpdir(), "e2e-relay-"));
+	// Without a default model the first session is a local Claude one, and the
+	// recording's OpenCode session is never created or viewed.
+	writeFileSync(
+		path.join(configDir, "settings.jsonc"),
+		JSON.stringify({ defaultModel: "anthropic/claude-opus-4-5-20251101" }),
+	);
 
 	const stack = await createRelayStack({
 		port: 0,
