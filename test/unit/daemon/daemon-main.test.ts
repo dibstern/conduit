@@ -96,6 +96,7 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 			opencodeUrl: "http://localhost:4096",
 			projectDir: "/tmp/test",
 			slug: "test-project",
+			persistenceDbPath: "/tmp/test/events.db",
 		}),
 		Layer.succeed(LoggerTag, {
 			info: vi.fn(),

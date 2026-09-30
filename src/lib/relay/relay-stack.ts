@@ -105,10 +105,7 @@ import {
 	LocalPtyServiceLive,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
-import {
-	ToolContentServiceLive,
-	ToolContentServiceNoop,
-} from "../domain/relay/Services/tool-content-service.js";
+import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
 import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
@@ -600,9 +597,8 @@ export interface RelayStackConfig {
 	statusPollerInterval?: number;
 	/** Override the message polling interval in milliseconds (default: 750). */
 	messagePollerInterval?: number;
-	/** SQLite event-store path — enables the durable persistence pipeline
-	 *  (same wiring the daemon passes to createProjectRelay). */
-	persistenceDbPath?: string;
+	/** SQLite event-store path for the durable persistence pipeline. */
+	persistenceDbPath: string;
 }
 
 // ─── Stack ───────────────────────────────────────────────────────────────────
@@ -694,28 +690,24 @@ export async function createProjectRelay(
 	const configLayer = makeProjectRelayConfigLive(config);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
-	const persistenceEffectLayer =
-		config.persistenceDbPath != null
-			? makePersistenceEffectLayer(config.persistenceDbPath)
-			: undefined;
-	const providerRuntimeIngestionLayer =
-		persistenceEffectLayer != null
-			? makeProviderRuntimeIngestionLive({
-					relayPublisher: {
-						publish: (msg) =>
-							Effect.sync(() => {
-								wsHandler.sendToSession(
-									"sessionId" in msg &&
-										typeof msg.sessionId === "string" &&
-										msg.sessionId.length > 0
-										? msg.sessionId
-										: "",
-									msg,
-								);
-							}),
-					},
-				}).pipe(Layer.provide(persistenceEffectLayer))
-			: undefined;
+	const persistenceEffectLayer = makePersistenceEffectLayer(
+		config.persistenceDbPath,
+	);
+	const providerRuntimeIngestionLayer = makeProviderRuntimeIngestionLive({
+		relayPublisher: {
+			publish: (msg) =>
+				Effect.sync(() => {
+					wsHandler.sendToSession(
+						"sessionId" in msg &&
+							typeof msg.sessionId === "string" &&
+							msg.sessionId.length > 0
+							? msg.sessionId
+							: "",
+						msg,
+					);
+				}),
+		},
+	}).pipe(Layer.provide(persistenceEffectLayer));
 	// Named OpenCode instance clients: one shared layer reference
 	// (Effect memoizes it) so orchestration wiring, the session manager, and
 	// the startup SSE wiring all see the same lazy per-instance client cache.
@@ -728,15 +720,12 @@ export async function createProjectRelay(
 	// ingestion pipeline — no duplicate event append. Likewise the shared
 	// persistenceEffectLayer reference gives orchestration (session bindings,
 	// durable command receipts) the relay's one SqlClient connection.
-	const providerOrchestrationDeps =
-		persistenceEffectLayer != null && providerRuntimeIngestionLayer != null
-			? Layer.mergeAll(
-					openCodeApiLayer,
-					persistenceEffectLayer,
-					providerRuntimeIngestionLayer,
-					openCodeInstanceClientsLayer,
-				)
-			: Layer.mergeAll(openCodeApiLayer, openCodeInstanceClientsLayer);
+	const providerOrchestrationDeps = Layer.mergeAll(
+		openCodeApiLayer,
+		persistenceEffectLayer,
+		providerRuntimeIngestionLayer,
+		openCodeInstanceClientsLayer,
+	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
 	);
@@ -790,10 +779,9 @@ export async function createProjectRelay(
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
-	const toolContentServiceLayer =
-		persistenceEffectLayer != null
-			? ToolContentServiceLive.pipe(Layer.provideMerge(persistenceEffectLayer))
-			: ToolContentServiceNoop;
+	const toolContentServiceLayer = ToolContentServiceLive.pipe(
+		Layer.provideMerge(persistenceEffectLayer),
+	);
 
 	const coreBridgeLayers = Layer.mergeAll(
 		openCodeApiLayer,
@@ -816,10 +804,8 @@ export async function createProjectRelay(
 		loggerLayer,
 		providerOrchestrationLayer,
 		openCodeInstanceClientsLayer,
-		...(persistenceEffectLayer != null ? [persistenceEffectLayer] : []),
-		...(providerRuntimeIngestionLayer != null
-			? [providerRuntimeIngestionLayer]
-			: []),
+		persistenceEffectLayer,
+		providerRuntimeIngestionLayer,
 	);
 
 	// Optional bridge layers (only included when deps are present)
@@ -884,7 +870,7 @@ export async function createProjectRelay(
 	};
 	let stopMonitoring = () => {};
 	let startup: {
-		sql: SqlClient.SqlClient | undefined;
+		sql: SqlClient.SqlClient;
 		sessionManagerService: typeof SessionManagerServiceTag.Service;
 		broadcastBackgroundSessionLists: () => void;
 		api: OpenCodeAPI;
@@ -903,7 +889,7 @@ export async function createProjectRelay(
 		// The startup Effect owns relay acquisition, wiring, and readiness.
 		startup = await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
-				const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+				const sql = yield* SqlClient.SqlClient;
 				const api = yield* OpenCodeAPITag;
 				const wsHandler = yield* WebSocketHandlerTag;
 				const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
@@ -978,13 +964,9 @@ export async function createProjectRelay(
 				const sessionId = opencodeAvailable
 					? yield* sessionManagerService.initialize(config.sessionTitle)
 					: yield* Effect.gen(function* () {
-							const readQueryEffectOption =
-								yield* Effect.serviceOption(ReadQueryEffectTag);
-							if (readQueryEffectOption._tag === "None") {
-								return "";
-							}
+							const readQueryEffect = yield* ReadQueryEffectTag;
 							const sessionsResult = yield* Effect.either(
-								readQueryEffectOption.value.listSessions(),
+								readQueryEffect.listSessions(),
 							);
 							if (
 								sessionsResult._tag === "Right" &&
@@ -1030,12 +1012,9 @@ export async function createProjectRelay(
 				}
 				const statusPoller = yield* StatusPollerTag;
 				const pollerManager = yield* PollerManagerTag;
-				const opencodeRuntimeIngress =
-					persistenceEffectLayer != null
-						? yield* makeEffectOpenCodeRuntimeIngress(
-								log.child("opencode-runtime-ingress"),
-							)
-						: undefined;
+				const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
+					log.child("opencode-runtime-ingress"),
+				);
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(
 						new RelayCreationAbortedError({ slug: config.slug }),
@@ -1115,9 +1094,7 @@ export async function createProjectRelay(
 						statusPoller,
 						slug: config.slug,
 						onDoneProcessed: monitoring.recordDoneDelivered,
-						...(opencodeRuntimeIngress != null && {
-							opencodeRuntimeIngress,
-						}),
+						opencodeRuntimeIngress,
 					};
 					yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
 					yield* sseStream.connectEffect();
@@ -1140,16 +1117,11 @@ export async function createProjectRelay(
 							yield* wireSSEConsumerEffect(
 								{
 									...sseConsumerDeps,
-									...(opencodeRuntimeIngress != null && {
-										opencodeRuntimeIngress: {
-											onSSEEventEffect: (event, sessionId) =>
-												opencodeRuntimeIngress.onSSEEventEffect(
-													event,
-													sessionId,
-												),
-											onReconnect: () => {},
-										},
-									}),
+									opencodeRuntimeIngress: {
+										onSSEEventEffect: (event, sessionId) =>
+											opencodeRuntimeIngress.onSSEEventEffect(event, sessionId),
+										onReconnect: () => {},
+									},
 								},
 								stream,
 							);
@@ -1159,7 +1131,7 @@ export async function createProjectRelay(
 				const gate = yield* RelayCommandGateTag;
 				yield* gate.markReady();
 				return {
-					sql: sql._tag === "Some" ? sql.value : undefined,
+					sql,
 					sessionManagerService,
 					broadcastBackgroundSessionLists: () => {
 						runFork(
@@ -1213,25 +1185,23 @@ export async function createProjectRelay(
 
 	return {
 		settleIdleSessions: (idleWindowMs, now) =>
-			startup.sql === undefined
-				? Effect.succeed(0)
-				: settleIdleSessions(
-						{
-							hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
-							hasLiveBackgroundWork: backgroundLiveness.hasLiveWork,
-							setSettled: (id) =>
-								startup.sessionManagerService.setSessionSettled(id, {
-									settled: true,
-									automatic: true,
-								}),
-							broadcastSessionList: () =>
-								startup.sessionManagerService.sendSessionLists((msg) =>
-									wsHandler.broadcast(msg),
-								),
-						},
-						idleWindowMs,
-						now,
-					).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
+			settleIdleSessions(
+				{
+					hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
+					hasLiveBackgroundWork: backgroundLiveness.hasLiveWork,
+					setSettled: (id) =>
+						startup.sessionManagerService.setSessionSettled(id, {
+							settled: true,
+							automatic: true,
+						}),
+					broadcastSessionList: () =>
+						startup.sessionManagerService.sendSessionLists((msg) =>
+							wsHandler.broadcast(msg),
+						),
+				},
+				idleWindowMs,
+				now,
+			).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
@@ -1376,6 +1346,11 @@ export async function createRelayStack(
 		pendingSlugs.add(slug);
 		try {
 			// Create relay FIRST — if this throws, nothing is registered
+			// Beside the stack's own store, so a caller's temp-dir cleanup covers it.
+			const persistenceDbPath = join(
+				dirname(config.persistenceDbPath),
+				`${slug}.events.db`,
+			);
 			const newRelay = await createProjectRelay({
 				httpServer,
 				opencodeUrl: config.opencodeUrl,
@@ -1388,6 +1363,7 @@ export async function createRelayStack(
 				log,
 				getProjects: getProjectList,
 				addProject: addProjectRelay,
+				persistenceDbPath,
 				...(pushMgr != null && { pushManager: pushMgr }),
 				...(config.configDir != null && { configDir: config.configDir }),
 			});
@@ -1441,9 +1417,7 @@ export async function createRelayStack(
 		...(config.messagePollerInterval != null && {
 			messagePollerInterval: config.messagePollerInterval,
 		}),
-		...(config.persistenceDbPath != null && {
-			persistenceDbPath: config.persistenceDbPath,
-		}),
+		persistenceDbPath: config.persistenceDbPath,
 	});
 	relays.set(config.slug, relay);
 	server.addProject({

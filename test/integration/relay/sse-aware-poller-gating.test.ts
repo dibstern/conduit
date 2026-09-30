@@ -15,12 +15,16 @@
 // 100+ second real-time waits while still exercising the same code paths.
 
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -236,12 +240,15 @@ async function createTestHarness(
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 	const relayPort = (relayServer.address() as { port: number }).port;
+	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-sse-gating-"));
+	const persistenceDbPath = join(persistenceDir, "events.db");
 
 	const relay = await createProjectRelay({
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
 		slug: `test-sse-gating-${relayPort}`,
+		persistenceDbPath,
 		noServer: true,
 		log: createSilentLogger(),
 		pollerGatingConfig: {
@@ -283,6 +290,39 @@ async function createTestHarness(
 		socket.destroy();
 	});
 
+	// The poller reads projected SQLite status, so mirror the mock's status
+	// mutations into the per-harness store without emitting SSE coverage.
+	const db = new Database(persistenceDbPath);
+	const upsertStatus = db.prepare(`
+		INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+		VALUES (?, 'opencode', 'Untitled', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET status = excluded.status,
+			updated_at = excluded.updated_at
+	`);
+	for (const [sessionId, status] of Object.entries(mock.sessionStatuses)) {
+		upsertStatus.run(sessionId, status.type, Date.now(), Date.now());
+	}
+	mock.sessionStatuses = new Proxy(mock.sessionStatuses, {
+		set(target, sessionId, value: unknown) {
+			if (
+				typeof sessionId === "string" &&
+				typeof value === "object" &&
+				value !== null &&
+				"type" in value &&
+				typeof value.type === "string"
+			) {
+				upsertStatus.run(sessionId, value.type, Date.now(), Date.now());
+			}
+			return Reflect.set(target, sessionId, value);
+		},
+		deleteProperty(target, sessionId) {
+			if (typeof sessionId === "string") {
+				db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+			}
+			return Reflect.deleteProperty(target, sessionId);
+		},
+	});
+
 	// Wait for SSE + status poller to initialize
 	await new Promise((r) => setTimeout(r, 200));
 
@@ -299,9 +339,11 @@ async function createTestHarness(
 		},
 		async stop() {
 			await relay.stop();
+			db.close();
 			await new Promise<void>((resolve) => eventSockets.close(() => resolve()));
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
+			rmSync(persistenceDir, { recursive: true, force: true });
 		},
 	};
 }

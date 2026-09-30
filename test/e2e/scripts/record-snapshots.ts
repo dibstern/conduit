@@ -12,7 +12,14 @@
 //   E2E_ALLOW_PAID — set to "1" to allow non-opencode providers (paid models)
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { Socket } from "@effect/platform";
@@ -627,6 +634,7 @@ async function main(): Promise<void> {
 			proxy.reset();
 
 			let relayStack: Awaited<ReturnType<typeof createRelayStack>> | undefined;
+			const persistenceDir = mkdtempSync(path.join(tmpdir(), "e2e-record-"));
 			try {
 				// Create a fresh RelayStack for this scenario
 				console.log("  Creating RelayStack...");
@@ -635,6 +643,7 @@ async function main(): Promise<void> {
 					opencodeUrl: proxy.url,
 					projectDir: process.cwd(),
 					slug: "e2e-record",
+					persistenceDbPath: path.join(persistenceDir, "events.db"),
 					log: verbose ? createLogger("e2e-record") : createSilentLogger(),
 				});
 				const relayPort = relayStack.getPort();
@@ -810,6 +819,7 @@ async function main(): Promise<void> {
 						console.warn("  Relay stop eventually failed:", err),
 					);
 				}
+				rmSync(persistenceDir, { recursive: true, force: true });
 			}
 
 			// Clean up all sessions from the ephemeral OpenCode instance

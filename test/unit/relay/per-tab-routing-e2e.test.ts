@@ -5,12 +5,15 @@
 // No real OpenCode required — runs in CI without external dependencies.
 
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -233,12 +236,14 @@ async function createTestHarness(): Promise<TestHarness> {
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 	const relayPort = (relayServer.address() as { port: number }).port;
+	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-per-tab-"));
 
 	const relay = await createProjectRelay({
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
 		slug: "test-project",
+		persistenceDbPath: join(persistenceDir, "events.db"),
 		log: createSilentLogger(), // silence logs
 		noServer: true,
 		statusPollerInterval: 100,
@@ -304,6 +309,7 @@ async function createTestHarness(): Promise<TestHarness> {
 			}
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
+			rmSync(persistenceDir, { recursive: true, force: true });
 		},
 	};
 }

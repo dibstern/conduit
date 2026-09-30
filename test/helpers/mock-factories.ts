@@ -258,6 +258,7 @@ function createMockConfig(): HandlerDeps["config"] {
 		opencodeUrl: "http://localhost:4096",
 		projectDir: "/test/project",
 		slug: "test-project",
+		persistenceDbPath: "/test/project/.conduit/events.db",
 	} as unknown as HandlerDeps["config"];
 }
 

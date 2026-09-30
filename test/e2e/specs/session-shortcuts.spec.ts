@@ -1,6 +1,6 @@
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 
-test.use({ recording: "chat-simple", persistence: true, screenshot: "off" });
+test.use({ recording: "chat-simple", screenshot: "off" });
 
 for (const mode of [
 	{

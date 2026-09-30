@@ -70,8 +70,7 @@ export const StatusPollerLive: Layer.Layer<
 			ProjectionRunnerEffectTag,
 		);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const persistenceReady =
-			config.persistenceDbPath != null && readQueryOption._tag === "Some";
+		const persistenceReady = readQueryOption._tag === "Some";
 		const reconciliationDeps: ReconciliationDeps | undefined =
 			persistenceReady &&
 			eventStoreOption._tag === "Some" &&

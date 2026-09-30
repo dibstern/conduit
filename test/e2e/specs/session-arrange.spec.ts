@@ -3,7 +3,6 @@ import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
 	recording: "chat-simple",
-	persistence: true,
 	viewport: { width: 1440, height: 900 },
 	screenshot: "off",
 });

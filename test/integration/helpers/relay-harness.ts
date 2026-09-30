@@ -3,6 +3,9 @@
 // Integration tests use this to exercise the exact same wiring as production,
 // without requiring a live OpenCode instance.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	createRelayStack,
@@ -44,6 +47,7 @@ export async function createRelayHarness(
 			: recordingName;
 	const mock = new MockOpenCodeServer(recording);
 	await mock.start();
+	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-relay-harness-"));
 
 	const stack = await createRelayStack({
 		port: 0,
@@ -53,9 +57,8 @@ export async function createRelayHarness(
 		slug: "integration-test",
 		sessionTitle: "Integration Test Session",
 		log: createSilentLogger(),
-		...(options.persistenceDbPath != null
-			? { persistenceDbPath: options.persistenceDbPath }
-			: {}),
+		persistenceDbPath:
+			options.persistenceDbPath ?? join(persistenceDir, "events.db"),
 		...(options.configDir != null ? { configDir: options.configDir } : {}),
 	});
 
@@ -84,6 +87,7 @@ export async function createRelayHarness(
 			}
 			await stack.stop();
 			await mock.stop();
+			rmSync(persistenceDir, { recursive: true, force: true });
 			// Allow OS to fully release ports and file descriptors
 			await new Promise((r) => setTimeout(r, 100));
 		},

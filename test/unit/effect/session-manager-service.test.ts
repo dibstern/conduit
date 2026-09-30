@@ -520,6 +520,7 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				configDir: tmpDir,
+				persistenceDbPath: join(tmpDir, "events.db"),
 			};
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "create").mockResolvedValue({
@@ -1735,6 +1736,7 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				configDir: tmpDir,
+				persistenceDbPath: join(tmpDir, "events.db"),
 			};
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
@@ -1790,6 +1792,7 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				configDir: tmpDir,
+				persistenceDbPath: join(tmpDir, "events.db"),
 			};
 			const layer = SessionManagerServiceLive.pipe(
 				Layer.provide(
