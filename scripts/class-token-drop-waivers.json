@@ -243,5 +243,25 @@
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: instance": {
 		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
 		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: bg-bg-surface,font-brand,font-semibold,gap-0.5,gap-2,items-center,justify-between,md:min-h-0,md:min-w-0,min-h-[44px],min-w-0,min-w-[44px],px-2,px-4,py-1,session-list-header,session-list-header-actions,text-sm,text-text-dimmer,tracking-[0.5px],uppercase": {
+		"movedTo": "src/lib/frontend/components/session/SessionListHeader.svelte",
+		"requires": "<SessionListHeader",
+		"reason": "The select and standard header markup moved intact into SessionListHeader. Tokens shared by other extracted blocks are present there as well."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: active,bg-accent/10,bg-bg-alt,border,border-accent/40,border-border,border-border-subtle,chip.value,count,gap-1,gap-1.5,min-h-8,overflow-x-auto,pb-1.5,px-2.5,px-3.5,rounded-full,scrollbar-width:none],sessionViewState.compact,text-text,text-xs,webkit-scrollbar]:hidden,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/session/SessionListFilters.svelte",
+		"requires": "<SessionListFilters",
+		"reason": "The search and filter markup moved intact into SessionListFilters. Names such as active and count are checker tokens from class expressions, also moved intact."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: font-medium,h-px,leading-snug,md:min-h-8,ml-auto,mt-2,overflow-y-auto,pb-0.5,pt-1.5,px-3,py-0.5,py-2,py-3,py-6,session-empty,session-group-label,session-unavailable,text-center,tracking-[0.3px]": {
+		"movedTo": "src/lib/frontend/components/session/SessionListRows.svelte",
+		"requires": "<SessionListRows",
+		"reason": "The scroll region, groups, empty state, and paging markup moved intact into SessionListRows."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: border-t,pb-[calc(10px+env(safe-area-inset-bottom))],pt-2,px-[6px],selectVerbClass,text-error": {
+		"movedTo": "src/lib/frontend/components/session/SessionListBulkBar.svelte",
+		"requires": "<SessionListBulkBar",
+		"reason": "The select-mode action bar moved intact into SessionListBulkBar; selectVerbClass is the checker reading its class expression."
 	}
 }
