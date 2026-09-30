@@ -46,10 +46,7 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	chatState,
-	sessionActivity,
-} from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { sessionActivity } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearSessionState,
 	getFilteredSessions,
@@ -354,13 +351,13 @@ describe("event routing for the session being viewed", () => {
 			expect(sessionState.sessions.has("ses_new")).toBe(false);
 
 			handleMessage({
-				type: "delta",
+				type: "status",
 				sessionId: "ses_new",
-				text: "hello",
+				status: "processing",
 			} as RelayMessage);
 			await vi.advanceTimersByTimeAsync(200);
 
-			expect(chatState.messages.length).toBeGreaterThan(0);
+			expect(sessionActivity.get("ses_new")?.phase).toBe("processing");
 		} finally {
 			vi.useRealTimers();
 		}

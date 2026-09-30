@@ -103,6 +103,8 @@
 	// only re-runs when actual content changes — not on every toggle.
 	$effect(() => {
 		const _len = currentChat().messages.length;
+		// A detail upsert can grow the final bubble without changing the count.
+		const _latest = currentChat().messages.at(-1);
 		const _permLen = permissionsState.pendingPermissions.length;
 		const isActive = untrack(() => isProcessing());
 		const isSettling = untrack(() => scrollCtrl.state === "settling");

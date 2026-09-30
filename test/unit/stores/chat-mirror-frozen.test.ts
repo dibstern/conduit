@@ -39,11 +39,9 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	getOrCreateSessionSlot,
-	handleDelta,
 	isProcessing,
 	isReplaying,
 	isStreaming,
-	phaseStartReplay,
 	phaseToStreaming,
 	sessionActivity,
 	sessionMessages,
@@ -122,24 +120,6 @@ describe("chatState reflects the current session's slot", () => {
 		expect(chatState.turnEpoch).toBe(0);
 		expect(chatState.currentMessageId).toBeNull();
 	});
-
-	it("does not let a background session's delta reach the foreground", () => {
-		const a = getOrCreateSessionSlot("session-a");
-		a.messages.messages = [userMessage("from a")];
-		const b = getOrCreateSessionSlot("session-b");
-
-		handleDelta(b.activity, b.messages, {
-			type: "delta",
-			sessionId: "session-b",
-			text: "background tokens",
-			messageId: "msg_b",
-			partId: "prt_b",
-		});
-
-		expect(chatState.messages).toEqual(a.messages.messages);
-		expect(chatState.currentAssistantText).toBe("");
-		expect(chatState.phase).toBe("idle");
-	});
 });
 
 describe("phase flags read the current session's slot", () => {
@@ -153,7 +133,7 @@ describe("phase flags read the current session's slot", () => {
 		expect(isProcessing()).toBe(true);
 		expect(isStreaming()).toBe(true);
 
-		phaseStartReplay(a.activity, a.messages);
+		a.messages.loadLifecycle = "loading";
 		expect(isReplaying()).toBe(true);
 		expect(isProcessing()).toBe(false);
 		expect(isStreaming()).toBe(false);

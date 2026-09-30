@@ -140,6 +140,10 @@ vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 	registerClearMessagesHook: vi.fn(),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", () => ({
+	viewTranscript: vi.fn(),
+}));
+
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	sessionState: {
 		currentId: null,

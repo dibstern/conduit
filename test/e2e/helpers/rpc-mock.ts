@@ -1,4 +1,9 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
+import {
+	mockDetailPage,
+	mockDetailSnapshot,
+	subscribeMockDetail,
+} from "./detail-projection-mock.js";
 
 interface JsonRpcRequest {
 	readonly jsonrpc?: "2.0";
@@ -37,6 +42,7 @@ export interface RecordedRpcRequest {
 }
 
 export class RpcMockControl {
+	constructor(private readonly page: Page) {}
 	private readonly requests: RecordedRpcRequest[] = [];
 	private readonly streams = new Map<
 		string,
@@ -44,6 +50,37 @@ export class RpcMockControl {
 	>();
 	private shellRows: readonly unknown[] | null = null;
 	private shellSequence = 0;
+	private readonly detailRows = new Map<string, readonly unknown[]>();
+	private readonly detailSequences = new Map<string, number>();
+
+	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
+		const sequence = (this.detailSequences.get(sessionId) ?? 0) + 1;
+		this.detailRows.set(sessionId, rows);
+		this.detailSequences.set(sessionId, sequence);
+		if (this.streams.has(this.streamKey("SubscribeSessionDetail", sessionId)))
+			this.sendChunk(
+				"SubscribeSessionDetail",
+				[
+					{ _tag: "snapshot", rows, sequence, hasMore: false },
+					{ _tag: "synchronized" },
+				],
+				sessionId,
+			);
+	}
+
+	initialDetailFrames(sessionId: string): readonly unknown[] {
+		return [
+			this.detailRows.has(sessionId)
+				? {
+						_tag: "snapshot",
+						rows: this.detailRows.get(sessionId),
+						sequence: this.detailSequences.get(sessionId) ?? 0,
+						hasMore: false,
+					}
+				: mockDetailSnapshot(this.page, sessionId),
+			{ _tag: "synchronized" },
+		];
+	}
 
 	setShellRows(rows: readonly unknown[]): void {
 		this.shellRows = rows;
@@ -77,20 +114,39 @@ export class RpcMockControl {
 		return this.requests;
 	}
 
-	registerStream(tag: string, ws: WebSocketRoute, id: string): void {
-		this.streams.set(tag, { ws, id });
+	private streamKey(tag: string, sessionId?: string): string {
+		return tag === "SubscribeSessionDetail" ? `${tag}:${sessionId ?? ""}` : tag;
 	}
 
-	sendChunk(tag: string, values: readonly unknown[]): void {
-		const stream = this.streams.get(tag);
+	registerStream(
+		tag: string,
+		ws: WebSocketRoute,
+		id: string,
+		sessionId?: string,
+	): void {
+		this.streams.set(this.streamKey(tag, sessionId), { ws, id });
+	}
+
+	hasStream(tag: string, sessionId?: string): boolean {
+		return this.streams.has(this.streamKey(tag, sessionId));
+	}
+
+	interruptStream(requestId: string): void {
+		for (const [key, stream] of this.streams)
+			if (stream.id === requestId) this.streams.delete(key);
+	}
+
+	sendChunk(tag: string, values: readonly unknown[], sessionId?: string): void {
+		const stream = this.streams.get(this.streamKey(tag, sessionId));
 		if (!stream) throw new Error(`No active ${tag} stream`);
 		sendJson(stream.ws, { _tag: "Chunk", requestId: stream.id, values });
 	}
 
-	failStream(tag: string, message: string): void {
-		const stream = this.streams.get(tag);
+	failStream(tag: string, message: string, sessionId?: string): void {
+		const key = this.streamKey(tag, sessionId);
+		const stream = this.streams.get(key);
 		if (!stream) throw new Error(`No active ${tag} stream`);
-		this.streams.delete(tag);
+		this.streams.delete(key);
 		sendJson(stream.ws, {
 			_tag: "Exit",
 			requestId: stream.id,
@@ -101,10 +157,11 @@ export class RpcMockControl {
 		});
 	}
 
-	closeStreamSocket(tag: string): void {
-		const stream = this.streams.get(tag);
+	closeStreamSocket(tag: string, sessionId?: string): void {
+		const key = this.streamKey(tag, sessionId);
+		const stream = this.streams.get(key);
 		if (!stream) throw new Error(`No active ${tag} stream`);
-		this.streams.delete(tag);
+		this.streams.delete(key);
 		stream.ws.close();
 	}
 
@@ -139,6 +196,14 @@ const isEffectRpcPing = (value: unknown): value is EffectRpcPing =>
 	value !== null &&
 	(value as { _tag?: unknown })._tag === "Ping";
 
+const isEffectRpcInterrupt = (
+	value: unknown,
+): value is { _tag: "Interrupt"; requestId: string } =>
+	typeof value === "object" &&
+	value !== null &&
+	(value as { _tag?: unknown })._tag === "Interrupt" &&
+	typeof (value as { requestId?: unknown }).requestId === "string";
+
 const sendJson = (ws: WebSocketRoute, message: unknown) => {
 	ws.send(JSON.stringify(message));
 };
@@ -172,17 +237,28 @@ async function handleMessage(
 		sendJson(ws, { _tag: "Pong" });
 		return;
 	}
+	if (isEffectRpcInterrupt(raw)) {
+		control.interruptStream(raw.requestId);
+		return;
+	}
 	if (isEffectRpcRequest(raw)) {
 		control.record(raw.tag, raw.payload ?? {});
 		const stream =
 			streams?.[raw.tag] ??
 			(raw.tag === "SubscribeShell" && control.initialShellFrames().length > 0
 				? () => control.initialShellFrames()
-				: undefined);
+				: raw.tag === "SubscribeSessionDetail"
+					? (payload: Record<string, unknown>) =>
+							control.initialDetailFrames(String(payload["sessionId"] ?? ""))
+					: undefined);
 		if (stream) {
-			control.registerStream(raw.tag, ws, raw.id);
+			const sessionId =
+				raw.tag === "SubscribeSessionDetail"
+					? String(raw.payload?.["sessionId"] ?? "")
+					: undefined;
+			control.registerStream(raw.tag, ws, raw.id, sessionId);
 			const values = stream(raw.payload ?? {});
-			if (values.length > 0) control.sendChunk(raw.tag, values);
+			if (values.length > 0) control.sendChunk(raw.tag, values, sessionId);
 			return;
 		}
 		const handler = handlers[raw.tag];
@@ -235,8 +311,12 @@ export async function mockWsRpc(
 	page: Page,
 	options: RpcMockOptions,
 ): Promise<RpcMockControl> {
-	const control = new RpcMockControl();
+	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
+	subscribeMockDetail(page, (sessionId, envelope) => {
+		if (control.hasStream("SubscribeSessionDetail", sessionId))
+			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
+	});
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
@@ -256,4 +336,32 @@ export async function mockWsRpc(
 		});
 	});
 	return control;
+}
+
+/** Legacy transcript fixtures need an RPC detail feed even when a spec only mocks /ws. */
+export async function ensureMockTranscriptRpc(page: Page): Promise<void> {
+	if (controls.has(page)) return;
+	await mockWsRpc(page, {
+		handlers: {
+			ViewSession: () => ({ ok: true }),
+			ResolveSession: ({ projectSlug }) => ({
+				projectSlug: String(projectSlug ?? "e2e-replay"),
+			}),
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
+				projectSlug: String(projectSlug ?? "e2e-replay"),
+				sessionId: String(sessionId ?? ""),
+				...mockDetailPage(
+					page,
+					String(sessionId ?? ""),
+					typeof before === "string" ? before : undefined,
+				),
+			}),
+		},
+	});
 }

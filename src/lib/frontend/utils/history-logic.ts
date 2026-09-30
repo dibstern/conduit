@@ -163,12 +163,17 @@ function convertAssistantParts(
 	renderHtml?: (text: string) => string,
 	messageId?: string,
 	createdAt?: number,
+	uuidFor?: (messageId: string, partId: string) => string,
+	completed = true,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];
 	// One fork point per message, on the text the transcript shows as the reply.
 	const replyPart = parts.filter((p) => p.type === "text" && p.text).at(-1);
 
-	for (const part of parts) {
+	for (const [index, part] of parts.entries()) {
+		const uuid =
+			messageId && uuidFor ? uuidFor(messageId, part.id) : generateUuid();
+		const settled = completed || index < parts.length - 1;
 		// A turn's parts all live under one message, so the message stamp would
 		// make every step 0ms. Use the part's own stamp when the store has one.
 		const partCreatedAt = part.time?.start ?? createdAt;
@@ -182,10 +187,10 @@ function convertAssistantParts(
 					part.renderedHtml ?? (renderHtml ? renderHtml(rawText) : rawText);
 				result.push({
 					type: "assistant",
-					uuid: generateUuid(),
+					uuid,
 					rawText,
 					html,
-					finalized: true,
+					finalized: settled,
 					partId: part.id,
 					...(messageId != null && part === replyPart && { messageId }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
@@ -203,9 +208,9 @@ function convertAssistantParts(
 						: undefined;
 				result.push({
 					type: "thinking",
-					uuid: generateUuid(),
+					uuid,
 					text,
-					done: true,
+					done: settled,
 					...(duration != null && { duration }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 					...(partEndedAt != null && { endedAt: partEndedAt }),
@@ -235,7 +240,7 @@ function convertAssistantParts(
 						: undefined;
 				result.push(
 					createToolMessage({
-						uuid: generateUuid(),
+						uuid,
 						id: part.callID ?? part.id,
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
@@ -255,7 +260,7 @@ function convertAssistantParts(
 				// lets restoreContextFromMessages recover the reduced context bar.
 				result.push({
 					type: "system",
-					uuid: generateUuid(),
+					uuid,
 					text: part.text ?? "",
 					variant: "info",
 					compaction: "completed",
@@ -296,6 +301,7 @@ export function historyToChatMessages(
 	messages: HistoryMessage[],
 	renderHtml?: (text: string) => string,
 	turnContext: readonly HistoryMessage[] = messages,
+	uuidFor?: (messageId: string, partId: string) => string,
 ): ChatMessage[] {
 	return messages.flatMap((msg) => {
 		const result: ChatMessage[] = [];
@@ -308,7 +314,7 @@ export function historyToChatMessages(
 					.join("\n") ?? "";
 			result.push({
 				type: "user",
-				uuid: generateUuid(),
+				uuid: uuidFor ? uuidFor(msg.id, "user") : generateUuid(),
 				messageId: msg.id,
 				text: extractDisplayText(text),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),
@@ -325,6 +331,8 @@ export function historyToChatMessages(
 						renderHtml,
 						msg.id,
 						msg.time?.created,
+						uuidFor,
+						!uuidFor || msg.time?.completed !== undefined,
 					),
 				);
 			}
@@ -352,7 +360,7 @@ export function historyToChatMessages(
 				const { cost, duration } = openCodeTurnTotals(msg, turnSteps);
 				result.push({
 					type: "result",
-					uuid: generateUuid(),
+					uuid: uuidFor ? uuidFor(msg.id, "result") : generateUuid(),
 					...(msg.cost != null && { cost }),
 					duration,
 					...(msg.tokens?.input != null && { inputTokens: msg.tokens.input }),

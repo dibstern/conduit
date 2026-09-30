@@ -1,21 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Mock dompurify — required for chat.svelte.ts imports
 vi.mock("dompurify", () => ({
 	default: { sanitize: (html: string) => html },
 }));
 
-import {
-	chatState,
-	clearMessages,
-	handleDone,
-	handleThinkingDelta,
-	handleThinkingStart,
-	handleThinkingStop,
-	type SessionActivity,
-	type SessionMessages,
+import type {
+	SessionActivity,
+	SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -23,98 +16,18 @@ import type {
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
-import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 // ─── Per-session tiers for handler calls ────────────────────────────────────
-let ta: SessionActivity;
-let tm: SessionMessages;
+let _ta: SessionActivity;
+let _tm: SessionMessages;
 
 // Helper to create typed relay messages
-function msg<T extends RelayMessage["type"]>(
+function _msg<T extends RelayMessage["type"]>(
 	type: T,
 	data?: Partial<Extract<RelayMessage, { type: T }>>,
 ): Extract<RelayMessage, { type: T }> {
 	return { type, ...data } as Extract<RelayMessage, { type: T }>;
 }
-
-describe("Thinking block invariants", () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("INVARIANT: every ThinkingMessage has done=true after handleDone", () => {
-		// Create multiple thinking blocks in various states
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "block 1" }));
-		// Block 1: NOT explicitly stopped
-
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "block 2" }));
-		handleThinkingStop(ta, tm, msg("thinking_stop"));
-		// Block 2: properly stopped
-
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		// Block 3: started but no delta or stop
-
-		// Fire handleDone
-		handleDone(ta, tm, msg("done", { code: 0 }));
-
-		// INVARIANT: every thinking block is done
-		const thinkingBlocks = chatState.messages.filter(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		expect(thinkingBlocks.length).toBeGreaterThanOrEqual(1);
-		for (const block of thinkingBlocks) {
-			expect(block.done).toBe(true);
-		}
-	});
-
-	it("INVARIANT: thinking text preserved through handleDone finalization", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "important" }));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: " reasoning" }));
-		// No explicit stop
-
-		handleDone(ta, tm, msg("done", { code: 0 }));
-
-		const thinking = chatState.messages.find(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		expect(thinking).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.text).toContain("important");
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.text).toContain("reasoning");
-	});
-
-	it("INVARIANT: handleDone is idempotent for already-done thinking blocks", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "done block" }));
-		handleThinkingStop(ta, tm, msg("thinking_stop"));
-
-		const before = chatState.messages.find(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		// biome-ignore lint/style/noNonNullAssertion: asserted
-		const durationBefore = before!.duration;
-
-		handleDone(ta, tm, msg("done", { code: 0 }));
-
-		const after = chatState.messages.find(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		// biome-ignore lint/style/noNonNullAssertion: asserted
-		expect(after!.duration).toBe(durationBefore);
-	});
-});
 
 describe("Fork-split thinking invariants", () => {
 	function thinking(
@@ -202,174 +115,6 @@ describe("Fork-split thinking invariants", () => {
 		for (const t of allThinking) {
 			expect(t.done).toBe(true);
 		}
-	});
-});
-
-describe("Error → recovery cycle", () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("error mid-thinking, then new turn — old thinking finalized", () => {
-		// Turn 1: thinking starts, no stop
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "old thought" }));
-		// Error arrives — handleDone finalizes everything
-		handleDone(ta, tm, msg("done", { code: 1 }));
-
-		// Turn 2: new thinking
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "new thought" }));
-		handleThinkingStop(ta, tm, msg("thinking_stop"));
-		handleDone(ta, tm, msg("done", { code: 0 }));
-
-		const thinkingBlocks = chatState.messages.filter(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		// All thinking blocks (old and new) must be done
-		for (const block of thinkingBlocks) {
-			expect(block.done).toBe(true);
-		}
-		expect(thinkingBlocks.length).toBeGreaterThanOrEqual(2);
-	});
-
-	it("multiple handleDone calls in sequence — no error, no double-finalization artifacts", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "content" }));
-		handleThinkingStop(ta, tm, msg("thinking_stop"));
-
-		// First done
-		handleDone(ta, tm, msg("done", { code: 0 }));
-		const countAfterFirst = chatState.messages.filter(
-			(m) => m.type === "thinking",
-		).length;
-
-		// Second done — should not create new messages or crash
-		handleDone(ta, tm, msg("done", { code: 0 }));
-		const countAfterSecond = chatState.messages.filter(
-			(m) => m.type === "thinking",
-		).length;
-
-		expect(countAfterSecond).toBe(countAfterFirst);
-	});
-
-	it("thinking blocks without handleDone — remain done=false (zombie state)", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(
-			ta,
-			tm,
-			msg("thinking_delta", { text: "zombie thought" }),
-		);
-		// NO handleDone — simulates process killed or WS disconnect
-
-		const thinking = chatState.messages.find(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		expect(thinking).toBeDefined();
-		// Without handleDone, thinking blocks remain done=false
-		// This documents the zombie state — frontend should handle reconnect
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.done).toBe(false);
-	});
-});
-
-describe("clearMessages + active thinking race", () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("clearMessages mid-thinking — subsequent delta silently dropped, no crash", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "part 1" }));
-
-		// Mid-stream clear (simulates session switch)
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-
-		// Delta arrives after clear — no target message exists
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "part 2" }));
-
-		// No crash, no orphan thinking block
-		expect(chatState.messages).toHaveLength(0);
-	});
-
-	it("clearMessages mid-thinking — subsequent stop silently dropped, no crash", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "content" }));
-
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-
-		// Stop arrives after clear
-		handleThinkingStop(ta, tm, msg("thinking_stop"));
-
-		expect(chatState.messages).toHaveLength(0);
-	});
-
-	it("clearMessages mid-thinking — subsequent handleDone is clean no-op", () => {
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "active" }));
-
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-
-		// handleDone after clear — should not crash or create zombie thinking
-		handleDone(ta, tm, msg("done", { code: 0 }));
-
-		// No orphan thinking blocks with done=false
-		const zombies = chatState.messages.filter(
-			(m): m is ThinkingMessage => m.type === "thinking" && !m.done,
-		);
-		expect(zombies).toHaveLength(0);
-	});
-
-	it("new thinking after clearMessages — fresh lifecycle works correctly", () => {
-		// First thinking
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "old" }));
-
-		clearMessages();
-		sessionState.currentId = "test-session";
-		ta = testActivity();
-		tm = testMessages();
-
-		// New thinking after clear
-		handleThinkingStart(ta, tm, msg("thinking_start"));
-		handleThinkingDelta(ta, tm, msg("thinking_delta", { text: "fresh" }));
-		handleThinkingStop(ta, tm, msg("thinking_stop"));
-		handleDone(ta, tm, msg("done", { code: 0 }));
-
-		const thinkingBlocks = chatState.messages.filter(
-			(m): m is ThinkingMessage => m.type === "thinking",
-		);
-		// Only the fresh thinking block — old one was cleared
-		expect(thinkingBlocks).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(thinkingBlocks[0]!.text).toBe("fresh");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(thinkingBlocks[0]!.done).toBe(true);
 	});
 });
 

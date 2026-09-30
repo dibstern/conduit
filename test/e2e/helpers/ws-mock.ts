@@ -5,7 +5,8 @@
 
 import type { Page, WebSocketRoute } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
-import { sendMockShellSnapshot } from "./rpc-mock.js";
+import { projectLegacyRelayMessage } from "./detail-projection-mock.js";
+import { ensureMockTranscriptRpc, sendMockShellSnapshot } from "./rpc-mock.js";
 
 export interface WsMockOptions {
 	/** Messages to send immediately on WebSocket connect */
@@ -125,6 +126,23 @@ export async function mockRelayWebSocket(
 	page: Page,
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
+	const cachedTranscript = options.initMessages.some(
+		(message) => message.type === "session_switched",
+	);
+	const streamedTranscript = [...options.responses.values()].some((messages) =>
+		messages.some((message) =>
+			[
+				"user_message",
+				"delta",
+				"thinking_start",
+				"thinking_delta",
+				"tool_start",
+				"result",
+			].includes(message.type),
+		),
+	);
+	if (cachedTranscript || streamedTranscript)
+		await ensureMockTranscriptRpc(page);
 	const control = new WsMockControl(page);
 	// Mock-only input: deliver roots through SubscribeShell, never through /ws.
 	const initialShell = options.initMessages.find(
@@ -256,9 +274,9 @@ export class WsMockControl {
 			return;
 		}
 		if (!this._ws) throw new Error("WebSocket not connected yet");
-		this._ws.send(
-			JSON.stringify(normalizeMockRelayMessage(msg, this._context)),
-		);
+		const normalized = normalizeMockRelayMessage(msg, this._context);
+		projectLegacyRelayMessage(this.page, normalized);
+		this._ws.send(JSON.stringify(normalized));
 	}
 
 	/** Send multiple messages with optional delay between them. */

@@ -28,7 +28,6 @@ import type {
 	SessionInfo,
 } from "../types.js";
 import {
-	abortSessionReplay,
 	activateSessionChatState,
 	clearSessionChatState,
 	sessionActivity,
@@ -1081,7 +1080,8 @@ export function switchToSession(
 	pendingSelectionRequestId = createRequestId();
 	_switchingFromId = clientSession.currentId;
 	if (_switchingFromId && _switchingFromId !== sessionId) {
-		abortSessionReplay(_switchingFromId);
+		const activity = sessionActivity.get(_switchingFromId);
+		if (activity) activity.replayGeneration++;
 	}
 
 	clientSession.currentId = sessionId;

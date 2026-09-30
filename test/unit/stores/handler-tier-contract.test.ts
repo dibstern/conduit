@@ -15,10 +15,7 @@ vi.mock("dompurify", () => ({
 import {
 	advanceTurnIfNewMessage,
 	clearMessages,
-	handleDelta,
-	handleDone,
 	handleStatus,
-	handleThinkingStart,
 	phaseToIdle,
 	phaseToProcessing,
 	phaseToStreaming,
@@ -44,8 +41,6 @@ function snapActivity(a: SessionActivity) {
 		replayGeneration: a.replayGeneration,
 		doneMessageIds: [...a.doneMessageIds],
 		seenMessageIds: [...a.seenMessageIds],
-		liveEventBuffer: a.liveEventBuffer,
-		eventsHasMore: a.eventsHasMore,
 		renderTimer: a.renderTimer,
 		thinkingStartTime: a.thinkingStartTime,
 	};
@@ -56,13 +51,12 @@ function snapActivity(a: SessionActivity) {
 function snapMessages(m: SessionMessages) {
 	return {
 		messagesLength: m.messages.length,
+		transcript: m.transcript,
 		currentAssistantText: m.currentAssistantText,
 		loadLifecycle: m.loadLifecycle,
 		contextPercent: m.contextPercent,
 		historyHasMore: m.historyHasMore,
 		historyLoading: m.historyLoading,
-		replayBatch: m.replayBatch,
-		replayBuffer: m.replayBuffer,
 	};
 }
 
@@ -80,61 +74,6 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-});
-
-// ─── handleDelta ───────────────────────────────────────────────────────────
-
-describe("handleDelta — tier contract", () => {
-	it("should modify activity tier (phase → streaming)", () => {
-		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "Hello" });
-		vi.advanceTimersByTime(100); // flush debounced render
-		expect(ta.phase).toBe("streaming");
-	});
-
-	it("should modify messages tier (currentAssistantText, messages)", () => {
-		handleDelta(ta, tm, { type: "delta", sessionId: "s1", text: "Hello" });
-		vi.advanceTimersByTime(100);
-		expect(tm.currentAssistantText).toBe("Hello");
-		expect(tm.messages.length).toBeGreaterThan(0);
-	});
-});
-
-// ─── handleDone ────────────────────────────────────────────────────────────
-
-describe("handleDone — tier contract", () => {
-	it("should modify activity tier (doneMessageIds)", () => {
-		// Set up streaming state so handleDone has something to finalize
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "response",
-			messageId: "msg-1",
-		});
-		vi.advanceTimersByTime(100);
-
-		const beforeActivity = snapActivity(ta);
-		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
-
-		const afterActivity = snapActivity(ta);
-		// doneMessageIds should have been updated on the activity tier
-		expect(afterActivity.doneMessageIds.length).toBeGreaterThanOrEqual(
-			beforeActivity.doneMessageIds.length,
-		);
-	});
-
-	it("should write to activity.doneMessageIds when finalizing a streamed message", () => {
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "streamed text",
-			messageId: "msg-done-1",
-		});
-		vi.advanceTimersByTime(100);
-
-		handleDone(ta, tm, { type: "done", sessionId: "s1", code: 0 });
-		// The finalized messageId should appear in activity.doneMessageIds
-		expect(ta.doneMessageIds.has("msg-done-1")).toBe(true);
-	});
 });
 
 // ─── handleStatus ──────────────────────────────────────────────────────────
@@ -168,27 +107,6 @@ describe("handleStatus — tier contract", () => {
 		});
 		expect(ta.phase).toBe("idle");
 		expect(ta.currentMessageId).toBeNull();
-	});
-});
-
-// ─── handleThinkingStart ───────────────────────────────────────────────────
-
-describe("handleThinkingStart — tier contract", () => {
-	it("should write thinkingStartTime to activity tier", () => {
-		handleThinkingStart(ta, tm, {
-			type: "thinking_start",
-			sessionId: "s1",
-		});
-		expect(ta.thinkingStartTime).toBeGreaterThan(0);
-	});
-
-	it("should write thinking message to messages tier", () => {
-		handleThinkingStart(ta, tm, {
-			type: "thinking_start",
-			sessionId: "s1",
-		});
-		expect(tm.messages.length).toBe(1);
-		expect(tm.messages[0]?.type).toBe("thinking");
 	});
 });
 
@@ -263,32 +181,6 @@ describe("advanceTurnIfNewMessage — tier contract", () => {
 		advanceTurnIfNewMessage(ta, tm, undefined);
 		expect(snapActivity(ta)).toEqual(beforeActivity);
 		expect(snapMessages(tm)).toEqual(beforeMessages);
-	});
-
-	it("should modify activity.doneMessageIds when finalizing a streaming turn", () => {
-		// Set up: start streaming a message
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "text",
-			messageId: "msg-turn-1",
-		});
-		vi.advanceTimersByTime(100);
-
-		// Now advance to a new message — should finalize streaming + add to doneMessageIds
-		advanceTurnIfNewMessage(ta, tm, "msg-turn-1");
-		// First call just records it as seen. Set up streaming again.
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "more",
-			messageId: "msg-turn-1",
-		});
-		vi.advanceTimersByTime(100);
-
-		// A genuinely new messageId triggers turn advance
-		advanceTurnIfNewMessage(ta, tm, "msg-turn-2");
-		expect(ta.seenMessageIds.has("msg-turn-2")).toBe(true);
 	});
 });
 

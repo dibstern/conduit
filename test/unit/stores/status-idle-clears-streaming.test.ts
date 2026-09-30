@@ -17,10 +17,8 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
-	handleDelta,
 	handleStatus,
 	isProcessing,
-	isStreaming,
 	phaseToProcessing,
 	type SessionActivity,
 	type SessionMessages,
@@ -61,48 +59,6 @@ describe("F2 fix: status:idle full cleanup", () => {
 		expect(isProcessing()).toBe(false);
 	});
 
-	it("clears streaming phase when idle arrives (F2 fix)", () => {
-		// Start streaming
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "streaming text",
-		});
-		expect(isStreaming()).toBe(true);
-
-		// Server says idle — should force cleanup
-		handleStatus(ta, tm, statusMsg("idle"));
-		expect(chatState.phase).toBe("idle");
-		expect(isStreaming()).toBe(false);
-	});
-
-	it("finalizes in-flight assistant message when streaming and idle arrives", () => {
-		// Simulate an in-flight message
-		ta.currentMessageId = "msg-1";
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "partial response",
-		});
-		expect(chatState.phase).toBe("streaming");
-
-		// Flush the render timer so the assistant message has content
-		vi.advanceTimersByTime(100);
-
-		handleStatus(ta, tm, statusMsg("idle"));
-
-		// Phase should be idle
-		expect(chatState.phase).toBe("idle");
-
-		// The assistant message should be finalized
-		const assistantMsgs = chatState.messages.filter(
-			(m) => m.type === "assistant",
-		);
-		expect(assistantMsgs.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — checked above
-		expect(assistantMsgs[0]!.type).toBe("assistant");
-	});
-
 	it("clears currentMessageId on idle", () => {
 		ta.currentMessageId = "msg-123";
 		phaseToProcessing(ta);
@@ -128,15 +84,6 @@ describe("F2 fix: status:idle full cleanup", () => {
 		handleStatus(ta, tm, statusMsg("idle"));
 
 		expect(ta.thinkingStartTime).toBe(0);
-	});
-
-	it("drains liveEventBuffer on idle", () => {
-		ta.liveEventBuffer = [{ type: "delta", sessionId: "s1", text: "buffered" }];
-		phaseToProcessing(ta);
-
-		handleStatus(ta, tm, statusMsg("idle"));
-
-		expect(ta.liveEventBuffer).toBeNull();
 	});
 
 	it("preserves seenMessageIds across idle (cross-turn dedup)", () => {
@@ -166,19 +113,5 @@ describe("F2 fix: status:idle full cleanup", () => {
 		handleStatus(ta, tm, statusMsg("idle"));
 
 		expect(chatState.phase).toBe("idle");
-	});
-
-	it("does not downgrade streaming to processing on status:processing", () => {
-		// Start streaming
-		handleDelta(ta, tm, {
-			type: "delta",
-			sessionId: "s1",
-			text: "still streaming",
-		});
-		expect(isStreaming()).toBe(true);
-
-		// status:processing should NOT downgrade
-		handleStatus(ta, tm, statusMsg("processing"));
-		expect(isStreaming()).toBe(true);
 	});
 });

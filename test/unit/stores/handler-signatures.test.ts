@@ -87,8 +87,6 @@ describe("getOrCreateSessionSlot", () => {
 		expect(activity.turnEpoch).toBe(0);
 		expect(activity.doneMessageIds.size).toBe(0);
 		expect(activity.seenMessageIds.size).toBe(0);
-		expect(activity.liveEventBuffer).toBeNull();
-		expect(activity.eventsHasMore).toBe(false);
 		expect(activity.renderTimer).toBeNull();
 		expect(activity.thinkingStartTime).toBe(0);
 	});

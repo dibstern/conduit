@@ -82,104 +82,6 @@ afterEach(() => {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("Race: session_switched history .then() fires after session switch", () => {
-	it("two rapid session_switched with history — only second session's messages present", async () => {
-		// SMALL history (< chunk size) so convertHistoryAsync completes in one
-		// tick without yielding — the .then() callback is the only guard.
-		const firstHistory: HistoryMessage[] = [
-			makeHistoryMessage("f1", "user", "first session question"),
-			makeHistoryMessage("f2", "assistant", "first session answer"),
-		];
-		const secondHistory: HistoryMessage[] = [
-			makeHistoryMessage("s1", "user", "second session question"),
-			makeHistoryMessage("s2", "assistant", "second session answer"),
-		];
-
-		// First session_switched fires convertHistoryAsync — schedules .then()
-		routerState.path = "/s/session-first";
-		handleMessage({
-			type: "session_switched",
-			id: "session-first",
-			sessionId: "session-first",
-			history: { messages: firstHistory, hasMore: true },
-		});
-
-		// Second session_switched arrives IMMEDIATELY — clearMessages() bumps
-		// replayGeneration, then fires its own convertHistoryAsync
-		routerState.path = "/s/session-second";
-		handleMessage({
-			type: "session_switched",
-			id: "session-second",
-			sessionId: "session-second",
-			history: { messages: secondHistory, hasMore: false },
-		});
-
-		// Let all microtasks and timers resolve
-		await vi.runAllTimersAsync();
-
-		// CRITICAL: Only the second session's messages should be present.
-		// Without the generation guard, the first .then() would also
-		// prependMessages, contaminating state with stale data.
-		expect(sessionState.currentId).toBe("session-second");
-
-		const userMsgs = chatState.messages.filter((m) => m.type === "user");
-		expect(userMsgs).toHaveLength(1);
-		expect((userMsgs[0] as { text: string }).text).toBe(
-			"second session question",
-		);
-
-		const assistantMsgs = chatState.messages.filter(
-			(m) => m.type === "assistant",
-		);
-		expect(assistantMsgs).toHaveLength(1);
-
-		// historyState should reflect the second session's values, not the first
-		expect(historyState.hasMore).toBe(false);
-		expect(chatState.messages).toHaveLength(2);
-	});
-
-	it("three rapid session_switched — only the last session wins", async () => {
-		routerState.path = "/s/s-a";
-		handleMessage({
-			type: "session_switched",
-			id: "s-a",
-			sessionId: "s-a",
-			history: {
-				messages: [makeHistoryMessage("a1", "user", "from A")],
-				hasMore: true,
-			},
-		});
-		routerState.path = "/s/s-b";
-		handleMessage({
-			type: "session_switched",
-			id: "s-b",
-			sessionId: "s-b",
-			history: {
-				messages: [makeHistoryMessage("b1", "user", "from B")],
-				hasMore: true,
-			},
-		});
-		routerState.path = "/s/s-c";
-		handleMessage({
-			type: "session_switched",
-			id: "s-c",
-			sessionId: "s-c",
-			history: {
-				messages: [makeHistoryMessage("c1", "user", "from C")],
-				hasMore: false,
-			},
-		});
-
-		await vi.runAllTimersAsync();
-
-		expect(sessionState.currentId).toBe("s-c");
-		const userMsgs = chatState.messages.filter((m) => m.type === "user");
-		expect(userMsgs).toHaveLength(1);
-		expect((userMsgs[0] as { text: string }).text).toBe("from C");
-		expect(historyState.hasMore).toBe(false);
-	});
-});
-
 describe("Race: history_page .then() fires after session switch", () => {
 	it("history_page completes after session switch — stale page discarded", async () => {
 		// Start with session A
@@ -209,10 +111,6 @@ describe("Race: history_page .then() fires after session switch", () => {
 			type: "session_switched",
 			id: "session-b",
 			sessionId: "session-b",
-			history: {
-				messages: [makeHistoryMessage("b1", "user", "from session B")],
-				hasMore: false,
-			},
 		});
 
 		await vi.runAllTimersAsync();
@@ -221,9 +119,7 @@ describe("Race: history_page .then() fires after session switch", () => {
 		// The stale history_page for session A must NOT contaminate session B.
 		expect(sessionState.currentId).toBe("session-b");
 
-		const userMsgs = chatState.messages.filter((m) => m.type === "user");
-		expect(userMsgs).toHaveLength(1);
-		expect((userMsgs[0] as { text: string }).text).toBe("from session B");
+		expect(chatState.messages).toHaveLength(0);
 
 		// historyState.loading MUST be false regardless (unconditional reset)
 		expect(historyState.loading).toBe(false);

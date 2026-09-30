@@ -24,44 +24,21 @@ import type {
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { renderMarkdown } from "../utils/markdown.js";
-import { isSubagentToolName } from "../utils/subagent-tools.js";
 import {
-	abortSessionReplay,
 	activateSessionChatState,
-	addUserMessage,
-	advanceTurnIfNewMessage,
-	beginReplayBatch,
 	clearMessages,
-	commitReplayFinal,
-	discardReplayBatch,
 	findMessage,
-	flushPendingRender,
 	getMessages,
 	getOrCreateSessionSlot,
 	handleCompaction,
-	handleDelta,
 	handleDone,
 	handleError,
 	handleInputSyncReceived,
-	handleMessageRemoved,
-	handlePartRemoved,
-	handleResult,
 	handleStatus,
-	handleThinkingDelta,
-	handleThinkingStart,
 	handleThinkingStop,
 	handleToolExecuting,
-	handleToolResult,
-	handleToolStart,
 	historyState,
-	isLlmActive,
-	markPendingHistoryQueuedFallback,
-	phaseEndReplay,
-	phaseStartReplay,
 	prependMessages,
-	registerClearMessagesHook,
-	renderDeferredMarkdown,
-	restoreContextFromMessages,
 	type SessionActivity,
 	type SessionMessages,
 	seedRegistryFromMessages,
@@ -204,13 +181,6 @@ function isDev(): boolean {
 	return (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
 }
 
-function shouldIgnoreOwnUserMessage(event: {
-	type: string;
-	originId?: string;
-}): boolean {
-	return event.type === "user_message" && isOwnBrowserClientId(event.originId);
-}
-
 /**
  * Route a per-session event to the correct session slot by event.sessionId.
  * Validates sessionId presence, and that the session is one we know about or
@@ -268,41 +238,14 @@ function routePerSession(event: PerSessionEvent): void {
 
 	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
 
-	// ── Turn boundary detection ─────────────────────────────────────────
-	if (
-		event.type !== "user_message" &&
-		"messageId" in event &&
-		event.messageId != null
-	) {
-		advanceTurnIfNewMessage(
-			activity,
-			messages,
-			event.messageId as string,
-			event.type === "delta" ? event.partId : undefined,
-		);
-	}
-
 	switch (event.type) {
-		case "delta":
-			handleDelta(activity, messages, event);
-			break;
-		case "thinking_start":
-			handleThinkingStart(activity, messages, event);
-			break;
-		case "thinking_delta":
-			handleThinkingDelta(activity, messages, event);
-			break;
 		case "thinking_stop":
 			handleThinkingStop(activity, messages, event);
-			break;
-		case "tool_start":
-			handleToolStart(activity, messages, event);
 			break;
 		case "tool_executing":
 			handleToolExecuting(activity, messages, event);
 			break;
 		case "tool_result": {
-			handleToolResult(activity, messages, event);
 			// If this was a TodoWrite result, also update the todo store.
 			const msgs = getMessages(messages);
 			const toolMsg = msgs.find(
@@ -313,9 +256,6 @@ function routePerSession(event: PerSessionEvent): void {
 			}
 			break;
 		}
-		case "result":
-			handleResult(activity, messages, event);
-			break;
 		case "done": {
 			handleDone(activity, messages, event);
 			// Only notify for root agent sessions — subagent completions are
@@ -336,29 +276,8 @@ function routePerSession(event: PerSessionEvent): void {
 			handleChatError(activity, messages, event);
 			triggerNotifications(event);
 			break;
-		case "user_message":
-			if (shouldIgnoreOwnUserMessage(event) && !event.messageId) break;
-			addUserMessage(
-				activity,
-				messages,
-				event.text,
-				undefined,
-				// Queued-ness is a property of *this* event's session, not of
-				// whichever session happens to be on screen.
-				isLlmActive(activity.phase, messages.loadLifecycle),
-				event.messageId,
-				shouldIgnoreOwnUserMessage(event),
-				event.originId,
-			);
-			break;
 		case "tool_content":
 			handleToolContentResponse(messages, event);
-			break;
-		case "part_removed":
-			handlePartRemoved(activity, messages, event);
-			break;
-		case "message_removed":
-			handleMessageRemoved(activity, messages, event);
 			break;
 		case "session_switched":
 			// Handled in handleMessage — session_switched requires global
@@ -380,93 +299,9 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 }
 
-// ─── LLM Content Start ──────────────────────────────────────────────────────
-// Single source of truth for event types that indicate the LLM started
-// producing content for a turn. Used by replayEvents() to track `llmActive`
-// and infer whether a user_message was sent while the LLM was busy (queued).
-// A user_message that appears while llmActive is true gets `sentDuringEpoch`
-// set, so the UI can derive the "Queued" shimmer reactively.
-
-// LLM content start types — canonical source is event-classify.ts (shared
-// between server and frontend). Import from there so the turn-boundary
-// definition stays in sync with patchMissingDone and isLastTurnActive.
-import { LLM_CONTENT_START_TYPES } from "../../event-classify.js";
-
-function isLlmContentStart(type: string): boolean {
-	return LLM_CONTENT_START_TYPES.has(type as RelayMessage["type"]);
-}
-
-// ─── Async replay infrastructure ────────────────────────────────────────────
-
-// replayGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
-const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
-
 function yieldToEventLoop(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
-
-// ─── Live event buffer during replay ────────────────────────────────────────
-// When an async replay is in progress, live WebSocket chat events are buffered
-// instead of being dispatched immediately. This prevents interleaving of live
-// events (e.g. thinking_stop) with cached events being replayed, which would
-// cause data loss (e.g. cached thinking_deltas silently dropped after a live
-// thinking_stop prematurely marks the thinking message as done).
-// liveEventBuffer: per-session only (activity.liveEventBuffer).
-
-/** Event types handled by dispatchChatEvent — used to decide what to buffer. */
-const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
-	"user_message",
-	"delta",
-	"thinking_start",
-	"thinking_delta",
-	"thinking_stop",
-	"tool_start",
-	"tool_executing",
-	"tool_result",
-	"result",
-	"done",
-	"status",
-	"compaction",
-	"error",
-]);
-
-/** Start buffering live chat events for a specific session slot. */
-function startBufferingLiveEvents(activity?: SessionActivity): void {
-	if (activity) activity.liveEventBuffer = [];
-}
-
-/** Drain buffered live events through normal dispatch (called after replay commits). */
-function drainLiveEventBuffer(
-	activity?: SessionActivity,
-	messages?: SessionMessages,
-): void {
-	const buffer = activity?.liveEventBuffer ?? null;
-	if (activity) activity.liveEventBuffer = null;
-	if (!buffer || buffer.length === 0) return;
-	if (!activity || !messages) return;
-	for (const event of buffer) {
-		// Recomputed per event: draining a buffer replays the turn's own
-		// transitions, and the queued flag must follow the drained slot —
-		// not the session on screen, which may be a different one entirely.
-		const ctx: DispatchContext = {
-			isReplay: false,
-			isQueued: isLlmActive(activity.phase, messages.loadLifecycle),
-		};
-		dispatchChatEvent({ activity, messages }, event, ctx);
-	}
-}
-
-// Register abort hook: clearMessages bumps generation to cancel in-flight replays
-// and discards the live event buffer (session is changing, buffered events are stale).
-registerClearMessagesHook((sessionId: string | null) => {
-	if (sessionId) {
-		const activity = sessionActivity.get(sessionId);
-		if (activity) {
-			activity.liveEventBuffer = null;
-			activity.replayGeneration++;
-		}
-	}
-});
 
 // ─── Async history conversion ───────────────────────────────────────────────
 
@@ -508,198 +343,6 @@ async function convertHistoryAsync(
 	return result;
 }
 
-function isSubagentToolMessage(message: ChatMessage): message is ToolMessage {
-	return message.type === "tool" && isSubagentToolName(message.name);
-}
-
-function hasSubagentSessionLink(message: ToolMessage): boolean {
-	const metadata = message.metadata;
-	return (
-		typeof metadata?.["childSessionId"] === "string" ||
-		typeof metadata?.["sessionId"] === "string"
-	);
-}
-
-function isTerminalToolStatus(status: ToolMessage["status"]): boolean {
-	return status === "completed" || status === "error";
-}
-
-function preserveCachedSubagentToolState(
-	cachedMessages: readonly ChatMessage[],
-	freshMessages: readonly ChatMessage[],
-): ChatMessage[] {
-	const cachedByToolId = new Map<string, ToolMessage>();
-	for (const message of cachedMessages) {
-		if (isSubagentToolMessage(message)) cachedByToolId.set(message.id, message);
-	}
-	if (cachedByToolId.size === 0) return [...freshMessages];
-
-	return freshMessages.map((message) => {
-		if (!isSubagentToolMessage(message)) return message;
-		const cached = cachedByToolId.get(message.id);
-		if (!cached) return message;
-
-		let next = message;
-		if (!hasSubagentSessionLink(message) && hasSubagentSessionLink(cached)) {
-			next = {
-				...next,
-				metadata: { ...(cached.metadata ?? {}), ...(next.metadata ?? {}) },
-			};
-		}
-		if (
-			isTerminalToolStatus(cached.status) &&
-			!isTerminalToolStatus(next.status)
-		) {
-			next = { ...next, status: cached.status };
-		}
-		return next;
-	});
-}
-
-// ─── Shared chat-event dispatch ─────────────────────────────────────────────
-// Single dispatch function for ALL chat event types (PERSISTED_EVENT_TYPES
-// plus `status`). Used by both handleMessage (live) and replayEvents (replay)
-// to eliminate the parallel switch statements that previously diverged subtly.
-
-/** Context passed to dispatchChatEvent to abstract live/replay differences. */
-export interface DispatchContext {
-	/** True when replaying cached events (suppresses notifications). */
-	isReplay: boolean;
-	/** Whether the LLM is active *on the event's own session*
-	 *  (sentDuringEpoch source).
-	 *  Live: `isLlmActive(slot)`. Replay: local `llmActive` tracker. */
-	isQueued: boolean;
-}
-
-/** The session slot an event is dispatched into. Named by the caller, because
- *  the event's own session id is the only correct answer — a global "current
- *  slot" pointer routes a background session's output into the foreground. */
-interface ChatSlot {
-	readonly activity: SessionActivity;
-	readonly messages: SessionMessages;
-}
-
-/**
- * Dispatch a single chat event to the appropriate store handler.
- * Returns `true` if the event was a chat event (handled), `false` otherwise.
- *
- * Live vs replay divergences:
- * - `user_message`: 3rd arg uses `ctx.isQueued` (live: processing, replay: llmActive)
- * - `tool_result`: TodoWrite side-effect uses `getMessages()` (works for both)
- * - `done`: notifications fire only when `!ctx.isReplay` and not a subagent
- * - `error`: live routes through `handleChatError` (PTY/HANDLER/INSTANCE) +
- *   notifications; replay uses `handleError` directly (those error codes
- *   never appear in the cache — they're sent via sendToSession, not recordEvent)
- */
-function dispatchChatEvent(
-	slot: ChatSlot,
-	event: RelayMessage,
-	ctx: DispatchContext,
-): boolean {
-	const { activity, messages } = slot;
-
-	// ── Turn boundary detection ─────────────────────────────────────────
-	// When an event carries a messageId that differs from the current one,
-	// a new turn has started.  This single check replaces per-handler
-	// new-turn detection and handles all response shapes (text-first,
-	// tool-first, thinking-first).
-	const hasMessageId = "messageId" in event;
-	const msgId = hasMessageId
-		? (event as Record<string, unknown>)["messageId"]
-		: undefined;
-	if (event.type !== "user_message" && hasMessageId && msgId != null) {
-		advanceTurnIfNewMessage(
-			activity,
-			messages,
-			msgId as string,
-			event.type === "delta" ? event.partId : undefined,
-		);
-	}
-
-	switch (event.type) {
-		case "user_message":
-			if (shouldIgnoreOwnUserMessage(event) && !event.messageId) return true;
-			addUserMessage(
-				activity,
-				messages,
-				event.text,
-				undefined,
-				ctx.isQueued,
-				event.messageId,
-				shouldIgnoreOwnUserMessage(event),
-				event.originId,
-			);
-			return true;
-		case "delta":
-			handleDelta(activity, messages, event);
-			return true;
-		case "thinking_start":
-			handleThinkingStart(activity, messages, event);
-			return true;
-		case "thinking_delta":
-			handleThinkingDelta(activity, messages, event);
-			return true;
-		case "thinking_stop":
-			handleThinkingStop(activity, messages, event);
-			return true;
-		case "tool_start":
-			handleToolStart(activity, messages, event);
-			return true;
-		case "tool_executing":
-			handleToolExecuting(activity, messages, event);
-			return true;
-		case "tool_result":
-			handleToolResult(activity, messages, event);
-			// If this was a TodoWrite result, also update the todo store.
-			// The tool_result has no `name`, so look up the message in chat state.
-			{
-				const msgs = getMessages(messages);
-				const toolMsg = msgs.find(
-					(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
-				);
-				if (toolMsg?.name === "TodoWrite" && !event.is_error && event.content) {
-					updateTodosFromToolResult(event.content);
-				}
-			}
-			return true;
-		case "result":
-			handleResult(activity, messages, event);
-			return true;
-		case "done": {
-			handleDone(activity, messages, event);
-			if (!ctx.isReplay) {
-				// Only notify for root agent sessions — subagent completions are
-				// intermediate steps; the parent emits its own done when finished.
-				const doneSession = findSession(event.sessionId ?? "");
-				if (!doneSession?.parentID) {
-					triggerNotifications(event);
-				}
-			}
-			return true;
-		}
-		case "status":
-			handleStatus(activity, messages, event);
-			return true;
-		case "compaction":
-			handleCompaction(activity, messages, event);
-			return true;
-		case "error":
-			if (ctx.isReplay) {
-				// Replay: route directly to handleError. PTY/HANDLER/INSTANCE
-				// error codes never appear in the cache (they're sent via
-				// sendToSession, not recordEvent), so no routing is needed.
-				handleError(activity, messages, event);
-			} else {
-				// Live: full error routing (PTY, HANDLER, INSTANCE) + notifications.
-				handleChatError(activity, messages, event);
-				triggerNotifications(event);
-			}
-			return true;
-		default:
-			return false;
-	}
-}
-
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
 /**
@@ -712,12 +355,9 @@ export function handleMessage(msg: RelayMessage): void {
 	}
 	observeSessionActivity(msg);
 	if (msg.type === "project_attached") {
-		if (attachedProjectState.slug !== msg.slug) {
-			for (const activity of sessionActivity.values()) {
+		if (attachedProjectState.slug !== msg.slug)
+			for (const activity of sessionActivity.values())
 				activity.replayGeneration++;
-				activity.liveEventBuffer = null;
-			}
-		}
 		attachedProjectState.slug = msg.slug;
 		for (const listener of projectAttachedListeners) listener(msg.slug);
 		return;
@@ -727,23 +367,6 @@ export function handleMessage(msg: RelayMessage): void {
 	// session slot. notification_event is excluded by construction
 	// (PerSessionEventType union does not include it).
 	if (isPerSessionEvent(msg)) {
-		// Buffer live chat events during replay to prevent interleaving
-		if (CHAT_EVENT_TYPES.has(msg.type)) {
-			// The buffer belongs to the session the event names. A replay of a
-			// background session must not swallow the foreground's live events,
-			// and vice versa.
-			const eventActivity = msg.sessionId
-				? sessionActivity.get(msg.sessionId)
-				: undefined;
-			if (
-				eventActivity?.liveEventBuffer !== null &&
-				eventActivity?.liveEventBuffer !== undefined
-			) {
-				eventActivity.liveEventBuffer.push(msg);
-				return;
-			}
-		}
-
 		// Events requiring global coordination are handled in the switch
 		// below rather than routePerSession. All other per-session events
 		// route through routePerSession.
@@ -795,6 +418,8 @@ export function handleMessage(msg: RelayMessage): void {
 				route.sessionId !== msg.id &&
 				route.sessionId !== msg.replacesSessionId &&
 				route.sessionId !== (msg.parentID ?? parentOf(msg.id)) &&
+				// A switch carrying a transcript is the initial replay naming the
+				// provider's session; R12 retires the payload and this signal.
 				(sessionState.currentId !== null || (!msg.events && !msg.history))
 			)
 				break;
@@ -817,73 +442,15 @@ export function handleMessage(msg: RelayMessage): void {
 			// list's query (scope, filter, grouping) on every reload.
 			if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
 
-			// Bump the outgoing session's replayGeneration to abort any in-flight
-			// convertHistoryAsync or replay for the previous session.
+			// Invalidate an in-flight history page for the outgoing session.
 			if (previousSessionId) {
-				abortSessionReplay(previousSessionId);
+				const activity = sessionActivity.get(previousSessionId);
+				if (activity) activity.replayGeneration++;
 			}
 
 			activateSessionChatState(msg.id);
 			updateContextPercent(0);
 			clearTodoState();
-
-			if (msg.events) {
-				// Cache hit: replay raw events through existing chat handlers
-				// (full fidelity — same code paths as live streaming).
-				// Fire-and-forget — handleMessage stays synchronous.
-				const eventsHasMore = msg.eventsHasMore ?? false;
-				replayEvents(msg.events, msg.id, eventsHasMore).catch((err) => {
-					log.warn("Replay error:", err);
-				});
-			} else if (msg.history) {
-				// REST API fallback: convert to ChatMessages and prepend.
-				// REST history has no event-level data, so sentDuringEpoch
-				// can't be set during conversion.  Signal that the next
-				// status:processing should apply the queued-state fallback.
-				markPendingHistoryQueuedFallback();
-				// Fire-and-forget — handleMessage stays synchronous.
-				// Capture slot at start so commits go to the correct session.
-				const historyMsgs = msg.history.messages;
-				const hasMore = msg.history.hasMore;
-				const capturedSlot = getOrCreateSessionSlot(msg.id);
-				const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
-				capturedSlot.messages.historyLoading = true;
-				capturedSlot.messages.loadLifecycle = "loading";
-				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
-					.then((chatMsgs) => {
-						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
-							const mergedChatMsgs = preserveCachedSubagentToolState(
-								getMessages(capturedSlot.messages),
-								chatMsgs,
-							);
-							capturedSlot.messages.toolRegistry.clear();
-							setMessages(capturedSlot.messages, mergedChatMsgs);
-							seedRegistryFromMessages(
-								capturedSlot.activity,
-								capturedSlot.messages,
-								mergedChatMsgs,
-							);
-							restoreContextFromMessages(capturedSlot.messages);
-							capturedSlot.messages.historyHasMore = hasMore;
-							historyState.hasMore = hasMore;
-							// Transition loadLifecycle so the scroll controller
-							// exits "loading" state and scrolls to bottom.
-							capturedSlot.messages.loadLifecycle = "ready";
-						}
-						capturedSlot.messages.historyLoading = false;
-					})
-					.catch((err) => {
-						log.warn("History conversion error:", err);
-						capturedSlot.messages.historyLoading = false;
-					});
-			} else {
-				// Empty session (neither events nor history) — hasMore stays false
-				// so "Beginning of session" marker shows immediately.
-				// Transition loadLifecycle to "ready" so the scroll controller
-				// exits "loading" state and can handle live events normally.
-				const emptySlot = getOrCreateSessionSlot(msg.id);
-				emptySlot.messages.loadLifecycle = "ready";
-			}
 
 			// Apply server-provided input draft for this session.
 			// This uses the input_sync mechanism so InputArea picks it up
@@ -1152,101 +719,6 @@ export function handleMessage(msg: RelayMessage): void {
 			// Unknown message type — debug-only (tree-shaken in production)
 			log.debug("Unhandled message type:", msg.type, msg);
 			break;
-	}
-}
-
-// ─── Event Replay (session switch with cached events) ────────────────────────
-// Replays raw events through existing chat handlers — same code paths as live
-// streaming. Zero conversion, full fidelity, handles mid-stream.
-//
-// Queued-flag inference: The message cache NEVER contains status:processing
-// events (prompt.ts sends them via sendToSession, not recordEvent). So we
-// track LLM activity locally via LLM_CONTENT_START_TYPES: content events set
-// llmActive=true; done and non-retry errors set it false. A user_message
-// that appears while llmActive is true was queued behind an in-progress turn.
-
-export async function replayEvents(
-	events: RelayMessage[],
-	sessionId: string,
-	eventsHasMore = false,
-): Promise<void> {
-	// ── Slot-capture: capture at start, thread through all dispatches ──
-	const slot = getOrCreateSessionSlot(sessionId);
-	const gen = ++slot.activity.replayGeneration;
-
-	phaseStartReplay(slot.activity, slot.messages);
-	beginReplayBatch(slot.activity, slot.messages);
-	slot.messages.toolRegistry.clear();
-	startBufferingLiveEvents(slot.activity);
-
-	/** Ghost-write guard: abort if the slot's generation has changed
-	 *  (concurrent replay or clearMessages bumped it). */
-	function isAborted(): boolean {
-		return slot.activity.replayGeneration !== gen;
-	}
-
-	try {
-		// Local tracker: true when the LLM is producing content for the current
-		// turn. Inferred from event structure, NOT from status events (which
-		// aren't cached). Used to set the `queued` flag on user_message events.
-		let llmActive = false;
-
-		for (let i = 0; i < events.length; i++) {
-			// Abort: a newer replay or clearMessages happened
-			if (isAborted()) {
-				discardReplayBatch(slot.activity, slot.messages);
-				return; // don't call phaseEndReplay — clearMessages already reset loadLifecycle, or a new replay set it to loading
-			}
-
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const event = events[i]!;
-
-			// ── LLM activity tracking (before handler, so user_message reads it) ──
-			if (isLlmContentStart(event.type)) llmActive = true;
-			else if (event.type === "done") llmActive = false;
-			else if (event.type === "error" && event.code !== "RETRY")
-				llmActive = false;
-
-			const ctx: DispatchContext = { isReplay: true, isQueued: llmActive };
-			dispatchChatEvent(slot, event, ctx);
-
-			// Yield between chunks to keep the main thread responsive.
-			// NOTE: Do NOT call discardReplayBatch() on abort after yield.
-			// A newer replay may have already called beginReplayBatch() and
-			// started populating it — discarding here would destroy the new
-			// replay's batch. clearMessages() already sets replayBatch = null.
-			if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
-				await yieldToEventLoop();
-				if (isAborted()) return;
-			}
-		}
-
-		// Flush any pending debounced render (for mid-stream sessions
-		// where no "done" event has been received yet)
-		flushPendingRender(slot.activity, slot.messages);
-
-		// Single commit: page large replays so only the last 50 messages
-		// render immediately, with older messages buffered for lazy loading.
-		commitReplayFinal(slot.activity, slot.messages, sessionId, eventsHasMore);
-
-		// Reconcile processing state after replay completes.
-		// phaseEndReplay handles the edge case where llmActive is true
-		// but phase ended at "idle" (all turns completed during replay,
-		// but server says LLM is still active).
-		phaseEndReplay(slot.activity, llmActive);
-
-		// Drain live events that arrived while the replay was in progress.
-		// These are post-cache events dispatched as normal live events,
-		// continuing the timeline where the cache left off.
-		drainLiveEventBuffer(slot.activity, slot.messages);
-
-		renderDeferredMarkdown(slot.activity, slot.messages);
-	} finally {
-		// Safety: ensure buffer is cleared on any exit path not handled above.
-		// Normal path: drainLiveEventBuffer already set buffer to null.
-		// Abort path: clearMessages hook already set buffer to null.
-		// Error path: discard any un-drained buffer to prevent infinite buffering.
-		if (slot.activity) slot.activity.liveEventBuffer = null;
 	}
 }
 

@@ -1,413 +1,52 @@
-// ─── Regression: Dual-Render Duplication ─────────────────────────────────────
-// Verifies that loading a session via events cache and then receiving a
-// history_page does NOT produce duplicate messages in chatState.messages.
-//
-// Root cause (pre-fix): HistoryView and the live {#each} in MessageList
-// were two independent rendering surfaces. After replayEvents() populated
-// chatState.messages, the IntersectionObserver requested older history.
-// The server responded with history_page containing the same messages,
-// causing HistoryView to also render the full conversation → duplicates.
-//
-// Fix: All messages flow into chatState.messages. After replayEvents(),
-// historyState.hasMore is false, preventing spurious loads.
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedSessions } from "./session-fixtures.js";
 
-vi.hoisted(() => {
-	let store: Record<string, string> = {};
-	const mock = {
-		getItem: vi.fn((key: string) => store[key] ?? null),
-		setItem: vi.fn((key: string, value: string) => {
-			store[key] = value;
-		}),
-		removeItem: vi.fn((key: string) => {
-			delete store[key];
-		}),
-		clear: vi.fn(() => {
-			store = {};
-		}),
-		get length() {
-			return Object.keys(store).length;
-		},
-		key: vi.fn((_: number) => null),
-	};
-	Object.defineProperty(globalThis, "localStorage", {
-		value: mock,
-		writable: true,
-		configurable: true,
-	});
-});
-
-vi.mock("dompurify", () => ({
-	default: { sanitize: (html: string) => html },
-}));
+vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
-	chatState,
 	clearMessages,
-	clearSessionChatState,
-	historyState,
+	getOrCreateSessionSlot,
+	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
 beforeEach(() => {
-	clearMessages();
-	for (const id of ["session-a", "session-b"]) {
-		clearSessionChatState(id);
-	}
-	sessionState.currentId = null;
 	vi.useFakeTimers();
+	sessionState.currentId = "history-test";
+	clearMessages();
+	seedSessions([{ id: "history-test", title: "History", status: "idle" }]);
+	getOrCreateSessionSlot("history-test");
 });
+afterEach(() => vi.useRealTimers());
 
-afterEach(() => {
-	vi.useRealTimers();
-});
-
-describe("Regression: no dual-render duplication", () => {
-	it("events cache path sets historyState.hasMore to false", async () => {
-		routerState.path = "/s/session-a";
-		handleMessage({
-			type: "session_switched",
-			id: "session-a",
-			sessionId: "session-a",
-			events: [
-				{ type: "user_message", sessionId: "s1", text: "hello" },
-				{ type: "delta", sessionId: "s1", text: "world" },
-				{ type: "done", sessionId: "s1", code: 0 },
-			],
-		});
-		await vi.runAllTimersAsync();
-
-		expect(historyState.hasMore).toBe(false);
-		expect(chatState.messages.filter((m) => m.type === "user")).toHaveLength(1);
-	});
-
-	it("history_page after events replay does not duplicate messages", async () => {
-		// Step 1: Load session via events cache
-		routerState.path = "/s/session-a";
-		handleMessage({
-			type: "session_switched",
-			id: "session-a",
-			sessionId: "session-a",
-			events: [
-				{ type: "user_message", sessionId: "s1", text: "hello" },
-				{ type: "delta", sessionId: "s1", text: "response" },
-				{ type: "done", sessionId: "s1", code: 0 },
-			],
-		});
-		await vi.runAllTimersAsync();
-
-		const countAfterReplay = chatState.messages.length;
-		expect(countAfterReplay).toBeGreaterThan(0);
-
-		// Step 2: Simulate what the old IntersectionObserver race did —
-		// a history_page arrives containing the same conversation
-		handleMessage({
-			type: "history_page",
-			sessionId: "session-a",
-			messages: [
-				{
-					id: "m1",
-					role: "user",
-					parts: [{ id: "p1", type: "text", text: "hello" }],
-				},
-				{
-					id: "m2",
-					role: "assistant",
-					parts: [{ id: "p2", type: "text", text: "response" }],
-				},
-			],
-			hasMore: false,
-		});
-		await vi.runAllTimersAsync();
-
-		// The KEY protection is historyState.hasMore = false, which
-		// prevents the observer from firing. Verify that:
-		expect(historyState.hasMore).toBe(false);
-	});
-
-	it("REST fallback sets historyState.hasMore from server", async () => {
-		routerState.path = "/s/session-b";
-		handleMessage({
-			type: "session_switched",
-			id: "session-b",
-			sessionId: "session-b",
-			history: {
-				messages: [
-					{
-						id: "m1",
-						role: "user",
-						parts: [{ id: "p1", type: "text", text: "msg" }],
-					},
-				],
-				hasMore: true,
+const page = (id: string, hasMore: boolean) =>
+	handleMessage({
+		type: "history_page",
+		sessionId: "history-test",
+		messages: [
+			{
+				id,
+				role: "user",
+				parts: [{ id: `${id}-text`, type: "text", text: id }],
 			},
-		});
-		await vi.runAllTimersAsync();
-
-		expect(historyState.hasMore).toBe(true);
-		expect(chatState.messages.filter((m) => m.type === "user")).toHaveLength(1);
+		],
+		hasMore,
 	});
 
-	it("session switch clears historyState and messages", async () => {
-		// Load session A
-		routerState.path = "/s/session-a";
-		handleMessage({
-			type: "session_switched",
-			id: "session-a",
-			sessionId: "session-a",
-			events: [
-				{ type: "user_message", sessionId: "s1", text: "in A" },
-				{ type: "done", sessionId: "s1", code: 0 },
-			],
-		});
+describe("history_page until R12", () => {
+	it("prepends older rows and updates the paging flag", async () => {
+		page("newer", true);
 		await vi.runAllTimersAsync();
-		expect(chatState.messages.length).toBeGreaterThan(0);
-		expect(historyState.hasMore).toBe(false);
-
-		// Switch to session B (empty)
-		routerState.path = "/s/session-b";
-		handleMessage({
-			type: "session_switched",
-			id: "session-b",
-			sessionId: "session-b",
-		});
-		expect(chatState.messages).toHaveLength(0);
-		// historyState resets via clearMessages() — hasMore defaults to false (disarmed)
-		expect(historyState.hasMore).toBe(false);
-	});
-});
-
-// ─── History page accumulation ───────────────────────────────────────────────
-
-describe("history page accumulation", () => {
-	it("REST fallback displays the initial page", async () => {
-		routerState.path = "/s/s1";
-		handleMessage({
-			type: "session_switched",
-			id: "s1",
-			sessionId: "s1",
-			history: {
-				messages: [
-					{
-						id: "m1",
-						role: "user",
-						parts: [{ id: "p1", type: "text", text: "a" }],
-					},
-					{
-						id: "m2",
-						role: "assistant",
-						parts: [{ id: "p2", type: "text", text: "b" }],
-					},
-					{
-						id: "m3",
-						role: "user",
-						parts: [{ id: "p3", type: "text", text: "c" }],
-					},
-				],
-				hasMore: true,
-			},
-		});
+		page("older", false);
 		await vi.runAllTimersAsync();
-
-		expect(chatState.messages).toHaveLength(3);
-		expect(historyState.hasMore).toBe(true);
-	});
-
-	it("history_page prepends each older page without dropping messages", async () => {
-		// Initial page: 3 messages
-		routerState.path = "/s/s2";
-		handleMessage({
-			type: "session_switched",
-			id: "s2",
-			sessionId: "s2",
-			history: {
-				messages: [
-					{
-						id: "m1",
-						role: "user",
-						parts: [{ id: "p1", type: "text", text: "a" }],
-					},
-					{
-						id: "m2",
-						role: "assistant",
-						parts: [{ id: "p2", type: "text", text: "b" }],
-					},
-					{
-						id: "m3",
-						role: "user",
-						parts: [{ id: "p3", type: "text", text: "c" }],
-					},
-				],
-				hasMore: true,
-			},
-		});
-		await vi.runAllTimersAsync();
-		expect(chatState.messages).toHaveLength(3);
-
-		// Second page: 2 more messages
-		handleMessage({
-			type: "history_page",
-			sessionId: "s2",
-			messages: [
-				{
-					id: "m4",
-					role: "user",
-					parts: [{ id: "p4", type: "text", text: "d" }],
-				},
-				{
-					id: "m5",
-					role: "assistant",
-					parts: [{ id: "p5", type: "text", text: "e" }],
-				},
-			],
-			hasMore: true,
-		});
-		await vi.runAllTimersAsync();
-
-		expect(chatState.messages).toHaveLength(5);
-		expect(historyState.hasMore).toBe(true);
-
-		// Third page: final 1 message
-		handleMessage({
-			type: "history_page",
-			sessionId: "s2",
-			messages: [
-				{
-					id: "m6",
-					role: "user",
-					parts: [{ id: "p6", type: "text", text: "f" }],
-				},
-			],
-			hasMore: false,
-		});
-		await vi.runAllTimersAsync();
-
-		expect(chatState.messages).toHaveLength(6);
-		expect(historyState.hasMore).toBe(false);
-	});
-
-	it("session switch clears the visible history", async () => {
-		// Load with history
-		routerState.path = "/s/s3";
-		handleMessage({
-			type: "session_switched",
-			id: "s3",
-			sessionId: "s3",
-			history: {
-				messages: [
-					{
-						id: "m1",
-						role: "user",
-						parts: [{ id: "p1", type: "text", text: "a" }],
-					},
-				],
-				hasMore: true,
-			},
-		});
-		await vi.runAllTimersAsync();
-		expect(chatState.messages).toHaveLength(1);
-
-		// Switch away — the old session's messages must leave the visible list.
-		routerState.path = "/s/s4";
-		handleMessage({ type: "session_switched", id: "s4", sessionId: "s4" });
-		expect(chatState.messages).toHaveLength(0);
-		expect(historyState.hasMore).toBe(false);
-		expect(historyState.loading).toBe(false);
-	});
-
-	it("events cache path does not offer older pages", async () => {
-		routerState.path = "/s/s5";
-		handleMessage({
-			type: "session_switched",
-			id: "s5",
-			sessionId: "s5",
-			events: [
-				{ type: "user_message", sessionId: "s1", text: "hello" },
-				{ type: "delta", sessionId: "s1", text: "world" },
-				{ type: "done", sessionId: "s1", code: 0 },
-			],
-		});
-		await vi.runAllTimersAsync();
-
-		expect(historyState.hasMore).toBe(false);
-	});
-
-	it("history_page sets loading to false", async () => {
-		routerState.path = "/s/s6";
-		sessionState.currentId = "s6";
-		// Simulate loading state
-		historyState.loading = true;
-		historyState.hasMore = true;
-
-		handleMessage({
-			type: "history_page",
-			sessionId: "s6",
-			messages: [
-				{
-					id: "m1",
-					role: "user",
-					parts: [{ id: "p1", type: "text", text: "a" }],
-				},
-			],
-			hasMore: false,
-		});
-		await vi.runAllTimersAsync();
-
-		expect(historyState.loading).toBe(false);
-	});
-
-	it("messages prepend in correct order across pages", async () => {
-		// Page 1: newest messages
-		routerState.path = "/s/s7";
-		handleMessage({
-			type: "session_switched",
-			id: "s7",
-			sessionId: "s7",
-			history: {
-				messages: [
-					{
-						id: "m3",
-						role: "user",
-						parts: [{ id: "p3", type: "text", text: "third" }],
-					},
-				],
-				hasMore: true,
-			},
-		});
-		await vi.runAllTimersAsync();
-
-		const afterFirst = chatState.messages.filter((m) => m.type === "user");
-		expect(afterFirst).toHaveLength(1);
-		expect((afterFirst[0] as { text: string }).text).toBe("third");
-
-		// Page 2: older messages prepended
-		handleMessage({
-			type: "history_page",
-			sessionId: "s7",
-			messages: [
-				{
-					id: "m1",
-					role: "user",
-					parts: [{ id: "p1", type: "text", text: "first" }],
-				},
-				{
-					id: "m2",
-					role: "user",
-					parts: [{ id: "p2", type: "text", text: "second" }],
-				},
-			],
-			hasMore: false,
-		});
-		await vi.runAllTimersAsync();
-
-		const allUsers = chatState.messages.filter((m) => m.type === "user");
-		expect(allUsers).toHaveLength(3);
-		// Prepended messages come first, then existing
-		expect((allUsers[0] as { text: string }).text).toBe("first");
-		expect((allUsers[1] as { text: string }).text).toBe("second");
-		expect((allUsers[2] as { text: string }).text).toBe("third");
+		const messages = sessionMessages.get("history-test");
+		expect(
+			messages?.messages
+				.filter((item) => item.type === "user")
+				.map((item) => item.type === "user" && item.text),
+		).toEqual(["older", "newer"]);
+		expect(messages?.historyHasMore).toBe(false);
+		expect(messages?.historyLoading).toBe(false);
 	});
 });

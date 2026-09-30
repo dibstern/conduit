@@ -55,6 +55,7 @@
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, sessionList } from "../../stores/session-list.svelte.js";
+	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
@@ -443,6 +444,12 @@
 	const connected = $derived(
 		wsState.status === "connected" || wsState.status === "processing",
 	);
+	$effect(() => {
+		const project = attachedProjectState.slug ?? "";
+		const sessionId = project ? sessionState.currentId : null;
+		untrack(() => viewTranscript(project, sessionId));
+		return () => viewTranscript(project, null);
+	});
 	$effect(() => {
 		const route = getCurrentRoute();
 		const projectHint = getCurrentSearchParams().get("p");

@@ -45,8 +45,6 @@ export function testActivity(sessionId?: string): SessionActivity {
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
-		liveEventBuffer: null,
-		eventsHasMore: false,
 		renderTimer: null,
 		thinkingStartTime: 0,
 	};
@@ -60,14 +58,13 @@ export function testMessages(sessionId?: string): SessionMessages {
 	const id = sessionId ?? sessionState.currentId ?? TEST_SESSION_ID;
 	const m: SessionMessages = {
 		messages: [],
+		transcript: null,
 		currentAssistantText: "",
 		loadLifecycle: "empty",
 		contextPercent: 0,
 		historyHasMore: false,
 		historyLoading: false,
 		toolRegistry: createToolRegistry(),
-		replayBatch: null,
-		replayBuffer: null,
 	};
 	sessionMessages.set(id, m);
 	return m;

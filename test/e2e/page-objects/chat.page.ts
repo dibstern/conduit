@@ -125,11 +125,12 @@ export class ChatPage {
 		await this.turnActivityToggles
 			.last()
 			.waitFor({ state: "visible", timeout });
-		for (const toggle of await this.turnActivityToggles.all()) {
-			if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-				await toggle.click();
+		await this.turnActivityToggles.evaluateAll((toggles) => {
+			for (const toggle of toggles) {
+				if (toggle.getAttribute("aria-expanded") !== "true")
+					(toggle as HTMLButtonElement).click();
 			}
-		}
+		});
 	}
 
 	/** Wait for a thinking block to appear */

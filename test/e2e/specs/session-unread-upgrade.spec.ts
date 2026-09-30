@@ -36,6 +36,10 @@ function rewindToMain(dbPath: string, sessionId: string, state: MainReadState) {
 		for (const column of ["read_at", "marked_unread_at"])
 			if (!columns.has(column))
 				db.exec(`ALTER TABLE sessions ADD COLUMN ${column} INTEGER`);
+		// Rewinding the ledger must also remove objects from later migrations
+		// that do not have an idempotent column guard when they run again.
+		db.exec("DROP INDEX IF EXISTS idx_message_tombstones_session_version");
+		db.exec("DROP TABLE IF EXISTS message_tombstones");
 		// Main's ledger ends before session_attention, so every later
 		// migration is unrecorded too.
 		db.exec(

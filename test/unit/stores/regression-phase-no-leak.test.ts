@@ -43,8 +43,6 @@ import {
 	currentChat,
 	getOrCreateSessionSlot,
 	getSessionPhase,
-	handleDelta,
-	handleDone,
 	handleStatus,
 	sessionActivity,
 	sessionMessages,
@@ -80,27 +78,6 @@ afterEach(() => {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Phase does not leak between sessions", () => {
-	it("session A streaming, session B idle — phases are independent via getSessionPhase", () => {
-		// Start streaming on session A
-		const slotA = getOrCreateSessionSlot("session-a");
-		handleDelta(slotA.activity, slotA.messages, {
-			type: "delta",
-			sessionId: "session-a",
-			text: "streaming on A",
-		});
-
-		// During the transition, phase transitions write to chatState.phase
-		// (legacy global), not activity.phase. The global phase is "streaming"
-		// because handleDelta called phaseToStreaming.
-		expect(chatState.phase).toBe("streaming");
-
-		// Session B should be idle (never touched)
-		// getSessionPhase reads from activity.phase — during transition,
-		// this stays at the factory default until per-session phase writes
-		// are fully migrated.
-		expect(getSessionPhase("session-b")).toBe("idle");
-	});
-
 	it("status:idle clears the global phase for the dispatched session", () => {
 		const slotA = getOrCreateSessionSlot("session-a");
 
@@ -115,38 +92,6 @@ describe("Phase does not leak between sessions", () => {
 
 		// Global phase should be idle
 		expect(chatState.phase).toBe("idle");
-	});
-
-	it("done on session A does not affect session B's phase", () => {
-		const slotA = getOrCreateSessionSlot("session-a");
-		const slotB = getOrCreateSessionSlot("session-b");
-
-		// Stream on A
-		handleDelta(slotA.activity, slotA.messages, {
-			type: "delta",
-			sessionId: "session-a",
-			text: "text on A",
-		});
-		// Set B to streaming too
-		handleDelta(slotB.activity, slotB.messages, {
-			type: "delta",
-			sessionId: "session-b",
-			text: "text on B",
-		});
-
-		// Done on A only
-		handleDone(slotA.activity, slotA.messages, {
-			type: "done",
-			sessionId: "session-a",
-			code: 0,
-		});
-
-		// Both slots should have the correct assistant message
-		// The key check: B's activity phase should still reflect
-		// its own streaming state, not A's idle state
-		expect(slotA.activity.phase).toBe("idle");
-		// Note: during transition, chatState.phase is shared.
-		// Per-session phase (slotB.activity.phase) reflects the correct state.
 	});
 
 	it("getSessionPhase returns idle for non-existent sessions", () => {

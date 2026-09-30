@@ -10,7 +10,6 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
-	handleResult,
 	restoreContextFromMessages,
 	type SessionActivity,
 	type SessionMessages,
@@ -18,7 +17,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearDiscoveryState,
-	handleContextWindowInfo,
 	handleModelInfo,
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -26,7 +24,7 @@ import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilities } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
-function resultMsg(usage: {
+function _resultMsg(usage: {
 	input?: number;
 	output?: number;
 	cache_read?: number;
@@ -49,50 +47,17 @@ function selectModel(model: string): void {
 }
 
 describe("context percent computation", () => {
-	let activity: SessionActivity;
+	let _activity: SessionActivity;
 	let messages: SessionMessages;
 
 	beforeEach(() => {
-		activity = testActivity();
+		_activity = testActivity();
 		messages = testMessages();
 		clearDiscoveryState();
 	});
 
 	afterEach(() => {
 		clearDiscoveryState();
-	});
-
-	it("computes percent from model limit on result", () => {
-		selectModel("claude-fable-5");
-		setClaudeProvider([
-			{
-				id: "claude-fable-5",
-				name: "Claude Fable 5",
-				providerId: "claude",
-				limit: { context: 200_000, output: 128_000 },
-			},
-		]);
-		handleResult(activity, messages, resultMsg({ cache_read: 100_000 }));
-		expect(messages.contextPercent).toBe(50);
-	});
-
-	it("uses the selected 1m context-window override", () => {
-		selectModel("claude-fable-5");
-		handleContextWindowInfo({
-			type: "context_window_info",
-			contextWindow: "1m",
-			options: [],
-		});
-		setClaudeProvider([
-			{
-				id: "claude-fable-5",
-				name: "Claude Fable 5",
-				providerId: "claude",
-				limit: { context: 200_000, output: 128_000 },
-			},
-		]);
-		handleResult(activity, messages, resultMsg({ cache_read: 100_000 }));
-		expect(messages.contextPercent).toBe(10);
 	});
 
 	it("restores percent from the last result message in history", () => {

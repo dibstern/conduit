@@ -3,10 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
 	currentChat,
-	getOrCreateSessionActivity,
-	getOrCreateSessionMessages,
 	getOrCreateSessionSlot,
-	handleDelta,
 	sessionActivity,
 	sessionMessages,
 	setMessages,
@@ -232,45 +229,6 @@ it("keeps the family list owned by session_family messages", () => {
 	expect(sessionState.familySessions).toEqual([original]);
 	applySessionRemoved("root");
 	expect(sessionState.familySessions).toEqual([original]);
-});
-
-describe("clearSessionState", () => {
-	it("clears evicted activity, replay generations and timers on project reset", () => {
-		vi.useFakeTimers();
-		try {
-			const evicted = getOrCreateSessionSlot("evicted");
-			evicted.activity.replayGeneration = 7;
-			handleDelta(evicted.activity, evicted.messages, {
-				type: "delta",
-				sessionId: "evicted",
-				text: "pending",
-			});
-			for (let index = 0; index < 21; index += 1)
-				getOrCreateSessionSlot(`visited-${index}`);
-			const activityOnly = getOrCreateSessionActivity("activity-only");
-			handleDelta(activityOnly, getOrCreateSessionMessages("activity-only"), {
-				type: "delta",
-				sessionId: "activity-only",
-				text: "pending",
-			});
-			getOrCreateSessionMessages("messages-only");
-			const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
-			expect(sessionMessages.has("evicted")).toBe(false);
-			expect(sessionActivity.has("evicted")).toBe(true);
-			clearSessionState();
-			expect(sessionActivity.size).toBe(0);
-			expect(sessionMessages.size).toBe(0);
-			expect(evicted.activity.replayGeneration).toBe(8);
-			expect(activityOnly.replayGeneration).toBe(1);
-			expect(clearTimeoutSpy).toHaveBeenCalled();
-			expect(vi.getTimerCount()).toBe(0);
-			vi.advanceTimersByTime(100);
-			expect(vi.getTimerCount()).toBe(0);
-			clearTimeoutSpy.mockRestore();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
 });
 
 describe("switchToSession", () => {

@@ -32,24 +32,19 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
-	chatState,
 	clearMessages,
-	phaseStartReplay,
-	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { createScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
+import { testMessages } from "../../helpers/test-session-slot.js";
 
-let ta: SessionActivity;
 let tm: SessionMessages;
 
 describe("Scroll lifecycle integration", () => {
 	beforeEach(() => {
 		sessionState.currentId = "test-session";
 		clearMessages();
-		ta = testActivity();
 		tm = testMessages();
 	});
 
@@ -61,16 +56,15 @@ describe("Scroll lifecycle integration", () => {
 		// 1. Start: empty
 		expect(ctrl.state).toBe("loading");
 
-		// 2. Start replay
-		phaseStartReplay(ta, tm);
-		expect(chatState.loadLifecycle).toBe("loading");
+		// 2. Cold transcript view starts loading
+		tm.loadLifecycle = "loading";
 		expect(ctrl.state).toBe("loading");
 
-		// 3. Commit messages (simulate commitReplayFinal)
+		// 3. A page is available while layout settles
 		tm.loadLifecycle = "committed";
 		expect(ctrl.state).toBe("settling");
 
-		// 4. Deferred markdown completes
+		// 4. The transcript is ready
 		tm.loadLifecycle = "ready";
 		expect(ctrl.state).toBe("following");
 

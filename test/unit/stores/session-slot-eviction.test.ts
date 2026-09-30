@@ -133,8 +133,7 @@ describe("Tier 2 LRU cap", () => {
 		expect(reconstructed.historyHasMore).toBe(false);
 		expect(reconstructed.historyLoading).toBe(false);
 		expect(reconstructed.messages).toHaveLength(0);
-		expect(reconstructed.replayBatch).toBeNull();
-		expect(reconstructed.replayBuffer).toBeNull();
+		expect(reconstructed.transcript).toBeNull();
 	});
 });
 

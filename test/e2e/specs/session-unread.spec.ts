@@ -501,14 +501,18 @@ async function dwellAndViewport(
 	await test.step("scrolled up keeps it until the turn end is in view", async () => {
 		const viewport = A.viewportSize();
 		if (!viewport) throw new Error("window A has no viewport");
-		await A.setViewportSize({ width: viewport.width, height: 420 });
+		await A.setViewportSize({ width: viewport.width, height: 300 });
 		await transcript(A).evaluate((el) => {
 			el.scrollTop = 0;
+			// Establish the detached state before the paused-clock interaction.
+			el.dispatchEvent(new Event("scroll"));
+			el.dispatchEvent(new Event("scroll"));
 		});
 		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
 		await paused(A, async () => {
 			await transcript(A).click({ position: { x: 24, y: 24 } });
 			await A.clock.runFor(1_500);
+			await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
 			await expectKept(ctx, 1, "scrolled up");
 			const centre = await transcriptCentre(A);
 			await A.mouse.move(centre.x, centre.y);
