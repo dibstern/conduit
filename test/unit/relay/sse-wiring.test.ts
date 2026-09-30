@@ -1,20 +1,30 @@
+import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import {
+	OverridesStateTag,
+	startProcessingTimeout,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { shouldCache } from "../../../src/lib/relay/event-pipeline.js";
 import {
 	extractSessionId,
-	handleSSEEvent,
+	handleSSEEventEffect,
 	type SSEWiringDeps,
-	wireSSEConsumer,
+	type wireSSEConsumerEffect,
 } from "../../../src/lib/relay/sse-wiring.js";
 import { TRUNCATION_THRESHOLD } from "../../../src/lib/relay/truncate-content.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import {
+	makeSSETestServices,
+	runSSEEvent,
+	wireSSEConsumerForTest,
+} from "../../helpers/sse-effect-harness.js";
 
 // ─── extractSessionId ────────────────────────────────────────────────────────
 
 describe("extractSessionId", () => {
-	it("returns top-level sessionID", () => {
+	it("returns top-level sessionID", async () => {
 		const event: OpenCodeEvent = {
 			type: "message.part.delta",
 			properties: { sessionID: "s1" },
@@ -22,7 +32,7 @@ describe("extractSessionId", () => {
 		expect(extractSessionId(event)).toBe("s1");
 	});
 
-	it("returns sessionID nested in part", () => {
+	it("returns sessionID nested in part", async () => {
 		const event: OpenCodeEvent = {
 			type: "message.part.updated",
 			properties: { part: { sessionID: "s2" } },
@@ -30,7 +40,7 @@ describe("extractSessionId", () => {
 		expect(extractSessionId(event)).toBe("s2");
 	});
 
-	it("returns sessionID nested in info", () => {
+	it("returns sessionID nested in info", async () => {
 		const event: OpenCodeEvent = {
 			type: "message.updated",
 			properties: { info: { sessionID: "s3" } },
@@ -38,7 +48,7 @@ describe("extractSessionId", () => {
 		expect(extractSessionId(event)).toBe("s3");
 	});
 
-	it("returns id from info for session.updated", () => {
+	it("returns id from info for session.updated", async () => {
 		const event: OpenCodeEvent = {
 			type: "session.updated",
 			properties: { info: { id: "s4" } },
@@ -46,7 +56,7 @@ describe("extractSessionId", () => {
 		expect(extractSessionId(event)).toBe("s4");
 	});
 
-	it("returns undefined when no sessionID found", () => {
+	it("returns undefined when no sessionID found", async () => {
 		const event: OpenCodeEvent = {
 			type: "unknown",
 			properties: {},
@@ -54,7 +64,7 @@ describe("extractSessionId", () => {
 		expect(extractSessionId(event)).toBeUndefined();
 	});
 
-	it("prefers top-level sessionID over nested", () => {
+	it("prefers top-level sessionID over nested", async () => {
 		const event: OpenCodeEvent = {
 			type: "message.part.delta",
 			properties: {
@@ -69,7 +79,7 @@ describe("extractSessionId", () => {
 // ─── shouldCache ─────────────────────────────────────────────────────────────
 
 describe("shouldCache", () => {
-	it("returns true for chat-relevant types", () => {
+	it("returns true for chat-relevant types", async () => {
 		const cacheableTypes = [
 			"user_message",
 			"delta",
@@ -88,7 +98,7 @@ describe("shouldCache", () => {
 		}
 	});
 
-	it("returns false for non-chat types", () => {
+	it("returns false for non-chat types", async () => {
 		const nonCacheable = [
 			"file_changed",
 			"permission_request",
@@ -104,10 +114,10 @@ describe("shouldCache", () => {
 	});
 });
 
-// ─── handleSSEEvent ──────────────────────────────────────────────────────────
+// ─── handleSSEEventEffect ──────────────────────────────────────────────────────────
 
-describe("handleSSEEvent", () => {
-	it("translates and firehoses events to every client on the project (Phase 0b)", () => {
+describe("handleSSEEventEffect", () => {
+	it("translates and firehoses events to every client on the project (Phase 0b)", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "delta",
@@ -123,7 +133,7 @@ describe("handleSSEEvent", () => {
 			type: "message.part.delta",
 			properties: { sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
@@ -139,7 +149,7 @@ describe("handleSSEEvent", () => {
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("firehoses events regardless of which session they belong to (Phase 0b)", () => {
+	it("firehoses events regardless of which session they belong to (Phase 0b)", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "delta",
@@ -155,7 +165,7 @@ describe("handleSSEEvent", () => {
 			type: "message.part.delta",
 			properties: { sessionID: "other-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"other-session",
@@ -165,7 +175,7 @@ describe("handleSSEEvent", () => {
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("firehoses events even when no clients are actively viewing the session (Phase 0b)", () => {
+	it("firehoses events even when no clients are actively viewing the session (Phase 0b)", async () => {
 		// Phase 0b: delivery is no longer viewer-gated. The event goes to all
 		// connected clients. The frontend dispatcher handles routing into the
 		// correct per-session slot.
@@ -185,7 +195,7 @@ describe("handleSSEEvent", () => {
 			type: "message.part.delta",
 			properties: { sessionID: "other-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// Event still fires on the firehose — the "no viewers" signal only
 		// controls cross-session notification_event fallback (not tested here
@@ -197,200 +207,99 @@ describe("handleSSEEvent", () => {
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 	});
 
-	it("clears processing timeout when done event arrives for a session", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "session.status",
-			properties: { sessionID: "active-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
+	it.each([
+		[
+			"clears processing timeout when done event arrives for a session",
+			"done",
 			"active-session",
-		);
-	});
-
-	it("clears processing timeout for done on any session (not just active)", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "session.status",
-			properties: { sessionID: "other-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		expect(deps.processingTimeouts.clearProcessingTimeout).toHaveBeenCalledWith(
+			"clear",
+		],
+		[
+			"clears processing timeout for done on any session (not just active)",
+			"done",
 			"other-session",
-		);
-	});
-
-	it("resets processing timeout on non-done events (inactivity timer)", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: { sessionID: "active-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
+			"clear",
+		],
+		[
+			"resets processing timeout on non-done events (inactivity timer)",
+			"delta",
 			"active-session",
-		);
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
-	});
-
-	it("does not reset processing timeout when no sessionID is present", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: {},
-		};
-		handleSSEEvent(deps, event);
-
-		expect(
-			deps.processingTimeouts.resetProcessingTimeout,
-		).not.toHaveBeenCalled();
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
-	});
-
-	it("resets processing timeout on non-done events for active session", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: { sessionID: "active-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalled();
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
-	});
-
-	it("resets processing timeout on non-done events for any session (per-session timer)", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: { sessionID: "other-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		expect(deps.processingTimeouts.resetProcessingTimeout).toHaveBeenCalledWith(
+			"reset",
+		],
+		[
+			"resets processing timeout on non-done events for active session",
+			"delta",
+			"active-session",
+			"reset",
+		],
+		[
+			"resets processing timeout on non-done events for any session (per-session timer)",
+			"delta",
 			"other-session",
+			"reset",
+		],
+		[
+			"resets processing timeout on retry events for active session",
+			"retry",
+			"active-session",
+			"reset",
+		],
+		[
+			"does not reset processing timeout when no sessionID is present",
+			"delta",
+			undefined,
+			"same",
+		],
+	] as const)("%s", async (_name, kind, sessionId, expected) => {
+		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		const message: RelayMessage =
+			kind === "done"
+				? { type: "done", sessionId: "s1", code: 0 }
+				: kind === "retry"
+					? {
+							type: "error",
+							sessionId: "s1",
+							code: "RETRY",
+							message: "Retrying...",
+						}
+					: { type: "delta", sessionId: "s1", text: "hello" };
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [message],
+		});
+		const event: OpenCodeEvent = {
+			type: kind === "delta" ? "message.part.delta" : "session.status",
+			properties: sessionId ? { sessionID: sessionId } : {},
+		};
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const timeoutSessionId = sessionId ?? "active-session";
+				yield* startProcessingTimeout(
+					timeoutSessionId,
+					"1 minute",
+					() => Effect.void,
+				);
+				const ref = yield* OverridesStateTag;
+				const before = (yield* Ref.get(ref)).sessions.get(
+					timeoutSessionId,
+				)?.processingTimeoutToken;
+				yield* handleSSEEventEffect(deps, event);
+				const after = (yield* Ref.get(ref)).sessions.get(
+					timeoutSessionId,
+				)?.processingTimeoutToken;
+				expect(before).toBeDefined();
+				if (expected === "clear") expect(after).toBeUndefined();
+				else if (expected === "reset") expect(after).not.toBe(before);
+				else expect(after).toBe(before);
+			}).pipe(Effect.provide(services.layer)),
 		);
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
 	});
 
-	it("resets processing timeout on retry events for active session", () => {
+	it("records permission.asked events through pending permission state", async () => {
 		const deps = createMockSSEWiringDeps();
-		// Retry now produces only a single error message (no processing status)
-		const messages: RelayMessage[] = [
-			{ type: "error", sessionId: "s1", code: "RETRY", message: "Retrying..." },
-		];
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages,
-		});
-
-		const event: OpenCodeEvent = {
-			type: "session.status",
-			properties: { sessionID: "active-session" },
-		};
-		handleSSEEvent(deps, event);
-
-		// The error message should reset the timeout (it's not "done")
-		expect(
-			deps.processingTimeouts.resetProcessingTimeout,
-		).toHaveBeenCalledTimes(1);
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
-	});
-
-	it("does not reset processing timeout when no sessionID is present", () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: {},
-		};
-		handleSSEEvent(deps, event);
-
-		expect(
-			deps.processingTimeouts.resetProcessingTimeout,
-		).not.toHaveBeenCalled();
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
-	});
-
-	it("records permission.asked events through pending permission state", () => {
-		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		vi.spyOn(services.pendingInteractions, "recordPermissionRequest");
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
@@ -403,10 +312,10 @@ describe("handleSSEEvent", () => {
 				always: ["git *"],
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
 		expect(
-			deps.pendingInteractions.recordPermissionRequest,
+			services.pendingInteractions.recordPermissionRequest,
 		).toHaveBeenCalledWith({
 			requestId: "perm-1",
 			sessionId: "session-1",
@@ -419,7 +328,7 @@ describe("handleSSEEvent", () => {
 		});
 	});
 
-	it("broadcast permission_request includes sessionId from the event", () => {
+	it("broadcast permission_request includes sessionId from the event", async () => {
 		const deps = createMockSSEWiringDeps();
 
 		const event: OpenCodeEvent = {
@@ -430,7 +339,7 @@ describe("handleSSEEvent", () => {
 				sessionID: "ses-abc",
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -440,8 +349,9 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("translates and routes question.asked events to the question's session", () => {
+	it("translates and routes question.asked events to the question's session", async () => {
 		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
 		const translated: RelayMessage = {
 			type: "ask_user",
 			sessionId: "s1",
@@ -457,7 +367,7 @@ describe("handleSSEEvent", () => {
 			type: "question.asked",
 			properties: { id: "q-1", questions: [], sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
 		// ask_user messages are routed to the question's session, not broadcast
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
@@ -466,14 +376,14 @@ describe("handleSSEEvent", () => {
 		);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
 		expect(
-			deps.sessionService.incrementPendingQuestionCount,
+			services.sessionService.incrementPendingQuestionCount,
 		).toHaveBeenCalledWith("active-session");
 		expect(
-			deps.sessionService.incrementPendingQuestionCount,
+			services.sessionService.incrementPendingQuestionCount,
 		).toHaveBeenCalledTimes(1);
 	});
 
-	it("broadcasts question resolutions so family viewers drop replayed questions", () => {
+	it("broadcasts question resolutions so family viewers drop replayed questions", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "ask_user_resolved",
@@ -485,7 +395,7 @@ describe("handleSSEEvent", () => {
 			messages: [translated],
 		});
 
-		handleSSEEvent(deps, {
+		await runSSEEvent(deps, {
 			type: "question.replied",
 			properties: { sessionID: "child-session", requestID: "que_q1" },
 		});
@@ -493,8 +403,10 @@ describe("handleSSEEvent", () => {
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(translated);
 	});
 
-	it("routes permission.replied events to pending permission state", () => {
+	it("routes permission.replied events to pending permission state", async () => {
 		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		vi.spyOn(services.pendingInteractions, "markPermissionReplied");
 
 		const event: OpenCodeEvent = {
 			type: "permission.replied",
@@ -504,14 +416,14 @@ describe("handleSSEEvent", () => {
 				reply: "once",
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
-		expect(deps.pendingInteractions.markPermissionReplied).toHaveBeenCalledWith(
-			"perm-1",
-		);
+		expect(
+			services.pendingInteractions.markPermissionReplied,
+		).toHaveBeenCalledWith("perm-1");
 	});
 
-	it("does not record non-cacheable events to cache", () => {
+	it("does not record non-cacheable events to cache", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "file_changed",
@@ -528,7 +440,7 @@ describe("handleSSEEvent", () => {
 			type: "file.edited",
 			properties: { sessionID: "active-session", file: "/foo.ts" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// Non-cacheable events still firehose via Phase 0b.
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
@@ -537,7 +449,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("routes user_message events normally (echo suppression removed in Task 50.5)", () => {
+	it("routes user_message events normally (echo suppression removed in Task 50.5)", async () => {
 		const deps = createMockSSEWiringDeps();
 
 		const translated: RelayMessage = {
@@ -554,7 +466,7 @@ describe("handleSSEEvent", () => {
 			type: "message.created",
 			properties: { sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// user_message events are firehosed normally — no suppression.
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
@@ -563,7 +475,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("does nothing when translator returns not ok", () => {
+	it("does nothing when translator returns not ok", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: false,
@@ -574,12 +486,12 @@ describe("handleSSEEvent", () => {
 			type: "unknown.event",
 			properties: {},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("handles array of translated messages", () => {
+	it("handles array of translated messages", async () => {
 		const deps = createMockSSEWiringDeps();
 		const messages: RelayMessage[] = [
 			{ type: "tool_start", sessionId: "s1", id: "call-1", name: "Bash" },
@@ -600,7 +512,7 @@ describe("handleSSEEvent", () => {
 			type: "message.part.updated",
 			properties: { sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledTimes(2);
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
@@ -613,7 +525,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("does not route events with no sessionID", () => {
+	it("does not route events with no sessionID", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "delta",
@@ -629,7 +541,7 @@ describe("handleSSEEvent", () => {
 			type: "message.part.delta",
 			properties: {}, // no sessionID
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// No sessionID means we can't attribute the event — Phase 0b firehose
 		// is keyed on sessionId, so missing-id events are dropped.
@@ -638,7 +550,7 @@ describe("handleSSEEvent", () => {
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
-	it("broadcasts permission_request even when sessionID is missing from SSE event", () => {
+	it("broadcasts permission_request even when sessionID is missing from SSE event", async () => {
 		const deps = createMockSSEWiringDeps();
 
 		const event: OpenCodeEvent = {
@@ -650,7 +562,7 @@ describe("handleSSEEvent", () => {
 			},
 			// No sessionID!
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// The permission MUST be broadcast even without sessionID
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
@@ -662,7 +574,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("broadcasts permission_request with sessionID when present in SSE event", () => {
+	it("broadcasts permission_request with sessionID when present in SSE event", async () => {
 		const deps = createMockSSEWiringDeps();
 
 		const event: OpenCodeEvent = {
@@ -673,7 +585,7 @@ describe("handleSSEEvent", () => {
 				sessionID: "sess-abc",
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -685,7 +597,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("sends push notification for permission.asked", () => {
+	it("sends push notification for permission.asked", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -695,7 +607,7 @@ describe("handleSSEEvent", () => {
 			type: "permission.asked",
 			properties: { id: "perm-1", permission: "Bash" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(mockPush!.sendToAll).toHaveBeenCalledWith({
@@ -708,7 +620,7 @@ describe("handleSSEEvent", () => {
 		});
 	});
 
-	it("sends push notification for question.asked", () => {
+	it("sends push notification for question.asked", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -718,7 +630,7 @@ describe("handleSSEEvent", () => {
 			type: "question.asked",
 			properties: { id: "q-1", questions: [] },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(mockPush!.sendToAll).toHaveBeenCalledWith({
@@ -730,7 +642,7 @@ describe("handleSSEEvent", () => {
 		});
 	});
 
-	it("sends push notification for done events", () => {
+	it("sends push notification for done events", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -745,7 +657,7 @@ describe("handleSSEEvent", () => {
 			type: "session.status",
 			properties: { sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(mockPush!.sendToAll).toHaveBeenCalledWith(
@@ -753,7 +665,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("sends push notification for error events", () => {
+	it("sends push notification for error events", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -776,7 +688,7 @@ describe("handleSSEEvent", () => {
 				error: { name: "err", data: { message: "Something broke" } },
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(mockPush!.sendToAll).toHaveBeenCalledWith(
@@ -788,7 +700,7 @@ describe("handleSSEEvent", () => {
 		);
 	});
 
-	it("sends push notification for done/error on ANY session (not just active)", () => {
+	it("sends push notification for done/error on ANY session (not just active)", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -803,7 +715,7 @@ describe("handleSSEEvent", () => {
 			type: "session.status",
 			properties: { sessionID: "other-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		const calls = vi.mocked(mockPush!.sendToAll).mock.calls;
@@ -813,8 +725,8 @@ describe("handleSSEEvent", () => {
 		expect(doneCalls).toHaveLength(1);
 	});
 
-	it("calls notifySSEIdle on status poller when session.status:idle arrives", () => {
-		const mockStatusPoller = { notifySSEIdle: vi.fn() };
+	it("calls notifySSEIdle on status poller when session.status:idle arrives", async () => {
+		const mockStatusPoller = { notifySSEIdle: vi.fn(() => Effect.void) };
 		const deps = createMockSSEWiringDeps({ statusPoller: mockStatusPoller });
 		// Translator returns ok: false for idle (no relay messages produced)
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -829,13 +741,13 @@ describe("handleSSEEvent", () => {
 				status: { type: "idle" },
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(mockStatusPoller.notifySSEIdle).toHaveBeenCalledWith("sess-123");
 	});
 
-	it("does not call notifySSEIdle for session.status:busy", () => {
-		const mockStatusPoller = { notifySSEIdle: vi.fn() };
+	it("does not call notifySSEIdle for session.status:busy", async () => {
+		const mockStatusPoller = { notifySSEIdle: vi.fn(() => Effect.void) };
 		const deps = createMockSSEWiringDeps({ statusPoller: mockStatusPoller });
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: false,
@@ -849,12 +761,12 @@ describe("handleSSEEvent", () => {
 				status: { type: "busy" },
 			},
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(mockStatusPoller.notifySSEIdle).not.toHaveBeenCalled();
 	});
 
-	it("does not call notifySSEIdle when no statusPoller is configured", () => {
+	it("does not call notifySSEIdle when no statusPoller is configured", async () => {
 		const deps = createMockSSEWiringDeps();
 		// No statusPoller in deps
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -870,20 +782,20 @@ describe("handleSSEEvent", () => {
 			},
 		};
 		// Should not throw even without statusPoller
-		expect(() => handleSSEEvent(deps, event)).not.toThrow();
+		await expect(runSSEEvent(deps, event)).resolves.toBeUndefined();
 	});
 });
 
-// ─── wireSSEConsumer ─────────────────────────────────────────────────────────
+// ─── wireSSEConsumerEffect ─────────────────────────────────────────────────────────
 
-describe("wireSSEConsumer", () => {
-	it("registers event listeners on consumer", () => {
+describe("wireSSEConsumerEffect", () => {
+	it("registers event listeners on consumer", async () => {
 		const deps = createMockSSEWiringDeps();
 		const consumer = {
 			on: vi.fn(),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 
 		const registeredEvents = vi.mocked(consumer.on).mock.calls.map((c) => c[0]);
 		expect(registeredEvents).toContain("connected");
@@ -893,16 +805,16 @@ describe("wireSSEConsumer", () => {
 		expect(registeredEvents).toContain("event");
 	});
 
-	it("event listener delegates to handleSSEEvent", () => {
+	it("event listener delegates to handleSSEEventEffect", async () => {
 		const deps = createMockSSEWiringDeps();
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 
 		const translated: RelayMessage = {
 			type: "delta",
@@ -930,7 +842,7 @@ describe("wireSSEConsumer", () => {
 		);
 	});
 
-	it("forwards a schema-valid event without a decode warning (conduit-test-8g7)", () => {
+	it("forwards a schema-valid event without a decode warning (conduit-test-8g7)", async () => {
 		const warnSpy = vi.fn();
 		const log = { ...createSilentLogger(), warn: warnSpy };
 		const deps = createMockSSEWiringDeps({ log });
@@ -939,8 +851,8 @@ describe("wireSSEConsumer", () => {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
-		wireSSEConsumer(deps, consumer);
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		await wireSSEConsumerForTest(deps, consumer);
 
 		const event = {
 			type: "message.part.delta",
@@ -960,7 +872,7 @@ describe("wireSSEConsumer", () => {
 		);
 	});
 
-	it("warns but still forwards an event that fails schema decode — never drops (conduit-test-8g7)", () => {
+	it("warns but still forwards an event that fails schema decode — never drops (conduit-test-8g7)", async () => {
 		const warnSpy = vi.fn();
 		const log = { ...createSilentLogger(), warn: warnSpy };
 		const deps = createMockSSEWiringDeps({ log });
@@ -969,8 +881,8 @@ describe("wireSSEConsumer", () => {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
-		wireSSEConsumer(deps, consumer);
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		await wireSSEConsumerForTest(deps, consumer);
 
 		// Well-formed envelope, but an event type not in the modeled union.
 		const unknownEvent = {
@@ -991,7 +903,7 @@ describe("wireSSEConsumer", () => {
 		);
 	});
 
-	it("logs SSE lifecycle events", () => {
+	it("logs SSE lifecycle events", async () => {
 		const infoSpy = vi.fn();
 		const warnSpy = vi.fn();
 		const log = { ...createSilentLogger(), info: infoSpy, warn: warnSpy };
@@ -1001,9 +913,9 @@ describe("wireSSEConsumer", () => {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
@@ -1034,14 +946,16 @@ describe("wireSSEConsumer", () => {
 			},
 		]);
 		const deps = createMockSSEWiringDeps({ listPendingPermissions });
+		const services = makeSSETestServices();
+		vi.spyOn(services.pendingInteractions, "recoverPendingPermissions");
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer, services);
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
 
@@ -1052,7 +966,7 @@ describe("wireSSEConsumer", () => {
 
 		// Should recover into pending permission state
 		expect(
-			deps.pendingInteractions.recoverPendingPermissions,
+			services.pendingInteractions.recoverPendingPermissions,
 		).toHaveBeenCalledWith([
 			expect.objectContaining({
 				id: "perm-recover-1",
@@ -1075,14 +989,16 @@ describe("wireSSEConsumer", () => {
 	it("handles empty permission list from API on SSE connect", async () => {
 		const listPendingPermissions = vi.fn().mockResolvedValue([]);
 		const deps = createMockSSEWiringDeps({ listPendingPermissions });
+		const services = makeSSETestServices();
+		vi.spyOn(services.pendingInteractions, "recoverPendingPermissions");
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer, services);
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
 
@@ -1092,7 +1008,7 @@ describe("wireSSEConsumer", () => {
 
 		// Should not recover or broadcast anything
 		expect(
-			deps.pendingInteractions.recoverPendingPermissions,
+			services.pendingInteractions.recoverPendingPermissions,
 		).not.toHaveBeenCalled();
 	});
 
@@ -1105,19 +1021,22 @@ describe("wireSSEConsumer", () => {
 		const deps = createMockSSEWiringDeps({
 			listPendingQuestions,
 		});
+		const services = makeSSETestServices();
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer, services);
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
 
 		await vi.waitFor(() => {
-			expect(deps.sessionService.setPendingQuestionCounts).toHaveBeenCalledWith(
+			expect(
+				services.sessionService.setPendingQuestionCounts,
+			).toHaveBeenCalledWith(
 				new Map([
 					["sess-a", 2],
 					["sess-b", 1],
@@ -1126,16 +1045,16 @@ describe("wireSSEConsumer", () => {
 		});
 	});
 
-	it("broadcasts connection_status 'connected' on connected event", () => {
+	it("broadcasts connection_status 'connected' on connected event", async () => {
 		const deps = createMockSSEWiringDeps();
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
 
@@ -1145,16 +1064,16 @@ describe("wireSSEConsumer", () => {
 		});
 	});
 
-	it("broadcasts connection_status 'disconnected' on disconnected event", () => {
+	it("broadcasts connection_status 'disconnected' on disconnected event", async () => {
 		const deps = createMockSSEWiringDeps();
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("disconnected")!(new Error("connection lost"));
 
@@ -1164,16 +1083,16 @@ describe("wireSSEConsumer", () => {
 		});
 	});
 
-	it("broadcasts connection_status 'reconnecting' on reconnecting event", () => {
+	it("broadcasts connection_status 'reconnecting' on reconnecting event", async () => {
 		const deps = createMockSSEWiringDeps();
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
-		} as unknown as Parameters<typeof wireSSEConsumer>[1];
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("reconnecting")!({ attempt: 1, delay: 1000 });
 
@@ -1186,8 +1105,8 @@ describe("wireSSEConsumer", () => {
 
 // ─── tool_result truncation in SSE pipeline ─────────────────────────────────
 
-describe("handleSSEEvent – tool_result truncation", () => {
-	it("truncates tool_result over threshold before sending and caching", () => {
+describe("handleSSEEventEffect – tool_result truncation", () => {
+	it("truncates tool_result over threshold before sending and caching", async () => {
 		const deps = createMockSSEWiringDeps();
 		const largeContent = "x".repeat(TRUNCATION_THRESHOLD + 1000);
 		const translated: RelayMessage = {
@@ -1206,7 +1125,7 @@ describe("handleSSEEvent – tool_result truncation", () => {
 			type: "message.part.updated",
 			properties: { sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// broadcastPerSessionEvent should receive truncated content under Phase 0b
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -1220,7 +1139,7 @@ describe("handleSSEEvent – tool_result truncation", () => {
 		}
 	});
 
-	it("passes through tool_result under threshold unchanged", () => {
+	it("passes through tool_result under threshold unchanged", async () => {
 		const deps = createMockSSEWiringDeps();
 		const smallContent = "short result";
 		const translated: RelayMessage = {
@@ -1239,7 +1158,7 @@ describe("handleSSEEvent – tool_result truncation", () => {
 			type: "message.part.updated",
 			properties: { sessionID: "active-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// broadcastPerSessionEvent should receive original message unchanged.
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
@@ -1255,12 +1174,12 @@ describe("handleSSEEvent – tool_result truncation", () => {
 // notification_event so clients on other sessions can fire sound/browser alerts.
 
 // ─── Notification routing through resolveNotifications (F2 wiring) ───────────
-// Verifies that handleSSEEvent gates push and cross-session broadcast through
+// Verifies that handleSSEEventEffect gates push and cross-session broadcast through
 // resolveNotifications() — not inline logic. These tests exercise the REAL
 // wiring path, not the policy function in isolation.
 
 describe("notification routing: push gating via resolveNotifications", () => {
-	it("does NOT call push for non-notification-worthy events (delta)", () => {
+	it("does NOT call push for non-notification-worthy events (delta)", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
@@ -1277,19 +1196,22 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			type: "message.part.delta",
 			properties: { sessionID: "s1" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(mockPush.sendToAll).not.toHaveBeenCalled();
 	});
 
-	it("calls push for done event from root session (no parent)", () => {
+	it("calls push for done event from root session (no parent)", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
-			getSessionParentMap: () => new Map(),
 		});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map()),
+		);
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -1300,19 +1222,22 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			type: "session.status",
 			properties: { sessionID: "root-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
 		expect(mockPush.sendToAll).toHaveBeenCalled();
 	});
 
-	it("does NOT call push for done event from subagent session", () => {
+	it("does NOT call push for done event from subagent session", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
-			getSessionParentMap: () => new Map([["child-session", "parent-session"]]),
 		});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map([["child-session", "parent-session"]])),
+		);
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -1323,15 +1248,17 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			type: "session.status",
 			properties: { sessionID: "child-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
 		expect(mockPush.sendToAll).not.toHaveBeenCalled();
 	});
 
-	it("does NOT broadcast cross-session notification for subagent done", () => {
-		const deps = createMockSSEWiringDeps({
-			getSessionParentMap: () => new Map([["child-session", "parent-session"]]),
-		});
+	it("does NOT broadcast cross-session notification for subagent done", async () => {
+		const deps = createMockSSEWiringDeps({});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map([["child-session", "parent-session"]])),
+		);
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -1342,7 +1269,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			type: "session.status",
 			properties: { sessionID: "child-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
 		const broadcastCalls = vi.mocked(deps.wsHandler.broadcast).mock.calls;
 		const notifCalls = broadcastCalls.filter(
@@ -1351,14 +1278,17 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		expect(notifCalls).toHaveLength(0);
 	});
 
-	it("DOES call push for subagent error (errors always notify)", () => {
+	it("DOES call push for subagent error (errors always notify)", async () => {
 		const mockPush = {
 			sendToAll: vi.fn().mockResolvedValue(undefined),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
-			getSessionParentMap: () => new Map([["child-session", "parent-session"]]),
 		});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map([["child-session", "parent-session"]])),
+		);
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -1376,14 +1306,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			type: "session.error",
 			properties: { sessionID: "child-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event, services);
 
 		expect(mockPush.sendToAll).toHaveBeenCalled();
 	});
 });
 
 describe("notification_event broadcast for dropped notification-worthy events", () => {
-	it("broadcasts notification_event when done is dropped (no viewers)", () => {
+	it("broadcasts notification_event when done is dropped (no viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
@@ -1396,7 +1326,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "session.status",
 			properties: { sessionID: "other-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
@@ -1405,7 +1335,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		});
 	});
 
-	it("broadcasts notification_event with message when error is dropped", () => {
+	it("broadcasts notification_event with message when error is dropped", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
@@ -1423,7 +1353,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "session.status",
 			properties: { sessionID: "other-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
@@ -1433,7 +1363,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		});
 	});
 
-	it("does NOT broadcast notification_event when done is sent (has viewers)", () => {
+	it("does NOT broadcast notification_event when done is sent (has viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
 		// Has viewers — event is sent normally
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
@@ -1447,7 +1377,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "session.status",
 			properties: { sessionID: "my-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		// Should NOT broadcast notification_event — the event was sent to the session
 		const broadcastCalls = vi.mocked(deps.wsHandler.broadcast).mock.calls;
@@ -1457,7 +1387,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		expect(notifCalls).toHaveLength(0);
 	});
 
-	it("does NOT broadcast notification_event for non-notification types (delta)", () => {
+	it("does NOT broadcast notification_event for non-notification types (delta)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
@@ -1474,7 +1404,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "message.part.delta",
 			properties: { sessionID: "other-session" },
 		};
-		handleSSEEvent(deps, event);
+		await runSSEEvent(deps, event);
 
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});

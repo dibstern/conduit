@@ -7,7 +7,7 @@
 // applyPipelineResult. This pipeline sends the WS message to session viewers
 // but NEVER calls pushManager.sendToAll(). The push notification code in
 // sse-wiring.ts (lines 266-278) is dead code for "done" events because the
-// SSE translator returns ok:false for session.status:idle — handleSSEEvent
+// SSE translator returns ok:false for session.status:idle — handleSSEEventEffect
 // exits early and never reaches the push code.
 //
 // Fix: extract sendPushForEvent() from the inline code in sse-wiring.ts so

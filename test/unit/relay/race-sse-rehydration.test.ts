@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	type SSEWiringDeps,
-	wireSSEConsumer,
+import type {
+	SSEWiringDeps,
+	wireSSEConsumerEffect,
 } from "../../../src/lib/relay/sse-wiring.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import { wireSSEConsumerForTest } from "../../helpers/sse-effect-harness.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ function createMockConsumer() {
 		on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 			listeners.set(name, fn);
 		}),
-	} as unknown as Parameters<typeof wireSSEConsumer>[1];
+	} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 	return { consumer, listeners };
 }
 
@@ -60,7 +61,7 @@ describe("race: SSE rehydration generation counter", () => {
 		delete (deps as Partial<SSEWiringDeps>).listPendingPermissions;
 
 		const { consumer, listeners } = createMockConsumer();
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		const fireConnected = listeners.get("connected")!;
@@ -108,23 +109,8 @@ describe("race: SSE rehydration generation counter", () => {
 		});
 		delete (deps as Partial<SSEWiringDeps>).listPendingQuestions;
 
-		// Mock recovery to return recoverable permissions
-		vi.mocked(
-			deps.pendingInteractions.recoverPendingPermissions,
-		).mockImplementation((input) =>
-			input.map((p) => ({
-				requestId:
-					p.id as unknown as import("../../../src/lib/shared-types.js").PermissionId,
-				sessionId: p.sessionId ?? "",
-				toolName: p.permission,
-				toolInput: {},
-				always: [],
-				timestamp: Date.now(),
-			})),
-		);
-
 		const { consumer, listeners } = createMockConsumer();
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		const fireConnected = listeners.get("connected")!;
@@ -173,7 +159,7 @@ describe("race: SSE rehydration generation counter", () => {
 		delete (deps as Partial<SSEWiringDeps>).listPendingPermissions;
 
 		const { consumer, listeners } = createMockConsumer();
-		wireSSEConsumer(deps, consumer);
+		await wireSSEConsumerForTest(deps, consumer);
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();

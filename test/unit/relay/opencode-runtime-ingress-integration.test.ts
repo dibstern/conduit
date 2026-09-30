@@ -8,8 +8,8 @@ import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Ser
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
-	type EffectSSEWiringDeps,
 	handleSSEEventEffect,
+	type SSEWiringDeps,
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 import {
@@ -18,9 +18,7 @@ import {
 } from "../../helpers/mock-factories.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
-type RuntimeIngress = NonNullable<
-	EffectSSEWiringDeps["opencodeRuntimeIngress"]
->;
+type RuntimeIngress = NonNullable<SSEWiringDeps["opencodeRuntimeIngress"]>;
 
 const ingressSuccess = {
 	ok: true,
@@ -40,21 +38,11 @@ function createRuntimeIngress(
 }
 
 function createEffectDeps(
-	overrides: Partial<EffectSSEWiringDeps> = {},
-): EffectSSEWiringDeps {
+	overrides: Partial<SSEWiringDeps> = {},
+): SSEWiringDeps {
 	const deps = createMockSSEWiringDeps();
-	const {
-		processingTimeouts: _processingTimeouts,
-		pendingInteractions: _pendingInteractions,
-		sessionService: _sessionService,
-		getSessionParentMap: _getSessionParentMap,
-		getSessionStatuses: _getSessionStatuses,
-		statusPoller: _statusPoller,
-		...effectDeps
-	} = deps;
-	effectDeps satisfies EffectSSEWiringDeps;
 	return {
-		...effectDeps,
+		...deps,
 		...overrides,
 	};
 }
@@ -68,7 +56,7 @@ function createServicesLayer() {
 }
 
 async function runSSEEvent(
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	event: Parameters<typeof handleSSEEventEffect>[1],
 ) {
 	await Effect.runPromise(

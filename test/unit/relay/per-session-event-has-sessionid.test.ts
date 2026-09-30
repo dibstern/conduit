@@ -5,7 +5,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
-import { handleSSEEvent } from "../../../src/lib/relay/sse-wiring.js";
 import {
 	patchMissingDone,
 	type SessionHistorySource,
@@ -20,6 +19,7 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { tagWithSessionId } from "../../../src/lib/shared-types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import { runSSEEvent } from "../../helpers/sse-effect-harness.js";
 
 // ─── Type-level: PerSessionEvent is not never ──────────────────────────────
 
@@ -76,7 +76,7 @@ describe("PerSessionEvent type discriminator", () => {
 // ─── Emission site: SSE wiring — tagWithSessionId after translation ────────
 
 describe("SSE wiring tags events with sessionId", () => {
-	it("translated SSE events carry sessionId after tagging", () => {
+	it("translated SSE events carry sessionId after tagging", async () => {
 		const sent: RelayMessage[] = [];
 		const deps = createMockSSEWiringDeps({
 			translator: {
@@ -96,7 +96,7 @@ describe("SSE wiring tags events with sessionId", () => {
 			},
 		});
 
-		handleSSEEvent(deps, {
+		await runSSEEvent(deps, {
 			type: "message.part.delta",
 			properties: { sessionID: "ses_abc" },
 		});

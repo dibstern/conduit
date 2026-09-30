@@ -12,8 +12,8 @@ import {
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
-	type EffectSSEWiringDeps,
 	handleSSEEventEffect,
+	type SSEWiringDeps,
 	wireSSEConsumerEffect,
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
@@ -50,20 +50,11 @@ const makeEffectDeps = (
 	) => Promise<void>,
 ) => {
 	const deps = createMockSSEWiringDeps();
-	const {
-		processingTimeouts: _processingTimeouts,
-		pendingInteractions: _pendingInteractions,
-		sessionService: _sessionService,
-		getSessionParentMap: _getSessionParentMap,
-		getSessionStatuses: _getSessionStatuses,
-		statusPoller: _statusPoller,
-		...baseEffectDeps
-	} = deps;
 	const effectDeps = {
-		...baseEffectDeps,
+		...deps,
 		...(replyPermission ? { replyPermission } : {}),
 	};
-	effectDeps satisfies EffectSSEWiringDeps;
+	effectDeps satisfies SSEWiringDeps;
 	return { deps, effectDeps };
 };
 
@@ -118,16 +109,8 @@ describe("handleSSEEventEffect", () => {
 	});
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
-		const {
-			processingTimeouts: _processingTimeouts,
-			pendingInteractions: _pendingInteractions,
-			sessionService: _sessionService,
-			getSessionParentMap: _getSessionParentMap,
-			getSessionStatuses: _getSessionStatuses,
-			statusPoller: _statusPoller,
-			...effectDeps
-		} = deps;
-		effectDeps satisfies EffectSSEWiringDeps;
+		const effectDeps = deps;
+		effectDeps satisfies SSEWiringDeps;
 		const translated: RelayMessage = {
 			type: "done",
 			sessionId: "session-1",
@@ -168,9 +151,6 @@ describe("handleSSEEventEffect", () => {
 			),
 		);
 
-		expect(
-			deps.processingTimeouts.clearProcessingTimeout,
-		).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"session-1",
 			translated,
@@ -201,16 +181,8 @@ describe("handleSSEEventEffect", () => {
 
 	it("records message activity through SessionManagerServiceTag", async () => {
 		const deps = createMockSSEWiringDeps();
-		const {
-			processingTimeouts: _processingTimeouts,
-			pendingInteractions: _pendingInteractions,
-			sessionService: _sessionService,
-			getSessionParentMap: _getSessionParentMap,
-			getSessionStatuses: _getSessionStatuses,
-			statusPoller: _statusPoller,
-			...effectDeps
-		} = deps;
-		effectDeps satisfies EffectSSEWiringDeps;
+		const effectDeps = deps;
+		effectDeps satisfies SSEWiringDeps;
 		const recordMessageActivity = vi.fn(() => Effect.void);
 		const translated: RelayMessage = {
 			type: "delta",
@@ -246,7 +218,6 @@ describe("handleSSEEventEffect", () => {
 			"session-1",
 			expect.any(Number),
 		);
-		expect(deps.sessionService.recordMessageActivity).not.toHaveBeenCalled();
 	});
 
 	it("full mode replies once without broadcasting or recording a pending permission", async () => {

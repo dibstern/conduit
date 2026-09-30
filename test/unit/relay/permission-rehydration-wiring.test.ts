@@ -4,7 +4,7 @@
 // SSE connect. Uses a mock OpenCode server — no real OpenCode required.
 //
 // This is the integration-level companion to the unit tests in sse-wiring.test.ts
-// that prove wireSSEConsumer handles listPendingPermissions correctly. This test
+// that prove wireSSEConsumerEffect handles listPendingPermissions correctly. This test
 // proves relay-stack.ts actually passes the function through.
 
 import {

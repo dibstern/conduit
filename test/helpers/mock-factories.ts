@@ -89,7 +89,6 @@ import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wi
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
-import type { PermissionId } from "../../src/lib/shared-types.js";
 import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
@@ -303,41 +302,6 @@ export function createMockSSEWiringDeps(
 ): SSEWiringDeps {
 	return {
 		translator: createMockTranslator(),
-		sessionService:
-			createMockSessionMgr() as unknown as SSEWiringDeps["sessionService"],
-		pendingInteractions: {
-			recordPermissionRequest: vi.fn((input) => ({
-				requestId: input.requestId,
-				sessionId: input.sessionId,
-				toolName: input.toolName,
-				toolInput: input.toolInput,
-				always: [...(input.always ?? [])],
-				timestamp: Date.now(),
-			})),
-			markPermissionReplied: vi.fn(() => true),
-			recoverPendingPermissions: vi.fn(
-				(
-					permissions: Parameters<
-						SSEWiringDeps["pendingInteractions"]["recoverPendingPermissions"]
-					>[0],
-				) =>
-					permissions.map((permission) => ({
-						requestId: permission.id as PermissionId,
-						sessionId: permission.sessionId ?? "",
-						toolName: permission.permission,
-						toolInput: {
-							patterns: [...(permission.patterns ?? [])],
-							metadata: permission.metadata ?? {},
-						},
-						always: [...(permission.always ?? [])],
-						timestamp: Date.now(),
-					})),
-			),
-		},
-		processingTimeouts: {
-			clearProcessingTimeout: vi.fn(),
-			resetProcessingTimeout: vi.fn(),
-		},
 		wsHandler: {
 			broadcast: vi.fn(),
 			sendToSession: vi.fn(),

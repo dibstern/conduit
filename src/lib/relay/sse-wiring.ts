@@ -23,12 +23,7 @@ import type { PushNotificationSender } from "../server/push.js";
 import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { PendingPermission, RelayMessage } from "../types.js";
-import {
-	applyPipelineResult,
-	applyPipelineResultEffect,
-	type ProcessingTimeoutsPort,
-	processEvent,
-} from "./event-pipeline.js";
+import { applyPipelineResultEffect, processEvent } from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
 import { resolveNotifications } from "./notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
@@ -71,44 +66,15 @@ export function extractSessionId(event: SSEEvent): string | undefined {
 
 // ─── SSE Wiring Dependencies ─────────────────────────────────────────────────
 
-/** Narrowed Effect session service capabilities needed by SSE wiring. */
-interface SessionServiceLike {
-	recordMessageActivity(sessionId: string, timestamp?: number): void;
-	incrementPendingQuestionCount(sessionId: string): void;
-	addToParentMap(childId: string, parentId: string): void;
-	sendSessionLists(
-		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
-		options?: {
-			statuses?:
-				| Record<string, import("../instance/sdk-types.js").SessionStatus>
-				| undefined;
-		},
-	): Promise<void>;
-	setPendingQuestionCounts(counts: Map<string, number>): void;
-}
-
-interface PendingInteractionServiceLike {
-	recordPermissionRequest(
-		input: PendingPermissionRequestInput,
-	): PendingPermission;
-	markPermissionReplied(requestId: string): boolean;
-	recoverPendingPermissions(
-		permissions: readonly PendingPermissionRecoveryInput[],
-	): PendingPermission[];
-}
-
 export interface SSEWiringDeps {
 	translator: Translator;
-	sessionService: SessionServiceLike;
-	pendingInteractions: PendingInteractionServiceLike;
-	processingTimeouts: ProcessingTimeoutsPort;
 	wsHandler: {
 		broadcast: (msg: RelayMessage) => void;
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 		getClientsForSession: (sessionId: string) => string[];
 		/**
 		 * Phase 0b: project-scoped per-session event firehose. Pipeline
-		 * routing uses this (via `applyPipelineResult`) so per-session chat
+		 * routing uses this (via `applyPipelineResultEffect`) so per-session chat
 		 * events reach every client on `/p/<slug>` regardless of viewed session.
 		 */
 		broadcastPerSessionEvent: (sessionId: string, msg: RelayMessage) => void;
@@ -116,10 +82,9 @@ export interface SSEWiringDeps {
 	pushManager?: PushNotificationSender;
 	log: Logger;
 	pipelineLog: Logger;
-	/** Optional: current session statuses for processing flags */
-	getSessionStatuses?: () => Record<
-		string,
-		import("../instance/sdk-types.js").SessionStatus
+	/** Optional: current session statuses for processing flags. */
+	getSessionStatuses?: () => Effect.Effect<
+		Record<string, import("../instance/sdk-types.js").SessionStatus>
 	>;
 	/** Optional: REST client for rehydrating pending questions on reconnect */
 	listPendingQuestions?: () => Promise<
@@ -129,38 +94,15 @@ export interface SSEWiringDeps {
 	listPendingPermissions?: () => Promise<
 		Array<{ id: string; permission: string; [key: string]: unknown }>
 	>;
-	/** Optional: notify status poller of SSE idle events for fast transition detection */
-	statusPoller?: {
-		notifySSEIdle(sessionId: string): void;
-		/** One-shot reconciliation on SSE reconnect — corrects stuck statuses. */
-		reconcileNow?(): Promise<void>;
-	};
-	/** Optional: session parent map for subagent detection in notification routing */
-	getSessionParentMap?: () => Map<string, string>;
-	/** Project slug for push notification routing */
-	slug?: string;
-	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
-	onDoneProcessed?: (sessionId: string) => void;
-}
-
-export type EffectSSEWiringDeps = Omit<
-	SSEWiringDeps,
-	| "pendingInteractions"
-	| "processingTimeouts"
-	| "sessionService"
-	| "getSessionParentMap"
-	| "getSessionStatuses"
-	| "statusPoller"
-> & {
-	/** Optional: current session statuses for processing flags. */
-	getSessionStatuses?: () => Effect.Effect<
-		Record<string, import("../instance/sdk-types.js").SessionStatus>
-	>;
 	/** Optional: notify status poller of SSE status events and reconnects. */
 	statusPoller?: {
 		notifySSEIdle(sessionId: string): Effect.Effect<void>;
 		reconcileNow?(): Effect.Effect<void>;
 	};
+	/** Project slug for push notification routing */
+	slug?: string;
+	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
+	onDoneProcessed?: (sessionId: string) => void;
 	/** Optional: reply to an OpenCode permission (auto-approve path). */
 	replyPermission?: (
 		sessionId: string,
@@ -175,10 +117,10 @@ export type EffectSSEWiringDeps = Omit<
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(): void;
 	};
-};
+}
 
 // ─── Push notification helper ────────────────────────────────────────────────
-// Extracted so both handleSSEEvent (SSE path) and relay-stack.ts (status/message
+// Extracted so both handleSSEEventEffect (SSE path) and relay-stack.ts (status/message
 // poller paths) can fire push notifications for done/error events. Without this,
 // push notifications are only sent when the translator produces done/error —
 // but the translator returns ok:false for session.status:idle, so done events
@@ -241,23 +183,8 @@ export function sendPushForEvent(
 		);
 }
 
-function recordSSEEventStart(
-	deps: SSEWiringDeps,
-	event: SSEEvent,
-	eventSessionId: string | undefined,
-): void {
-	deps.log.verbose(`event=${event.type} session=${eventSessionId ?? "?"}`);
-
-	// ── Track message activity for session ordering ──────────────────────
-	// Record the timestamp of any message-related event so sessions are
-	// ordered by actual conversation activity, not metadata updates.
-	if (eventSessionId && event.type.startsWith("message.")) {
-		deps.sessionService.recordMessageActivity(eventSessionId, Date.now());
-	}
-}
-
 const recordSSEEventStartEffect = (
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 ) =>
@@ -344,7 +271,7 @@ function permissionRecoveryInputs(
 }
 
 function broadcastRecoveredPermissions(
-	deps: SSEWiringDeps | EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	recovered: readonly PendingPermission[],
 ): void {
 	for (const perm of recovered) {
@@ -360,7 +287,7 @@ function broadcastRecoveredPermissions(
 }
 
 function broadcastPermissionAsked(
-	deps: SSEWiringDeps | EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 	pending: PendingPermission | null,
@@ -406,31 +333,8 @@ function broadcastPermissionAsked(
 	}
 }
 
-function handleQuestionAsked(
-	deps: SSEWiringDeps,
-	eventSessionId: string | undefined,
-): void {
-	deps.log.debug(`question.asked: event received`);
-	if (eventSessionId) {
-		deps.sessionService.incrementPendingQuestionCount(eventSessionId);
-	}
-	if (deps.pushManager) {
-		sendPushForEvent(
-			deps.pushManager,
-			{
-				type: "ask_user",
-				sessionId: eventSessionId ?? "",
-				toolId: "",
-				questions: [],
-			},
-			deps.log,
-			buildPushContext(deps.slug, eventSessionId),
-		);
-	}
-}
-
 const handleQuestionAskedEffect = (
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	eventSessionId: string | undefined,
 ) =>
 	Effect.gen(function* () {
@@ -457,179 +361,8 @@ const handleQuestionAskedEffect = (
 		}
 	});
 
-function handleSSEEventAfterPending(
-	deps: SSEWiringDeps,
-	event: SSEEvent,
-	eventSessionId: string | undefined,
-): void {
-	const {
-		translator,
-		sessionService,
-		processingTimeouts,
-		wsHandler,
-		pushManager,
-		pipelineLog,
-		log,
-	} = deps;
-
-	// ── Session updated (title change, etc.) → refresh session list ──────
-
-	if (event.type === "session.updated") {
-		// Eagerly update parent map from SSE event to eliminate the race
-		// between subagent creation and the async listSessions() refresh.
-		// Without this, a fast subagent could complete before getSessionParentMap()
-		// knows about it, causing its "done" to be treated as a root session event.
-		if (hasInfoWithSessionID(event.properties)) {
-			const info = event.properties.info;
-			const childId = info.sessionID ?? info.id;
-			const parentId =
-				typeof (info as Record<string, unknown>)["parentID"] === "string"
-					? ((info as Record<string, unknown>)["parentID"] as string)
-					: undefined;
-			if (childId && parentId) {
-				sessionService.addToParentMap(childId, parentId);
-			}
-		}
-
-		const statuses = deps.getSessionStatuses?.();
-		sessionService
-			.sendSessionLists((msg) => wsHandler.broadcast(msg), { statuses })
-			.catch((err) =>
-				log.warn(`Failed to refresh sessions after session.updated: ${err}`),
-			);
-	}
-
-	// ── Log session errors for debugging ──────────────────────────────────
-
-	if (isSessionErrorEvent(event)) {
-		const err = event.properties.error;
-		log.warn(
-			`event=${event.type} session=${eventSessionId ?? "?"} Session error: ${err?.name ?? "?"} — ${err?.data?.message ?? "(no message)"}`,
-		);
-	}
-
-	// ── SSE idle hint → status poller for fast transition detection ──────
-	if (event.type === "session.status") {
-		const statusType = (
-			event.properties?.["status"] as { type?: string } | undefined
-		)?.type;
-		if (statusType === "idle" && eventSessionId && deps.statusPoller) {
-			deps.statusPoller.notifySSEIdle(eventSessionId);
-		}
-	}
-
-	// ── permission.asked already handled above (bridge → broadcast) ─────
-	// Skip the translator to avoid double-broadcasting.
-	if (event.type === "permission.asked") return;
-
-	// ── Translate → filter → cache → route per-session ──────────────────
-
-	const translateResult = translator.translate(event, {
-		sessionId: eventSessionId,
-	});
-	if (!translateResult.ok) {
-		// Log skipped events for debugging (skip noisy unhandled types in production)
-		if (!translateResult.reason.startsWith("unhandled event type")) {
-			log.verbose(`translate skip: ${translateResult.reason} (${event.type})`);
-		}
-		return;
-	}
-
-	const targetSessionId = eventSessionId;
-
-	// Tag per-session events with sessionId after translation.
-	// The translator produces untagged events; we attach sessionId here
-	// at the SSE emission site.
-	const toSend: RelayMessage[] = translateResult.messages.map((m) =>
-		targetSessionId
-			? tagWithSessionId(m, targetSessionId)
-			: (m as RelayMessage),
-	);
-	for (let msg of toSend) {
-		// Permission events: broadcast to all clients (not session-scoped)
-		if (
-			msg.type === "permission_request" ||
-			msg.type === "permission_resolved"
-		) {
-			wsHandler.broadcast(msg);
-			continue;
-		}
-
-		// Question events: route to clients viewing the question's session
-		if (msg.type === "ask_user" || msg.type === "ask_user_resolved") {
-			if (msg.type === "ask_user") {
-				const askMsg = msg as Extract<RelayMessage, { type: "ask_user" }>;
-				log.debug(
-					`Routing ask_user to session=${targetSessionId ?? "?"}: toolId=${askMsg.toolId} questionCount=${askMsg.questions?.length ?? 0}`,
-				);
-			}
-			if (targetSessionId) {
-				// Resolutions go to everyone: family viewers hold replayed copies.
-				if (msg.type === "ask_user_resolved") wsHandler.broadcast(msg);
-				else wsHandler.sendToSession(targetSessionId, msg);
-				// Broadcast a lightweight notification so clients on OTHER
-				// sessions know a question exists (AttentionBanner).
-				wsHandler.broadcast({
-					type: "notification_event",
-					eventType: msg.type,
-					...(targetSessionId != null ? { sessionId: targetSessionId } : {}),
-				});
-			} else {
-				// No session ID available — broadcast as fallback (defensive)
-				wsHandler.broadcast(msg);
-			}
-			continue;
-		}
-
-		// Shared pipeline: pure decisions, explicit side effects
-		const viewers = targetSessionId
-			? wsHandler.getClientsForSession(targetSessionId)
-			: [];
-		const pipeResult = processEvent(msg, targetSessionId, viewers);
-		msg = pipeResult.msg;
-
-		applyPipelineResult(pipeResult, targetSessionId, {
-			processingTimeouts,
-			wsHandler,
-			log: pipelineLog,
-		});
-
-		// Record done delivery for dedup with status-poller synthetic done
-		if (msg.type === "done" && targetSessionId) {
-			deps.onDoneProcessed?.(targetSessionId);
-		}
-
-		// Notification routing: push + cross-session broadcast
-		const isSubagent =
-			targetSessionId != null &&
-			(deps.getSessionParentMap?.().has(targetSessionId) ?? false);
-		const notification = resolveNotifications(
-			msg,
-			pipeResult.route,
-			isSubagent,
-			targetSessionId,
-		);
-		if (notification.sendPush && pushManager) {
-			sendPushForEvent(
-				pushManager,
-				msg,
-				log,
-				buildPushContext(deps.slug, targetSessionId),
-			);
-		}
-		if (
-			notification.broadcastCrossSession &&
-			notification.crossSessionPayload
-		) {
-			wsHandler.broadcast(
-				notification.crossSessionPayload as import("../shared-types.js").RelayMessage,
-			);
-		}
-	}
-}
-
 const refreshSessionListAfterUpdateEffect = (
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	statuses:
 		| Record<string, import("../instance/sdk-types.js").SessionStatus>
 		| undefined,
@@ -652,7 +385,7 @@ const refreshSessionListAfterUpdateEffect = (
 	});
 
 const handleSSEEventAfterPendingEffect = (
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 ) =>
@@ -809,32 +542,7 @@ const handleSSEEventAfterPendingEffect = (
 
 // ─── Handle a single SSE event ───────────────────────────────────────────────
 
-export function handleSSEEvent(deps: SSEWiringDeps, event: SSEEvent): void {
-	const eventSessionId = extractSessionId(event);
-	recordSSEEventStart(deps, event, eventSessionId);
-	// ── Permission / question bridge routing ──────────────────────────────
-
-	if (event.type === "permission.asked") {
-		const input = permissionRequestInput(event, eventSessionId);
-		const pending = input
-			? deps.pendingInteractions.recordPermissionRequest(input)
-			: null;
-		broadcastPermissionAsked(deps, event, eventSessionId, pending);
-	}
-	if (event.type === "question.asked") {
-		handleQuestionAsked(deps, eventSessionId);
-	}
-	if (isPermissionRepliedEvent(event)) {
-		deps.pendingInteractions.markPermissionReplied(event.properties.requestID);
-	}
-
-	handleSSEEventAfterPending(deps, event, eventSessionId);
-}
-
-export const handleSSEEventEffect = (
-	deps: EffectSSEWiringDeps,
-	event: SSEEvent,
-) =>
+export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const eventSessionId = extractSessionId(event);
@@ -923,7 +631,7 @@ function questionCountsBySession(
 }
 
 function broadcastRecoveredQuestions(
-	deps: SSEWiringDeps | EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
 ): void {
 	for (const pq of pendingQuestions) {
@@ -963,7 +671,7 @@ function broadcastRecoveredQuestions(
 }
 
 const recoverPendingQuestionsEffect = (
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
 ) =>
 	Effect.gen(function* () {
@@ -981,7 +689,7 @@ const recoverPendingQuestionsEffect = (
 	});
 
 function wireSSEConsumerWithCallbacks(
-	deps: SSEWiringDeps | EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	consumer: SSEStreamEvents,
 	callbacks: SSEConsumerCallbacks,
 ): void {
@@ -1091,38 +799,8 @@ function wireSSEConsumerWithCallbacks(
 
 // ─── Wire all SSE consumer event listeners ───────────────────────────────────
 
-export function wireSSEConsumer(
-	deps: SSEWiringDeps,
-	consumer: SSEStreamEvents,
-): void {
-	wireSSEConsumerWithCallbacks(deps, consumer, {
-		handleEvent: (event) => handleSSEEvent(deps, event),
-		reconcileOnConnected: () => {
-			if (deps.statusPoller?.reconcileNow) {
-				deps.statusPoller
-					.reconcileNow()
-					.catch((err: unknown) =>
-						deps.log.warn(`SSE reconnect reconciliation failed: ${err}`),
-					);
-			}
-		},
-		recoverPendingPermissions: (pendingPermissions) => {
-			const recovered = deps.pendingInteractions.recoverPendingPermissions(
-				permissionRecoveryInputs(pendingPermissions),
-			);
-			broadcastRecoveredPermissions(deps, recovered);
-		},
-		recoverPendingQuestions: (pendingQuestions) => {
-			deps.sessionService.setPendingQuestionCounts(
-				questionCountsBySession(pendingQuestions),
-			);
-			broadcastRecoveredQuestions(deps, pendingQuestions);
-		},
-	});
-}
-
 export const wireSSEConsumerEffect = (
-	deps: EffectSSEWiringDeps,
+	deps: SSEWiringDeps,
 	consumer: SSEStreamEvents,
 ) =>
 	Effect.gen(function* () {
