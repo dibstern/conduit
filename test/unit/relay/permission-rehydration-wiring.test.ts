@@ -7,14 +7,17 @@
 // that prove wireSSEConsumerEffect handles listPendingPermissions correctly. This test
 // proves relay-stack.ts actually passes the function through.
 
+import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -201,6 +204,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 	let relayServer: Server;
 	let relayPort: number;
 	let wss: WebSocketServer;
+	let persistenceDir: string;
 
 	beforeAll(async () => {
 		mock = await createMockOpenCode();
@@ -208,12 +212,14 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		relayServer = createServer();
 		await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 		relayPort = (relayServer.address() as { port: number }).port;
+		persistenceDir = mkdtempSync(join(tmpdir(), "conduit-permission-"));
 
 		relay = await createProjectRelay({
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),
 			slug: "test-perm-rehydrate",
+			persistenceDbPath: join(persistenceDir, "events.db"),
 			log: createSilentLogger(),
 		});
 
@@ -225,8 +231,15 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			});
 		});
 
-		// Wait for SSE to connect and rehydration to complete
-		await new Promise((r) => setTimeout(r, 1000));
+		await vi.waitFor(async () => {
+			const pending = await relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					const interactions = yield* PendingInteractionServiceTag;
+					return yield* interactions.listPendingPermissions();
+				}),
+			);
+			expect(pending).toHaveLength(1);
+		});
 	}, 15_000);
 
 	afterAll(async () => {
@@ -235,6 +248,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		if (relayServer)
 			await new Promise<void>((r) => relayServer.close(() => r()));
 		if (mock) await mock.close();
+		rmSync(persistenceDir, { recursive: true, force: true });
 	}, 10_000);
 
 	it("rehydrates pending permissions from OpenCode API into the Effect service on SSE connect", async () => {

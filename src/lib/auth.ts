@@ -1,4 +1,4 @@
-// ─── PIN Authentication & Rate Limiting (Ticket 2.4, 8.4) ───────────────────
+// ─── PIN Authentication & Rate Limiting ───────────────────
 
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Data, Effect } from "effect";

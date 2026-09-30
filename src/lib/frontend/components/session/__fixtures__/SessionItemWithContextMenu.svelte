@@ -7,7 +7,7 @@
 	let anchor: HTMLElement | null = $state(null);
 </script>
 
-<!-- conduit-test-732b: compose the menu owner just as SessionList does. -->
+<!-- Compose the menu owner just as SessionList does. -->
 <SessionItem {session} {active} oncontextmenu={(_session, element) => { anchor = element; }} />
 {#if anchor}
 	<SessionContextMenu

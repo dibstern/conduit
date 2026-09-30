@@ -22,10 +22,8 @@ describe("Integration: Model Selection", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("model_list only contains configured providers", async () => {
@@ -169,11 +167,17 @@ describe("Integration: Model Selection", () => {
 		await client.waitFor("model_info");
 
 		// Create a new session — should reset model selection
+		client.clearReceived();
 		await client.createSession("Model Reset Test");
-		await client.waitFor("session_switched");
+		const switched = await client.waitFor("session_switched");
 
-		// Let the session fully initialize before sending a message
-		await new Promise((r) => setTimeout(r, 1000));
+		await client.waitFor("session_list", {
+			predicate: (message) =>
+				Array.isArray(message["sessions"]) &&
+				message["sessions"].some(
+					(session: { id: string }) => session.id === switched["id"],
+				),
+		});
 		client.clearReceived();
 
 		// Send a message in the new session — should work

@@ -24,13 +24,14 @@ import {
 	defaultClaudeSubagentSdk,
 	makeClaudeSubagentMaterializer,
 } from "./claude/claude-subagent-materializer.js";
-import { ClaudeDriver, ClaudeProviderInstance } from "./claude/index.js";
+import { ClaudeDriver } from "./claude/index.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
+import type { ProviderCommandStoreFailure } from "./orchestration-side-effect-reactor.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
 	type ProviderSessionBindingReadModel,
@@ -78,7 +79,7 @@ export interface OrchestrationLayer {
 	 * side effects through the reactor (crash recovery / test flush). Same-process
 	 * dispatch already awaits its own execution.
 	 */
-	drainSideEffects(): Effect.Effect<void, unknown>;
+	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure>;
 }
 
 const TURN_COMPLETE_RESULT: TurnResult = {
@@ -103,97 +104,59 @@ class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
 	OrchestrationComponents
 >() {}
 
-function createOrchestrationComponents(
-	options: OrchestrationLayerOptions,
-): OrchestrationComponents {
-	const registry = new ProviderRegistry();
-
-	const openCodeInstance = new OpenCodeProviderInstance({
-		client: options.client,
-		...(options.workspaceRoot != null
-			? { workspaceRoot: options.workspaceRoot }
-			: {}),
-	});
-
-	registry.registerInstance(openCodeInstance);
-
-	const claudeInstance = new ClaudeProviderInstance({
-		workspaceRoot: options.workspaceRoot ?? process.cwd(),
-		claudeSettingsOverrides: () =>
-			loadRelaySettings(options.configDir).claudeSettings,
-	});
-	registry.registerInstance(claudeInstance);
-
-	const engine = new OrchestrationEngine({
-		registry,
-		resolveProviderDriver: (providerId) =>
-			resolveProviderRoutingDriver(
-				loadDaemonConfig(options.configDir),
-				providerId,
-			),
-		...(options.sessionBindingReadModel != null
-			? { sessionBindingReadModel: options.sessionBindingReadModel }
-			: {}),
-	});
-
-	return { engine, registry, openCodeInstance };
-}
-
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
-): Effect.Effect<OrchestrationComponents, never, Scope.Scope> =>
+): Effect.Effect<
+	OrchestrationComponents,
+	never,
+	| Scope.Scope
+	| SqlClient.SqlClient
+	| OpenCodeInstanceClientsTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
+> =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
 
-		// The relay's persistence SqlClient (when persistence is configured) backs
+		// The relay's persistence SqlClient backs
 		// the session binding read model and durable command receipts, so
 		// orchestration shares the relay's single database connection.
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
-		const sessionBindingReadModel =
-			sql != null ? new SqliteProviderSessionBindingReadModel(sql) : undefined;
+		const sql = yield* SqlClient.SqlClient;
+		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
+			sql,
+		);
 
-		// Phase 4.4: sessions bound to a NAMED OpenCode instance route their
+		// Sessions bound to a NAMED OpenCode instance route their
 		// provider calls to that instance's client. The binding is set before
 		// sendTurn dispatches (orchestration-engine binds session→providerId),
 		// so a session-keyed resolver over the binding read model is correct
 		// for sendTurn/interrupt/permission/question alike.
-		const instanceClientsOption = yield* Effect.serviceOption(
-			OpenCodeInstanceClientsTag,
-		);
-		const clientForSession =
-			instanceClientsOption._tag === "Some" && sessionBindingReadModel != null
-				? (sessionId: string) =>
-						sessionBindingReadModel
-							.getProviderForSession(sessionId)
-							.pipe(
-								Effect.flatMap((boundInstanceId) =>
-									boundInstanceId == null
-										? Effect.succeed(undefined)
-										: instanceClientsOption.value.clientFor(boundInstanceId),
-								),
-							)
-				: undefined;
+		const instanceClients = yield* OpenCodeInstanceClientsTag;
+		const clientForSession = (sessionId: string) =>
+			sessionBindingReadModel
+				.getProviderForSession(sessionId)
+				.pipe(
+					Effect.flatMap((boundInstanceId) =>
+						boundInstanceId == null
+							? Effect.succeed(undefined)
+							: instanceClients.clientFor(boundInstanceId),
+					),
+				);
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
 			...(options.workspaceRoot != null
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
-			...(clientForSession != null ? { clientForSession } : {}),
+			clientForSession,
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 
-		const persistOption = yield* Effect.serviceOption(
-			ClaudeEventPersistEffectTag,
-		);
-		const materializeSubagents =
-			persistOption._tag === "Some"
-				? makeClaudeSubagentMaterializer({
-						sdk: defaultClaudeSubagentSdk,
-						persist: persistOption.value,
-					})
-				: undefined;
+		const persist = yield* ClaudeEventPersistEffectTag;
+		const materializeSubagents = makeClaudeSubagentMaterializer({
+			sdk: defaultClaudeSubagentSdk,
+			persist,
+		});
 		const claudeInstance = yield* ClaudeDriver.create({
 			...(options.onBackgroundTask
 				? { onBackgroundTask: options.onBackgroundTask }
@@ -201,37 +164,29 @@ const createOrchestrationComponentsEffect = (
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
-			...(materializeSubagents ? { materializeSubagents } : {}),
+			materializeSubagents,
 		});
 		registry.registerInstance(claudeInstance);
 		// Durable command receipts share the persistence SqlClient with the
 		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
-		// global randomness. The shared ProviderRuntimeIngestion (when present) is
+		// global randomness. The shared ProviderRuntimeIngestion is
 		// handed to the engine's side-effect reactor so streamed provider output
 		// is persisted exactly as the former inline path did.
-		const ingestionOption = yield* Effect.serviceOption(
-			ProviderRuntimeIngestionTag,
-		);
+		const ingestion = yield* ProviderRuntimeIngestionTag;
 		// Narrow command read-model bootstrap: load only the command decision
 		// snapshot (receipts + stale-command tombstones), never the full
 		// relay/UI snapshot or message history.
-		const durableCommands =
-			sql != null
-				? {
-						sql,
-						snapshot: yield* new CommandReadModelRepository(sql)
-							.bootstrap()
-							.pipe(Effect.orDie),
-						projectKey:
-							options.projectKey ?? options.workspaceRoot ?? process.cwd(),
-						now: () => Date.now(),
-						generateId: () => `disp_${randomUUID()}`,
-						...(ingestionOption._tag === "Some"
-							? { ingestion: ingestionOption.value }
-							: {}),
-					}
-				: undefined;
+		const durableCommands = {
+			sql,
+			snapshot: yield* new CommandReadModelRepository(sql)
+				.bootstrap()
+				.pipe(Effect.orDie),
+			projectKey: options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+			now: () => Date.now(),
+			generateId: () => `disp_${randomUUID()}`,
+			ingestion,
+		};
 		const engine = new OrchestrationEngine({
 			registry,
 			resolveProviderDriver: (providerId) =>
@@ -284,25 +239,16 @@ function createOrchestrationView(
 	};
 }
 
-/**
- * Create an imperative view over orchestration components.
- *
- * Kept for narrow unit tests and compatibility surfaces. Production relay
- * wiring uses makeOrchestrationRuntimeLayer() so provider instance shutdown is
- * owned by the relay runtime Scope.
- */
-export function createOrchestrationLayer(
-	options: OrchestrationLayerOptions,
-): OrchestrationLayer {
-	return createOrchestrationView(createOrchestrationComponents(options));
-}
-
 export const makeOrchestrationRuntimeLayer = (
 	options: OrchestrationRuntimeLayerOptions = {},
 ): Layer.Layer<
 	ProviderRegistryTag | OrchestrationEngineTag,
 	never,
-	OpenCodeAPITag
+	| OpenCodeAPITag
+	| SqlClient.SqlClient
+	| OpenCodeInstanceClientsTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
 > => {
 	const componentsLayer = Layer.scoped(
 		OrchestrationComponentsTag,

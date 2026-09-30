@@ -3,7 +3,7 @@
 // instance. Sends a prompt that triggers tool use, then validates that
 // the SSE event stream delivers the expected state transitions in order.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ToolStatus } from "../../src/lib/shared-types.js";
 import {
 	authHeaders,
@@ -393,50 +393,59 @@ describe("Tool SSE Transition Validation (live)", () => {
 
 		it("REST API final state matches SSE terminal state", async () => {
 			if (skipIfNoServer() || !testSession || toolGroups.size === 0) return;
+			const sessionId = testSession.id;
 
-			// Wait a moment for the session to settle
-			await new Promise((r) => setTimeout(r, 2_000));
+			await vi.waitFor(
+				async () => {
+					const messages = await getSessionMessages(sessionId);
 
-			const messages = await getSessionMessages(testSession.id);
-
-			// Extract tool parts from REST messages
-			const restTools = new Map<string, { status: string; tool: string }>();
-			for (const msg of messages) {
-				const parts = (msg as Record<string, unknown>)["parts"] as
-					| Array<Record<string, unknown>>
-					| undefined;
-				if (!parts) continue;
-				for (const part of parts) {
-					if (part["type"] !== "tool") continue;
-					const callID = part["callID"] as string;
-					const state = part["state"] as Record<string, unknown> | undefined;
-					if (callID && state?.["status"]) {
-						restTools.set(callID, {
-							status: state["status"] as string,
-							tool: (part["tool"] as string) ?? "",
-						});
+					// Extract tool parts from REST messages
+					const restTools = new Map<string, { status: string; tool: string }>();
+					for (const msg of messages) {
+						const parts = (msg as Record<string, unknown>)["parts"] as
+							| Array<Record<string, unknown>>
+							| undefined;
+						if (!parts) continue;
+						for (const part of parts) {
+							if (part["type"] !== "tool") continue;
+							const callID = part["callID"] as string;
+							const state = part["state"] as
+								| Record<string, unknown>
+								| undefined;
+							if (callID && state?.["status"]) {
+								restTools.set(callID, {
+									status: state["status"] as string,
+									tool: (part["tool"] as string) ?? "",
+								});
+							}
+						}
 					}
-				}
-			}
 
-			// Compare SSE terminal state with REST state
-			for (const [callID, events] of toolGroups) {
-				const lastEvent = events.at(-1);
-				if (!lastEvent) continue;
-				const sseTerminal = lastEvent.status;
-				const restTool = restTools.get(callID);
-
-				if (restTool) {
+					// Compare SSE terminal state with REST state once REST has matching tool data.
 					expect(
-						restTool.status,
-						`Tool ${callID} (${events[0]?.tool}): SSE terminal=${sseTerminal}, REST=${restTool.status}`,
-					).toBe(sseTerminal);
-				}
-			}
+						[...toolGroups.keys()].some((callID) => restTools.has(callID)),
+					).toBe(true);
+					for (const [callID, events] of toolGroups) {
+						const lastEvent = events.at(-1);
+						if (!lastEvent) continue;
+						const sseTerminal = lastEvent.status;
+						const restTool = restTools.get(callID);
+
+						if (restTool) {
+							expect(
+								restTool.status,
+								`Tool ${callID} (${events[0]?.tool}): SSE terminal=${sseTerminal}, REST=${restTool.status}`,
+							).toBe(sseTerminal);
+						}
+					}
+				},
+				{ timeout: 10_000 },
+			);
 		}, 30_000);
 
 		it("session becomes idle after all tools complete", async () => {
 			if (skipIfNoServer() || !testSession) return;
+			const sessionId = testSession.id;
 
 			// Check SSE events already collected for a session.status idle event.
 			// The main SSE collection captured idle (that's what triggers the
@@ -456,28 +465,24 @@ describe("Tool SSE Transition Validation (live)", () => {
 
 			// Fallback: poll if SSE didn't capture idle (e.g., no tool events collected)
 			if (lastStatus !== "idle") {
-				const deadline = Date.now() + 30_000;
-				while (Date.now() < deadline) {
-					try {
+				await vi.waitFor(
+					async () => {
 						const statuses = (await (
 							await fetch(`${OPENCODE_BASE_URL}/session/status`, {
 								headers: { Accept: "application/json", ...authHeaders() },
 							})
 						).json()) as Record<string, { type: string }>;
-						const sessionStatus = statuses[testSession.id];
+						const sessionStatus = statuses[sessionId];
 						if (sessionStatus) {
 							lastStatus = sessionStatus.type;
-							if (lastStatus === "idle") break;
 						} else {
 							// Session not in status map means idle
 							lastStatus = "idle";
-							break;
 						}
-					} catch {
-						// ignore
-					}
-					await new Promise((r) => setTimeout(r, 1_000));
-				}
+						expect(lastStatus).toBe("idle");
+					},
+					{ timeout: 30_000, interval: 1_000 },
+				);
 			}
 			expect(lastStatus).toBe("idle");
 		}, 90_000);

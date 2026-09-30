@@ -5,7 +5,7 @@
   screen-reader contract a tab strip owes: no `role="tablist"`, no
   `role="tab"`, no `aria-selected`, no roving tabindex, no arrow keys. Five
   settings tabs and a Unified/Split switch were, to assistive tech, six
-  unrelated buttons (conduit-test-mkah).
+  unrelated buttons.
 
   Built on bits-ui's Tabs rather than hand-rolled, for the same reason ui/Menu
   is built on its DropdownMenu: roving focus, arrow/Home/End handling and the

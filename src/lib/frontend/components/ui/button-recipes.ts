@@ -40,7 +40,7 @@ export type ButtonVariant =
  * colour you actually got depended on a byte offset in the built CSS that
  * nobody could see from the call site. Replacing means exactly one
  * `text-*` is ever emitted, so there is no collision and no order to know.
- * The same argument that produced `align` (conduit-test-ixfu), applied to
+ * The same argument that produced `align`, applied to
  * the group that 39 of the remaining native controls actually care about.
  *
  * Members earn their place by cross-file evidence, the same bar the
@@ -75,7 +75,7 @@ export const TONE_CLASSES = {
  * Two pairs in here are very probably drift rather than design, and are
  * deliberately NOT collapsed by this ticket:
  *
- *   `overlay` (0.04) vs `overlay-soft` (0.03) -- a 1% alpha delta on a
+ *   `overlay` 0.04 vs `overlay-soft` 0.03 -- a 1% alpha delta on a
  *   neutral scrim. Collapsing them is a real, if tiny, pixel change and
  *   so belongs in a ticket that can own the baseline churn.
  *
@@ -101,7 +101,7 @@ export const HOVER_FILL_CLASSES = {
 	 * The accent tint, for a control whose LABEL is already accent-coloured, so
 	 * a neutral wash would read as the label dimming rather than the row
 	 * lighting up. TerminalPanel's "+ Terminal" is the first; FileMenu and
-	 * CommandMenu use the same pair for their active row (conduit-test-4ors).
+	 * CommandMenu use the same pair for their active row.
 	 */
 	"accent-bg": "hover:bg-accent-bg",
 } as const;
@@ -116,7 +116,7 @@ export type ButtonHoverFill = keyof typeof HOVER_FILL_CLASSES;
  * invariant, and it was not one: nine hand-written controls dissented, and a
  * consumer class cannot beat a BASE utility in the same group, so each of them
  * was blocked from migrating onto Button by exactly that one string
- * (conduit-test-8lxm).
+ *.
  *
  * Both `disabled:` and `aria-disabled:` are emitted for every member because
  * Button sets `aria-disabled` for the `loading` and "explain why" cases, where
@@ -179,11 +179,11 @@ export type ButtonDisabledStyle = keyof typeof DISABLED_CLASSES;
  * a white label on either measures 2.56:1 -- under AA's 3:1 large-text
  * floor, on the app's most prominent call to action. `text-bg` measures
  * 6.93:1 dark and 5.60:1 light, so it passes in BOTH themes where white
- * passes in only one (conduit-test-tpdw).
+ * passes in only one.
  *
  * The three transparent-base hover washes sit at 5%, not 10%. Five call
  * sites across three files had each dialled the 10% down by hand -- to 5%,
- * 6% or 0% -- and not one had dialled it up (conduit-test-d5nv). When every
+ * 6% or 0% -- and not one had dialled it up. When every
  * consumer corrects a default in the same direction the default is wrong.
  */
 type VariantRecipe = {
@@ -250,7 +250,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	 * copies of this recipe, and being a pill is what the affordance IS.
 	 * Splitting it across a variant and a size would mean every call site
 	 * has to remember to pair them, and a half-applied pill is worse than
-	 * no pill at all (conduit-test-de3.35.6).
+	 * no pill at all.
 	 *
 	 * Pair with `size="content"`; `sm`/`md` would add a conflicting
 	 * `rounded-lg`.
@@ -291,7 +291,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	 * recipes stay local. It was never single-file: SessionList had
 	 * independently hand-written four near-identical copies, agreeing on the
 	 * base colour and the hover fill and disagreeing only on the hover text
-	 * step (conduit-test-de3.35.3). Ten instances across two files.
+	 * step. Ten instances across two files.
 	 *
 	 * Deliberately colour-only. The two toolbars use different geometry --
 	 * Header a 23px box with a border, SessionList an 18px square -- so the
@@ -319,7 +319,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 /**
  * `content` is an opt-out, not a third size: it emits no padding, radius,
  * weight or type scale, so the call site supplies its own ADDITIVELY via
- * `class`. It exists because the de3.5 audit found 64 of 81 migration
+ * `class`. It exists because the component audit found 64 of 81 migration
  * candidates need intrinsic height — `sm`/`md` hard-code `h-8`/`h-9`, and
  * a call site cannot reliably override that (see component-conventions.mdx:
  * consumer `class` is additive; beating a size utility needs `h-auto!`).
@@ -346,7 +346,7 @@ export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 // The disabled appearance left for the same reason and by the same route:
 // nine controls dissented on how far a dead button should dim, and none of
 // them could win against a BASE utility. It is now `disabledStyle` — see
-// DISABLED_CLASSES in button-recipes.ts (conduit-test-8lxm).
+// DISABLED_CLASSES in button-recipes.ts.
 const TOUCH_TARGET_CLASSES =
 	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden";
 
@@ -356,14 +356,14 @@ const BASE_CLASSES =
 	// (`primary`) is the same colour as the button, so the old
 	// `ring-accent/70` was invisible on the one variant that most needed it.
 	// `ring-text` contrasts with every surface in both themes. Keyboard only:
-	// `focus-visible` never fires on a mouse click. See conduit-test-de3.19.
+	// `focus-visible` never fires on a mouse click.
 	"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text";
 
 const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
 
 /**
  * Main-axis alignment, as a prop rather than a base class, because the base
- * class was a coin flip nobody could see (conduit-test-ixfu).
+ * class was a coin flip nobody could see.
  *
  * BASE_CLASSES used to hard-code `justify-center`, so a call site wanting
  * something else had to append a competing utility and hope. Whether it won
@@ -468,7 +468,7 @@ export function buttonClasses({
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
-	 * button is disabled, so until conduit-test-or29 a dead button still lit up
+	 * button is disabled, so without a disabled hover guard a dead button still lit up
 	 * under the cursor -- in every variant, everywhere in the app. It read as
 	 * interactive at the exact moment it is not.
 	 *

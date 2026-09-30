@@ -40,6 +40,7 @@ import type { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonHandleTag } from "./daemon-handle.js";
 import type { DaemonEventBusTag } from "./daemon-pubsub.js";
 import type { DaemonStateTag } from "./daemon-state.js";
+import type { InstanceHealthCheckTag } from "./instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
 	getInstance as getEffectInstance,
@@ -119,6 +120,7 @@ export const IpcHandlersLayer: Layer.Layer<
 	| ShutdownSignalTag
 	| InstanceManagerStateTag
 	| PollerFibersTag
+	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| ProjectRegistryTag
 	| RelayCacheTag

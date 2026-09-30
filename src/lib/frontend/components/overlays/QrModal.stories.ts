@@ -43,7 +43,7 @@ const meta = {
 	//    (`catch {}`) and the suite never noticed it was documenting the sad path.
 	//
 	// Anything other than /health is rejected, so a new request can't silently
-	// reintroduce network dependence. See conduit-test-afp and conduit-test-de3.33.
+	// reintroduce network dependence.
 	beforeEach: () => {
 		const realFetch = globalThis.fetch;
 		globalThis.fetch = (input: RequestInfo | URL, _init?: RequestInit) => {

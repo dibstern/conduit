@@ -1,6 +1,7 @@
 // ─── Session Helpers ───────────────────────────────────────────────────────
 // Create and clean up test sessions for contract tests.
 
+import { expect, vi } from "vitest";
 import {
 	apiDelete,
 	apiGet,
@@ -84,19 +85,20 @@ export async function waitForIdle(
 	timeoutMs = 60_000,
 	pollMs = 500,
 ): Promise<boolean> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		try {
-			const status = await apiGet<{ status?: { type?: string } }>(
-				"/session/status",
-			);
-			if (status?.status?.type === "idle") return true;
-		} catch {
-			// Ignore — server might be busy
-		}
-		await new Promise((r) => setTimeout(r, pollMs));
+	try {
+		await vi.waitFor(
+			async () => {
+				const status = await apiGet<{ status?: { type?: string } }>(
+					"/session/status",
+				);
+				expect(status?.status?.type).toBe("idle");
+			},
+			{ timeout: timeoutMs, interval: pollMs },
+		);
+		return true;
+	} catch {
+		return false;
 	}
-	return false;
 }
 
 /**

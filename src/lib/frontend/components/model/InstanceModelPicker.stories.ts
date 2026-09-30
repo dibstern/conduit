@@ -60,7 +60,7 @@ async function openPicker(canvasElement: HTMLElement) {
 	// attribute, which the HTML spec ignores once the document's
 	// autofocus-processed flag is set -- i.e. for anything rendered after load.
 	// It was inert, so the picker opened with focus nowhere and typing did
-	// nothing (conduit-test-de3.35.6).
+	// nothing.
 	await expect(await canvas.findByTestId("model-picker-search")).toHaveFocus();
 	// userEvent.click leaves the pointer on the trigger. Its background has a
 	// 150ms transition, so a hovered trigger is a flaky thing to bake into a
@@ -126,7 +126,7 @@ export const WithVariants: Story = {
 	},
 };
 
-// ─── Controls migrated onto ui/Button in conduit-test-de3.35.6 ───────────────
+// ─── Controls migrated onto ui/Button ───────────────
 // Four of the seven had no baseline at all: the favourites toggle in its lit
 // state, the geo-routing chips, and the whole locked-mode rail. `Open` covers
 // the rest (search row, model rows, the set-default star, the reload footer).
@@ -225,8 +225,8 @@ export const Locked: Story = {
 };
 
 /**
- * The rail's hover tooltip, which had no visual coverage before
- * conduit-test-ee6y replaced the hand-written one with `ui/Tooltip`.
+ * The rail's hover tooltip had no visual coverage before the hand-written one
+ * was replaced with `ui/Tooltip`.
  *
  * This is the first real consumer of that primitive -- until now only a
  * fixture used it -- and it is the story that proves two things the unit
@@ -265,7 +265,7 @@ export const RailTooltip: Story = {
 
 /**
  * A provider the user has not set up yet. This state ships and had no visual
- * coverage at all, which is how conduit-test-40k4 found it: the "(not
+ * coverage at all, so it went unnoticed: the "(not
  * configured)" suffix was a `::after` recipe in style.css, and moving it into
  * the markup would have been unverifiable against a suite that never renders
  * an unconfigured provider.

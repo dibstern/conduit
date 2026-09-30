@@ -6,7 +6,7 @@
 // constructs the appropriate Node.js server factory, and wires the
 // Effect HTTP router via HttpServer.serve.
 //
-// WebSocket upgrade is NOT handled here — that is Task 32. This layer
+// WebSocket upgrade is outside this HTTP layer. This layer
 // only serves HTTP routes through the Effect router.
 
 import { readFileSync } from "node:fs";
@@ -19,6 +19,7 @@ import { Context, Effect, Layer } from "effect";
 import {
 	effectRouterWithCors,
 	type ProjectsProvider,
+	type SetupInfoProvider,
 } from "../../../server/effect-http-router.js";
 import type { DaemonEnvConfig } from "../../daemon/Services/daemon-config.js";
 import { DaemonEnvConfigTag } from "../../daemon/Services/daemon-config.js";
@@ -91,13 +92,17 @@ const makeServerFactory = (
  * 4. Serves routes through the Effect HTTP router with CORS
  *
  * Requires: HttpServerConfigTag + all router dependencies
- * (ProjectsProvider, and optionally HealthProvider, PushProvider, CaCertProvider,
- * SetupInfoProvider).
+ * (ProjectsProvider, SetupInfoProvider, and optionally HealthProvider,
+ * PushProvider, CaCertProvider).
  */
 export const HttpServerLive: Layer.Layer<
 	never,
 	HttpServerError.ServeError,
-	AuthManagerTag | HttpServerConfigTag | ProjectsProvider | StaticDirTag
+	| AuthManagerTag
+	| HttpServerConfigTag
+	| ProjectsProvider
+	| SetupInfoProvider
+	| StaticDirTag
 > = Layer.unwrapEffect(
 	Effect.gen(function* () {
 		const config = yield* HttpServerConfigTag;
@@ -124,5 +129,9 @@ export const HttpServerLive: Layer.Layer<
 export const HttpServerFromEnvLive: Layer.Layer<
 	never,
 	HttpServerError.ServeError,
-	AuthManagerTag | DaemonEnvConfigTag | ProjectsProvider | StaticDirTag
+	| AuthManagerTag
+	| DaemonEnvConfigTag
+	| ProjectsProvider
+	| SetupInfoProvider
+	| StaticDirTag
 > = HttpServerLive.pipe(Layer.provide(HttpServerConfigFromEnv));

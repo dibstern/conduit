@@ -58,7 +58,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"tool.running",
 	"tool.completed",
 	"file.attached",
-	"tool.input_updated", // Retained for historical event compatibility — no longer emitted after Phase 2
+	"tool.input_updated", // Retained for historical event compatibility — no longer emitted after tool input buffering changed
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
@@ -206,8 +206,8 @@ export type CanonicalToolInput =
  * to keep working on the same prompt: the session goes busy again, a second
  * assistant message arrives, tools run. Nothing here says the turn is over, so
  * never latch a turn to finished on this event. See `phaseAfter` in
- * `src/lib/contracts/turn-phase.ts` for the rule both surfaces follow, and
- * conduit-test-siq2 for the bug that came from believing the name.
+ * `src/lib/contracts/turn-phase.ts` for the rule both surfaces follow.
+ * The event name once caused turns to be marked finished too early.
  *
  * `cost` is cumulative for the whole provider session, not for this execution;
  * `tokens` are per-execution. Take the latest cost, sum the tokens.

@@ -329,7 +329,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 });
 
 test.describe("Sidebar Layout — Mobile", () => {
-	test.use({ viewport: { width: 375, height: 667 }, persistence: true });
+	test.use({ viewport: { width: 375, height: 667 } });
 
 	test("phone file preview returns to the Files view", async ({
 		page,

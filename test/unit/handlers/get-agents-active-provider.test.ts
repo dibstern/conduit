@@ -4,6 +4,7 @@ import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
@@ -19,6 +20,9 @@ import { handleGetAgents } from "../../../src/lib/handlers/agent.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { OrchestrationEngine as OrchestrationEngineLive } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -67,16 +71,18 @@ function agentHandlerLayer({
 	const wsLayer = Layer.succeed(WebSocketHandlerTag, ws);
 	const overridesLayer = makeOverridesStateLive();
 	const logLayer = Layer.succeed(LoggerTag, log);
-	const deps =
-		engine == null
-			? Layer.mergeAll(apiLayer, wsLayer, overridesLayer, logLayer)
-			: Layer.mergeAll(
-					apiLayer,
-					wsLayer,
-					overridesLayer,
-					logLayer,
-					Layer.succeed(OrchestrationEngineTag, engine),
-				);
+	const deps = Layer.mergeAll(
+		apiLayer,
+		wsLayer,
+		overridesLayer,
+		logLayer,
+		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(
+			OrchestrationEngineTag,
+			engine ??
+				new OrchestrationEngineLive({ registry: new ProviderRegistry() }),
+		),
+	);
 	return Layer.provideMerge(AgentServiceLive, deps);
 }
 

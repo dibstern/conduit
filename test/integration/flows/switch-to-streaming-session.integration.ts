@@ -24,10 +24,8 @@ describe("Integration: Switch to Streaming Session", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("deltas arrive after switching to a session that streamed", async () => {

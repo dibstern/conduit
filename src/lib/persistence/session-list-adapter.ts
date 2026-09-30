@@ -64,7 +64,7 @@ export function deriveSessionAttention(input: {
 
 	// Cold daemon-wide reads have no live status, so the projected column is the
 	// only working signal. A relay killed mid-turn can leave it busy until another
-	// event moves it; conduit-test-vik1.12 owns repairing that stale signal.
+	// event moves it; the server sweep repairs that stale signal.
 	const status = input.liveStatus?.type ?? input.projectedStatus;
 	if (status === "busy" || status === "retry" || input.hasLiveBackgroundWork)
 		return "working";

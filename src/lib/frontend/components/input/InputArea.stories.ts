@@ -30,11 +30,11 @@ async function assertSwapStyles(
 	const popoverProbe = document.createElement("div");
 	popoverProbe.className = "z-[var(--z-popover)]";
 	// The swap dropped the consumer's own `bg-bg-surface` in favour of
-	// FLOATING_SURFACE_CLASSES' `bg-bg-alt` (conduit-test-9kov). Back then the two
+	// FLOATING_SURFACE_CLASSES' `bg-bg-alt`. Back then the two
 	// tokens resolved identically, so a second probe asserted their equality --
 	// deliberately, to go red the day they diverged. They have now diverged: the
 	// approved palette puts every surface that FLOATS over content on --alt and
-	// every INSET control on --surface (conduit-test-vik1.21). So the equality
+	// every INSET control on --surface. So the equality
 	// probe is gone and the one below carries the load on its own: pinning the
 	// listbox to bg-alt exactly is what catches a slide back to bg-surface.
 	const surfaceBgProbe = document.createElement("div");
@@ -126,8 +126,7 @@ type Story = StoryObj<typeof meta>;
 //   color-contrast    The composer chrome (.model-label, the variant and permission badges)
 //                     already fails at #71717a on #27272a/#333338 today, independently of
 //                     this change — verified: the diff contains zero references to those
-//                     selectors. That is conduit-test-de3.28.2's contrast floor, which is
-//                     gated on a pending colour decision. Expires when de3.28.2 lands.
+//                     selectors. That is a separate contrast floor for those colours.
 //   scrollable-region-focusable
 //                     Direct, measured consequence of dropping the role — not a pre-existing
 //                     failure. axe exempts a scrollable listbox from this rule only when it
@@ -139,10 +138,9 @@ type Story = StoryObj<typeof meta>;
 //                     is the second, wrong tab stop DetachedListbox forbids by construction.
 //                     SC 2.1.1 is met by the route axe cannot see — ArrowUp/ArrowDown scroll
 //                     the active row from the textarea, asserted below via scrollIntoView.
-//                     Tracked: conduit-test-n9s.
 //
-// `aria-allowed-role` was excluded here until conduit-test-n9s settled. It no longer is:
-// n9s.1 measured both candidate markups in a real browser and found `role="combobox"` on a
+// `aria-allowed-role` was previously excluded here. It no longer is:
+// Browser checks measured both candidate markups and found `role="combobox"` on a
 // <textarea> to be the sole violation, so the composer dropped the role (option 3C) rather
 // than keep the exclusion. The rule is live below, and it is the gate that keeps it dropped.
 const STRICT_ARIA = {

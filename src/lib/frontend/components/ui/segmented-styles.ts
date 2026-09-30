@@ -15,7 +15,7 @@
  * Every recipe below started as the as-found class list of a real call site,
  * token for token, so the migration was zero-diff by construction.
  *
- * One convergence has since landed (conduit-test-de3.6). The three strips
+ * One convergence has since landed. The three strips
  * marked their selected option in two different colours: `pill` used `accent`
  * while `underline` and `field` used `brand-a`. Those two tokens hold the same
  * value in both canonical themes (#ff2d7b dark, #c9004f light), so the split
@@ -25,7 +25,7 @@
  * because selection is an interactive state and `accent` is the token family
  * that models one (it has `--color-accent-hover` and `--color-accent-bg`;
  * `brand-a` is a bare swatch for glows and identity marks). The token
- * duplication itself is conduit-test-57oe's problem, not this file's.
+ * duplication remains unresolved (tracked in conduit-test-57oe).
  *
  * What is NOT converged, deliberately: `pill` stays content-width with a
  * border-colour hover and `field` stays `flex-1` with none, because one is a
@@ -55,7 +55,7 @@ export const SEGMENTED_VARIANTS = {
 	 * element's own style attribute. Dropping `border-none` makes the classes
 	 * load-bearing again and the inline style unnecessary — Tailwind v4's
 	 * preflight already sets `border: 0 solid`, so `border-b-2` alone is a solid
-	 * 2px bottom border (conduit-test-mkah).
+	 * 2px bottom border.
 	 */
 	underline: {
 		list: "flex border-b border-border px-5 gap-1 font-brand",

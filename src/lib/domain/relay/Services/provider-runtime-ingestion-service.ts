@@ -1,8 +1,15 @@
 import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Effect, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
-import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
-import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import {
+	EventStoreEffectTag,
+	type EventStoreError,
+} from "../../../persistence/effect/event-store-effect.js";
+import {
+	ProjectionRunnerEffectTag,
+	type ProjectionRunnerError,
+} from "../../../persistence/effect/projection-runner-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
@@ -12,15 +19,20 @@ import { translateDomainEventToRelay } from "../../../relay/domain-event-to-rela
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 
+export type ProviderRuntimeIngestionError =
+	| EventStoreError
+	| ProjectionRunnerError
+	| SqlError;
+
 export interface ProviderRuntimeIngestion {
 	readonly ingest: (
 		event: ProviderRuntimeEvent,
-	) => Effect.Effect<number, unknown>;
+	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 	readonly ingestBatch: (
 		events: readonly ProviderRuntimeEvent[],
 		options?: { readonly publish?: boolean },
-	) => Effect.Effect<number, unknown>;
-	readonly drain: () => Effect.Effect<void, unknown>;
+	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
+	readonly drain: () => Effect.Effect<void>;
 }
 
 export class ProviderRuntimeIngestionTag extends Context.Tag(
@@ -28,7 +40,7 @@ export class ProviderRuntimeIngestionTag extends Context.Tag(
 )<ProviderRuntimeIngestionTag, ProviderRuntimeIngestion>() {}
 
 export interface ProviderRuntimeRelayPublisher {
-	readonly publish: (message: RelayMessage) => Effect.Effect<void, unknown>;
+	readonly publish: (message: RelayMessage) => Effect.Effect<void>;
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
@@ -56,7 +68,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
 				ingestOptions: { readonly publish?: boolean } = {},
-			): Effect.Effect<number, unknown> =>
+			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
 				ingestSemaphore.withPermits(1)(
 					Effect.gen(function* () {
 						const currentState = yield* Ref.get(mapperStateRef);
@@ -166,7 +178,7 @@ export const ProviderRuntimeIngestionLive = makeProviderRuntimeIngestionLive();
 function publishRelayMessages(
 	events: readonly CanonicalEvent[],
 	publisher: ProviderRuntimeRelayPublisher,
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void> {
 	return Effect.forEach(
 		events,
 		(event) => {

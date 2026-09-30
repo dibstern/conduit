@@ -134,6 +134,7 @@ describe("createProjectRelay override-state defaults", () => {
 			projectDir: process.cwd(),
 			slug: "test-default-overrides",
 			configDir,
+			persistenceDbPath: join(configDir, "events.db"),
 			log: createSilentLogger(),
 		});
 		const sseHealth = {
@@ -190,6 +191,7 @@ describe("createProjectRelay override-state defaults", () => {
 			projectDir: process.cwd(),
 			slug: "test-default-agent-command",
 			configDir,
+			persistenceDbPath: join(configDir, "events.db"),
 			log: createSilentLogger(),
 		});
 
@@ -215,6 +217,7 @@ describe("createProjectRelay override-state defaults", () => {
 			projectDir: process.cwd(),
 			slug: "test-no-opencode-startup",
 			configDir,
+			persistenceDbPath: join(configDir, "events.db"),
 			log: createSilentLogger(),
 			statusPollerInterval: 60_000,
 			messagePollerInterval: 60_000,
@@ -233,6 +236,7 @@ describe("createProjectRelay override-state defaults", () => {
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
 			slug: "test-aborted-relay",
+			persistenceDbPath: join(tmpdir(), "conduit-aborted-relay.db"),
 			signal: controller.signal,
 			log: createSilentLogger(),
 		});

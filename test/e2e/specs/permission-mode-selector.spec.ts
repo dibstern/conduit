@@ -118,7 +118,11 @@ async function setup(
 				permissionMode: serverModes.get(String(params["sessionId"])) ?? "ask",
 			}),
 			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
-			GetProjects: () => ({ projects: [] }),
+			// The attached project must be listed, or the frontend treats it as
+			// removed and returns to the session list, unbinding the session.
+			GetProjects: () => ({
+				projects: [{ slug: "myapp", name: "myapp", path: "/tmp/myapp" }],
+			}),
 			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
 			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},
@@ -311,6 +315,7 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 		relay.sendMessage({ type: "session_switched", id: "sess-pm-001" });
 
 		// Flushing "ask" (or nothing) is acceptable; flushing "full" is not.
+		// No elevated mode may be flushed during this observation window.
 		await page.waitForTimeout(500);
 		const flushed = switchCalls(rpc).map((c) => c.payload["mode"]);
 		expect(flushed).not.toContain("full");

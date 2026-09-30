@@ -593,7 +593,7 @@ test.describe("Project Rename", () => {
 		// Input should disappear
 		await expect(renameInput).not.toBeVisible();
 
-		// Wait a bit to ensure no rename request arrives.
+		// No rename request may arrive during this observation window.
 		await page.waitForTimeout(300);
 		const renameRequests = control.rpc
 			.getRequests()
@@ -684,7 +684,7 @@ test.describe("Project Delete", () => {
 		// Modal should close
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 
-		// Verify no RemoveProject RPC was sent.
+		// No RemoveProject RPC may arrive during this observation window.
 		await page.waitForTimeout(300);
 		const removeRequests = control.rpc
 			.getRequests()

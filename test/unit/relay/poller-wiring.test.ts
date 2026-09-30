@@ -136,7 +136,8 @@ describe("wirePollers", () => {
 			[{ type: "done", sessionId: "child-session", code: 0 }],
 			"child-session",
 		);
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		// Flush handling of the child event before checking that it produced no notification.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(pushManager.sendToAll).not.toHaveBeenCalled();
 		expect(broadcast).not.toHaveBeenCalledWith(

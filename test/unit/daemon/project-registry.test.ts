@@ -780,7 +780,7 @@ describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 
 describe("ProjectRegistry — Property-based invariants", () => {
 	/** Flush microtasks so immediateRelayFactory promises resolve */
-	const flush = () => new Promise((r) => setTimeout(r, 0));
+	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 	/** Arbitrary slug from a small pool to encourage collisions */
 	const slugArb = fc.constantFrom("a", "b", "c", "d", "e");
@@ -933,7 +933,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 
 describe("ProjectRegistry — Stateful model tests", () => {
 	/** Flush microtasks so immediateRelayFactory promises resolve */
-	const flush = () => new Promise((r) => setTimeout(r, 0));
+	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 	type ModelEntry = {
 		slug: string;

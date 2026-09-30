@@ -41,6 +41,7 @@ import {
 	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
 } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import {
 	type ProviderStateEffect,
 	ProviderStateEffectError,
@@ -67,7 +68,6 @@ import type {
 	ProviderInstance,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
-import type { HistoryMessage } from "../../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -183,13 +183,6 @@ const historyRow = (text: string) => ({
 	],
 });
 
-const historyMessage = (text: string): HistoryMessage => ({
-	id: `history-${text}`,
-	role: "user",
-	text,
-	parts: [{ id: `part-${text}`, type: "text", text }],
-});
-
 const makeReadQuery = (
 	getSessionMessagesWithParts: ReadQueryEffect["getSessionMessagesWithParts"],
 ): ReadQueryEffect => ({
@@ -266,7 +259,6 @@ const serviceLayer = (input: {
 	readonly ingestion?: ProviderRuntimeIngestion;
 	readonly providerState?: ProviderStateEffect;
 	readonly titleService?: SessionTitleService;
-	readonly sessionHistory?: readonly HistoryMessage[];
 	readonly api?: OpenCodeAPI;
 	readonly configDir?: string;
 }) => {
@@ -274,14 +266,7 @@ const serviceLayer = (input: {
 		getClientsForSession: vi.fn(() => ["client-1"]),
 	});
 	const log = makeMockLogger();
-	const sessionManagerService = makeMockSessionManagerService({
-		loadPreRenderedHistory: vi.fn(() =>
-			Effect.succeed({
-				messages: [...(input.sessionHistory ?? [])],
-				hasMore: false,
-			}),
-		),
-	});
+	const sessionManagerService = makeMockSessionManagerService();
 	let baseLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
@@ -298,17 +283,17 @@ const serviceLayer = (input: {
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
+		makePersistenceEffectLayer(":memory:"),
+		Layer.succeed(OrchestrationEngineTag, input.engine ?? makeEngine()),
+		Layer.succeed(
+			ProviderRuntimeIngestionTag,
+			input.ingestion ?? makeIngestion(),
+		),
 		Layer.succeed(
 			SessionTitleServiceTag,
 			input.titleService ?? makeTitleService(),
 		),
 	);
-	if (input.engine) {
-		baseLayer = Layer.merge(
-			baseLayer,
-			Layer.succeed(OrchestrationEngineTag, input.engine),
-		);
-	}
 	if (input.readQuery) {
 		baseLayer = Layer.merge(
 			baseLayer,
@@ -319,12 +304,6 @@ const serviceLayer = (input: {
 		baseLayer = Layer.merge(
 			baseLayer,
 			Layer.succeed(ClaudeEventPersistEffectTag, input.persist),
-		);
-	}
-	if (input.ingestion) {
-		baseLayer = Layer.merge(
-			baseLayer,
-			Layer.succeed(ProviderRuntimeIngestionTag, input.ingestion),
 		);
 	}
 	if (input.providerState) {
@@ -360,7 +339,7 @@ const interruptTurn = () =>
 
 describe("ProviderTurnService", () => {
 	it.effect(
-		"fails closed for Claude provider output when ProviderRuntimeIngestion is unavailable",
+		"passes Claude provider output to the required ingestion service",
 		() =>
 			Effect.gen(function* () {
 				let capturedSink: EventSink | undefined;
@@ -375,7 +354,8 @@ describe("ProviderTurnService", () => {
 					providerId: "claude",
 					dispatchEffect,
 				});
-				const { layer } = serviceLayer({ engine });
+				const ingestion = makeIngestion();
+				const { layer } = serviceLayer({ engine, ingestion });
 
 				yield* sendTurn().pipe(Effect.provide(layer));
 
@@ -383,28 +363,19 @@ describe("ProviderTurnService", () => {
 				expect(sink).toBeDefined();
 				if (!sink) return;
 
-				const result = yield* Effect.either(
-					sink.push(
-						providerRuntimeEvent(
-							"text.delta",
-							"session-1",
-							{
-								messageId: "msg-1",
-								partId: "part-1",
-								text: "hello",
-							},
-							{ eventId: "evt-missing-ingestion", providerId: "claude" },
-						),
-					),
-				);
-
-				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
-						_tag: "ProviderRuntimeIngestionRequired",
-						sessionId: "session-1",
+				const event = providerRuntimeEvent(
+					"text.delta",
+					"session-1",
+					{
+						messageId: "msg-1",
+						partId: "part-1",
+						text: "hello",
 					},
-				});
+					{ eventId: "evt-required-ingestion", providerId: "claude" },
+				);
+				const result = yield* Effect.either(sink.push(event));
+				expect(result._tag).toBe("Right");
+				expect(ingestion.ingest).toHaveBeenCalledWith(event);
 			}),
 	);
 
@@ -953,7 +924,9 @@ describe("ProviderTurnService", () => {
 				engine,
 				persist,
 				titleService,
-				sessionHistory: [historyMessage("Earlier prompt")],
+				readQuery: makeReadQuery(() =>
+					Effect.succeed([historyRow("Earlier prompt")]),
+				),
 				configDir,
 			});
 
@@ -1267,7 +1240,7 @@ describe("ProviderTurnService", () => {
 	});
 
 	it.effect(
-		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",
+		"uses OpenCode abort for an unbound session, clears processing timeout, and broadcasts done",
 		() => {
 			const api = {
 				session: { abort: vi.fn(async () => undefined) },

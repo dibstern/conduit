@@ -8,16 +8,27 @@
 // ProviderRuntimeIngestion is present; the local translation branch here remains
 // for focused translator and compatibility tests.
 
+import { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
+import { PendingInteractionCancelled } from "../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
+import { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
+import { EventStoreError } from "../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerError } from "../persistence/effect/projection-runner-effect.js";
+import { PersistenceError } from "../persistence/errors.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import { translateDomainEventToRelay } from "../relay/domain-event-to-relay.js";
 import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { MissingPendingInteractions } from "./errors.js";
+import {
+	type EventSinkError,
+	EventSinkIngestionError,
+	type EventSinkPersistenceError,
+} from "./event-sink-errors.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
@@ -36,10 +47,10 @@ const log = createLogger("relay-event-sink");
 export interface EffectRelayEventSinkPersist {
 	readonly persistEvent: (
 		event: CanonicalEvent,
-	) => Effect.Effect<void, unknown>;
+	) => Effect.Effect<void, EventSinkPersistenceError>;
 	readonly persistEvents?: (
 		events: readonly CanonicalEvent[],
-	) => Effect.Effect<void, unknown>;
+	) => Effect.Effect<void, EventSinkPersistenceError>;
 }
 
 export type RelayEventSinkPersist = EffectRelayEventSinkPersist;
@@ -60,7 +71,7 @@ export interface RelayEventSinkDeps {
 	 */
 	readonly applyReportedPermissionMode?: (
 		mode: SessionPermissionMode,
-	) => Effect.Effect<void, unknown>;
+	) => Effect.Effect<void, Error>;
 	/** Optional: persist events to SQLite for session history survival. */
 	readonly persist?: RelayEventSinkPersist;
 	/** Optional durable runtime ingestion owner. When present, push() delegates provider output to this path. */
@@ -73,14 +84,16 @@ export interface RelayEventSinkDeps {
 			toolName: string;
 			toolInput: Record<string, unknown>;
 			always: string[];
-		}): Effect.Effect<
-			{ readonly awaitResponse: Effect.Effect<PermissionResponse, unknown> },
-			unknown
-		>;
+		}): Effect.Effect<{
+			readonly awaitResponse: Effect.Effect<
+				PermissionResponse,
+				PendingInteractionCancelled
+			>;
+		}>;
 		resolvePermissionRequest(
 			requestId: string,
 			response: PermissionResponse,
-		): Effect.Effect<boolean | undefined, unknown>;
+		): Effect.Effect<boolean | undefined>;
 		beginQuestionRequest(entry: {
 			requestId: string;
 			sessionId: string;
@@ -92,20 +105,20 @@ export interface RelayEventSinkDeps {
 			}>;
 			toolCallId?: string;
 			providerId?: string;
-		}): Effect.Effect<
-			{
-				readonly awaitAnswers: Effect.Effect<Record<string, unknown>, unknown>;
-			},
-			unknown
-		>;
+		}): Effect.Effect<{
+			readonly awaitAnswers: Effect.Effect<
+				Record<string, unknown>,
+				PendingInteractionCancelled
+			>;
+		}>;
 		resolveQuestionRequest(
 			requestId: string,
 			answers: Record<string, unknown>,
-		): Effect.Effect<boolean | undefined, unknown>;
+		): Effect.Effect<boolean | undefined>;
 		cancelSessionInteractions?(
 			reason: string,
 			options?: { readonly recoverQuestions?: boolean },
-		): Effect.Effect<void, unknown>;
+		): Effect.Effect<void>;
 	};
 }
 
@@ -152,7 +165,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 	const sink: RelayEventSink = {
 		noteActivity: reset,
-		push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown> {
+		push(event: ProviderRuntimeEvent): Effect.Effect<void, EventSinkError> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
 				// Ahead of the ingestion short-circuit: the live override has to
@@ -162,7 +175,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					yield* applyReportedPermissionMode(event);
 				}
 				if (deps.ingestion) {
-					yield* deps.ingestion.ingest(event);
+					yield* deps.ingestion
+						.ingest(event)
+						.pipe(Effect.mapError(toEventSinkError));
 					if (isTerminalRuntimeEvent(event)) {
 						yield* Effect.sync(finish);
 					}
@@ -239,7 +254,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 		requestPermission(
 			request: PermissionRequest,
-		): Effect.Effect<PermissionResponse, unknown> {
+		): Effect.Effect<
+			PermissionResponse,
+			MissingPendingInteractions | PendingInteractionCancelled
+		> {
 			return Effect.gen(function* () {
 				// The turn now blocks on the human. Stop the inactivity timeout
 				// instead of restarting it, or it fires a bogus PROCESSING_TIMEOUT
@@ -304,7 +322,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 		requestQuestion(
 			request: QuestionRequest,
-		): Effect.Effect<Record<string, unknown>, unknown> {
+		): Effect.Effect<
+			Record<string, unknown>,
+			MissingPendingInteractions | PendingInteractionCancelled
+		> {
 			return Effect.gen(function* () {
 				// Same as requestPermission: awaiting the user is not inactivity.
 				yield* Effect.sync(finish);
@@ -354,7 +375,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		resolvePermission(
 			requestId: string,
 			response: PermissionResponse,
-		): Effect.Effect<void, unknown> {
+		): Effect.Effect<void> {
 			return Effect.gen(function* () {
 				if (!deps.pendingInteractions) {
 					yield* Effect.sync(() => {
@@ -374,7 +395,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		resolveQuestion(
 			requestId: string,
 			answers: Record<string, unknown>,
-		): Effect.Effect<void, unknown> {
+		): Effect.Effect<void> {
 			return Effect.gen(function* () {
 				if (!deps.pendingInteractions) {
 					yield* Effect.sync(() => {
@@ -394,7 +415,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		cancelSessionInteractions(
 			reason: string,
 			options?: { readonly recoverQuestions?: boolean },
-		): Effect.Effect<void, unknown> {
+		): Effect.Effect<void> {
 			if (deps.pendingInteractions?.cancelSessionInteractions) {
 				return deps.pendingInteractions.cancelSessionInteractions(
 					reason,
@@ -405,6 +426,20 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		},
 	};
 	return sink;
+}
+
+export function toEventSinkError(cause: unknown): EventSinkError {
+	if (
+		cause instanceof PersistenceError ||
+		cause instanceof EventStoreError ||
+		cause instanceof ClaudeEventPersistEffectError ||
+		cause instanceof ProjectionRunnerError ||
+		cause instanceof SqlError ||
+		cause instanceof MissingPendingInteractions ||
+		cause instanceof PendingInteractionCancelled
+	)
+		return cause;
+	return new EventSinkIngestionError({ cause });
 }
 
 function isTerminalRuntimeEvent(event: ProviderRuntimeEvent): boolean {

@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { isRecord } from "../../utils.js";
+import {
+	type ClaudeAdapterError,
+	ClaudeRuntimeError,
+} from "../event-sink-errors.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -137,15 +141,17 @@ function stringField(value: unknown): string {
 	return typeof value === "string" ? value : "";
 }
 
-function abortSignalEffect(signal: AbortSignal): Effect.Effect<never, Error> {
-	return Effect.async<never, Error>((resume) => {
+function abortSignalEffect(
+	signal: AbortSignal,
+): Effect.Effect<never, ClaudeRuntimeError> {
+	return Effect.async<never, ClaudeRuntimeError>((resume) => {
 		if (signal.aborted) {
-			resume(Effect.fail(new Error("Aborted")));
+			resume(Effect.fail(new ClaudeRuntimeError({ message: "Aborted" })));
 			return;
 		}
 		const onAbort = () => {
 			signal.removeEventListener("abort", onAbort);
-			resume(Effect.fail(new Error("Aborted")));
+			resume(Effect.fail(new ClaudeRuntimeError({ message: "Aborted" })));
 		};
 		signal.addEventListener("abort", onAbort, { once: true });
 		return Effect.sync(() => signal.removeEventListener("abort", onAbort));
@@ -160,7 +166,7 @@ export class ClaudePermissionService {
 		toolName: string,
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
-	): Effect.Effect<PermissionResult, unknown> {
+	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
 		const attributes = {
 			providerId: "claude",
 			sessionId: ctx.sessionId,
@@ -181,7 +187,7 @@ export class ClaudePermissionService {
 		ctx: ClaudeSessionContext,
 		requestId: string,
 		decision: PermissionDecision,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		const pending = ctx.pendingApprovals.get(requestId);
 		if (!pending) return Effect.void;
 		return pending.resolve(decision);
@@ -191,7 +197,7 @@ export class ClaudePermissionService {
 		ctx: ClaudeSessionContext,
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
-	): Effect.Effect<PermissionResult, unknown> {
+	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
 		const sink = ctx.eventSink ?? this.deps.sink;
 		if (!sink) {
 			return Effect.succeed({
@@ -240,7 +246,7 @@ export class ClaudePermissionService {
 		toolName: string,
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
-	): Effect.Effect<PermissionResult, unknown> {
+	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const requestId = randomUUID();
 			const createdAt = new Date().toISOString();

@@ -101,7 +101,7 @@
 	// Resolved by option id rather than a descendant class query: the old lookup
 	// started at `document` and matched the first `#command-menu .cmd-menu` in the
 	// page, which is the wrong list once two instances are mounted
-	// (conduit-test-9kov). rAF still waits for the DOM update.
+	//. rAF still waits for the DOM update.
 	function scrollActiveIntoView(): void {
 		requestAnimationFrame(() => {
 			document

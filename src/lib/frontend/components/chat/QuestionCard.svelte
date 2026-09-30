@@ -430,10 +430,10 @@
 			<div class="question-actions flex gap-2 mt-2 max-sm:flex-col">
 				<!-- No `!` overrides left. Two are gone rather than moved: a
 				     `disabled:opacity-40!` that disagreed with the primitive's 50%
-				     for no stated reason (de3.35.2), and a `disabled:hover:bg-success/10!`
+				     for no stated reason, and a `disabled:hover:bg-success/10!`
 				     that cancelled the disabled hover tint one call site at a time.
 				     Button now drops every variant hover while the button is inert
-				     (conduit-test-or29), so the whole app gets what this file had. -->
+, so the whole app gets what this file had. -->
 				<Button
 					variant="success-soft"
 					size="content"

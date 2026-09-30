@@ -8,21 +8,18 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { restoreSessionPermissionModes } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { restoreSessionPermissionModes } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import {
 	getDefaultPermissionMode,
 	getPermissionMode,
 	makeOverridesStateLive,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
-import {
-	ProviderRegistry,
-	ProviderRegistryTag,
-} from "../../../src/lib/provider/provider-registry.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -75,7 +72,7 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 describe("WsRpcServerLayer SwitchPermissionMode", () => {
 	it.effect("sets, broadcasts, and hydrates the permission mode", () => {
 		const wsHandler = makeMockWebSocketHandler();
-		const claudeInstance = new ClaudeProviderInstance({
+		const claudeInstance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 		});
 		const setSdkPermissionMode = vi
@@ -122,14 +119,13 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							providerRegistry,
+							persistenceLayer: makePersistenceEffectLayer(":memory:"),
 							wsHandler,
 							log: makeMockLogger(),
 						}),
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
-					Layer.provideMerge(
-						Layer.succeed(ProviderRegistryTag, providerRegistry),
-					),
 				),
 			),
 		);
@@ -137,7 +133,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 
 	it.effect("restores the switched mode after a fresh overrides layer", () => {
 		const wsHandler = makeMockWebSocketHandler();
-		const claudeInstance = new ClaudeProviderInstance({
+		const claudeInstance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 		});
 		vi.spyOn(claudeInstance, "setPermissionModeEffect").mockReturnValue(
@@ -145,6 +141,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		);
 		const providerRegistry = new ProviderRegistry([claudeInstance]);
 		const sessionId = "session-restart";
+		const persistenceLayer = makePersistenceEffectLayer(":memory:");
 
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -173,15 +170,14 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							providerRegistry,
 							wsHandler,
 							log: makeMockLogger(),
+							persistenceLayer,
 						}),
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
-					Layer.provideMerge(
-						Layer.succeed(ProviderRegistryTag, providerRegistry),
-					),
-					Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
+					Layer.provideMerge(persistenceLayer),
 				),
 			),
 		);
@@ -191,7 +187,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		"leaves the stored mode unchanged when the live query rejects the update",
 		() => {
 			const wsHandler = makeMockWebSocketHandler();
-			const claudeInstance = new ClaudeProviderInstance({
+			const claudeInstance = makeTestClaudeProviderInstance({
 				workspaceRoot: "/tmp/ws",
 			});
 			vi.spyOn(claudeInstance, "setPermissionModeEffect").mockReturnValue(
@@ -205,6 +201,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 			);
 			const providerRegistry = new ProviderRegistry([claudeInstance]);
 			const sessionId = "session-1";
+			const persistenceLayer = makePersistenceEffectLayer(":memory:");
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -242,15 +239,14 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(
 							makeTestHandlerLayer({
+								providerRegistry,
 								wsHandler,
 								log: makeMockLogger(),
+								persistenceLayer,
 							}),
 						),
 						Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
-						Layer.provideMerge(
-							Layer.succeed(ProviderRegistryTag, providerRegistry),
-						),
-						Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
+						Layer.provideMerge(persistenceLayer),
 					),
 				),
 			);

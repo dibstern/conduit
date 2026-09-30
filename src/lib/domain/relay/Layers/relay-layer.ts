@@ -27,6 +27,7 @@ import { RateLimiterLive } from "./rate-limiter-layer.js";
 
 const sessionManagerDepsLive = Layer.mergeAll(
 	makeSessionManagerStateLive(),
+	makeOverridesStateLive(),
 	DaemonEventBusLive,
 	RelayStatusSnapshotLive,
 );
@@ -54,7 +55,6 @@ const SessionManagerStateServiceAndTitleLive = Layer.provideMerge(
 export const RelayStateLive = Layer.mergeAll(
 	// Session state
 	makeSessionRegistryStateLive(),
-	makeOverridesStateLive(),
 	SessionManagerStateServiceAndTitleLive,
 	// Poller state
 	makePollerManagerStateLive(),

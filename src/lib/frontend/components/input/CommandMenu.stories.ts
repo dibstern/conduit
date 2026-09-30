@@ -59,7 +59,6 @@ const meta = {
 	},
 	// This menu opens upward (`absolute bottom-full`), so without a positioned
 	// ancestor it renders above the viewport and the capture is a blank page.
-	// See conduit-test-7jv.
 	beforeEach: () => menuOpensUpwardFrame(),
 } satisfies Meta<typeof CommandMenu>;
 
@@ -88,7 +87,7 @@ export const Filtered: Story = {
 
 /**
  * Typing a query with no matches dismisses the menu silently. That is the
- * intended behaviour, ratified as decision 3B on conduit-test-qf3s: there is no
+ * intended behaviour: there is no
  * "no results" empty state, and the markup that used to imply one was
  * unreachable in every state and has been deleted.
  *

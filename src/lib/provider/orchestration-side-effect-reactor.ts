@@ -5,6 +5,7 @@ import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
+import { toEventSinkError } from "./relay-event-sink.js";
 import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
 
 /**
@@ -45,7 +46,7 @@ class UnknownProviderCommandEffect extends Data.TaggedError(
 	}
 }
 
-class ProviderCommandStoreFailure extends Data.TaggedError(
+export class ProviderCommandStoreFailure extends Data.TaggedError(
 	"ProviderCommandStoreFailure",
 )<{
 	readonly operation: string;
@@ -70,7 +71,7 @@ class ProviderCommandPayloadParseFailed extends Data.TaggedError(
 	}
 }
 
-class ProviderSideEffectInteractionUnsupported extends Data.TaggedError(
+export class ProviderSideEffectInteractionUnsupported extends Data.TaggedError(
 	"ProviderSideEffectInteractionUnsupported",
 )<{
 	readonly operation: "requestPermission" | "requestQuestion";
@@ -92,6 +93,14 @@ class ProviderCommandNotExecutable extends Data.TaggedError(
 		return `Provider command is no longer executable: ${this.commandId}`;
 	}
 }
+
+type ProviderCommandExecutionError =
+	| ProviderCommandStoreFailure
+	| ProviderCommandNotExecutable
+	| ProviderCommandPayloadParseFailed
+	| UnknownProviderCommandEffect
+	| ProviderNotRegistered
+	| ProviderInstanceFailure;
 
 export interface ProviderSideEffectReactorOptions {
 	readonly sql: SqlClient.SqlClient;
@@ -137,7 +146,7 @@ const storeFailure =
 export class ProviderSideEffectReactor {
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
-	drain(): Effect.Effect<void, unknown> {
+	drain(): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return Effect.gen(this, function* () {
 			while (true) {
 				const processed = yield* this.runOnce();
@@ -146,7 +155,7 @@ export class ProviderSideEffectReactor {
 		});
 	}
 
-	runOnce(): Effect.Effect<number, unknown> {
+	runOnce(): Effect.Effect<number, ProviderCommandStoreFailure> {
 		return Effect.gen(this, function* () {
 			const now = yield* this.currentTimeMillis();
 			const row = yield* this.nextPendingRequest(now);
@@ -175,7 +184,7 @@ export class ProviderSideEffectReactor {
 	runCommand(
 		commandId: string,
 		interactions?: EventSink,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen(this, function* () {
 			const row = yield* this.pendingRequestForCommand(commandId);
 			if (row) return yield* this.executeRow(row, interactions);
@@ -192,7 +201,7 @@ export class ProviderSideEffectReactor {
 	private executeRow(
 		row: ProviderCommandOutboxRow,
 		interactions?: EventSink,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen(this, function* () {
 			const startedAt = yield* this.currentTimeMillis();
 			// The `pending -> running` update is the exclusive execution claim.
@@ -234,7 +243,10 @@ export class ProviderSideEffectReactor {
 	 */
 	private durableOutcome(
 		commandId: string,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<
+		TurnResult,
+		ProviderCommandStoreFailure | ProviderCommandNotExecutable
+	> {
 		return Effect.gen(this, function* () {
 			const pollInterval = clampPollDuration(
 				this.options.outcomePollInterval ?? defaultOutcomePollInterval,
@@ -333,7 +345,13 @@ export class ProviderSideEffectReactor {
 	private runProviderEffect(
 		row: ProviderCommandOutboxRow,
 		interactions?: EventSink,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<
+		TurnResult,
+		| ProviderCommandPayloadParseFailed
+		| UnknownProviderCommandEffect
+		| ProviderNotRegistered
+		| ProviderInstanceFailure
+	> {
 		return Effect.gen(this, function* () {
 			const driver = this.options.resolveProviderDriver
 				? this.options.resolveProviderDriver(row.provider_id)
@@ -519,7 +537,9 @@ export class ProviderSideEffectReactor {
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
 				interactions?.noteActivity?.();
-				return this.options.ingestion.ingest(event).pipe(Effect.asVoid);
+				return this.options.ingestion
+					.ingest(event)
+					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));
 			});
 		if (!interactions) {
 			return {

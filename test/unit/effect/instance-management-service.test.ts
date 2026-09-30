@@ -73,6 +73,7 @@ const makeConfigLayer = (instanceMgmt: InstanceManagementDeps) =>
 				opencodeUrl: "http://127.0.0.1:4096",
 				projectDir: process.cwd(),
 				slug: "test-project",
+				persistenceDbPath: "/tmp/test-project/events.db",
 				getInstances: instanceMgmt.getInstances,
 				addInstance: instanceMgmt.addInstance,
 				removeInstance: instanceMgmt.removeInstance,

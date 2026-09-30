@@ -1,6 +1,6 @@
 // ─── Model Handlers ──────────────────────────────────────────────────────────
 
-import { Data, Effect } from "effect";
+import { type Cause, Data, Effect } from "effect";
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
@@ -115,11 +115,10 @@ const loadVariantsForModel = (activeModel: ModelOverride | undefined) =>
 		if (!activeModel) return [] as string[];
 
 		if (isClaudeProvider(activeModel.providerID)) {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None") return [] as string[];
+			const engine = yield* OrchestrationEngineTag;
 
 			const capsResult = yield* Effect.either(
-				engineOption.value.dispatchEffect({
+				engine.dispatchEffect({
 					type: "discover",
 					providerId: "claude",
 				}),
@@ -158,12 +157,9 @@ const loadVariantsForModel = (activeModel: ModelOverride | undefined) =>
 
 const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQueryOption._tag === "None") return true;
+		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(
-			readQueryOption.value.getSession(sessionId),
-		);
+		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
 		if (rowResult._tag === "Left") return true;
 
 		const row = rowResult.right;
@@ -304,26 +300,26 @@ export const getModelsResponse = (
 	} = {},
 ): Effect.Effect<
 	GetModelsResponse,
-	unknown,
+	Cause.UnknownException,
 	| LoggerTag
+	| ConfigTag
 	| OpenCodeModelServiceTag
 	| OrchestrationEngineTag
+	| ReadQueryEffectTag
 	| OverridesStateTag
 	| WebSocketHandlerTag
 > =>
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const engine = yield* OrchestrationEngineTag;
+		const config = yield* ConfigTag;
 		const instanceId =
 			input.instanceId === undefined
 				? undefined
 				: ProviderInstanceIdSchema.make(input.instanceId);
 		const daemonConfig =
-			instanceId === undefined || configOption._tag === "None"
-				? null
-				: loadDaemonConfig(configOption.value.configDir);
+			instanceId === undefined ? null : loadDaemonConfig(config.configDir);
 		const instanceDriver =
 			instanceId === undefined
 				? undefined
@@ -339,12 +335,9 @@ export const getModelsResponse = (
 		const fallbackModel = activeId
 			? yield* getModel(activeId)
 			: yield* getDefaultModel();
-		const activeProviderId =
-			activeId &&
-			engineOption._tag === "Some" &&
-			typeof engineOption.value.getProviderForSessionEffect === "function"
-				? yield* engineOption.value.getProviderForSessionEffect(activeId)
-				: undefined;
+		const activeProviderId = activeId
+			? yield* engine.getProviderForSessionEffect(activeId)
+			: undefined;
 		const selectedDriver: ProviderDriverKind = isClaudeProvider(
 			activeProviderId ?? fallbackModel?.providerID ?? "",
 		)
@@ -354,8 +347,7 @@ export const getModelsResponse = (
 			instanceDriver === undefined || instanceDriver === selectedDriver;
 
 		const providers: ProviderInfo[] = [];
-		let openCodeDiscoveryFailed = false;
-		let openCodeFailure: unknown;
+		let openCodeFailure: Cause.UnknownException | undefined;
 		if (instanceDriver === undefined || instanceDriver === "opencode") {
 			const openCodeProviderResult = yield* Effect.either(
 				modelService.listProviders(),
@@ -390,7 +382,6 @@ export const getModelsResponse = (
 						.filter((p) => p.configured),
 				);
 			} else {
-				openCodeDiscoveryFailed = true;
 				openCodeFailure = openCodeProviderResult.left;
 				log.warn(
 					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
@@ -398,14 +389,11 @@ export const getModelsResponse = (
 			}
 		}
 
-		// Merge Claude in-process models when the orchestration engine is available.
+		// Merge Claude in-process models when requested.
 		let claudeDiscoveryFailed = false;
-		if (
-			(instanceDriver === undefined || instanceDriver === "claude") &&
-			engineOption._tag === "Some"
-		) {
+		if (instanceDriver === undefined || instanceDriver === "claude") {
 			const engineResult = yield* Effect.either(
-				engineOption.value.dispatchEffect({
+				engine.dispatchEffect({
 					type: "discover",
 					providerId: "claude",
 				}),
@@ -444,12 +432,10 @@ export const getModelsResponse = (
 			if (engineResult._tag === "Left") {
 				claudeDiscoveryFailed = true;
 			}
-		} else if (instanceDriver === undefined || instanceDriver === "claude") {
-			claudeDiscoveryFailed = true;
 		}
 		if (
 			instanceId === undefined &&
-			openCodeDiscoveryFailed &&
+			openCodeFailure !== undefined &&
 			claudeDiscoveryFailed &&
 			providers.length === 0
 		) {
@@ -513,33 +499,31 @@ export const getModelsResponse = (
 			: yield* getDefaultContextWindow();
 		let modelExecution: GetModelsResponse["modelExecution"];
 		if (activeId) {
-			const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-			if (readQueryOption._tag === "Some") {
-				const executionResult = yield* Effect.either(
-					readQueryOption.value.getLatestTurnModelExecution(activeId),
+			const readQuery = yield* ReadQueryEffectTag;
+			const executionResult = yield* Effect.either(
+				readQuery.getLatestTurnModelExecution(activeId),
+			);
+			if (executionResult._tag === "Left") {
+				log.warn(
+					`Failed to read latest model execution for session ${activeId}: ${formatErrorDetail(executionResult.left)}`,
 				);
-				if (executionResult._tag === "Left") {
-					log.warn(
-						`Failed to read latest model execution for session ${activeId}: ${formatErrorDetail(executionResult.left)}`,
-					);
-				} else if (executionResult.right) {
-					const row = executionResult.right;
-					modelExecution = {
-						...(row.requested_model === null
-							? {}
-							: { requestedModel: row.requested_model }),
-						...(row.expected_model === null
-							? {}
-							: {
-									expectedModel: row.expected_model,
-									drifted: !isSameModelIdentity(
-										row.actual_model,
-										row.expected_model,
-									),
-								}),
-						actualModel: row.actual_model,
-					};
-				}
+			} else if (executionResult.right) {
+				const row = executionResult.right;
+				modelExecution = {
+					...(row.requested_model === null
+						? {}
+						: { requestedModel: row.requested_model }),
+					...(row.expected_model === null
+						? {}
+						: {
+								expectedModel: row.expected_model,
+								drifted: !isSameModelIdentity(
+									row.actual_model,
+									row.expected_model,
+								),
+							}),
+					actualModel: row.actual_model,
+				};
 			}
 		}
 
@@ -576,10 +560,12 @@ export const sendModelsStateToClient = (
 	instanceId?: string,
 ): Effect.Effect<
 	void,
-	unknown,
+	Cause.UnknownException,
 	| LoggerTag
+	| ConfigTag
 	| OpenCodeModelServiceTag
 	| OrchestrationEngineTag
+	| ReadQueryEffectTag
 	| OverridesStateTag
 	| WebSocketHandlerTag
 > =>
@@ -640,9 +626,8 @@ export interface SwitchModelInput {
  */
 export const applyLiveSessionSettings = (sessionId: string) =>
 	Effect.gen(function* () {
-		const registryOption = yield* Effect.serviceOption(ProviderRegistryTag);
-		if (registryOption._tag === "None") return;
-		const instance = registryOption.value.getInstance("claude");
+		const registry = yield* ProviderRegistryTag;
+		const instance = registry.getInstance("claude");
 		if (!instance?.applyLiveSettingsEffect) return;
 
 		const model = yield* getModel(sessionId);
@@ -679,18 +664,16 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 				providerID: providerId,
 				modelID: modelId,
 			});
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "Some") {
-				const providerInstanceId = isClaudeProvider(providerId)
-					? "claude"
-					: "opencode";
-				if (providerInstanceId === "claude") {
-					engineOption.value.bindSession(sessionId, providerInstanceId);
-				} else if (yield* shouldBindOpenCodeSessionOnModelSwitch(sessionId)) {
-					engineOption.value.bindSession(sessionId, providerInstanceId);
-				} else {
-					engineOption.value.unbindSession(sessionId);
-				}
+			const engine = yield* OrchestrationEngineTag;
+			const providerInstanceId = isClaudeProvider(providerId)
+				? "claude"
+				: "opencode";
+			if (providerInstanceId === "claude") {
+				engine.bindSession(sessionId, providerInstanceId);
+			} else if (yield* shouldBindOpenCodeSessionOnModelSwitch(sessionId)) {
+				engine.bindSession(sessionId, providerInstanceId);
+			} else {
+				engine.unbindSession(sessionId);
 			}
 			yield* applyLiveSessionSettings(sessionId);
 		} else {

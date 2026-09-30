@@ -30,7 +30,7 @@ export const WithDetails: Story = {
 /**
  * Hovers the details-bearing card, not the plain info card. The info card has no
  * hover treatment by design — it is inert — so a hover story over it captured a
- * frame byte-identical to Info and asserted nothing (conduit-test-wzat).
+ * frame byte-identical to Info and asserted nothing.
  */
 export const Hover: Story = {
 	...WithDetails,

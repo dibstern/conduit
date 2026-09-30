@@ -1,4 +1,4 @@
-// ─── Terminal Rendering Engine (Ticket 8.0) ──────────────────────────────────
+// ─── Terminal Rendering Engine ──────────────────────────────────
 // Pure-function terminal rendering primitives for CLI output. ANSI escape
 // sequences, gradient text, symbolic indicators, and status line formatting.
 // Ported from claude-relay/bin/cli.js lines 200-245.

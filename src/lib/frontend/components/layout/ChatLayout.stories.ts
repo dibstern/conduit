@@ -30,7 +30,7 @@ let nativeWebSocket: typeof WebSocket;
 /**
  * Connecting is not enough to get off the network: ChatLayout also fetches the
  * relay status and the daemon version. Both are left unstubbed by default, which
- * the de3.33 guard rejects — see its message for why a racing request makes a
+ * the network guard rejects — see its message for why a racing request makes a
  * baseline platform-dependent.
  */
 function stubProjectFetches(): () => void {
@@ -138,7 +138,7 @@ export const SidebarCollapsed: Story = {
  * value seeded before render is wiped before the first paint — which is why this
  * story's baseline was byte-identical to Default's even after the ConnectOverlay
  * fix. `sidebarCollapsed` survives the same path only because `resetProjectUI()`
- * does not touch it. See conduit-test-732b.
+ * does not touch it.
  */
 export const WithRewindBanner: Story = {
 	beforeEach: () => {

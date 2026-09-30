@@ -53,6 +53,10 @@ export const StatusPollerLive: Layer.Layer<
 	| PollerStateTag
 	| RelayStatusSnapshotTag
 	| SessionManagerStateTag
+	| ReadQueryEffectTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
 > = Layer.scoped(
 	StatusPollerTag,
 	Effect.gen(function* () {
@@ -64,71 +68,50 @@ export const StatusPollerLive: Layer.Layer<
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sessionManagerStateRef = yield* SessionManagerStateTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const persistenceReady =
-			config.persistenceDbPath != null && readQueryOption._tag === "Some";
-		const reconciliationDeps: ReconciliationDeps | undefined =
-			persistenceReady &&
-			eventStoreOption._tag === "Some" &&
-			projectionRunnerOption._tag === "Some" &&
-			sqlOption._tag === "Some"
-				? {
-						getRestStatuses: () =>
-							Effect.tryPromise(() => api.session.statuses()),
-						getProjectedSessions: (reportedIds) =>
-							readQueryOption.value.getSessionsForReconciliation(reportedIds),
-						getSessionsAwaitingUser: () =>
-							Effect.all([
-								pendingInteractions.listPendingQuestions(),
-								pendingInteractions.listPendingPermissions(),
-							]).pipe(
-								Effect.map(
-									([questions, permissions]) =>
-										new Set(
-											[...questions, ...permissions].map((p) => p.sessionId),
-										),
-								),
-							),
-						injectCorrectiveEvent: (sessionId: string, status: string) =>
-							Effect.gen(function* () {
-								const event = canonicalEvent(
-									"session.status",
-									sessionId,
-									{
-										sessionId,
-										status: status as SessionStatusValue,
-									},
-									{
-										metadata: {
-											synthetic: true,
-											source: "reconciliation-loop",
-										},
-									},
-								);
-								const stored = yield* eventStoreOption.value
-									.append(event)
-									.pipe(
-										Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-									);
-								yield* projectionRunnerOption.value
-									.projectEvent(stored)
-									.pipe(
-										Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-									);
-							}),
-					}
-				: undefined;
+		const readQuery = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
+		const reconciliationDeps: ReconciliationDeps = {
+			getRestStatuses: () => Effect.tryPromise(() => api.session.statuses()),
+			getProjectedSessions: (reportedIds) =>
+				readQuery.getSessionsForReconciliation(reportedIds),
+			getSessionsAwaitingUser: () =>
+				Effect.all([
+					pendingInteractions.listPendingQuestions(),
+					pendingInteractions.listPendingPermissions(),
+				]).pipe(
+					Effect.map(
+						([questions, permissions]) =>
+							new Set([...questions, ...permissions].map((p) => p.sessionId)),
+					),
+				),
+			injectCorrectiveEvent: (sessionId: string, status: string) =>
+				Effect.gen(function* () {
+					const event = canonicalEvent(
+						"session.status",
+						sessionId,
+						{
+							sessionId,
+							status: status as SessionStatusValue,
+						},
+						{
+							metadata: {
+								synthetic: true,
+								source: "reconciliation-loop",
+							},
+						},
+					);
+					const stored = yield* eventStore
+						.append(event)
+						.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+					yield* projectionRunner
+						.projectEvent(stored)
+						.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				}),
+		};
 		const readProjectedStatuses = () =>
-			persistenceReady
-				? readQueryOption.value
-						.getAllSessionStatuses()
-						.pipe(Effect.map(toStatusRecord))
-				: Effect.tryPromise(() => api.session.statuses());
+			readQuery.getAllSessionStatuses().pipe(Effect.map(toStatusRecord));
 		const pollerState = <A, E>(effect: Effect.Effect<A, E, PollerStateTag>) =>
 			effect.pipe(Effect.provideService(PollerStateTag, stateRef));
 		const pollerPubSub = <A, E>(effect: Effect.Effect<A, E, PollerPubSubTag>) =>
@@ -145,7 +128,7 @@ export const StatusPollerLive: Layer.Layer<
 					const session = await api.session.get(sessionId);
 					return session.parentID;
 				}).pipe(Effect.catchAll(() => Effect.succeed(undefined))),
-			...(reconciliationDeps ? { reconciliation: reconciliationDeps } : {}),
+			reconciliation: reconciliationDeps,
 		};
 		const interval = Duration.millis(
 			config.statusPollerInterval ?? DEFAULT_RECONCILIATION_INTERVAL_MS,

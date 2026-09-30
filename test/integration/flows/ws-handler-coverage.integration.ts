@@ -94,7 +94,7 @@ describe("Integration: WS Handler Coverage", () => {
 		client.clearReceived();
 
 		await client.switchAgent("code");
-		// No error should come back
+		// Observe a full window to ensure SwitchAgent produces no error.
 		await new Promise((r) => setTimeout(r, 500));
 		const errors = client.getReceivedOfType("error");
 		expect(errors).toHaveLength(0);
@@ -107,7 +107,11 @@ describe("Integration: WS Handler Coverage", () => {
 		client.clearReceived();
 
 		await client.switchModel("test-model", "test-provider");
-		const msg = await client.waitFor("model_info", { timeout: 3000 });
+		// The connect handshake can send its own model_info late, so match ours.
+		const msg = await client.waitFor("model_info", {
+			timeout: 3000,
+			predicate: (m) => m["model"] === "test-model",
+		});
 		expect(msg["model"]).toBe("test-model");
 		expect(msg["provider"]).toBe("test-provider");
 		await client.close();

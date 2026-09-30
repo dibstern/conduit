@@ -20,13 +20,10 @@ import { applyLiveSessionSettings, isClaudeProvider } from "./model.js";
 const loadContextWindowOptions = (modelId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		if (engineOption._tag === "None") {
-			return [] as readonly ContextWindowOption[];
-		}
+		const engine = yield* OrchestrationEngineTag;
 
 		const capsResult = yield* Effect.either(
-			engineOption.value.dispatchEffect({
+			engine.dispatchEffect({
 				type: "discover",
 				providerId: "claude",
 			}),

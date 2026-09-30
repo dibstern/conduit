@@ -729,7 +729,9 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		control.sendMessage(personalInstanceUnhealthy);
-		await page.waitForTimeout(200);
+		await expect(
+			page.locator("[data-testid='instance-status-dot']"),
+		).toHaveClass(/bg-red-500/);
 		control.close();
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
@@ -743,7 +745,9 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		control.sendMessage(personalInstanceUnhealthy);
-		await page.waitForTimeout(200);
+		await expect(
+			page.locator("[data-testid='instance-status-dot']"),
+		).toHaveClass(/bg-red-500/);
 		control.close();
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });

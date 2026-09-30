@@ -28,7 +28,7 @@
 	// Hover is an affordance, so the card only gets one when it actually holds
 	// something to click. A card with no details is inert, and a hover response on
 	// an inert card promises an interaction that does not exist. Ring rather than
-	// border so nothing reflows (conduit-test-wzat).
+	// border so nothing reflows.
 	const hoverClasses = $derived(hasDetails ? "hover:ring-1 hover:ring-border" : "");
 </script>
 

@@ -1,4 +1,4 @@
-// ─── OpenCode Instance Clients (Phase 4.4) ──────────────────────────────────
+// ─── OpenCode Instance Clients ──────────────────────────────────
 // Relay-scoped lazy API clients + SSE streams for NAMED OpenCode instances.
 // A session bound to a named OpenCode instance runs on that instance's real
 // server: its session is created there, its turns are prompted there, and its

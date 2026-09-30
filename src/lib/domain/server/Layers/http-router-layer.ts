@@ -70,7 +70,7 @@ export interface StandaloneHttpRouterOptions {
 		slug: string,
 		subPath: string,
 		req: HttpServerRequest.HttpServerRequest,
-	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
+	) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
 	readonly getPort: () => number;
 	readonly getIsTls: () => boolean;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
@@ -87,7 +87,7 @@ interface HttpRouterRequestHandlerOptions {
 		slug: string,
 		subPath: string,
 		req: HttpServerRequest.HttpServerRequest,
-	) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>;
+	) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
 	readonly getHealthResponse?: () => Effect.Effect<object>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 	readonly caRootPath?: string | undefined;

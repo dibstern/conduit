@@ -1,5 +1,5 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { RecordingProxy } from "../../helpers/recording-proxy.js";
 
@@ -114,7 +114,11 @@ describe("RecordingProxy", () => {
 			headers: { Accept: "text/event-stream" },
 		});
 		expect(res.status).toBe(200);
-		await new Promise((r) => setTimeout(r, 100));
+		await vi.waitFor(() =>
+			expect(
+				proxy.getRecording().filter((entry) => entry.kind === "sse").length,
+			).toBeGreaterThanOrEqual(1),
+		);
 		controller.abort();
 
 		const recording = proxy.getRecording();

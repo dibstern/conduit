@@ -11,7 +11,7 @@ import {
 	Ref,
 	TestClock,
 } from "effect";
-import { expect, it as vitestIt } from "vitest";
+import { expect, vi, it as vitestIt } from "vitest";
 import {
 	clearAgent,
 	clearProcessingTimeout,
@@ -424,6 +424,7 @@ describe("SessionOverrides Effect", () => {
 	vitestIt(
 		"processing timeout runs in the managed overrides layer scope",
 		async () => {
+			vi.useFakeTimers();
 			const runtime = ManagedRuntime.make(makeOverridesStateLive());
 			let called = false;
 
@@ -440,14 +441,14 @@ describe("SessionOverrides Effect", () => {
 					await runtime.runPromise(hasActiveProcessingTimeout("sess-1")),
 				).toBe(true);
 
-				await new Promise((resolve) => setTimeout(resolve, 50));
-
+				await vi.advanceTimersByTimeAsync(10);
 				expect(called).toBe(true);
 				expect(
 					await runtime.runPromise(hasActiveProcessingTimeout("sess-1")),
 				).toBe(false);
 			} finally {
 				await runtime.dispose();
+				vi.useRealTimers();
 			}
 		},
 	);

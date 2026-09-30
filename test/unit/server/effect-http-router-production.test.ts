@@ -13,6 +13,7 @@ import {
 	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	type RouterProjectInfo,
+	SetupInfoProvider,
 } from "../../../src/lib/server/effect-http-router.js";
 
 let staticDir = "";
@@ -57,6 +58,10 @@ function makeHandler(options?: {
 		}),
 		makeAuthManagerLive(auth),
 		Layer.succeed(StaticDirTag, staticDir),
+		Layer.succeed(SetupInfoProvider, {
+			getPort: () => Effect.succeed(2633),
+			getIsTls: () => Effect.succeed(false),
+		}),
 		Layer.succeed(ProjectApiDelegateProvider, {
 			delegateApiRequest: () =>
 				Effect.succeed(HttpServerResponse.text("delegated", { status: 299 })),

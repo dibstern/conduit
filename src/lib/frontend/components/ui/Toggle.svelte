@@ -8,7 +8,7 @@
   There used to be a separate `dimmed` prop that faded only the switch, and
   every call site passed it alongside `disabled` — so a call site that forgot
   it got a disabled toggle indistinguishable from an enabled one
-  (conduit-test-wzat).
+.
 -->
 <script lang="ts">
 	import Icon from "./Icon.svelte";

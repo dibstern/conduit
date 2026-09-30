@@ -9,9 +9,9 @@
   Renders a <button>, or an <a> when `href` is set. The anchor branch exists
   because "link-styled buttons are out of scope" did not stop anyone needing
   one: it just moved the recipe into feature components, where four <a> tags
-  ended up hand-copying `bg-accent text-bg ...` (conduit-test-75iq). The shape
+  ended up hand-copying `bg-accent text-bg ...`. The shape
   mirrors ui/MenuItem.svelte, which has resolved the same question the same way
-  since conduit-test-de3.3.4 -- one idiom for "styled control that is sometimes
+  — one idiom for "styled control that is sometimes
   a link", not two.
 -->
 <script lang="ts">
@@ -65,7 +65,7 @@
 		 * rest). `size="content"` emits no geometry by design, so without this a
 		 * call site that supplies its own box has no way to scale the glyph to
 		 * match -- it silently gets the 16px default. That cost SessionList a
-		 * 2px-too-large icon in four toolbar buttons (conduit-test-de3.35.3).
+		 * 2px-too-large icon in four toolbar buttons.
 		 */
 		iconSize?: number;
 		/** Spinner + `aria-busy`; stays focusable and swallows clicks. */
@@ -80,7 +80,7 @@
 		 * InstanceModelPicker's rail dims every instance the current session is
 		 * not bound to, and a hover tooltip is the only place that says so. A
 		 * real `disabled` button fires no `mouseenter`, so the explanation would
-		 * be unreachable exactly when it is needed (conduit-test-de3.35.6).
+		 * be unreachable exactly when it is needed.
 		 *
 		 * Not reachable through `rest`: `aria-disabled` is omitted from the base
 		 * attributes below because the primitive owns that attribute, and a
@@ -121,8 +121,8 @@
 		/**
 		 * Paint at the designed size, take the tap at 44px on phones: a
 		 * transparent ::before, centred, at least 44x44 below `md`. Growing the
-		 * control itself turns a rounded-full pill into a tall empty lozenge
-		 * (conduit-test-lciu). Literal px because the root font-size is 12px.
+		 * control itself turns a rounded-full pill into a tall empty lozenge.
+		 * Literal px because the root font-size is 12px.
 		 * Adds `relative`, so not for a control that is itself positioned.
 		 */
 		touchTarget?: boolean;
@@ -154,7 +154,7 @@
 	 *    completely empty button with no warning. That is what made Modal's
 	 *    close control invisible in every committed visual baseline, and it was
 	 *    invisible to the baselines too — hiding an invisible button and showing
-	 *    it produce the same frame. See conduit-test-arl1.
+	 *    it produce the same frame.
 	 *
 	 * Spelled `children?: undefined` rather than `?: never`: under
 	 * `exactOptionalPropertyTypes` a `never` property rejects even an EXPLICIT
@@ -260,7 +260,7 @@
 	<!-- Rendered unconditionally: `iconOnly` now forbids children in the type, so
 	     the old `{#if !iconOnly}` guard could only ever fire for a caller that
 	     had already bypassed the compiler — and silently swallowing its content
-	     is the worse of the two failures. See conduit-test-arl1. -->
+	     is the worse of the two failures. -->
 	{@render children?.()}
 {/snippet}
 

@@ -73,7 +73,7 @@ export interface SSEWiringDeps {
 		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 		getClientsForSession: (sessionId: string) => string[];
 		/**
-		 * Phase 0b: project-scoped per-session event firehose. Pipeline
+		 * Project-scoped per-session event firehose. Pipeline
 		 * routing uses this (via `applyPipelineResultEffect`) so per-session chat
 		 * events reach every client on `/p/<slug>` regardless of viewed session.
 		 */
@@ -775,9 +775,9 @@ function wireSSEConsumerWithCallbacks(
 	});
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
-	// Decode boundary (conduit-test-8g7). OpenCodeEventSchema now models the full
+	// Decode boundary. OpenCodeEventSchema now models the full
 	// 1.17.18 event surface (all 89 event types), and the consumer guards are
-	// reconciled to the real wire (conduit-test-nz8), so an envelope decode here
+	// reconciled to the real wire, so an envelope decode here
 	// is finally meaningful: a failure means the frame is malformed or the server
 	// introduced a new/renamed event type we do not yet model. We surface that as
 	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would

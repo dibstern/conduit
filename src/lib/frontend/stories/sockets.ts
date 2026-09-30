@@ -2,7 +2,7 @@
  * A WebSocket stand-in for stories of components that mount the real connection
  * lifecycle.
  *
- * Why this exists (conduit-test-732b): ChatLayout calls `connect()` on
+ * Why this exists: ChatLayout calls `connect()` on
  * mount, which opens a real WebSocket. Storybook is served by a static file
  * server, so the upgrade never completes, `wsState.status` never reaches
  * "connected", and ConnectOverlay — `fixed inset-0 bg-bg`, gated on

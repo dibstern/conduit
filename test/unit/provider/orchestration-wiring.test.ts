@@ -1,8 +1,14 @@
 // test/unit/provider/orchestration-wiring.test.ts
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
@@ -11,11 +17,31 @@ import {
 } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
-	createOrchestrationLayer,
 	getOrchestrationLayer,
 	makeOrchestrationRuntimeLayer,
+	type OrchestrationLayerOptions,
 } from "../../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
+
+function orchestrationDeps(
+	persistence: ReturnType<typeof makePersistenceEffectLayer>,
+	client: OpenCodeAPI,
+) {
+	const config = Layer.succeed(ConfigTag, makeMockConfig());
+	const logger = Layer.succeed(LoggerTag, makeMockLogger());
+	return Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		persistence,
+		OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(Layer.merge(config, logger)),
+		),
+		makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+	);
+}
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -78,40 +104,47 @@ function makeSharedPersistenceRuntime(
 	return ManagedRuntime.make(
 		Layer.merge(
 			makeOrchestrationRuntimeLayer().pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(OpenCodeAPITag, makeStubClient()),
-						persistence,
-					),
-				),
+				Layer.provide(orchestrationDeps(persistence, makeStubClient())),
 			),
 			outerPersistence(persistence),
 		),
 	);
 }
 
+async function makeScopedOrchestrationView(options: OrchestrationLayerOptions) {
+	const persistence = makePersistenceEffectLayer(":memory:");
+	const runtime = ManagedRuntime.make(
+		makeOrchestrationRuntimeLayer(options).pipe(
+			Layer.provide(orchestrationDeps(persistence, options.client)),
+		),
+	);
+	onTestFinished(() => runtime.dispose());
+	return runtime.runPromise(getOrchestrationLayer);
+}
+
 describe("Orchestration wiring", () => {
-	it("createOrchestrationLayer returns engine, registry, and OpenCode instance", () => {
+	it("scoped orchestration view returns engine, registry, and OpenCode instance", async () => {
 		const client = makeStubClient();
-		const layer = createOrchestrationLayer({ client });
+		const layer = await makeScopedOrchestrationView({ client });
 
 		expect(layer.engine).toBeInstanceOf(OrchestrationEngine);
 		expect(layer.registry).toBeInstanceOf(ProviderRegistry);
 		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);
 	});
 
-	it("registry has opencode provider instance registered", () => {
+	it("registry has opencode provider instance registered", async () => {
 		const client = makeStubClient();
-		const layer = createOrchestrationLayer({ client });
+		const layer = await makeScopedOrchestrationView({ client });
 
 		expect(layer.registry.hasInstance("opencode")).toBe(true);
 	});
 
 	it("exposes orchestration services through the scoped runtime layer", async () => {
 		const client = makeStubClient();
+		const persistence = makePersistenceEffectLayer(":memory:");
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
-				Layer.provide(Layer.succeed(OpenCodeAPITag, client)),
+				Layer.provide(orchestrationDeps(persistence, client)),
 			),
 		);
 
@@ -190,7 +223,7 @@ describe("Orchestration wiring", () => {
 
 	it("engine can discover opencode capabilities", async () => {
 		const client = makeStubClient();
-		const layer = createOrchestrationLayer({ client });
+		const layer = await makeScopedOrchestrationView({ client });
 
 		const caps = await Effect.runPromise(
 			layer.engine.dispatchEffect({
@@ -204,15 +237,15 @@ describe("Orchestration wiring", () => {
 
 	it("shutdown cleans up all components", async () => {
 		const client = makeStubClient();
-		const layer = createOrchestrationLayer({ client });
+		const layer = await makeScopedOrchestrationView({ client });
 
 		// Should not throw
 		await Effect.runPromise(layer.engine.shutdownEffect());
 	});
 
-	it("accepts optional workspace root", () => {
+	it("accepts optional workspace root", async () => {
 		const client = makeStubClient();
-		const layer = createOrchestrationLayer({
+		const layer = await makeScopedOrchestrationView({
 			client,
 			workspaceRoot: "/my/project",
 		});
@@ -223,9 +256,9 @@ describe("Orchestration wiring", () => {
 	// ─── wireSSEToInstance ────────────────────────────────────────────────
 
 	describe("wireSSEToInstance", () => {
-		it("calls notifyTurnCompleted when session.status idle event arrives", () => {
+		it("calls notifyTurnCompleted when session.status idle event arrives", async () => {
 			const client = makeStubClient();
-			const layer = createOrchestrationLayer({ client });
+			const layer = await makeScopedOrchestrationView({ client });
 
 			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
@@ -254,9 +287,9 @@ describe("Orchestration wiring", () => {
 			);
 		});
 
-		it("ignores non-session.status events", () => {
+		it("ignores non-session.status events", async () => {
 			const client = makeStubClient();
-			const layer = createOrchestrationLayer({ client });
+			const layer = await makeScopedOrchestrationView({ client });
 			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
@@ -273,9 +306,9 @@ describe("Orchestration wiring", () => {
 			expect(notifySpy).not.toHaveBeenCalled();
 		});
 
-		it("ignores session.status events with non-idle status", () => {
+		it("ignores session.status events with non-idle status", async () => {
 			const client = makeStubClient();
-			const layer = createOrchestrationLayer({ client });
+			const layer = await makeScopedOrchestrationView({ client });
 			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
@@ -295,9 +328,9 @@ describe("Orchestration wiring", () => {
 			expect(notifySpy).not.toHaveBeenCalled();
 		});
 
-		it("does nothing when sessionId is not present in event", () => {
+		it("does nothing when sessionId is not present in event", async () => {
 			const client = makeStubClient();
-			const layer = createOrchestrationLayer({ client });
+			const layer = await makeScopedOrchestrationView({ client });
 			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;
@@ -317,9 +350,9 @@ describe("Orchestration wiring", () => {
 			expect(notifySpy).not.toHaveBeenCalled();
 		});
 
-		it("falls back to event.sessionId when properties.sessionID is absent", () => {
+		it("falls back to event.sessionId when properties.sessionID is absent", async () => {
 			const client = makeStubClient();
-			const layer = createOrchestrationLayer({ client });
+			const layer = await makeScopedOrchestrationView({ client });
 			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
 
 			type Handler = (e: unknown) => void;

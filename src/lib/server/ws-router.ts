@@ -1,4 +1,4 @@
-// ─── WebSocket Message Router (Ticket 2.2) ──────────────────────────────────
+// ─── WebSocket Message Router ──────────────────────────────────
 // Pure logic for routing incoming WebSocket messages to correct handlers,
 // client tracking, broadcast targeting, and state snapshot building.
 // Deliberately IO-free: no actual WebSocket I/O — just routing decisions.

@@ -46,9 +46,15 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		await gotoRelay(page, relayUrl);
 
-		// Wait for relay SSE connection to stabilize and initial session
-		// data to be loaded into the frontend.
-		await page.waitForTimeout(500);
+		// Wait for initial session data to render before injecting the event.
+		await expect(
+			page.locator("#session-list [data-session-id]").first(),
+		).toBeVisible();
+		await expect
+			.poll(() =>
+				mockServer.diagnostics.some(({ event }) => event === "sse_connect"),
+			)
+			.toBe(true);
 
 		// Inject a session.error for an unwatched session.
 		// session.error is translated by the event translator into an
@@ -148,7 +154,14 @@ test.describe("Notification → session navigation (replay)", () => {
 		});
 
 		await gotoRelay(page, relayUrl);
-		await page.waitForTimeout(500);
+		await expect(
+			page.locator("#session-list [data-session-id]").first(),
+		).toBeVisible();
+		await expect
+			.poll(() =>
+				mockServer.diagnostics.some(({ event }) => event === "sse_connect"),
+			)
+			.toBe(true);
 
 		// The browser IS currently viewing this session (the target session
 		// from the chat-simple recording).
@@ -157,6 +170,21 @@ test.describe("Notification → session navigation (replay)", () => {
 		expect(watchedSession).toBeTruthy();
 		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
 		const watchedId = watchedSession!;
+
+		// The relay registers the viewer before it sends session_switched, so
+		// this frame proves the session HAS a viewer before the error arrives.
+		await expect
+			.poll(() =>
+				receivedFrames.some((f) => {
+					try {
+						const msg = JSON.parse(f);
+						return msg.type === "session_switched" && msg.id === watchedId;
+					} catch {
+						return false;
+					}
+				}),
+			)
+			.toBe(true);
 
 		// Clear any frames accumulated during init so we only check new ones.
 		const frameCountBefore = receivedFrames.length;
@@ -177,16 +205,21 @@ test.describe("Notification → session navigation (replay)", () => {
 			},
 		]);
 
-		// Wait a reasonable time for any WS messages to arrive.
+		// No notification for the watched session may arrive during this window.
 		await page.waitForTimeout(1500);
 
-		// Filter frames received AFTER injection for notification_event
-		// targeting the watched session. There should be none.
+		// Filter frames received AFTER injection for an error notification_event
+		// targeting the watched session. There should be none. The relay's own
+		// "session_viewed" broadcast can land late in this window and is unrelated.
 		const newFrames = receivedFrames.slice(frameCountBefore);
 		const notifEvents = newFrames.filter((f) => {
 			try {
 				const msg = JSON.parse(f);
-				return msg.type === "notification_event" && msg.sessionId === watchedId;
+				return (
+					msg.type === "notification_event" &&
+					msg.eventType === "error" &&
+					msg.sessionId === watchedId
+				);
 			} catch {
 				return false;
 			}

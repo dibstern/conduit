@@ -40,8 +40,8 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 		reason: "frontend transport wrappers expose Promise-shaped store APIs",
 	},
 	{
-		path: "src/lib/relay/relay-stack.ts",
-		linePattern: /startup = await relayManagedRuntime\.runPromise\(/,
+		path: "src/lib/relay/project-relay-startup.ts",
+		linePattern: /return await relayManagedRuntime\.runPromise\(/,
 		reason: "public createProjectRelay startup boundary returns a Promise",
 	},
 ];
@@ -71,12 +71,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		path: "src/lib/frontend/stories/mocks.ts",
 		snippetPattern: /throw new Error\('Refresh failed'\)/,
 		reason: "storybook/mock fixture text, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/overlays/NotifSettings.stories.ts",
-		snippetPattern: /pushUnavailable takes precedence/,
-		reason:
-			"storybook beforeEach environment guard, not executable production code — same class as stories/mocks.ts above",
 	},
 	{
 		path: "src/lib/frontend/components/session/SessionItem.stories.ts",
@@ -208,6 +202,12 @@ describe("Effect runtime boundary grep", () => {
 		const forbiddenPatterns = [
 			{
 				path: "src/lib/relay/relay-stack.ts",
+				pattern: /Layer\.succeed\(/g,
+				reason:
+					"relay-stack should compose self-constructing relay Layers, not prebuilt service instances",
+			},
+			{
+				path: "src/lib/relay/project-relay-layers.ts",
 				pattern: /Layer\.succeed\(/g,
 				reason:
 					"relay-stack should compose self-constructing relay Layers, not prebuilt service instances",
@@ -435,6 +435,17 @@ describe("Effect runtime boundary grep", () => {
 		);
 
 		expect(unexpected).toEqual([]);
+
+		// An entry that matches nothing outlived its throw; drop it.
+		const stale = allowedPlainErrorThrows.filter(
+			(boundary) =>
+				!hits.some(
+					(hit) =>
+						boundary.path === hit.path &&
+						boundary.snippetPattern.test(hit.source),
+				),
+		);
+		expect(stale.map((boundary) => boundary.path)).toEqual([]);
 	});
 
 	it("does not schedule daemon shutdown by re-entering the daemon runtime", () => {
@@ -1576,7 +1587,7 @@ describe("Effect runtime boundary grep", () => {
 	it("does not reintroduce the retired SessionRegistry Effect bridge", () => {
 		const retiredBridgePatterns = [
 			{
-				path: "src/lib/relay/relay-stack.ts",
+				path: "src/lib/relay/project-relay-layers.ts",
 				pattern: /Layer\.succeed\(SessionRegistryTag,/,
 			},
 			{
@@ -1622,7 +1633,7 @@ describe("Effect runtime boundary grep", () => {
 				reason: "PTY cleanup belongs to the PtyManager scoped finalizer",
 			},
 		] as const;
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
 			source
@@ -1652,7 +1663,7 @@ describe("Effect runtime boundary grep", () => {
 				reason: "Message poller cleanup belongs to the scoped Layer finalizer",
 			},
 		] as const;
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
 			source
@@ -2158,7 +2169,7 @@ describe("Effect runtime boundary grep", () => {
 					"ProjectRelayConfig should not expose a legacy persistence object",
 			},
 			{
-				path: "src/lib/relay/relay-stack.ts",
+				path: "src/lib/relay/project-relay-startup.ts",
 				pattern:
 					/\b(?:config\.persistence|new ReadQueryService|new ProviderStateService|new SessionSeeder|new OpenCodeRuntimeIngress|ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag)\b/,
 				reason:
@@ -2172,6 +2183,42 @@ describe("Effect runtime boundary grep", () => {
 			},
 			{
 				path: "src/lib/domain/relay/Services/session-manager-service.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-list.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-history.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-triage.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-state-operations.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+				pattern: /\bReadQueryTag\b/,
+				reason:
+					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-error.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
@@ -2291,7 +2338,7 @@ describe("Effect runtime boundary grep", () => {
 	it("does not keep production SessionManager EventEmitter bridges", () => {
 		const retiredBridgePatterns = [
 			{
-				path: "src/lib/relay/relay-stack.ts",
+				path: "src/lib/relay/project-relay-layers.ts",
 				pattern: /\bSessionEventBridgeLive\b/,
 				reason:
 					"relay runtime should subscribe directly to DaemonEventBus, not bridge SessionManager EventEmitter events",
@@ -2337,13 +2384,49 @@ describe("Effect runtime boundary grep", () => {
 	it("does not keep the production SessionManagerTag bridge", () => {
 		const retiredBridgePatterns = [
 			{
-				path: "src/lib/relay/relay-stack.ts",
+				path: "src/lib/relay/project-relay-startup.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"relay runtime should use SessionManagerServiceTag/SessionManagerStateTag instead of injecting a legacy SessionManager",
 			},
 			{
 				path: "src/lib/domain/relay/Services/session-manager-service.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-list.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-history.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-triage.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-state-operations.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+				pattern: /\bSessionManagerTag\b/,
+				reason:
+					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
+			},
+			{
+				path: "src/lib/domain/relay/Services/session-manager-error.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
@@ -2391,7 +2474,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not inject daemon instance management into relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2420,7 +2503,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not inject status poller into relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2527,7 +2610,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not construct websocket handler bridge services in relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2622,7 +2705,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not inject core relay ports into relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2653,7 +2736,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not build client-init service bridges in relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2687,7 +2770,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not acquire startup relay services through piecemeal runtime calls", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2763,7 +2846,7 @@ describe("Effect runtime boundary grep", () => {
 		const hookPath =
 			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
 		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");
-		const relayPath = "src/lib/relay/relay-stack.ts";
+		const relayPath = "src/lib/relay/project-relay-startup.ts";
 		const relaySource = readFileSync(join(REPO_ROOT, relayPath), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2830,23 +2913,26 @@ describe("Effect runtime boundary grep", () => {
 
 	it("keeps ProviderTurnService Claude output behind ProviderRuntimeIngestion", () => {
 		const providerTurnServiceSource = readFileSync(
-			join(REPO_ROOT, "src/lib/domain/relay/Services/provider-turn-service.ts"),
+			join(
+				REPO_ROOT,
+				"src/lib/domain/relay/Services/provider-turn-dispatch.ts",
+			),
 			"utf8",
 		);
 
 		expect(providerTurnServiceSource).toMatch(
-			/ProviderRuntimeIngestionRequired/,
+			/const ingestion = yield\* ProviderRuntimeIngestionTag/,
+		);
+		expect(providerTurnServiceSource).not.toMatch(
+			/Effect\.serviceOption\(ProviderRuntimeIngestionTag\)/,
 		);
 		expect(providerTurnServiceSource).toMatch(
-			/if \(!ingestion\) return makeProviderRuntimeIngestionRequiredSink/,
-		);
-		expect(providerTurnServiceSource).toMatch(
-			/createRelayEventSink\(\{[\s\S]*\.\.\(ingestion \? \{ ingestion \} : \{\}\)/,
+			/createRelayEventSink\(\{[\s\S]*\bingestion,/,
 		);
 	});
 
 	it("keeps relay startup as the only relay-stack runPromise boundary", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const hits = Array.from(
 			source.matchAll(/relayManagedRuntime\.runPromise\(/g),
@@ -2871,8 +2957,10 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not throw plain Error for relay startup and add-project domain failures", () => {
-		const path = "src/lib/relay/relay-stack.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		const paths = [
+			"src/lib/relay/relay-stack.ts",
+			"src/lib/relay/project-relay-startup.ts",
+		];
 		const patterns = [
 			/throw new Error\("Relay creation aborted"\)/,
 			/Effect\.fail\(new Error\("Relay creation aborted"\)\)/,
@@ -2881,13 +2969,16 @@ describe("Effect runtime boundary grep", () => {
 			/throw new Error\(`Relay for \$\{directory\} is still being created`\)/,
 		] as const;
 
-		const hits = patterns.flatMap((pattern) =>
-			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
-				path,
-				line: source.slice(0, match.index).split("\n").length,
-				source: match[0].split("\n")[0]?.trim(),
-			})),
-		);
+		const hits = paths.flatMap((path) => {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
+			return patterns.flatMap((pattern) =>
+				Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
+					path,
+					line: source.slice(0, match.index).split("\n").length,
+					source: match[0].split("\n")[0]?.trim(),
+				})),
+			);
+		});
 
 		expect(hits).toEqual([]);
 	});
@@ -2923,7 +3014,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not connect SSE and mark the command gate ready through separate runtime calls", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2953,7 +3044,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not split relay startup acquisition from relay wiring setup", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2977,7 +3068,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not drain SSE as a bare shutdown runtime bridge", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3003,7 +3094,7 @@ describe("Effect runtime boundary grep", () => {
 	it("does not keep a duplicate pending-question bridge for SSE wiring", () => {
 		const retiredBridgePatterns = [
 			{
-				path: "src/lib/relay/relay-stack.ts",
+				path: "src/lib/relay/project-relay-startup.ts",
 				pattern: /\bpendingQuestionCounts:\s*\{/,
 				reason:
 					"SSE wiring should update pending question counts through the session service",
@@ -3033,7 +3124,7 @@ describe("Effect runtime boundary grep", () => {
 	it("does not keep a bespoke pending-permission bridge for SSE wiring", () => {
 		const retiredBridgePatterns = [
 			{
-				path: "src/lib/relay/relay-stack.ts",
+				path: "src/lib/relay/project-relay-startup.ts",
 				pattern: /\bpendingPermissions:\s*\{/,
 				reason: "SSE wiring should use the pending interaction service surface",
 			},
@@ -3066,7 +3157,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not run pending-interaction SSE writes through relay-stack runtime calls", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3107,7 +3198,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not wire production message pollers through relay-stack bridge deps", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3140,7 +3231,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not wire production monitoring through relay-stack bridge deps", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3173,7 +3264,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not bridge SSE processing timeouts through relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3206,7 +3297,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not bridge production SSE session service calls through relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3234,7 +3325,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not keep a relay-stack session service bridge object", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3257,7 +3348,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not expose default-session runtime bridges from relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3286,7 +3377,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not expose session-count runtime bridges from relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -3314,7 +3405,7 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not fork WebSocket callback programs directly from relay-stack", () => {
-		const path = "src/lib/relay/relay-stack.ts";
+		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{

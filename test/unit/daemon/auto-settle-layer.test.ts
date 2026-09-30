@@ -24,7 +24,7 @@ const DAY = 86_400_000;
 
 function fakeRelay(
 	slug: string,
-	sweep: () => Effect.Effect<number, unknown>,
+	sweep: () => Effect.Effect<number, Error>,
 ): Relay {
 	return {
 		slug,

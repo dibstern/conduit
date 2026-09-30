@@ -153,8 +153,10 @@ const parentSwitchMessages: MockMessage[] = [
 async function waitForChatReady(page: import("@playwright/test").Page) {
 	// Wait for the input to be visible and connect overlay to be gone
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
-	// Give the session list time to render
-	await page.waitForTimeout(500);
+	await page
+		.locator("#session-list [data-session-id]")
+		.first()
+		.waitFor({ state: "visible" });
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────

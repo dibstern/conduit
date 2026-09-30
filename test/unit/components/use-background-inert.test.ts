@@ -6,14 +6,15 @@ import ModalSurfaceHost from "./fixtures/ModalSurfaceHost.svelte";
 import NestedModals from "./fixtures/NestedModals.svelte";
 
 describe("backgroundInert", () => {
-	// bits-ui's body-scroll-lock defers its body-style restore by 24ms so a
-	// same-tick destroy/create does not flash the page back. Unmounting a modal
-	// and ending the test immediately leaves that timer to fire into a torn-down
-	// jsdom, which vitest reports as an unhandled `document is not defined` and
-	// fails the whole run without failing any test. Outlive the timer instead.
 	afterEach(async () => {
-		cleanup();
-		await new Promise((resolve) => setTimeout(resolve, 50));
+		vi.useFakeTimers();
+		try {
+			cleanup();
+			// bits-ui defers body-scroll-lock cleanup by 24ms.
+			await vi.advanceTimersByTimeAsync(24);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("inerts HTML and SVG background siblings and restores their prior state", async () => {

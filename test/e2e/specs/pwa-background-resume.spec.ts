@@ -35,7 +35,6 @@ async function background(page: Page): Promise<void> {
 			new PageTransitionEvent("pagehide", { persisted: true }),
 		);
 	});
-	await page.waitForTimeout(300);
 }
 
 /** Simulate iOS restoring the app from its page cache. */
@@ -46,7 +45,6 @@ async function foreground(page: Page): Promise<void> {
 		);
 		document.dispatchEvent(new Event("visibilitychange"));
 	});
-	await page.waitForTimeout(500);
 }
 
 test.describe("PWA background/resume", () => {
@@ -104,6 +102,7 @@ test.describe("PWA background/resume", () => {
 			text: "the newest thi",
 			from: "other",
 		});
+		// The typed draft must remain unchanged through the stale sync window.
 		await page.waitForTimeout(500);
 
 		await expect(composer).toHaveValue("the newest thing I typed");

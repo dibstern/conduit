@@ -15,10 +15,12 @@ describe("SSE stream Effect boundary", () => {
 	});
 
 	it("production relay wiring uses the Effect lifecycle API", () => {
-		const source = readFileSync(
-			join(REPO_ROOT, "src/lib/relay/relay-stack.ts"),
-			"utf8",
-		);
+		const source = [
+			"src/lib/relay/project-relay-layers.ts",
+			"src/lib/relay/project-relay-startup.ts",
+		]
+			.map((path) => readFileSync(join(REPO_ROOT, path), "utf8"))
+			.join("\n");
 
 		expect(source).not.toContain("sseStream.connect()");
 		expect(source).not.toContain("sseStream.drain()");
@@ -27,10 +29,12 @@ describe("SSE stream Effect boundary", () => {
 	});
 
 	it("relay-stack does not construct or drain SSE as an imperative runtime bridge", () => {
-		const source = readFileSync(
-			join(REPO_ROOT, "src/lib/relay/relay-stack.ts"),
-			"utf8",
-		);
+		const source = [
+			"src/lib/relay/relay-stack.ts",
+			"src/lib/relay/project-relay-startup.ts",
+		]
+			.map((path) => readFileSync(join(REPO_ROOT, path), "utf8"))
+			.join("\n");
 
 		expect(source).not.toMatch(/\bnew SSEStream\b/);
 		expect(source).not.toMatch(

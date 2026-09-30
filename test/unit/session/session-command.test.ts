@@ -17,6 +17,7 @@ import {
 	SessionCommandError,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	makeProjectionRunnerEffect,
@@ -27,6 +28,7 @@ import {
 	type EffectProjector,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import type { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -53,7 +55,13 @@ describe("applySessionCommand", () => {
 		}) => Effect.Effect<
 			A,
 			E,
-			SqlClient.SqlClient | ProjectionRunnerEffectTag | OpenCodeAPITag
+			| SqlClient.SqlClient
+			| ProjectionRunnerEffectTag
+			| OpenCodeAPITag
+			| ReadQueryEffectTag
+			| EventStoreEffectTag
+			| ConfigTag
+			| LoggerTag
 		>,
 		projectors?: readonly EffectProjector[],
 	) => {

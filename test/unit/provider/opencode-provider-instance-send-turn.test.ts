@@ -302,22 +302,26 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 	});
 
 	it("records start time for duration calculation", async () => {
-		const input = makeSendTurnInput();
-		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
+		vi.useFakeTimers();
+		try {
+			const input = makeSendTurnInput();
+			const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
-		// Small delay to ensure non-zero duration
-		await new Promise((r) => setTimeout(r, 10));
+			await vi.advanceTimersByTimeAsync(10);
 
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0.01,
-			tokens: { input: 100, output: 50 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+			instance.notifyTurnCompleted("s1", {
+				status: "completed",
+				cost: 0.01,
+				tokens: { input: 100, output: 50 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			});
 
-		const result = await resultPromise;
-		expect(result.status).toBe("completed");
+			const result = await resultPromise;
+			expect(result.status).toBe("completed");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("fails with send_failed (no hang) when the bound named instance cannot be resolved", async () => {

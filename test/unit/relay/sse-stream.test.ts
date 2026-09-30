@@ -90,7 +90,7 @@ describe("SSEStream", () => {
 		});
 		connect(stream).catch(() => {});
 		await connected;
-		await new Promise((r) => setTimeout(r, 50));
+		await vi.waitFor(() => expect(received).toHaveLength(2));
 		await disconnect(stream);
 		expect(received).toHaveLength(2);
 		expect(received[0]).toEqual(events[0]);
@@ -108,7 +108,7 @@ describe("SSEStream", () => {
 		});
 		connect(stream).catch(() => {});
 		await connected;
-		await new Promise((r) => setTimeout(r, 50));
+		await vi.waitFor(() => expect(heartbeatSeen).toBe(true));
 		await disconnect(stream);
 		expect(heartbeatSeen).toBe(true);
 	});
@@ -125,7 +125,7 @@ describe("SSEStream", () => {
 		});
 		connect(stream).catch(() => {});
 		await connected;
-		await new Promise((r) => setTimeout(r, 50));
+		await vi.waitFor(() => expect(heartbeatSeen).toBe(true));
 		await disconnect(stream);
 		expect(heartbeatSeen).toBe(true);
 	});
@@ -144,7 +144,7 @@ describe("SSEStream", () => {
 		});
 		connect(stream).catch(() => {});
 		await connected;
-		await new Promise((r) => setTimeout(r, 50));
+		await vi.waitFor(() => expect(received).toHaveLength(1));
 		await disconnect(stream);
 		expect(received).toHaveLength(1);
 		expect((received[0] as { type: string }).type).toBe("message.part.updated");
@@ -318,7 +318,7 @@ describe("SSEStream", () => {
 		try {
 			await withTimeout(cleanupStarted.promise, "cleanup to start");
 			cleanupStartedSeen = true;
-			await new Promise((resolve) => setTimeout(resolve, 0));
+			await new Promise<void>((resolve) => setImmediate(resolve));
 			settledBeforeCleanupReleased = disconnectSettled;
 		} finally {
 			releaseCleanup.resolve();
@@ -666,7 +666,7 @@ describe("SSEStream", () => {
 			// Give any already-runnable Promise continuation one event-loop turn.
 			// This is not a timing allowance: microtasks must run before this timer,
 			// so an entry released before interruption cannot hide on a loaded host.
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			await new Promise<void>((resolve) => setImmediate(resolve));
 			expect(api.event.subscribe).toHaveBeenCalledTimes(1);
 
 			observed.push("active-interruption-sent");
@@ -740,13 +740,9 @@ describe("SSEStream reconnection", () => {
 		label: string,
 		ms: number,
 	): Promise<void> {
-		const deadline = Date.now() + ms;
-		while (!predicate()) {
-			if (Date.now() > deadline) {
-				throw new Error(`Timed out waiting for ${label}`);
-			}
-			await new Promise((r) => setTimeout(r, 5));
-		}
+		await vi.waitFor(() => expect(predicate(), label).toBe(true), {
+			timeout: ms,
+		});
 	}
 
 	it("T1: never gives up reconnecting against a dead server", async () => {
@@ -841,48 +837,57 @@ describe("SSEStream reconnection", () => {
 	});
 
 	it("T4: resets backoff after a healthy connection", async () => {
-		const releaseThird = deferred();
-		let subscribeCount = 0;
-		const api = {
-			event: {
-				subscribe: vi.fn(async () => {
-					subscribeCount++;
-					if (subscribeCount < 3) throw new Error("connection refused");
-					const holdOpen = subscribeCount === 3;
-					return {
-						stream: (async function* () {
-							yield { type: "server.heartbeat" };
-							if (holdOpen) await releaseThird.promise;
-						})(),
-					};
+		vi.useFakeTimers();
+		try {
+			const releaseThird = deferred();
+			let subscribeCount = 0;
+			const api = {
+				event: {
+					subscribe: vi.fn(async () => {
+						subscribeCount++;
+						if (subscribeCount < 3) throw new Error("connection refused");
+						const holdOpen = subscribeCount === 3;
+						return {
+							stream: (async function* () {
+								yield { type: "server.heartbeat" };
+								if (holdOpen) await releaseThird.promise;
+							})(),
+						};
+					}),
+				},
+				// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
+			} as any;
+			const cfg = { baseDelay: 5, maxDelay: 40, multiplier: 2 };
+			const stream = track(
+				new SSEStream({
+					api,
+					baseDelay: cfg.baseDelay,
+					maxDelay: cfg.maxDelay,
 				}),
-			},
-			// biome-ignore lint/suspicious/noExplicitAny: lightweight mock for unit test
-		} as any;
-		const cfg = { baseDelay: 5, maxDelay: 40, multiplier: 2 };
-		const stream = track(
-			new SSEStream({ api, baseDelay: cfg.baseDelay, maxDelay: cfg.maxDelay }),
-		);
-		const payloads: Array<{ attempt: number; delay: number }> = [];
-		stream.on("reconnecting", (info) => payloads.push(info));
-		await connect(stream);
+			);
+			const payloads: Array<{ attempt: number; delay: number }> = [];
+			stream.on("reconnecting", (info) => payloads.push(info));
+			await connect(stream);
 
-		// Two failures, then the third connection is held open past maxDelay.
-		await waitFor(() => subscribeCount === 3, "third connection", 2000);
-		await new Promise((r) => setTimeout(r, cfg.maxDelay * 2));
-		const priorPayloads = payloads.length;
-		releaseThird.resolve();
+			// Two failures, then the third connection is held open past maxDelay.
+			await waitFor(() => subscribeCount === 3, "third connection", 2000);
+			await vi.advanceTimersByTimeAsync(cfg.maxDelay * 2);
+			const priorPayloads = payloads.length;
+			releaseThird.resolve();
 
-		await waitFor(
-			() => payloads.length > priorPayloads,
-			"reconnecting after healthy connection",
-			2000,
-		);
-		// biome-ignore lint/style/noNonNullAssertion: safe — waitFor guarantees the index exists
-		const next = payloads[priorPayloads]!;
-		expect(next.attempt).toBe(1);
-		expect(next.delay).toBeGreaterThanOrEqual(0.8 * cfg.baseDelay);
-		expect(next.delay).toBeLessThanOrEqual(1.2 * cfg.baseDelay);
+			await waitFor(
+				() => payloads.length > priorPayloads,
+				"reconnecting after healthy connection",
+				2000,
+			);
+			// biome-ignore lint/style/noNonNullAssertion: safe — waitFor guarantees the index exists
+			const next = payloads[priorPayloads]!;
+			expect(next.attempt).toBe(1);
+			expect(next.delay).toBeGreaterThanOrEqual(0.8 * cfg.baseDelay);
+			expect(next.delay).toBeLessThanOrEqual(1.2 * cfg.baseDelay);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("T5: tears down and reconnects a stale connection", async () => {
@@ -991,6 +996,7 @@ describe("SSEStream reconnection", () => {
 		await connect(stream);
 		await connected;
 		await disconnect(stream);
+		// No reconnect event may occur during this window after disconnect.
 		await new Promise((r) => setTimeout(r, 20));
 		expect(reconnects).toHaveLength(0);
 	});
@@ -1024,6 +1030,7 @@ describe("SSEStream reconnection", () => {
 
 		// subscribe() resolving does no network I/O — the SDK issues the fetch
 		// on the first next(). No first frame means no "connected".
+		// No connected event may occur while the first frame is withheld.
 		await new Promise((r) => setTimeout(r, 30));
 		expect(connectedCount).toBe(0);
 		expect(stream.isConnected()).toBe(false);

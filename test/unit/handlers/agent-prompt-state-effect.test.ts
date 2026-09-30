@@ -10,6 +10,7 @@ import {
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 describe("agent selection state", () => {
 	it.effect("uses the switched agent when sending the next prompt", () => {
@@ -21,6 +22,15 @@ describe("agent selection state", () => {
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			recordMessageActivity: vi.fn(() => Effect.void),
+		});
+		const engine = withDispatchEffect({
+			dispatch: vi.fn(async () => ({
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			})),
 		});
 
 		return Effect.gen(function* () {
@@ -35,9 +45,11 @@ describe("agent selection state", () => {
 				commandId: "cmd-agent-prompt-1",
 			});
 
-			expect(api.session.prompt).toHaveBeenCalledWith(
-				"session-1",
-				expect.objectContaining({ agent: "plan" }),
+			expect(engine.dispatchEffect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					input: expect.objectContaining({ agent: "plan" }),
+				}),
 			);
 		}).pipe(
 			Effect.provide(
@@ -46,6 +58,7 @@ describe("agent selection state", () => {
 						api,
 						wsHandler: ws,
 						sessionManagerService,
+						orchestrationEngine: engine,
 					}),
 				),
 			),
@@ -62,6 +75,15 @@ describe("agent selection state", () => {
 		const sessionManagerService = makeMockSessionManagerService({
 			recordMessageActivity: vi.fn(() => Effect.void),
 		});
+		const engine = withDispatchEffect({
+			dispatch: vi.fn(async () => ({
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			})),
+		});
 
 		return Effect.gen(function* () {
 			yield* setDefaultAgent("plan");
@@ -70,9 +92,11 @@ describe("agent selection state", () => {
 				commandId: "cmd-agent-prompt-2",
 			});
 
-			expect(api.session.prompt).toHaveBeenCalledWith(
-				"session-1",
-				expect.objectContaining({ agent: "plan" }),
+			expect(engine.dispatchEffect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					input: expect.objectContaining({ agent: "plan" }),
+				}),
 			);
 		}).pipe(
 			Effect.provide(
@@ -81,6 +105,7 @@ describe("agent selection state", () => {
 						api,
 						wsHandler: ws,
 						sessionManagerService,
+						orchestrationEngine: engine,
 					}),
 				),
 			),

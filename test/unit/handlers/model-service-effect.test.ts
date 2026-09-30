@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "@effect/vitest";
+import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -28,6 +28,11 @@ import {
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -35,6 +40,8 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
+// biome-ignore format: Keep the existing test layout inside this runtime suite.
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and active-session model info without requiring the Promise OpenCode API tag",
@@ -465,4 +472,5 @@ describe("model handlers with Effect-native model service", () => {
 			);
 		},
 	);
+});
 });

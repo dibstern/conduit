@@ -7,7 +7,6 @@ import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limit
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
-	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
@@ -70,9 +69,8 @@ describe("WsRpcServerLayer SendMessage", () => {
 	});
 
 	it.effect("sends prompts through the shared prompt path", () => {
-		const prompt = vi.fn(async () => undefined);
-		const api = makeMockOpenCodeAPI();
-		api.session.prompt = prompt as typeof api.session.prompt;
+		const dispatchEffect = vi.fn(() => Effect.never);
+		const engine = withDispatchEffect({ dispatchEffect });
 		const recordMessageActivity = vi.fn(() => Effect.void);
 		const { wsHandler, calls } = makeRecordingWebSocketHandler({
 			getClientsForSession: vi.fn(() => ["tab-a", "tab-b"]),
@@ -92,10 +90,16 @@ describe("WsRpcServerLayer SendMessage", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(recordMessageActivity).toHaveBeenCalledWith("session-1");
-			expect(prompt).toHaveBeenCalledWith("session-1", {
-				text: "hello",
-				images: ["data:image/png;base64,abc"],
-			});
+			expect(dispatchEffect).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "send_turn",
+					input: expect.objectContaining({
+						sessionId: "session-1",
+						prompt: "hello",
+						images: ["data:image/png;base64,abc"],
+					}),
+				}),
+			);
 			expect(calls).toContainEqual({
 				channel: "sendToSession",
 				sessionId: "session-1",
@@ -131,7 +135,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
-							api,
+							orchestrationEngine: engine,
 							wsHandler,
 							sessionManagerService: makeMockSessionManagerService({
 								recordMessageActivity,
@@ -144,9 +148,8 @@ describe("WsRpcServerLayer SendMessage", () => {
 	});
 
 	it.effect("applies the relay rate limit when a limiter is available", () => {
-		const prompt = vi.fn(async () => undefined);
-		const api = makeMockOpenCodeAPI();
-		api.session.prompt = prompt as typeof api.session.prompt;
+		const dispatchEffect = vi.fn(() => Effect.never);
+		const engine = withDispatchEffect({ dispatchEffect });
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -169,14 +172,14 @@ describe("WsRpcServerLayer SendMessage", () => {
 			);
 
 			expect(second._tag).toBe("Left");
-			expect(prompt).toHaveBeenCalledTimes(1);
+			expect(dispatchEffect).toHaveBeenCalledTimes(1);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
-							makeTestHandlerLayer({ api }),
+							makeTestHandlerLayer({ orchestrationEngine: engine }),
 							RateLimiterLive({ maxRequests: 1, windowMs: 60_000 }),
 						),
 					),

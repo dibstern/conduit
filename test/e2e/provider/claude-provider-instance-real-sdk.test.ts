@@ -8,11 +8,12 @@
  *
  *   pnpm test:e2e:expensive-real-prompts
  */
+
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type { EventSink } from "../../../src/lib/provider/types.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 
@@ -41,7 +42,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 	it(
 		"full turn: sendTurnEffect() resolves with completed TurnResult and emits canonical events",
 		async () => {
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: process.cwd(),
 				// No queryFactory override — uses the real SDK
 			});
@@ -89,7 +90,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 	it(
 		"subagent turn: stays busy from the prompt until the result",
 		async () => {
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: process.cwd(),
 			});
 			const sink = createCollectingEventSink();

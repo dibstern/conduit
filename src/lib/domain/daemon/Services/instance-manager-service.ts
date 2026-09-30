@@ -45,10 +45,7 @@ import {
 	publishInstanceStatusChanged,
 } from "./daemon-pubsub.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
-import {
-	InstanceHealthCheckLiveService,
-	InstanceHealthCheckTag,
-} from "./instance-health-service.js";
+import { InstanceHealthCheckTag } from "./instance-health-service.js";
 import {
 	defaultInstanceForUrl,
 	type OpenCodeUnavailableError,
@@ -491,13 +488,7 @@ export const startHealthPoller = (instanceId: string) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
 		const fibers = yield* PollerFibersTag;
-		const healthCheckOption = yield* Effect.serviceOption(
-			InstanceHealthCheckTag,
-		);
-		const healthCheck = Option.getOrElse(
-			healthCheckOption,
-			() => InstanceHealthCheckLiveService,
-		);
+		const healthCheck = yield* InstanceHealthCheckTag;
 		const initialState = yield* Ref.get(stateRef);
 		const { config } = initialState;
 		const initialInstance = HashMap.get(initialState.instances, instanceId);

@@ -1,13 +1,14 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "@effect/vitest";
+import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -19,7 +20,12 @@ import {
 import { switchModelForSession } from "../../../src/lib/handlers/model.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { Logger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeMockConfig,
@@ -60,6 +66,8 @@ function mockLogger(): Logger {
 const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
+// biome-ignore format: Keep the existing test layout inside this runtime suite.
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect override state", () => {
 	it.effect(
 		"stores selected session model and restored variant without legacy SessionOverrides",
@@ -212,4 +220,5 @@ describe("model handlers with Effect override state", () => {
 			);
 		},
 	);
+});
 });

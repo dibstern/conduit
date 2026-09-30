@@ -126,9 +126,6 @@ describe("Integration: Multi-Client", () => {
 		// Disconnect client1
 		await client1.close();
 
-		// Give the server a moment to process the disconnect
-		await new Promise((r) => setTimeout(r, 500));
-
 		// client2 should still be fully functional
 		client2.clearReceived();
 		const result = await client2.getAgents();

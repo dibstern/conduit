@@ -1,18 +1,21 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { SessionTitleService } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectError,
-	ClaudeEventPersistEffectTag,
 } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectError,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { MessageWithParts } from "../../../src/lib/persistence/read-model-types.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
-import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
@@ -48,44 +51,81 @@ const makeTitleService = (): SessionTitleService => ({
 	startForFirstClaudeMessage: vi.fn(() => Effect.void),
 });
 
-const userHistoryMessage = (text: string): HistoryMessage => ({
+const userHistoryMessage = (text: string): MessageWithParts => ({
 	id: `history-${text}`,
+	session_id: "session-1",
+	turn_id: "turn-1",
 	role: "user",
 	text,
-	parts: [{ id: `part-${text}`, type: "text", text }],
+	cost: null,
+	tokens_in: null,
+	tokens_out: null,
+	tokens_cache_read: null,
+	tokens_cache_write: null,
+	context_window: null,
+	is_streaming: 0,
+	created_at: 1,
+	updated_at: 1,
+	parts: [
+		{
+			id: `part-${text}`,
+			message_id: `history-${text}`,
+			type: "text",
+			text,
+			tool_name: null,
+			call_id: null,
+			input: null,
+			result: null,
+			metadata: null,
+			duration: null,
+			status: null,
+			sort_order: 0,
+			created_at: 1,
+			updated_at: 1,
+		},
+	],
+});
+
+const makeReadQuery = (
+	getSessionMessagesWithParts: ReadQueryEffect["getSessionMessagesWithParts"],
+): ReadQueryEffect => ({
+	getToolContent: vi.fn(() => Effect.succeed(undefined)),
+	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+	getSession: vi.fn(() => Effect.succeed(undefined)),
+	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+	getSessionsForReconciliation: () => Effect.succeed([]),
+	listSessions: vi.fn(() => Effect.succeed([])),
+	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+	getSessionFamily: () => Effect.succeed([]),
+	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+	getSessionMessagesWithParts,
 });
 
 const providePromptLayer = (input: {
 	readonly engine: OrchestrationEngine;
 	readonly titleService: SessionTitleService;
 	readonly persistService?: ClaudeEventPersistEffect;
-	readonly priorMessages?: HistoryMessage[];
+	readonly priorMessages?: MessageWithParts[];
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientSession: vi.fn(() => "session-1"),
 		getClientsForSession: vi.fn(() => []),
 	});
-	const sessionManagerService = makeMockSessionManagerService({
-		loadPreRenderedHistory: vi.fn(() =>
-			Effect.succeed({
-				messages: input.priorMessages ?? [],
-				hasMore: false,
-			}),
-		),
-	});
+	const sessionManagerService = makeMockSessionManagerService();
 	const baseLayer = makeTestHandlerLayer({
 		wsHandler,
 		sessionManagerService,
 		orchestrationEngine: input.engine,
 		sessionTitleService: input.titleService,
+		readQueryEffect: makeReadQuery(() =>
+			Effect.succeed(input.priorMessages ?? []),
+		),
+		...(input.persistService
+			? { claudeEventPersistEffect: input.persistService }
+			: {}),
 	});
-
-	return input.persistService
-		? Layer.merge(
-				baseLayer,
-				Layer.succeed(ClaudeEventPersistEffectTag, input.persistService),
-			)
-		: baseLayer;
+	return baseLayer;
 };
 
 describe("Claude prompt title generation", () => {
@@ -94,46 +134,34 @@ describe("Claude prompt title generation", () => {
 		() => {
 			const engine = makeEngine("claude");
 			const events: string[] = [];
-			let persisted = false;
 			const persistService = makePersistService(
 				vi.fn(() =>
 					Effect.sync(() => {
 						events.push("persist");
-						persisted = true;
 					}),
 				),
 			);
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory: vi.fn(() =>
-					Effect.sync(() => ({
-						messages: persisted ? [userHistoryMessage("current prompt")] : [],
-						hasMore: false,
-					})),
-				),
-			});
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
 				getClientsForSession: vi.fn(() => []),
 			});
-			const layer = Layer.merge(
-				makeTestHandlerLayer({
-					wsHandler,
-					sessionManagerService,
-					orchestrationEngine: engine,
-					sessionTitleService: {
-						startForFirstClaudeMessage: vi.fn((input) =>
-							Effect.sync(() => {
-								events.push("title");
-								expect(input).toEqual({
-									sessionId: "session-1",
-									firstMessage: "current prompt",
-								});
-							}),
-						),
-					},
-				}),
-				Layer.succeed(ClaudeEventPersistEffectTag, persistService),
-			);
+			const layer = makeTestHandlerLayer({
+				wsHandler,
+				orchestrationEngine: engine,
+				readQueryEffect: makeReadQuery(() => Effect.succeed([])),
+				claudeEventPersistEffect: persistService,
+				sessionTitleService: {
+					startForFirstClaudeMessage: vi.fn((input) =>
+						Effect.sync(() => {
+							events.push("title");
+							expect(input).toEqual({
+								sessionId: "session-1",
+								firstMessage: "current prompt",
+							});
+						}),
+					),
+				},
+			});
 
 			return Effect.gen(function* () {
 				yield* setModel("session-1", {
@@ -274,29 +302,27 @@ describe("Claude prompt title generation", () => {
 			const engine = makeEngine("claude");
 			const titleService = makeTitleService();
 			const persistService = makePersistService(vi.fn(() => Effect.void));
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory: vi.fn(() =>
+			const readQuery = makeReadQuery(
+				vi.fn(() =>
 					Effect.fail(
-						new SessionManagerError({
-							operation: "loadPreRenderedHistory",
+						new ReadQueryEffectError({
+							operation: "getSessionMessagesWithParts",
 							cause: new Error("history unavailable"),
 						}),
 					),
 				),
-			});
+			);
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
 				getClientsForSession: vi.fn(() => []),
 			});
-			const layer = Layer.merge(
-				makeTestHandlerLayer({
-					wsHandler,
-					sessionManagerService,
-					orchestrationEngine: engine,
-					sessionTitleService: titleService,
-				}),
-				Layer.succeed(ClaudeEventPersistEffectTag, persistService),
-			);
+			const layer = makeTestHandlerLayer({
+				wsHandler,
+				orchestrationEngine: engine,
+				sessionTitleService: titleService,
+				readQueryEffect: readQuery,
+				claudeEventPersistEffect: persistService,
+			});
 
 			return Effect.gen(function* () {
 				yield* setModel("session-1", {
@@ -308,9 +334,9 @@ describe("Claude prompt title generation", () => {
 					commandId: "cmd-auto-rename-maybe-first",
 				});
 
-				expect(
-					sessionManagerService.loadPreRenderedHistory,
-				).toHaveBeenCalledWith("session-1");
+				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+					"session-1",
+				);
 				expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"maybe first prompt",

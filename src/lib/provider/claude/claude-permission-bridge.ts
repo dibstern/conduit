@@ -7,6 +7,7 @@
  * callback and AbortSignal-aware unblocking.
  */
 import { Effect } from "effect";
+import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import {
 	ClaudePermissionService,
@@ -26,7 +27,7 @@ export interface ClaudePermissionBridgeDeps {
 }
 
 function runPermissionRequestAtSdkBoundary<T>(
-	effect: Effect.Effect<T, unknown>,
+	effect: Effect.Effect<T, ClaudeAdapterError>,
 ): Promise<T> {
 	return Effect.runPromise(effect);
 }
@@ -73,7 +74,7 @@ export class ClaudePermissionBridge {
 		ctx: ClaudeSessionContext,
 		requestId: string,
 		decision: PermissionDecision,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return this.service.resolvePermission(ctx, requestId, decision);
 	}
 }

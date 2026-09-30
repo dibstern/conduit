@@ -3,6 +3,7 @@
 // screenshots, and compare images with pixelmatch.
 
 import type { Locator, Page } from "@playwright/test";
+import { expect } from "@playwright/test";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
@@ -23,14 +24,15 @@ export async function freezeAnimations(page: Page): Promise<void> {
       }
     `,
 	});
-	// Wait a frame for the style to apply
-	await page.waitForTimeout(50);
 	await page.evaluate(() => {
 		for (const animation of document.getAnimations()) {
 			if (animation.effect?.getTiming().iterations !== Infinity) continue;
 			animation.pause();
 			animation.currentTime = 0;
 		}
+		return new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
 	});
 }
 
@@ -66,6 +68,8 @@ export async function screenshotRegion(
 	selector: string,
 ): Promise<Buffer> {
 	const element = page.locator(selector);
+	await expect(element).toBeVisible();
+	await waitForFonts(page);
 	return (await element.screenshot()) as Buffer;
 }
 
@@ -73,6 +77,8 @@ export async function screenshotRegion(
  * Take a screenshot of a Playwright Locator.
  */
 export async function screenshotLocator(locator: Locator): Promise<Buffer> {
+	await expect(locator).toBeVisible();
+	await waitForFonts(locator.page());
 	return (await locator.screenshot()) as Buffer;
 }
 

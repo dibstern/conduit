@@ -21,11 +21,13 @@ import {
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import {
 	RelayStatusSnapshotLive,
 	RelayStatusSnapshotTag,
 } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -33,27 +35,33 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	addToParentMap,
 	clearPaginationCursor,
-	decrementPendingQuestionCount,
-	getSessionParentMap,
-	incrementPendingQuestionCount,
-	listSessions,
 	loadHistory,
 	loadPreRenderedHistory,
-	recordMessageActivity,
-	renameSession,
+	seedPaginationCursor,
+} from "../../../src/lib/domain/relay/Services/session-manager-history.js";
+import {
+	listSessions,
+	sendSessionLists,
+} from "../../../src/lib/domain/relay/Services/session-manager-list.js";
+import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
-	seedPaginationCursor,
-	sendSessionLists,
-	setForkEntry,
-	setPendingQuestionCounts,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import {
+	addToParentMap,
+	decrementPendingQuestionCount,
+	getSessionParentMap,
+	incrementPendingQuestionCount,
+	recordMessageActivity,
+	setForkEntry,
+	setPendingQuestionCounts,
+} from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
+import { renameSession } from "../../../src/lib/domain/relay/Services/session-manager-triage.js";
 import {
 	makeOverridesStateLive,
 	setDefaultModel,
@@ -75,6 +83,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
@@ -119,7 +128,11 @@ function makeReadQueryEffect(
 		),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getSessionsForReconciliation: () => Effect.succeed([]),
-		listSessions: vi.fn(() => Effect.succeed(rows)),
+		listSessions: vi.fn((options?: { roots?: boolean }) =>
+			Effect.succeed(
+				options?.roots ? rows.filter((row) => !row.parent_id) : rows,
+			),
+		),
 		getSessionLineage: vi.fn(() =>
 			Effect.succeed({
 				rows: rows.map(({ id, parent_id }) => ({ id, parent_id })),
@@ -157,8 +170,31 @@ function makeHistoryMessage(
 	};
 }
 
+const sessionConfigLayer = Layer.succeed(
+	ConfigTag,
+	makeMockConfig({ configDir: "/tmp/conduit-session-manager-tests" }),
+);
+const sessionLoggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+const requiredSessionServices = Layer.mergeAll(
+	makePersistenceEffectLayer(":memory:"),
+	sessionConfigLayer,
+	sessionLoggerLayer,
+	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+	Layer.succeed(BackgroundLivenessTag, () => false),
+	RelayStatusSnapshotLive,
+	makeOverridesStateLive(),
+	OpenCodeInstanceClientsLive.pipe(
+		Layer.provide(Layer.mergeAll(sessionConfigLayer, sessionLoggerLayer)),
+	),
+	Layer.succeed(
+		OrchestrationEngineTag,
+		new OrchestrationEngine({ registry: new ProviderRegistry() }),
+	),
+);
+
 describe("SessionManagerService", () => {
-	it.effect("checks session existence in the store when available", () => {
+	it.effect("checks session existence in the store", () => {
 		const api = makeMockOpenCodeAPI();
 		const readQuery = makeReadQueryEffect([makeRow("existing")]);
 		const layer = Layer.provideMerge(
@@ -178,53 +214,8 @@ describe("SessionManagerService", () => {
 			expect(yield* service.sessionExists("missing")).toBe(false);
 			expect(readQuery.getSession).toHaveBeenCalledTimes(2);
 			expect(api.session.get).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
-
-	it.effect(
-		"checks the provider without a store and treats only 404 as absent",
-		() => {
-			const api = makeMockOpenCodeAPI();
-			const notFound = new OpenCodeApiError({
-				message: "Not found",
-				endpoint: "/session/missing",
-				responseStatus: 404,
-			});
-			const serverError = new OpenCodeApiError({
-				message: "Server error",
-				endpoint: "/session/failing",
-				responseStatus: 500,
-			});
-			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					makeSessionManagerStateLive(),
-					DaemonEventBusLive,
-				),
-			);
-
-			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				expect(yield* service.sessionExists("existing")).toBe(true);
-				vi.mocked(api.session.get)
-					.mockRejectedValueOnce(notFound)
-					.mockRejectedValueOnce(serverError);
-				expect(yield* service.sessionExists("missing")).toBe(false);
-				const failure = yield* Effect.either(service.sessionExists("failing"));
-				expect(failure._tag).toBe("Left");
-				if (failure._tag === "Left") {
-					expect(failure.left).toMatchObject({
-						_tag: "SessionManagerError",
-						operation: "sessionExists",
-						cause: serverError,
-					});
-				}
-				expect(api.session.get).toHaveBeenCalledTimes(3);
-			}).pipe(Effect.provide(layer));
-		},
-	);
 
 	it.effect("updates pending question counts in service state", () =>
 		Effect.gen(function* () {
@@ -294,57 +285,8 @@ describe("SessionManagerService", () => {
 
 			const state = yield* Ref.get(stateRef);
 			expect(HashMap.has(state.pendingQuestionCounts, "session-1")).toBe(false);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
-
-	it.effect(
-		"live service projects pending question counts into session lists",
-		() => {
-			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockResolvedValue([
-				{
-					id: "session-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Session 1",
-					version: "1.0.0",
-					time: { created: 10, updated: 20 },
-				},
-			]);
-			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, api),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					makeSessionManagerStateLive(),
-					DaemonEventBusLive,
-				),
-			);
-
-			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-
-				yield* service.incrementPendingQuestionCount("session-1");
-				yield* service.incrementPendingQuestionCount("session-1");
-				let sessions = yield* service.listSessions();
-				expect(sessions).toEqual([
-					expect.objectContaining({
-						id: "session-1",
-						pendingQuestionCount: 2,
-					}),
-				]);
-
-				yield* service.decrementPendingQuestionCount("session-1");
-				yield* service.decrementPendingQuestionCount("session-1");
-				sessions = yield* service.listSessions();
-				expect(sessions).toEqual([
-					expect.not.objectContaining({
-						pendingQuestionCount: expect.any(Number),
-					}),
-				]);
-			}).pipe(Effect.provide(layer));
-		},
-	);
 
 	it.scoped(
 		"live service publishes one SessionCreated after create succeeds",
@@ -372,7 +314,9 @@ describe("SessionManagerService", () => {
 				const sub = yield* subscribeToDaemonEvents;
 				const service = yield* SessionManagerServiceTag;
 
-				const session = yield* service.createSession("Created");
+				const session = yield* service.createSession("Created", {
+					providerId: "opencode",
+				});
 
 				expect(session.id).toBe("created-session");
 				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
@@ -383,7 +327,10 @@ describe("SessionManagerService", () => {
 				});
 				const extra = yield* Queue.poll(sub);
 				expect(Option.isNone(extra)).toBe(true);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
+			);
 		},
 	);
 
@@ -430,6 +377,7 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -492,6 +440,7 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -520,6 +469,7 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				configDir: tmpDir,
+				persistenceDbPath: join(tmpDir, "events.db"),
 			};
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "create").mockResolvedValue({
@@ -606,6 +556,7 @@ describe("SessionManagerService", () => {
 				expect(api.session.create).toHaveBeenCalledOnce();
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
 				),
@@ -653,6 +604,7 @@ describe("SessionManagerService", () => {
 				expect(sessions).toEqual([]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -695,6 +647,7 @@ describe("SessionManagerService", () => {
 				expect(bindSession).toHaveBeenCalledWith(session.id, "claude");
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -730,7 +683,10 @@ describe("SessionManagerService", () => {
 				});
 				const extra = yield* Queue.poll(sub);
 				expect(Option.isNone(extra)).toBe(true);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
+			);
 		},
 	);
 
@@ -773,23 +729,35 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					RelayStatusSnapshotLive,
+					makePersistenceEffectLayer(":memory:"),
 				),
 			);
 
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				const snapshot = yield* RelayStatusSnapshotTag;
+				const sql = yield* SqlClient.SqlClient;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Session 1', 'idle', 1, 1),
+						('session-2', 'opencode', 'Session 2', 'idle', 2, 2)`;
 
 				expect(snapshot.getSnapshot().sessionCount).toBe(0);
 				yield* service.listSessions();
 				expect(snapshot.getSnapshot().sessionCount).toBe(2);
 
-				yield* service.createSession("Session 3");
+				yield* service.createSession("Session 3", {
+					providerId: "opencode",
+				});
 				expect(snapshot.getSnapshot().sessionCount).toBe(3);
 
 				yield* service.deleteSession("session-1");
 				expect(snapshot.getSnapshot().sessionCount).toBe(2);
-			}).pipe(Effect.provide(Layer.fresh(layer)));
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
+			);
 		},
 	);
 
@@ -829,7 +797,7 @@ describe("SessionManagerService", () => {
 				if (cursor._tag === "Some") {
 					expect(cursor.value).toBe("msg-oldest");
 				}
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 		},
 	);
 
@@ -847,7 +815,7 @@ describe("SessionManagerService", () => {
 
 			expect(page).toEqual({ messages: [], hasMore: false });
 			expect(messagesPage).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect(
@@ -872,7 +840,7 @@ describe("SessionManagerService", () => {
 				expect(HashMap.get(cleared.paginationCursors, "session-1")._tag).toBe(
 					"None",
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 		},
 	);
 
@@ -927,7 +895,7 @@ describe("SessionManagerService", () => {
 				expect(logger.warn).toHaveBeenCalledWith(
 					expect.stringContaining("Pagination cursor failed for session-1"),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 		},
 	);
 
@@ -942,32 +910,23 @@ describe("SessionManagerService", () => {
 			expect(update).toHaveBeenCalledWith("session-1", {
 				title: "New Title",
 			});
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
-	it.effect("projects provider sessions into frontend session info", () => {
-		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "list").mockResolvedValue([
-			{
-				id: "child-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: undefined as unknown as string,
-				version: "1.0.0",
-				parentID: "root-1",
-				time: { created: 10, updated: 20 },
-			},
-			{
-				id: "root-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Root",
-				version: "1.0.0",
-				time: { created: 30, updated: 40 },
-			},
-		]);
+	it.effect("projects persisted sessions into frontend session info", () => {
+		const readQuery = makeReadQueryEffect(
+			[
+				makeRow("child-1", {
+					title: "Untitled",
+					parent_id: "root-1",
+					updated_at: 100,
+				}),
+				makeRow("root-1", { title: "Root", updated_at: 30 }),
+			],
+			[{ session_id: "child-1", type: "question", pending_count: 2 }],
+		);
 		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
 			makeSessionManagerStateLive({
 				lastMessageAt: HashMap.fromIterable([["child-1", 100]]),
 				forkMeta: HashMap.fromIterable([
@@ -996,6 +955,7 @@ describe("SessionManagerService", () => {
 			expect(sessions).toEqual([
 				{
 					id: "child-1",
+					attention: "needs-reply",
 					title: "Untitled",
 					updatedAt: 100,
 					messageCount: 0,
@@ -1008,32 +968,29 @@ describe("SessionManagerService", () => {
 				},
 				{
 					id: "root-1",
+					attention: "needs-reply",
 					title: "Root",
 					updatedAt: 30,
 					messageCount: 0,
+					pendingQuestionCount: 2,
+					processing: true,
 				},
 			]);
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
 				["child-1", "root-1"],
 			]);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect("stores fork metadata for subsequent service session lists", () => {
 		const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-"));
 		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "list").mockResolvedValue([
-			{
-				id: "forked-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Forked",
-				version: "1.0.0",
-				time: { created: 50, updated: 60 },
-			},
+		const readQuery = makeReadQueryEffect([
+			makeRow("forked-1", { title: "Forked", updated_at: 50 }),
 		]);
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
 			makeSessionManagerStateLive(),
 		);
 
@@ -1053,6 +1010,7 @@ describe("SessionManagerService", () => {
 			expect(sessions).toEqual([
 				{
 					id: "forked-1",
+					attention: "idle",
 					title: "Forked",
 					updatedAt: 50,
 					messageCount: 0,
@@ -1068,11 +1026,12 @@ describe("SessionManagerService", () => {
 			});
 		}).pipe(
 			Effect.provide(layer),
+			Effect.provide(requiredSessionServices),
 			Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
 		);
 	});
 
-	it.effect("prefers the Effect SQLite read path when available", () => {
+	it.effect("uses the Effect SQLite read path", () => {
 		const api = makeMockOpenCodeAPI();
 		vi.spyOn(api.session, "list").mockRejectedValue(
 			new Error("provider API should not be called"),
@@ -1119,7 +1078,7 @@ describe("SessionManagerService", () => {
 					attention: "idle",
 				},
 			]);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect(
@@ -1198,6 +1157,7 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -1259,6 +1219,7 @@ describe("SessionManagerService", () => {
 				).toBe(true);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -1372,6 +1333,7 @@ describe("SessionManagerService", () => {
 				expect(api.session.delete).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		},
@@ -1433,6 +1395,7 @@ describe("SessionManagerService", () => {
 			expect((yield* service.listSessions())[0]?.unread).toBe(true);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
+			Effect.provide(requiredSessionServices),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 		);
 	});
@@ -1460,23 +1423,18 @@ describe("SessionManagerService", () => {
 			const sessions = yield* listSessions();
 
 			expect(sessions[0]?.pendingQuestionCount).toBe(1);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect("keeps the parent map when fetching roots only", () => {
 		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "list").mockResolvedValue([
-			{
-				id: "root-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Root",
-				version: "1.0.0",
-				time: { created: 1, updated: 1 },
-			},
+		const readQuery = makeReadQueryEffect([
+			makeRow("root-1", { title: "Root", updated_at: 1 }),
+			makeRow("child-1", { parent_id: "root-1" }),
 		]);
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
 			makeSessionManagerStateLive({
 				cachedParentMap: HashMap.fromIterable([["child-1", "root-1"]]),
 			}),
@@ -1490,8 +1448,9 @@ describe("SessionManagerService", () => {
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
 				["child-1", "root-1"],
 			]);
-			expect(api.session.list).toHaveBeenCalledWith({ roots: true });
-		}).pipe(Effect.provide(layer));
+			expect(readQuery.listSessions).toHaveBeenCalledWith({ roots: true });
+			expect(api.session.list).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect("exposes parent map reads and writes through service state", () => {
@@ -1515,7 +1474,11 @@ describe("SessionManagerService", () => {
 				["child-1", "root-1"],
 				["child-2", "root-2"],
 			]);
-		}).pipe(Effect.provide(SessionManagerServiceLive), Effect.provide(layer));
+		}).pipe(
+			Effect.provide(SessionManagerServiceLive),
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices),
+		);
 	});
 
 	it.effect("keeps message activity timestamps monotonic", () => {
@@ -1529,30 +1492,19 @@ describe("SessionManagerService", () => {
 			const state = yield* Ref.get(stateRef);
 
 			expect(HashMap.get(state.lastMessageAt, "s1")).toEqual(Option.some(300));
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
-	it.effect("sends only roots without requesting the all-session list", () => {
+	it.effect("sends only roots from the read model", () => {
 		const api = makeMockOpenCodeAPI();
-		const list = vi
-			.spyOn(api.session, "list")
-			.mockImplementation(async (options) => {
-				if (!options?.roots)
-					throw new Error("unfiltered list must not be fetched");
-				return [
-					{
-						id: "root-1",
-						projectID: "project-1",
-						directory: "/tmp/project",
-						title: "Root",
-						version: "1.0.0",
-						time: { created: 1, updated: 1 },
-					},
-				];
-			});
+		const readQuery = makeReadQueryEffect([
+			makeRow("root-1", { title: "Root", updated_at: 1 }),
+			makeRow("child-1", { parent_id: "root-1" }),
+		]);
 		const messages: unknown[] = [];
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
 			Layer.succeed(LoggerTag, makeMockLogger()),
 			makeSessionManagerStateLive(),
 		);
@@ -1563,13 +1515,20 @@ describe("SessionManagerService", () => {
 					type: "session_list",
 					roots: true,
 					sessions: [
-						{ id: "root-1", title: "Root", updatedAt: 1, messageCount: 0 },
+						{
+							id: "root-1",
+							attention: "idle",
+							title: "Root",
+							updatedAt: 1,
+							messageCount: 0,
+						},
 					],
 				},
 			]);
-			expect(list).toHaveBeenCalledTimes(1);
-			expect(list).toHaveBeenCalledWith({ roots: true });
-		}).pipe(Effect.provide(layer));
+			expect(readQuery.listSessions).toHaveBeenCalledTimes(1);
+			expect(readQuery.listSessions).toHaveBeenCalledWith({ roots: true });
+			expect(api.session.list).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect(
@@ -1646,26 +1605,24 @@ describe("SessionManagerService", () => {
 				expect(HashMap.get(state.cachedParentMap, "grandchild")).toEqual(
 					Option.some("child"),
 				);
-			}).pipe(Effect.provide(SessionManagerServiceLive), Effect.provide(layer));
+			}).pipe(
+				Effect.provide(SessionManagerServiceLive),
+				Effect.provide(layer),
+				Effect.provide(requiredSessionServices),
+			);
 		},
 	);
 
 	it.effect("live service falls back to current status poller statuses", () => {
 		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "list").mockResolvedValue([
-			{
-				id: "session-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Session 1",
-				version: "1.0.0",
-				time: { created: 1, updated: 1 },
-			},
+		const readQuery = makeReadQueryEffect([
+			makeRow("session-1", { title: "Session 1", updated_at: 1 }),
 		]);
 		const layer = SessionManagerServiceLive.pipe(
 			Layer.provide(
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(ReadQueryEffectTag, readQuery),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					Layer.succeed(
 						StatusPollerTag,
@@ -1692,13 +1649,14 @@ describe("SessionManagerService", () => {
 			expect(sessions).toEqual([
 				{
 					id: "session-1",
+					attention: "working",
 					title: "Session 1",
 					updatedAt: 1,
 					messageCount: 0,
 					processing: true,
 				},
 			]);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
 	it.effect(
@@ -1719,15 +1677,8 @@ describe("SessionManagerService", () => {
 				tmpDir,
 			);
 			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockResolvedValue([
-				{
-					id: "forked-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Forked",
-					version: "1.0.0",
-					time: { created: 50, updated: 60 },
-				},
+			const readQuery = makeReadQueryEffect([
+				makeRow("forked-1", { title: "Forked", updated_at: 50 }),
 			]);
 			const config: ProjectRelayConfig = {
 				httpServer: createServer(),
@@ -1735,11 +1686,13 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				configDir: tmpDir,
+				persistenceDbPath: join(tmpDir, "events.db"),
 			};
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(ReadQueryEffectTag, readQuery),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					Layer.succeed(ConfigTag, config),
 					makeSessionManagerStateLive(),
@@ -1754,6 +1707,7 @@ describe("SessionManagerService", () => {
 				expect(sessions).toEqual([
 					{
 						id: "forked-1",
+						attention: "idle",
 						title: "Forked",
 						updatedAt: 50,
 						messageCount: 0,
@@ -1764,6 +1718,7 @@ describe("SessionManagerService", () => {
 				]);
 			}).pipe(
 				Effect.provide(layer),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
 			);
 		},
@@ -1774,15 +1729,8 @@ describe("SessionManagerService", () => {
 		() => {
 			const tmpDir = mkdtempSync(join(tmpdir(), "conduit-fork-meta-live-"));
 			const api = makeMockOpenCodeAPI();
-			vi.spyOn(api.session, "list").mockResolvedValue([
-				{
-					id: "forked-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Forked",
-					version: "1.0.0",
-					time: { created: 50, updated: 60 },
-				},
+			const readQuery = makeReadQueryEffect([
+				makeRow("forked-1", { title: "Forked", updated_at: 50 }),
 			]);
 			const config: ProjectRelayConfig = {
 				httpServer: createServer(),
@@ -1790,11 +1738,13 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				configDir: tmpDir,
+				persistenceDbPath: join(tmpDir, "events.db"),
 			};
 			const layer = SessionManagerServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(ReadQueryEffectTag, readQuery),
 						Layer.succeed(LoggerTag, makeMockLogger()),
 						Layer.succeed(ConfigTag, config),
 						makeSessionManagerStateLive(),
@@ -1817,6 +1767,7 @@ describe("SessionManagerService", () => {
 				expect(sessions).toEqual([
 					{
 						id: "forked-1",
+						attention: "idle",
 						title: "Forked",
 						updatedAt: 50,
 						messageCount: 0,
@@ -1829,6 +1780,7 @@ describe("SessionManagerService", () => {
 				expect(loadForkMetadata(tmpDir).get("forked-1")).toEqual(entry);
 			}).pipe(
 				Effect.provide(layer),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(tmpDir, { recursive: true }))),
 			);
 		},
@@ -1889,6 +1841,7 @@ describe("snooze session commands", () => {
 				expect(yield* store.readAllBySession("s1")).toEqual([]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		});
@@ -1912,6 +1865,7 @@ describe("snooze session commands", () => {
 			).toEqual(["session.snoozed", "session.snoozed", "session.unsnoozed"]);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
+			Effect.provide(requiredSessionServices),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 		);
 	});
@@ -1937,6 +1891,7 @@ describe("snooze session commands", () => {
 				]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
+				Effect.provide(requiredSessionServices),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 			);
 		});

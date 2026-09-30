@@ -5,7 +5,7 @@
 // scope close (addFinalizer).
 //
 // Defines its own Tag that will coexist with the one in services.ts until
-// Phase 3 consumer migration.
+// Consumer migration.
 
 import { Context, Effect, Fiber, Layer, Ref } from "effect";
 

@@ -9,7 +9,6 @@ async function markCurrentUnreadFromTitle(page: Page): Promise<void> {
 
 test.use({
 	recording: "chat-simple",
-	persistence: true,
 	viewport: { width: 1440, height: 900 },
 	screenshot: "off",
 });

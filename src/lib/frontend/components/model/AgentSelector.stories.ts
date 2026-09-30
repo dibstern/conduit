@@ -53,7 +53,7 @@ export const Hover: Story = {
 
 /**
  * The open dropdown, which had no visual coverage at all until
- * conduit-test-p4kj needed it. Every other story renders the trigger pill
+ * the portal migration needed it. Every other story renders the trigger pill
  * only, so the panel this component exists to show -- its surface, its rows,
  * its scope heading -- was invisible to the gate, and the swap onto
  * `ui/Surface` would have been blessed by a suite that never saw it.

@@ -8,6 +8,7 @@
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
 //   - Layer.scoped ties all ScopedRefs to the layer scope
 
+import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Context,
 	Data,
@@ -23,10 +24,14 @@ import {
 	ScopedRef,
 } from "effect";
 import type { WebSocket } from "ws";
+import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
 import type { WsAttachOptions } from "../../../server/ws-handler-shape.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
 import type { RelayMessage } from "../../../shared-types.js";
 import type { ConnectionHealth } from "../../../types.js";
+import type { SessionManagerError } from "../../relay/Services/session-manager-error.js";
+import type { RelayFactoryError } from "../Layers/relay-factory-layer.js";
+import type { ProjectNotFound } from "./project-registry-service.js";
 
 // ─── Relay interface ────────────────────────────────────────────────────────
 
@@ -42,7 +47,7 @@ export interface Relay {
 	settleIdleSessions?: (
 		idleWindowMs: number,
 		now: number,
-	) => Effect.Effect<number, unknown>;
+	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
 	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
 	wsHandler: {
@@ -81,14 +86,26 @@ export class RelayCreationInvalidatedError extends Data.TaggedError(
 // ─── RelayFactory ───────────────────────────────────────────────────────────
 
 /** Factory function that creates a Relay for the given slug. */
-export type RelayFactory = (slug: string) => Effect.Effect<Relay, unknown>;
+export type RelayFactory = (
+	slug: string,
+) => Effect.Effect<
+	Relay,
+	Error | ProjectNotFound | RelayFactoryError | PersistenceEffectError
+>;
+
+type RelayCacheError =
+	| Error
+	| ProjectNotFound
+	| RelayFactoryError
+	| PersistenceEffectError
+	| RelayCreationInvalidatedError;
 
 // ─── RelayCache interface ───────────────────────────────────────────────────
 
 /** Cache that stores and manages relay instances per slug. */
 export interface RelayCache {
 	/** Get or create a relay for the given slug. */
-	get: (slug: string) => Effect.Effect<Relay, unknown>;
+	get: (slug: string) => Effect.Effect<Relay, RelayCacheError>;
 	/** Get a cached relay if one exists. Must not create or start a relay. */
 	peek: (slug: string) => Effect.Effect<Option.Option<Relay>>;
 	/** Invalidate (stop and remove) the relay for the given slug. */
@@ -106,7 +123,7 @@ export class RelayCacheTag extends Context.Tag("RelayCache")<
 
 interface CacheEntry {
 	readonly scopedRef: ScopedRef.ScopedRef<Relay | null>;
-	readonly ready: Deferred.Deferred<Relay, unknown>;
+	readonly ready: Deferred.Deferred<Relay, RelayCacheError>;
 	readonly creationFiber: Deferred.Deferred<Fiber.RuntimeFiber<void, never>>;
 }
 
@@ -185,7 +202,7 @@ export const makeRelayCacheService = (
 				),
 			);
 
-		const get = (slug: string): Effect.Effect<Relay, unknown> =>
+		const get = (slug: string): Effect.Effect<Relay, RelayCacheError> =>
 			Effect.gen(function* () {
 				const entry = yield* semaphore.withPermits(1)(
 					Effect.uninterruptible(
@@ -201,7 +218,7 @@ export const makeRelayCacheService = (
 							const scopedRef = yield* ScopedRef.fromAcquire(
 								Effect.succeed<Relay | null>(null),
 							).pipe(Effect.provideService(Scope.Scope, layerScope));
-							const ready = yield* Deferred.make<Relay, unknown>();
+							const ready = yield* Deferred.make<Relay, RelayCacheError>();
 							const creationFiber =
 								yield* Deferred.make<Fiber.RuntimeFiber<void, never>>();
 							const newEntry: CacheEntry = {

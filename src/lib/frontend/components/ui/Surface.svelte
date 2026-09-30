@@ -1,11 +1,11 @@
 <!--
   Surface — the structural <div> shell behind the app's panels, cards and insets.
 
-  Sixty-nine containers across twenty-eight files were inventoried for
-  conduit-test-6hr2 before a single value here was chosen. Every map entry below
+  Sixty-nine containers across twenty-eight files were inventoried before a
+  single value here was chosen. Every map entry below
   is backed by two or more of them; every as-found value that is NOT here was
-  rejected on purpose and recorded in that ticket as site drift for the batch
-  tickets to normalize. Nothing in this file is a guess about what a panel
+  rejected on purpose as site drift to normalize. Nothing in this file is a
+  guess about what a panel
   "should" look like.
 
   Two findings shaped the prop surface more than anything else:
@@ -42,7 +42,7 @@
 		| "modal"
 		| "dropdown";
 
-	// Counts are inventoried candidate sites (conduit-test-6hr2).
+	// Counts are inventoried candidate sites.
 	//
 	// `raised` was called `floating` and is renamed here: it is the largest
 	// group at nineteen sites and roughly half of them are static (the setup
@@ -69,7 +69,7 @@
 	// API, which is the failure this primitive exists to prevent; naming five of
 	// them would look like a scale while still missing most sites. So these are
 	// the three coherent steps fifteen sites already sit on, and they are the
-	// destination for the convergence work tracked in conduit-test-6hr2.
+	// destination for convergence work.
 	//
 	// Defaulting to `none` is the load-bearing half. A default that emits
 	// padding means every migration that forgets the prop both changes the

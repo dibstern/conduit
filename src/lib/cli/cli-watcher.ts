@@ -1,4 +1,4 @@
-// ─── Daemon Health Watcher (Ticket 8.13) ─────────────────────────────────────
+// ─── Daemon Health Watcher ─────────────────────────────────────
 // Polls a Unix domain socket to detect when the daemon process dies.
 // On crash: reads crash info, manages restart attempts with backoff.
 // On intentional shutdown (no crash info): calls onShutdown.

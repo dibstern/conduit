@@ -55,7 +55,7 @@ export const Empty: Story = {
  */
 export const CopyInteraction: Story = {
 	args: { message: mockAssistantMarkdown },
-	// conduit-test-732b: drive the body twice and suppress its reset so success survives capture.
+	// Drive the body twice and suppress its reset so success survives capture.
 	beforeEach: () => {
 		const original = window.setTimeout;
 		Object.defineProperty(window, "setTimeout", {

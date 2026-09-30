@@ -89,7 +89,7 @@
 	 * That is the only feedback for where the cursor is, so deleting
 	 * `bg-transparent` (a no-op on its own: preflight already makes a button's
 	 * background transparent) makes `bg-bg` load-bearing and fixes it. Same
-	 * shape as the dead `border-none`/`border-b-2` underline in conduit-test-mkah.
+	 * shape as the dead `border-none`/`border-b-2` underline.
 	 */
 	function agentItemClass(index: number): string {
 		const base =
@@ -134,8 +134,8 @@
 		portalStyle = `position:fixed;left:${left}px;${verticalPosition}width:${width}px;max-height:${maxHeight}px;overflow-y:auto;z-index:9999;`;
 	}
 
-	// An attachment, not a `use:` action, and that is the whole point of
-	// conduit-test-p4kj. Actions and `bind:this` cannot be applied to a
+	// An attachment, not a `use:` action, because it can cross a component
+	// boundary. Actions and `bind:this` cannot be applied to a
 	// component tag, so as long as the portal was an action the dropdown was
 	// physically unable to become a `ui/Surface`. Attachments forward through a
 	// component's `{...rest}` spread, so the primitive never has to know.

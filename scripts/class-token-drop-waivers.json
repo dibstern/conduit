@@ -1,4 +1,30 @@
 {
+	"src/lib/domain/relay/Services/agent-service.ts :: function": "Not a class: the typeof guard on an optional engine lookup. The orchestration engine is now required, so the guard is gone.",
+	"src/lib/domain/relay/Services/provider-turn-dispatch.ts :: ProviderRuntimeIngestion,output:,required": "Not classes: words from ProviderRuntimeIngestionRequired's message. Ingestion is now a required service, so that error no longer exists.",
+	"test/unit/domain/relay/provider-turn-service.test.ts :: ProviderRuntimeIngestion,closed": "Not classes: words from the title of a deleted test for missing ProviderRuntimeIngestion. Ingestion is now required.",
+	"src/lib/domain/relay/Services/session-manager-service.ts :: Pagination,cursor,fetch,full": {
+		"movedTo": "src/lib/domain/relay/Services/session-manager-history.ts",
+		"reason": "Not classes: words from the pagination-cursor fallback log string, moved verbatim with history loading into session-manager-history.ts."
+	},
+	"src/lib/domain/relay/Services/session-manager-service.ts :: SessionManagerError": {
+		"movedTo": "src/lib/domain/relay/Services/session-manager-error.ts",
+		"reason": "Not a class: the tagged error's name, moved with its declaration into session-manager-error.ts."
+	},
+	"src/lib/domain/relay/Services/session-manager-service.ts :: session.permission_mode_changed": {
+		"movedTo": "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+		"reason": "Not a class: the event type string, moved with permission-mode persistence into session-manager-permission-mode.ts."
+	},
+	"src/lib/relay/relay-stack.ts :: API,Config,OpenCode,Restored,Session,background,broadcast,config:,down:,list,list:,modes,permission,session(s),unavailable:,while": {
+		"movedTo": "src/lib/relay/project-relay-startup.ts",
+		"reason": "Not classes: words from startup log and error strings. createProjectRelay's startup body moved verbatim into startProjectRelay."
+	},
+	"test/unit/effect/session-manager-service.test.ts :: absent,as,treats": "Not classes: words from the title of a deleted test for session existence without an event store. Persistence is now required, so that path no longer exists.",
+	"test/unit/server/ws-rpc-sessions.test.ts :: s,store": "Not classes: words from a deleted test.each title parameterised on whether a store was present. Persistence is now required.",
+	"test/unit/session/session-manager-effect.test.ts :: is,no-op,services,without": "Not classes: words from the title of a deleted test for permission-mode persistence without persistence services. Persistence is now required.",
+	"test/unit/domain/relay/provider-turn-service.test.ts :: abort,,back,falls,present": "Not classes: words from the title of a deleted test for the abort fallback when no orchestration engine is present. The engine is now required.",
+	"test/unit/provider/event-sink-effect-boundary.test.ts :: unknown": "Not a class: this was the error type in EventSink signature strings the test asserts on. The signatures now fail with EventSinkError instead of unknown.",
+	"test/e2e/specs/question-flow.spec.ts :: Submitting": "Not a class: this was the submit button's text in a Playwright toContainText assertion. The card is now marked answered on the server's acknowledgement of AnswerQuestion, so the test asserts the answered state instead.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: above,beforeEach,environment,guard,,same,stories/mocks.ts": "Not classes: these are words from the reason string of a deleted allow-list entry for NotifSettings.stories.ts, a file removed in wave 1.",
 	"test/unit/components/Menu.test.ts :: data-dropdown-menu-content]": "Not a class: this was a DOM selector in a jsdom assertion that a menu opened inside a native dialog was portaled outside it. The assertion was replaced by a browser story that selects modal menu items by keyboard and pointer.",
 	"test/unit/components/Popover.test.ts :: data-popover-content]": "Not a class: this was a DOM selector in a jsdom assertion that a popover opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
 	"test/unit/components/Tooltip.test.ts :: data-tooltip-content]": "Not a class: this was a DOM selector in a jsdom assertion that a tooltip opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
@@ -203,5 +229,63 @@
 	"test/unit/cli/cli.test.ts :: get_status": "Not a class: legacy { cmd } IPC command names and the words of its validation and deprecation messages, removed when daemon IPC collapsed to the tagged-request format.",
 	"test/unit/daemon/daemon-lifecycle-ipc.test.ts :: DEPRECATED:,Update,be,next,release.,removed,will": "Not a class: legacy { cmd } IPC command names and the words of its validation and deprecation messages, removed when daemon IPC collapsed to the tagged-request format.",
 	"test/unit/daemon/ipc-protocol.pbt.test.ts :: instance_add,instance_remove,instance_start,instance_status,instance_stop": "Not a class: legacy { cmd } IPC command names and the words of its validation and deprecation messages, removed when daemon IPC collapsed to the tagged-request format.",
-	"src/lib/frontend/components/session/ShortcutSheet.svelte :: gap-x-5,gap-y-2,grid-cols-[auto_1fr]": "The single flat shortcut list became titled sections (session list, focused row or transcript, open session from anywhere, anywhere). Each section is its own grid with a fixed 4.5rem key column, so keys align across sections, and tighter row gaps (gap-x-4 gap-y-1.5) because section spacing now separates the groups."
+	"src/lib/frontend/components/session/ShortcutSheet.svelte :: gap-x-5,gap-y-2,grid-cols-[auto_1fr]": "The single flat shortcut list became titled sections (session list, focused row or transcript, open session from anywhere, anywhere). Each section is its own grid with a fixed 4.5rem key column, so keys align across sections, and tighter row gaps (gap-x-4 gap-y-1.5) because section spacing now separates the groups.",
+	"src/lib/provider/claude/claude-provider-runtime.ts :: Open": "Not a class: this was the _tag of a hand-built FiberMap state object inside makeUnsafeFiberMap, deleted in z4sv.5 when the runtime moved to the scoped FiberMap.make.",
+	"src/bin/cli-core.ts :: Daemon,Failed,Instance,Scan,Unknown,Usage:,action.,added:,args.instanceName,get,http://,id,instance:,instances:,is,managed,n,name,or,pid:,port,port:,project:,required.,set,setup,start,started,status:,title:,to,visit:": "Not classes: words from CLI output, usage text and template strings that moved with their command handlers into cli-command-handlers.ts, cli-default-command.ts and cli-instance-command.ts when cli-core.ts was split (z4sv.13.1).",
+	"src/lib/server/ws-rpc.ts :: Failed,SwitchPermissionMode,Switched,after,client,failure,mode,permission,restore,session,to,to:": "Not classes: words from log and error strings in RPC handlers that moved into the per-domain modules under src/lib/server/ws-rpc/ when ws-rpc.ts was split (z4sv.13.6).",
+	"acceptance/src/stepHandlers.ts :: A,Artifacts:,Claude,Expected,INFRASTRUCTURE_ERROR:,Sonnet,Views,a,above,all,already,attribution,auto,bar,be,become,button,claude-setting-defaultModel-select,claude-setting-defaultPermissionMode-select,compact,conduit,data-collapsed,data-testid,desktop,did,differ,differ.,disabled,document.querySelector(,enabled,expected,failed,for,found,from,got,height,instances,is,it,it.,keeps,match,menu,not,of,one,only,other-harness,permission-mode-option-,picker-instance-,pixels,preview,rail,reads,ready:,reload,row:,running,s,selectedOptions[0],send,session,settings,sheet,started,starts.,textContent,that,the,these,to,transcript,,trim(),until,value,views,when,with,you": "Not classes: step patterns, selectors and message words from acceptance step handlers that moved into acceptance/src/steps/ when stepHandlers.ts was split by feature area (z4sv.13.11).",
+	"src/lib/domain/relay/Services/provider-turn-service.ts :: Abort,Cannot,Claude,Could,Failed,Non-fatal,OpenCode,Pending,ProviderRuntimeIngestion,ProviderTurnDispatchFibers,SEND_FAILED,after,before,broadcast,catalog,default,dispatch,engine,error,failed:,for,found:,from,inference,inferred,inspect,instance,interrupt,interrupt_turn,is,list,local,materialization:,materialized,message,message:,no,not,or,output:,persistence,provider,question,reason,required,resolve,routing:,send,server-side,state,to,tool,turn,user": "Not classes: log, error and comment words from provider-turn closures that moved into provider-turn-dispatch.ts and provider-turn-session.ts when makeProviderTurnService was split (z4sv.13.4).",
+	"src/lib/provider/claude/claude-provider-runtime.ts :: Capability,Failed,Final,after,catch-up,ensure,fallback,list:,metadata,ms,out,poll,probe,push,subagent,timed,to,using": "Not classes: log, error and comment words from Claude runtime helpers that moved into sibling claude-runtime-*.ts, claude-sdk-validation.ts and claude-subagent-runtime.ts modules when claude-provider-runtime.ts was split (z4sv.13.7).",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-bg-surface,gap-4,px-2,py-1.5,py-4,rounded-panel,space-y-2,text-error,text-text-muted,text-xs": {
+		"movedTo": "src/lib/frontend/components/overlays/NotificationsSettingsTab.svelte",
+		"reason": "These class tokens moved intact to NotificationsSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: font-medium,mt-1,mt-3,mt-4,text-base": {
+		"movedTo": "src/lib/frontend/components/overlays/AppearanceSettingsTab.svelte",
+		"reason": "These class tokens moved intact to AppearanceSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-transparent,border-none,gap-3,mb-2,px-1,px-4,py-2,space-y-1,space-y-4,tracking-widest,uppercase": {
+		"movedTo": "src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte",
+		"reason": "These class tokens moved intact to VisibilitySettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: animate-pulse,bg-black/[0.04],bg-green-500/10,bg-white/[0.04],border-accent,border-t,break-all,cursor-pointer,dark:bg-white/[0.06],flex-wrap,font-mono,gap-1.5,gap-2,group-hover/cmd:opacity-100,group/cmd,hover:border-text-muted,italic,items-start,justify-center,justify-end,leading-relaxed,max-w-[10rem],mb-3,min-w-0,ml-2,ml-auto,mt-2,opacity-0,opacity-60,p-0.5,p-3,pb-3,pt-1,pt-2,pt-2.5,px-2.5,px-3,py-1,resize-y,rounded,rounded-lg,select-all,space-y-3,text-green-400,text-green-500,text-sm,tracking-wide,transition-opacity,truncate,w-36,whitespace-pre-wrap": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "These class tokens moved intact to InstancesSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
+		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: Failed": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: to": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: instance": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: bg-bg-surface,font-brand,font-semibold,gap-0.5,gap-2,items-center,justify-between,md:min-h-0,md:min-w-0,min-h-[44px],min-w-0,min-w-[44px],px-2,px-4,py-1,session-list-header,session-list-header-actions,text-sm,text-text-dimmer,tracking-[0.5px],uppercase": {
+		"movedTo": "src/lib/frontend/components/session/SessionListHeader.svelte",
+		"requires": "<SessionListHeader",
+		"reason": "The select and standard header markup moved intact into SessionListHeader. Tokens shared by other extracted blocks are present there as well."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: active,bg-accent/10,bg-bg-alt,border,border-accent/40,border-border,border-border-subtle,chip.value,count,gap-1,gap-1.5,min-h-8,overflow-x-auto,pb-1.5,px-2.5,px-3.5,rounded-full,scrollbar-width:none],sessionViewState.compact,text-text,text-xs,webkit-scrollbar]:hidden,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/session/SessionListFilters.svelte",
+		"requires": "<SessionListFilters",
+		"reason": "The search and filter markup moved intact into SessionListFilters. Names such as active and count are checker tokens from class expressions, also moved intact."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: font-medium,h-px,leading-snug,md:min-h-8,ml-auto,mt-2,overflow-y-auto,pb-0.5,pt-1.5,px-3,py-0.5,py-2,py-3,py-6,session-empty,session-group-label,session-unavailable,text-center,tracking-[0.3px]": {
+		"movedTo": "src/lib/frontend/components/session/SessionListRows.svelte",
+		"requires": "<SessionListRows",
+		"reason": "The scroll region, groups, empty state, and paging markup moved intact into SessionListRows."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: border-t,pb-[calc(10px+env(safe-area-inset-bottom))],pt-2,px-[6px],selectVerbClass,text-error": {
+		"movedTo": "src/lib/frontend/components/session/SessionListBulkBar.svelte",
+		"requires": "<SessionListBulkBar",
+		"reason": "The select-mode action bar moved intact into SessionListBulkBar; selectVerbClass is the checker reading its class expression."
+	}
 }

@@ -7,26 +7,35 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 const DAY = 86_400_000;
@@ -36,18 +45,31 @@ describe("relay automatic settlement sweep", () => {
 		"settles only eligible rows once and clears the automatic marker on un-settle",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-auto-settle-"));
+			const configLayer = Layer.succeed(
+				ConfigTag,
+				makeMockConfig({ configDir: dir, projectDir: dir }),
+			);
+			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					makeSessionManagerStateLive(),
 					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-					Layer.succeed(LoggerTag, makeMockLogger()),
-					Layer.succeed(
-						ConfigTag,
-						makeMockConfig({ configDir: dir, projectDir: dir }),
+					loggerLayer,
+					configLayer,
+					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+					Layer.succeed(BackgroundLivenessTag, () => false),
+					RelayStatusSnapshotLive,
+					makeOverridesStateLive(),
+					OpenCodeInstanceClientsLive.pipe(
+						Layer.provide(Layer.merge(configLayer, loggerLayer)),
 					),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(join(dir, "events.db")),
+					Layer.succeed(
+						OrchestrationEngineTag,
+						new OrchestrationEngine({ registry: new ProviderRegistry() }),
+					),
 				),
 			);
 			return Effect.gen(function* () {

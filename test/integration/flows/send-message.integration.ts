@@ -19,10 +19,8 @@ describe("Integration: Send Message", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("sends a message and receives processing status", async () => {
@@ -38,6 +36,7 @@ describe("Integration: Send Message", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 		expect(status["status"]).toBe("processing");
+		await client.waitFor("done");
 
 		await client.close();
 	}, 15_000);
@@ -73,8 +72,7 @@ describe("Integration: Send Message", () => {
 
 		await client.sendMessage("Reply with just 'ok'");
 
-		// Wait a moment for the request to be processed
-		await new Promise((r) => setTimeout(r, 2000));
+		await client.waitFor("done");
 
 		// Should NOT have received a HANDLER_ERROR about 400
 		const errors = client.getReceivedOfType("error");

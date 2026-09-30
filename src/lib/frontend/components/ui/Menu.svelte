@@ -86,7 +86,7 @@
 	 * keydown handler gates typeahead and Home/End on
 	 * `target.closest("[data-dropdown-menu-content]")?.id === contentId`, which
 	 * can never match an empty id — typing a letter in an open menu does nothing
-	 * (conduit-test-de3.3.11). We own the element, so we own the id.
+	 *. We own the element, so we own the id.
 	 */
 	const contentId = $props.id();
 	let contentNode = $state<HTMLElement | null>(null);
@@ -152,7 +152,7 @@
 	 * open-auto-focus runs twice, each time deferred to a rAF. The second one
 	 * lands after the user has already arrowed down the menu, refocuses the
 	 * content, and bits' own focus handler then resets roving focus to the first
-	 * item (conduit-test-de3.24). Taking the initial focus ourselves makes it
+	 * item. Taking the initial focus ourselves makes it
 	 * idempotent: focus the menu only while it is open and focus is still
 	 * outside it.
 	 */

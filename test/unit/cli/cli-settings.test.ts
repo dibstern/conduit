@@ -109,19 +109,15 @@ function createMockIO() {
 }
 
 /** Yield one event-loop tick so the menu processes the preceding input. */
-function tick(ms = 1): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+function tick(): Promise<void> {
+	return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-/** Send a sequence of keys with delays between them. */
-async function sendKeys(
-	stdin: EventEmitter,
-	keys: string[],
-	delay = 1,
-): Promise<void> {
+/** Send a sequence of keys, flushing prompt work between them. */
+async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	for (const key of keys) {
 		stdin.emit("data", key);
-		await tick(delay);
+		await tick();
 	}
 }
 
@@ -386,7 +382,7 @@ describe("PIN set action", () => {
 		await tick();
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
 		await sendKeys(io.stdin, ["1", "2", "3", "4", "\r"]);
-		await tick(50);
+		await tick();
 		expect(setPin).toHaveBeenCalledWith("1234");
 		expect(io.text()).toContain("PIN update rejected");
 		expect(io.text()).not.toContain("PIN updated");
@@ -419,7 +415,7 @@ describe("PIN set action", () => {
 
 		// The promptPin is now active — type 4 digits and Enter
 		await sendKeys(io.stdin, ["1", "2", "3", "4", "\r"]);
-		await tick(50);
+		await tick();
 
 		expect(setPin).toHaveBeenCalledWith("1234");
 	});
@@ -441,7 +437,7 @@ describe("PIN remove action", () => {
 		);
 		await tick();
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 		expect(removePin).toHaveBeenCalledOnce();
 		expect(io.text()).toContain("PIN removal rejected");
 		expect(io.text()).not.toContain("PIN removed");
@@ -473,7 +469,7 @@ describe("PIN remove action", () => {
 		// 2: Remove PIN
 		// 3: View logs
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		expect(removePin).toHaveBeenCalledOnce();
 		expect(io.text()).toContain("PIN removed");
@@ -513,7 +509,7 @@ describe("keep awake toggle", () => {
 		// 2: Enable keep awake
 		// 3: View logs
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		expect(setKeepAwake).toHaveBeenCalledWith(true);
 	});
@@ -564,7 +560,7 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Should show the "No keep-awake tool detected" prompt
 		const text = io.text();
@@ -589,7 +585,7 @@ describe("keep awake toggle", () => {
 			"i",
 			"\r",
 		]);
-		await tick(100);
+		await tick();
 
 		expect(setKeepAwakeCommand).toHaveBeenCalledWith("caffeinate", ["-di"]);
 		// Should re-enable after setting command
@@ -628,12 +624,12 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Type: systemd-inhibit --what=idle sleep infinity
 		const cmd = "systemd-inhibit --what=idle sleep infinity";
 		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
-		await tick(100);
+		await tick();
 
 		expect(setKeepAwakeCommand).toHaveBeenCalledWith("systemd-inhibit", [
 			"--what=idle",
@@ -671,12 +667,12 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Type just: caffeinate (no args)
 		const cmd = "caffeinate";
 		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
-		await tick(100);
+		await tick();
 
 		expect(setKeepAwakeCommand).toHaveBeenCalledWith("caffeinate", []);
 	});
@@ -710,12 +706,12 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Type: "  caffeinate   -d   -i  " (extra whitespace everywhere)
 		const cmd = "  caffeinate   -d   -i  ";
 		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
-		await tick(100);
+		await tick();
 
 		// trim() + split(/\s+/) should normalize all whitespace
 		expect(setKeepAwakeCommand).toHaveBeenCalledWith("caffeinate", [
@@ -753,12 +749,12 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Type: systemd-inhibit --what=idle --who=conduit
 		const cmd = "systemd-inhibit --what=idle --who=conduit";
 		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
-		await tick(100);
+		await tick();
 
 		expect(setKeepAwakeCommand).toHaveBeenCalledWith("systemd-inhibit", [
 			"--what=idle",
@@ -795,12 +791,12 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Type: /usr/bin/caffeinate -di
 		const cmd = "/usr/bin/caffeinate -di";
 		await sendKeys(io.stdin, [...cmd].concat(["\r"]));
-		await tick(100);
+		await tick();
 
 		expect(setKeepAwakeCommand).toHaveBeenCalledWith("/usr/bin/caffeinate", [
 			"-di",
@@ -836,11 +832,11 @@ describe("keep awake toggle", () => {
 
 		// Navigate to "Enable keep awake" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Press Enter with empty input to skip
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(100);
+		await tick();
 
 		// Should disable keep-awake since user skipped
 		expect(setKeepAwakeCommand).not.toHaveBeenCalled();
@@ -938,7 +934,7 @@ describe("setup notifications", () => {
 
 		// First item is "Setup notifications"
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		expect(onSetupNotifications).toHaveBeenCalledOnce();
 	});
@@ -1034,7 +1030,7 @@ describe("re-render after action", () => {
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
 		await tick();
 		await sendKeys(io.stdin, ["5", "6", "7", "8", "\r"]);
-		await tick(50);
+		await tick();
 
 		// getSettingsInfo should have been called at least twice (initial + re-render)
 		expect(renderCount).toBeGreaterThanOrEqual(2);
