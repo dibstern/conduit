@@ -703,6 +703,264 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
 
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
+function handleSessionListMessage(
+	msg: Extract<RelayMessage, { type: "session_list" }>,
+): void {
+	const rootIds = new Set(
+		sessionState.rootSessions.map((session) => session.id),
+	);
+	handleSessionList(msg);
+	if (msg.roots === false || msg.search) return;
+	const counts = new Map<string, { questions: number; permissions: number }>();
+	for (const session of sessionState.rootSessions) {
+		rootIds.add(session.id);
+		counts.set(session.id, {
+			questions: session.pendingQuestionCount ?? 0,
+			permissions: session.pendingPermissionCount ?? 0,
+		});
+	}
+	dispatch({ type: "reconcile", counts, sessionIds: rootIds });
+}
+
+function handleSessionDeletedMessage(
+	msg: Extract<RelayMessage, { type: "session_deleted" }>,
+): void {
+	// Clean up per-session chat state for the deleted session.
+	const deletedId = "sessionId" in msg ? (msg.sessionId as string) : undefined;
+	if (deletedId) {
+		clearSessionChatState(deletedId);
+		// Remove from session map
+		sessionState.sessions.delete(deletedId);
+		if (sessionState.searchResults)
+			sessionState.searchResults = sessionState.searchResults.filter(
+				(session) => session.id !== deletedId,
+			);
+		sessionState.rootSessions = sessionState.rootSessions.filter(
+			(s) => s.id !== deletedId,
+		);
+		sessionState.familySessions = sessionState.familySessions.filter(
+			(s) => s.id !== deletedId,
+		);
+	}
+}
+
+function handleSessionSwitchedMessage(
+	msg: Extract<RelayMessage, { type: "session_switched" }>,
+): void {
+	const route = getCurrentRoute();
+	const requestedCreation =
+		sessionCreation.value.phase === "creating" &&
+		sessionCreation.value.requestId === msg.requestId;
+	// Only this tab's creation request may leave the session list.
+	if (route.page !== "chat" || (!route.sessionId && !requestedCreation)) return;
+	if (!msg.id) {
+		clearMessages();
+		return;
+	}
+	// Use the ID captured by switchToSession() before it changed currentId.
+	// Falls back to sessionState.currentId for server-initiated switches
+	// (e.g. CreateSession flow) where switchToSession() wasn't called.
+	// consumeSwitchingFromId() reads and clears the value in one call to
+	// prevent stale IDs from leaking into future server-initiated switches.
+	const previousSessionId = consumeSwitchingFromId() ?? sessionState.currentId;
+	handleSessionSwitched(msg);
+
+	// Update URL to reflect the new session. Skip it when the URL already
+	// names it: a same-path replace is taken literally and would drop the
+	// list's query (scope, filter, grouping) on every reload.
+	if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
+
+	// Bump the outgoing session's replayGeneration to abort any in-flight
+	// convertHistoryAsync or replay for the previous session.
+	if (previousSessionId) {
+		abortSessionReplay(previousSessionId);
+	}
+
+	activateSessionChatState(msg.id);
+	updateContextPercent(0);
+	clearTodoState();
+	dispatch({ type: "session_viewed", sessionId: msg.id });
+
+	if (msg.events) {
+		// Cache hit: replay raw events through existing chat handlers
+		// (full fidelity — same code paths as live streaming).
+		// Fire-and-forget — handleMessage stays synchronous.
+		const eventsHasMore = msg.eventsHasMore ?? false;
+		replayEvents(msg.events, msg.id, eventsHasMore).catch((err) => {
+			log.warn("Replay error:", err);
+		});
+	} else if (msg.history) {
+		// REST API fallback: convert to ChatMessages and prepend.
+		// REST history has no event-level data, so sentDuringEpoch
+		// can't be set during conversion.  Signal that the next
+		// status:processing should apply the queued-state fallback.
+		markPendingHistoryQueuedFallback();
+		// Fire-and-forget — handleMessage stays synchronous.
+		// Capture slot at start so commits go to the correct session.
+		const historyMsgs = msg.history.messages;
+		const hasMore = msg.history.hasMore;
+		const msgCount = historyMsgs.length;
+		const capturedSlot = getOrCreateSessionSlot(msg.id);
+		const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
+		capturedSlot.messages.historyLoading = true;
+		capturedSlot.messages.loadLifecycle = "loading";
+		chatState.loadLifecycle = "loading";
+		convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
+			.then((chatMsgs) => {
+				if (!chatMsgs || capturedSlot.activity.replayGeneration !== actGen) {
+					capturedSlot.messages.historyLoading = false;
+					return;
+				}
+				const mergedChatMsgs = preserveCachedSubagentToolState(
+					getMessages(capturedSlot.messages),
+					chatMsgs,
+				);
+				capturedSlot.messages.toolRegistry.clear();
+				setMessages(capturedSlot.messages, mergedChatMsgs);
+				seedRegistryFromMessages(
+					capturedSlot.activity,
+					capturedSlot.messages,
+					mergedChatMsgs,
+				);
+				restoreContextFromMessages(capturedSlot.messages);
+				capturedSlot.messages.historyHasMore = hasMore;
+				capturedSlot.messages.historyMessageCount = msgCount;
+				historyState.hasMore = hasMore;
+				historyState.messageCount = msgCount;
+				// Transition loadLifecycle so the scroll controller
+				// exits "loading" state and scrolls to bottom.
+				capturedSlot.messages.loadLifecycle = "ready";
+				chatState.loadLifecycle = "ready";
+				capturedSlot.messages.historyLoading = false;
+			})
+			.catch((err) => {
+				log.warn("History conversion error:", err);
+				capturedSlot.messages.historyLoading = false;
+			});
+	} else {
+		// Empty session (neither events nor history) — hasMore stays false
+		// so "Beginning of session" marker shows immediately.
+		// Transition loadLifecycle to "ready" so the scroll controller
+		// exits "loading" state and can handle live events normally.
+		const emptySlot = getOrCreateSessionSlot(msg.id);
+		emptySlot.messages.loadLifecycle = "ready";
+		chatState.loadLifecycle = "ready";
+	}
+
+	// Apply server-provided input draft for this session.
+	// This uses the input_sync mechanism so InputArea picks it up
+	// via the existing $effect (server value overrides local draft).
+	if (msg.inputText != null) {
+		handleInputSyncReceived({ text: msg.inputText });
+	}
+}
+
+function handleHistoryPageMessage(
+	msg: Extract<RelayMessage, { type: "history_page" }>,
+): void {
+	// Convert and prepend older messages into the session's message list.
+	// Fire-and-forget — handleMessage stays synchronous.
+	// Capture slot at start so commits go to the correct session.
+	const rawMessages = msg.messages ?? [];
+	const hasMore = msg.hasMore ?? false;
+	const hpSessionId = msg.sessionId ?? sessionState.currentId;
+	const hpCapturedSlot = hpSessionId
+		? getOrCreateSessionSlot(hpSessionId)
+		: null;
+	const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
+	convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
+		.then((chatMsgs) => {
+			if (
+				hpCapturedSlot &&
+				hpCapturedSlot.activity.replayGeneration !== hpActGen
+			)
+				return;
+			if (chatMsgs) {
+				// Commit to captured slot, not getCurrentSlot()
+				if (hpCapturedSlot) {
+					prependMessages(
+						hpCapturedSlot.activity,
+						hpCapturedSlot.messages,
+						chatMsgs,
+					);
+					seedRegistryFromMessages(
+						hpCapturedSlot.activity,
+						hpCapturedSlot.messages,
+						chatMsgs,
+					);
+					hpCapturedSlot.messages.historyHasMore = hasMore;
+					hpCapturedSlot.messages.historyMessageCount += rawMessages.length;
+				}
+				if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
+				historyState.hasMore = hasMore;
+				historyState.messageCount += rawMessages.length;
+			}
+			historyState.loading = false;
+		})
+		.catch((err) => {
+			log.warn("History page conversion error:", err);
+			if (
+				hpCapturedSlot &&
+				hpCapturedSlot.activity.replayGeneration !== hpActGen
+			)
+				return;
+			if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
+			historyState.loading = false;
+		});
+}
+
+function handleNotificationEventMessage(
+	msg: Extract<RelayMessage, { type: "notification_event" }>,
+): void {
+	const syntheticMsg = {
+		type: msg.eventType,
+		...(msg.message != null ? { message: msg.message } : {}),
+		...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
+	} as RelayMessage;
+
+	// Dispatch to notification reducer based on event type
+	if (msg.sessionId) {
+		if (msg.eventType === "ask_user") {
+			dispatch({ type: "question_appeared", sessionId: msg.sessionId });
+		} else if (msg.eventType === "ask_user_resolved") {
+			dispatch({ type: "question_resolved", sessionId: msg.sessionId });
+		} else if (msg.eventType === "session_viewed") {
+			dispatch({ type: "session_viewed", sessionId: msg.sessionId });
+		}
+	}
+
+	// session_viewed is a silent indicator update — no notifications or toasts.
+	if (msg.eventType === "session_viewed") return;
+
+	// Suppress all frontend notifications for subagent done events.
+	// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.
+	const isSubagentDone =
+		msg.eventType === "done" &&
+		msg.sessionId &&
+		findSession(msg.sessionId)?.parentID;
+
+	if (!isSubagentDone) {
+		triggerNotifications(syntheticMsg);
+	}
+
+	// In-app toast for cross-session error events only. Done events
+	// are suppressed: all "done" messages are synthetic (generated by
+	// conduit from session.status:idle), and OpenCode can emit idle
+	// between tool rounds (e.g. after a bash call completes), causing
+	// spurious "Task Complete" toasts mid-turn. Users still get sound,
+	// browser/push notifications, and the sidebar green dot for
+	// genuine completions. Skip ask_user and ask_user_resolved since
+	// the AttentionBanner already handles those.
+	if (!isSubagentDone && msg.eventType === "error") {
+		const content = notificationContent(syntheticMsg);
+		if (content) {
+			showToast(content.title + (content.body ? ` — ${content.body}` : ""), {
+				variant: "warn",
+			});
+		}
+	}
+}
+
 /**
  * Route an incoming WebSocket message to the appropriate store handler.
  * Replaces the vanilla handler registry pattern.
@@ -748,26 +1006,9 @@ export function handleMessage(msg: RelayMessage): void {
 	// ── Global events + globally-coordinated per-session events ──────────
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
-		case "session_list": {
-			const rootIds = new Set(
-				sessionState.rootSessions.map((session) => session.id),
-			);
-			handleSessionList(msg);
-			if (msg.roots === false || msg.search) break;
-			const counts = new Map<
-				string,
-				{ questions: number; permissions: number }
-			>();
-			for (const session of sessionState.rootSessions) {
-				rootIds.add(session.id);
-				counts.set(session.id, {
-					questions: session.pendingQuestionCount ?? 0,
-					permissions: session.pendingPermissionCount ?? 0,
-				});
-			}
-			dispatch({ type: "reconcile", counts, sessionIds: rootIds });
+		case "session_list":
+			handleSessionListMessage(msg);
 			break;
-		}
 		case "session_family": {
 			handleSessionFamily(msg);
 			break;
@@ -778,137 +1019,12 @@ export function handleMessage(msg: RelayMessage): void {
 			showToast(`Forked from "${parentTitle}"`);
 			break;
 		}
-		case "session_deleted": {
-			// Clean up per-session chat state for the deleted session.
-			const deletedId =
-				"sessionId" in msg ? (msg.sessionId as string) : undefined;
-			if (deletedId) {
-				clearSessionChatState(deletedId);
-				// Remove from session map
-				sessionState.sessions.delete(deletedId);
-				if (sessionState.searchResults)
-					sessionState.searchResults = sessionState.searchResults.filter(
-						(session) => session.id !== deletedId,
-					);
-				sessionState.rootSessions = sessionState.rootSessions.filter(
-					(s) => s.id !== deletedId,
-				);
-				sessionState.familySessions = sessionState.familySessions.filter(
-					(s) => s.id !== deletedId,
-				);
-			}
+		case "session_deleted":
+			handleSessionDeletedMessage(msg);
 			break;
-		}
-		case "session_switched": {
-			const route = getCurrentRoute();
-			const requestedCreation =
-				sessionCreation.value.phase === "creating" &&
-				sessionCreation.value.requestId === msg.requestId;
-			// Only this tab's creation request may leave the session list.
-			if (route.page !== "chat" || (!route.sessionId && !requestedCreation))
-				break;
-			if (!msg.id) {
-				clearMessages();
-				break;
-			}
-			// Use the ID captured by switchToSession() before it changed currentId.
-			// Falls back to sessionState.currentId for server-initiated switches
-			// (e.g. CreateSession flow) where switchToSession() wasn't called.
-			// consumeSwitchingFromId() reads and clears the value in one call to
-			// prevent stale IDs from leaking into future server-initiated switches.
-			const previousSessionId =
-				consumeSwitchingFromId() ?? sessionState.currentId;
-			handleSessionSwitched(msg);
-
-			// Update URL to reflect the new session. Skip it when the URL already
-			// names it: a same-path replace is taken literally and would drop the
-			// list's query (scope, filter, grouping) on every reload.
-			if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
-
-			// Bump the outgoing session's replayGeneration to abort any in-flight
-			// convertHistoryAsync or replay for the previous session.
-			if (previousSessionId) {
-				abortSessionReplay(previousSessionId);
-			}
-
-			activateSessionChatState(msg.id);
-			updateContextPercent(0);
-			clearTodoState();
-			dispatch({ type: "session_viewed", sessionId: msg.id });
-
-			if (msg.events) {
-				// Cache hit: replay raw events through existing chat handlers
-				// (full fidelity — same code paths as live streaming).
-				// Fire-and-forget — handleMessage stays synchronous.
-				const eventsHasMore = msg.eventsHasMore ?? false;
-				replayEvents(msg.events, msg.id, eventsHasMore).catch((err) => {
-					log.warn("Replay error:", err);
-				});
-			} else if (msg.history) {
-				// REST API fallback: convert to ChatMessages and prepend.
-				// REST history has no event-level data, so sentDuringEpoch
-				// can't be set during conversion.  Signal that the next
-				// status:processing should apply the queued-state fallback.
-				markPendingHistoryQueuedFallback();
-				// Fire-and-forget — handleMessage stays synchronous.
-				// Capture slot at start so commits go to the correct session.
-				const historyMsgs = msg.history.messages;
-				const hasMore = msg.history.hasMore;
-				const msgCount = historyMsgs.length;
-				const capturedSlot = getOrCreateSessionSlot(msg.id);
-				const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
-				capturedSlot.messages.historyLoading = true;
-				capturedSlot.messages.loadLifecycle = "loading";
-				chatState.loadLifecycle = "loading";
-				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
-					.then((chatMsgs) => {
-						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
-							const mergedChatMsgs = preserveCachedSubagentToolState(
-								getMessages(capturedSlot.messages),
-								chatMsgs,
-							);
-							capturedSlot.messages.toolRegistry.clear();
-							setMessages(capturedSlot.messages, mergedChatMsgs);
-							seedRegistryFromMessages(
-								capturedSlot.activity,
-								capturedSlot.messages,
-								mergedChatMsgs,
-							);
-							restoreContextFromMessages(capturedSlot.messages);
-							capturedSlot.messages.historyHasMore = hasMore;
-							capturedSlot.messages.historyMessageCount = msgCount;
-							historyState.hasMore = hasMore;
-							historyState.messageCount = msgCount;
-							// Transition loadLifecycle so the scroll controller
-							// exits "loading" state and scrolls to bottom.
-							capturedSlot.messages.loadLifecycle = "ready";
-							chatState.loadLifecycle = "ready";
-						}
-						capturedSlot.messages.historyLoading = false;
-					})
-					.catch((err) => {
-						log.warn("History conversion error:", err);
-						capturedSlot.messages.historyLoading = false;
-					});
-			} else {
-				// Empty session (neither events nor history) — hasMore stays false
-				// so "Beginning of session" marker shows immediately.
-				// Transition loadLifecycle to "ready" so the scroll controller
-				// exits "loading" state and can handle live events normally.
-				const emptySlot = getOrCreateSessionSlot(msg.id);
-				emptySlot.messages.loadLifecycle = "ready";
-				chatState.loadLifecycle = "ready";
-			}
-
-			// Apply server-provided input draft for this session.
-			// This uses the input_sync mechanism so InputArea picks it up
-			// via the existing $effect (server value overrides local draft).
-			if (msg.inputText != null) {
-				handleInputSyncReceived({ text: msg.inputText });
-			}
-
+		case "session_switched":
+			handleSessionSwitchedMessage(msg);
 			break;
-		}
 
 		// ─── Terminal / PTY ──────────────────────────────────────────────
 		case "pty_list":
@@ -986,59 +1102,9 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 
 		// ─── History ─────────────────────────────────────────────────────
-		case "history_page": {
-			// Convert and prepend older messages into the session's message list.
-			// Fire-and-forget — handleMessage stays synchronous.
-			// Capture slot at start so commits go to the correct session.
-			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
-			const rawMessages = historyMsg.messages ?? [];
-			const hasMore = historyMsg.hasMore ?? false;
-			const hpSessionId = historyMsg.sessionId ?? sessionState.currentId;
-			const hpCapturedSlot = hpSessionId
-				? getOrCreateSessionSlot(hpSessionId)
-				: null;
-			const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
-			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
-				.then((chatMsgs) => {
-					if (
-						hpCapturedSlot &&
-						hpCapturedSlot.activity.replayGeneration !== hpActGen
-					)
-						return;
-					if (chatMsgs) {
-						// Commit to captured slot, not getCurrentSlot()
-						if (hpCapturedSlot) {
-							prependMessages(
-								hpCapturedSlot.activity,
-								hpCapturedSlot.messages,
-								chatMsgs,
-							);
-							seedRegistryFromMessages(
-								hpCapturedSlot.activity,
-								hpCapturedSlot.messages,
-								chatMsgs,
-							);
-							hpCapturedSlot.messages.historyHasMore = hasMore;
-							hpCapturedSlot.messages.historyMessageCount += rawMessages.length;
-						}
-						if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-						historyState.hasMore = hasMore;
-						historyState.messageCount += rawMessages.length;
-					}
-					historyState.loading = false;
-				})
-				.catch((err) => {
-					log.warn("History page conversion error:", err);
-					if (
-						hpCapturedSlot &&
-						hpCapturedSlot.activity.replayGeneration !== hpActGen
-					)
-						return;
-					if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-					historyState.loading = false;
-				});
+		case "history_page":
+			handleHistoryPageMessage(msg);
 			break;
-		}
 
 		// ─── Plan Mode ───────────────────────────────────────────────────
 		case "plan_enter":
@@ -1112,59 +1178,9 @@ export function handleMessage(msg: RelayMessage): void {
 		// Broadcast by the server when a notification-worthy event (done,
 		// error) is dropped because the user is viewing a different session.
 		// Trigger sound/browser notifications without updating chat state.
-		case "notification_event": {
-			const syntheticMsg = {
-				type: msg.eventType,
-				...(msg.message != null ? { message: msg.message } : {}),
-				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
-			} as RelayMessage;
-
-			// Dispatch to notification reducer based on event type
-			if (msg.sessionId) {
-				if (msg.eventType === "ask_user") {
-					dispatch({ type: "question_appeared", sessionId: msg.sessionId });
-				} else if (msg.eventType === "ask_user_resolved") {
-					dispatch({ type: "question_resolved", sessionId: msg.sessionId });
-				} else if (msg.eventType === "session_viewed") {
-					dispatch({ type: "session_viewed", sessionId: msg.sessionId });
-				}
-			}
-
-			// session_viewed is a silent indicator update — no notifications or toasts.
-			if (msg.eventType === "session_viewed") break;
-
-			// Suppress all frontend notifications for subagent done events.
-			// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.
-			const isSubagentDone =
-				msg.eventType === "done" &&
-				msg.sessionId &&
-				findSession(msg.sessionId)?.parentID;
-
-			if (!isSubagentDone) {
-				triggerNotifications(syntheticMsg);
-			}
-
-			// In-app toast for cross-session error events only. Done events
-			// are suppressed: all "done" messages are synthetic (generated by
-			// conduit from session.status:idle), and OpenCode can emit idle
-			// between tool rounds (e.g. after a bash call completes), causing
-			// spurious "Task Complete" toasts mid-turn. Users still get sound,
-			// browser/push notifications, and the sidebar green dot for
-			// genuine completions. Skip ask_user and ask_user_resolved since
-			// the AttentionBanner already handles those.
-			if (!isSubagentDone && msg.eventType === "error") {
-				const content = notificationContent(syntheticMsg);
-				if (content) {
-					showToast(
-						content.title + (content.body ? ` — ${content.body}` : ""),
-						{
-							variant: "warn",
-						},
-					);
-				}
-			}
+		case "notification_event":
+			handleNotificationEventMessage(msg);
 			break;
-		}
 
 		default:
 			// Unknown message type — debug-only (tree-shaken in production)
