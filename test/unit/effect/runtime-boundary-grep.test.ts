@@ -73,12 +73,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		reason: "storybook/mock fixture text, not executable production code",
 	},
 	{
-		path: "src/lib/frontend/components/overlays/NotifSettings.stories.ts",
-		snippetPattern: /pushUnavailable takes precedence/,
-		reason:
-			"storybook beforeEach environment guard, not executable production code — same class as stories/mocks.ts above",
-	},
-	{
 		path: "src/lib/frontend/components/session/SessionItem.stories.ts",
 		snippetPattern: /Session row is missing/,
 		reason:
@@ -435,6 +429,17 @@ describe("Effect runtime boundary grep", () => {
 		);
 
 		expect(unexpected).toEqual([]);
+
+		// An entry that matches nothing outlived its throw; drop it.
+		const stale = allowedPlainErrorThrows.filter(
+			(boundary) =>
+				!hits.some(
+					(hit) =>
+						boundary.path === hit.path &&
+						boundary.snippetPattern.test(hit.source),
+				),
+		);
+		expect(stale.map((boundary) => boundary.path)).toEqual([]);
 	});
 
 	it("does not schedule daemon shutdown by re-entering the daemon runtime", () => {
