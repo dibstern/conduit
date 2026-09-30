@@ -5,6 +5,7 @@ import {
 	type ClaudeProviderInstanceDeps,
 } from "../../src/lib/provider/claude/claude-provider-instance.js";
 import { makeClaudeProviderRuntime } from "../../src/lib/provider/claude/claude-provider-runtime.js";
+import { ClaudeBoundaryError } from "../../src/lib/provider/event-sink-errors.js";
 
 export function makeTestClaudeProviderInstance(
 	deps: ClaudeProviderInstanceDeps,
@@ -19,7 +20,12 @@ export function makeTestClaudeProviderInstance(
 							capabilitiesService: {
 								get: () =>
 									Effect.fail(
-										new Error("Claude capabilities service unavailable"),
+										new ClaudeBoundaryError({
+											operation: "probeCapabilities",
+											cause: new Error(
+												"Claude capabilities service unavailable",
+											),
+										}),
 									),
 							},
 						}

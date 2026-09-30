@@ -1,4 +1,5 @@
 {
+	"test/unit/provider/event-sink-effect-boundary.test.ts :: unknown": "Not a class: this was the error type in EventSink signature strings the test asserts on. The signatures now fail with EventSinkError instead of unknown.",
 	"test/e2e/specs/question-flow.spec.ts :: Submitting": "Not a class: this was the submit button's text in a Playwright toContainText assertion. The card is now marked answered on the server's acknowledgement of AnswerQuestion, so the test asserts the answered state instead.",
 	"test/unit/effect/runtime-boundary-grep.test.ts :: above,beforeEach,environment,guard,,same,stories/mocks.ts": "Not classes: these are words from the reason string of a deleted allow-list entry for NotifSettings.stories.ts, a file removed in wave 1.",
 	"test/unit/components/Menu.test.ts :: data-dropdown-menu-content]": "Not a class: this was a DOM selector in a jsdom assertion that a menu opened inside a native dialog was portaled outside it. The assertion was replaced by a browser story that selects modal menu items by keyboard and pointer.",

@@ -4,6 +4,11 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import {
+	type ClaudeAdapterError,
+	ClaudeBoundaryError,
+	ClaudeRuntimeError,
+} from "../event-sink-errors.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
 import {
@@ -103,7 +108,7 @@ function materializeSubagentsAfterResultEffect(
 	materializeSubagents: ClaudeProviderInstanceDeps["materializeSubagents"],
 	ctx: ClaudeSessionContext,
 	result: SDKResultMessage,
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (!materializeSubagents) return;
 		const parentClaudeSessionId = ctx.resumeSessionId ?? result.session_id;
@@ -164,7 +169,7 @@ export function handleSubagentTaskStartedEffect(
 	ensureSession: ClaudeProviderInstanceDeps["ensureClaudeSubagentSession"],
 	ctx: ClaudeSessionContext,
 	message: SDKMessage,
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (!isClaudeTaskStartedMessage(message)) return;
 
@@ -273,7 +278,7 @@ export function handleSubagentTaskStartedEffect(
 export function pushForwardedSubagentMessageEffect(
 	ctx: ClaudeSessionContext,
 	message: SDKMessage,
-): Effect.Effect<boolean, unknown> {
+): Effect.Effect<boolean, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (message.type !== "assistant" && message.type !== "user") return false;
 		const parentToolUseId =
@@ -317,7 +322,7 @@ function queuePendingSubagentMessage(
 function flushPendingSubagentMessagesEffect(
 	ctx: ClaudeSessionContext,
 	poller: ClaudeSubagentLivePoller,
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		const pending = getPendingSubagentMessages(ctx);
 		const messages = pending.get(poller.parentToolUseId);
@@ -331,7 +336,7 @@ function pushForwardedSubagentMessagesEffect(
 	ctx: ClaudeSessionContext,
 	poller: ClaudeSubagentLivePoller,
 	messages: readonly SessionMessage[],
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		const stage = stageSessionMessagesToEvents({
 			childSessionId: poller.childSessionId,
@@ -412,7 +417,7 @@ function pollClaudeSubagentOnceEffect(
 	poller: ClaudeSubagentLivePoller,
 	subagentSdk: ClaudeSubagentSdk,
 	options: { readonly allowInactive?: boolean } = {},
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void, ClaudeAdapterError> {
 	if (!canPollSubagent(ctx, poller, options)) return Effect.void;
 	return pollClaudeSubagentSnapshotEffect(
 		deps,
@@ -429,7 +434,7 @@ function pollClaudeSubagentSnapshotEffect(
 	poller: ClaudeSubagentLivePoller,
 	subagentSdk: ClaudeSubagentSdk,
 	options: { readonly allowInactive?: boolean },
-): Effect.Effect<void, unknown> {
+): Effect.Effect<void, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (!canPollSubagent(ctx, poller, options)) return;
 		const messages = yield* Effect.tryPromise({
@@ -439,14 +444,15 @@ function pollClaudeSubagentSnapshotEffect(
 					poller.sdkSubagentId,
 					{ dir: ctx.workspaceRoot },
 				),
-			catch: (cause) => cause,
+			catch: (cause) =>
+				new ClaudeBoundaryError({ operation: "getSubagentMessages", cause }),
 		}).pipe(
 			Effect.timeoutFail({
 				duration: Duration.millis(subagentPollTimeoutMs(deps)),
 				onTimeout: () =>
-					new Error(
-						`Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
-					),
+					new ClaudeRuntimeError({
+						message: `Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+					}),
 			}),
 		);
 		if (!canPollSubagent(ctx, poller, options)) return;

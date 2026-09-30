@@ -11,6 +11,7 @@ import type {
 	SessionPermissionMode,
 } from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
+import type { EventSinkError } from "./event-sink-errors.js";
 
 // ─── Permission / Question Decisions ────────────────────────────────────────
 
@@ -62,25 +63,25 @@ export interface QuestionRequest {
  *   pending request when the UI returns an answer.
  */
 export interface EventSink {
-	push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown>;
+	push(event: ProviderRuntimeEvent): Effect.Effect<void, EventSinkError>;
 	requestPermission(
 		request: PermissionRequest,
-	): Effect.Effect<PermissionResponse, unknown>;
+	): Effect.Effect<PermissionResponse, EventSinkError>;
 	requestQuestion(
 		request: QuestionRequest,
-	): Effect.Effect<Record<string, unknown>, unknown>;
+	): Effect.Effect<Record<string, unknown>, EventSinkError>;
 	resolvePermission(
 		requestId: string,
 		response: PermissionResponse,
-	): Effect.Effect<void, unknown>;
+	): Effect.Effect<void, EventSinkError>;
 	resolveQuestion(
 		requestId: string,
 		answers: Record<string, unknown>,
-	): Effect.Effect<void, unknown>;
+	): Effect.Effect<void, EventSinkError>;
 	cancelSessionInteractions?(
 		reason: string,
 		options?: { readonly recoverQuestions?: boolean },
-	): Effect.Effect<void, unknown>;
+	): Effect.Effect<void>;
 	/**
 	 * Relay liveness hook. Providers never call this; the orchestration reactor
 	 * calls it for every streamed event so the relay's processing timeout stays

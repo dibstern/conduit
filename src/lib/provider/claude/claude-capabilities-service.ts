@@ -8,6 +8,7 @@ import {
 	Option,
 	Ref,
 } from "effect";
+import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ProbeDeps,
@@ -19,7 +20,7 @@ const CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
 interface CacheEntry {
 	readonly expiresAt: number;
 	readonly value?: ProbeResult;
-	readonly inFlight?: Deferred.Deferred<ProbeResult, unknown>;
+	readonly inFlight?: Deferred.Deferred<ProbeResult, ClaudeBoundaryError>;
 }
 
 const instrumentCapabilityProbe = <A, E, R>(
@@ -34,7 +35,9 @@ const instrumentCapabilityProbe = <A, E, R>(
 };
 
 export interface ClaudeCapabilitiesService {
-	readonly get: (workspaceRoot: string) => Effect.Effect<ProbeResult, unknown>;
+	readonly get: (
+		workspaceRoot: string,
+	) => Effect.Effect<ProbeResult, ClaudeBoundaryError>;
 }
 
 export class ClaudeCapabilitiesServiceTag extends Context.Tag(
@@ -69,7 +72,10 @@ const makeClaudeCapabilitiesServiceWithCache = (
 					return yield* Deferred.await(existing.inFlight);
 				}
 
-				const inFlight = yield* Deferred.make<ProbeResult, unknown>();
+				const inFlight = yield* Deferred.make<
+					ProbeResult,
+					ClaudeBoundaryError
+				>();
 				yield* Ref.update(cacheRef, (cache) =>
 					HashMap.set(cache, workspaceRoot, {
 						expiresAt: 0,
@@ -83,7 +89,8 @@ const makeClaudeCapabilitiesServiceWithCache = (
 							workspaceRoot,
 							...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 						}),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "probeCapabilities", cause }),
 				}).pipe(
 					Effect.tap((value) =>
 						Ref.update(cacheRef, (cache) =>

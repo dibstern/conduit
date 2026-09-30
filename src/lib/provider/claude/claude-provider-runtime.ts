@@ -37,6 +37,11 @@ import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-a
 import { createLogger } from "../../logger.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import {
+	type ClaudeAdapterError,
+	ClaudeBoundaryError,
+	ClaudeRuntimeError,
+} from "../event-sink-errors.js";
 import type {
 	PermissionDecision,
 	ProviderCapabilities,
@@ -137,7 +142,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly subagentSdk?: ClaudeSubagentSdk;
 	readonly materializeSubagents?: (
 		input: MaterializeClaudeSubagentsInput,
-	) => Effect.Effect<readonly MaterializedClaudeSubagent[], unknown>;
+	) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError>;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
@@ -239,7 +244,7 @@ export class ClaudeProviderRuntime {
 
 	private mapProviderFailure<A>(
 		operation: string,
-		effect: Effect.Effect<A, unknown>,
+		effect: Effect.Effect<A, ClaudeAdapterError>,
 	): Effect.Effect<A, ProviderInstanceFailure> {
 		return effect.pipe(
 			Effect.mapError(
@@ -247,7 +252,8 @@ export class ClaudeProviderRuntime {
 					new ProviderInstanceFailure({
 						providerId: this.providerId,
 						operation,
-						cause,
+						// Unwrap so the side-effect reactor still sees the SDK error's code and retryable fields.
+						cause: cause instanceof ClaudeBoundaryError ? cause.cause : cause,
 					}),
 			),
 		);
@@ -292,7 +298,7 @@ export class ClaudeProviderRuntime {
 
 	private sendTurnLocalEffect(
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const { sessionId } = input;
 
@@ -303,7 +309,12 @@ export class ClaudeProviderRuntime {
 				if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
 				}
-				yield* Deferred.await(pending);
+				yield* Deferred.await(pending).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+					),
+				);
 				return yield* this.sendTurnLocalEffect(input);
 			}
 
@@ -359,7 +370,7 @@ export class ClaudeProviderRuntime {
 
 	private createSessionAndSendTurnEffect(
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const { sessionId } = input;
 			const apiModelId = claudeApiModelId(
@@ -368,9 +379,10 @@ export class ClaudeProviderRuntime {
 			);
 			if (apiModelId === undefined) {
 				return yield* Effect.fail(
-					new Error(
-						"Claude runtime invariant violated: model is required before query creation",
-					),
+					new ClaudeRuntimeError({
+						message:
+							"Claude runtime invariant violated: model is required before query creation",
+					}),
 				);
 			}
 			const expectedApiModelId = yield* expectedApiModelIdEffect(
@@ -399,7 +411,8 @@ export class ClaudeProviderRuntime {
 				// 2. Build initial user message and enqueue.
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				yield* queue.enqueue(userMessage);
 
@@ -487,7 +500,8 @@ export class ClaudeProviderRuntime {
 								? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
 								: {}),
 						}),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 
 				// 6. Call query factory and assign to context.
@@ -497,7 +511,8 @@ export class ClaudeProviderRuntime {
 							prompt: queue,
 							options,
 						}),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				(ctx as { query: ClaudeSessionContext["query"] }).query = query;
 
@@ -540,7 +555,11 @@ export class ClaudeProviderRuntime {
 				),
 			);
 
-			return yield* Deferred.await(deferred);
+			return yield* Deferred.await(deferred).pipe(
+				Effect.mapError(
+					(cause) => new ClaudeBoundaryError({ operation: "awaitTurn", cause }),
+				),
+			);
 		});
 	}
 
@@ -563,7 +582,7 @@ export class ClaudeProviderRuntime {
 			readonly contextWindow?: string | undefined;
 			readonly variant?: string | undefined;
 		},
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const baseModelId = settings.modelId ?? ctx.currentModel;
 			const apiModelId = claudeApiModelId(baseModelId, settings.contextWindow);
@@ -580,7 +599,8 @@ export class ClaudeProviderRuntime {
 			if (shouldSetModel) {
 				yield* Effect.tryPromise({
 					try: () => ctx.query.setModel(apiModelId),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				ctx.currentApiModelId = apiModelId;
 			}
@@ -594,7 +614,8 @@ export class ClaudeProviderRuntime {
 				const effortLevel = (settings.variant || null) as EffortLevel | null;
 				yield* Effect.tryPromise({
 					try: () => ctx.query.applyFlagSettings({ effortLevel }),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				if (settings.variant) {
 					ctx.currentVariant = settings.variant;
@@ -623,7 +644,12 @@ export class ClaudeProviderRuntime {
 			Effect.gen(this, function* () {
 				const pending = yield* getSetupLock(this.stateRef, sessionId);
 				if (pending) {
-					yield* Deferred.await(pending);
+					yield* Deferred.await(pending).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+						),
+					);
 				}
 				const ctx = yield* getSession(this.stateRef, sessionId);
 				if (!ctx) return;
@@ -659,13 +685,19 @@ export class ClaudeProviderRuntime {
 			Effect.gen(this, function* () {
 				const pending = yield* getSetupLock(this.stateRef, sessionId);
 				if (pending) {
-					yield* Deferred.await(pending);
+					yield* Deferred.await(pending).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+						),
+					);
 				}
 				const ctx = yield* getSession(this.stateRef, sessionId);
 				if (!ctx) return;
 				yield* Effect.tryPromise({
 					try: () => ctx.query.setPermissionMode(mode),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 			}),
 		);
@@ -674,7 +706,7 @@ export class ClaudeProviderRuntime {
 	private enqueueTurnEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			if (this.hasAgentChanged(ctx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, ctx.sessionId)) {
@@ -686,9 +718,9 @@ export class ClaudeProviderRuntime {
 			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
 			if (!turnAdmissionSemaphore) {
 				return yield* Effect.fail(
-					new Error(
-						`Claude runtime invariant violated: missing turn admission semaphore for ${ctx.sessionId}`,
-					),
+					new ClaudeRuntimeError({
+						message: `Claude runtime invariant violated: missing turn admission semaphore for ${ctx.sessionId}`,
+					}),
 				);
 			}
 			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
@@ -711,7 +743,9 @@ export class ClaudeProviderRuntime {
 						(yield* isStreamEnded(this.stateRef, ctx.sessionId))
 					) {
 						return yield* Effect.fail(
-							new Error(`Claude session is no longer active: ${ctx.sessionId}`),
+							new ClaudeRuntimeError({
+								message: `Claude session is no longer active: ${ctx.sessionId}`,
+							}),
 						);
 					}
 
@@ -725,7 +759,8 @@ export class ClaudeProviderRuntime {
 					);
 					const userMessage = yield* Effect.try({
 						try: () => validateUserMessage(this.buildUserMessage(input)),
-						catch: (cause) => cause,
+						catch: (cause) =>
+							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 					});
 					yield* this.syncQuerySettingsEffect(ctx, {
 						modelId: input.model?.modelId,
@@ -768,7 +803,11 @@ export class ClaudeProviderRuntime {
 				}),
 			);
 
-			return yield* Deferred.await(deferred);
+			return yield* Deferred.await(deferred).pipe(
+				Effect.mapError(
+					(cause) => new ClaudeBoundaryError({ operation: "awaitTurn", cause }),
+				),
+			);
 		});
 	}
 
@@ -799,7 +838,7 @@ export class ClaudeProviderRuntime {
 	private restartSessionForAgentChangeEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
-	): Effect.Effect<TurnResult, unknown> {
+	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			yield* this.disposeSessionEffect(ctx, "Claude agent changed");
 
@@ -823,7 +862,7 @@ export class ClaudeProviderRuntime {
 	private runStreamConsumerEffect(
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		const attributes = {
 			providerId: this.providerId,
 			sessionId: ctx.sessionId,
@@ -838,7 +877,7 @@ export class ClaudeProviderRuntime {
 	private consumeStreamEffect(
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			let resultFinalizationStarted = false;
 			yield* this.consumeStreamLoopEffect(ctx, translator, () => {
@@ -861,7 +900,7 @@ export class ClaudeProviderRuntime {
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
 		markResultFinalizationStarted: () => void,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const iterator = (ctx.query as AsyncIterable<unknown>)[
 				Symbol.asyncIterator
@@ -871,7 +910,8 @@ export class ClaudeProviderRuntime {
 					break;
 				const next = yield* Effect.tryPromise({
 					try: () => iterator.next(),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				if (next.done) break;
 				captureClaudeSdkMessage(ctx.sessionId, next.value);
@@ -882,7 +922,13 @@ export class ClaudeProviderRuntime {
 				// session. Skip it; decodeProviderMessage already logged payload.
 				const decodedMessage = yield* Effect.try({
 					try: () => decodeProviderMessage(next.value),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						cause instanceof ClaudeSDKDecodeError
+							? cause
+							: new ClaudeBoundaryError({
+									operation: "decodeProviderMessage",
+									cause,
+								}),
 				}).pipe(
 					Effect.catchAll((cause) =>
 						cause instanceof ClaudeSDKDecodeError
@@ -949,7 +995,7 @@ export class ClaudeProviderRuntime {
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
 		err: unknown,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			stopSubagentPollers(ctx);
 			if (ctx.stopped || !(yield* isCurrentSession(this.stateRef, ctx))) return;
@@ -981,7 +1027,7 @@ export class ClaudeProviderRuntime {
 	private finalizeStreamConsumerEffect(
 		ctx: ClaudeSessionContext,
 		resultFinalizationStarted: () => boolean,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			if (!resultFinalizationStarted()) {
 				stopSubagentPollers(ctx);
@@ -1033,7 +1079,7 @@ export class ClaudeProviderRuntime {
 
 	private interruptSessionEffect(
 		sessionId: string,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return;
@@ -1063,7 +1109,7 @@ export class ClaudeProviderRuntime {
 		ctx: ClaudeSessionContext,
 		reason: string,
 		recoverQuestions: boolean,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			if (ctx.stopped) return;
 
@@ -1103,7 +1149,8 @@ export class ClaudeProviderRuntime {
 						ctx.eventSink?.cancelSessionInteractions?.(reason, {
 							recoverQuestions,
 						}),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				}).pipe(
 					Effect.flatMap((cancelEffect) => cancelEffect ?? Effect.void),
 					Effect.ignore,
@@ -1144,7 +1191,8 @@ export class ClaudeProviderRuntime {
 			// 6. Interrupt SDK query.
 			yield* Effect.tryPromise({
 				try: () => ctx.query.interrupt(),
-				catch: (cause) => cause,
+				catch: (cause) =>
+					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			}).pipe(Effect.ignore);
 
 			(ctx as { stopped: boolean }).stopped = true;
@@ -1206,7 +1254,7 @@ export class ClaudeProviderRuntime {
 	private disposeSessionEffect(
 		ctx: ClaudeSessionContext,
 		reason: string,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			yield* this.cleanupSessionEffect(ctx, reason, true);
 
@@ -1219,7 +1267,8 @@ export class ClaudeProviderRuntime {
 			// Terminal close of the SDK query (vs interrupt(), which is resumable).
 			yield* Effect.try({
 				try: () => ctx.query.close(),
-				catch: (cause) => cause,
+				catch: (cause) =>
+					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			}).pipe(Effect.ignore);
 
 			yield* FiberMap.remove(this.streamFibers, ctx.sessionId);
@@ -1242,7 +1291,7 @@ export class ClaudeProviderRuntime {
 
 	private endSessionLocalEffect(
 		sessionId: string,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return; // idempotent
@@ -1262,7 +1311,7 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
-	shutdownLocalEffect(): Effect.Effect<void, unknown> {
+	shutdownLocalEffect(): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			log.info("ClaudeProviderRuntime shutting down");
 			const state = yield* getState(this.stateRef);

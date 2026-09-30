@@ -27,6 +27,7 @@ import {
 	ProjectorCursorEffectTag,
 } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import { PersistenceError } from "../../../src/lib/persistence/errors.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import type {
 	MessagePartRow,
@@ -156,9 +157,11 @@ describe("Claude subagent materialization pipeline", () => {
 						eventStore.append(event).pipe(
 							Effect.mapError(
 								(cause) =>
-									new Error(
-										`append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
-									),
+									new PersistenceError({
+										code: "APPEND_FAILED",
+										message: `append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
+										context: { cause },
+									}),
 							),
 							Effect.flatMap((stored) =>
 								projectionRunner
@@ -388,9 +391,11 @@ describe("Claude subagent materialization pipeline", () => {
 						eventStore.append(event).pipe(
 							Effect.mapError(
 								(cause) =>
-									new Error(
-										`append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
-									),
+									new PersistenceError({
+										code: "APPEND_FAILED",
+										message: `append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
+										context: { cause },
+									}),
 							),
 							Effect.flatMap((stored) =>
 								projectionRunner

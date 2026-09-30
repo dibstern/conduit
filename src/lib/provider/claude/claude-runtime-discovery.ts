@@ -3,6 +3,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { createLogger } from "../../logger.js";
+import {
+	type ClaudeAdapterError,
+	ClaudeRuntimeError,
+} from "../event-sink-errors.js";
 import type { CommandInfo, ModelInfo, ProviderCapabilities } from "../types.js";
 import { expectedClaudeReportedModelId } from "./claude-api-model-id.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
@@ -189,10 +193,14 @@ export function discoverCapabilitiesEffect(
 function getCapabilitiesProbeEffect(
 	service: ClaudeCapabilitiesService | undefined,
 	workspaceRoot: string,
-): Effect.Effect<ProbeResult, unknown> {
+): Effect.Effect<ProbeResult, ClaudeAdapterError> {
 	return service
 		? service.get(workspaceRoot)
-		: Effect.fail(new Error("Claude capabilities service unavailable"));
+		: Effect.fail(
+				new ClaudeRuntimeError({
+					message: "Claude capabilities service unavailable",
+				}),
+			);
 }
 
 export function setExpectedApiModelId(

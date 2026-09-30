@@ -5,6 +5,7 @@ import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
+import { toEventSinkError } from "./relay-event-sink.js";
 import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
 
 /**
@@ -70,7 +71,7 @@ class ProviderCommandPayloadParseFailed extends Data.TaggedError(
 	}
 }
 
-class ProviderSideEffectInteractionUnsupported extends Data.TaggedError(
+export class ProviderSideEffectInteractionUnsupported extends Data.TaggedError(
 	"ProviderSideEffectInteractionUnsupported",
 )<{
 	readonly operation: "requestPermission" | "requestQuestion";
@@ -519,7 +520,9 @@ export class ProviderSideEffectReactor {
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
 				interactions?.noteActivity?.();
-				return this.options.ingestion.ingest(event).pipe(Effect.asVoid);
+				return this.options.ingestion
+					.ingest(event)
+					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));
 			});
 		if (!interactions) {
 			return {

@@ -23,6 +23,7 @@ import type {
 	SDKUserMessage,
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
+import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
 import type {
 	ModelInfo,
 	SendTurnInput,
@@ -97,7 +98,12 @@ function makeCapabilitiesService(
 	return {
 		get: vi.fn(() =>
 			failure
-				? Effect.fail(failure)
+				? Effect.fail(
+						new ClaudeBoundaryError({
+							operation: "probeCapabilities",
+							cause: failure,
+						}),
+					)
 				: Effect.succeed({ models, commands: [], agents: [] }),
 		),
 	};

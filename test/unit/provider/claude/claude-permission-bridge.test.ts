@@ -27,19 +27,18 @@ function makeInteractiveSink(): EventSink & {
 	resolvePermission(
 		requestId: string,
 		response: PermissionResponse,
-	): Effect.Effect<void, unknown>;
+	): Effect.Effect<void>;
 } {
 	const pending = new Map<string, (response: PermissionResponse) => void>();
 	return {
 		push: vi.fn(() => Effect.void),
 		requestPermission: vi.fn((request) =>
-			Effect.tryPromise({
-				try: () =>
+			Effect.promise(
+				() =>
 					new Promise<PermissionResponse>((resolve) => {
 						pending.set(request.requestId, resolve);
 					}),
-				catch: (cause) => cause,
-			}),
+			),
 		),
 		requestQuestion: vi.fn(() => Effect.succeed({})),
 		resolvePermission: vi.fn((requestId, response) =>
@@ -54,31 +53,29 @@ function makeInteractiveSink(): EventSink & {
 
 function pendingPermissionEffect(
 	register: (resolve: (value: unknown) => void) => void,
-): Effect.Effect<PermissionResponse, unknown> {
-	return Effect.tryPromise({
-		try: () =>
+): Effect.Effect<PermissionResponse> {
+	return Effect.promise(
+		() =>
 			new Promise<PermissionResponse>((resolve) => {
 				register(resolve as (value: unknown) => void);
 			}),
-		catch: (cause) => cause,
-	});
+	);
 }
 
 function pendingQuestionEffect(
 	register: (resolve: (value: Record<string, unknown>) => void) => void,
-): Effect.Effect<Record<string, unknown>, unknown> {
-	return Effect.tryPromise({
-		try: () =>
+): Effect.Effect<Record<string, unknown>> {
+	return Effect.promise(
+		() =>
 			new Promise<Record<string, unknown>>((resolve) => {
 				register(resolve);
 			}),
-		catch: (cause) => cause,
-	});
+	);
 }
 
 function permissionResponseEffect(
 	response: unknown,
-): Effect.Effect<PermissionResponse, unknown> {
+): Effect.Effect<PermissionResponse> {
 	return Effect.succeed(response as PermissionResponse);
 }
 

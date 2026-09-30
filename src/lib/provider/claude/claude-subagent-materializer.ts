@@ -14,6 +14,10 @@ import type {
 } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import {
+	type ClaudeAdapterError,
+	ClaudeBoundaryError,
+} from "../event-sink-errors.js";
+import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../provider-runtime-event-to-domain.js";
@@ -106,7 +110,7 @@ export function makeClaudeSubagentMaterializer(deps: {
 	readonly persist: ClaudeSubagentPersist;
 }): (
 	input: MaterializeClaudeSubagentsInput,
-) => Effect.Effect<readonly MaterializedClaudeSubagent[], unknown> {
+) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError> {
 	return (input) =>
 		Effect.gen(function* () {
 			const subagentIds = yield* Effect.tryPromise({
@@ -114,7 +118,8 @@ export function makeClaudeSubagentMaterializer(deps: {
 					deps.sdk.listSubagents(input.parentClaudeSessionId, {
 						dir: input.workspaceRoot,
 					}),
-				catch: (cause) => cause,
+				catch: (cause) =>
+					new ClaudeBoundaryError({ operation: "listSubagents", cause }),
 			});
 			const materialized: MaterializedClaudeSubagent[] = [];
 
@@ -132,7 +137,11 @@ export function makeClaudeSubagentMaterializer(deps: {
 							sdkSubagentId,
 							{ dir: input.workspaceRoot },
 						),
-					catch: (cause) => cause,
+					catch: (cause) =>
+						new ClaudeBoundaryError({
+							operation: "getSubagentMessages",
+							cause,
+						}),
 				});
 				// Prefer the Task's human description — the raw subagent type is
 				// an internal identifier (e.g. "local_agent") and reads as noise
