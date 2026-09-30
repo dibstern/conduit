@@ -102,13 +102,11 @@ export const ViewsSheetOpen: Story = {
 			"session-bar-views-sheet",
 		);
 		await expect(sheet).toBeVisible();
-		const items = within(sheet).getAllByRole("menuitemradio");
-		expect(items.map((item) => item.textContent?.trim())).toEqual([
-			"Chat",
-			"Terminal",
-			"Diff",
-			"Files",
-		]);
+		// Accessible names, in order: the shortcut hints are aria-hidden.
+		const items = ["Chat", "Terminal", "Diff", "Files"].map((name) =>
+			within(sheet).getByRole("menuitemradio", { name }),
+		);
+		expect(within(sheet).getAllByRole("menuitemradio")).toEqual(items);
 		await expect(items[0]).toHaveAttribute("aria-checked", "true");
 		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
 	},

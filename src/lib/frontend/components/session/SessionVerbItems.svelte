@@ -3,7 +3,7 @@
 	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
-	import type { SessionVerb, SessionVerbEntry } from "./session-verbs.js";
+	import { sessionVerbKeysHint, type SessionVerb, type SessionVerbEntry } from "./session-verbs.js";
 
 	let {
 		verbs,
@@ -21,7 +21,7 @@
 		{#if item.icon}<Icon name={item.icon} size={13} />{:else if item.checked !== undefined}<span class="w-[13px] shrink-0" aria-hidden="true"></span>{/if}
 	{/if}
 	<span>{item.label}</span>
-	{#if item.hint && presentation !== "sheet"}<span class="ml-auto text-xs text-text-muted">{item.hint}</span>{/if}
+	{#if item.keys}<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{sessionVerbKeysHint(item.keys)}</span>{/if}
 	{#if item.disabledReason}<span class="ml-auto text-xs text-text-dimmer">{item.disabledReason}</span>{/if}
 {/snippet}
 

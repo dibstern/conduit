@@ -1,3 +1,4 @@
+import { tick } from "svelte";
 import {
 	sessionViewState,
 	setFilesOpen,
@@ -11,7 +12,7 @@ export type SessionView = {
 	label: string;
 	icon: string;
 	badge?: () => number | undefined;
-	shortcut?: string;
+	shortcut: number;
 	disabled?: boolean;
 	isOn: () => boolean;
 	select: () => void;
@@ -24,20 +25,27 @@ export const sessionViews: readonly SessionView[] = [
 		id: "chat",
 		label: "Chat",
 		icon: "message-square",
+		shortcut: 1,
 		isOn: () =>
 			!sessionViewState.compact ||
 			(!terminalState.panelOpen && !sessionViewState.filesOpen),
 		select: () => {
-			// Desktop Chat selection is reserved for 17xt.16's shortcuts.
-			if (!sessionViewState.compact) return;
-			closePanel();
-			setFilesOpen(false);
+			if (sessionViewState.compact) {
+				closePanel();
+				setFilesOpen(false);
+				return;
+			}
+			// A Files pane forced wide by a narrow window stays expanded anyway.
+			sessionViewState.filesPaneExpanded = false;
+			// Chat is inert while the pane is expanded, so focus after it renders.
+			void tick().then(() => document.getElementById("input")?.focus());
 		},
 	},
 	{
 		id: "terminal",
 		label: "Terminal",
 		icon: "square-terminal",
+		shortcut: 2,
 		badge: () => terminalState.unreadPtyIds.size || undefined,
 		isOn: () => terminalState.panelOpen,
 		select: () => {
@@ -52,6 +60,7 @@ export const sessionViews: readonly SessionView[] = [
 		id: "diff",
 		label: "Diff",
 		icon: "code",
+		shortcut: 3,
 		disabled: true,
 		isOn: () => false,
 		select: () => {},
@@ -60,6 +69,7 @@ export const sessionViews: readonly SessionView[] = [
 		id: "files",
 		label: "Files",
 		icon: "folder-tree",
+		shortcut: 4,
 		isOn: () =>
 			sessionViewState.compact
 				? !terminalState.panelOpen && sessionViewState.filesOpen
@@ -76,6 +86,27 @@ export const sessionViews: readonly SessionView[] = [
 		},
 	},
 ];
+
+export function viewShortcutHint(view: SessionView): string {
+	return `⌥${view.shortcut}`;
+}
+
+export function matchSessionViewShortcut(
+	event: Pick<
+		KeyboardEvent,
+		"code" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "repeat"
+	>,
+): SessionView | undefined {
+	if (
+		!event.altKey ||
+		event.ctrlKey ||
+		event.metaKey ||
+		event.shiftKey ||
+		event.repeat
+	)
+		return undefined;
+	return sessionViews.find((view) => event.code === `Digit${view.shortcut}`);
+}
 
 export function activeSessionView(): string {
 	if (terminalState.panelOpen) return "terminal";

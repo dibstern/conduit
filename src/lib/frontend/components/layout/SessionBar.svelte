@@ -43,16 +43,17 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import Tooltip from "../ui/Tooltip.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
-	import { getSessionVerbs, getSettleVerb, sessionVerbActions } from "../session/session-verbs.js";
+	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
-	import { activeSessionView, sessionViews } from "./session-views.js";
+	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
 	// "New Session" matches session/SessionItem.svelte, so an untitled session
 	// reads the same in the bar as it does in the list it came from.
@@ -88,10 +89,22 @@
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
-	const islandVerbs = $derived(session
-		? getSessionVerbs(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, "sheet")
+	// The island is phone-only, so its verbs and the keyboard share one list.
+	const verbs = $derived(session
+		? getSessionVerbs(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
 		: []);
 	const globalActions = $derived(chromeMenuActions());
+
+	function handleSessionShortcut(event: KeyboardEvent) {
+		if (event.defaultPrevented) return;
+		const global = (event.metaKey || event.ctrlKey) && event.shiftKey;
+		if (!global) {
+			// Plain letters act on the open session only from the transcript.
+			const target = event.target;
+			if (!(target instanceof HTMLElement) || !target.closest("#messages") || target.isContentEditable || target.closest("input, textarea, select")) return;
+		}
+		runSessionVerbShortcut(event, verbs);
+	}
 
 	let barEl: HTMLElement | null = $state(null);
 
@@ -127,6 +140,8 @@
 
 </script>
 
+<svelte:window onkeydown={handleSessionShortcut} />
+
 {#snippet viewItems(testIdPrefix: string)}
 	<MenuRadioGroup value={activeView} aria-label="Views">
 		{#each sessionViews as view (view.id)}
@@ -139,6 +154,7 @@
 			>
 				<span class="flex items-center gap-2">
 					<span class="min-w-0 flex-1">{view.label}</span>
+					<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{viewShortcutHint(view)}</span>
 					{#if view.badge?.()}
 						<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
 					{/if}
@@ -329,19 +345,23 @@
 	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
 
 	{#if !sessionViewState.compact && settleVerb}
-		<Button
+		<Tooltip side="bottom">
+			{#snippet trigger({ props })}<Button
+			{...props}
 			id="session-bar-settle"
 			variant="secondary"
 			size="sm"
 			icon={settleVerb.icon ?? "check"}
 			disabled={settleVerb.disabledReason != null}
-			title={settleVerb.disabledReason ?? settleVerb.label}
+			title={settleVerb.disabledReason ?? undefined}
 			ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
 			data-testid="session-bar-settle"
 			onclick={() => settleVerb.run()}
 		>
 			<span id="session-bar-settle-label">{settleVerb.label}</span>
-		</Button>
+		</Button>{/snippet}
+			{#snippet children()}{settleVerb.label}{#if settleVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(settleVerb.keys)}</span>{/if}{/snippet}
+		</Tooltip>
 	{/if}
 
 	{#if !sessionViewState.compact}
@@ -450,7 +470,7 @@
 			<MenuSeparator />
 			{#if session}
 				<MenuGroup label="Session">
-					<SessionVerbItems verbs={islandVerbs} presentation="sheet" onselect={selectOverflow} />
+					<SessionVerbItems {verbs} presentation="sheet" onselect={selectOverflow} />
 				</MenuGroup>
 			{/if}
 		{/if}

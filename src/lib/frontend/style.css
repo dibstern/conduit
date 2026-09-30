@@ -2,6 +2,13 @@
 @import "./plan-mode.css";
 @import "./highlight-theme.css";
 
+/* Keyboard hints only where a keyboard is likely: any fine pointer. */
+@media not (any-pointer: fine) {
+	.shortcut-hint {
+		display: none;
+	}
+}
+
 /* ─── Design Tokens ─────────────────────────────────────────────────────────── */
 
 @theme {

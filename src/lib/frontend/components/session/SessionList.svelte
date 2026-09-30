@@ -58,7 +58,7 @@
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
-	import { getSessionVerbs, isForeignSession, sessionVerbActions } from "./session-verbs.js";
+	import { getSessionVerbs, isForeignSession, runSessionVerbShortcut, sessionVerbActions } from "./session-verbs.js";
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import ShortcutSheet from "./ShortcutSheet.svelte";
@@ -371,7 +371,6 @@
 			return;
 		}
 		if (event.defaultPrevented || event.repeat || event.altKey) return;
-		if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
 		if (isEditable(event.target) || document.querySelector('[role="dialog"], [role="menu"]') || renamingSessionId) return;
 		if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
 			const toast = [...uiState.toasts].reverse().find((item) => item.action);
@@ -411,30 +410,8 @@
 		const row = document.activeElement;
 		if (!(row instanceof HTMLAnchorElement) || !row.matches("#session-list .session-item")) return;
 		const session = filtered.find((item) => item.id === row.dataset["sessionId"]);
-		if (!session || isForeignSession(session)) return;
-		const actions = getSessionActionState(session, sessionState.now);
-		const verbs = getSessionVerbs(session, sessionState.now, { rename: () => { renamingSessionId = session.id; }, select: () => handleEnterSelect(session.id) }, "center");
-		const runVerb = (testId: string) => { const verb = verbs.find((item) => "testId" in item && item.testId === testId); if (verb && "run" in verb) verb.run(); };
-		switch (event.key) {
-			case "s":
-				event.preventDefault();
-				if (actions.settleDisabledReason) showToast(actions.settleDisabledReason, { variant: "warn" });
-				else runVerb(actions.settled ? "session-ctx-unsettle" : "session-ctx-settle");
-				break;
-			case "z":
-				event.preventDefault();
-				if (actions.snoozed) runVerb("session-ctx-unsnooze");
-				else if (actions.snoozeVisible && !actions.snoozeDisabledReason) runVerb("session-ctx-snooze");
-				break;
-			case "p":
-				event.preventDefault();
-				runVerb(actions.pinned ? "session-ctx-unpin" : "session-ctx-pin");
-				break;
-			case "r":
-				event.preventDefault();
-				runVerb("session-ctx-rename");
-				break;
-		}
+		if (!session) return;
+		runSessionVerbShortcut(event, getSessionVerbs(session, sessionState.now, { rename: () => { renamingSessionId = session.id; }, select: () => handleEnterSelect(session.id) }, "center"));
 	}
 
 	function closeShortcutSheet() {
