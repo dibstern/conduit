@@ -4,6 +4,11 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../daemon/config-persistence.js";
+import { OpenCodeHistoryReconcileTag } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
@@ -260,6 +265,7 @@ const resolveSessionHistory = (sessionId: string) =>
 
 		let projectedSource: SessionHistorySource = { kind: "empty" };
 		let projectedMessages: readonly HistoryMessage[] = [];
+		let reconcileOpenCode = false;
 		if (readQueryOption._tag === "Some") {
 			const rows =
 				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
@@ -268,17 +274,27 @@ const resolveSessionHistory = (sessionId: string) =>
 				projectedMessages = projectedSource.history.messages;
 			}
 
-			// The projection is authoritative only for relay-local (claude)
-			// sessions. OpenCode projections currently persist structure without
-			// message text, so provider REST history stays the source of truth
-			// for opencode rows; the projection is the fallback when REST fails.
 			const sessionRowResult = yield* Effect.either(
 				readQueryOption.value.getSession(sessionId),
 			);
+			const configOption = yield* Effect.serviceOption(ConfigTag);
+			const isOpenCodeSession =
+				sessionRowResult._tag === "Right" &&
+				sessionRowResult.right != null &&
+				resolveProviderRoutingDriver(
+					loadDaemonConfig(
+						configOption._tag === "Some"
+							? configOption.value.configDir
+							: undefined,
+					),
+					sessionRowResult.right.provider,
+				) === "opencode";
+			reconcileOpenCode =
+				isOpenCodeSession && sessionRowResult.right.history_complete === 0;
 			if (
 				sessionRowResult._tag === "Right" &&
 				sessionRowResult.right != null &&
-				sessionRowResult.right.provider !== "opencode"
+				(!isOpenCodeSession || sessionRowResult.right.history_complete === 1)
 			) {
 				return projectedSource;
 			}
@@ -288,6 +304,13 @@ const resolveSessionHistory = (sessionId: string) =>
 			sessionManagerService.loadPreRenderedHistory(sessionId),
 		);
 		if (historyResult._tag === "Right") {
+			if (reconcileOpenCode) {
+				const ingress = yield* Effect.serviceOption(
+					OpenCodeHistoryReconcileTag,
+				);
+				if (ingress._tag === "Some")
+					yield* ingress.value.reconcileSession(sessionId);
+			}
 			return {
 				kind: "rest-history",
 				history: {
@@ -320,6 +343,7 @@ const seedPaginationCursorFromHistory = (
 			oldestMessageId = source.history.messages[0]?.id;
 		}
 
+		yield* sessionManagerService.clearPaginationCursor(sessionId);
 		if (oldestMessageId) {
 			yield* sessionManagerService.seedPaginationCursor(
 				sessionId,
@@ -807,17 +831,37 @@ export const loadMoreHistoryForSession = ({
 				readQueryOption.value.getSession(sessionId),
 			);
 			if (sessionResult._tag === "Right" && sessionResult.right != null) {
+				const configOption = yield* Effect.serviceOption(ConfigTag);
+				const isOpenCodeSession =
+					resolveProviderRoutingDriver(
+						loadDaemonConfig(
+							configOption._tag === "Some"
+								? configOption.value.configDir
+								: undefined,
+						),
+						sessionResult.right.provider,
+					) === "opencode";
 				const rowsResult = yield* Effect.either(
 					readQueryOption.value.getSessionMessagesWithParts(sessionId),
 				);
 				if (rowsResult._tag === "Right") {
 					const rows = rowsResult.right;
-					const end = Math.max(0, rows.length - Math.max(0, offset));
-					const start = Math.max(0, end - 50);
-					const page = messageRowsToHistory(rows.slice(start, end), {
-						pageSize: 50,
-					});
-					if (sessionResult.right.provider !== "opencode") {
+					if (
+						!isOpenCodeSession ||
+						sessionResult.right.history_complete === 1
+					) {
+						const end = Math.max(0, rows.length - Math.max(0, offset));
+						const start = Math.max(0, end - 50);
+						const page = messageRowsToHistory(rows.slice(start, end), {
+							pageSize: 50,
+						});
+						if (page.messages[0]) {
+							yield* sessionManagerService.clearPaginationCursor(sessionId);
+							yield* sessionManagerService.seedPaginationCursor(
+								sessionId,
+								page.messages[0].id,
+							);
+						}
 						return {
 							sessionId,
 							messages: page.messages,

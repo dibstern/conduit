@@ -8,9 +8,14 @@
 
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import type { AgentList } from "../domain/relay/Services/agent-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { OpenCodeHistoryReconcileTag } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type {
 	PendingPermissionRecoveryInput,
 	PendingQuestion,
@@ -21,6 +26,7 @@ import type {
 	OpenCodeSessionDetail,
 } from "../domain/relay/Services/services.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
@@ -260,22 +266,33 @@ const resolveClientInitHistoryEffect = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		let projectedSource: SessionHistorySource = { kind: "empty" };
+		let reconcileOpenCode = false;
 		if (readQueryOption._tag === "Some") {
 			const rows =
 				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
 			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
 
-			// The projection is authoritative only for relay-local (claude)
-			// sessions. OpenCode projections currently persist structure without
-			// message text, so provider REST history stays the source of truth
-			// for opencode rows; the projection is the fallback when REST fails.
 			const sessionRowResult = yield* Effect.either(
 				readQueryOption.value.getSession(sessionId),
 			);
+			const configOption = yield* Effect.serviceOption(ConfigTag);
+			const isOpenCodeSession =
+				sessionRowResult._tag === "Right" &&
+				sessionRowResult.right != null &&
+				resolveProviderRoutingDriver(
+					loadDaemonConfig(
+						configOption._tag === "Some"
+							? configOption.value.configDir
+							: undefined,
+					),
+					sessionRowResult.right.provider,
+				) === "opencode";
+			reconcileOpenCode =
+				isOpenCodeSession && sessionRowResult.right.history_complete === 0;
 			if (
 				sessionRowResult._tag === "Right" &&
 				sessionRowResult.right != null &&
-				sessionRowResult.right.provider !== "opencode"
+				(!isOpenCodeSession || sessionRowResult.right.history_complete === 1)
 			) {
 				return projectedSource;
 			}
@@ -286,6 +303,13 @@ const resolveClientInitHistoryEffect = (sessionId: string) =>
 			sessionManagerService.loadPreRenderedHistory(sessionId),
 		);
 		if (historyResult._tag === "Right") {
+			if (reconcileOpenCode) {
+				const ingress = yield* Effect.serviceOption(
+					OpenCodeHistoryReconcileTag,
+				);
+				if (ingress._tag === "Some")
+					yield* ingress.value.reconcileSession(sessionId);
+			}
 			return {
 				kind: "rest-history",
 				history: historyResult.right,
@@ -315,6 +339,7 @@ const seedPaginationCursorFromHistoryEffect = (
 			oldestMessageId = source.history.messages[0]?.id;
 		}
 
+		yield* sessionManagerService.clearPaginationCursor(sessionId);
 		if (oldestMessageId) {
 			yield* sessionManagerService.seedPaginationCursor(
 				sessionId,

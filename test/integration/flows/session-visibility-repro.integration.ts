@@ -14,6 +14,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import type {
 	OpenCodeInteraction,
@@ -212,6 +213,7 @@ async function projectedHistory(
 	dbPath: string,
 	sessionId: string,
 	pageSize = 50,
+	offset = 0,
 ) {
 	const rows = await readStore(
 		dbPath,
@@ -219,7 +221,10 @@ async function projectedHistory(
 			readQuery.getSessionMessagesWithParts(sessionId),
 		),
 	);
-	return resolveSessionHistoryFromRows(rows, { pageSize });
+	return resolveSessionHistoryFromRows(
+		rows.slice(0, Math.max(0, rows.length - offset)),
+		{ pageSize },
+	);
 }
 
 /**
@@ -302,14 +307,37 @@ async function runPaginationDifferential(count: number) {
 		const switched = await client2.waitFor("session_switched", {
 			predicate: (message) => message["id"] === sessionId,
 		});
-		const rest = switched["history"] as DifferentialHistory;
+		const served = switched["history"] as DifferentialHistory;
+		const providerHistory = new SessionManager({
+			client: paginationHarness.stack.client,
+		});
+		const rest = await providerHistory.loadPreRenderedHistory(sessionId);
+		const olderRest = await providerHistory.loadPreRenderedHistory(
+			sessionId,
+			50,
+		);
 		const projected = await projectedHistory(dbPath, sessionId, 50);
+		const older = await client2.loadMoreHistory(sessionId, 50);
+		const projectedOlder = await projectedHistory(dbPath, sessionId, 50, 50);
 		expect(projected.kind).toBe("rest-history");
 		const projectedRest =
 			projected.kind === "rest-history"
 				? (projected.history as DifferentialHistory)
 				: { messages: [], hasMore: false };
-		const summarize = (messages: DifferentialMessage[]) =>
+		const projectedOlderRest =
+			projectedOlder.kind === "rest-history"
+				? (projectedOlder.history as DifferentialHistory)
+				: { messages: [], hasMore: false };
+		const summarize = (
+			messages: readonly {
+				id: string;
+				role?: string | undefined;
+				text?: string | undefined;
+				parts?:
+					| readonly { type: string; text?: string | undefined }[]
+					| undefined;
+			}[],
+		) =>
 			messages.map((message) => ({
 				id: message.id,
 				role: message.role,
@@ -324,13 +352,19 @@ async function runPaginationDifferential(count: number) {
 
 		return {
 			restSummary: summarize(rest.messages),
+			servedSummary: summarize(served.messages),
 			projectedSummary: summarize(projectedRest.messages),
 			restHasMore: rest.hasMore,
+			servedHasMore: served.hasMore,
 			projectedHasMore: projectedRest.hasMore,
-			// Recorded creation time of the first REST message. Proves the REST
-			// side really came from the provider: the projection substitutes row
-			// wall-clock timestamps, so a schema-decode failure that silently
-			// downgraded REST to the projection fallback would not carry it.
+			olderRestSummary: summarize(olderRest.messages),
+			olderSummary: summarize(older.messages),
+			projectedOlderSummary: summarize(projectedOlderRest.messages),
+			olderRestHasMore: olderRest.hasMore,
+			olderHasMore: older.hasMore,
+			projectedOlderHasMore: projectedOlderRest.hasMore,
+			// The REST timestamp proves this comparison uses provider data; the
+			// projection substitutes row wall-clock timestamps.
 			restFirstCreated: rest.messages[0]?.time?.created,
 		};
 	} finally {
@@ -773,7 +807,10 @@ describe("Integration: Session Visibility Repros", () => {
 			const switched = await client2.waitFor("session_switched", {
 				predicate: (message) => message["id"] === sessionId,
 			});
-			const rest = switched["history"] as DifferentialHistory;
+			const served = switched["history"] as DifferentialHistory;
+			const rest = await new SessionManager({
+				client: metadataHarness.stack.client,
+			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: DifferentialMessage[]) =>
@@ -792,7 +829,7 @@ describe("Integration: Session Visibility Repros", () => {
 							: part.type,
 					),
 				}));
-			const restSummary = summarize(rest.messages);
+			const restSummary = summarize(rest.messages as DifferentialMessage[]);
 			const projectedSummary =
 				projected.kind === "rest-history"
 					? summarize(projected.history.messages as DifferentialMessage[])
@@ -802,6 +839,7 @@ describe("Integration: Session Visibility Repros", () => {
 				`[REPRO-G] rest=${JSON.stringify(restSummary)}\n[REPRO-G] projected=${JSON.stringify(projectedSummary)}`,
 			);
 			expect(projectedSummary).toEqual(restSummary);
+			expect(summarize(served.messages)).toEqual(projectedSummary);
 			expect(JSON.stringify(restSummary)).toContain("ses_child_differential");
 			expect(JSON.stringify(projectedSummary)).toContain(
 				"ses_child_differential",
@@ -891,7 +929,10 @@ describe("Integration: Session Visibility Repros", () => {
 			const switched = await client2.waitFor("session_switched", {
 				predicate: (message) => message["id"] === sessionId,
 			});
-			const rest = switched["history"] as DifferentialHistory;
+			const served = switched["history"] as DifferentialHistory;
+			const rest = await new SessionManager({
+				client: fileHarness.stack.client,
+			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: DifferentialMessage[]) =>
@@ -903,7 +944,7 @@ describe("Integration: Session Visibility Repros", () => {
 							: `${part.type}:${part.text ?? ""}`,
 					),
 				}));
-			const restSummary = summarize(rest.messages);
+			const restSummary = summarize(rest.messages as DifferentialMessage[]);
 			const projectedMessages =
 				projected.kind === "rest-history"
 					? (projected.history.messages as DifferentialMessage[])
@@ -914,6 +955,7 @@ describe("Integration: Session Visibility Repros", () => {
 				`[REPRO-H] rest=${JSON.stringify(restSummary)}\n[REPRO-H] projected=${JSON.stringify(projectedSummary)}`,
 			);
 			expect(projectedSummary).toEqual(restSummary);
+			expect(summarize(served.messages)).toEqual(projectedSummary);
 			expect(
 				projectedMessages
 					.flatMap((message) => message.parts ?? [])
@@ -1021,12 +1063,22 @@ describe("Integration: Session Visibility Repros", () => {
 			`[REPRO-J/56] rest=${JSON.stringify(result.restSummary)} hasMore=${result.restHasMore}\n[REPRO-J/56] projected=${JSON.stringify(result.projectedSummary)} hasMore=${result.projectedHasMore}`,
 		);
 		expect(result.projectedSummary).toEqual(result.restSummary);
+		expect(result.servedSummary).toEqual(result.projectedSummary);
 		expect(result.restSummary).toHaveLength(50);
 		expect(result.restSummary[0]?.id).toBe("msg-007");
 		expect(result.restSummary[49]?.id).toBe("msg-056");
 		expect(result.restFirstCreated).toBe(1_000_007);
 		expect(result.restHasMore).toBe(true);
+		expect(result.servedHasMore).toBe(true);
 		expect(result.projectedHasMore).toBe(true);
+		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
+		expect(result.olderRestSummary).toEqual(result.projectedOlderSummary);
+		expect(result.olderSummary).toHaveLength(6);
+		expect(result.olderSummary[0]?.id).toBe("msg-001");
+		expect(result.olderSummary[5]?.id).toBe("msg-006");
+		expect(result.olderHasMore).toBe(false);
+		expect(result.olderRestHasMore).toBe(false);
+		expect(result.projectedOlderHasMore).toBe(false);
 	}, 45_000);
 
 	it("REPRO-J: exactly 50 messages preserves the accepted hasMore boundary divergence", async () => {
@@ -1036,12 +1088,17 @@ describe("Integration: Session Visibility Repros", () => {
 			`[REPRO-J/50] rest=${JSON.stringify(result.restSummary)} hasMore=${result.restHasMore}\n[REPRO-J/50] projected=${JSON.stringify(result.projectedSummary)} hasMore=${result.projectedHasMore}`,
 		);
 		expect(result.projectedSummary).toEqual(result.restSummary);
+		expect(result.servedSummary).toEqual(result.projectedSummary);
 		expect(result.restSummary).toHaveLength(50);
 		expect(result.restFirstCreated).toBe(1_000_001);
 		// REST uses >= page size conservatively, while projection over-fetch is
 		// exact. REST's false positive only causes one empty older-page fetch.
 		expect(result.restHasMore).toBe(true);
+		expect(result.servedHasMore).toBe(false);
 		expect(result.projectedHasMore).toBe(false);
+		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
+		expect(result.olderRestSummary).toEqual(result.projectedOlderSummary);
+		expect(result.olderSummary).toHaveLength(0);
 	}, 45_000);
 
 	it("session created with OpenCode providerId appears in its viewed family", async () => {

@@ -17,6 +17,7 @@ import {
 	type GetFileTreeResponse,
 	type GetProjectsResponse,
 	type GetTodoResponse,
+	type LoadMoreHistoryResponse,
 	type PermissionDecision,
 	type PtyListResponse,
 	WsRpcGroup,
@@ -247,6 +248,35 @@ export class TestWsClient {
 
 	async switchSession(sessionId: string): Promise<ReceivedMessage> {
 		return await this.viewSession(sessionId);
+	}
+
+	async loadMoreHistory(
+		sessionId: string,
+		offset: number,
+	): Promise<LoadMoreHistoryResponse> {
+		const previousWebSocket = globalThis.WebSocket;
+		Reflect.set(globalThis, "WebSocket", WebSocket);
+		try {
+			return await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						return yield* client.LoadMoreHistory({
+							projectSlug: "integration-test",
+							sessionId,
+							offset,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			Reflect.set(globalThis, "WebSocket", previousWebSocket);
+		}
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {

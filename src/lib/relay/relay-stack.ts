@@ -64,6 +64,7 @@ import {
 import {
 	type EffectOpenCodeRuntimeIngressPort,
 	makeEffectOpenCodeRuntimeIngress,
+	OpenCodeHistoryReconcileTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
@@ -869,11 +870,17 @@ export async function createProjectRelay(
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	let historyIngress: EffectOpenCodeRuntimeIngressPort | undefined;
+	const historyReconcileLayer = Layer.sync(OpenCodeHistoryReconcileTag, () => ({
+		reconcileSession: (sessionId: string) =>
+			historyIngress?.reconcileSession(sessionId) ?? Effect.void,
+	}));
 	const toolContentServiceLayer = ToolContentServiceLive.pipe(
 		Layer.provideMerge(persistenceEffectLayer),
 	);
 
 	const coreBridgeLayers = Layer.mergeAll(
+		historyReconcileLayer,
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
@@ -1163,6 +1170,7 @@ export async function createProjectRelay(
 							);
 						}),
 				);
+				historyIngress = opencodeRuntimeIngress;
 				if (config.signal?.aborted) {
 					return yield* Effect.fail(
 						new RelayCreationAbortedError({ slug: config.slug }),

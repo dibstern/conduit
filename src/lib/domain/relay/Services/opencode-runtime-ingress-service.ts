@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Effect, type Fiber, FiberId } from "effect";
+import { Cause, Context, Effect, type Fiber, FiberId } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
@@ -53,12 +53,20 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		providerInstanceId: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
+	reconcileSession(sessionId: string): Effect.Effect<void>;
 	shutdown(): void;
 	isHistoryComplete(sessionId: string): Effect.Effect<boolean>;
 	getStats(): Readonly<OpenCodeRuntimeIngressStats>;
 	startStatsLogging(intervalMs?: number): void;
 	stopStatsLogging(): void;
 }
+
+export class OpenCodeHistoryReconcileTag extends Context.Tag(
+	"OpenCodeHistoryReconcile",
+)<
+	OpenCodeHistoryReconcileTag,
+	{ reconcileSession(sessionId: string): Effect.Effect<void> }
+>() {}
 
 export interface EffectOpenCodeRuntimeIngressOptions {
 	readonly sql: SqlClient.SqlClient;
@@ -755,6 +763,26 @@ export class EffectOpenCodeRuntimeIngress
 		);
 	}
 
+	reconcileSession(sessionId: string): Effect.Effect<void> {
+		return this.withSql(
+			Effect.flatMap(
+				SqlClient.SqlClient,
+				(sql) =>
+					sql<{
+						provider: string | null;
+					}>`SELECT provider FROM sessions WHERE id = ${sessionId}`,
+			),
+		).pipe(
+			Effect.flatMap((rows) => {
+				const instanceId = rows[0]?.provider;
+				if (!instanceId) return Effect.void;
+				this.sessionInstanceIds.set(sessionId, instanceId);
+				return this.startBackfill(sessionId, instanceId);
+			}),
+			Effect.catchAll(() => Effect.void),
+		);
+	}
+
 	private removeSession(sessionId: string): void {
 		this.backfillFibers.get(sessionId)?.unsafeInterruptAsFork(FiberId.none);
 		this.backfillFibers.delete(sessionId);
@@ -868,5 +896,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
 		});
 		yield* ingress.recoverEffect();
+		// Reconciliation proof is valid only for the process that fetched REST.
+		yield* sql`UPDATE sessions SET history_complete = 0`;
 		return ingress;
 	});

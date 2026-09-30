@@ -804,7 +804,16 @@ export const makeTurnProjector = (): EffectProjector => ({
 								assistant_message_id: string | null;
 							}>`SELECT id, state, assistant_message_id FROM turns
 							WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId}`
-						: [];
+						: isEventType(event, "tool.started")
+							? yield* sql<{
+									id: string;
+									state: string;
+									assistant_message_id: string | null;
+								}>`SELECT turns.id, turns.state, turns.assistant_message_id
+								FROM turns JOIN messages ON messages.turn_id = turns.id
+								WHERE messages.id = ${event.data.messageId}
+								AND turns.session_id = ${event.sessionId}`
+							: [];
 				const [turn] = parentTurn.length
 					? parentTurn
 					: yield* sql<{

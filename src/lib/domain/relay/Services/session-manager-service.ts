@@ -2169,11 +2169,40 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			loadPreRenderedHistory: (sessionId, offset) =>
-				loadPreRenderedHistory(sessionId, offset).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-					Effect.provideService(SessionManagerStateTag, stateRef),
-					Effect.provideService(LoggerTag, log),
-				),
+				Effect.gen(function* () {
+					const sessionResult =
+						readQueryEffectOption._tag === "Some"
+							? yield* Effect.either(
+									readQueryEffectOption.value.getSession(sessionId),
+								)
+							: undefined;
+					const instanceId =
+						sessionResult?._tag === "Right"
+							? sessionResult.right?.provider
+							: undefined;
+					const instanceApi =
+						instanceId &&
+						instanceClientsOption._tag === "Some" &&
+						resolveProviderRoutingDriver(
+							loadDaemonConfig(configDir),
+							instanceId,
+						) === "opencode"
+							? yield* instanceClientsOption.value.clientFor(instanceId).pipe(
+									Effect.mapError(
+										(cause) =>
+											new SessionManagerError({
+												operation: "loadPreRenderedHistory",
+												cause,
+											}),
+									),
+								)
+							: undefined;
+					return yield* loadPreRenderedHistory(sessionId, offset).pipe(
+						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
+						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(LoggerTag, log),
+					);
+				}),
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),

@@ -339,6 +339,28 @@ describe("OpenCode message snapshots", () => {
 			{ id: "u1", assistant_message_id: "live-a1", state: "running" },
 			{ id: "u2", assistant_message_id: null, state: "pending" },
 		]);
+		await live.ingest(
+			runtime(
+				"tool.started",
+				"live-tool-started",
+				{
+					messageId: "live-a1",
+					partId: "live-tool",
+					toolName: "bash",
+					callId: "live-call",
+					input: { tool: "Unknown", name: "bash", raw: { command: "pwd" } },
+				},
+				31,
+			),
+		);
+		expect(
+			await live.query(
+				"SELECT id, assistant_message_id, state FROM turns ORDER BY id",
+			),
+		).toEqual([
+			{ id: "u1", assistant_message_id: "live-a1", state: "running" },
+			{ id: "u2", assistant_message_id: null, state: "pending" },
+		]);
 		const replay = makeHarness();
 		await replay.reproject(await live.storedEvents(sessionId));
 		expect(

@@ -12,6 +12,10 @@ import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+	defaultDaemonConfig,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
@@ -21,6 +25,7 @@ import {
 import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
+import { TestWsClient } from "../helpers/test-ws-client.js";
 
 const SESSION_ID = "ses_iea_backfill";
 /** Recorded provider time, an hour back: provider and Conduit share a clock,
@@ -243,18 +248,22 @@ function streamLiveAssistant(
 
 describe("Integration: OpenCode history backfill on first sighting", () => {
 	let mock: MockOpenCodeServer | undefined;
+	let namedMock: MockOpenCodeServer | undefined;
 	let stack: RelayStack | undefined;
 
 	afterEach(async () => {
 		await stack?.stop().catch(() => {});
 		await mock?.stop().catch(() => {});
+		await namedMock?.stop().catch(() => {});
 		stack = undefined;
 		mock = undefined;
+		namedMock = undefined;
 	});
 
 	async function startStack(
 		server: MockOpenCodeServer,
 		dbPath: string,
+		configDir?: string,
 	): Promise<RelayStack> {
 		const connectsBefore = server.diagnostics.filter(
 			(entry) => entry.event === "sse_connect",
@@ -268,6 +277,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			sessionTitle: "Backfill Test Session",
 			log: createSilentLogger(),
 			persistenceDbPath: dbPath,
+			...(configDir ? { configDir } : {}),
 		});
 		await waitFor(
 			() =>
@@ -297,6 +307,127 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			status: { type: "idle" },
 		});
 	}
+
+	it("serves new REST history after restart without an SSE event, then reconciles it", async () => {
+		const dbPath = join(
+			mkdtempSync(join(tmpdir(), "conduit-iea-stale-proof-")),
+			"events.sqlite",
+		);
+		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await mock.start();
+		const restPath = `/session/${SESSION_ID}/message`;
+		mock.setExactResponse("GET", restPath, 200, [u1, a1]);
+		stack = await startStack(mock, dbPath);
+		mock.emitTestEvent("session.created", {
+			info: { id: SESSION_ID, title: "Existing session" },
+		});
+		await waitFor(() => historyComplete(dbPath), "initial reconciliation");
+		await stack.stop();
+		stack = undefined;
+		mock.setExactResponse("GET", restPath, 200, [u1, a1, u2]);
+		stack = await startStack(mock, dbPath);
+		expect(await historyComplete(dbPath)).toBe(false);
+		const client = new TestWsClient(
+			`ws://127.0.0.1:${stack.getPort()}/ws?session=${SESSION_ID}`,
+		);
+		try {
+			await client.waitForOpen();
+			const switched = await client.waitFor("session_switched", {
+				predicate: (message) => message["id"] === SESSION_ID,
+			});
+			const history = switched["history"] as { messages: { id: string }[] };
+			expect(history.messages.map((message) => message.id)).toEqual([
+				"msg_u1",
+				"msg_a1",
+				"msg_u2",
+			]);
+			await waitFor(
+				() => historyComplete(dbPath),
+				"reconciliation after REST-served open",
+			);
+			expect((await projectedTexts(dbPath))["msg_u2"]).toBe("second question");
+		} finally {
+			await client.close();
+		}
+	}, 60_000);
+
+	it("resets a named instance's persisted proof and reconciles through that instance on open", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-iea-named-restart-"));
+		const dbPath = join(dir, "events.sqlite");
+		const configDir = join(dir, "config");
+		const restPath = `/session/${SESSION_ID}/message`;
+		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await mock.start();
+		mock.setExactResponse("GET", restPath, 200, [u1, a1]);
+		stack = await startStack(mock, dbPath);
+		mock.emitTestEvent("session.created", {
+			info: { id: SESSION_ID, title: "Existing session" },
+		});
+		await waitFor(() => historyComplete(dbPath), "initial reconciliation");
+		await stack.stop();
+		stack = undefined;
+		await readStore(
+			dbPath,
+			Effect.flatMap(
+				SqlClient.SqlClient,
+				(sql) =>
+					sql`UPDATE sessions SET provider = 'oc-secondary' WHERE id = ${SESSION_ID}`,
+			),
+		);
+		namedMock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await namedMock.start();
+		namedMock.setExactResponse("GET", restPath, 200, [u1, a1, u2]);
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "oc-secondary",
+						name: "Secondary OpenCode",
+						port: 0,
+						managed: false,
+						driver: "opencode",
+						url: namedMock.url,
+					},
+				],
+			},
+			configDir,
+		);
+		mock.setExactResponse("GET", restPath, 200, [u1, a1]);
+		stack = await startStack(mock, dbPath, configDir);
+		expect(await historyComplete(dbPath)).toBe(false);
+		const client = new TestWsClient(
+			`ws://127.0.0.1:${stack.getPort()}/ws?session=${SESSION_ID}`,
+		);
+		try {
+			await client.waitForOpen();
+			const switched = await client.waitFor("session_switched", {
+				predicate: (message) => message["id"] === SESSION_ID,
+			});
+			const history = switched["history"] as { messages: { id: string }[] };
+			expect(history.messages.map((message) => message.id)).toEqual([
+				"msg_u1",
+				"msg_a1",
+				"msg_u2",
+			]);
+			await waitFor(
+				() =>
+					namedMock?.diagnostics.some(
+						(entry) =>
+							entry.event === "request" &&
+							entry.detail?.startsWith(`GET ${restPath}`),
+					) ?? false,
+				"named instance REST reconciliation",
+			);
+			await waitFor(
+				() => historyComplete(dbPath),
+				"named instance reconciliation",
+			);
+			expect((await projectedTexts(dbPath))["msg_u2"]).toBe("second question");
+		} finally {
+			await client.close();
+		}
+	}, 60_000);
 
 	it("reconciles a rebuilt completeness flag on the next session sighting", async () => {
 		const dbPath = join(

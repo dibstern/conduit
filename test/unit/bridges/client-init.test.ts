@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { it as effectIt } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -6,6 +9,10 @@ import {
 	handleClientConnected,
 	handleClientConnectedEffect,
 } from "../../../src/lib/bridges/client-init.js";
+import {
+	defaultDaemonConfig,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	SessionManagerError,
@@ -17,6 +24,7 @@ import {
 	setDefaultVariant,
 	setPermissionMode,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { loadMoreHistoryForSession } from "../../../src/lib/handlers/session.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -26,6 +34,7 @@ import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	createMockClientInitDeps,
+	makeMockConfig,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -94,6 +103,7 @@ function applyTestDefaults(deps: ClientInitDeps): ClientInitDeps {
 function makeEmptyHistoryReadQuery(
 	provider: string,
 	parentId: string | null = null,
+	historyComplete = 0,
 ): ReadQueryEffect {
 	return {
 		getToolContent: vi.fn(() => Effect.succeed(undefined)),
@@ -102,6 +112,7 @@ function makeEmptyHistoryReadQuery(
 			Effect.succeed({
 				id: "requested-session",
 				provider,
+				history_complete: historyComplete,
 				provider_sid: null,
 				version: 0,
 				title: "Requested session",
@@ -138,10 +149,44 @@ function makeEmptyHistoryReadQuery(
 	};
 }
 
+function makeOpenCodeHistoryReadQuery(
+	historyComplete: number,
+	count = 1,
+	provider = "opencode",
+): ReadQueryEffect {
+	return {
+		...makeEmptyHistoryReadQuery(provider, null, historyComplete),
+		getSessionMessagesWithParts: vi.fn(() =>
+			Effect.succeed(
+				Array.from({ length: count }, (_, index) => ({
+					id: `projected-${index + 1}`,
+					session_id: "requested-session",
+					turn_id: "turn-1",
+					role: "user",
+					text: "Projected prompt",
+					cost: null,
+					tokens_in: null,
+					tokens_out: null,
+					tokens_cache_read: null,
+					tokens_cache_write: null,
+					context_window: null,
+					version: 0,
+					is_streaming: 0,
+					is_backfilled: 1,
+					created_at: 1,
+					updated_at: 1,
+					parts: [],
+				})),
+			),
+		),
+	};
+}
+
 function makeClientInitEffectLayer(
 	readQuery: ReadQueryEffect,
 	loadPreRenderedHistory: ReturnType<typeof vi.fn>,
 	sessionManagerOverrides: Partial<SessionManagerService> = {},
+	configDir?: string,
 ) {
 	const wsHandler = makeMockWebSocketHandler();
 	const sessionManagerService = makeMockSessionManagerService({
@@ -160,6 +205,7 @@ function makeClientInitEffectLayer(
 				wsHandler,
 				sessionManagerService,
 				orchestrationEngine,
+				...(configDir ? { config: makeMockConfig({ configDir }) } : {}),
 			}),
 			Layer.succeed(ReadQueryEffectTag, readQuery),
 		),
@@ -167,6 +213,219 @@ function makeClientInitEffectLayer(
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
+	it("continues before the oldest projected page after switching to REST", async () => {
+		let historyComplete = true;
+		let cursor: string | undefined;
+		const complete = makeOpenCodeHistoryReadQuery(1, 120);
+		const incomplete = makeOpenCodeHistoryReadQuery(0, 120);
+		const readQuery: ReadQueryEffect = {
+			...complete,
+			getSession: () =>
+				historyComplete
+					? complete.getSession("requested-session")
+					: incomplete.getSession("requested-session"),
+		};
+		const loadPreRenderedHistory = vi.fn((_sessionId: string, offset = 0) =>
+			Effect.sync(() => {
+				const end = offset === 0 ? 120 : Number(cursor?.split("-")[1]) - 1;
+				const start = Math.max(1, end - 49);
+				const messages = Array.from(
+					{ length: end - start + 1 },
+					(_, index) => ({
+						id: `projected-${start + index}`,
+						role: "user" as const,
+					}),
+				);
+				cursor = messages[0]?.id;
+				return { messages, hasMore: start > 1 };
+			}),
+		);
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			readQuery,
+			loadPreRenderedHistory,
+			{
+				clearPaginationCursor: () =>
+					Effect.sync(() => {
+						cursor = undefined;
+					}),
+				seedPaginationCursor: (_sessionId, messageId) =>
+					Effect.sync(() => {
+						cursor ??= messageId;
+					}),
+			},
+		);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		const initial = vi
+			.mocked(wsHandler.sendTo)
+			.mock.calls.find(
+				([, message]) => message.type === "session_switched",
+			)?.[1];
+		if (initial?.type !== "session_switched")
+			throw new Error("missing initial history");
+		expect(initial.history?.messages.map((message) => message.id)).toEqual(
+			Array.from({ length: 50 }, (_, index) => `projected-${index + 71}`),
+		);
+		const older = await Effect.runPromise(
+			loadMoreHistoryForSession({
+				sessionId: "requested-session",
+				offset: 50,
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(older.messages.map((message) => message.id)).toEqual(
+			Array.from({ length: 50 }, (_, index) => `projected-${index + 21}`),
+		);
+		historyComplete = false;
+		const oldest = await Effect.runPromise(
+			loadMoreHistoryForSession({
+				sessionId: "requested-session",
+				offset: 100,
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(oldest.messages.map((message) => message.id)).toEqual(
+			Array.from({ length: 20 }, (_, index) => `projected-${index + 1}`),
+		);
+	});
+	it("resets an old REST cursor to the projected first-page boundary", async () => {
+		let cursor: string | undefined = "rest-oldest";
+		const clearPaginationCursor = vi.fn(() =>
+			Effect.sync(() => {
+				cursor = undefined;
+			}),
+		);
+		const seedPaginationCursor = vi.fn(
+			(_sessionId: string, messageId: string) =>
+				Effect.sync(() => {
+					cursor ??= messageId;
+				}),
+		);
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.fail(new Error("projection should serve initial history")),
+		);
+		const { layer } = makeClientInitEffectLayer(
+			makeOpenCodeHistoryReadQuery(1, 100),
+			loadPreRenderedHistory,
+			{ clearPaginationCursor, seedPaginationCursor },
+		);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+		expect(cursor).toBe("projected-51");
+		expect(clearPaginationCursor).toHaveBeenCalledWith("requested-session");
+		expect(seedPaginationCursor).toHaveBeenCalledWith(
+			"requested-session",
+			"projected-51",
+		);
+	});
+
+	for (const historyComplete of [1, 0]) {
+		it(`serves ${historyComplete === 1 ? "projection" : "REST"} on connect for OpenCode history_complete=${historyComplete}`, async () => {
+			const loadPreRenderedHistory = vi.fn(() =>
+				Effect.succeed({
+					messages: [
+						{ id: "rest-1", role: "user" as const, text: "REST prompt" },
+					],
+					hasMore: false,
+				}),
+			);
+			const { wsHandler, layer } = makeClientInitEffectLayer(
+				makeOpenCodeHistoryReadQuery(historyComplete),
+				loadPreRenderedHistory,
+			);
+			await Effect.runPromise(
+				handleClientConnectedEffect("client-1", "requested-session").pipe(
+					Effect.provide(layer),
+				),
+			);
+			const switched = vi
+				.mocked(wsHandler.sendTo)
+				.mock.calls.find(
+					([, message]) => message.type === "session_switched",
+				)?.[1];
+			if (historyComplete === 1) {
+				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+				expect(switched).toMatchObject({
+					history: {
+						messages: [
+							{
+								id: "projected-1",
+								text: "Projected prompt",
+								isBackfilled: true,
+							},
+						],
+					},
+				});
+			} else {
+				expect(loadPreRenderedHistory).toHaveBeenCalledWith(
+					"requested-session",
+				);
+				expect(switched).toMatchObject({
+					history: { messages: [{ id: "rest-1", text: "REST prompt" }] },
+				});
+			}
+		});
+	}
+
+	for (const provider of ["oc-secondary", "claude"] as const) {
+		it(`uses ${provider === "oc-secondary" ? "REST" : "projection"} on connect for incomplete ${provider} history`, async () => {
+			const configDir = mkdtempSync(
+				join(tmpdir(), "conduit-client-init-history-"),
+			);
+			await saveDaemonConfig(
+				{
+					...defaultDaemonConfig(),
+					instances: [
+						{
+							id: "oc-secondary",
+							name: "Secondary OpenCode",
+							port: 0,
+							managed: false,
+							driver: "opencode",
+						},
+					],
+				},
+				configDir,
+			);
+			const loadPreRenderedHistory = vi.fn(() =>
+				Effect.succeed({
+					messages: [{ id: "rest-1", role: "user" as const, text: "REST" }],
+					hasMore: false,
+				}),
+			);
+			const { wsHandler, layer } = makeClientInitEffectLayer(
+				makeOpenCodeHistoryReadQuery(0, 1, provider),
+				loadPreRenderedHistory,
+				{},
+				configDir,
+			);
+			await Effect.runPromise(
+				handleClientConnectedEffect("client-1", "requested-session").pipe(
+					Effect.provide(layer),
+				),
+			);
+			expect(wsHandler.sendTo).toHaveBeenCalledWith(
+				"client-1",
+				expect.objectContaining({
+					history: expect.objectContaining({
+						messages: [
+							expect.objectContaining({
+								id: provider === "oc-secondary" ? "rest-1" : "projected-1",
+							}),
+						],
+					}),
+				}),
+			);
+			expect(loadPreRenderedHistory).toHaveBeenCalledTimes(
+				provider === "oc-secondary" ? 1 : 0,
+			);
+		});
+	}
 	effectIt.effect(
 		"a sessionless daemon attach sends project lists without selecting or creating a session",
 		() =>
