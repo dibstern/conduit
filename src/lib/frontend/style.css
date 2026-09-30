@@ -479,44 +479,8 @@
 
 /* ─── Custom Animation Utilities ───────────────────────────────────────────── */
 
-@utility animate-pulse-dot {
-	animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
-@utility animate-shimmer {
-	animation: shimmer 3s ease-in-out infinite;
-}
-
-@utility animate-tool-shimmer {
-	animation: tool-shimmer 3s ease-in-out infinite;
-}
-
-@utility animate-history-spin {
-	animation: history-spin 0.8s linear infinite;
-}
-
-@utility animate-history-fade-in {
-	animation: history-fade-in 0.2s ease-out;
-}
-
 @utility animate-todo-spin {
-	animation: todo-spin 0.8s linear infinite;
-}
-
-@utility animate-fb-slide-in {
-	animation: fb-slide-in 0.2s ease-out;
-}
-
-@utility animate-fb-fade-in {
-	animation: fb-fade-in 0.15s ease-out;
-}
-
-@utility animate-session-slide-in {
-	animation: session-slide-in 0.2s ease-out;
-}
-
-@utility animate-session-fade-in {
-	animation: session-fade-in 0.15s ease-out;
+	animation: spin 0.8s linear infinite;
 }
 
 @utility animate-bounce-bar {
@@ -527,15 +491,6 @@
 
 .connect-overlay.hidden {
 	display: none;
-}
-
-@keyframes shimmer {
-	0% {
-		background-position: 200% center;
-	}
-	100% {
-		background-position: -200% center;
-	}
 }
 
 /* ─── Modal System (7.10) ──────────────────────────────────────────────────── */
@@ -788,16 +743,6 @@ body:has(dialog:modal) {
 
 /* ─── Animations ────────────────────────────────────────────────────────────── */
 
-@keyframes pulse-dot {
-	0%,
-	100% {
-		opacity: 1;
-	}
-	50% {
-		opacity: 0.4;
-	}
-}
-
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
@@ -1031,50 +976,7 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Session Sidebar (4.3 + 7.3) ─────────────────────────────────────────── */
-
-@keyframes session-slide-in {
-	from {
-		transform: translateX(-100%);
-	}
-	to {
-		transform: translateX(0);
-	}
-}
-
-@keyframes session-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-/* ─── Progressive History Loading (4.8) — keyframes only ───────────────────── */
-
-@keyframes history-spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
-
-@keyframes history-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
 /* ─── Todo / Progress Overlay (4.7) ────────────────────────────────────────── */
-
-@keyframes todo-spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
 
 @keyframes todo-fade-out {
 	from {
@@ -1133,24 +1035,6 @@ body:has(dialog:modal) {
 }
 
 /* ─── File Browser (4.4) ──────────────────────────────────────────────────── */
-
-@keyframes fb-slide-in {
-	from {
-		transform: translateX(100%);
-	}
-	to {
-		transform: translateX(0);
-	}
-}
-
-@keyframes fb-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
 
 /* Hidden override for modal overlay */
 .fb-modal-overlay.hidden {
@@ -1240,15 +1124,6 @@ body:has(dialog:modal) {
 }
 
 /* ─── Shimmer Animations ───────────────────────────────────────────────────── */
-
-@keyframes tool-shimmer {
-	0% {
-		background-position: 200% center;
-	}
-	100% {
-		background-position: -200% center;
-	}
-}
 
 @keyframes tool-shimmer-slide {
 	0% {
