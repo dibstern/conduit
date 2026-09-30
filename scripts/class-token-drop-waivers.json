@@ -211,5 +211,37 @@
 	"src/lib/server/ws-rpc.ts :: Failed,SwitchPermissionMode,Switched,after,client,failure,mode,permission,restore,session,to,to:": "Not classes: words from log and error strings in RPC handlers that moved into the per-domain modules under src/lib/server/ws-rpc/ when ws-rpc.ts was split (z4sv.13.6).",
 	"acceptance/src/stepHandlers.ts :: A,Artifacts:,Claude,Expected,INFRASTRUCTURE_ERROR:,Sonnet,Views,a,above,all,already,attribution,auto,bar,be,become,button,claude-setting-defaultModel-select,claude-setting-defaultPermissionMode-select,compact,conduit,data-collapsed,data-testid,desktop,did,differ,differ.,disabled,document.querySelector(,enabled,expected,failed,for,found,from,got,height,instances,is,it,it.,keeps,match,menu,not,of,one,only,other-harness,permission-mode-option-,picker-instance-,pixels,preview,rail,reads,ready:,reload,row:,running,s,selectedOptions[0],send,session,settings,sheet,started,starts.,textContent,that,the,these,to,transcript,,trim(),until,value,views,when,with,you": "Not classes: step patterns, selectors and message words from acceptance step handlers that moved into acceptance/src/steps/ when stepHandlers.ts was split by feature area (z4sv.13.11).",
 	"src/lib/domain/relay/Services/provider-turn-service.ts :: Abort,Cannot,Claude,Could,Failed,Non-fatal,OpenCode,Pending,ProviderRuntimeIngestion,ProviderTurnDispatchFibers,SEND_FAILED,after,before,broadcast,catalog,default,dispatch,engine,error,failed:,for,found:,from,inference,inferred,inspect,instance,interrupt,interrupt_turn,is,list,local,materialization:,materialized,message,message:,no,not,or,output:,persistence,provider,question,reason,required,resolve,routing:,send,server-side,state,to,tool,turn,user": "Not classes: log, error and comment words from provider-turn closures that moved into provider-turn-dispatch.ts and provider-turn-session.ts when makeProviderTurnService was split (z4sv.13.4).",
-	"src/lib/provider/claude/claude-provider-runtime.ts :: Capability,Failed,Final,after,catch-up,ensure,fallback,list:,metadata,ms,out,poll,probe,push,subagent,timed,to,using": "Not classes: log, error and comment words from Claude runtime helpers that moved into sibling claude-runtime-*.ts, claude-sdk-validation.ts and claude-subagent-runtime.ts modules when claude-provider-runtime.ts was split (z4sv.13.7)."
+	"src/lib/provider/claude/claude-provider-runtime.ts :: Capability,Failed,Final,after,catch-up,ensure,fallback,list:,metadata,ms,out,poll,probe,push,subagent,timed,to,using": "Not classes: log, error and comment words from Claude runtime helpers that moved into sibling claude-runtime-*.ts, claude-sdk-validation.ts and claude-subagent-runtime.ts modules when claude-provider-runtime.ts was split (z4sv.13.7).",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-bg-surface,gap-4,px-2,py-1.5,py-4,rounded-panel,space-y-2,text-error,text-text-muted,text-xs": {
+		"movedTo": "src/lib/frontend/components/overlays/NotificationsSettingsTab.svelte",
+		"reason": "These class tokens moved intact to NotificationsSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: font-medium,mt-1,mt-3,mt-4,text-base": {
+		"movedTo": "src/lib/frontend/components/overlays/AppearanceSettingsTab.svelte",
+		"reason": "These class tokens moved intact to AppearanceSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-transparent,border-none,gap-3,mb-2,px-1,px-4,py-2,space-y-1,space-y-4,tracking-widest,uppercase": {
+		"movedTo": "src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte",
+		"reason": "These class tokens moved intact to VisibilitySettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: animate-pulse,bg-black/[0.04],bg-green-500/10,bg-white/[0.04],border-accent,border-t,break-all,cursor-pointer,dark:bg-white/[0.06],flex-wrap,font-mono,gap-1.5,gap-2,group-hover/cmd:opacity-100,group/cmd,hover:border-text-muted,italic,items-start,justify-center,justify-end,leading-relaxed,max-w-[10rem],mb-3,min-w-0,ml-2,ml-auto,mt-2,opacity-0,opacity-60,p-0.5,p-3,pb-3,pt-1,pt-2,pt-2.5,px-2.5,px-3,py-1,resize-y,rounded,rounded-lg,select-all,space-y-3,text-green-400,text-green-500,text-sm,tracking-wide,transition-opacity,truncate,w-36,whitespace-pre-wrap": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "These class tokens moved intact to InstancesSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
+		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: Failed": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: to": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: instance": {
+		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
+		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
+	}
 }
