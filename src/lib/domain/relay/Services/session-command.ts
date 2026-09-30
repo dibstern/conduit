@@ -6,7 +6,7 @@
 // the event store AND OpenCode, delete wrote OpenCode only, create wrote
 // OpenCode only. listSessions has always read the SQLite read model, so a
 // mutation that skipped the event store simply never reached the UI — which is
-// exactly how conduit-test-42k7 (deleted sessions reappearing) happened.
+// how deleted sessions reappeared in the sidebar.
 //
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
@@ -312,7 +312,7 @@ export const normalizeSessionTitle = (title?: string): string => {
  * left to the caller.
  *
  * That folding is the point. A caller who creates the session upstream and
- * forgets to record it locally is how conduit-test-42k7 happened; there is no
+ * forgets to record it locally can make the session absent from the read model; there is no
  * longer a way to express it from outside this module.
  */
 export const createOpenCodeSession = (
@@ -358,7 +358,7 @@ export const createOpenCodeSession = (
  * direct `api.session.fork` call lives here and `session.created` is applied in
  * the same function. Before this, the forked session reached the read model
  * only if the provider event stream happened to mention it — with no parent, so
- * it surfaced as a root session in the sidebar (conduit-test-o5vp).
+ * it surfaced as a root session in the sidebar.
  *
  * The fork point itself follows as `session.forked`, once the caller has
  * resolved which message it was.

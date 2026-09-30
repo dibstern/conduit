@@ -9,8 +9,8 @@ import type {
 // Creates a Layer that runs the startup sequence, forks background tasks
 // under supervision, and keeps alive until interrupted (SIGINT/SIGTERM).
 //
-// Phase 1: Only projectDiscovery is forked. Session prefetch and push init
-// are stubbed as comments for Phase 2 expansion.
+// Only projectDiscovery is forked. Session prefetch and push init
+// remain stubs.
 //
 // Design points:
 //   - Layer.scopedDiscard — side-effect-only Layer (no output service)
@@ -60,8 +60,8 @@ export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
 );
 
 // ─── DaemonDeps type ──────────────────────────────────────────────────────
-// Minimal at Phase 1, listing only Tags available from Tasks 1-5.
-// DO NOT import Tags from Phase 2+ modules.
+// Minimal: lists only the Tags used by the current startup sequence.
+// Do not import Tags for background tasks that are still stubs.
 
 export type DaemonDeps =
 	| DaemonStateTag
@@ -76,10 +76,10 @@ export const startupRetry = Schedule.exponential("1 second").pipe(
 	Schedule.intersect(Schedule.recurs(3)),
 );
 
-// ── sessionPrefetch — STUB (Phase 2a) ──
+// ── sessionPrefetch — STUB ──
 // export const sessionPrefetch: Effect.Effect<void, never, ...> = ...
 
-// ── pushInit — STUB (Phase 2b) ──
+// ── pushInit — STUB ──
 // export const pushInit: Effect.Effect<void, never, ...> = ...
 
 // ─── makeDaemonProgramLayer ───────────────────────────────────────────────
@@ -120,8 +120,8 @@ export const makeDaemonProgramLayer = (
 			yield* Effect.supervised(
 				Effect.gen(function* () {
 					yield* Effect.forkScoped(projectDiscovery);
-					// yield* Effect.forkScoped(sessionPrefetch);  // EXPAND Phase 2a
-					// yield* Effect.forkScoped(pushInit);          // EXPAND Phase 2b
+					// yield* Effect.forkScoped(sessionPrefetch);
+					// yield* Effect.forkScoped(pushInit);
 				}),
 				supervisor,
 			).pipe(

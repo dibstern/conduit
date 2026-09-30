@@ -253,7 +253,7 @@
 								way to tell the edit box was live. A text input always
 								matches `:focus-visible` while focused, so the inset
 								outline shows the moment the field appears -- which is the
-								point (conduit-test-de3.35.9.3).
+								point.
 							-->
 							<TextInput
 								bind:element={renameInputEl}
@@ -289,7 +289,7 @@
 			<!-- New Terminal button -->
 			{#if canCreate}
 				<!--
-					`hoverFill="accent-bg"` is new to the union (conduit-test-4ors):
+					`hoverFill="accent-bg"` is new to the union:
 					the label is already accent-coloured, so a neutral wash reads as
 					the label dimming rather than the row lighting up.
 					`hover:text-accent-hover` stays in `class` because no tone member

@@ -1,4 +1,4 @@
-// ─── Keep-Awake Management (Ticket 3.5) ─────────────────────────────────────
+// ─── Keep-Awake Management ─────────────────────────────────────
 // Prevents the host machine from sleeping during long-running agent tasks.
 // Uses `caffeinate` on macOS, `systemd-inhibit` on Linux, or a user-configured command.
 

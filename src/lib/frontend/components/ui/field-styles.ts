@@ -3,7 +3,7 @@
  * no height, padding or type scale, so the call site supplies its own
  * ADDITIVELY through `class`. Without it the three chromeless fields in the app
  * cannot migrate at all — `sm`/`md` hard-code `h-8`/`h-9`, and a consumer class
- * cannot beat a primitive utility in the same group (conduit-test-d1d4).
+ * cannot beat a primitive utility in the same group.
  */
 export type FieldSize = "sm" | "md";
 export type FieldControlSize = FieldSize | "content";
@@ -24,7 +24,7 @@ export type FieldControlSize = FieldSize | "content";
  *
  * Same failure ui/Button's BASE_CLASSES had, fixed the same way, and arrived
  * at the same place: what is actually shared is almost nothing
- * (conduit-test-1k0g).
+ *.
  */
 export const FIELD_BASE_CLASSES =
 	"disabled:opacity-50 disabled:cursor-not-allowed";
@@ -116,7 +116,7 @@ export const TEXTAREA_SIZE_CLASSES: Record<FieldControlSize, string> = {
 // per call site and one of them, RewindBanner, wrote `accent-[var(--accent)]`
 // against a custom property that is defined nowhere in the codebase -- so three
 // radios in a confirmation modal had been rendering the UA default blue rather
-// than the brand pink (conduit-test-de3.35.7).
+// than the brand pink.
 //
 // The invalid affordance is an OUTLINE, not `aria-invalid:border-error` like
 // FIELD_BASE_CLASSES uses: a UA-painted checkbox ignores `border`, and an

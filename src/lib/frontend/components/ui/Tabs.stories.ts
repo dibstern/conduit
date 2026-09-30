@@ -119,7 +119,7 @@ export const ArrowKeysMoveSelection: Story = {
  * conditional border-colour class sat there as dead code contradicting it.
  * This asserts the classes are load-bearing again and no inline style remains.
  *
- * The colour was `brand-a` until conduit-test-de3.6 converged all three strips
+ * The colour was `brand-a` before all three strips converged
  * onto `accent` -- same value in both themes, so this assertion moved one word
  * and no pixel.
  */

@@ -49,7 +49,7 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	/**
-	 * Phase 4.4: resolve the API client for a session bound to a NAMED
+	 * Resolve the API client for a session bound to a NAMED
 	 * OpenCode instance (a real second server). Resolves to undefined when the
 	 * session runs on the project-default instance, and fails when a named
 	 * instance cannot be resolved — the caller surfaces that as a send
@@ -249,7 +249,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					const cause = promptResult.left;
 					const baseMessage =
 						cause instanceof Error ? cause.message : String(cause);
-					// Migration guard (Phase 4.4): a session bound to a named
+					// Migration guard: a session bound to a named
 					// OpenCode instance BEFORE per-instance routing physically
 					// lives on the project-default server, so the named server
 					// 404s the prompt. Surface that clearly instead of silently

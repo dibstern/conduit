@@ -1,14 +1,14 @@
 /**
  * Outside-click / Escape dismissal for surfaces that are NOT built on a Bits
  * primitive. Two consumers remain: InstanceModelPicker and Sidebar.
- * PermissionModeSelector moved onto ui/Menu in conduit-test-de3.35.9.3.
+ * PermissionModeSelector moved onto ui/Menu when its menu became shared.
  *
  * Deliberately here rather than in `components/ui/actions/`, where it used to
  * live. Every consumer is a feature component, so importing it tripped
  * ADR-0003's `private-recipe-import` rule three times over -- and that rule is
  * right: a feature has no business reaching into the design system's internals.
  * What was wrong was the location. This is behaviour, not a style recipe, so it
- * is not part of the design system at all (conduit-test-de3.35.6).
+ * is not part of the design system at all.
  *
  * `use-background-inert` stays in `components/ui/actions/`: its only consumers
  * are the overlay primitives themselves (Modal, Menu, Popover, Tooltip).

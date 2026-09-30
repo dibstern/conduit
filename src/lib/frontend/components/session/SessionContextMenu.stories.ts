@@ -45,7 +45,7 @@ export const PhoneSheet: Story = {
 	parameters: { viewport: { defaultViewport: "mobile1" } },
 };
 
-// `rootSelector: "body"` is load-bearing. Since conduit-test-de3.35.4 the menu
+// `rootSelector: "body"` is load-bearing. The menu now
 // portals out of #storybook-root, which is where the pseudo-states addon starts
 // walking -- so a plain `hover: true` reached nothing and this story rendered a
 // frame byte-identical to Default for several commits.

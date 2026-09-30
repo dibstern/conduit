@@ -7,7 +7,7 @@
 <!-- and the empty trigger snippet is safe because by the time bits-ui would  -->
 <!-- return focus to a trigger this component no longer exists.               -->
 <!--                                                                         -->
-<!-- What this replaced (conduit-test-de3.35.9.3): a fixed full-screen        -->
+<!-- What this replaced: a fixed full-screen        -->
 <!-- backdrop for outside clicks, manual getBoundingClientRect positioning    -->
 <!-- with no collision handling, a window-level Escape listener, and two      -->
 <!-- <button>s with no role="menu", no role="menuitem", no roving focus, no   -->

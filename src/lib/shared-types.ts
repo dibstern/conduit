@@ -4,7 +4,7 @@
 
 import { ClaudeSettingsOverridesSchema } from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
-// SDK-derived type aliases (Task 10) — single source of truth for Part/Tool enums.
+// SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
 export type { PartType, ToolStatus };
@@ -365,7 +365,7 @@ export interface PtyInfo {
 // WebSocket messages. They represent a loose superset of the SDK's Part and Message
 // types with relay-specific extensions (renderedHtml, index signatures).
 //
-// SDK type mapping (Task 10):
+// SDK type mapping:
 //   PartType   ← SDK Part["type"]    (derived in sdk-types.ts)
 //   ToolStatus ← SDK ToolState["status"] (derived in sdk-types.ts)
 //   HistoryMessagePart ≈ SDK Part (loose — all fields optional, index sig)

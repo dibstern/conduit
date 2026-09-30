@@ -912,7 +912,7 @@
 											<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="rename-instance-btn" onclick={() => startRename(inst.id, inst.name)}>Rename</Button>
 										<!-- Three `!` and every one of them is raw Tailwind palette, not a
 										     token: border-red-700 / text-red-500 are the headline drift item
-										     for the de3.5 NORMALIZE pass. -->
+									     to normalize across the panel. -->
 										<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 										</div>
 									{/if}

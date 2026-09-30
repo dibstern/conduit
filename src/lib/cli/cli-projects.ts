@@ -1,4 +1,4 @@
-// ─── Projects Submenu (Ticket 8.11) ──────────────────────────────────────────
+// ─── Projects Submenu ──────────────────────────────────────────
 // Interactive CLI projects submenu for conduit. Displays project list
 // with status, handles add/remove/title operations, and project detail view.
 // Ported from claude-relay/bin/cli.js lines 1487-1679.

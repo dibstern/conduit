@@ -123,7 +123,7 @@
 		`hoverFill` is unconditional where the original gated it on
 		`subagentSessionId`, because that is exactly when the button is disabled
 		and Button already drops every `hover:` step when inert
-		(conduit-test-or29). `disabledStyle="undimmed"` reproduces the as-found
+. `disabledStyle="undimmed"` reproduces the as-found
 		`disabled:opacity-100 disabled:cursor-default` pair.
 	-->
 	<Button

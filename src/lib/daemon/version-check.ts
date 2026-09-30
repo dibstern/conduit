@@ -1,4 +1,4 @@
-// ─── Version Check (Ticket 3.4) ────────────────────────────────────────────────
+// ─── Version Check ────────────────────────────────────────────────
 // Periodically checks npm for newer versions and notifies via callbacks.
 
 import { Data } from "effect";

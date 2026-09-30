@@ -1,4 +1,4 @@
-// ─── Canonical Event Translator (Task 7) ─────────────────────────────────────
+// ─── Canonical Event Translator ─────────────────────────────────────
 // Maps OpenCode SSE events → canonical persistence events.
 // Stateful: tracks part lifecycle (tool pending → running → completed,
 // reasoning start → end) per session.

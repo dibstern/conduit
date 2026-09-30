@@ -23,11 +23,11 @@ async function assertSwapStyles(
 	const popoverProbe = document.createElement("div");
 	popoverProbe.className = "z-[var(--z-popover)]";
 	// The swap dropped the consumer's own `bg-bg-surface` in favour of
-	// FLOATING_SURFACE_CLASSES' `bg-bg-alt` (conduit-test-9kov). Back then the two
+	// FLOATING_SURFACE_CLASSES' `bg-bg-alt`. Back then the two
 	// tokens resolved identically, so a second probe asserted their equality --
 	// deliberately, to go red the day they diverged. They have now diverged: the
 	// approved palette puts every surface that FLOATS over content on --alt and
-	// every INSET control on --surface (conduit-test-vik1.21). So the equality
+	// every INSET control on --surface. So the equality
 	// probe is gone and the one below carries the load on its own: pinning the
 	// listbox to bg-alt exactly is what catches a slide back to bg-surface.
 	const surfaceBgProbe = document.createElement("div");
@@ -80,13 +80,12 @@ type Story = StoryObj<typeof meta>;
 //
 //   aria-allowed-role  Stays live. Unlike InputArea's <textarea>, this consumer drives a real
 //                      <input>, where role="combobox" is conforming — the rule genuinely
-//                      protects this surface, so conduit-test-n9s does not reach here.
+//                      protects this surface, so the textarea role constraint does not apply here.
 //   color-contrast     Disabled, matching InputArea.stories.ts. The option row's muted
 //                      `parentPath` span measures 3.08:1 (#71717a on #27272a), and it is
 //                      byte-identical to HEAD's markup — this swap did not introduce it. It is
-//                      conduit-test-de3.28.2's contrast floor, gated on a pending colour
+//                      a separate contrast floor, gated on a colour
 //                      decision, so enabling the rule here would silently make that decision.
-//                      Expires when de3.28.2 lands.
 //
 // Worth knowing if you re-measure: an earlier revision left color-contrast live on the
 // strength of a green `vitest --project=storybook` run. That gate is not sensitive to this

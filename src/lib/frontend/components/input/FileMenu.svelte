@@ -96,7 +96,7 @@
 	// started at `document` and matched the FIRST `#file-menu .file-menu-list` in
 	// the page, so a second mounted instance scrolled the wrong list. The option
 	// ids are already derived from the caller-supplied `listboxId`, which is where
-	// uniqueness belongs (conduit-test-9kov).
+	// uniqueness belongs.
 	function scrollActiveIntoView(): void {
 		requestAnimationFrame(() => {
 			document

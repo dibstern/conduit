@@ -1,4 +1,4 @@
-// ─── OpenCode SSE Event Types & Guards (Task 11) ────────────────────────────
+// ─── OpenCode SSE Event Types & Guards ────────────────────────────
 // Typed interfaces and runtime type guard functions for OpenCode SSE events.
 //
 // Architecture:

@@ -391,7 +391,7 @@ function isLlmContentStart(type: string): boolean {
 
 // ─── Async replay infrastructure ────────────────────────────────────────────
 
-// replayGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
+// replayGeneration: per-session only (activity.replayGeneration). Module-level counter removed.
 const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
 const isRelayMessage = Schema.is(RelayMessageSchema);
 

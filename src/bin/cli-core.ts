@@ -1,4 +1,4 @@
-// ─── CLI Core (Ticket 3.3) ──────────────────────────────────────────────────
+// ─── CLI Core ──────────────────────────────────────────────────
 // Command router and main entry point. The thin entry point (cli.ts) calls
 // run() with process.argv. Individual commands and utilities live in
 // cli-commands.ts and cli-utils.ts respectively.

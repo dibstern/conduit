@@ -1,4 +1,4 @@
-// ─── Client Init (Ticket 3.6) ────────────────────────────────────────────────
+// ─── Client Init ────────────────────────────────────────────────
 // Handles the initial handshake when a browser client connects via WebSocket.
 // Sends session info (with cached events or REST API history), model info,
 // agent list, provider/model list, and PTY replay to the new client.

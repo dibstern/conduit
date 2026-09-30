@@ -2,7 +2,7 @@
   StatusBox — the tinted result strip the setup steps print under each action.
 
   Five hand-written copies of this exact recipe lived in StepPwa and StepPush
-  (conduit-test-m8ww). They were not there by accident: the content is
+. They were not there by accident: the content is
   sometimes markup or a conditional, and the old `message: string` prop could
   only take text, so anything richer than a sentence had to fork the markup.
   Content is a snippet now, which is what lets those five come home.

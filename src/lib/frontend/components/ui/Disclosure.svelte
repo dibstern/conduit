@@ -2,7 +2,7 @@
   Disclosure — the expand/collapse header row used by the chat cards.
 
   Named for the affordance, not the tag. Five chat cards had each hand-written
-  the same dim-small-row recipe (conduit-test-de3.35.5), agreeing on the hover
+  the same dim-small-row recipe, agreeing on the hover
   fill, the transition and the duration, and disagreeing on vertical rhythm.
 
   This migration is deliberately ZERO-DIFF: every as-found gap/padding pairing
@@ -43,7 +43,7 @@
 	 * on two groups a consumer might legitimately need. `border-none` is the
 	 * more dangerous of the pair: it sets border-STYLE to none, so any
 	 * `border-b-2` a call site added would render as a 2px-wide nothing. That
-	 * exact bug shipped in SettingsPanel's tab strip (conduit-test-mkah).
+	 * exact bug shipped in SettingsPanel's tab strip.
 	 *
 	 * `transition-colors duration-150` stays invariant even though the four
 	 * SettingsPanel rows had no transition: a 150ms hover fade is invisible to

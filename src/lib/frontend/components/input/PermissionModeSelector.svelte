@@ -99,7 +99,7 @@
      buttons in a Surface with a hand-drawn checkmark, so assistive technology
      heard four unrelated controls and never that exactly one was current. It
      also carried its own Escape listener, outside-click action and open state,
-     all of which the primitive already owns (conduit-test-de3.35.9.3).
+     all of which the primitive already owns.
 
      MenuRadioGroup is the honest shape here: "approvals is exactly one of
      these" is a radio group, and `aria-checked` says what the &#10003; glyph was

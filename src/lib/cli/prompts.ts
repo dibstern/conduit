@@ -1,4 +1,4 @@
-// ─── Interactive Prompt Components (Ticket 8.1) ──────────────────────────────
+// ─── Interactive Prompt Components ──────────────────────────────
 // Five reusable interactive terminal prompt primitives: toggle, PIN, text,
 // select, and multi-select. Ported from claude-relay/bin/cli.js lines 544-1013.
 // Each prompt accepts injectable stdin/stdout/exit for testability.

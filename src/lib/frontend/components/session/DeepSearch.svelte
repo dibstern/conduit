@@ -140,7 +140,7 @@
 
 	function choose(result: SearchResult): void {
 		close();
-		// conduit-test-vik1.15: viewing a shelf session needs no unsnooze or
+		// Viewing a shelf session needs no unsnooze or
 		// unsettle mutation, so preserve its shelf state when navigating.
 		switchToSession(result.id, result.projectSlug ?? getCurrentSlug() ?? undefined);
 	}

@@ -54,7 +54,7 @@ export type SessionMessages = {
 	historyLoading: boolean;
 	toolRegistry: ToolRegistry;
 	/** Working copy of messages during replay. Null when not replaying.
-	 *  Moved from module-level in Task 3 to enable per-session replay. */
+	 *  Moved from module-level to enable per-session replay. */
 	replayBatch: ChatMessage[] | null;
 	/** Per-session buffer of older messages from large replays.
 	 *  HistoryLoader pages through this before hitting the server. */
@@ -487,7 +487,7 @@ function applyToolUpdate(
 	}
 }
 
-// doneMessageIds: per-session only (activity.doneMessageIds). Module-level set removed in Task 6.
+// doneMessageIds: per-session only (activity.doneMessageIds). Module-level set removed.
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -570,7 +570,7 @@ export function registerClearMessagesHook(
 	onClearMessages = fn;
 }
 
-// replayBatch: per-session only (messages.replayBatch). Module-level variable removed in Task 6.
+// replayBatch: per-session only (messages.replayBatch). Module-level variable removed.
 
 export function beginReplayBatch(
 	_activity?: SessionActivity,
@@ -715,7 +715,7 @@ export function setMessages(
  *  and the new messageId is recorded.
  *
  *  No-op when the messageId is the same as the current one. */
-// seenMessageIds: per-session only (activity.seenMessageIds). Module-level set removed in Task 6.
+// seenMessageIds: per-session only (activity.seenMessageIds). Module-level set removed.
 
 export function advanceTurnIfNewMessage(
 	activity: SessionActivity,
@@ -1737,7 +1737,7 @@ function flushAssistantRender(
 // in their `html` field. renderDeferredMarkdown processes them in batches
 // via requestIdleCallback/setTimeout to avoid blocking the main thread.
 
-// deferredGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
+// deferredGeneration: per-session only (activity.replayGeneration). Module-level counter removed.
 
 export function cancelDeferredMarkdown(
 	_activity?: SessionActivity,

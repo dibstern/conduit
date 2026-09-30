@@ -135,7 +135,7 @@ export const InstancesEmpty: Story = {
  * Also the a11y gate for the setup-scenario rows. They were bare `<button>`s
  * that announced nothing about the region they opened; on ui/Disclosure they
  * always carry `aria-expanded`, and this asserts the value actually tracks the
- * state rather than being a constant (conduit-test-jeji).
+ * state rather than being a constant.
  */
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "instances" },
@@ -186,7 +186,7 @@ export const Hover: Story = {
 
 /**
  * The add/edit instance form. Its Cancel and Save buttons appeared in no
- * baseline of any kind, so the de3.5 swap would have had nothing holding them
+ * baseline of any kind, so the component swap would have had nothing holding them
  * to zero pixel diff. Captured deliberately BEFORE that migration: a fidelity
  * gate can only prove "nothing moved" against an image of the old markup.
  */
@@ -208,7 +208,7 @@ export const InstanceForm: Story = {
 /**
  * Hover on the instances tab. The existing Hover story sits on the Alerts tab,
  * so every hover style in the instances list — Scan Now, Add, and the per-row
- * actions — was uncaptured. That matters more than usual here: the de3.5 swap
+ * actions — was uncaptured. That matters more than usual here: the component swap
  * of this panel needs `!` overrides mostly to hold HOVER colours that differ
  * from the Button variants, and an override no baseline can see is an override
  * no gate can prove.
@@ -222,7 +222,7 @@ export const InstancesHover: Story = {
 /**
  * Hover on an EXPANDED instance row, where Start / Stop / Edit / Rename /
  * Remove live. Those five buttons are the densest cluster of hover colours in
- * the panel, and the de3.5 swap needs `!` overrides to hold them.
+ * the panel, and the component swap needs `!` overrides to hold them.
  *
  * The hover state is applied by hand instead of through `parameters.pseudo`,
  * and it is applied to `document.body`. Neither is a style preference; both are

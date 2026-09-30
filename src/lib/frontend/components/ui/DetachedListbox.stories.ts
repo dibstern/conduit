@@ -17,7 +17,7 @@ const meta = {
 	parameters: {
 		layout: "padded",
 		// Opted in per story: the repository-wide setting is still "todo" pending
-		// the conduit-test-de3.28 burn-down.
+		// the accessibility burn-down.
 		a11y: { test: "error" },
 	},
 	argTypes: {
@@ -100,7 +100,7 @@ export const Ownership: Story = {
 		// used to be consumer `!` overrides, and a class string proves nothing
 		// about which declaration wins without `tailwind-merge`. Probing the
 		// popover tier too is the point — that is the value this surface must
-		// NOT have (conduit-test-llxm).
+		// NOT have.
 		const radiusProbe = document.createElement("div");
 		radiusProbe.className = "rounded-lg";
 		const dropdownProbe = document.createElement("div");

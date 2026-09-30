@@ -6,7 +6,7 @@
 // constructs the appropriate Node.js server factory, and wires the
 // Effect HTTP router via HttpServer.serve.
 //
-// WebSocket upgrade is NOT handled here — that is Task 32. This layer
+// WebSocket upgrade is outside this HTTP layer. This layer
 // only serves HTTP routes through the Effect router.
 
 import { readFileSync } from "node:fs";

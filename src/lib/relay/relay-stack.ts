@@ -381,7 +381,7 @@ export interface ProjectRelay {
 	sseStream: SSEStreamPort;
 	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
-	/** Phase 5: Orchestration layer: provider registry, instances, and engine. */
+	/** Orchestration layer: provider registry, instances, and engine. */
 	orchestration: OrchestrationLayer;
 	/** Effect ManagedRuntime for dispatching through the Effect handler pipeline. */
 	effectRuntime: RelayRuntime;
@@ -716,7 +716,7 @@ export async function createProjectRelay(
 					},
 				}).pipe(Layer.provide(persistenceEffectLayer))
 			: undefined;
-	// Named OpenCode instance clients (Phase 4.4): one shared layer reference
+	// Named OpenCode instance clients: one shared layer reference
 	// (Effect memoizes it) so orchestration wiring, the session manager, and
 	// the startup SSE wiring all see the same lazy per-instance client cache.
 	const openCodeInstanceClientsLayer = OpenCodeInstanceClientsLive.pipe(
@@ -1121,7 +1121,7 @@ export async function createProjectRelay(
 					};
 					yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
 					yield* sseStream.connectEffect();
-					// Named OpenCode instances (Phase 4.4): lazily created
+					// Named OpenCode instances: lazily created
 					// per-instance SSE streams join the SAME pipeline — turn
 					// completion via wireSSEToInstance, streaming/persistence via
 					// wireSSEConsumerEffect. Pending permission/question recovery

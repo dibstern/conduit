@@ -1497,7 +1497,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				const createViaOpenCode = (instanceId?: ProviderInstanceId) =>
 					Effect.either(
 						Effect.gen(function* () {
-							// Phase 4.4: a session bound to a NAMED OpenCode instance is
+							// A session bound to a NAMED OpenCode instance is
 							// created on THAT instance's server; the default id (and
 							// wirings without the instance-clients service, e.g. legacy
 							// or unit harnesses) use the project-default client. A named

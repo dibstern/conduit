@@ -8,7 +8,7 @@
 // for relay cancellation. This service replaces callbacks with DaemonEventBus
 // publishes, and AbortController with Effect Scope/interruption.
 //
-// Relay lifecycle is delegated to RelayCacheTag (Task 18).
+// Relay lifecycle is delegated to RelayCacheTag.
 
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -532,7 +532,7 @@ export const removeAll = Effect.gen(function* () {
 	yield* Effect.logInfo(`Removed ${allSlugs.length} project(s)`);
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
 
-// ─── Additional operations (Task 6 gap-fill) ───────────────────────────────
+// ─── Additional operations ───────────────────────────────
 
 /**
  * Broadcast a message to all connected clients via DaemonEventBus.

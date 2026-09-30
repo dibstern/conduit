@@ -96,7 +96,7 @@ export const PillHover: Story = {
  *
  * It replaces a standalone `ui/Pill` component that duplicated the whole pill
  * recipe and had no consumers -- both of its variants now live here, so the
- * neutral and warning pills cannot drift apart (conduit-test-de3.35.8).
+ * neutral and warning pills cannot drift apart.
  * Deliberately no PillWarningHover companion: the variant has no hover step.
  */
 export const PillWarning: Story = {
@@ -112,7 +112,7 @@ export const PillWarning: Story = {
  * site brings its own, additively. Without a baseline this story would be an
  * unstyled box, which is the point: it proves the size really is an opt-out
  * rather than quietly leaking `sm`/`md` geometry. The class below is what a
- * real migrated call site looks like (conduit-test-de3.5).
+ * real migrated call site looks like.
  */
 export const ContentSize: Story = {
 	args: {
@@ -148,7 +148,7 @@ export const ContentSize: Story = {
 };
 
 /**
- * `align` exists because the thing it replaced was a coin flip (conduit-test-ixfu).
+ * `align` exists because the thing it replaced was a coin flip.
  * Button used to hard-code `justify-center` in BASE_CLASSES, and beating it from
  * a call site depended on which side of it Tailwind happened to emit your class:
  * `justify-start` wins, `justify-between` loses, and nothing at the call site
@@ -217,7 +217,7 @@ export const IconOnly: Story = {
 		// `children` for every story, and this one inherited it. Button used to
 		// discard children whenever `iconOnly` was set, so the stray label was
 		// invisible and this baseline looked correct. Removing that silent
-		// discard (conduit-test-arl1) is what surfaced it. Storybook merges meta
+		// discard is what surfaced it. Storybook merges meta
 		// args at runtime, so the props union cannot catch this — the assertion
 		// below is the guard instead.
 		children: undefined,
@@ -273,7 +273,7 @@ export const Hover: Story = {
 
 /**
  * The hover wash that five call sites had each dialled down by hand before
- * conduit-test-d5nv moved the correction into the variant. `Hover` above is
+ * the shared variant absorbed the correction. `Hover` above is
  * `primary`, whose hover swaps one solid fill for another, so it never covered
  * this: a translucent scrim over whatever the button is sitting on.
  */
@@ -285,7 +285,7 @@ export const SecondaryHover: Story = {
 /**
  * A disabled button under the cursor, which must look exactly like `Disabled`.
  * `:hover` goes on matching while a button is disabled, so every variant used
- * to light up at the one moment it must not (conduit-test-or29). Nothing else
+ * to light up at the one moment it must not. Nothing else
  * in this file could have caught it -- `Disabled` is not hovered and `Hover`
  * is not disabled.
  */
@@ -307,14 +307,14 @@ export const FocusVisible: Story = {
 	// own ring. The product never does this: Tab to a real Pill or Button and
 	// the computed outline-style is `none`, the ring is the box-shadow.
 	// The array form applies the class to the matched element only, so the
-	// story depicts one ring, the one being tested (conduit-test-j7ny).
+	// story depicts one ring, the one being tested.
 	parameters: { pseudo: { focusVisible: ["button"] } },
 };
 
 /**
  * The anchor branch. Without a story the `href` path has no visual baseline at
  * all, and the failure it would hide is a quiet one: an <a> that stopped
- * looking like the <button> beside it (conduit-test-75iq).
+ * looking like the <button> beside it.
  *
  * The play() assertion is the load-bearing half. `no-underline` lives in
  * BASE_CLASSES precisely because the UA stylesheet underlines anchors and no

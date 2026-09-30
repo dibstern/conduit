@@ -1,4 +1,4 @@
-// ─── Settings Menu (Ticket 8.12) ──────────────────────────────────────────────
+// ─── Settings Menu ──────────────────────────────────────────────
 // Interactive CLI settings menu for conduit. Displays detection status
 // (Tailscale, mkcert, HTTPS, PIN, keep-awake) and provides actions for PIN
 // management, keep-awake toggle, log viewing, and notification setup.

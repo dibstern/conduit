@@ -153,7 +153,7 @@ const createOrchestrationComponentsEffect = (
 		const sessionBindingReadModel =
 			sql != null ? new SqliteProviderSessionBindingReadModel(sql) : undefined;
 
-		// Phase 4.4: sessions bound to a NAMED OpenCode instance route their
+		// Sessions bound to a NAMED OpenCode instance route their
 		// provider calls to that instance's client. The binding is set before
 		// sendTurn dispatches (orchestration-engine binds session→providerId),
 		// so a session-keyed resolver over the binding read model is correct

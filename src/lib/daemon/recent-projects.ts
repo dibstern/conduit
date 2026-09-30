@@ -1,4 +1,4 @@
-// ─── Recent Projects Tracking (Ticket 3.6) ──────────────────────────────────
+// ─── Recent Projects Tracking ──────────────────────────────────
 
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";

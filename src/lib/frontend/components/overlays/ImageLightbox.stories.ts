@@ -21,7 +21,7 @@ type Story = StoryObj<typeof meta>;
  * An 800x600 inline SVG, not a URL. This story used to point at
  * `https://picsum.photos/seed/opencode/800/600`, which made a committed visual
  * baseline depend on a third-party CDN being reachable and returning identical
- * bytes (conduit-test-de3.23). It was not: the baseline shows a photograph
+ * bytes. It was not: the baseline shows a photograph
  * while the capture shows a near-black viewport with only the close button, and
  * the diff magnitude tracked concurrency — 815,785 pixels alone, 1,253,248
  * under load. npm-release.yml Job 4 gates `release` on this suite, so an outage

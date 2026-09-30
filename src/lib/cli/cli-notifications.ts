@@ -1,4 +1,4 @@
-// ─── Notifications Setup Wizard (Ticket 8.14) ─────────────────────────────────
+// ─── Notifications Setup Wizard ─────────────────────────────────
 // Interactive CLI wizard for configuring push notifications and remote access.
 // Two-toggle flow → conditional Tailscale/HTTPS/QR sections. Ported from
 // claude-relay/bin/cli.js lines 1684-1851 (showSetupGuide).

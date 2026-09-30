@@ -1,4 +1,4 @@
-// ─── SSE Reconnection & Backoff (Ticket 1.2) ────────────────────────────────
+// ─── SSE Reconnection & Backoff ────────────────────────────────
 // Pure logic for exponential backoff calculation.
 // Deliberately IO-free.
 

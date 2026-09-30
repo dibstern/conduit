@@ -1,4 +1,4 @@
-// ─── Error Handling Foundation (Ticket 0.5, 6.2) ─────────────────────────────
+// ─── Error Handling Foundation ─────────────────────────────
 //
 // Schema.TaggedError-based error hierarchy for the relay layer.
 // Each subclass is a Schema.TaggedError with _tag set to the class name.

@@ -147,7 +147,7 @@ export interface ProcessingTimeoutsPort {
 export interface PipelineDeps {
 	processingTimeouts: ProcessingTimeoutsPort;
 	/**
-	 * Phase 0b: per-session events are broadcast to every client on the
+	 * Per-session events are broadcast to every client on the
 	 * project's `/p/<slug>` regardless of per-tab viewed-session state. The
 	 * handler buffers events for clients still in bootstrap so that
 	 * `session_list` always arrives first — see
@@ -164,7 +164,7 @@ export interface PipelineDeps {
  * Apply pipeline side effects based on PipelineResult decisions.
  * This is the single place where pipeline decisions become actions.
  *
- * Under Phase 0b the {@link PipelineResult.route} field still reflects
+ * The {@link PipelineResult.route} field still reflects
  * viewer presence (`action: "send"` when at least one client has bound to
  * the target session, `action: "drop"` otherwise).
  * That signal drives downstream notification logic (cross-session
@@ -182,7 +182,7 @@ export function applyPipelineResult(
 	} else if (result.timeout === "reset" && sessionId) {
 		deps.processingTimeouts.resetProcessingTimeout(sessionId);
 	}
-	// Phase 0b: always firehose to the project. The route field is retained
+	// Always firehose to the project. The route field is retained
 	// as a "had-viewers?" signal for cross-session notification decisions.
 	if (sessionId) {
 		deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
@@ -206,7 +206,7 @@ export function applyPipelineResultEffect(
 			yield* resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION);
 		}
 		yield* Effect.sync(() => {
-			// Phase 0b: always firehose to the project. The route field is retained
+			// Always firehose to the project. The route field is retained
 			// as a "had-viewers?" signal for cross-session notification decisions.
 			if (sessionId) {
 				deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);

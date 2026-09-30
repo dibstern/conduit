@@ -18,7 +18,7 @@
  *   session.compaction (compaction progress and results)
  *   turn.completed (result)
  *
- * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
+ * All payloads match the EventPayloadMap interfaces.
  */
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";

@@ -2,7 +2,7 @@
 // ever applies -- no two utilities from the shadow group can collide.
 //
 // `left` and `right` were missing until ui/Tooltip got its first real consumer
-// (conduit-test-ee6y, the instance rail). A side-anchored surface simply had
+// (the instance rail). A side-anchored surface simply had
 // no elevation at all, which nobody had noticed because nothing had ever asked
 // for one. They take `shadow-panel` rather than a horizontal offset because no
 // such token exists: menu casts up (-4px) for surfaces opening above, dropdown
@@ -14,7 +14,7 @@
 // tier and the inline detached listboxes sit two tiers below at the dropdown
 // tier. Baking it in made the shared constant emit a utility half its
 // consumers had to beat with a Tailwind `!`, which is the primitive losing an
-// argument it started (conduit-test-llxm).
+// argument it started.
 //
 // Radius WAS a second such axis, and turned out not to be one. CommandMenu and
 // FileMenu wore `rounded-xl` while DirectoryAutocomplete and every portaled
@@ -22,7 +22,7 @@
 // not along anything a reader could see. At this app's 12px root that is 9px
 // against 6px. So the union collapsed to the canonical `rounded-lg` and the
 // `radius` prop came off DetachedListbox: every floating surface in conduit,
-// portaled or inline, now has one corner (conduit-test-de3.6).
+// portaled or inline, now has one corner.
 const FLOATING_SURFACE_BASE_CLASSES =
 	"border border-border bg-bg-alt rounded-lg py-1 " +
 	"focus-visible:outline-hidden " +
@@ -70,7 +70,7 @@ export const FLOATING_ITEM_BASE_CLASSES =
 // before the migration. Shrinking a touch target is a product decision, not a
 // side effect of moving onto the shared primitive.
 //
-// conduit-test-de3.6 asked whether the two looks should converge, and the
+// The question was whether the two looks should converge, and the
 // answer is no. Every other convergence in this file collapsed a split that
 // ran along which feature owned the file; this one runs along which input
 // device the row is for, which is a distinction a reader can see and a user

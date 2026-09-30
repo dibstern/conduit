@@ -66,7 +66,7 @@ export const ExpandedPayload: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		// The name is the aria-label, not the "[+]"/"[-]" glyph, since
-		// conduit-test-de3.35.9.3: the glyph flips with state, so a name built from
+		// The glyph flips with state, so a name built from
 		// it renamed the control every time you pressed it.
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Toggle raw payload" }),

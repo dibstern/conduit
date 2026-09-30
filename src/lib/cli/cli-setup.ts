@@ -1,4 +1,4 @@
-// ─── First-Run Setup Flow (Ticket 8.9) ───────────────────────────────────────
+// ─── First-Run Setup Flow ───────────────────────────────────────
 // Interactive CLI setup wizard for conduit. Prompts for port, PIN,
 // keep-awake, and project restoration. Ported from claude-relay/bin/cli.js
 // lines 1109-1166 with OpenCode-specific adaptations.

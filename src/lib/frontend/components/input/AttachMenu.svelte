@@ -1,7 +1,7 @@
 <!-- ─── Attach Menu ─────────────────────────────────────────────────────────── -->
 <!-- Attach button with a camera/photos dropdown.                             -->
 <!--                                                                         -->
-<!-- What this replaced (conduit-test-de3.35.9.3): a Surface toggled by a     -->
+<!-- What this replaced: a Surface toggled by a     -->
 <!-- `hidden` class, positioned by hand, with no role="menu", no              -->
 <!-- role="menuitem", no roving focus, no arrow keys, no typeahead, no        -->
 <!-- Escape-to-close and no focus return -- plus a trigger that declared      -->

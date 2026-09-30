@@ -5,8 +5,7 @@
  * A frame exists when a component's real anchoring comes from a parent it does
  * not have in isolation. Rendering such a component bare does not merely look
  * wrong — it can place the entire component outside the captured area, which
- * produces a blank baseline that then compares equal forever. See
- * conduit-test-7jv.
+ * produces a blank baseline that then compares equal forever.
  */
 
 /**
