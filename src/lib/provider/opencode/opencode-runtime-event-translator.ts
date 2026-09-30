@@ -8,8 +8,10 @@ import { mapToolName } from "../../relay/event-translator.js";
 import type { SSEEvent } from "../../relay/opencode-events.js";
 import {
 	isMessageCreatedEvent,
+	isMessageRemovedEvent,
 	isMessageUpdatedEvent,
 	isPartDeltaEvent,
+	isPartRemovedEvent,
 	isPartUpdatedEvent,
 	isPermissionAskedEvent,
 	isPermissionRepliedEvent,
@@ -22,6 +24,7 @@ import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 interface TrackedPart {
+	readonly messageId: string;
 	readonly type: string;
 	readonly status?: string;
 	readonly thinkingStarted?: boolean;
@@ -110,6 +113,29 @@ export class OpenCodeRuntimeEventTranslator {
 	): ProviderRuntimeEvent[] | null {
 		if (isMessageCreatedEvent(event)) {
 			return this.translateMessageCreated(event, sessionId, state);
+		}
+		if (isMessageRemovedEvent(event)) {
+			state.seenMessages.delete(event.properties.messageID);
+			for (const [partId, part] of state.parts) {
+				if (part.messageId !== event.properties.messageID) continue;
+				state.parts.delete(partId);
+				state.emitted.forget(partId);
+			}
+			return [
+				opencodeRuntimeEvent("message.removed", sessionId, event, {
+					messageId: event.properties.messageID,
+				}),
+			];
+		}
+		if (isPartRemovedEvent(event)) {
+			state.parts.delete(event.properties.partID);
+			state.emitted.forget(event.properties.partID);
+			return [
+				opencodeRuntimeEvent("message.part.removed", sessionId, event, {
+					messageId: event.properties.messageID,
+					partId: event.properties.partID,
+				}),
+			];
 		}
 		if (isPartDeltaEvent(event)) {
 			return this.translatePartDelta(event, sessionId, state);
@@ -254,7 +280,13 @@ export class OpenCodeRuntimeEventTranslator {
 		if (tracked?.type === "reasoning") {
 			parts.set(
 				partId,
-				trackedPart(tracked.type, tracked.status, tracked.thinkingStarted),
+				trackedPart(
+					tracked.type,
+					tracked.status,
+					tracked.thinkingStarted,
+					undefined,
+					messageId,
+				),
 			);
 			return [
 				opencodeRuntimeEvent("thinking.delta", sessionId, event, {
@@ -272,6 +304,8 @@ export class OpenCodeRuntimeEventTranslator {
 					tracked?.type ?? props.field,
 					tracked?.status,
 					tracked?.thinkingStarted,
+					undefined,
+					messageId,
 				),
 			);
 			return [
@@ -314,6 +348,7 @@ export class OpenCodeRuntimeEventTranslator {
 				rawPart.state?.status,
 				existing?.thinkingStarted,
 				existing?.toolInputEmpty,
+				messageId,
 			),
 		);
 
@@ -322,7 +357,13 @@ export class OpenCodeRuntimeEventTranslator {
 			if (!existing?.thinkingStarted) {
 				parts.set(
 					partId,
-					trackedPart(rawPart.type, rawPart.state?.status, true),
+					trackedPart(
+						rawPart.type,
+						rawPart.state?.status,
+						true,
+						undefined,
+						messageId,
+					),
 				);
 				events.push(
 					opencodeRuntimeEvent("thinking.start", sessionId, event, {
@@ -406,6 +447,7 @@ export class OpenCodeRuntimeEventTranslator {
 						rawPart.state?.status,
 						existing?.thinkingStarted,
 						toolInputEmpty,
+						messageId,
 					),
 				);
 
@@ -756,9 +798,11 @@ function trackedPart(
 	status?: string,
 	thinkingStarted?: boolean,
 	toolInputEmpty?: boolean,
+	messageId = "",
 ): TrackedPart {
 	return {
 		type,
+		messageId,
 		...(status != null ? { status } : {}),
 		...(thinkingStarted != null ? { thinkingStarted } : {}),
 		...(toolInputEmpty != null ? { toolInputEmpty } : {}),

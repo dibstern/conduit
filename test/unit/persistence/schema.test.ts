@@ -26,6 +26,7 @@ describe("Schema Migration", () => {
 				"command_receipts",
 				"events",
 				"message_parts",
+				"message_tombstones",
 				"messages",
 				"pending_approvals",
 				"projection_failures",
@@ -100,6 +101,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_message_parts_message",
 					table: "message_parts",
+					unique: false,
+				},
+				{
+					name: "idx_message_tombstones_session_version",
+					table: "message_tombstones",
 					unique: false,
 				},
 				{

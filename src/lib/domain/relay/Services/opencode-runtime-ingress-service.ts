@@ -594,10 +594,7 @@ export class EffectOpenCodeRuntimeIngress
 
 			if (!translated || translated.length === 0) {
 				const invalidated =
-					translation.droppedRewrite ||
-					event.type === "message.part.updated" ||
-					event.type === "message.removed" ||
-					event.type === "message.part.removed";
+					translation.droppedRewrite || event.type === "message.part.updated";
 				if (invalidated) {
 					yield* this.invalidateHistory(sessionId);
 					this.syncedSessions.delete(sessionId);

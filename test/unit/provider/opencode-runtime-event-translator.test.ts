@@ -36,6 +36,44 @@ function comparable(events: readonly CanonicalEvent[]) {
 }
 
 describe("OpenCodeRuntimeEventTranslator", () => {
+	it("translates removals and permits the same message id to be announced again", () => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const created = makeSSEEvent("message.created", {
+			sessionID: sessionId,
+			messageID: "m1",
+			info: { role: "assistant" },
+		});
+		expect(runtimeToDomain(translator, created, sessionId)).toHaveLength(1);
+		expect(
+			comparable(
+				runtimeToDomain(
+					translator,
+					makeSSEEvent("message.part.removed", {
+						sessionID: sessionId,
+						messageID: "m1",
+						partID: "p1",
+					}),
+					sessionId,
+				),
+			),
+		).toMatchObject([
+			{ type: "message.part.removed", data: { messageId: "m1", partId: "p1" } },
+		]);
+		expect(
+			comparable(
+				runtimeToDomain(
+					translator,
+					makeSSEEvent("message.removed", {
+						sessionID: sessionId,
+						messageID: "m1",
+					}),
+					sessionId,
+				),
+			),
+		).toMatchObject([{ type: "message.removed", data: { messageId: "m1" } }]);
+		expect(runtimeToDomain(translator, created, sessionId)).toHaveLength(1);
+	});
 	it("carries assistant parentID from message.created into the canonical event", () => {
 		const translator = new OpenCodeRuntimeEventTranslator();
 		const event = makeSSEEvent("message.created", {

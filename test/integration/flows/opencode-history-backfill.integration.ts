@@ -1230,7 +1230,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it.each([
 		"message",
 		"part",
-	] as const)("invalidates complete history on live %s removal", async (removed) => {
+	] as const)("projects live %s removal without invalidating complete history", async (removed) => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-live-removal-")),
 			"events.sqlite",
@@ -1256,11 +1256,14 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			});
 		}
 		await waitFor(
-			async () => !(await historyComplete(dbPath)),
-			"history invalidation after live removal",
+			async () => {
+				const text = (await projectedTexts(dbPath))["msg_u1"];
+				return removed === "message" ? text === undefined : text === "";
+			},
+			"projected live removal",
 			3_000,
 		);
-		expect((await projectedTexts(dbPath))["msg_u1"]).toBe("first question");
+		expect(await historyComplete(dbPath)).toBe(true);
 	}, 60_000);
 
 	it("keeps an absent unsettled REST assistant pending", async () => {

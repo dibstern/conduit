@@ -267,6 +267,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 	name: "message",
 	handles: [
 		"message.created",
+		"message.removed",
+		"message.part.removed",
 		"message.snapshot",
 		"text.delta",
 		"thinking.start",
@@ -283,8 +285,23 @@ export const makeMessageProjector = (): EffectProjector => ({
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "message.removed")) {
+				const { messageId } = event.data;
+				yield* sql`UPDATE turns SET user_message_id = NULL
+					WHERE session_id = ${event.sessionId} AND user_message_id = ${messageId}`;
+				yield* sql`UPDATE turns SET assistant_message_id = NULL
+					WHERE session_id = ${event.sessionId} AND assistant_message_id = ${messageId}`;
+				yield* sql`DELETE FROM messages
+					WHERE id = ${messageId} AND session_id = ${event.sessionId}`;
+				yield* sql`INSERT INTO message_tombstones (session_id, message_id, version)
+					VALUES (${event.sessionId}, ${messageId}, ${ctx.version})
+					ON CONFLICT (message_id) DO UPDATE SET
+					session_id = excluded.session_id, version = excluded.version`;
+				return [];
+			}
 			if (
 				"messageId" in event.data &&
+				event.type !== "message.part.removed" &&
 				event.metadata.rawSource !== "opencode.rest"
 			) {
 				const rows = yield* sql<{
@@ -373,6 +390,23 @@ export const makeMessageProjector = (): EffectProjector => ({
 						 ${encodeJson(part)})`;
 				}
 				return written.map((row) => row.id);
+			}
+
+			if (isEventType(event, "message.part.removed")) {
+				const removed = yield* sql<{ id: string }>`DELETE FROM message_parts
+					WHERE id = ${event.data.partId} AND message_id = ${event.data.messageId}
+					RETURNING id`;
+				if (removed.length === 0) return [];
+				return ids(
+					yield* sql<{ id: string }>`UPDATE messages
+					SET text = COALESCE((SELECT group_concat(text, '') FROM (
+						SELECT text FROM message_parts WHERE message_id = ${event.data.messageId}
+						AND type = 'text' ORDER BY sort_order
+					)), ''), rest_payload = NULL, rest_digest = NULL,
+					updated_at = ${event.createdAt}
+					WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}
+					RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "message.created")) {
@@ -657,7 +691,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
-			Effect.flatMap((written) => stampMessage(written, ctx.version)),
+			Effect.flatMap((written) =>
+				isEventType(event, "message.removed")
+					? stampSessions([event.sessionId], ctx.version)
+					: Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							for (const messageId of new Set(written)) {
+								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
+							}
+							return yield* stampMessage(written, ctx.version);
+						}),
+			),
 		),
 });
 

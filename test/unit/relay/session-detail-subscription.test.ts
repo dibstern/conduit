@@ -46,7 +46,7 @@ import {
 	type EffectProjector,
 	ProjectionError,
 } from "../../../src/lib/persistence/effect/projectors-effect.js";
-import type { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -525,6 +525,55 @@ describe("subscribeSessionDetail", () => {
 			// And live continues from there.
 			yield* commit([textDelta(SID, "m2", "m2-0", "!")]);
 			expect(textOf(expectMessage(yield* Queue.take(q)))).toBe("also missed!");
+		}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped(
+		"resume reports a removed message and fresh transcript omits it",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated(SID),
+					messageCreated(SID, "gone", "user"),
+				]);
+				const cursor = yield* readModelVersion;
+				yield* commit([
+					canonicalEvent("message.removed", SID, { messageId: "gone" }),
+				]);
+				const removalVersion = yield* readModelVersion;
+				const { q } = yield* openDetail({
+					sessionId: SID,
+					resumeFromSequence: cursor,
+				});
+				expect(yield* Queue.take(q)).toEqual({
+					_tag: "remove",
+					id: "gone",
+					sequence: removalVersion,
+				});
+				expect(yield* Queue.take(q)).toEqual({ _tag: "synchronized" });
+				const readQuery = yield* ReadQueryEffectTag;
+				expect((yield* readQuery.readSessionTranscript(SID)).messages).toEqual(
+					[],
+				);
+			}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped("live removal emits a remove at the committed version", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated(SID), messageCreated(SID, "gone", "user")]);
+			const { q } = yield* openDetail({ sessionId: SID });
+			expect((yield* Queue.take(q))._tag).toBe("snapshot");
+			expect(yield* Queue.take(q)).toEqual({ _tag: "synchronized" });
+			yield* commit([
+				canonicalEvent("message.removed", SID, { messageId: "gone" }),
+			]);
+			expect(yield* Queue.take(q)).toEqual({
+				_tag: "remove",
+				id: "gone",
+				sequence: yield* readModelVersion,
+			});
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 

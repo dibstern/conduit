@@ -132,6 +132,8 @@ describe("MessageProjector", () => {
 		expect(projector.name).toBe("message");
 		expect(projector.handles).toEqual([
 			"message.created",
+			"message.removed",
+			"message.part.removed",
 			"message.snapshot",
 			"text.delta",
 			"thinking.start",
@@ -145,6 +147,89 @@ describe("MessageProjector", () => {
 			"turn.error",
 			"session.compaction",
 		]);
+	});
+
+	it("removes an imported message, its parts and turn references, and records a tombstone", async () => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, rest_digest, created_at, updated_at) VALUES ('m1', 's1', 'user', 'digest', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, sort_order, created_at, updated_at) VALUES ('p1', 'm1', 'text', 0, 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO turns (id, session_id, user_message_id, requested_at) VALUES ('t1', 's1', 'm1', 1)",
+		);
+		await project(makeStored("message.removed", "s1", { messageId: "m1" }));
+		expect(
+			await harness.query("SELECT id FROM messages WHERE id = 'm1'"),
+		).toEqual([]);
+		expect(
+			await harness.query("SELECT id FROM message_parts WHERE id = 'p1'"),
+		).toEqual([]);
+		expect(
+			await queryOne<{ user_message_id: string | null }>(
+				"SELECT user_message_id FROM turns WHERE id = 't1'",
+			),
+		).toEqual({ user_message_id: null });
+		expect(
+			await queryOne<{
+				session_id: string;
+				message_id: string;
+				version: number;
+			}>(
+				"SELECT session_id, message_id, version FROM message_tombstones WHERE message_id = 'm1'",
+			),
+		).toEqual({ session_id: "s1", message_id: "m1", version: 1 });
+	});
+
+	it("removes a part and advances the surviving message", async () => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, text, rest_digest, rest_payload, created_at, updated_at) VALUES ('m1', 's1', 'assistant', 'gonekeep', 'digest', '{}', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p1', 'm1', 'text', 'gone', 0, 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p2', 'm1', 'text', 'keep', 1, 1, 1)",
+		);
+		await project(
+			makeStored("message.part.removed", "s1", {
+				messageId: "m1",
+				partId: "p1",
+			}),
+		);
+		expect(
+			await harness.query(
+				"SELECT id FROM message_parts WHERE message_id = 'm1'",
+			),
+		).toEqual([{ id: "p2" }]);
+		expect(
+			await queryOne<{
+				text: string;
+				version: number;
+				rest_payload: string | null;
+			}>("SELECT text, version, rest_payload FROM messages WHERE id = 'm1'"),
+		).toEqual({ text: "keep", version: 1, rest_payload: null });
+	});
+
+	it("a recreated message supersedes its tombstone", async () => {
+		await project(makeStored("message.removed", "s1", { messageId: "m1" }));
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{ messageId: "m1", partId: "p1", text: "back" },
+				2,
+			),
+		);
+		expect(
+			await harness.query("SELECT id FROM messages WHERE id = 'm1'"),
+		).toEqual([{ id: "m1" }]);
+		expect(
+			await harness.query(
+				"SELECT message_id FROM message_tombstones WHERE message_id = 'm1'",
+			),
+		).toEqual([]);
 	});
 
 	it.each([

@@ -313,7 +313,14 @@ export interface ReadQueryEffect {
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
 	) => Effect.Effect<
-		{ readonly messages: MessageWithParts[]; readonly version: number },
+		{
+			readonly messages: MessageWithParts[];
+			readonly version: number;
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
+		},
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -901,7 +908,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
 	): Effect.Effect<
-		{ readonly messages: MessageWithParts[]; readonly version: number },
+		{
+			readonly messages: MessageWithParts[];
+			readonly version: number;
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
+		},
 		ReadQueryEffectError | SqlError
 	> =>
 		sql
@@ -928,10 +942,21 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							JOIN target_messages tm ON mp.message_id = tm.id
 							ORDER BY mp.message_id, mp.sort_order`;
 					}
+					const removed =
+						range === undefined
+							? undefined
+							: yield* sql<{
+									id: string;
+									version: number;
+								}>`SELECT message_id AS id, version FROM message_tombstones
+						WHERE session_id = ${sessionId}
+						AND version > ${floor} AND version <= ${ceiling}
+						ORDER BY version, message_id`;
 
 					return {
 						messages: groupMessagesWithParts(messages, parts),
 						version,
+						...(removed === undefined ? {} : { removed }),
 					};
 				}),
 			)

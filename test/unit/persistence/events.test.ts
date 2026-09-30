@@ -19,7 +19,7 @@ import {
 
 describe("Canonical Event Types", () => {
 	it("exports all 37 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(37);
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(39);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("message.snapshot");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");

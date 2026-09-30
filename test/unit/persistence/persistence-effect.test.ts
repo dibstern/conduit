@@ -138,6 +138,7 @@ describe("Persistence Effect", () => {
 					"command_receipts",
 					"events",
 					"message_parts",
+					"message_tombstones",
 					"messages",
 					"pending_approvals",
 					"projection_failures",
@@ -274,6 +275,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 26, name: "sessions_forked_from" },
 				{ migration_id: 27, name: "messages_backfilled" },
 				{ migration_id: 28, name: "sessions_history_complete" },
+				{ migration_id: 29, name: "message_tombstones" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

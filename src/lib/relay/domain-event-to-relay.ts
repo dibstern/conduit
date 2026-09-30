@@ -194,6 +194,8 @@ export function translateDomainEventToRelay(
 		}
 
 		case "message.created":
+		case "message.removed":
+		case "message.part.removed":
 		case "file.attached":
 		case "session.created":
 		case "session.renamed":

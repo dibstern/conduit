@@ -38,6 +38,8 @@ export type MessageRole = (typeof MESSAGE_ROLES)[number];
 
 export const CANONICAL_EVENT_TYPES = [
 	"message.created",
+	"message.removed",
+	"message.part.removed",
 	"message.snapshot",
 	"text.delta",
 	"thinking.start",
@@ -89,6 +91,15 @@ export interface MessageCreatedPayload {
 	/** Imported from the provider's own record rather than observed streaming
 	 *  (OpenCode history backfill, conduit-test-iea). */
 	readonly backfilled?: true;
+}
+
+export interface MessageRemovedPayload {
+	readonly messageId: string;
+}
+
+export interface MessagePartRemovedPayload {
+	readonly messageId: string;
+	readonly partId: string;
 }
 
 /** A settled OpenCode REST message, including its ordered provider parts. */
@@ -383,6 +394,8 @@ export interface QuestionResolvedPayload {
  */
 export interface EventPayloadMap {
 	"message.created": MessageCreatedPayload;
+	"message.removed": MessageRemovedPayload;
+	"message.part.removed": MessagePartRemovedPayload;
 	"message.snapshot": MessageSnapshotPayload;
 	"text.delta": TextDeltaPayload;
 	"thinking.start": ThinkingStartPayload;
@@ -527,6 +540,14 @@ const MessageCreatedPayloadSchema = Schema.Struct({
 	parentID: Schema.optionalWith(Schema.String, { exact: true }),
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
 	backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+});
+
+const MessageRemovedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+});
+const MessagePartRemovedPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	partId: Schema.String,
 });
 
 const MessageSnapshotPayloadSchema = Schema.Struct({
@@ -875,6 +896,14 @@ const MessageCreatedEventSchema = eventEnvelope(
 	"message.created",
 	MessageCreatedPayloadSchema,
 );
+const MessageRemovedEventSchema = eventEnvelope(
+	"message.removed",
+	MessageRemovedPayloadSchema,
+);
+const MessagePartRemovedEventSchema = eventEnvelope(
+	"message.part.removed",
+	MessagePartRemovedPayloadSchema,
+);
 const MessageSnapshotEventSchema = eventEnvelope(
 	"message.snapshot",
 	MessageSnapshotPayloadSchema,
@@ -1024,6 +1053,8 @@ const QuestionResolvedEventSchema = eventEnvelope(
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
+	MessageRemovedEventSchema,
+	MessagePartRemovedEventSchema,
 	MessageSnapshotEventSchema,
 	TextDeltaEventSchema,
 	ThinkingStartEventSchema,

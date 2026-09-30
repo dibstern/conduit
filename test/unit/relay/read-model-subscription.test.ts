@@ -148,6 +148,36 @@ const withBus = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.provide(effect, SessionEventBusLive);
 
 describe("ReadModelSubscription", () => {
+	it.scoped("replays a tombstone at its own version on catch-up resume", () =>
+		withBus(
+			Effect.gen(function* () {
+				const bus = yield* SessionEventBusTag;
+				const source: SubscriptionSource<Row> = {
+					read: (range) =>
+						Effect.succeed({
+							rows: [],
+							version: 7,
+							...(range === undefined
+								? {}
+								: { removed: [{ id: "gone", version: 6 }] }),
+						}),
+					route: () => ({ moved: true, removed: [] }),
+					resume: "catchUp",
+				};
+				const { queue } = yield* subscribe({
+					source,
+					bus,
+					resumeFromSequence: 5,
+				});
+				expect(yield* Queue.take(queue)).toEqual({
+					_tag: "remove",
+					id: "gone",
+					sequence: 6,
+				});
+				expect(yield* Queue.take(queue)).toEqual({ _tag: "synchronized" });
+			}),
+		),
+	);
 	it.scoped("preserves page info on cold and overflow snapshots", () =>
 		withBus(
 			Effect.gen(function* () {

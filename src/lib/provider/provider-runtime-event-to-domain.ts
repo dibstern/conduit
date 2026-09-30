@@ -40,6 +40,38 @@ export function translateProviderRuntimeEventToDomain(
 } {
 	const data = dataRecord(event);
 
+	if (event.type === "message.removed") {
+		return {
+			events: [
+				canonicalEvent(
+					"message.removed",
+					event.sessionId,
+					{
+						messageId: messageIdFromData(event, data),
+					},
+					eventOptions(event),
+				),
+			],
+			state,
+		};
+	}
+	if (event.type === "message.part.removed") {
+		return {
+			events: [
+				canonicalEvent(
+					"message.part.removed",
+					event.sessionId,
+					{
+						messageId: messageIdFromData(event, data),
+						partId: partIdFromData(event, data),
+					},
+					eventOptions(event),
+				),
+			],
+			state,
+		};
+	}
+
 	if (event.type === "message.snapshot") {
 		if (!isSnapshotPayload(event.data)) {
 			throw new TypeError("Invalid OpenCode message snapshot");

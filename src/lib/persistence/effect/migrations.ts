@@ -11,6 +11,7 @@ import {
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
@@ -356,6 +357,7 @@ const preDurableProviderCommandTableNames =
 const postBaselineTableNames = new Set<string>([
 	"read_model_counter", // 0013
 	"sent_alerts", // 0015
+	"message_tombstones", // 0029
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -1036,6 +1038,9 @@ export const effectMigrationEntries = {
 			readMigrationSql(SESSIONS_HISTORY_COMPLETE_MIGRATION),
 		);
 	}),
+	"0029_message_tombstones": executeSqlStatements(
+		readMigrationSql(MESSAGE_TOMBSTONES_MIGRATION),
+	),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
 
 /**

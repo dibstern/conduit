@@ -17,8 +17,8 @@
 //
 // The commit seam publishes advances in commit order. Bounded reads cannot
 // retire queued removals; each upsert retains its row version for resume dedup.
-// A dropped bus publication forces a fresh snapshot because deleted rows cannot
-// be recovered from a version query.
+// A dropped bus publication forces a fresh snapshot for sources whose live
+// removal signal may have been lost.
 
 import { Effect, Ref, type Schema, Stream } from "effect";
 import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
@@ -85,6 +85,11 @@ export interface SubscriptionSource<T, E = never> {
 			readonly version: number;
 			readonly hasMore?: boolean;
 			readonly cursor?: string;
+			/** Tombstones in a ranged read; a base snapshot represents absence directly. */
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
 		},
 		E
 	>;
@@ -93,26 +98,45 @@ export interface SubscriptionSource<T, E = never> {
 	/**
 	 * How a resume is served.
 	 *
-	 * `catchUp` — the rows that moved past the client's cursor are enough, each
-	 * replayed at its OWN version so it keeps the identity it had when it was
-	 * first delivered. Only an append-only source may say this: a removed row
-	 * leaves no version behind, so a source whose rows can disappear would
-	 * resume a client that still shows something that is gone.
+	 * `catchUp` — ranged reads return every surviving changed row and every
+	 * removal past the cursor, each at its own version. Sources with deletions
+	 * need durable tombstones to provide that history.
 	 *
 	 * `rebase` — re-read the whole set and send it as a fresh base. Absence is
-	 * the removal, which is exactly the gap `catchUp` cannot close.
+	 * the removal.
 	 */
 	readonly resume: "catchUp" | "rebase";
 }
 
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
+const deltaEnvelopes = <T>(
+	rows: readonly VersionedRow<T>[],
+	removed: readonly { readonly id: string; readonly version: number }[],
+): Envelope<T>[] =>
+	[
+		...removed.map(({ id, version }) => ({
+			_tag: "remove" as const,
+			id,
+			sequence: version,
+		})),
+		...rows.map(({ item, version }) => ({
+			_tag: "upsert" as const,
+			item,
+			sequence: version,
+		})),
+	].sort(
+		(left, right) =>
+			left.sequence - right.sequence ||
+			Number(right._tag === "remove") - Number(left._tag === "remove"),
+	);
+
 /**
  * Produce one ordered subscription stream from a {@link SubscriptionSource}.
  *
  * - Cold start (`resumeFromSequence` undefined): `snapshot` → `synchronized` →
  *   live upserts and removes.
- * - Resume, `catchUp` source: one upsert per row that moved past the cursor, in
+ * - Resume, `catchUp` source: one delta per row or tombstone past the cursor, in
  *   version order and at its own version → `synchronized` → live. No base
  *   envelope; the client already holds one.
  * - Resume, `rebase` source: a fresh `snapshot` → `synchronized` → live.
@@ -147,17 +171,7 @@ export const stream = <T, E = never>(options: {
 			const baseFloor = yield* Ref.make(base.version);
 
 			const opening: Envelope<T>[] = catchUp
-				? // Each replayed row keeps the sequence it was first delivered at, so
-					// a client that already saw it recognises it as the same envelope
-					// rather than a new one. Version order keeps the replay monotonic;
-					// the sort is stable, so rows sharing a version keep read order.
-					[...base.rows]
-						.sort((left, right) => left.version - right.version)
-						.map(({ item, version }) => ({
-							_tag: "upsert" as const,
-							item,
-							sequence: version,
-						}))
+				? deltaEnvelopes(base.rows, base.removed ?? [])
 				: [
 						{
 							_tag: "snapshot" as const,
@@ -206,32 +220,22 @@ export const stream = <T, E = never>(options: {
 						const sequence = advance.version;
 						// A removal also closes this window, so catch up every row before
 						// moving the watermark past it.
-						const rows = (yield* options.source.read({
+						const window = yield* options.source.read({
 							after: lastSeen,
 							through: advance.version,
-						})).rows;
+						});
 						yield* Ref.set(seen, sequence);
 
 						// Removals first: within a group the client should drop before it
 						// adds, so a delete and a re-create that land together settle on
 						// the row that survived.
-						const envelopes = [
+						return deltaEnvelopes(window.rows, [
 							...route.removed.map((id) => ({
-								_tag: "remove" as const,
 								id,
-								sequence,
+								version: sequence,
 							})),
-							...rows.map(({ item, version }) => ({
-								_tag: "upsert" as const,
-								item,
-								sequence: version,
-							})),
-						];
-						// Rows may span several projection batches in one commit. Keep
-						// their replay identity and version order; removals lead ties.
-						return envelopes.sort(
-							(left, right) => left.sequence - right.sequence,
-						);
+							...(window.removed ?? []),
+						]);
 					}),
 			);
 

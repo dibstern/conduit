@@ -9,11 +9,8 @@
 // a delta here is a projected transcript message and not the raw event that
 // caused it. The transcript is durable, so it also outlives event eviction.
 //
-// Detail is APPEND-ONLY: it emits `upsert` only, never `remove`. Its rows are
-// keyed by message id and an advance speaks in sessions, so a removal has no id
-// to name here; the session's own disappearance is the shell's to report.
-// Resume is therefore a catch-up — the version alone is enough, which is the
-// case the shell cannot make.
+// Ranged reads include tombstones, so catch-up can report messages removed
+// while the client was away. The session's disappearance is the shell's to report.
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Stream } from "effect";
@@ -101,6 +98,12 @@ export const subscribeSessionDetail = (options: {
 									version: result.messages[index]?.version ?? result.version,
 								})),
 								version: result.version,
+								...(range === undefined
+									? {}
+									: {
+											removed:
+												"removed" in result ? (result.removed ?? []) : [],
+										}),
 								...(page === undefined
 									? {}
 									: {
