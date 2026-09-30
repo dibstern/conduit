@@ -15,6 +15,18 @@ vi.mock(
 	() => import("../../helpers/Empty.svelte"),
 );
 
+beforeEach(() => {
+	vi.stubGlobal(
+		"ResizeObserver",
+		class {
+			observe() {}
+			disconnect() {}
+		},
+	);
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
 describe("MessageList session-view publication", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();

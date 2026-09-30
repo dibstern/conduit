@@ -364,7 +364,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		await new AppPage(page).goto(relayUrl);
 		const bar = page.getByTestId("session-bar");
-		const overflow = page.getByTestId("session-bar-overflow");
+		const overflow = page.getByTestId("session-bar-island-overflow");
 		const viewsButton = page.getByTestId("session-bar-views-button");
 		const titleChevron = page.getByTestId("session-bar-title-menu");
 		const menu = page.getByTestId("session-bar-views-sheet");
@@ -437,7 +437,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 			const spacer = document.createElement("div");
 			spacer.style.height = "1200px";
 			element.firstElementChild?.append(spacer);
+		});
+		await page.evaluate(() => new Promise(requestAnimationFrame));
+		await messages.evaluate((element) => {
 			element.scrollTop = 180;
+			element.dispatchEvent(new Event("scroll"));
 		});
 		await expect(page.locator("#messages #scroll-btn")).toBeVisible();
 		await messages.evaluate((element) => {
@@ -454,12 +458,12 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const collapsedBefore = await bar.boundingBox();
 		await expect(viewsButton).toHaveCount(0);
 		await overflow.click();
-		const overflowMenu = page.getByTestId("session-bar-overflow-menu");
+		const overflowMenu = page.getByTestId("session-bar-island-menu");
 		await expect(
-			overflowMenu.getByRole("menuitem", { name: "Chat" }),
+			overflowMenu.getByRole("menuitemradio", { name: "Chat" }),
 		).toBeVisible();
 		await expect(
-			overflowMenu.getByRole("menuitem", { name: "Files" }),
+			overflowMenu.getByRole("menuitemradio", { name: "Files" }),
 		).toBeVisible();
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
 		expect(await bar.boundingBox()).toEqual(collapsedBefore);
@@ -552,6 +556,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 		const messages = page.locator("#messages");
 		await messages.evaluate((element) => {
+			const probe = document.createElement("div");
+			probe.dataset["testid"] = "transcript-position-probe";
+			probe.style.height = "1px";
+			probe.style.marginTop = "360px";
+			element.firstElementChild?.prepend(probe);
 			const spacer = document.createElement("div");
 			spacer.style.height = "1200px";
 			element.firstElementChild?.append(spacer);
@@ -559,6 +568,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		});
 		const scrollTop = await messages.evaluate((element) => element.scrollTop);
 		expect(scrollTop).toBeGreaterThan(0);
+		const probe = page.getByTestId("transcript-position-probe");
+		const probeBefore = await probe.boundingBox();
 		await viewsButton.click();
 		await terminal.click();
 		await expect(sheet).toBeHidden();
@@ -567,9 +578,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(terminal).toHaveAttribute("aria-checked", "true");
 		await chat.click();
 		await expect(messages).toBeVisible();
-		expect(await messages.evaluate((element) => element.scrollTop)).toBe(
-			scrollTop,
-		);
+		const probeAfter = await probe.boundingBox();
+		expect(probeBefore && probeAfter).not.toBeNull();
+		expect(
+			Math.abs((probeAfter?.y ?? 0) - (probeBefore?.y ?? 0)),
+		).toBeLessThanOrEqual(1);
 
 		await viewsButton.click();
 		await files.click();
@@ -697,7 +710,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		});
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
 		await expect(viewsButton).toHaveCount(0);
-		await expect(page.getByTestId("session-bar-overflow")).toBeVisible();
+		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
 	});
 
 	test("mobile: visible list and projects controls have 44px touch targets", async ({

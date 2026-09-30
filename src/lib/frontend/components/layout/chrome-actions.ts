@@ -8,6 +8,7 @@
  */
 
 import { getBrowserClientId } from "../../stores/client-identity.js";
+import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
 import {
 	beginCreateTab,
@@ -30,6 +31,35 @@ export function shareViaQr(): void {
 
 export function toggleDebugPanel(): void {
 	window.dispatchEvent(new CustomEvent("debug:toggle"));
+}
+
+export type ChromeMenuAction = {
+	id: "share" | "settings" | "debug";
+	label: string;
+	icon: "share" | "settings" | "bug";
+	run: () => void;
+};
+
+export function chromeMenuActions(): readonly ChromeMenuAction[] {
+	return [
+		{ id: "share", label: "Share", icon: "share", run: shareViaQr },
+		{
+			id: "settings",
+			label: "Settings",
+			icon: "settings",
+			run: () => openSettings(),
+		},
+		...(featureFlags.debug
+			? [
+					{
+						id: "debug" as const,
+						label: "Debug panel",
+						icon: "bug" as const,
+						run: toggleDebugPanel,
+					},
+				]
+			: []),
+	];
 }
 
 /**

@@ -216,7 +216,7 @@ export function createScrollController(
 			}
 		},
 
-		// Anti-oscillation: collapsing the bar changes the container height and can
+		// Anti-oscillation: resizing can change the container height and can
 		// fire a scroll event. Re-pin through scrollToBottom() so it consumes a
 		// programmaticScrollCount slot and is never counted as user intent.
 		// This is the single most likely thing a future reader deletes as redundant.

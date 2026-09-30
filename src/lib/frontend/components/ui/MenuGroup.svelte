@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { DropdownMenu, type DropdownMenuGroupProps } from "bits-ui";
-	import type { Snippet } from "svelte";
+	import { getContext, type Snippet } from "svelte";
 	import { FLOATING_ITEM_PADDING_CLASSES } from "./floating-styles.js";
+	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 
 	type MenuGroupProps = {
 		label: string;
@@ -18,6 +19,7 @@
 		children,
 		...rest
 	}: MenuGroupProps = $props();
+	const menuDensity = getContext<MenuDensityContext | undefined>(menuDensityContextKey);
 
 	const groupProps: Omit<
 		DropdownMenuGroupProps,
@@ -34,7 +36,9 @@
 			<div
 				{...props}
 				role="presentation"
-				class={`${FLOATING_ITEM_PADDING_CLASSES} text-xs font-medium text-text-muted`}
+				class={menuDensity?.() === "sheet"
+					? "px-4 pb-[5px] pt-[10px] font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.1em] text-text-muted"
+					: `${FLOATING_ITEM_PADDING_CLASSES} text-xs font-medium text-text-muted`}
 			>
 				{label}
 			</div>

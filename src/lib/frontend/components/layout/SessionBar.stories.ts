@@ -306,6 +306,7 @@ export const WithInstanceBadge: Story = {
  * and Views sheets.
  */
 export const OverflowMenuOpen: Story = {
+	args: { island: true },
 	// The menu portals to <body>, so the capture has to frame the page.
 	tags: ["viewport-capture"],
 	beforeEach: () => {
@@ -315,25 +316,24 @@ export const OverflowMenuOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("session-bar-overflow"));
+		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
 
 		const menu = await within(document.body).findByTestId(
-			"session-bar-overflow-menu",
+			"session-bar-island-menu",
 		);
-		for (const name of [
-			"Chat",
-			"Terminal",
-			"Diff",
-			"Files",
-			"Share",
-			"Settings",
-		]) {
-			await expect(within(menu).getByRole("menuitem", { name })).toBeVisible();
+		for (const name of ["Chat", "Terminal", "Diff", "Files"]) {
+			await expect(
+				within(menu).getByRole("menuitemradio", { name }),
+			).toBeVisible();
 		}
+		await expect(within(menu).getByTestId("session-ctx-snooze")).toBeVisible();
+		await expect(within(menu).getByTestId("session-ctx-delete")).toBeVisible();
+		for (const name of ["Share", "Settings"])
+			await expect(within(menu).getByRole("menuitem", { name })).toBeVisible();
 		await expect(menu).toHaveClass(/bottom-0/);
 		await expect(
-			within(menu).getByRole("menuitem", { name: "Chat" }),
-		).toHaveAttribute("aria-current", "true");
+			within(menu).getByRole("menuitemradio", { name: "Chat" }),
+		).toHaveAttribute("aria-checked", "true");
 		// Debug is behind its feature flag.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
 	},
@@ -363,6 +363,7 @@ export const TitleChevronSheet: Story = {
  * view switcher is not duplicated here.
  */
 export const Collapsed: Story = {
+	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
@@ -376,7 +377,7 @@ export const Collapsed: Story = {
 		// from the design, so they are measured rather than inferred from class
 		// names: `min-h-[44px]` and a 46px row are both claims about pixels.
 		expect(bar.getBoundingClientRect().height).toBe(46);
-		for (const id of ["session-bar-expand", "session-bar-overflow"]) {
+		for (const id of ["session-bar-expand", "session-bar-island-overflow"]) {
 			const box = canvas.getByTestId(id).getBoundingClientRect();
 			expect(box.height).toBeGreaterThanOrEqual(44);
 			expect(box.width).toBeGreaterThanOrEqual(44);
@@ -397,7 +398,7 @@ export const Collapsed: Story = {
 		// The word goes but the accessible name does not — this is the only way
 		// off the screen.
 		const back = canvas.getByRole("button", { name: /Sessions/ });
-		expect(back.getBoundingClientRect().width).toBeLessThan(44);
+		expect(back.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
 	},
 };
 

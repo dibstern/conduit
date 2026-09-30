@@ -4,7 +4,7 @@
 <!-- Instances, Debug.                                                      -->
 
 <script lang="ts">
-	import Modal from "./Modal.svelte";
+  import Dialog from "../ui/Dialog.svelte";
 	import { untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -557,7 +557,7 @@
 	</div>
 {/snippet}
 
-<Modal open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle">
+<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle">
 		<div id="settings-panel" class="bg-bg border border-border rounded-xl shadow-2xl max-w-lg w-[calc(100vw-2rem)] mx-4 flex flex-col max-h-[80vh]">
 			<!-- Header -->
 			<div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
@@ -1000,4 +1000,4 @@
 				{/if}
 			</div>
 		</div>
-</Modal>
+</Dialog>

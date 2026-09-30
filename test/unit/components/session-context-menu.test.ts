@@ -202,14 +202,19 @@ describe("session triage menu", () => {
 	});
 
 	it("changes or removes an existing snooze", async () => {
-		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
+		const anchor = document.createElement("button");
+		document.body.append(anchor);
+		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 }, { anchor });
 		const change = await screen.findByTestId("session-ctx-snooze");
 		expect(change.textContent).toContain("Change snooze…");
 		await fireEvent.click(change);
 		expect(openSnoozePicker).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "a" }),
 			"center",
+			expect.any(Function),
 		);
+		expect(vi.mocked(openSnoozePicker).mock.calls[0]?.[2]?.()).toBe(anchor);
+		anchor.remove();
 		// Re-open with the same snoozed state.
 		cleanup();
 		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });

@@ -58,7 +58,7 @@
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
-	import { FILES_PANE_MIN_WIDTH, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
+	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -97,6 +97,7 @@
 	/** Visual viewport height — tracks keyboard show/hide on mobile. */
 	let vvHeight = $state<number | null>(null);
 	let appEl: HTMLDivElement | undefined = $state(undefined);
+	let chromeHeight = $state(0);
 	let sessionListScrollTop = 0;
 	let wasPhoneListScreen = false;
 
@@ -116,6 +117,7 @@
 			!mobileMaximized
 		);
 	});
+	const topClearance = $derived(sessionViewState.compact && !phoneListScreen ? chromeHeight : 0);
 
 	const layoutClass = $derived.by(() => {
 		let cls = "flex h-dvh";
@@ -719,46 +721,49 @@
 		id="app"
 		class="flex-1 flex flex-col min-w-0 relative pt-[env(safe-area-inset-top,0px)]"
 		class:h-full={!vvHeight}
+		class:phone-session={sessionViewState.compact && !phoneListScreen}
 		class:select-none={isResizing || isSidebarResizing || isPaneResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<!-- The list screen has its own bar in Sidebar; keep one session bar
-		     mounted across breakpoint changes so its state follows the viewport. -->
-		{#if !phoneListScreen}<SessionBar />{/if}
+		<div id="session-chrome" bind:offsetHeight={chromeHeight}>
+			<!-- The list screen has its own bar in Sidebar; keep one session bar
+			     mounted across breakpoint changes so its state follows the viewport. -->
+			{#if !phoneListScreen}<SessionBar />{/if}
 
-		<!-- Banners (update available, skip permissions, etc.). The phone list
-		     screen hides #app, so Sidebar shows them there instead. -->
-		{#if !phoneListScreen}<Banners />{/if}
+			<!-- Banners (update available, skip permissions, etc.). The phone list
+			     screen hides #app, so Sidebar shows them there instead. -->
+			{#if !phoneListScreen}<Banners />{/if}
 
-		<!-- Todo Sticky Overlay -->
-		<TodoOverlay items={todoItems} />
+			<!-- Todo Sticky Overlay -->
+			<TodoOverlay items={todoItems} />
 
-		<!-- Plan Mode UI -->
-		{#if planModeData.mode}
-			<PlanMode
-				mode={planModeData.mode}
-				content={planModeData.content}
-				{...planModeData.onApprove != null ? { onApprove: planModeData.onApprove } : {}}
-				{...planModeData.onReject != null ? { onReject: planModeData.onReject } : {}}
-			/>
-		{/if}
+			<!-- Plan Mode UI -->
+			{#if planModeData.mode}
+				<PlanMode
+					mode={planModeData.mode}
+					content={planModeData.content}
+					{...planModeData.onApprove != null ? { onApprove: planModeData.onApprove } : {}}
+					{...planModeData.onReject != null ? { onReject: planModeData.onReject } : {}}
+				/>
+			{/if}
 
-		<!-- Rewind Banner -->
-		{#if uiState.rewindActive}
-			<RewindBanner />
-		{/if}
+			<!-- Rewind Banner -->
+			{#if uiState.rewindActive}
+				<RewindBanner />
+			{/if}
+		</div>
 
 		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
-		<div class="relative flex flex-1 min-h-0 min-w-0">
+		<div class="relative flex flex-1 min-h-0 min-w-0" style={`--phone-chrome-clearance: ${topClearance}px`}>
 			<div bind:this={paneRowEl} class="relative flex flex-1 min-h-0 min-w-0">
 				<!-- Lift horizontal clipping while the in-DOM 404px model picker overhangs a narrow chat column. -->
-				<div class="flex flex-col flex-1 min-h-0 min-w-0 has-[#model-picker]:overflow-x-visible" class:overflow-x-clip={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded} class:relative={!filesPaneExpanded} class:absolute={filesPaneExpanded} class:inset-0={filesPaneExpanded} class:invisible={filesPaneExpanded} inert={filesPaneExpanded} style:min-width={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded ? `${CHAT_MIN_WIDTH}px` : undefined}>
+				<div id="chat-area" class="flex flex-col flex-1 min-h-0 min-w-0 has-[#model-picker]:overflow-x-visible" class:overflow-x-clip={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded} class:relative={!filesPaneExpanded} class:absolute={filesPaneExpanded} class:inset-0={filesPaneExpanded} class:invisible={filesPaneExpanded} class:island-transcript={isBarCollapsed() && phoneView === "chat"} inert={filesPaneExpanded} style:min-width={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded ? `${CHAT_MIN_WIDTH}px` : undefined}>
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized}>
-						<MessageList />
+						<MessageList {topClearance} />
 						<InputArea />
 					</div>
 					{#if sessionViewState.compact && sessionViewState.filesEverOpened}
-						<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={phoneView !== "files"} inert={phoneView !== "files"}>
+						<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={phoneView !== "files"} inert={phoneView !== "files"} style:padding-top="var(--phone-chrome-clearance)">
 							<SidebarFilePanel onClose={() => { setFilesOpen(false); }} />
 						</div>
 					{/if}
@@ -776,7 +781,7 @@
 								<div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-accent/50 transition-colors"></div>
 							</div>
 						{/if}
-						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "" : `height: ${terminalHeight}px;`}>
+						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "padding-top: var(--phone-chrome-clearance);" : `height: ${terminalHeight}px;`}>
 							<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
 						</div>
 					{/if}

@@ -7,7 +7,7 @@
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
 	import Radio from "../ui/Radio.svelte";
-	import Modal from "./Modal.svelte";
+  import Dialog from "../ui/Dialog.svelte";
 	import {
 		uiState,
 		exitRewindMode,
@@ -93,7 +93,7 @@
 	</div>
 {/if}
 
-<Modal open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
+<Dialog open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
 		<Surface
 			variant="raised"
 			radius="lg"
@@ -166,4 +166,4 @@
 				</Button>
 			</div>
 		</Surface>
-</Modal>
+</Dialog>

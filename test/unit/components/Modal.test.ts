@@ -4,7 +4,30 @@ import ModalDemo from "../../../src/lib/frontend/components/ui/__fixtures__/Moda
 import OverlappingModals from "./fixtures/OverlappingModals.svelte";
 
 describe("Modal", () => {
+	let nativeOpeners: WeakMap<HTMLDialogElement, HTMLElement | null>;
 	beforeEach(() => {
+		nativeOpeners = new WeakMap();
+		vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(
+			function (this: HTMLDialogElement) {
+				nativeOpeners.set(
+					this,
+					document.activeElement instanceof HTMLElement
+						? document.activeElement
+						: null,
+				);
+				this.open = true;
+				const first = this.querySelector<HTMLElement>(
+					'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+				);
+				(first ?? this).focus();
+			},
+		);
+		vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function (
+			this: HTMLDialogElement,
+		) {
+			this.open = false;
+			nativeOpeners.get(this)?.focus();
+		});
 		vi.spyOn(Element.prototype, "getClientRects").mockReturnValue({
 			length: 1,
 		} as unknown as DOMRectList);
@@ -43,7 +66,7 @@ describe("Modal", () => {
 		const dialog = getByRole("dialog", { name: "Modal title" });
 		const heading = getByRole("heading", { name: "Modal title", level: 2 });
 
-		expect(dialog.getAttribute("aria-modal")).toBe("true");
+		expect((dialog as HTMLDialogElement).open).toBe(true);
 		expect(heading.id).not.toBe("");
 		expect(dialog.getAttribute("aria-labelledby")).toBe(heading.id);
 	});
@@ -93,7 +116,10 @@ describe("Modal", () => {
 			props: { initiallyOpen: true },
 		});
 
-		await fireEvent.keyDown(document, { key: "Escape" });
+		await fireEvent(
+			getByRole("dialog"),
+			new Event("cancel", { cancelable: true }),
+		);
 
 		expect(queryByRole("dialog")).toBeNull();
 		expect(getByRole("button", { name: "Open modal" })).toBeTruthy();
@@ -105,23 +131,26 @@ describe("Modal", () => {
 			props: { initiallyOpen: true, onclose },
 		});
 
-		await fireEvent.keyDown(document, { key: "Escape" });
+		await fireEvent(
+			getByRole("dialog"),
+			new Event("cancel", { cancelable: true }),
+		);
 
 		expect(onclose).toHaveBeenCalledOnce();
 		expect(getByRole("dialog")).toBeTruthy();
 	});
 
-	it("stays open when an unprevented Bits close is refused by the parent", async () => {
+	it("stays open when a child close is refused by the parent", async () => {
 		const onclose = vi.fn();
 		const { getByRole } = render(ModalDemo, {
 			props: {
 				initiallyOpen: true,
 				onclose,
-				withBitsClose: true,
+				withChildClose: true,
 			},
 		});
 
-		await fireEvent.click(getByRole("button", { name: "Close through Bits" }));
+		await fireEvent.click(getByRole("button", { name: "Close through child" }));
 
 		expect(onclose).toHaveBeenCalledOnce();
 		expect(getByRole("dialog")).toBeTruthy();
@@ -133,21 +162,11 @@ describe("Modal", () => {
 			props: { initiallyOpen: true, onclose },
 		});
 		const dialog = getByRole("dialog");
-		const backdrop = document.querySelector<HTMLElement>(
-			"[data-dialog-overlay]",
-		);
-
-		expect(backdrop).not.toBeNull();
-		await new Promise((resolve) => setTimeout(resolve, 10));
-		await fireEvent.pointerDown(dialog, { button: 0, pointerType: "mouse" });
+		const panel = dialog.firstElementChild as HTMLElement;
+		await fireEvent.click(panel);
 		expect(onclose).not.toHaveBeenCalled();
-
-		await fireEvent.pointerDown(backdrop as HTMLElement, {
-			button: 0,
-			pointerType: "mouse",
-			clientX: 0,
-			clientY: 0,
-		});
+		// ::backdrop reports the native dialog as the click target.
+		await fireEvent.click(dialog);
 
 		await waitFor(() => expect(onclose).toHaveBeenCalledOnce());
 	});
@@ -158,20 +177,8 @@ describe("Modal", () => {
 			props: { initiallyOpen: true, dismissible: false, onclose },
 		});
 		const dialog = getByRole("dialog");
-		const backdrop = document.querySelector<HTMLElement>(
-			"[data-dialog-overlay]",
-		);
-
-		expect(backdrop).not.toBeNull();
-		await fireEvent.keyDown(document, { key: "Escape" });
-		await new Promise((resolve) => setTimeout(resolve, 10));
-		await fireEvent.pointerDown(backdrop as HTMLElement, {
-			button: 0,
-			pointerType: "mouse",
-			clientX: 0,
-			clientY: 0,
-		});
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		await fireEvent(dialog, new Event("cancel", { cancelable: true }));
+		await fireEvent.click(dialog);
 		expect(onclose).not.toHaveBeenCalled();
 		expect(getByRole("dialog")).toBe(dialog);
 
@@ -213,62 +220,47 @@ describe("Modal", () => {
 		await waitFor(() => expect(document.activeElement).toBe(trigger));
 	});
 
-	it("makes the background inert while open and restores it on close", async () => {
+	it("opens and closes through the native modal dialog", async () => {
 		const { getByRole } = render(ModalDemo);
 		const trigger = getByRole("button", { name: "Open modal" });
 
-		expect(trigger.hasAttribute("inert")).toBe(false);
-		expect(trigger.hasAttribute("aria-hidden")).toBe(false);
-
 		await fireEvent.click(trigger);
-
-		expect(trigger.hasAttribute("inert")).toBe(true);
-		expect(trigger.getAttribute("aria-hidden")).toBe("true");
+		const dialog = getByRole("dialog") as HTMLDialogElement;
+		expect(dialog.open).toBe(true);
 
 		await fireEvent.click(getByRole("button", { name: "Close" }));
 
-		expect(trigger.hasAttribute("inert")).toBe(false);
-		expect(trigger.hasAttribute("aria-hidden")).toBe(false);
+		expect(dialog.open).toBe(false);
 	});
 
-	it("never inerts portaled dialog content", () => {
+	it("keeps both native dialogs open when they overlap", () => {
 		const view = render(OverlappingModals);
 
-		const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+		const dialogs = document.querySelectorAll<HTMLDialogElement>("dialog");
 		expect(dialogs).toHaveLength(2);
-		const overlays = document.querySelectorAll<HTMLElement>(
-			"[data-dialog-overlay]",
-		);
-		expect(overlays).toHaveLength(2);
-		for (const portalElement of [...dialogs, ...overlays]) {
-			let current: HTMLElement | null = portalElement;
-			while (current && current !== document.body) {
-				expect(current.hasAttribute("inert")).toBe(false);
-				expect(current.hasAttribute("aria-hidden")).toBe(false);
-				current = current.parentElement;
-			}
-		}
-		expect(view.getByTestId("background-control").hasAttribute("inert")).toBe(
-			true,
-		);
+		for (const dialog of dialogs) expect(dialog.open).toBe(true);
+		expect(view.getByTestId("background-control")).toBeTruthy();
 	});
 
 	it("keeps overlapping modals compositional when closed out of order", async () => {
 		const view = render(OverlappingModals);
-		const background = view.getByTestId("background-control");
-
-		expect(background.hasAttribute("inert")).toBe(true);
-		expect(background.getAttribute("aria-hidden")).toBe("true");
+		const first = view.getByRole("dialog", {
+			name: "First modal",
+		}) as HTMLDialogElement;
+		const second = view.getByRole("dialog", {
+			name: "Second modal",
+		}) as HTMLDialogElement;
+		expect(first.open).toBe(true);
+		expect(second.open).toBe(true);
 
 		await view.rerender({ firstOpen: false, secondOpen: true });
 
-		expect(background.hasAttribute("inert")).toBe(true);
-		expect(background.getAttribute("aria-hidden")).toBe("true");
+		expect(first.open).toBe(false);
+		expect(second.open).toBe(true);
 
 		await view.rerender({ firstOpen: false, secondOpen: false });
 
-		expect(background.hasAttribute("inert")).toBe(false);
-		expect(background.hasAttribute("aria-hidden")).toBe(false);
+		expect(second.open).toBe(false);
 	});
 
 	it("contains focus when the modal has no tabbable descendants", async () => {

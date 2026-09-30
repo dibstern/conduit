@@ -113,6 +113,8 @@
 	   themes because a scrim dims, it does not invert. */
 	--overlay-rgb: 255, 255, 255;
 	--color-backdrop: rgba(6, 7, 9, 0.55);
+	--color-backdrop-dark: rgba(6, 7, 9, 0.85);
+	--color-backdrop-subtle: rgba(6, 7, 9, 0.15);
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
@@ -169,7 +171,7 @@
 	   Modals are deliberately absent. They use <dialog>.showModal() and live in
 	   the browser's top layer, above every z-index on the page. Anything that
 	   must cover a modal has to join them there — raising a number will not do
-	   it. See components/overlays/Modal.svelte.
+	   it. See components/ui/Dialog.svelte.
 
 	   Scrims pair with the layer they dim, one step below it. */
 	--z-raised: 1;
@@ -254,6 +256,8 @@
 
 	--overlay-rgb: 0, 0, 0;
 	--color-backdrop: rgba(22, 26, 33, 0.34);
+	--color-backdrop-dark: rgba(22, 26, 33, 0.85);
+	--color-backdrop-subtle: rgba(22, 26, 33, 0.15);
 	--shadow-rgb: 19, 26, 37;
 
 	--hl-comment: #6c7481;
@@ -556,7 +560,7 @@ body:has(dialog:modal) {
 
 /* ─── Session bar (design bar 20) ──────────────────────────────────────────── */
 
-/* On phones, the grid moves the title beside the back control when collapsed.
+/* On phones, the grid moves the title beside the back control in the island.
    The <h1> stays mounted throughout. Identity appears before the title on
    phones and after it on desktop, matching DOM, focus, and visual order.
 
@@ -574,17 +578,54 @@ body:has(dialog:modal) {
 	padding: 3px 12px 6px;
 }
 
-#session-bar[data-collapsed="true"] {
+/* Phone chrome overlays every view so the transcript keeps its geometry. */
+#session-chrome {
+	display: contents;
+}
+
+#app.phone-session #session-chrome {
+	display: block;
+	position: absolute;
+	inset-inline: 0;
+	top: env(safe-area-inset-top, 0px);
+	z-index: var(--z-dropdown);
+}
+
+#app.phone-session #messages {
+	padding-top: var(--phone-chrome-clearance, 0px);
+	scroll-padding-top: var(--phone-chrome-clearance, 0px);
+}
+
+#app.phone-session #session-bar[data-collapsed="true"] {
 	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas: "back title chev more";
 	min-height: 46px;
-	padding: 0 12px;
+	padding: 0 4px;
+	margin: 8px 9px 0;
+	border: 1px solid var(--color-border);
+	border-radius: 12px;
+	background: var(--color-glass);
+	backdrop-filter: blur(16px);
+	box-shadow: var(--shadow-panel);
 }
 
-/* The meta area does not exist in the collapsed template, and a grid item
+/* The meta area does not exist in the island template, and a grid item
    naming a missing area gets auto-placed into a phantom row. */
-#session-bar[data-collapsed="true"] #session-bar-meta {
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-meta {
 	display: none;
+}
+
+/* Text recedes beneath the floating controls without intercepting scrolling. */
+.island-transcript::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 76px;
+	z-index: var(--z-raised);
+	pointer-events: none;
+	background: linear-gradient(to bottom, var(--color-bg), transparent);
 }
 
 #session-bar-back {

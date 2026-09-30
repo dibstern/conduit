@@ -12,6 +12,7 @@
 		now = Date.now(),
 		onclose,
 		onsnooze,
+		returnFocus,
 	}: {
 		open: boolean;
 		placement?: "center" | "sheet";
@@ -19,6 +20,7 @@
 		now?: number;
 		onclose: () => void;
 		onsnooze: (until: number | null) => void;
+		returnFocus?: (() => HTMLElement | null) | undefined;
 	} = $props();
 
 	let picking = $state(false);
@@ -33,7 +35,7 @@
 	}
 </script>
 
-<Modal {open} {onclose} {placement} title="Snooze until…" description={sessionTitle || "New Session"} size="sm">
+<Modal {open} {onclose} {placement} {returnFocus} title="Snooze until…" description={sessionTitle || "New Session"} size="sm">
 	<div class="flex flex-col gap-1 font-brand">
 		{#each presets.filter((preset) => preset.id !== "indefinite") as preset (preset.id)}
 			<Button

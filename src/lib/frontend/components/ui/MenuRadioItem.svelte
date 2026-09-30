@@ -1,14 +1,18 @@
 <script lang="ts">
 	import { DropdownMenu, type DropdownMenuRadioItemProps } from "bits-ui";
-	import type { Snippet } from "svelte";
+	import { getContext, type Snippet } from "svelte";
 	import Icon from "./Icon.svelte";
 	import {
-		FLOATING_ITEM_CLASSES,
+		FLOATING_ITEM_BASE_CLASSES,
+		MENU_ITEM_DENSITY_CLASSES,
 		MENU_RADIO_ITEM_COLOR_CLASSES,
+		MENU_SHEET_LEADING_ICON_CLASSES,
 	} from "./floating-styles.js";
+	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 
 	type MenuRadioItemProps = {
 		value: string;
+		icon?: string | undefined;
 		disabled?: boolean | undefined;
 		closeOnSelect?: boolean | undefined;
 		onselect?: ((event: Event) => void) | undefined;
@@ -27,6 +31,7 @@
 
 	let {
 		value,
+		icon,
 		disabled = false,
 		closeOnSelect = true,
 		onselect,
@@ -34,10 +39,13 @@
 		children,
 		...rest
 	}: MenuRadioItemProps = $props();
+	const menuDensity = getContext<MenuDensityContext | undefined>(menuDensityContextKey);
+	const density = $derived(menuDensity?.() ?? "default");
 
 	const itemClass = $derived(
 		[
-			FLOATING_ITEM_CLASSES,
+			FLOATING_ITEM_BASE_CLASSES,
+			MENU_ITEM_DENSITY_CLASSES[density],
 			`justify-between ${MENU_RADIO_ITEM_COLOR_CLASSES}`,
 			className,
 		]
@@ -65,6 +73,11 @@
 <DropdownMenu.RadioItem {...radioItemProps}>
 	{#snippet child({ props, checked })}
 		<div {...props}>
+			{#if density === "sheet"}
+				<span aria-hidden="true" class={`${MENU_SHEET_LEADING_ICON_CLASSES} ${checked ? "text-accent" : "text-text-secondary"}`}>
+					{#if icon}<Icon name={icon} size={15} />{/if}
+				</span>
+			{/if}
 			<span class="min-w-0 flex-1">
 				{@render children()}
 			</span>

@@ -32,9 +32,20 @@ export const Sheet: Story = {
 		const menu = body.getByRole("menu", { name: "File actions" });
 		await expect(menu).toBeVisible();
 		await expect(body.getByTestId("menu-sheet-scrim")).toBeVisible();
-		await expect(body.getByRole("menuitem", { name: "Archive" })).toHaveClass(
-			/py-3/,
-		);
+		for (const item of [
+			body.getByRole("menuitem", { name: "Archive" }),
+			body.getByRole("menuitem", { name: "Duplicate" }),
+			body.getByRole("menuitemradio", { name: "Shared" }),
+			body.getByRole("menuitemcheckbox", { name: "Auto-settle when idle" }),
+		]) {
+			await expect(item).toHaveClass(/min-h-\[44px\]/);
+			await expect(item).toHaveClass(/text-\[14.5px\]/);
+		}
+		await expect(
+			body
+				.getByRole("group", { name: "Project" })
+				.querySelector("[data-dropdown-menu-group-heading]"),
+		).toHaveClass(/uppercase/);
 	},
 };
 

@@ -7,7 +7,7 @@
 	import QRCode from "@castlenine/svelte-qrcode";
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
-	import Modal from "./Modal.svelte";
+  import Dialog from "../ui/Dialog.svelte";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 
 	// ─── Props ──────────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@
 	});
 </script>
 
-<Modal open={visible} onclose={() => onClose?.()} labelledBy="qr-modal-title">
+<Dialog open={visible} onclose={() => onClose?.()} labelledBy="qr-modal-title">
 		<!-- Dialog card -->
 		<Surface
 			variant="card"
@@ -153,4 +153,4 @@
 				Scan to open on another device
 			</p>
 		</Surface>
-</Modal>
+</Dialog>

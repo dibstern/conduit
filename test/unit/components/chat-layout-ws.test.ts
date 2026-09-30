@@ -35,6 +35,10 @@ vi.mock(
 
 // Overlay components
 vi.mock(
+	"../../../src/lib/frontend/components/ui/Dialog.svelte",
+	emptyComponent,
+);
+vi.mock(
 	"../../../src/lib/frontend/components/overlays/ConnectOverlay.svelte",
 	emptyComponent,
 );
@@ -293,6 +297,14 @@ function attach(slug: string): void {
 describe("ChatLayout WS lifecycle", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			},
+		);
 		wsLifecycleHarness.onAttachCallbacks = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.

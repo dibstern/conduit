@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import { uiState } from "../../stores/ui.svelte.js";
 import ConfirmModal from "./ConfirmModal.svelte";
 
@@ -28,6 +29,14 @@ export const Visible: Story = {
 			},
 		};
 	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		expect(dialog.matches(":modal")).toBe(true);
+		await expect(
+			within(dialog).getByTestId("confirm-modal-cancel"),
+		).toBeVisible();
+	},
 };
 
 export const WithCustomAction: Story = {
@@ -40,6 +49,13 @@ export const WithCustomAction: Story = {
 				uiState.confirmDialog = null;
 			},
 		};
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		expect(dialog.matches(":modal")).toBe(true);
+		await expect(
+			within(dialog).getByTestId("confirm-modal-action"),
+		).toHaveTextContent("Delete");
 	},
 };
 

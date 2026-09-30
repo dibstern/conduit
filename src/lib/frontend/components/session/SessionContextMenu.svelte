@@ -5,11 +5,9 @@
 	import { onDestroy, untrack } from "svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
-	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
-	import MenuItem from "../ui/MenuItem.svelte";
-	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
+	import SessionVerbItems from "./SessionVerbItems.svelte";
 	import { getSessionVerbs, type SessionVerb, type SessionVerbHost } from "./session-verbs.js";
 
 	let {
@@ -36,7 +34,10 @@
 		/** Non-session actions appended after a divider, drawn as verb rows. */
 		extras?: readonly SessionVerb[];
 	} = $props();
+	// Captured once: dialogs opened from a verb call focusTarget after this menu
+	// unmounts, when its props may already be gone.
 	const opener = untrack(() => anchor);
+	const targetId = untrack(() => session.id);
 
 	let open = $state(true);
 	let selected = false;
@@ -53,14 +54,16 @@
 		...getSessionVerbs(session, now, host, presentation === "sheet" ? "sheet" : "center"),
 		...(extras.length > 0 ? [{ divider: true } as const, ...extras] : []),
 	]);
+	function focusTarget(): HTMLElement | null {
+		const row = [...opener.ownerDocument.querySelectorAll<HTMLElement>("#session-list .session-item[data-session-id]")].find((item) => item.dataset["sessionId"] === targetId);
+		return (opener.matches(".session-more-btn") ? row?.querySelector<HTMLElement>(".session-more-btn") : null) ?? (opener.isConnected ? opener : row) ?? null;
+	}
 	function returnFocus() {
 		if (focusScheduled) return;
 		focusScheduled = true;
-		const targetId = session.id;
 		setTimeout(() => {
-			const row = [...opener.ownerDocument.querySelectorAll<HTMLElement>("#session-list .session-item[data-session-id]")].find((item) => item.dataset["sessionId"] === targetId);
-			const target = (opener?.matches(".session-more-btn") ? row?.querySelector<HTMLElement>(".session-more-btn") : null) ?? (opener?.isConnected ? opener : row);
-			if (target?.matches(".session-more-btn")) row?.focus();
+			const target = focusTarget();
+			if (target?.matches(".session-more-btn")) target.closest<HTMLElement>(".session-item")?.focus();
 			target?.focus();
 		}, 100);
 	}
@@ -68,9 +71,9 @@
 		if (!selected) returnFocus();
 	});
 
-	function select(action: () => void) {
+	function select(action: SessionVerb["run"]) {
 		selected = true;
-		action();
+		action(focusTarget);
 		onclose();
 	}
 </script>
@@ -96,58 +99,6 @@
 	{/if}
 {/snippet}
 
-{#snippet verbContent(item: SessionVerb)}
-	{#if presentation === "sheet"}<span class="flex w-full items-center gap-3 font-brand text-[14px]">{@render verbDetails(item)}</span>
-	{:else}{@render verbDetails(item)}{/if}
-{/snippet}
-
-{#snippet verbDetails(item: SessionVerb)}
-	{#if item.icon}<Icon name={item.icon} size={13} />{:else if item.checked !== undefined}<span class="w-[13px] shrink-0" aria-hidden="true"></span>{/if}
-	<span>{item.label}</span>
-	{#if item.hint && presentation !== "sheet"}<span class="ml-auto text-xs text-text-muted">{item.hint}</span>{/if}
-	{#if item.disabledReason}<span class="ml-auto text-xs text-text-dimmer">{item.disabledReason}</span>{/if}
-{/snippet}
-
-{#snippet actionList()}
-	{#each verbs as item, index (index)}
-		{#if "divider" in item}
-			<MenuSeparator />
-		{:else}
-			{#if item.checked !== undefined}
-			<MenuCheckboxItem
-				data-testid={item.testId}
-				class="min-h-[44px] md:min-h-0"
-				checked={item.checked}
-				disabled={item.disabledReason != null}
-				onselect={() => select(item.run)}
-			>
-				{@render verbContent(item)}
-			</MenuCheckboxItem>
-			{:else if item.danger}
-			<MenuItem
-				data-testid={item.testId}
-				class="min-h-[44px] md:min-h-0"
-				variant="danger"
-				disabled={item.disabledReason != null}
-				onselect={() => select(item.run)}
-			>
-				{@render verbContent(item)}
-			</MenuItem>
-			{:else}
-			<MenuItem
-				data-testid={item.testId}
-				class="min-h-[44px] md:min-h-0"
-				variant="default"
-				disabled={item.disabledReason != null}
-				onselect={() => select(item.run)}
-			>
-				{@render verbContent(item)}
-			</MenuItem>
-			{/if}
-		{/if}
-	{/each}
-{/snippet}
-
 	<Menu
 		bind:open
 		presentation={presentation === "sheet" ? "sheet" : "popover"}
@@ -170,5 +121,5 @@
 	>
 		{#snippet trigger()}{/snippet}
 		{@render header(presentation === "sheet")}
-		{@render actionList()}
+		<SessionVerbItems {verbs} {presentation} onselect={select} />
 	</Menu>

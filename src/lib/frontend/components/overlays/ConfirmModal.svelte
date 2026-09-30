@@ -7,7 +7,11 @@
   import { uiState, resolveConfirm } from "../../stores/ui.svelte.js";
   import Button from "../ui/Button.svelte";
   import Surface from "../ui/Surface.svelte";
-  import Modal from "./Modal.svelte";
+  import Dialog from "../ui/Dialog.svelte";
+	let returnFocus = $state<(() => HTMLElement | null) | undefined>();
+	$effect(() => {
+		if (uiState.confirmDialog) returnFocus = uiState.confirmDialog.returnFocus;
+	});
 
   function handleCancel(): void {
     resolveConfirm(false);
@@ -18,9 +22,10 @@
   }
 </script>
 
-<Modal
+<Dialog
   open={uiState.confirmDialog !== null}
   onclose={handleCancel}
+  {returnFocus}
   labelledBy="confirm-modal-text"
 >
   <Surface
@@ -55,4 +60,4 @@
       </Button>
     </div>
   </Surface>
-</Modal>
+</Dialog>
