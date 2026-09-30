@@ -1,30 +1,10 @@
 // ─── CLI Core ──────────────────────────────────────────────────
 // Command router and main entry point. The thin entry point (cli.ts) calls
-// run() with process.argv. Individual commands and utilities live in
-// cli-commands.ts and cli-utils.ts respectively.
+// run() with process.argv. Command handlers and utilities live in sibling modules.
 
-import { resolve } from "node:path";
 import { getTailscaleIP } from "../lib/cli/tls.js";
-import {
-	AddProject,
-	GetStatus,
-	InstanceAdd,
-	InstanceList,
-	InstanceRemove,
-	InstanceStart,
-	InstanceStatus,
-	InstanceStop,
-	type IpcTaggedRequest,
-	ListProjects,
-	RemoveProject,
-	SetPin,
-	SetProjectTitle,
-	Shutdown,
-} from "../lib/contracts/ipc-requests.js";
-import {
-	isDaemonSpawnPortInUseError,
-	spawnDaemon,
-} from "../lib/daemon/daemon-spawn.js";
+import type { IpcTaggedRequest } from "../lib/contracts/ipc-requests.js";
+import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
 import {
@@ -32,18 +12,26 @@ import {
 	startDaemonChildProcess,
 	startForegroundDaemon,
 } from "../lib/domain/daemon/Layers/daemon-foreground.js";
-import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
-import { formatErrorDetail } from "../lib/errors.js";
 import type { IPCResponse } from "../lib/types.js";
-import { defaultInteractiveMenu } from "./cli-commands.js";
 import {
-	DEFAULT_CONFIG_DIR,
-	DEFAULT_PORT,
+	type CommandContext,
+	handleAdd,
+	handleDaemon,
+	handleForeground,
+	handleHelp,
+	handleList,
+	handlePin,
+	handleRemove,
+	handleStatus,
+	handleStop,
+	handleTitle,
+} from "./cli-command-handlers.js";
+import { handleDefault } from "./cli-default-command.js";
+import { handleInstance } from "./cli-instance-command.js";
+import {
 	DEFAULT_SOCKET_PATH,
-	formatUptime,
 	generateQR,
 	getNetworkAddress,
-	HELP_TEXT,
 	parseArgs,
 	sendIpcRequest,
 } from "./cli-utils.js";
@@ -138,632 +126,47 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
 	const getTsIP = options?.getTailscaleIP ?? getTailscaleIP;
 
-	// ─── --daemon (internal: run as background daemon server) ──────────
-	if (args.command === "daemon") {
-		// This is the child process spawned by Daemon.spawn().
-		// Read config from env vars set by the parent.
-		const daemonPort = Number.parseInt(
-			process.env[RELAY_ENV_KEYS.PORT] ?? String(DEFAULT_PORT),
-			10,
-		);
-		const daemonHost = process.env[RELAY_ENV_KEYS.HOST];
-		const daemonConfigDir =
-			process.env[RELAY_ENV_KEYS.CONFIG_DIR] ?? DEFAULT_CONFIG_DIR;
+	const context: CommandContext = {
+		args,
+		options,
+		cwd,
+		stdout,
+		stderr,
+		exit,
+		ipcSend,
+		checkDaemon,
+		spawnDaemonFn,
+		startForegroundDaemonFn,
+		startDaemonChildProcessFn,
+		qr,
+		getAddr,
+		getTsIP,
+	};
 
-		const pinHash = process.env[RELAY_ENV_KEYS.PIN_HASH];
-		const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
-		const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
-		const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
-		const claudeConfigDir = process.env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR];
-		await startDaemonChildProcessFn({
-			port: daemonPort,
-			...(daemonHost ? { host: daemonHost } : {}),
-			configDir: daemonConfigDir,
-			...(pinHash ? { pinHash } : {}),
-			keepAwake: process.env[RELAY_ENV_KEYS.KEEP_AWAKE] === "1",
-			...(keepAwakeCommand ? { keepAwakeCommand } : {}),
-			...(keepAwakeArgsRaw
-				? { keepAwakeArgs: JSON.parse(keepAwakeArgsRaw) as string[] }
-				: {}),
-			tlsEnabled: process.env[RELAY_ENV_KEYS.TLS] === "1",
-			...(claudeConfigDir ? { claudeConfigDir } : {}),
-			...(opencodeUrl ? { opencodeUrl } : {}),
-			logLevel: args.logLevel,
-			logFormat: args.logFormat ?? "json",
-		});
-		// Resolves only after shutdown (signal or IPC), then exits the process.
-		return;
+	switch (args.command) {
+		case "daemon":
+			return handleDaemon(context);
+		case "foreground":
+			return handleForeground(context);
+		case "help":
+			return handleHelp(context);
+		case "status":
+			return handleStatus(context);
+		case "stop":
+			return handleStop(context);
+		case "pin":
+			return handlePin(context);
+		case "add":
+			return handleAdd(context);
+		case "remove":
+			return handleRemove(context);
+		case "list":
+			return handleList(context);
+		case "title":
+			return handleTitle(context);
+		case "instance":
+			return handleInstance(context);
+		default:
+			return handleDefault(context);
 	}
-
-	// ─── --foreground (dev mode: run daemon in current process) ──────
-	if (args.command === "foreground") {
-		// Stop any running daemon first if requested (avoids port conflicts)
-		if (args.restartDaemon) {
-			try {
-				const running = await checkDaemon();
-				if (running) {
-					await ipcSend(new Shutdown({}));
-					stdout.write("Stopped existing daemon.\n");
-				}
-			} catch {
-				// Daemon not running or already stopped — continue
-			}
-		}
-
-		const opencodeUrl = ENV.opencodeUrl || `http://localhost:${args.ocPort}`;
-
-		stdout.write(`\nConduit (foreground)\n`);
-		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
-
-		const daemon = await startForegroundDaemonFn({
-			port: args.port,
-			...(args.host ? { host: args.host } : {}),
-			...(args.claudeConfigDir
-				? { claudeConfigDir: args.claudeConfigDir }
-				: {}),
-			opencodeUrl,
-			// Always enable TLS in foreground (matches daemon spawn behavior).
-			// Gracefully falls back to HTTP if mkcert is not available.
-			tlsEnabled: !args.noHttps,
-			logLevel: args.logLevel,
-			logFormat: args.logFormat ?? "pretty",
-		});
-
-		await daemon.addProject(cwd);
-
-		// Discover projects from OpenCode's project registry
-		await daemon.discoverProjects();
-
-		const fgStatus = daemon.getStatus();
-		const fgScheme = fgStatus.tlsEnabled ? "https" : "http";
-		const fgHost = fgStatus.host ?? "localhost";
-		stdout.write(`  Relay:    ${fgScheme}://${fgHost}:${daemon.port}\n`);
-		stdout.write(`  Project:  ${cwd}\n`);
-		stdout.write(`  Ready.\n\n`);
-		void daemon.stopped.then(
-			() => exit(0),
-			() => exit(1),
-		);
-		return;
-	}
-
-	// ─── --help ─────────────────────────────────────────────────────────
-	if (args.command === "help") {
-		stdout.write(HELP_TEXT);
-		return;
-	}
-
-	// ─── --status ───────────────────────────────────────────────────────
-	if (args.command === "status") {
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		const response = await ipcSend(new GetStatus({}));
-		if (!response.ok) {
-			stderr.write(
-				`Failed to get status: ${response.error ?? "unknown error"}\n`,
-			);
-			exit(1);
-			return;
-		}
-
-		const uptime = typeof response.uptime === "number" ? response.uptime : 0;
-		const port =
-			typeof response.port === "number" ? response.port : DEFAULT_PORT;
-		const projectCount =
-			typeof response.projectCount === "number" ? response.projectCount : 0;
-		const clientCount =
-			typeof response.clientCount === "number" ? response.clientCount : 0;
-
-		stdout.write(`Daemon Status\n`);
-		stdout.write(`  Uptime:   ${formatUptime(uptime)}\n`);
-		stdout.write(`  Port:     ${port}\n`);
-		stdout.write(`  Projects: ${projectCount}\n`);
-		stdout.write(`  Clients:  ${clientCount}\n`);
-		return;
-	}
-
-	// ─── --stop ─────────────────────────────────────────────────────────
-	if (args.command === "stop") {
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			exit(1);
-			return;
-		}
-
-		try {
-			await ipcSend(new Shutdown({}));
-			stdout.write("Daemon stopped.\n");
-		} catch (err) {
-			stderr.write(`Failed to stop daemon: ${formatErrorDetail(err)}\n`);
-			exit(1);
-		}
-		return;
-	}
-
-	// ─── --pin ──────────────────────────────────────────────────────────
-	if (args.command === "pin") {
-		if (!args.pin || !/^\d{4,8}$/.test(args.pin)) {
-			stderr.write("PIN must be 4-8 digits.\n");
-			exit(1);
-			return;
-		}
-
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		const response = await ipcSend(new SetPin({ pin: args.pin }));
-		if (response.ok) {
-			stdout.write("PIN updated.\n");
-		} else {
-			stderr.write(`Failed to set PIN: ${response.error ?? "unknown error"}\n`);
-			exit(1);
-		}
-		return;
-	}
-
-	// ─── --add ──────────────────────────────────────────────────────────
-	if (args.command === "add") {
-		const addDir = resolve(args.addPath ?? cwd);
-
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		const response = await ipcSend(new AddProject({ directory: addDir }));
-		if (response.ok) {
-			stdout.write(`Project added: ${response.slug ?? addDir}\n`);
-		} else {
-			stderr.write(
-				`Failed to add project: ${response.error ?? "unknown error"}\n`,
-			);
-			exit(1);
-		}
-		return;
-	}
-
-	// ─── --remove ───────────────────────────────────────────────────────
-	if (args.command === "remove") {
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		// First, list projects to find the slug for cwd
-		const listResponse = await ipcSend(new ListProjects({}));
-		if (!listResponse.ok || !Array.isArray(listResponse.projects)) {
-			stderr.write("Failed to list projects.\n");
-			exit(1);
-			return;
-		}
-
-		const projects = listResponse.projects as Array<{
-			slug: string;
-			directory: string;
-		}>;
-		const match = projects.find((p) => p.directory === cwd);
-
-		if (!match) {
-			stderr.write(`Current directory is not registered: ${cwd}\n`);
-			exit(1);
-			return;
-		}
-
-		const response = await ipcSend(new RemoveProject({ slug: match.slug }));
-		if (response.ok) {
-			stdout.write(`Project removed: ${match.slug}\n`);
-		} else {
-			stderr.write(
-				`Failed to remove project: ${response.error ?? "unknown error"}\n`,
-			);
-			exit(1);
-		}
-		return;
-	}
-
-	// ─── --list ─────────────────────────────────────────────────────────
-	if (args.command === "list") {
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		const response = await ipcSend(new ListProjects({}));
-		if (!response.ok || !Array.isArray(response.projects)) {
-			stderr.write("Failed to list projects.\n");
-			exit(1);
-			return;
-		}
-
-		const projects = response.projects as Array<{
-			slug: string;
-			directory: string;
-			title?: string;
-		}>;
-
-		if (projects.length === 0) {
-			stdout.write("No projects registered.\n");
-			return;
-		}
-
-		stdout.write(`Projects (${projects.length}):\n`);
-		for (const p of projects) {
-			const label = p.title ? `${p.slug} (${p.title})` : p.slug;
-			stdout.write(`  ${label}\n    ${p.directory}\n`);
-		}
-		return;
-	}
-
-	// ─── --title ────────────────────────────────────────────────────────
-	if (args.command === "title") {
-		if (!args.title) {
-			stderr.write("Title is required. Usage: --title <name>\n");
-			exit(1);
-			return;
-		}
-
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		// Find slug for cwd
-		const listResponse = await ipcSend(new ListProjects({}));
-		if (!listResponse.ok || !Array.isArray(listResponse.projects)) {
-			stderr.write("Failed to list projects.\n");
-			exit(1);
-			return;
-		}
-
-		const projects = listResponse.projects as Array<{
-			slug: string;
-			directory: string;
-		}>;
-		const match = projects.find((p) => p.directory === cwd);
-
-		if (!match) {
-			stderr.write(`Current directory is not registered: ${cwd}\n`);
-			exit(1);
-			return;
-		}
-
-		const response = await ipcSend(
-			new SetProjectTitle({
-				slug: match.slug,
-				title: args.title,
-			}),
-		);
-
-		if (response.ok) {
-			stdout.write(`Title updated: ${args.title}\n`);
-		} else {
-			stderr.write(
-				`Failed to set title: ${response.error ?? "unknown error"}\n`,
-			);
-			exit(1);
-		}
-		return;
-	}
-
-	// ─── --instance <action> [name] ────────────────────────────────────
-	if (args.command === "instance") {
-		const running = await checkDaemon();
-		if (!running) {
-			stderr.write("Daemon is not running.\n");
-			stderr.write("Start with: npx conduit\n");
-			exit(1);
-			return;
-		}
-
-		switch (args.instanceAction) {
-			case "list": {
-				const response = await ipcSend(new InstanceList({}));
-				if (!response.ok) {
-					stderr.write(
-						`Failed to list instances: ${response.error ?? "unknown error"}\n`,
-					);
-					exit(1);
-					return;
-				}
-				const instances = (response.instances ?? []) as Array<{
-					id: string;
-					name: string;
-					port: number;
-					managed: boolean;
-					status: string;
-				}>;
-				if (instances.length === 0) {
-					stdout.write("No instances configured.\n");
-					return;
-				}
-				stdout.write(`Instances (${instances.length}):\n`);
-				for (const inst of instances) {
-					stdout.write(
-						`  ${inst.name} (${inst.id})  port=${inst.port}  managed=${inst.managed}  status=${inst.status}\n`,
-					);
-				}
-				return;
-			}
-
-			case "add": {
-				if (!args.instanceName) {
-					stderr.write(
-						"Instance name is required. Usage: --instance add <name>\n",
-					);
-					exit(1);
-					return;
-				}
-				const response = await ipcSend(
-					new InstanceAdd({
-						name: args.instanceName,
-						managed: args.instanceManaged ?? false,
-						...(args.instancePort != null && { port: args.instancePort }),
-						...(args.instanceUrl != null && { url: args.instanceUrl }),
-					}),
-				);
-				if (response.ok) {
-					stdout.write(
-						`Instance added: ${(response.instance as { id: string })?.id ?? args.instanceName}\n`,
-					);
-				} else {
-					stderr.write(
-						`Failed to add instance: ${response.error ?? "unknown error"}\n`,
-					);
-					exit(1);
-				}
-				return;
-			}
-
-			case "remove": {
-				if (!args.instanceName) {
-					stderr.write(
-						"Instance id is required. Usage: --instance remove <id>\n",
-					);
-					exit(1);
-					return;
-				}
-				const response = await ipcSend(
-					new InstanceRemove({
-						id: args.instanceName,
-					}),
-				);
-				if (response.ok) {
-					stdout.write(`Instance removed: ${args.instanceName}\n`);
-				} else {
-					stderr.write(
-						`Failed to remove instance: ${response.error ?? "unknown error"}\n`,
-					);
-					exit(1);
-				}
-				return;
-			}
-
-			case "start": {
-				if (!args.instanceName) {
-					stderr.write(
-						"Instance id is required. Usage: --instance start <id>\n",
-					);
-					exit(1);
-					return;
-				}
-				const response = await ipcSend(
-					new InstanceStart({
-						id: args.instanceName,
-					}),
-				);
-				if (response.ok) {
-					stdout.write(`Instance started: ${args.instanceName}\n`);
-				} else {
-					stderr.write(
-						`Failed to start instance: ${response.error ?? "unknown error"}\n`,
-					);
-					exit(1);
-				}
-				return;
-			}
-
-			case "stop": {
-				if (!args.instanceName) {
-					stderr.write(
-						"Instance id is required. Usage: --instance stop <id>\n",
-					);
-					exit(1);
-					return;
-				}
-				const response = await ipcSend(
-					new InstanceStop({
-						id: args.instanceName,
-					}),
-				);
-				if (response.ok) {
-					stdout.write(`Instance stopped: ${args.instanceName}\n`);
-				} else {
-					stderr.write(
-						`Failed to stop instance: ${response.error ?? "unknown error"}\n`,
-					);
-					exit(1);
-				}
-				return;
-			}
-
-			case "status": {
-				if (!args.instanceName) {
-					stderr.write(
-						"Instance id is required. Usage: --instance status <id>\n",
-					);
-					exit(1);
-					return;
-				}
-				const response = await ipcSend(
-					new InstanceStatus({
-						id: args.instanceName,
-					}),
-				);
-				if (!response.ok) {
-					stderr.write(
-						`Failed to get instance status: ${response.error ?? "unknown error"}\n`,
-					);
-					exit(1);
-					return;
-				}
-				const inst = response.instance as {
-					id: string;
-					name: string;
-					port: number;
-					managed: boolean;
-					status: string;
-				};
-				stdout.write(`Instance: ${inst.name} (${inst.id})\n`);
-				stdout.write(`  Port:    ${inst.port}\n`);
-				stdout.write(`  Managed: ${inst.managed}\n`);
-				stdout.write(`  Status:  ${inst.status}\n`);
-				return;
-			}
-
-			default:
-				stderr.write(
-					"Unknown instance action. Usage: --instance <list|add|remove|start|stop|status>\n",
-				);
-				exit(1);
-				return;
-		}
-	}
-
-	// ─── Validate --dangerously-skip-permissions ───────────────────────
-	if (args.skipPerms && !args.pin) {
-		stderr.write("--dangerously-skip-permissions requires --pin\n");
-		exit(1);
-		return;
-	}
-
-	// ─── Default invocation ─────────────────────────────────────────────
-	const stdin = options?.stdin ?? process.stdin;
-
-	// Determine if interactive mode should be used:
-	// - Explicit injectable overrides everything
-	// - stdin being a TTY means real terminal → interactive
-	// - Non-TTY (pipe, test, CI) → legacy non-interactive behavior
-	if (options?.showInteractiveMenu || (stdin as { isTTY?: boolean }).isTTY) {
-		const interactiveMenu =
-			options?.showInteractiveMenu ?? defaultInteractiveMenu;
-
-		await interactiveMenu({
-			args,
-			cwd,
-			stdin,
-			stdout,
-			stderr,
-			exit,
-			ipcSend,
-			checkDaemon,
-			spawnDaemon: spawnDaemonFn,
-			getAddr,
-			generateQR: qr,
-		});
-		return;
-	}
-
-	// ─── Non-interactive default (legacy behavior) ──────────────────────
-	// 1. Ensure daemon is running
-	let running = await checkDaemon();
-	if (!running) {
-		try {
-			const result = await spawnDaemonFn({
-				port: args.port,
-				opencodeUrl: `http://localhost:${args.ocPort}`,
-			});
-			stdout.write(
-				`Daemon started (pid: ${result.pid}, port: ${result.port})\n`,
-			);
-			running = true;
-		} catch (err) {
-			const message = formatErrorDetail(err);
-			if (isDaemonSpawnPortInUseError(err)) {
-				stderr.write(`Port ${args.port} is already in use.\n`);
-				stderr.write("Try a different port: --port <number>\n");
-			} else {
-				stderr.write(`Failed to start daemon: ${message}\n`);
-			}
-			exit(1);
-			return;
-		}
-	}
-
-	// 2. Register current directory as a project
-	const registerResponse = await ipcSend(
-		new AddProject({
-			directory: cwd,
-		}),
-	);
-	const slug = registerResponse.ok
-		? (registerResponse.slug as string)
-		: undefined;
-
-	// 3. Build URL (check daemon TLS status for correct scheme)
-	const statusResponse = await ipcSend(new GetStatus({}));
-	const scheme = statusResponse["tlsEnabled"] === true ? "https" : "http";
-	// 3b. Build URLs with Tailscale priority (consistent with interactive path)
-	const tsIP = getTsIP();
-	const lanIP = getAddr();
-	const primaryIP = tsIP ?? lanIP ?? "localhost";
-	const url = `${scheme}://${primaryIP}:${args.port}`;
-	const tlsActive = statusResponse["tlsEnabled"] === true;
-
-	// 4. Show QR code with optional setup caption
-	if (primaryIP !== "localhost") {
-		const qrUrl = tlsActive
-			? `http://${primaryIP}:${args.port + 1}/setup`
-			: url;
-		const qrCode = qr(qrUrl);
-		if (qrCode) {
-			stdout.write("\n");
-			stdout.write(qrCode);
-			if (tlsActive) {
-				stdout.write(
-					`  Scan or visit: http://${primaryIP}:${args.port + 1}/setup\n`,
-				);
-			}
-			stdout.write("\n");
-		}
-	}
-
-	// 5. Display connection info
-	stdout.write("\n");
-	stdout.write("conduit\n");
-	stdout.write(`  URL: ${url}\n`);
-	if (tsIP && lanIP && tsIP !== lanIP) {
-		stdout.write(`  Local: ${scheme}://${lanIP}:${args.port}\n`);
-	}
-
-	if (slug) {
-		stdout.write(`  Project: ${slug} (${cwd})\n`);
-	}
-
-	// 6. Show PIN info
-	stdout.write("Tip: Set a PIN for security: conduit --pin <4-8 digits>\n");
-	stdout.write("\n");
 }
