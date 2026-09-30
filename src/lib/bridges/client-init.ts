@@ -138,31 +138,28 @@ const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
 
 const resolveClientInitHistoryEffect = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		let projectedSource: SessionHistorySource = { kind: "empty" };
 		let projectedMessages: readonly HistoryMessage[] = [];
-		if (readQueryOption._tag === "Some") {
-			const rows =
-				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
-			if (projectedSource.kind === "rest-history") {
-				projectedMessages = projectedSource.history.messages;
-			}
+		const rows = yield* readQuery.getSessionMessagesWithParts(sessionId);
+		projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+		if (projectedSource.kind === "rest-history") {
+			projectedMessages = projectedSource.history.messages;
+		}
 
-			// The projection is authoritative only for relay-local (claude)
-			// sessions. OpenCode projections currently persist structure without
-			// message text, so provider REST history stays the source of truth
-			// for opencode rows; the projection is the fallback when REST fails.
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				sessionRowResult.right.provider !== "opencode"
-			) {
-				return projectedSource;
-			}
+		// The projection is authoritative only for relay-local (claude)
+		// sessions. OpenCode projections currently persist structure without
+		// message text, so provider REST history stays the source of truth
+		// for opencode rows; the projection is the fallback when REST fails.
+		const sessionRowResult = yield* Effect.either(
+			readQuery.getSession(sessionId),
+		);
+		if (
+			sessionRowResult._tag === "Right" &&
+			sessionRowResult.right != null &&
+			sessionRowResult.right.provider !== "opencode"
+		) {
+			return projectedSource;
 		}
 
 		const sessionManagerService = yield* SessionManagerServiceTag;
@@ -246,15 +243,13 @@ const switchClientToSessionForInitEffect = (
 			sessionId,
 			pollerIsProcessing || hasActiveTimeout,
 		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		let parentID: string | undefined;
-		if (readQueryOption._tag === "Some") {
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (sessionRowResult._tag === "Right") {
-				parentID = sessionRowResult.right?.parent_id ?? undefined;
-			}
+		const sessionRowResult = yield* Effect.either(
+			readQuery.getSession(sessionId),
+		);
+		if (sessionRowResult._tag === "Right") {
+			parentID = sessionRowResult.right?.parent_id ?? undefined;
 		}
 		yield* seedPaginationCursorFromHistoryEffect(sessionId, patchedSource);
 

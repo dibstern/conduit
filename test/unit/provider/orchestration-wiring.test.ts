@@ -93,7 +93,12 @@ function makeSharedPersistenceRuntime(
 async function makeScopedOrchestrationView(options: OrchestrationLayerOptions) {
 	const runtime = ManagedRuntime.make(
 		makeOrchestrationRuntimeLayer(options).pipe(
-			Layer.provide(Layer.succeed(OpenCodeAPITag, options.client)),
+			Layer.provide(
+				Layer.merge(
+					Layer.succeed(OpenCodeAPITag, options.client),
+					makePersistenceEffectLayer(":memory:"),
+				),
+			),
 		),
 	);
 	onTestFinished(() => runtime.dispose());
@@ -121,7 +126,12 @@ describe("Orchestration wiring", () => {
 		const client = makeStubClient();
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
-				Layer.provide(Layer.succeed(OpenCodeAPITag, client)),
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(OpenCodeAPITag, client),
+						makePersistenceEffectLayer(":memory:"),
+					),
+				),
 			),
 		);
 

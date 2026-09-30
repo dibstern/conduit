@@ -9,7 +9,7 @@ import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "@effect/vitest";
+import { describe, layer } from "@effect/vitest";
 import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -253,6 +253,8 @@ function mockConfig(
 
 // ─── Agent handler tests ───────────────────────────────────────────────────
 
+// biome-ignore format: Keep the existing test layout inside this runtime suite.
+layer(Layer.merge(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) }))))("persistent handler runtime", (it) => {
 describe("handleGetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and sends filtered list to client",
@@ -4324,101 +4326,6 @@ describe("handleMessage", () => {
 	);
 
 	it.effect(
-		"loads prior Claude history through SessionManagerService when Effect SQLite is unavailable",
-		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
-			const log = mockLogger();
-			const legacyLoadPreRenderedHistory = vi.fn(async () => {
-				throw new Error("legacy prompt history load should not be used");
-			});
-			const _sessionMgr = mockSessionManager({
-				loadPreRenderedHistory: legacyLoadPreRenderedHistory,
-			});
-			const loadPreRenderedHistory = vi.fn(() =>
-				Effect.succeed({
-					messages: [
-						{
-							id: "history-msg-1",
-							role: "user" as const,
-							parts: [
-								{
-									id: "history-part-1",
-									type: "text" as const,
-									text: "Earlier fallback question",
-								},
-							],
-						},
-					],
-					hasMore: false,
-				}),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory,
-			});
-			const config = mockConfig();
-			const client = {} as unknown as OpenCodeAPI;
-			const engine = {
-				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-				dispatch: vi.fn(async () => ({
-					status: "completed",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				})),
-			} as unknown as OrchestrationEngine;
-			const layer = Layer.provideMerge(
-				ProviderTurnServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, client),
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(LoggerTag, log),
-					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					Layer.succeed(ConfigTag, config),
-					PendingInteractionServiceLive,
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-					makeOverridesStateLive(),
-				),
-			);
-
-			return Effect.gen(function* () {
-				yield* setModel("session-1", {
-					providerID: "claude",
-					modelID: "sonnet",
-				});
-				yield* handleMessage("client-1", {
-					text: "new prompt",
-					commandId: "cmd-prerendered-history",
-				});
-				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-				expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
-				expect(engine.dispatchEffect).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "send_turn",
-						providerId: "claude",
-						input: expect.objectContaining({
-							history: [
-								expect.objectContaining({
-									role: "user",
-									parts: [
-										expect.objectContaining({
-											type: "text",
-											text: "Earlier fallback question",
-										}),
-									],
-								}),
-							],
-						}),
-					}),
-				);
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
 		"does not run legacy session-manager auto-rename after first Claude turn",
 		() => {
 			const ws = mockWsHandler({
@@ -4781,52 +4688,6 @@ describe("handleMessage", () => {
 		},
 	);
 
-	it.effect("sends message via legacy path when no engine", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => ["client-1"]),
-		});
-		const log = mockLogger();
-		const legacyRecordMessageActivity = vi.fn(() => {
-			throw new Error("legacy recordMessageActivity should not be used");
-		});
-		const _sessionMgr = mockSessionManager({
-			recordMessageActivity: legacyRecordMessageActivity,
-		});
-		const recordMessageActivity = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			recordMessageActivity,
-		});
-		const config = mockConfig();
-		const client = {
-			session: { prompt: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
 
-		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				makeOverridesStateLive(),
-			),
-		);
-
-		return handleMessage("client-1", {
-			text: "hello world",
-			commandId: "cmd-legacy-prompt",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.session.prompt).toHaveBeenCalledWith("session-1", {
-					text: "hello world",
-				});
-				expect(recordMessageActivity).toHaveBeenCalledWith("session-1");
-				expect(legacyRecordMessageActivity).not.toHaveBeenCalled();
-			}),
-		);
-	});
+});
 });

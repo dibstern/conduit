@@ -1,4 +1,5 @@
 import { Context, Effect, FiberMap, Layer } from "effect";
+import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type {
 	PendingInteractionServiceTag,
@@ -14,7 +15,12 @@ import {
 	interruptTurn,
 	prepareTurnSession,
 } from "./provider-turn-session.js";
-import type { ConfigTag, LoggerTag, WebSocketHandlerTag } from "./services.js";
+import type {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
+} from "./services.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
 
@@ -84,6 +90,8 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| SessionManagerServiceTag
 		| PendingInteractionServiceTag
 		| OverridesStateTag
+		| OrchestrationEngineTag
+		| ReadQueryEffectTag
 		| ProviderTurnDispatchFibersTag
 	>();
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
@@ -121,6 +129,8 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| SessionManagerServiceTag
 	| PendingInteractionServiceTag
 	| OverridesStateTag
+	| OrchestrationEngineTag
+	| ReadQueryEffectTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
 );

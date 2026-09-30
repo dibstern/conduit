@@ -7,13 +7,9 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
-import type { PromptOptions } from "../../../instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
-import {
-	type ReadQueryEffect,
-	ReadQueryEffectTag,
-} from "../../../persistence/effect/read-query-effect.js";
+import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
 import {
 	createRelayEventSink,
@@ -27,7 +23,6 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../../../provider/types.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceSendInput } from "./provider-turn-service.js";
@@ -38,10 +33,6 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "./services.js";
-import {
-	type SessionManagerService,
-	SessionManagerServiceTag,
-} from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
 	getPermissionMode,
@@ -129,43 +120,6 @@ function targetSessionForRelayMessage(
 		: fallbackSessionId;
 }
 
-type PriorHistoryReaders = {
-	readQueryEffect?: ReadQueryEffect;
-};
-
-function loadPriorHistoryForTurn(
-	sessionId: string,
-	sessionManagerService: SessionManagerService,
-	readers: PriorHistoryReaders,
-): Effect.Effect<SendTurnInput["history"], unknown> {
-	if (readers.readQueryEffect) {
-		return readers.readQueryEffect.getSessionMessagesWithParts(sessionId).pipe(
-			Effect.map(
-				(rows) =>
-					messageRowsToHistory(rows, {
-						pageSize: Number.MAX_SAFE_INTEGER,
-					}).messages,
-			),
-		);
-	}
-	return sessionManagerService
-		.loadPreRenderedHistory(sessionId)
-		.pipe(Effect.map((history) => history.messages));
-}
-
-function buildLegacyPrompt(input: ProviderTurnServiceSendInput): PromptOptions {
-	const prompt: PromptOptions = {
-		text: input.text,
-		...(input.images && input.images.length > 0
-			? { images: Array.from(input.images) }
-			: {}),
-	};
-	if (input.agent) prompt.agent = input.agent;
-	if (input.model && input.modelUserSelected) prompt.model = input.model;
-	if (input.variant) prompt.variant = input.variant;
-	return prompt;
-}
-
 const sendErrorMessage = (
 	input: ProviderTurnServiceSendInput,
 	message: ReturnType<RelayError["toMessage"]>,
@@ -180,17 +134,17 @@ const sendErrorMessage = (
 
 const loadClaudeHistory = (sessionId: string) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
-		const readQueryEffectOption =
-			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const historyReaders: PriorHistoryReaders = {
-			...(readQueryEffectOption._tag === "Some"
-				? { readQueryEffect: readQueryEffectOption.value }
-				: {}),
-		};
+		const readQuery = yield* ReadQueryEffectTag;
 		const result = yield* Effect.either(
-			loadPriorHistoryForTurn(sessionId, sessionManagerService, historyReaders),
+			readQuery.getSessionMessagesWithParts(sessionId).pipe(
+				Effect.map(
+					(rows) =>
+						messageRowsToHistory(rows, {
+							pageSize: Number.MAX_SAFE_INTEGER,
+						}).messages,
+				),
+			),
 		);
 		if (result._tag === "Right") {
 			return { history: result.right, loaded: true };
@@ -611,42 +565,27 @@ const sendViaEngine = (
 export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const client = yield* OpenCodeAPITag;
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		if (engineOption._tag === "Some") {
-			const providerId =
-				(yield* engineOption.value.getProviderForSessionEffect(
-					input.sessionId,
-				)) ??
-				(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
-					? CLAUDE_PROVIDER_ID
-					: OPENCODE_PROVIDER_ID);
-			const daemonConfig = loadDaemonConfig(config.configDir);
-			const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
-			if (driver === undefined) {
-				yield* handleDispatchFailure(
-					input,
-					new Error(
-						`Cannot resolve provider instance for turn routing: ${providerId}`,
-					),
-				);
-				return;
-			}
-			yield* sendViaEngine(
+		const engine = yield* OrchestrationEngineTag;
+		const providerId =
+			(yield* engine.getProviderForSessionEffect(input.sessionId)) ??
+			(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
+				? CLAUDE_PROVIDER_ID
+				: OPENCODE_PROVIDER_ID);
+		const daemonConfig = loadDaemonConfig(config.configDir);
+		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
+		if (driver === undefined) {
+			yield* handleDispatchFailure(
 				input,
-				providerId,
-				driver,
-				resolveClaudeInstanceConfigDir(daemonConfig, providerId),
-			).pipe(Effect.provideService(OrchestrationEngineTag, engineOption.value));
+				new Error(
+					`Cannot resolve provider instance for turn routing: ${providerId}`,
+				),
+			);
 			return;
 		}
-
-		const sendResult = yield* Effect.either(
-			Effect.tryPromise(() =>
-				client.session.prompt(input.sessionId, buildLegacyPrompt(input)),
-			),
-		);
-		if (sendResult._tag === "Left") {
-			yield* handleDispatchFailure(input, sendResult.left);
-		}
+		yield* sendViaEngine(
+			input,
+			providerId,
+			driver,
+			resolveClaudeInstanceConfigDir(daemonConfig, providerId),
+		).pipe(Effect.provideService(OrchestrationEngineTag, engine));
 	});

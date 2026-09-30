@@ -225,15 +225,9 @@ export const handlePermissionResponse = (
 				`client=${clientId} session=${sessionId} ${result.toolName}: ${result.mapped}`,
 			);
 
-			let isClaudeSession = false;
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "Some") {
-				const engine = engineOption.value;
-				const providerId = yield* engine.getProviderForSessionEffect(sessionId);
-				if (providerId === "claude") {
-					isClaudeSession = true;
-				}
-			}
+			const engine = yield* OrchestrationEngineTag;
+			const isClaudeSession =
+				(yield* engine.getProviderForSessionEffect(sessionId)) === "claude";
 
 			if (!isClaudeSession) {
 				yield* Effect.either(
@@ -327,19 +321,13 @@ export const handleAskUserResponse = (
 						commandId: payload.commandId ?? createCommandId(),
 					});
 				}
-				const engineOption = yield* Effect.serviceOption(
-					OrchestrationEngineTag,
-				);
-				if (engineOption._tag === "Some") {
-					const providerId =
-						yield* engineOption.value.getProviderForSessionEffect(
-							questionSessionId,
-						);
-					if (providerId !== "claude") {
-						log.warn(
-							`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
-						);
-					}
+				const engine = yield* OrchestrationEngineTag;
+				const providerId =
+					yield* engine.getProviderForSessionEffect(questionSessionId);
+				if (providerId !== "claude") {
+					log.warn(
+						`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+					);
 				}
 				wsHandler.broadcast({
 					type: "ask_user_resolved",
@@ -458,15 +446,9 @@ export const handleQuestionReject = (
 			);
 			if (pendingQuestion) {
 				const questionSessionId = pendingQuestion.sessionId || sessionId;
-				const engineOption = yield* Effect.serviceOption(
-					OrchestrationEngineTag,
-				);
+				const engine = yield* OrchestrationEngineTag;
 				const providerId =
-					engineOption._tag === "Some"
-						? yield* engineOption.value.getProviderForSessionEffect(
-								questionSessionId,
-							)
-						: undefined;
+					yield* engine.getProviderForSessionEffect(questionSessionId);
 				if (providerId === "claude") {
 					log.warn(
 						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
@@ -490,19 +472,13 @@ export const handleQuestionReject = (
 			const resolved = Option.getOrUndefined(resolvedOption);
 			if (resolved) {
 				const questionSessionId = resolved.sessionId || sessionId;
-				const engineOption = yield* Effect.serviceOption(
-					OrchestrationEngineTag,
-				);
-				if (engineOption._tag === "Some") {
-					const providerId =
-						yield* engineOption.value.getProviderForSessionEffect(
-							questionSessionId,
-						);
-					if (providerId !== "claude") {
-						log.warn(
-							`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
-						);
-					}
+				const engine = yield* OrchestrationEngineTag;
+				const providerId =
+					yield* engine.getProviderForSessionEffect(questionSessionId);
+				if (providerId !== "claude") {
+					log.warn(
+						`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+					);
 				}
 				wsHandler.broadcast({
 					type: "ask_user_resolved",

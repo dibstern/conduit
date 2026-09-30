@@ -105,17 +105,21 @@ class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
 
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
-): Effect.Effect<OrchestrationComponents, never, Scope.Scope> =>
+): Effect.Effect<
+	OrchestrationComponents,
+	never,
+	Scope.Scope | SqlClient.SqlClient
+> =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
 
-		// The relay's persistence SqlClient (when persistence is configured) backs
+		// The relay's persistence SqlClient backs
 		// the session binding read model and durable command receipts, so
 		// orchestration shares the relay's single database connection.
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
-		const sessionBindingReadModel =
-			sql != null ? new SqliteProviderSessionBindingReadModel(sql) : undefined;
+		const sql = yield* SqlClient.SqlClient;
+		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
+			sql,
+		);
 
 		// Sessions bound to a NAMED OpenCode instance route their
 		// provider calls to that instance's client. The binding is set before
@@ -126,7 +130,7 @@ const createOrchestrationComponentsEffect = (
 			OpenCodeInstanceClientsTag,
 		);
 		const clientForSession =
-			instanceClientsOption._tag === "Some" && sessionBindingReadModel != null
+			instanceClientsOption._tag === "Some"
 				? (sessionId: string) =>
 						sessionBindingReadModel
 							.getProviderForSession(sessionId)
@@ -180,22 +184,18 @@ const createOrchestrationComponentsEffect = (
 		// Narrow command read-model bootstrap: load only the command decision
 		// snapshot (receipts + stale-command tombstones), never the full
 		// relay/UI snapshot or message history.
-		const durableCommands =
-			sql != null
-				? {
-						sql,
-						snapshot: yield* new CommandReadModelRepository(sql)
-							.bootstrap()
-							.pipe(Effect.orDie),
-						projectKey:
-							options.projectKey ?? options.workspaceRoot ?? process.cwd(),
-						now: () => Date.now(),
-						generateId: () => `disp_${randomUUID()}`,
-						...(ingestionOption._tag === "Some"
-							? { ingestion: ingestionOption.value }
-							: {}),
-					}
-				: undefined;
+		const durableCommands = {
+			sql,
+			snapshot: yield* new CommandReadModelRepository(sql)
+				.bootstrap()
+				.pipe(Effect.orDie),
+			projectKey: options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+			now: () => Date.now(),
+			generateId: () => `disp_${randomUUID()}`,
+			...(ingestionOption._tag === "Some"
+				? { ingestion: ingestionOption.value }
+				: {}),
+		};
 		const engine = new OrchestrationEngine({
 			registry,
 			resolveProviderDriver: (providerId) =>
@@ -253,7 +253,7 @@ export const makeOrchestrationRuntimeLayer = (
 ): Layer.Layer<
 	ProviderRegistryTag | OrchestrationEngineTag,
 	never,
-	OpenCodeAPITag
+	OpenCodeAPITag | SqlClient.SqlClient
 > => {
 	const componentsLayer = Layer.scoped(
 		OrchestrationComponentsTag,

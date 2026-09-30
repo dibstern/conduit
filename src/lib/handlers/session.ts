@@ -236,34 +236,31 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 
 const resolveSessionHistory = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		let projectedSource: SessionHistorySource = { kind: "empty" };
 		let projectedMessages: readonly HistoryMessage[] = [];
-		if (readQueryOption._tag === "Some") {
-			const rows =
-				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
-			if (projectedSource.kind === "rest-history") {
-				projectedMessages = projectedSource.history.messages;
-			}
+		const rows = yield* readQuery.getSessionMessagesWithParts(sessionId);
+		projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
+		if (projectedSource.kind === "rest-history") {
+			projectedMessages = projectedSource.history.messages;
+		}
 
-			// The projection is authoritative only for relay-local (claude)
-			// sessions. OpenCode projections currently persist structure without
-			// message text, so provider REST history stays the source of truth
-			// for opencode rows; the projection is the fallback when REST fails.
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				sessionRowResult.right.provider !== "opencode"
-			) {
-				return projectedSource;
-			}
+		// The projection is authoritative only for relay-local (claude)
+		// sessions. OpenCode projections currently persist structure without
+		// message text, so provider REST history stays the source of truth
+		// for opencode rows; the projection is the fallback when REST fails.
+		const sessionRowResult = yield* Effect.either(
+			readQuery.getSession(sessionId),
+		);
+		if (
+			sessionRowResult._tag === "Right" &&
+			sessionRowResult.right != null &&
+			sessionRowResult.right.provider !== "opencode"
+		) {
+			return projectedSource;
 		}
 
 		const historyResult = yield* Effect.either(
@@ -312,12 +309,9 @@ const seedPaginationCursorFromHistory = (
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQueryOption._tag === "None") return true;
+		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(
-			readQueryOption.value.getSession(sessionId),
-		);
+		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
 		if (rowResult._tag === "Left") return true;
 
 		const row = rowResult.right;
@@ -348,17 +342,15 @@ const switchClientToSession = (
 			sessionId,
 			pollerIsProcessing || hasActiveTimeout,
 		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		let parentID: string | undefined;
 		let forkedFrom: string | undefined;
-		if (readQueryOption._tag === "Some") {
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (sessionRowResult._tag === "Right") {
-				parentID = sessionRowResult.right?.parent_id ?? undefined;
-				forkedFrom = sessionRowResult.right?.forked_from ?? undefined;
-			}
+		const sessionRowResult = yield* Effect.either(
+			readQuery.getSession(sessionId),
+		);
+		if (sessionRowResult._tag === "Right") {
+			parentID = sessionRowResult.right?.parent_id ?? undefined;
+			forkedFrom = sessionRowResult.right?.forked_from ?? undefined;
 		}
 
 		yield* seedPaginationCursorFromHistory(sessionId, patchedSource);
@@ -803,36 +795,32 @@ export const loadMoreHistoryForSession = ({
 }) =>
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		let projectedMessages: readonly HistoryMessage[] = [];
 
-		if (readQueryOption._tag === "Some") {
-			const sessionResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
+		const sessionResult = yield* Effect.either(readQuery.getSession(sessionId));
+		if (sessionResult._tag === "Right" && sessionResult.right != null) {
+			const rowsResult = yield* Effect.either(
+				readQuery.getSessionMessagesWithParts(sessionId),
 			);
-			if (sessionResult._tag === "Right" && sessionResult.right != null) {
-				const rowsResult = yield* Effect.either(
-					readQueryOption.value.getSessionMessagesWithParts(sessionId),
-				);
-				if (rowsResult._tag === "Right") {
-					const rows = rowsResult.right;
-					const end = Math.max(0, rows.length - Math.max(0, offset));
-					const start = Math.max(0, end - 50);
-					const page = messageRowsToHistory(rows.slice(start, end), {
-						pageSize: 50,
-					});
-					if (sessionResult.right.provider !== "opencode") {
-						return {
-							sessionId,
-							messages: page.messages,
-							hasMore: start > 0,
-							total: rows.length,
-						};
-					}
-					projectedMessages = messageRowsToHistory(rows, {
-						pageSize: Number.MAX_SAFE_INTEGER,
-					}).messages;
+			if (rowsResult._tag === "Right") {
+				const rows = rowsResult.right;
+				const end = Math.max(0, rows.length - Math.max(0, offset));
+				const start = Math.max(0, end - 50);
+				const page = messageRowsToHistory(rows.slice(start, end), {
+					pageSize: 50,
+				});
+				if (sessionResult.right.provider !== "opencode") {
+					return {
+						sessionId,
+						messages: page.messages,
+						hasMore: start > 0,
+						total: rows.length,
+					};
 				}
+				projectedMessages = messageRowsToHistory(rows, {
+					pageSize: Number.MAX_SAFE_INTEGER,
+				}).messages;
 			}
 		}
 

@@ -5,7 +5,7 @@
 // to the global profile — the only scope AWS guarantees is invokable from any
 // commercial source region.
 
-import { describe, it } from "@effect/vitest";
+import { layer } from "@effect/vitest";
 import { Cause, Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
@@ -19,6 +19,7 @@ import {
 	getModelsResponse,
 	groupGeoRoutingModels,
 } from "../../../src/lib/handlers/model.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
@@ -31,7 +32,7 @@ const bedrockModel = (id: string, name: string) => ({
 	provider: "amazon-bedrock",
 });
 
-describe("groupGeoRoutingModels", () => {
+layer(makePersistenceEffectLayer(":memory:"))("groupGeoRoutingModels", (it) => {
 	it("groups geo-prefix variants into one entry defaulting to global", () => {
 		const grouped = groupGeoRoutingModels([
 			bedrockModel(

@@ -78,6 +78,7 @@ import {
 	OpenCodeModelServiceLive,
 	type OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
+	type OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -512,6 +513,8 @@ const makeRelayDefaultCommandQueueLive = (
 	| ConfigTag
 	| LoggerTag
 	| OpenCodeModelServiceTag
+	| OrchestrationEngineTag
+	| ReadQueryEffectTag
 	| OverridesStateTag
 	| WebSocketHandlerTag
 > =>

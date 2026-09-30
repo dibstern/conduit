@@ -85,9 +85,17 @@ import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { createSilentLogger } from "../../src/lib/logger.js";
 import {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectTag,
+} from "../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
 } from "../../src/lib/persistence/effect/live.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../src/lib/persistence/effect/read-query-effect.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../src/lib/provider/provider-registry.js";
@@ -95,6 +103,7 @@ import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
 import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
+import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
 
@@ -845,6 +854,8 @@ export interface TestHandlerLayerOptions {
 	instanceMgmt?: InstanceManagementDeps;
 	orchestrationEngine?: OrchestrationEngine;
 	persistenceLayer?: ReturnType<typeof makePersistenceEffectLayer>;
+	readQueryEffect?: ReadQueryEffect;
+	claudeEventPersistEffect?: ClaudeEventPersistEffect;
 }
 
 /**
@@ -907,17 +918,34 @@ export function makeTestHandlerLayer(
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
 	const configLayer = Layer.succeed(ConfigTag, config);
 	const loggerLayer = Layer.succeed(LoggerTag, log);
-	const orchestrationLayer =
-		opts?.orchestrationEngine == null
-			? Layer.empty
-			: Layer.succeed(OrchestrationEngineTag, opts.orchestrationEngine);
+	const orchestrationLayer = Layer.succeed(
+		OrchestrationEngineTag,
+		opts?.orchestrationEngine ??
+			withDispatchEffect({
+				dispatch: vi.fn(async () => ({ models: [], commands: [] })),
+			}),
+	);
+	const persistenceLayer =
+		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
+	const providerTurnPersistenceLayer = Layer.mergeAll(
+		persistenceLayer,
+		...(opts?.readQueryEffect
+			? [Layer.succeed(ReadQueryEffectTag, opts.readQueryEffect)]
+			: []),
+		...(opts?.claudeEventPersistEffect
+			? [
+					Layer.succeed(
+						ClaudeEventPersistEffectTag,
+						opts.claudeEventPersistEffect,
+					),
+				]
+			: []),
+	);
 	const sessionManagerOrchestrationLayer = Layer.succeed(
 		OrchestrationEngineTag,
 		opts?.orchestrationEngine ??
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
-	const persistenceLayer =
-		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -952,6 +980,7 @@ export function makeTestHandlerLayer(
 				loggerLayer,
 				overridesStateLayer,
 				orchestrationLayer,
+				persistenceLayer,
 			),
 		),
 	);
@@ -1001,6 +1030,7 @@ export function makeTestHandlerLayer(
 				PendingInteractionServiceLive,
 				overridesStateLayer,
 				orchestrationLayer,
+				providerTurnPersistenceLayer,
 			),
 		),
 	);
@@ -1032,6 +1062,7 @@ export function makeTestHandlerLayer(
 		sessionTitleServiceLayer,
 		connectPtyUpstreamLayer,
 		orchestrationLayer,
+		persistenceLayer,
 		...(instanceMgmt == null
 			? []
 			: [Layer.succeed(InstanceMgmtTag, instanceMgmt)]),

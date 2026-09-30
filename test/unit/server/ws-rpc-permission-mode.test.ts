@@ -146,6 +146,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		);
 		const providerRegistry = new ProviderRegistry([claudeInstance]);
 		const sessionId = "session-restart";
+		const persistenceLayer = makePersistenceEffectLayer(":memory:");
 
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -174,15 +175,16 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
-							persistenceLayer: makePersistenceEffectLayer(":memory:"),
 							wsHandler,
 							log: makeMockLogger(),
+							persistenceLayer,
 						}),
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
 					Layer.provideMerge(
 						Layer.succeed(ProviderRegistryTag, providerRegistry),
 					),
+					Layer.provideMerge(persistenceLayer),
 				),
 			),
 		);
@@ -206,6 +208,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 			);
 			const providerRegistry = new ProviderRegistry([claudeInstance]);
 			const sessionId = "session-1";
+			const persistenceLayer = makePersistenceEffectLayer(":memory:");
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -243,15 +246,16 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(
 							makeTestHandlerLayer({
-								persistenceLayer: makePersistenceEffectLayer(":memory:"),
 								wsHandler,
 								log: makeMockLogger(),
+								persistenceLayer,
 							}),
 						),
 						Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
 						Layer.provideMerge(
 							Layer.succeed(ProviderRegistryTag, providerRegistry),
 						),
+						Layer.provideMerge(persistenceLayer),
 					),
 				),
 			);

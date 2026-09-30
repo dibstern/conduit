@@ -5,6 +5,7 @@ import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Serv
 import {
 	ConfigTag,
 	OpenCodeSettingsServiceTag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
@@ -15,6 +16,7 @@ import {
 	makeMockConfig,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 describe("settings handlers with Effect-native settings service", () => {
 	it.effect(
@@ -31,6 +33,7 @@ describe("settings handlers with Effect-native settings service", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 			);
 
 			return handleGetCommands("client-1", {}).pipe(

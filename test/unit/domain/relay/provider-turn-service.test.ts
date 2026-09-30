@@ -41,6 +41,7 @@ import {
 	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
 } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import {
 	type ProviderStateEffect,
 	ProviderStateEffectError,
@@ -67,7 +68,6 @@ import type {
 	ProviderInstance,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
-import type { HistoryMessage } from "../../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -183,13 +183,6 @@ const historyRow = (text: string) => ({
 	],
 });
 
-const historyMessage = (text: string): HistoryMessage => ({
-	id: `history-${text}`,
-	role: "user",
-	text,
-	parts: [{ id: `part-${text}`, type: "text", text }],
-});
-
 const makeReadQuery = (
 	getSessionMessagesWithParts: ReadQueryEffect["getSessionMessagesWithParts"],
 ): ReadQueryEffect => ({
@@ -266,7 +259,6 @@ const serviceLayer = (input: {
 	readonly ingestion?: ProviderRuntimeIngestion;
 	readonly providerState?: ProviderStateEffect;
 	readonly titleService?: SessionTitleService;
-	readonly sessionHistory?: readonly HistoryMessage[];
 	readonly api?: OpenCodeAPI;
 	readonly configDir?: string;
 }) => {
@@ -274,14 +266,7 @@ const serviceLayer = (input: {
 		getClientsForSession: vi.fn(() => ["client-1"]),
 	});
 	const log = makeMockLogger();
-	const sessionManagerService = makeMockSessionManagerService({
-		loadPreRenderedHistory: vi.fn(() =>
-			Effect.succeed({
-				messages: [...(input.sessionHistory ?? [])],
-				hasMore: false,
-			}),
-		),
-	});
+	const sessionManagerService = makeMockSessionManagerService();
 	let baseLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
@@ -298,17 +283,13 @@ const serviceLayer = (input: {
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
+		makePersistenceEffectLayer(":memory:"),
+		Layer.succeed(OrchestrationEngineTag, input.engine ?? makeEngine()),
 		Layer.succeed(
 			SessionTitleServiceTag,
 			input.titleService ?? makeTitleService(),
 		),
 	);
-	if (input.engine) {
-		baseLayer = Layer.merge(
-			baseLayer,
-			Layer.succeed(OrchestrationEngineTag, input.engine),
-		);
-	}
 	if (input.readQuery) {
 		baseLayer = Layer.merge(
 			baseLayer,
@@ -953,7 +934,9 @@ describe("ProviderTurnService", () => {
 				engine,
 				persist,
 				titleService,
-				sessionHistory: [historyMessage("Earlier prompt")],
+				readQuery: makeReadQuery(() =>
+					Effect.succeed([historyRow("Earlier prompt")]),
+				),
 				configDir,
 			});
 
@@ -1267,7 +1250,7 @@ describe("ProviderTurnService", () => {
 	});
 
 	it.effect(
-		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",
+		"uses OpenCode abort for an unbound session, clears processing timeout, and broadcasts done",
 		() => {
 			const api = {
 				session: { abort: vi.fn(async () => undefined) },

@@ -1,4 +1,4 @@
-import { describe, it } from "@effect/vitest";
+import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -33,6 +33,7 @@ import {
 	setSessionSettledForClient,
 } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -162,6 +163,8 @@ function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
 	};
 }
 
+// biome-ignore format: Keep the existing test layout inside this runtime suite.
+layer(makePersistenceEffectLayer(":memory:"))("persistent handler runtime", (it) => {
 describe("session handlers with Effect-native model service", () => {
 	for (const changed of [true, false]) {
 		it.effect(`broadcasts triage lists only when changed=${changed}`, () => {
@@ -916,4 +919,5 @@ describe("session handlers with Effect-native model service", () => {
 			}),
 		);
 	});
+});
 });

@@ -157,6 +157,7 @@ describe("handleGetCommands active provider", () => {
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 		);
 
 		return handleGetCommands("client-1", {}).pipe(

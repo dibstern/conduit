@@ -7,6 +7,7 @@ import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -20,8 +21,10 @@ import {
 } from "../../../src/lib/handlers/permissions.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function makeWsHandler() {
 	return {
@@ -63,6 +66,8 @@ describe("permission/question processing timeouts through Effect state", () => {
 						makeMockSessionManagerService(),
 					),
 					makeOverridesStateLive(),
+					makePersistenceEffectLayer(":memory:"),
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 				),
 			);
 
@@ -92,6 +97,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 					makeMockSessionManagerService(),
 				),
 				makeOverridesStateLive(),
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 			);
 
 			return Effect.gen(function* () {

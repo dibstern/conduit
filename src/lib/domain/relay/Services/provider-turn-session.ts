@@ -40,15 +40,13 @@ export const completeRecoveredQuestion = (
 		let messageId = question.messageId;
 		let partId = question.partId ?? question.toolCallId ?? question.requestId;
 		if (!messageId) {
-			const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
-			const tool =
-				readQuery._tag === "Some" &&
-				readQuery.value.getPendingClaudeQuestionTool
-					? yield* readQuery.value.getPendingClaudeQuestionTool(
-							question.sessionId,
-							question.toolCallId ?? question.requestId,
-						)
-					: undefined;
+			const readQuery = yield* ReadQueryEffectTag;
+			const tool = readQuery.getPendingClaudeQuestionTool
+				? yield* readQuery.getPendingClaudeQuestionTool(
+						question.sessionId,
+						question.toolCallId ?? question.requestId,
+					)
+				: undefined;
 			if (!tool)
 				return yield* Effect.fail(
 					new Error(
@@ -149,12 +147,10 @@ const materializeOpenCodeSession = (
 		const log = yield* LoggerTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const readQueryEffectOption =
-			yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQueryEffectOption._tag === "None") return input.sessionId;
+		const readQuery = yield* ReadQueryEffectTag;
 
 		const rowResult = yield* Effect.either(
-			readQueryEffectOption.value.getSession(input.sessionId),
+			readQuery.getSession(input.sessionId),
 		);
 		if (rowResult._tag === "Left") {
 			log.warn(
@@ -208,10 +204,7 @@ const materializeOpenCodeSession = (
 export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		if (engineOption._tag === "None") return input.sessionId;
-
-		const orchestrationEngine = engineOption.value;
+		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const providerId =
 			(yield* orchestrationEngine.getProviderForSessionEffect(
 				input.sessionId,
@@ -262,13 +255,8 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
 		yield* clearProcessingTimeout(input.sessionId);
 
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		if (engineOption._tag === "None") {
-			yield* interruptLegacyTurn(input);
-			return;
-		}
-
-		const providerId = yield* engineOption.value.getProviderForSessionEffect(
+		const engine = yield* OrchestrationEngineTag;
+		const providerId = yield* engine.getProviderForSessionEffect(
 			input.sessionId,
 		);
 		if (!providerId) {
@@ -296,7 +284,7 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		}
 
 		const interruptResult = yield* Effect.either(
-			engineOption.value.dispatchEffect({
+			engine.dispatchEffect({
 				type: "interrupt_turn",
 				commandId: input.commandId,
 				sessionId: input.sessionId,

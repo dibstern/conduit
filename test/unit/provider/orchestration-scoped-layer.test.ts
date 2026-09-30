@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
@@ -39,7 +40,12 @@ describe("orchestration scoped layer", () => {
 			.mockReturnValue(Effect.void);
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
-				Layer.provide(Layer.succeed(OpenCodeAPITag, makeStubClient())),
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(OpenCodeAPITag, makeStubClient()),
+						makePersistenceEffectLayer(":memory:"),
+					),
+				),
 			),
 		);
 
