@@ -2,7 +2,9 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -16,6 +18,7 @@ import {
 	makeOverridesStateLive,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import {
 	cancelSessionById,
 	handleMessage,
@@ -24,7 +27,11 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
-import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import {
+	makeMockAgentService,
+	makeMockSessionManagerService,
+	makeMockSessionTitleService,
+} from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const config = {
@@ -60,6 +67,7 @@ describe("prompt processing timeouts through Effect state", () => {
 		const client = {
 			session: { prompt: vi.fn(async () => undefined) },
 		} as unknown as OpenCodeAPI;
+		const persistence = makePersistenceEffectLayer(":memory:");
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -73,7 +81,10 @@ describe("prompt processing timeouts through Effect state", () => {
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
-				makePersistenceEffectLayer(":memory:"),
+				persistence,
+				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+				Layer.succeed(AgentServiceTag, makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(
 					OrchestrationEngineTag,
 					withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.never) }),
@@ -98,6 +109,7 @@ describe("prompt processing timeouts through Effect state", () => {
 			const client = {
 				session: { abort: vi.fn(async () => undefined) },
 			} as unknown as OpenCodeAPI;
+			const persistence = makePersistenceEffectLayer(":memory:");
 			const baseLayer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
@@ -109,7 +121,10 @@ describe("prompt processing timeouts through Effect state", () => {
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
-				makePersistenceEffectLayer(":memory:"),
+				persistence,
+				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+				Layer.succeed(AgentServiceTag, makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 			);
 			const layer = Layer.provideMerge(ProviderTurnServiceLive, baseLayer);

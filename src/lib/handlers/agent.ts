@@ -51,16 +51,14 @@ export const handleGetAgents = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const agentService = yield* AgentServiceTag;
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const config = yield* ConfigTag;
 		const activeSessionId = wsHandler.getClientSession(clientId);
 		const instanceId =
 			payload.instanceId === undefined
 				? undefined
 				: ProviderInstanceIdSchema.make(payload.instanceId);
 		const daemonConfig =
-			instanceId === undefined || configOption._tag === "None"
-				? null
-				: loadDaemonConfig(configOption.value.configDir);
+			instanceId === undefined ? null : loadDaemonConfig(config.configDir);
 		const instanceDriver =
 			instanceId === undefined || daemonConfig === null
 				? undefined

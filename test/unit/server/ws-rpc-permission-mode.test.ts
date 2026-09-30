@@ -16,10 +16,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
-import {
-	ProviderRegistry,
-	ProviderRegistryTag,
-} from "../../../src/lib/provider/provider-registry.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
@@ -122,15 +119,13 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							providerRegistry,
 							persistenceLayer: makePersistenceEffectLayer(":memory:"),
 							wsHandler,
 							log: makeMockLogger(),
 						}),
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
-					Layer.provideMerge(
-						Layer.succeed(ProviderRegistryTag, providerRegistry),
-					),
 				),
 			),
 		);
@@ -175,15 +170,13 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							providerRegistry,
 							wsHandler,
 							log: makeMockLogger(),
 							persistenceLayer,
 						}),
 					),
 					Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
-					Layer.provideMerge(
-						Layer.succeed(ProviderRegistryTag, providerRegistry),
-					),
 					Layer.provideMerge(persistenceLayer),
 				),
 			),
@@ -246,15 +239,13 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(
 							makeTestHandlerLayer({
+								providerRegistry,
 								wsHandler,
 								log: makeMockLogger(),
 								persistenceLayer,
 							}),
 						),
 						Layer.provideMerge(Layer.succeed(LoggerTag, makeMockLogger())),
-						Layer.provideMerge(
-							Layer.succeed(ProviderRegistryTag, providerRegistry),
-						),
 						Layer.provideMerge(persistenceLayer),
 					),
 				),

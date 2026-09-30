@@ -12,6 +12,7 @@ import type {
 	SessionManagerShape,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
@@ -40,6 +41,7 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
@@ -109,6 +111,7 @@ function makeSessionMetadataLayer(options: {
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		Layer.succeed(LoggerTag, logger),
+		Layer.succeed(ConfigTag, makeMockConfig()),
 		PendingInteractionServiceLive,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),

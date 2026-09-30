@@ -644,9 +644,9 @@ export const setSessionSettledForClient = ({
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, { settled })) {
 			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
-			const config = yield* Effect.serviceOption(ConfigTag);
-			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
-				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
+			const config = yield* ConfigTag;
+			if (config.broadcastSessionListChanged) {
+				yield* Effect.tryPromise(config.broadcastSessionListChanged).pipe(
 					Effect.catchAll(() => Effect.void),
 				);
 			}
@@ -688,9 +688,9 @@ export const setSessionAutoSettleForClient = ({
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
 			yield* service.sendSessionLists((msg) => wsHandler.broadcast(msg));
-			const config = yield* Effect.serviceOption(ConfigTag);
-			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
-				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
+			const config = yield* ConfigTag;
+			if (config.broadcastSessionListChanged) {
+				yield* Effect.tryPromise(config.broadcastSessionListChanged).pipe(
 					Effect.catchAll(() => Effect.void),
 				);
 			}

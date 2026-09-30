@@ -1,4 +1,7 @@
 {
+	"src/lib/domain/relay/Services/agent-service.ts :: function": "Not a class: the typeof guard on an optional engine lookup. The orchestration engine is now required, so the guard is gone.",
+	"src/lib/domain/relay/Services/provider-turn-dispatch.ts :: ProviderRuntimeIngestion,output:,required": "Not classes: words from ProviderRuntimeIngestionRequired's message. Ingestion is now a required service, so that error no longer exists.",
+	"test/unit/domain/relay/provider-turn-service.test.ts :: ProviderRuntimeIngestion,closed": "Not classes: words from the title of a deleted test for missing ProviderRuntimeIngestion. Ingestion is now required.",
 	"src/lib/domain/relay/Services/session-manager-service.ts :: Pagination,cursor,fetch,full": {
 		"movedTo": "src/lib/domain/relay/Services/session-manager-history.ts",
 		"reason": "Not classes: words from the pagination-cursor fallback log string, moved verbatim with history loading into session-manager-history.ts."

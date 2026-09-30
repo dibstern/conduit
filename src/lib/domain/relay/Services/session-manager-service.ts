@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, HashMap, Layer, type Option, Ref } from "effect";
+import { Context, Effect, HashMap, Layer, Ref } from "effect";
 import {
 	isKnownDriverKind,
 	type ProviderDriverKind,
@@ -205,12 +205,9 @@ const getLocalSessionProvider = () =>
 
 const getConfiguredLocalSessionProvider = () =>
 	Effect.gen(function* () {
-		const overridesOption = yield* Effect.serviceOption(OverridesStateTag);
-		if (overridesOption._tag === "Some") {
-			const state = yield* Ref.get(overridesOption.value);
-			return state.defaultModel?.providerID;
-		}
-		return undefined;
+		const overrides = yield* OverridesStateTag;
+		const state = yield* Ref.get(overrides);
+		return state.defaultModel?.providerID;
 	});
 
 const createLocalSession = (
@@ -218,7 +215,7 @@ const createLocalSession = (
 	selectedInstanceId?: ProviderInstanceId,
 ) =>
 	Effect.gen(function* () {
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const config = yield* ConfigTag;
 
 		const provider =
 			selectedInstanceId === undefined
@@ -244,8 +241,7 @@ const createLocalSession = (
 		return {
 			id: sessionId,
 			projectID: "",
-			directory:
-				configOption._tag === "Some" ? configOption.value.projectDir : "",
+			directory: config.projectDir,
 			title: sessionTitle,
 			version: "",
 			time: { created: now, updated: now },
@@ -389,7 +385,7 @@ const makeServiceCreateSession = ({
 	api,
 	engine,
 	configDir,
-	instanceClientsOption,
+	instanceClients,
 	readQuery,
 	eventStore,
 	projectionRunner,
@@ -399,7 +395,7 @@ const makeServiceCreateSession = ({
 	api: OpenCodeAPI;
 	engine: OrchestrationEngine;
 	configDir: string | undefined;
-	instanceClientsOption: Option.Option<OpenCodeInstanceClients>;
+	instanceClients: OpenCodeInstanceClients;
 	readQuery: ReadQueryEffect;
 	eventStore: EventStoreEffect;
 	projectionRunner: ProjectionRunnerEffect;
@@ -444,8 +440,8 @@ const makeServiceCreateSession = ({
 						// instance that cannot be resolved fails the create cleanly
 						// instead of silently landing on the default server.
 						const instanceApi =
-							instanceId !== undefined && instanceClientsOption._tag === "Some"
-								? yield* instanceClientsOption.value.clientFor(instanceId).pipe(
+							instanceId !== undefined
+								? yield* instanceClients.clientFor(instanceId).pipe(
 										Effect.mapError(
 											(cause) =>
 												new SessionManagerError({
@@ -602,6 +598,12 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| OpenCodeAPITag
 	| SessionManagerStateTag
 	| LoggerTag
+	| ConfigTag
+	| WebSocketHandlerTag
+	| RelayStatusSnapshotTag
+	| OpenCodeInstanceClientsTag
+	| BackgroundLivenessTag
+	| OverridesStateTag
 	| DaemonEventBusTag
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag
@@ -615,38 +617,29 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const stateRef = yield* SessionManagerStateTag;
 		const log = yield* LoggerTag;
 		const eventBus = yield* DaemonEventBusTag;
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const configDir =
-			configOption._tag === "Some" ? configOption.value.configDir : undefined;
+		const config = yield* ConfigTag;
+		const configDir = config.configDir;
 		const engine = yield* OrchestrationEngineTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
+		// The relay constructs the session manager before its status-poller layer.
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
-		const backgroundLivenessOption = yield* Effect.serviceOption(
-			BackgroundLivenessTag,
-		);
-		const hasLiveBackgroundWork =
-			backgroundLivenessOption._tag === "Some"
-				? backgroundLivenessOption.value
-				: undefined;
-		const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
-		const snapshotOption = yield* Effect.serviceOption(RelayStatusSnapshotTag);
-		const instanceClientsOption = yield* Effect.serviceOption(
-			OpenCodeInstanceClientsTag,
-		);
-		if (configOption._tag === "Some") {
-			const forkMeta = loadForkMetadata(configDir);
-			if (forkMeta.size > 0) {
-				yield* Ref.update(stateRef, (s) => {
-					let nextForkMeta = s.forkMeta;
-					for (const [sessionId, entry] of forkMeta) {
-						nextForkMeta = HashMap.set(nextForkMeta, sessionId, entry);
-					}
-					return { ...s, forkMeta: nextForkMeta };
-				});
-			}
+		const hasLiveBackgroundWork = yield* BackgroundLivenessTag;
+		const wsHandler = yield* WebSocketHandlerTag;
+		const snapshot = yield* RelayStatusSnapshotTag;
+		const instanceClients = yield* OpenCodeInstanceClientsTag;
+		const overrides = yield* OverridesStateTag;
+		const forkMeta = loadForkMetadata(configDir);
+		if (forkMeta.size > 0) {
+			yield* Ref.update(stateRef, (s) => {
+				let nextForkMeta = s.forkMeta;
+				for (const [sessionId, entry] of forkMeta) {
+					nextForkMeta = HashMap.set(nextForkMeta, sessionId, entry);
+				}
+				return { ...s, forkMeta: nextForkMeta };
+			});
 		}
 		const { serviceListSessions, getSessionFamily, serviceSendSessionLists } =
 			makeSessionListOperations({
@@ -655,20 +648,31 @@ export const SessionManagerServiceLive: Layer.Layer<
 				readQuery,
 				statusPollerOption,
 				hasLiveBackgroundWork,
-				snapshotOption,
-				wsHandlerOption,
+				snapshot,
+				wsHandler,
 			});
 		const serviceCreateSession = makeServiceCreateSession({
 			api,
 			engine,
 			configDir,
-			instanceClientsOption,
+			instanceClients,
 			readQuery,
 			eventStore,
 			projectionRunner,
 			sql,
 			log,
 		});
+		const createSessionWithServices = (
+			title?: string,
+			options?: CreateSessionOptions,
+		) =>
+			serviceCreateSession(title, options).pipe(
+				Effect.provideService(ConfigTag, config),
+				Effect.provideService(LoggerTag, log),
+				Effect.provideService(OpenCodeAPITag, api),
+				Effect.provideService(OverridesStateTag, overrides),
+				Effect.provideService(RelayStatusSnapshotTag, snapshot),
+			);
 
 		const withSessionCommandServices = <A, E>(
 			effect: Effect.Effect<
@@ -679,6 +683,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				| EventStoreEffectTag
 				| ProjectionRunnerEffectTag
 				| SqlClient.SqlClient
+				| ConfigTag
+				| LoggerTag
 			>,
 		): Effect.Effect<A, E> => {
 			return effect.pipe(
@@ -687,6 +693,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				Effect.provideService(EventStoreEffectTag, eventStore),
 				Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(ConfigTag, config),
+				Effect.provideService(LoggerTag, log),
 			);
 		};
 
@@ -699,9 +707,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 						const topLevel = sessions.find((session) => !session.parentID);
 						return (topLevel ?? sessions[0])?.id ?? "";
 					}
-					const session = yield* serviceCreateSession(title);
+					const session = yield* createSessionWithServices(title);
 					yield* incrementLastKnownSessionCount().pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(RelayStatusSnapshotTag, snapshot),
 					);
 					yield* publishSessionCreated(session.id).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),
@@ -717,11 +726,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 						);
 						return sorted[0]?.id ?? "";
 					}
-					const session = yield* serviceCreateSession(title);
+					const session = yield* createSessionWithServices(title);
 					yield* incrementLastKnownSessionCount().pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(RelayStatusSnapshotTag, snapshot),
 					);
-					yield* updateRelaySessionCountSnapshot(1);
+					yield* updateRelaySessionCountSnapshot(1).pipe(
+						Effect.provideService(RelayStatusSnapshotTag, snapshot),
+					);
 					return session.id;
 				}),
 			getLastKnownSessionCount: () =>
@@ -736,9 +748,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
-					const session = yield* serviceCreateSession(title, options);
+					const session = yield* createSessionWithServices(title, options);
 					yield* incrementLastKnownSessionCount().pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(RelayStatusSnapshotTag, snapshot),
 					);
 					yield* publishSessionCreated(session.id).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),
@@ -754,6 +767,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(EventStoreEffectTag, eventStore),
 						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.provideService(ConfigTag, config),
+						Effect.provideService(LoggerTag, log),
+						Effect.provideService(RelayStatusSnapshotTag, snapshot),
 					);
 					yield* publishSessionDeleted(sessionId).pipe(
 						Effect.provideService(DaemonEventBusTag, eventBus),
@@ -833,6 +849,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(EventStoreEffectTag, eventStore),
 						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.provideService(ConfigTag, config),
+						Effect.provideService(LoggerTag, log),
+						Effect.provideService(OpenCodeAPITag, api),
 					);
 				}),
 			sendSessionLists: serviceSendSessionLists,

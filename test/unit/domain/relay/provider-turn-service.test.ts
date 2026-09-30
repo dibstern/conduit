@@ -286,6 +286,10 @@ const serviceLayer = (input: {
 		makePersistenceEffectLayer(":memory:"),
 		Layer.succeed(OrchestrationEngineTag, input.engine ?? makeEngine()),
 		Layer.succeed(
+			ProviderRuntimeIngestionTag,
+			input.ingestion ?? makeIngestion(),
+		),
+		Layer.succeed(
 			SessionTitleServiceTag,
 			input.titleService ?? makeTitleService(),
 		),
@@ -300,12 +304,6 @@ const serviceLayer = (input: {
 		baseLayer = Layer.merge(
 			baseLayer,
 			Layer.succeed(ClaudeEventPersistEffectTag, input.persist),
-		);
-	}
-	if (input.ingestion) {
-		baseLayer = Layer.merge(
-			baseLayer,
-			Layer.succeed(ProviderRuntimeIngestionTag, input.ingestion),
 		);
 	}
 	if (input.providerState) {
@@ -341,7 +339,7 @@ const interruptTurn = () =>
 
 describe("ProviderTurnService", () => {
 	it.effect(
-		"fails closed for Claude provider output when ProviderRuntimeIngestion is unavailable",
+		"passes Claude provider output to the required ingestion service",
 		() =>
 			Effect.gen(function* () {
 				let capturedSink: EventSink | undefined;
@@ -356,7 +354,8 @@ describe("ProviderTurnService", () => {
 					providerId: "claude",
 					dispatchEffect,
 				});
-				const { layer } = serviceLayer({ engine });
+				const ingestion = makeIngestion();
+				const { layer } = serviceLayer({ engine, ingestion });
 
 				yield* sendTurn().pipe(Effect.provide(layer));
 
@@ -364,28 +363,19 @@ describe("ProviderTurnService", () => {
 				expect(sink).toBeDefined();
 				if (!sink) return;
 
-				const result = yield* Effect.either(
-					sink.push(
-						providerRuntimeEvent(
-							"text.delta",
-							"session-1",
-							{
-								messageId: "msg-1",
-								partId: "part-1",
-								text: "hello",
-							},
-							{ eventId: "evt-missing-ingestion", providerId: "claude" },
-						),
-					),
-				);
-
-				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
-						_tag: "ProviderRuntimeIngestionRequired",
-						sessionId: "session-1",
+				const event = providerRuntimeEvent(
+					"text.delta",
+					"session-1",
+					{
+						messageId: "msg-1",
+						partId: "part-1",
+						text: "hello",
 					},
-				});
+					{ eventId: "evt-required-ingestion", providerId: "claude" },
+				);
+				const result = yield* Effect.either(sink.push(event));
+				expect(result._tag).toBe("Right");
+				expect(ingestion.ingest).toHaveBeenCalledWith(event);
 			}),
 	);
 

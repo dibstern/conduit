@@ -42,12 +42,10 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 					}),
 				);
 				if (result._tag === "Left") {
-					const logOption = yield* Effect.serviceOption(LoggerTag);
-					if (logOption._tag === "Some") {
-						logOption.value.warn(
-							`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
-						);
-					}
+					const log = yield* LoggerTag;
+					log.warn(
+						`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+					);
 					return [];
 				}
 				return result.right.commands.map((command) => ({
@@ -68,16 +66,14 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 		}
 
 		if (activeProviderId !== "opencode") {
-			const logOption = yield* Effect.serviceOption(LoggerTag);
-			if (logOption._tag === "Some") {
-				logOption.value.warn(
-					`Failed to discover OpenCode commands; falling back to Claude commands: ${
-						openCodeResult.left instanceof Error
-							? openCodeResult.left.message
-							: openCodeResult.left
-					}`,
-				);
-			}
+			const log = yield* LoggerTag;
+			log.warn(
+				`Failed to discover OpenCode commands; falling back to Claude commands: ${
+					openCodeResult.left instanceof Error
+						? openCodeResult.left.message
+						: openCodeResult.left
+				}`,
+			);
 			return yield* listClaudeCommands();
 		}
 

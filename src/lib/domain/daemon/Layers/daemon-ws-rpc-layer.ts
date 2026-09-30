@@ -19,6 +19,7 @@ import {
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
 import { DaemonWsClientRegistryTag } from "../Services/daemon-ws-client-registry.js";
+import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance,
 	getInstances,
@@ -61,6 +62,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| RelayCacheTag
 			| InstanceManagerStateTag
 			| PollerFibersTag
+			| InstanceHealthCheckTag
 			| PortScannerTag
 		>();
 		const bus = yield* DaemonEventBusTag;
@@ -100,6 +102,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| RelayCacheTag
 				| InstanceManagerStateTag
 				| PollerFibersTag
+				| InstanceHealthCheckTag
 				| PortScannerTag
 			>,
 		) =>

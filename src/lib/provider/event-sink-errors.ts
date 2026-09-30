@@ -1,7 +1,6 @@
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data } from "effect";
 import type { PendingInteractionCancelled } from "../domain/relay/Services/pending-interaction-service.js";
-import type { ProviderRuntimeIngestionRequired } from "../domain/relay/Services/provider-turn-dispatch.js";
 import type { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerError } from "../persistence/effect/projection-runner-effect.js";
@@ -56,5 +55,4 @@ export type EventSinkError =
 	| EventSinkIngestionError
 	| MissingPendingInteractions
 	| PendingInteractionCancelled
-	| ProviderRuntimeIngestionRequired
 	| ProviderSideEffectInteractionUnsupported;

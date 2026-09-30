@@ -158,12 +158,9 @@ export const isClaudeSessionRow = (
  */
 export const applySessionCommand = (command: SessionCommand) =>
 	Effect.gen(function* () {
-		// Optional: a Claude-only relay never wires the OpenCode API, and a
-		// mutation on a Claude-backed session has no upstream to reach anyway.
-		// Requiring it here would put OpenCode in the type of every local create.
-		const apiOption = yield* Effect.serviceOption(OpenCodeAPITag);
-		const logOption = yield* Effect.serviceOption(LoggerTag);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const api = yield* OpenCodeAPITag;
+		const log = yield* LoggerTag;
+		const config = yield* ConfigTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
@@ -243,35 +240,22 @@ export const applySessionCommand = (command: SessionCommand) =>
 			);
 		}
 
-		// No adapter means no upstream to sync: the relay has no OpenCode API
-		// wired at all, so there is no session registry anywhere to fall out of
-		// step with.
 		const adapter =
-			row !== undefined &&
-			isClaudeSessionRow(
-				row,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
+			row !== undefined && isClaudeSessionRow(row, config.configDir)
 				? claudeUpstreamAdapter
-				: apiOption._tag === "Some"
-					? openCodeUpstreamAdapter(apiOption.value)
-					: undefined;
+				: openCodeUpstreamAdapter(api);
 
-		if (adapter !== undefined) {
-			yield* adapter.sync(command).pipe(
-				Effect.catchAll((cause) =>
-					Effect.sync(() => {
-						if (logOption._tag === "Some") {
-							logOption.value.warn("Upstream session sync failed", {
-								operation: command.type,
-								sessionId,
-								cause,
-							});
-						}
-					}),
-				),
-			);
-		}
+		yield* adapter.sync(command).pipe(
+			Effect.catchAll((cause) =>
+				Effect.sync(() => {
+					log.warn("Upstream session sync failed", {
+						operation: command.type,
+						sessionId,
+						cause,
+					});
+				}),
+			),
+		);
 	}).pipe(
 		Effect.annotateLogs("sessionId", command.data.sessionId),
 		Effect.withSpan("session.applySessionCommand", {
@@ -394,30 +378,10 @@ export const forkOpenCodeSession = (
 const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
-		const providerStateOption = yield* Effect.serviceOption(
-			ProviderStateEffectTag,
-		);
-		const persistOption = yield* Effect.serviceOption(
-			ClaudeEventPersistEffectTag,
-		);
+		const providerState = yield* ProviderStateEffectTag;
+		const persist = yield* ClaudeEventPersistEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-		if (
-			providerStateOption._tag === "None" ||
-			persistOption._tag === "None" ||
-			configOption._tag === "None"
-		) {
-			return yield* Effect.fail(
-				new SessionCommandError({
-					operation: "session.forked.services",
-					cause: parentSessionId,
-					message: "Claude session fork services are unavailable",
-				}),
-			);
-		}
-		const providerState = providerStateOption.value;
-		const persist = persistOption.value;
-		const config = configOption.value;
+		const config = yield* ConfigTag;
 		const parent = yield* readQuery.getSession(parentSessionId);
 		if (!parent) {
 			return yield* Effect.fail(
@@ -527,17 +491,11 @@ const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 export const forkSession = (parentSessionId: string, messageId?: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const config = yield* ConfigTag;
 		const parent = yield* readQuery
 			.getSession(parentSessionId)
 			.pipe(Effect.orElseSucceed(() => undefined));
-		if (
-			parent &&
-			isClaudeSessionRow(
-				parent,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
-		) {
+		if (parent && isClaudeSessionRow(parent, config.configDir)) {
 			return yield* forkClaudeSession(parentSessionId, messageId);
 		}
 

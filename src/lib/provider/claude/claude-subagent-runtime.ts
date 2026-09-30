@@ -402,11 +402,10 @@ function resolveEnsureClaudeSubagentSessionEffect(
 		if (ensureClaudeSubagentSession) {
 			return ensureClaudeSubagentSession;
 		}
-		const persistOption = yield* Effect.serviceOption(
-			ClaudeEventPersistEffectTag,
-		);
-		return persistOption._tag === "Some"
-			? persistOption.value.ensureClaudeSubagentSession
+		// Claude provider turn callbacks run outside the relay persistence context.
+		const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
+		return persist._tag === "Some"
+			? persist.value.ensureClaudeSubagentSession
 			: undefined;
 	});
 }

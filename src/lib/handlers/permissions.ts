@@ -274,76 +274,68 @@ export const handleAskUserResponse = (
 			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: formatted })}`,
 		);
 
-		const pendingInteractionsOption = yield* Effect.serviceOption(
-			PendingInteractionServiceTag,
-		);
-		if (pendingInteractionsOption._tag === "Some") {
-			const resolvedOption =
-				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
-					toolId,
-					answers as Record<string, unknown>,
+		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const resolvedOption =
+			yield* pendingInteractions.resolveQuestionFromBrowser(
+				toolId,
+				answers as Record<string, unknown>,
+			);
+		const resolved = Option.getOrUndefined(resolvedOption);
+		if (resolved) {
+			const questionSessionId = resolved.sessionId || sessionId;
+			if (resolved.question.recovered) {
+				const answerText = resolved.question.questions
+					.map(
+						(question, index) =>
+							`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
+					)
+					.join("\n");
+				const turns = yield* ProviderTurnServiceTag;
+				if (!turns.completeRecoveredQuestion) {
+					yield* pendingInteractions.recoverPendingQuestions([
+						resolved.question,
+					]);
+					return yield* Effect.fail(
+						new Error("Recovered question turn service unavailable"),
+					);
+				}
+				const completed = yield* Effect.either(
+					turns.completeRecoveredQuestion(resolved.question, answerText),
 				);
-			const resolved = Option.getOrUndefined(resolvedOption);
-			if (resolved) {
-				const questionSessionId = resolved.sessionId || sessionId;
-				if (resolved.question.recovered) {
-					const answerText = resolved.question.questions
-						.map(
-							(question, index) =>
-								`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
-						)
-						.join("\n");
-					const turnsOption = yield* Effect.serviceOption(
-						ProviderTurnServiceTag,
-					);
-					const turns = Option.getOrUndefined(turnsOption);
-					if (!turns?.completeRecoveredQuestion) {
-						yield* pendingInteractionsOption.value.recoverPendingQuestions([
-							resolved.question,
-						]);
-						return yield* Effect.fail(
-							new Error("Recovered question turn service unavailable"),
-						);
-					}
-					const completed = yield* Effect.either(
-						turns.completeRecoveredQuestion(resolved.question, answerText),
-					);
-					if (completed._tag === "Left") {
-						yield* pendingInteractionsOption.value.recoverPendingQuestions([
-							resolved.question,
-						]);
-						return yield* Effect.fail(completed.left);
-					}
-					yield* sendMessageToSession({
-						clientId,
-						sessionId: questionSessionId,
-						text: answerText,
-						commandId: payload.commandId ?? createCommandId(),
-					});
+				if (completed._tag === "Left") {
+					yield* pendingInteractions.recoverPendingQuestions([
+						resolved.question,
+					]);
+					return yield* Effect.fail(completed.left);
 				}
-				const engine = yield* OrchestrationEngineTag;
-				const providerId =
-					yield* engine.getProviderForSessionEffect(questionSessionId);
-				if (providerId !== "claude") {
-					log.warn(
-						`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
-					);
-				}
-				wsHandler.broadcast({
-					type: "ask_user_resolved",
-					toolId,
+				yield* sendMessageToSession({
+					clientId,
 					sessionId: questionSessionId,
+					text: answerText,
+					commandId: payload.commandId ?? createCommandId(),
 				});
-				if (questionSessionId) {
-					yield* sessionManagerService.decrementPendingQuestionCount(
-						questionSessionId,
-					);
-				}
-				yield* restartProcessingTimeout(questionSessionId);
-				return;
 			}
+			const engine = yield* OrchestrationEngineTag;
+			const providerId =
+				yield* engine.getProviderForSessionEffect(questionSessionId);
+			if (providerId !== "claude") {
+				log.warn(
+					`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+				);
+			}
+			wsHandler.broadcast({
+				type: "ask_user_resolved",
+				toolId,
+				sessionId: questionSessionId,
+			});
+			if (questionSessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(
+					questionSessionId,
+				);
+			}
+			yield* restartProcessingTimeout(questionSessionId);
+			return;
 		}
-
 		// OpenCode REST API path with fallback (preserving recovery logic)
 		const replyResult = yield* Effect.either(
 			Effect.tryPromise(() => client.question.reply(toolId, formatted)),
@@ -435,66 +427,57 @@ export const handleQuestionReject = (
 
 		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
 
-		const pendingInteractionsOption = yield* Effect.serviceOption(
-			PendingInteractionServiceTag,
+		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const pendingQuestions = yield* pendingInteractions.listPendingQuestions();
+		const pendingQuestion = pendingQuestions.find(
+			(question) => question.requestId === toolId,
 		);
-		if (pendingInteractionsOption._tag === "Some") {
-			const pendingQuestions =
-				yield* pendingInteractionsOption.value.listPendingQuestions();
-			const pendingQuestion = pendingQuestions.find(
-				(question) => question.requestId === toolId,
-			);
-			if (pendingQuestion) {
-				const questionSessionId = pendingQuestion.sessionId || sessionId;
-				const engine = yield* OrchestrationEngineTag;
-				const providerId =
-					yield* engine.getProviderForSessionEffect(questionSessionId);
-				if (providerId === "claude") {
-					log.warn(
-						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
-					);
-					wsHandler.sendTo(clientId, {
-						type: "ask_user_error",
-						sessionId: questionSessionId,
-						toolId,
-						message:
-							"Claude questions require an answer before the turn can continue.",
-					});
-					return;
-				}
-			}
-
-			const resolvedOption =
-				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
-					toolId,
-					{},
+		if (pendingQuestion) {
+			const questionSessionId = pendingQuestion.sessionId || sessionId;
+			const engine = yield* OrchestrationEngineTag;
+			const providerId =
+				yield* engine.getProviderForSessionEffect(questionSessionId);
+			if (providerId === "claude") {
+				log.warn(
+					`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
 				);
-			const resolved = Option.getOrUndefined(resolvedOption);
-			if (resolved) {
-				const questionSessionId = resolved.sessionId || sessionId;
-				const engine = yield* OrchestrationEngineTag;
-				const providerId =
-					yield* engine.getProviderForSessionEffect(questionSessionId);
-				if (providerId !== "claude") {
-					log.warn(
-						`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
-					);
-				}
-				wsHandler.broadcast({
-					type: "ask_user_resolved",
-					toolId,
+				wsHandler.sendTo(clientId, {
+					type: "ask_user_error",
 					sessionId: questionSessionId,
+					toolId,
+					message:
+						"Claude questions require an answer before the turn can continue.",
 				});
-				if (questionSessionId) {
-					yield* sessionManagerService.decrementPendingQuestionCount(
-						questionSessionId,
-					);
-				}
-				yield* restartProcessingTimeout(questionSessionId);
 				return;
 			}
 		}
 
+		const resolvedOption =
+			yield* pendingInteractions.resolveQuestionFromBrowser(toolId, {});
+		const resolved = Option.getOrUndefined(resolvedOption);
+		if (resolved) {
+			const questionSessionId = resolved.sessionId || sessionId;
+			const engine = yield* OrchestrationEngineTag;
+			const providerId =
+				yield* engine.getProviderForSessionEffect(questionSessionId);
+			if (providerId !== "claude") {
+				log.warn(
+					`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
+				);
+			}
+			wsHandler.broadcast({
+				type: "ask_user_resolved",
+				toolId,
+				sessionId: questionSessionId,
+			});
+			if (questionSessionId) {
+				yield* sessionManagerService.decrementPendingQuestionCount(
+					questionSessionId,
+				);
+			}
+			yield* restartProcessingTimeout(questionSessionId);
+			return;
+		}
 		// OpenCode REST API path with fallback (preserving recovery logic)
 		const rejectResult = yield* Effect.either(
 			Effect.tryPromise(() => client.question.reject(toolId)),

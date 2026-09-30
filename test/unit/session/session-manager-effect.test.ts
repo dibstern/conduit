@@ -7,10 +7,14 @@ import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
@@ -56,6 +60,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import {
 	makeMockConfig,
 	makeMockLogger,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 describe("SessionManager Effect", () => {
@@ -68,12 +73,30 @@ describe("SessionManager Effect", () => {
 		},
 	});
 
-	const makeTestLayer = (mockApi: ReturnType<typeof makeMockApi>) =>
-		Layer.mergeAll(
+	const makeTestLayer = (
+		mockApi: ReturnType<typeof makeMockApi>,
+		configDir?: string,
+	) => {
+		const configLayer = Layer.succeed(
+			ConfigTag,
+			makeMockConfig(configDir ? { configDir } : {}),
+		);
+		const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+		return Layer.mergeAll(
 			makeSessionManagerStateLive(),
 			Layer.succeed(OpenCodeAPITag, mockApi as unknown as OpenCodeAPI),
 			makePersistenceEffectLayer(":memory:"),
+			configLayer,
+			loggerLayer,
+			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+			Layer.succeed(BackgroundLivenessTag, () => false),
+			RelayStatusSnapshotLive,
+			makeOverridesStateLive(),
+			OpenCodeInstanceClientsLive.pipe(
+				Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+			),
 		);
+	};
 
 	const makeLiveServiceLayer = (
 		mockApi: ReturnType<typeof makeMockApi>,
@@ -93,7 +116,7 @@ describe("SessionManager Effect", () => {
 		return Layer.provideMerge(
 			SessionManagerServiceLive,
 			Layer.mergeAll(
-				Layer.fresh(makeTestLayer(mockApi)),
+				Layer.fresh(makeTestLayer(mockApi, configDir)),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				DaemonEventBusLive,
 				persistenceLayer,
@@ -103,9 +126,6 @@ describe("SessionManager Effect", () => {
 				),
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
-					: []),
-				...(configDir
-					? [Layer.succeed(ConfigTag, makeMockConfig({ configDir }))]
 					: []),
 				...(projectionRunnerOverride ? [projectionRunnerOverride] : []),
 			),

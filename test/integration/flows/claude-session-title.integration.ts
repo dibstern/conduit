@@ -5,7 +5,11 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	WebSocketHandlerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	type ClaudeTitleQueryFactory,
@@ -18,8 +22,10 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockSessionManagerService,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 const SESSION_ID = "claude-title-integration-session";
@@ -86,6 +92,8 @@ const makeTitleServiceLayer = (input: {
 		makeSessionTitleServiceLive({ queryFactory: input.queryFactory }),
 		Layer.mergeAll(
 			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
+			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 			makePersistenceEffectLayer(input.filename),
 		),

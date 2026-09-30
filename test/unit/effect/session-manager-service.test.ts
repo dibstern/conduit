@@ -21,11 +21,13 @@ import {
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import {
 	RelayStatusSnapshotLive,
 	RelayStatusSnapshotTag,
 } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -81,6 +83,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
@@ -167,8 +170,23 @@ function makeHistoryMessage(
 	};
 }
 
+const sessionConfigLayer = Layer.succeed(
+	ConfigTag,
+	makeMockConfig({ configDir: "/tmp/conduit-session-manager-tests" }),
+);
+const sessionLoggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 const requiredSessionServices = Layer.mergeAll(
 	makePersistenceEffectLayer(":memory:"),
+	sessionConfigLayer,
+	sessionLoggerLayer,
+	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+	Layer.succeed(BackgroundLivenessTag, () => false),
+	RelayStatusSnapshotLive,
+	makeOverridesStateLive(),
+	OpenCodeInstanceClientsLive.pipe(
+		Layer.provide(Layer.mergeAll(sessionConfigLayer, sessionLoggerLayer)),
+	),
 	Layer.succeed(
 		OrchestrationEngineTag,
 		new OrchestrationEngine({ registry: new ProviderRegistry() }),

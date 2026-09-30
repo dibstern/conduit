@@ -17,6 +17,10 @@ import {
 import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
@@ -79,6 +83,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 				Layer.succeed(LoggerTag, mockLogger()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
+				Layer.succeed(ProviderRegistryTag, new ProviderRegistry()),
 			);
 
 			return Effect.gen(function* () {
@@ -128,6 +133,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 				Layer.succeed(LoggerTag, mockLogger()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
+				Layer.succeed(ProviderRegistryTag, new ProviderRegistry()),
 			);
 
 			return Effect.gen(function* () {

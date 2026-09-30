@@ -217,6 +217,8 @@ export const makeSessionTitleServiceLive = (
 	SessionTitleServiceTag,
 	never,
 	| LoggerTag
+	| ConfigTag
+	| WebSocketHandlerTag
 	| SessionManagerServiceTag
 	| ReadQueryEffectTag
 	| EventStoreEffectTag
@@ -228,9 +230,9 @@ export const makeSessionTitleServiceLive = (
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
-			const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
+			const wsHandler = yield* WebSocketHandlerTag;
 			const sessionManagerService = yield* SessionManagerServiceTag;
-			const configOption = yield* Effect.serviceOption(ConfigTag);
+			const config = yield* ConfigTag;
 			const readQuery = yield* ReadQueryEffectTag;
 			const eventStore = yield* EventStoreEffectTag;
 			const projectionRunner = yield* ProjectionRunnerEffectTag;
@@ -239,10 +241,7 @@ export const makeSessionTitleServiceLive = (
 			const queryFactory =
 				options.queryFactory ?? ((params) => sdkQuery(params));
 			const now = options.now ?? (() => new Date());
-			const cwd =
-				configOption._tag === "Some"
-					? (configOption.value.projectDir ?? process.cwd())
-					: process.cwd();
+			const cwd = config.projectDir ?? process.cwd();
 
 			const generateTitle = (firstMessage: string) =>
 				Effect.gen(function* () {
@@ -325,8 +324,7 @@ export const makeSessionTitleServiceLive = (
 					log.warn(
 						`SESSION_TITLE_GENERATION_FAILED sessionId=${sessionId} reason=${reason}`,
 					);
-					if (wsHandlerOption._tag === "None") return;
-					wsHandlerOption.value.broadcast({
+					wsHandler.broadcast({
 						type: "system_error",
 						code: "SESSION_TITLE_GENERATION_FAILED",
 						message:
@@ -382,11 +380,9 @@ export const makeSessionTitleServiceLive = (
 						isClaudeSessionProvider(appliedRow.provider);
 					if (!applied) return false;
 
-					if (wsHandlerOption._tag === "Some") {
-						yield* sessionManagerService.sendSessionLists((message) =>
-							wsHandlerOption.value.broadcast(message),
-						);
-					}
+					yield* sessionManagerService.sendSessionLists((message) =>
+						wsHandler.broadcast(message),
+					);
 					return true;
 				});
 

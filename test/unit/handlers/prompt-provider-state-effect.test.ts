@@ -7,6 +7,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
@@ -22,6 +23,7 @@ import {
 	makeOverridesStateLive,
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -33,7 +35,11 @@ import type {
 	SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
-import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import {
+	makeMockAgentService,
+	makeMockSessionManagerService,
+	makeMockSessionTitleService,
+} from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -114,6 +120,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					],
 				})),
 			} as unknown as OrchestrationEngine;
+			const persistence = makePersistenceEffectLayer(filename);
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
@@ -132,8 +139,11 @@ describe("handleMessage with Effect provider state persistence", () => {
 						persistenceDbPath: filename,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
+					Layer.succeed(AgentServiceTag, makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-					makePersistenceEffectLayer(filename),
+					persistence,
+					makeIngestionLayer(persistence, ws),
 					makeOverridesStateLive(),
 				),
 			);
@@ -209,6 +219,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				durationMs: 0,
 			})),
 		} as unknown as OrchestrationEngine;
+		const persistence = makePersistenceEffectLayer(filename);
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -227,8 +238,11 @@ describe("handleMessage with Effect provider state persistence", () => {
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
+				Layer.succeed(AgentServiceTag, makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makePersistenceEffectLayer(filename),
+				persistence,
+				makeIngestionLayer(persistence, ws),
 				makeOverridesStateLive(),
 			),
 		);
@@ -315,6 +329,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				durationMs: 0,
 			})),
 		} as unknown as OrchestrationEngine;
+		const persistence = makePersistenceEffectLayer(filename);
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -333,8 +348,11 @@ describe("handleMessage with Effect provider state persistence", () => {
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
+				Layer.succeed(AgentServiceTag, makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makePersistenceEffectLayer(filename),
+				persistence,
+				makeIngestionLayer(persistence, ws),
 				makeOverridesStateLive(),
 			),
 		);
@@ -443,6 +461,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 						persistenceDbPath: filename,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
+					Layer.succeed(AgentServiceTag, makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					persistence,
 					makeIngestionLayer(persistence, ws),
@@ -553,6 +573,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
+				Layer.succeed(AgentServiceTag, makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				persistence,
 				makeIngestionLayer(persistence, ws),

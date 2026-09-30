@@ -17,7 +17,6 @@ import {
 	isClaudeDriver,
 	isProviderTurnInterruptProvider,
 	OPENCODE_PROVIDER_ID,
-	ProviderRuntimeIngestionRequired,
 } from "./provider-turn-dispatch.js";
 import type {
 	ProviderTurnServiceInterruptInput,
@@ -56,12 +55,7 @@ export const completeRecoveredQuestion = (
 			messageId = tool.message_id;
 			partId = tool.id;
 		}
-		const ingestion = yield* Effect.serviceOption(ProviderRuntimeIngestionTag);
-		if (ingestion._tag === "None") {
-			return yield* Effect.fail(
-				new ProviderRuntimeIngestionRequired(question.sessionId),
-			);
-		}
+		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const completedEvent = {
 			eventId: createEventId(),
 			type: "tool.completed" as const,
@@ -82,7 +76,7 @@ export const completeRecoveredQuestion = (
 		if (question.messageId) {
 			// A fresh mapper has not seen the stored tool start. Seed its identity
 			// so completion updates the existing card without an Unknown tool.
-			yield* ingestion.value.ingestBatch([
+			yield* ingestion.ingestBatch([
 				{
 					...completedEvent,
 					eventId: createEventId(),
@@ -98,7 +92,7 @@ export const completeRecoveredQuestion = (
 				completedEvent,
 			]);
 		} else {
-			yield* ingestion.value.ingest(completedEvent);
+			yield* ingestion.ingest(completedEvent);
 		}
 	});
 

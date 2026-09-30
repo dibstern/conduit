@@ -4,6 +4,7 @@ import { expect, vi } from "vitest";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ConfigTag,
+	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
@@ -14,6 +15,7 @@ import {
 } from "../../../src/lib/handlers/settings.js";
 import {
 	makeMockConfig,
+	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -34,6 +36,7 @@ describe("settings handlers with Effect-native settings service", () => {
 				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
 				Layer.succeed(WebSocketHandlerTag, wsHandler),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+				Layer.succeed(LoggerTag, makeMockLogger()),
 			);
 
 			return handleGetCommands("client-1", {}).pipe(

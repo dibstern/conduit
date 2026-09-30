@@ -10,7 +10,6 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
-	getAgent,
 	getContextWindow,
 	getModel,
 	getVariant,
@@ -141,11 +140,8 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
-		const agentServiceOption = yield* Effect.serviceOption(AgentServiceTag);
-		const sessionAgent =
-			agentServiceOption._tag === "Some"
-				? yield* agentServiceOption.value.getActiveAgent(activeId)
-				: yield* getAgent(activeId);
+		const agentService = yield* AgentServiceTag;
+		const sessionAgent = yield* agentService.getActiveAgent(activeId);
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 

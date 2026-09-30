@@ -60,6 +60,8 @@ describe("applySessionCommand", () => {
 			| OpenCodeAPITag
 			| ReadQueryEffectTag
 			| EventStoreEffectTag
+			| ConfigTag
+			| LoggerTag
 		>,
 		projectors?: readonly EffectProjector[],
 	) => {

@@ -30,6 +30,10 @@ import {
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
+import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
@@ -37,7 +41,7 @@ import {
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.merge(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) }))))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and active-session model info without requiring the Promise OpenCode API tag",

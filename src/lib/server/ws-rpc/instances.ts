@@ -10,6 +10,7 @@ const CCS_DEFAULT_PORT = 8317;
 
 const instanceServiceOrFail = (operation: string) =>
 	Effect.gen(function* () {
+		// Relays without instance-management config omit this service.
 		const serviceOption = yield* Effect.serviceOption(
 			InstanceManagementServiceTag,
 		);

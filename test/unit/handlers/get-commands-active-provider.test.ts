@@ -51,7 +51,10 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.merge(
 		apiLayer,
-		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+		Layer.merge(
+			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+			Layer.succeed(LoggerTag, mockLogger()),
+		),
 	);
 }
 

@@ -1,12 +1,22 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -38,12 +48,19 @@ describe("orchestration scoped layer", () => {
 		const claudeShutdown = vi
 			.spyOn(ClaudeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
+		const persistence = makePersistenceEffectLayer(":memory:");
+		const config = Layer.succeed(ConfigTag, makeMockConfig());
+		const logger = Layer.succeed(LoggerTag, makeMockLogger());
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
 				Layer.provide(
-					Layer.merge(
+					Layer.mergeAll(
 						Layer.succeed(OpenCodeAPITag, makeStubClient()),
-						makePersistenceEffectLayer(":memory:"),
+						persistence,
+						OpenCodeInstanceClientsLive.pipe(
+							Layer.provide(Layer.merge(config, logger)),
+						),
+						makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 					),
 				),
 			),

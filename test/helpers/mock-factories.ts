@@ -27,16 +27,24 @@ import {
 import { InstanceMgmtTag } from "../../src/lib/domain/daemon/Services/management-service.js";
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
-import { AgentServiceLive } from "../../src/lib/domain/relay/Services/agent-service.js";
+import {
+	type AgentList,
+	type AgentService,
+	AgentServiceLive,
+} from "../../src/lib/domain/relay/Services/agent-service.js";
 import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
+import { OpenCodeInstanceClientsLive } from "../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
+import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
@@ -98,7 +106,10 @@ import {
 } from "../../src/lib/persistence/effect/read-query-effect.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
-import { ProviderRegistry } from "../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../src/lib/provider/provider-registry.js";
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
@@ -810,6 +821,19 @@ export function makeMockStatusPoller(
 }
 
 /** Create a mock SessionTitleService for Effect-native handler tests. */
+export function makeMockAgentService(): AgentService {
+	return {
+		listAgents: vi.fn(() =>
+			Effect.succeed<AgentList>({
+				providerScope: { id: "opencode", name: "OpenCode" },
+				agents: [],
+			}),
+		),
+		getActiveAgent: vi.fn(() => Effect.succeed(undefined)),
+		switchAgent: vi.fn(() => Effect.void),
+	};
+}
+
 export function makeMockSessionTitleService(
 	overrides?: Partial<SessionTitleService>,
 ): SessionTitleService {
@@ -853,6 +877,7 @@ export interface TestHandlerLayerOptions {
 	sessionTitleService?: SessionTitleService;
 	instanceMgmt?: InstanceManagementDeps;
 	orchestrationEngine?: OrchestrationEngine;
+	providerRegistry?: ProviderRegistry;
 	persistenceLayer?: ReturnType<typeof makePersistenceEffectLayer>;
 	readQueryEffect?: ReadQueryEffect;
 	claudeEventPersistEffect?: ClaudeEventPersistEffect;
@@ -925,6 +950,10 @@ export function makeTestHandlerLayer(
 				dispatch: vi.fn(async () => ({ models: [], commands: [] })),
 			}),
 	);
+	const providerRegistryLayer = Layer.succeed(
+		ProviderRegistryTag,
+		opts?.providerRegistry ?? new ProviderRegistry(),
+	);
 	const persistenceLayer =
 		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
 	const providerTurnPersistenceLayer = Layer.mergeAll(
@@ -941,12 +970,18 @@ export function makeTestHandlerLayer(
 				]
 			: []),
 	);
+	const providerRuntimeIngestionLayer = makeProviderRuntimeIngestionLive().pipe(
+		Layer.provide(providerTurnPersistenceLayer),
+	);
 	const sessionManagerOrchestrationLayer = Layer.succeed(
 		OrchestrationEngineTag,
 		opts?.orchestrationEngine ??
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const openCodeInstanceClientsLayer = OpenCodeInstanceClientsLive.pipe(
+		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+	);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
 		ConnectPtyUpstreamTag,
@@ -1008,6 +1043,12 @@ export function makeTestHandlerLayer(
 						Layer.succeed(LoggerTag, log),
 						Layer.succeed(StatusPollerTag, statusPoller),
 						DaemonEventBusLive,
+						configLayer,
+						wsHandlerLayer,
+						RelayStatusSnapshotLive,
+						openCodeInstanceClientsLayer,
+						Layer.succeed(BackgroundLivenessTag, () => false),
+						overridesStateLayer,
 						sessionManagerOrchestrationLayer,
 						persistenceLayer,
 					),
@@ -1031,6 +1072,8 @@ export function makeTestHandlerLayer(
 				overridesStateLayer,
 				orchestrationLayer,
 				providerTurnPersistenceLayer,
+				providerRuntimeIngestionLayer,
+				sessionTitleServiceLayer,
 			),
 		),
 	);
@@ -1062,6 +1105,9 @@ export function makeTestHandlerLayer(
 		sessionTitleServiceLayer,
 		connectPtyUpstreamLayer,
 		orchestrationLayer,
+		providerRegistryLayer,
+		providerRuntimeIngestionLayer,
+		RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
 		persistenceLayer,
 		...(instanceMgmt == null
 			? []

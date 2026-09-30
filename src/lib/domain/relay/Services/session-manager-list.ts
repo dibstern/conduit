@@ -85,12 +85,8 @@ export const sessionRowsToInfo = (
 	});
 
 export const updateRelaySessionCountSnapshot = (sessionCount: number) =>
-	Effect.serviceOption(RelayStatusSnapshotTag).pipe(
-		Effect.flatMap((snapshot) =>
-			snapshot._tag === "Some"
-				? snapshot.value.setSessionCount(sessionCount)
-				: Effect.void,
-		),
+	RelayStatusSnapshotTag.pipe(
+		Effect.flatMap((snapshot) => snapshot.setSessionCount(sessionCount)),
 	);
 
 export const incrementLastKnownSessionCount = () =>
@@ -203,16 +199,16 @@ export const makeSessionListOperations = ({
 	readQuery,
 	statusPollerOption,
 	hasLiveBackgroundWork,
-	snapshotOption,
-	wsHandlerOption,
+	snapshot,
+	wsHandler,
 }: {
 	api: OpenCodeAPI;
 	stateRef: Ref.Ref<SessionManagerState>;
 	readQuery: ReadQueryEffect;
 	statusPollerOption: Option.Option<StatusPollerShape>;
 	hasLiveBackgroundWork: ((sessionId: string) => boolean) | undefined;
-	snapshotOption: Option.Option<RelayStatusSnapshotService>;
-	wsHandlerOption: Option.Option<WebSocketHandlerShape>;
+	snapshot: RelayStatusSnapshotService;
+	wsHandler: WebSocketHandlerShape;
 }) => {
 	const currentStatuses = (
 		explicit?: Record<string, SessionStatus> | undefined,
@@ -236,11 +232,9 @@ export const makeSessionListOperations = ({
 			const withEffectRead = base.pipe(
 				Effect.provideService(ReadQueryEffectTag, readQuery),
 			);
-			return yield* snapshotOption._tag === "Some"
-				? withEffectRead.pipe(
-						Effect.provideService(RelayStatusSnapshotTag, snapshotOption.value),
-					)
-				: withEffectRead;
+			return yield* withEffectRead.pipe(
+				Effect.provideService(RelayStatusSnapshotTag, snapshot),
+			);
 		});
 	const getSessionFamily: SessionManagerService["getSessionFamily"] = (
 		sessionId,
@@ -292,8 +286,7 @@ export const makeSessionListOperations = ({
 				statuses: options?.statuses,
 			});
 			send({ type: "session_list", sessions: roots, roots: true });
-			if (wsHandlerOption._tag === "None") return;
-			const ws = wsHandlerOption.value;
+			const ws = wsHandler;
 			const parentMap = (yield* Ref.get(stateRef)).cachedParentMap;
 			const families = new Map<string, string[]>();
 			for (const clientId of ws.getClientIds()) {

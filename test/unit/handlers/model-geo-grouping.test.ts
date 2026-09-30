@@ -9,6 +9,7 @@ import { layer } from "@effect/vitest";
 import { Cause, Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
@@ -21,6 +22,7 @@ import {
 } from "../../../src/lib/handlers/model.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
@@ -32,7 +34,12 @@ const bedrockModel = (id: string, name: string) => ({
 	provider: "amazon-bedrock",
 });
 
-layer(makePersistenceEffectLayer(":memory:"))("groupGeoRoutingModels", (it) => {
+layer(
+	Layer.merge(
+		makePersistenceEffectLayer(":memory:"),
+		Layer.succeed(ConfigTag, makeMockConfig()),
+	),
+)("groupGeoRoutingModels", (it) => {
 	it("groups geo-prefix variants into one entry defaulting to global", () => {
 		const grouped = groupGeoRoutingModels([
 			bedrockModel(

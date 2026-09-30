@@ -6,14 +6,10 @@ import { SessionManagerServiceTag } from "./session-manager-service.js";
 
 /** Rebuild answerable Claude questions from the one durable tool snapshot. */
 export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
-	const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
-	if (
-		readQuery._tag === "None" ||
-		!readQuery.value.listPendingClaudeQuestionTools
-	)
-		return;
+	const readQuery = yield* ReadQueryEffectTag;
+	if (!readQuery.listPendingClaudeQuestionTools) return;
 
-	const rows = yield* readQuery.value.listPendingClaudeQuestionTools();
+	const rows = yield* readQuery.listPendingClaudeQuestionTools();
 	const questions: PendingQuestionInput[] = [];
 	for (const row of rows) {
 		try {

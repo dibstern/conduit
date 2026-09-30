@@ -103,7 +103,10 @@ function makeTestLayer(input: {
 			SessionManagerServiceTag,
 			input.sessionManager ?? makeMockSessionManagerService(),
 		),
-		...(input.config ? [Layer.succeed(ConfigTag, input.config)] : []),
+		Layer.succeed(
+			ConfigTag,
+			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
+		),
 		makePersistenceEffectLayer(":memory:"),
 	);
 	return Layer.provideMerge(
@@ -132,7 +135,10 @@ function makePersistenceTestLayer(input: {
 			SessionManagerServiceTag,
 			input.sessionManager ?? makeMockSessionManagerService(),
 		),
-		...(input.config ? [Layer.succeed(ConfigTag, input.config)] : []),
+		Layer.succeed(
+			ConfigTag,
+			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
+		),
 		makePersistenceEffectLayer(input.persistenceDbPath),
 	);
 	return Layer.provideMerge(
@@ -272,6 +278,7 @@ const makeManualRenameRaceLayer = (input: {
 		const deps = Layer.mergeAll(
 			Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
 			Layer.succeed(
 				SessionManagerServiceTag,
 				input.sessionManager ?? makeMockSessionManagerService(),

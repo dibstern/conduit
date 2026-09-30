@@ -58,6 +58,7 @@ export const commitDaemonRuntimeConfig = (
 	Effect.gen(function* () {
 		const ref = yield* DaemonConfigRefTag;
 		const next = yield* Ref.updateAndGet(ref, update);
+		// DaemonLive omits the legacy config mirror when no mirror is configured.
 		const mirror = yield* Effect.serviceOption(DaemonConfigMirrorTag);
 		if (mirror._tag === "Some") {
 			yield* mirror.value.set(next);

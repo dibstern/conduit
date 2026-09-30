@@ -302,6 +302,7 @@ export const getModelsResponse = (
 	GetModelsResponse,
 	unknown,
 	| LoggerTag
+	| ConfigTag
 	| OpenCodeModelServiceTag
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag
@@ -312,15 +313,13 @@ export const getModelsResponse = (
 		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
 		const engine = yield* OrchestrationEngineTag;
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const config = yield* ConfigTag;
 		const instanceId =
 			input.instanceId === undefined
 				? undefined
 				: ProviderInstanceIdSchema.make(input.instanceId);
 		const daemonConfig =
-			instanceId === undefined || configOption._tag === "None"
-				? null
-				: loadDaemonConfig(configOption.value.configDir);
+			instanceId === undefined ? null : loadDaemonConfig(config.configDir);
 		const instanceDriver =
 			instanceId === undefined
 				? undefined
@@ -565,6 +564,7 @@ export const sendModelsStateToClient = (
 	void,
 	unknown,
 	| LoggerTag
+	| ConfigTag
 	| OpenCodeModelServiceTag
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag
@@ -628,9 +628,8 @@ export interface SwitchModelInput {
  */
 export const applyLiveSessionSettings = (sessionId: string) =>
 	Effect.gen(function* () {
-		const registryOption = yield* Effect.serviceOption(ProviderRegistryTag);
-		if (registryOption._tag === "None") return;
-		const instance = registryOption.value.getInstance("claude");
+		const registry = yield* ProviderRegistryTag;
+		const instance = registry.getInstance("claude");
 		if (!instance?.applyLiveSettingsEffect) return;
 
 		const model = yield* getModel(sessionId);

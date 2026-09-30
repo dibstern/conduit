@@ -11,18 +11,8 @@ import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
-import {
-	createRelayEventSink,
-	type RelayEventSinkPersist,
-} from "../../../provider/relay-event-sink.js";
-import type {
-	EventSink,
-	PermissionRequest,
-	PermissionResponse,
-	QuestionRequest,
-	SendTurnInput,
-	TurnResult,
-} from "../../../provider/types.js";
+import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
+import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceSendInput } from "./provider-turn-service.js";
@@ -56,16 +46,6 @@ const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	resolveQuestion: () => Effect.void,
 };
 
-export class ProviderRuntimeIngestionRequired extends Error {
-	readonly _tag = "ProviderRuntimeIngestionRequired" as const;
-
-	constructor(readonly sessionId: string) {
-		super(
-			`ProviderRuntimeIngestion is required for provider output: session=${sessionId}`,
-		);
-	}
-}
-
 export class ProviderTurnDispatchFibersTag extends Context.Tag(
 	"ProviderTurnDispatchFibers",
 )<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
@@ -79,23 +59,6 @@ export class ProviderTurnTimeoutRuntimeTag extends Context.Tag(
 		readonly overridesRef: Ref.Ref<OverridesState>;
 	}
 >() {}
-
-const makeProviderRuntimeIngestionRequiredSink = (
-	sessionId: string,
-): EventSink => {
-	const fail = () =>
-		Effect.fail(new ProviderRuntimeIngestionRequired(sessionId));
-	return {
-		push: fail,
-		requestPermission: (_request: PermissionRequest) => fail(),
-		requestQuestion: (_request: QuestionRequest) => fail(),
-		resolvePermission: (_requestId: string, _response: PermissionResponse) =>
-			fail(),
-		resolveQuestion: (_requestId: string, _answers: Record<string, unknown>) =>
-			fail(),
-		cancelSessionInteractions: () => Effect.void,
-	};
-};
 
 export function isProviderTurnInterruptProvider(
 	driver: ProviderDriverKind,
@@ -164,26 +127,14 @@ const maybePersistClaudeUserMessage = (input: {
 }) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const claudeEventPersistEffectOption = yield* Effect.serviceOption(
-			ClaudeEventPersistEffectTag,
-		);
-		if (claudeEventPersistEffectOption._tag === "None") return;
+		const persist = yield* ClaudeEventPersistEffectTag;
 
 		const persistResult = yield* Effect.either(
-			claudeEventPersistEffectOption.value.persistUserMessage(
-				input.sessionId,
-				input.text,
-			),
+			persist.persistUserMessage(input.sessionId, input.text),
 		);
-		const titleServiceOption = yield* Effect.serviceOption(
-			SessionTitleServiceTag,
-		);
-		if (
-			input.isFirstClaudeMessage &&
-			titleServiceOption._tag === "Some" &&
-			persistResult._tag === "Right"
-		) {
-			yield* titleServiceOption.value.startForFirstClaudeMessage({
+		const titleService = yield* SessionTitleServiceTag;
+		if (input.isFirstClaudeMessage && persistResult._tag === "Right") {
+			yield* titleService.startForFirstClaudeMessage({
 				sessionId: input.sessionId,
 				firstMessage: input.text,
 			});
@@ -201,20 +152,9 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
 		const runTimeout = Runtime.runFork(runtime);
-		const persistOption = yield* Effect.serviceOption(
-			ClaudeEventPersistEffectTag,
-		);
-		const ingestionOption = yield* Effect.serviceOption(
-			ProviderRuntimeIngestionTag,
-		);
-		const persist =
-			persistOption._tag === "Some" ? persistOption.value : undefined;
-		const ingestion =
-			ingestionOption._tag === "Some" ? ingestionOption.value : undefined;
+		const persist = yield* ClaudeEventPersistEffectTag;
+		const ingestion = yield* ProviderRuntimeIngestionTag;
 		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
-		if (!ingestion) return makeProviderRuntimeIngestionRequiredSink(sessionId);
-		let eventSinkPersist: RelayEventSinkPersist | undefined;
-		if (persist) eventSinkPersist = persist;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
@@ -235,8 +175,8 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 				setPermissionMode(sessionId, mode).pipe(
 					Effect.provideService(OverridesStateTag, overridesRef),
 				),
-			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
-			...(ingestion ? { ingestion } : {}),
+			persist,
+			ingestion,
 			pendingInteractions: {
 				beginPermissionRequest: (request) =>
 					pendingInteractionService.beginPermissionRequest(request),
@@ -329,17 +269,14 @@ const handleDispatchResult = (
 		if (!result.providerStateUpdates?.length) {
 			return;
 		}
-		const providerStateEffectOption = yield* Effect.serviceOption(
-			ProviderStateEffectTag,
-		);
-		if (providerStateEffectOption._tag === "None") return;
+		const providerState = yield* ProviderStateEffectTag;
 
 		const updates = result.providerStateUpdates.map((update) => ({
 			key: update.key,
 			value: String(update.value),
 		}));
 		const saveResult = yield* Effect.either(
-			providerStateEffectOption.value.saveUpdates(input.sessionId, updates),
+			providerState.saveUpdates(input.sessionId, updates),
 		);
 		if (saveResult._tag === "Left") {
 			log.warn(
@@ -438,15 +375,10 @@ const prepareEngineTurnInput = (
 				})
 			: Effect.void;
 
-		const providerStateEffectOption = yield* Effect.serviceOption(
-			ProviderStateEffectTag,
+		const providerStateEffect = yield* ProviderStateEffectTag;
+		const providerState = yield* providerStateEffect.getState(
+			resolvedInput.sessionId,
 		);
-		const providerState =
-			providerStateEffectOption._tag === "Some"
-				? yield* providerStateEffectOption.value.getState(
-						resolvedInput.sessionId,
-					)
-				: {};
 		const eventSink = yield* makeEventSink(resolvedInput.sessionId, driver);
 		const imageList =
 			resolvedInput.images && resolvedInput.images.length > 0

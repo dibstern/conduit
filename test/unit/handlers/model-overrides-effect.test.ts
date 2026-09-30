@@ -22,6 +22,10 @@ import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeMockConfig,
@@ -63,7 +67,7 @@ const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.merge(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) }))))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect override state", () => {
 	it.effect(
 		"stores selected session model and restored variant without legacy SessionOverrides",

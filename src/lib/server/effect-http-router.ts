@@ -163,6 +163,7 @@ const PushUnsubscribeBody = Schema.Struct({
 /** GET /health, GET /api/status */
 const healthHandler = Effect.gen(function* () {
 	const { getProjects } = yield* ProjectsProvider;
+	// The standalone router omits daemon health details.
 	const maybeHealth = yield* Effect.serviceOption(HealthProvider);
 
 	const body = Option.isSome(maybeHealth)
@@ -200,6 +201,7 @@ const projectsHandler = Effect.gen(function* () {
 
 /** GET /api/push/vapid-key */
 const vapidKeyHandler = Effect.gen(function* () {
+	// PushProvider is omitted when push notifications are disabled.
 	const maybePush = yield* Effect.serviceOption(PushProvider);
 
 	if (Option.isSome(maybePush)) {
@@ -220,6 +222,7 @@ const vapidKeyHandler = Effect.gen(function* () {
 
 /** POST /api/push/subscribe */
 const pushSubscribeHandler = Effect.gen(function* () {
+	// PushProvider is omitted when push notifications are disabled.
 	const maybePush = yield* Effect.serviceOption(PushProvider);
 
 	if (Option.isNone(maybePush)) {
@@ -239,6 +242,7 @@ const pushSubscribeHandler = Effect.gen(function* () {
 
 /** GET /ca/download */
 const caDownloadHandler = Effect.gen(function* () {
+	// The HTTP router omits CaCertProvider when no CA certificate exists.
 	const maybeCa = yield* Effect.serviceOption(CaCertProvider);
 
 	if (Option.isNone(maybeCa)) {
@@ -280,6 +284,7 @@ const caDownloadHandler = Effect.gen(function* () {
 
 /** POST /api/push/unsubscribe */
 const pushUnsubscribeHandler = Effect.gen(function* () {
+	// PushProvider is omitted when push notifications are disabled.
 	const maybePush = yield* Effect.serviceOption(PushProvider);
 
 	if (Option.isNone(maybePush)) {
@@ -299,13 +304,7 @@ const pushUnsubscribeHandler = Effect.gen(function* () {
 
 /** GET /api/setup-info */
 const setupInfoHandler = Effect.gen(function* () {
-	const maybeSetup = yield* Effect.serviceOption(SetupInfoProvider);
-
-	if (Option.isNone(maybeSetup)) {
-		return yield* jsonError(404, "NOT_AVAILABLE", "Setup info not available");
-	}
-
-	const setup = maybeSetup.value;
+	const setup = yield* SetupInfoProvider;
 	const port = yield* setup.getPort();
 	const isTls = yield* setup.getIsTls();
 	const request = yield* HttpServerRequest.HttpServerRequest;
@@ -357,6 +356,7 @@ const projectRouteHandler = Effect.gen(function* () {
 		} satisfies ProjectStatusResponse);
 	}
 
+	// The standalone router can omit project API delegation.
 	const delegate = yield* Effect.serviceOption(ProjectApiDelegateProvider);
 	if (Option.isSome(delegate)) {
 		return yield* delegate.value.delegateApiRequest(

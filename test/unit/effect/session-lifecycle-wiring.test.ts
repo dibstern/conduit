@@ -9,7 +9,11 @@ import {
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 	PollerManagerTag,
@@ -21,6 +25,7 @@ import {
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
@@ -32,6 +37,7 @@ import {
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
 import {
+	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
@@ -130,6 +136,18 @@ function makeServiceLifecycleTestLayer(
 	});
 
 	const baseLayer = Layer.mergeAll(
+		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(BackgroundLivenessTag, () => false),
+		makeOverridesStateLive(),
+		RelayStatusSnapshotLive,
+		OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(
+				Layer.merge(
+					Layer.succeed(ConfigTag, makeMockConfig()),
+					Layer.succeed(LoggerTag, services.log),
+				),
+			),
+		),
 		Layer.succeed(WebSocketHandlerTag, services.wsHandler as any),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(PollerManagerTag, services.pollerManager as any),

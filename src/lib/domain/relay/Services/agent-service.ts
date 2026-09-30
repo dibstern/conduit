@@ -166,14 +166,14 @@ const resolveBuiltInInstanceDriver = (
 export const AgentServiceLive: Layer.Layer<
 	AgentServiceTag,
 	never,
-	OpenCodeAPITag | LoggerTag | OverridesStateTag
+	OpenCodeAPITag | LoggerTag | OverridesStateTag | OrchestrationEngineTag
 > = Layer.effect(
 	AgentServiceTag,
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
 		const overridesRef = yield* OverridesStateTag;
-		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const engine = yield* OrchestrationEngineTag;
 		const provideOverrides = <A, E>(
 			effect: Effect.Effect<A, E, OverridesStateTag>,
 		) => Effect.provideService(effect, OverridesStateTag, overridesRef);
@@ -193,15 +193,9 @@ export const AgentServiceLive: Layer.Layer<
 								? instanceDriver
 								: resolveBuiltInInstanceDriver(instanceId);
 					} else {
-						const activeProviderId =
-							activeSessionId &&
-							engineOption._tag === "Some" &&
-							typeof engineOption.value.getProviderForSessionEffect ===
-								"function"
-								? yield* engineOption.value.getProviderForSessionEffect(
-										activeSessionId,
-									)
-								: undefined;
+						const activeProviderId = activeSessionId
+							? yield* engine.getProviderForSessionEffect(activeSessionId)
+							: undefined;
 						const defaultModel =
 							activeProviderId == null
 								? yield* provideOverrides(getDefaultModel())
@@ -211,18 +205,8 @@ export const AgentServiceLive: Layer.Layer<
 
 					const listClaudeAgents = () =>
 						Effect.gen(function* () {
-							if (engineOption._tag !== "Some") {
-								return yield* provideOverrides(
-									scopedAgentList(
-										CLAUDE_PROVIDER_SCOPE,
-										[],
-										activeSessionId,
-										instanceId,
-									),
-								);
-							}
 							const result = yield* Effect.either(
-								engineOption.value.dispatchEffect({
+								engine.dispatchEffect({
 									type: "discover",
 									providerId: "claude",
 								}),
@@ -264,10 +248,7 @@ export const AgentServiceLive: Layer.Layer<
 						);
 					}
 
-					if (
-						preferredProviderId === "claude" &&
-						(isInstanceScoped || engineOption._tag === "Some")
-					) {
+					if (preferredProviderId === "claude") {
 						return yield* listClaudeAgents();
 					}
 
@@ -299,10 +280,7 @@ export const AgentServiceLive: Layer.Layer<
 						);
 					}
 
-					if (
-						preferredProviderId !== "opencode" &&
-						engineOption._tag === "Some"
-					) {
+					if (preferredProviderId !== "opencode") {
 						log.warn(
 							`Failed to discover OpenCode agents; falling back to Claude agents: ${describeError(rawAgentsResult.left)}`,
 						);

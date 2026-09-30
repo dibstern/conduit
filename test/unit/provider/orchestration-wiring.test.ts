@@ -3,6 +3,12 @@ import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
@@ -16,6 +22,26 @@ import {
 	type OrchestrationLayerOptions,
 } from "../../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
+
+function orchestrationDeps(
+	persistence: ReturnType<typeof makePersistenceEffectLayer>,
+	client: OpenCodeAPI,
+) {
+	const config = Layer.succeed(ConfigTag, makeMockConfig());
+	const logger = Layer.succeed(LoggerTag, makeMockLogger());
+	return Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		persistence,
+		OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(Layer.merge(config, logger)),
+		),
+		makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+	);
+}
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -78,12 +104,7 @@ function makeSharedPersistenceRuntime(
 	return ManagedRuntime.make(
 		Layer.merge(
 			makeOrchestrationRuntimeLayer().pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(OpenCodeAPITag, makeStubClient()),
-						persistence,
-					),
-				),
+				Layer.provide(orchestrationDeps(persistence, makeStubClient())),
 			),
 			outerPersistence(persistence),
 		),
@@ -91,14 +112,10 @@ function makeSharedPersistenceRuntime(
 }
 
 async function makeScopedOrchestrationView(options: OrchestrationLayerOptions) {
+	const persistence = makePersistenceEffectLayer(":memory:");
 	const runtime = ManagedRuntime.make(
 		makeOrchestrationRuntimeLayer(options).pipe(
-			Layer.provide(
-				Layer.merge(
-					Layer.succeed(OpenCodeAPITag, options.client),
-					makePersistenceEffectLayer(":memory:"),
-				),
-			),
+			Layer.provide(orchestrationDeps(persistence, options.client)),
 		),
 	);
 	onTestFinished(() => runtime.dispose());
@@ -124,14 +141,10 @@ describe("Orchestration wiring", () => {
 
 	it("exposes orchestration services through the scoped runtime layer", async () => {
 		const client = makeStubClient();
+		const persistence = makePersistenceEffectLayer(":memory:");
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(OpenCodeAPITag, client),
-						makePersistenceEffectLayer(":memory:"),
-					),
-				),
+				Layer.provide(orchestrationDeps(persistence, client)),
 			),
 		);
 

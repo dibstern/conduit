@@ -1,5 +1,9 @@
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 // ─── Effect Handler Tests (Batch 1) ─────────────────────────────────────────
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
@@ -18,7 +22,10 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
-import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -29,6 +36,7 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
@@ -124,14 +132,20 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
+	makeMockAgentService,
+	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
+	makeMockSessionTitleService,
 	makeMockStatusPoller,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -254,7 +268,9 @@ function mockConfig(
 // ─── Agent handler tests ───────────────────────────────────────────────────
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.merge(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) }))))("persistent handler runtime", (it) => {
+const persistentHandlerPersistence = makePersistenceEffectLayer(":memory:");
+// biome-ignore format: Keep the existing test layout inside this runtime suite.
+layer(Layer.mergeAll(persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
 describe("handleGetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and sends filtered list to client",
@@ -3647,11 +3663,19 @@ describe("sendMessageToSession", () => {
 					`conduit-prompt-triage-${crypto.randomUUID()}.sqlite`,
 				);
 				const ws = mockWsHandler();
+				const configLayer = Layer.succeed(ConfigTag, mockConfig());
+				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 				const serviceLayer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
 						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-						Layer.succeed(LoggerTag, mockLogger()),
+						loggerLayer,
+						configLayer,
+						Layer.succeed(WebSocketHandlerTag, ws),
+						Layer.succeed(BackgroundLivenessTag, () => false),
+						RelayStatusSnapshotLive,
+						makeOverridesStateLive(),
+						OpenCodeInstanceClientsLive.pipe(Layer.provide(Layer.merge(configLayer, loggerLayer))),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile),

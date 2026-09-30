@@ -1,10 +1,13 @@
 import { Context, Effect, FiberMap, Layer } from "effect";
+import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type {
 	PendingInteractionServiceTag,
 	PendingQuestion,
 } from "./pending-interaction-service.js";
+import type { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnDispatchFibersTag,
 	ProviderTurnTimeoutRuntimeTag,
@@ -23,11 +26,9 @@ import type {
 } from "./services.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
+import type { SessionTitleServiceTag } from "./session-title-service.js";
 
-export {
-	isProviderTurnInterruptProvider,
-	ProviderRuntimeIngestionRequired,
-} from "./provider-turn-dispatch.js";
+export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
 
 export interface ProviderTurnServiceSendInput {
 	readonly clientId: string;
@@ -92,6 +93,10 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| OverridesStateTag
 		| OrchestrationEngineTag
 		| ReadQueryEffectTag
+		| ClaudeEventPersistEffectTag
+		| ProviderRuntimeIngestionTag
+		| ProviderStateEffectTag
+		| SessionTitleServiceTag
 		| ProviderTurnDispatchFibersTag
 	>();
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
@@ -131,6 +136,10 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| OverridesStateTag
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
+	| ProviderStateEffectTag
+	| SessionTitleServiceTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
 );

@@ -3,9 +3,13 @@ import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import {
+	BackgroundLivenessTag,
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { OverridesStateTag } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -16,15 +20,25 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
+const configLayer = Layer.succeed(ConfigTag, makeMockConfig());
+const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 const relayStateTestLayer = RelayStateLive.pipe(
 	Layer.provide(
 		Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
+			configLayer,
+			loggerLayer,
+			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+			Layer.succeed(BackgroundLivenessTag, () => false),
+			OpenCodeInstanceClientsLive.pipe(
+				Layer.provide(Layer.merge(configLayer, loggerLayer)),
+			),
 			Layer.succeed(
 				OrchestrationEngineTag,
 				new OrchestrationEngine({ registry: new ProviderRegistry() }),

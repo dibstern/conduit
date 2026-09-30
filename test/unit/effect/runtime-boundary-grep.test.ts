@@ -2921,13 +2921,13 @@ describe("Effect runtime boundary grep", () => {
 		);
 
 		expect(providerTurnServiceSource).toMatch(
-			/ProviderRuntimeIngestionRequired/,
+			/const ingestion = yield\* ProviderRuntimeIngestionTag/,
+		);
+		expect(providerTurnServiceSource).not.toMatch(
+			/Effect\.serviceOption\(ProviderRuntimeIngestionTag\)/,
 		);
 		expect(providerTurnServiceSource).toMatch(
-			/if \(!ingestion\) return makeProviderRuntimeIngestionRequiredSink/,
-		);
-		expect(providerTurnServiceSource).toMatch(
-			/createRelayEventSink\(\{[\s\S]*\.\.\(ingestion \? \{ ingestion \} : \{\}\)/,
+			/createRelayEventSink\(\{[\s\S]*\bingestion,/,
 		);
 	});
 

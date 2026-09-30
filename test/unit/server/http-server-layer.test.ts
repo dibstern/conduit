@@ -233,17 +233,22 @@ describe("Effect HTTP Router - Extended Routes", () => {
 			expect(body.lanMode).toBe(true);
 		});
 
-		it("returns 404 when SetupInfoProvider absent", async () => {
-			const handler = tracked(TestProjectsLayer);
+		it("returns setup info with the required provider", async () => {
+			const handler = tracked(
+				Layer.merge(TestProjectsLayer, TestSetupInfoLayer),
+			);
 			const response = await handler(
 				new Request("http://localhost/api/setup-info"),
 			);
 
-			expect(response.status).toBe(404);
-			const body = (await response.json()) as {
-				error: { code: string };
-			};
-			expect(body.error.code).toBe("NOT_AVAILABLE");
+			expect(response.status).toBe(200);
+			const body: unknown = await response.json();
+			expect(body).toEqual({
+				httpUrl: `http://localhost:${setupInfoPort}`,
+				httpsUrl: `https://localhost:${setupInfoPort}`,
+				hasCert: setupInfoIsTls,
+				lanMode: false,
+			});
 		});
 	});
 });
@@ -373,6 +378,7 @@ describe("HttpServerLive layer construction", () => {
 			const fullLayer = HttpServerLive.pipe(
 				Layer.provide(configLayer),
 				Layer.provide(TestProjectsLayer),
+				Layer.provide(TestSetupInfoLayer),
 				Layer.provide(baseRouterLayer()),
 			);
 

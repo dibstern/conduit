@@ -135,6 +135,7 @@ export const makeProjectionRunnerEffect = (
 		const notifySessionStateProjected = (event: StoredEvent) =>
 			Effect.gen(function* () {
 				if (replaying) return;
+				// Persistence runtimes outside the project relay omit its notifier.
 				const notifierOption = yield* Effect.serviceOption(
 					SessionStateProjectionNotifierTag,
 				);

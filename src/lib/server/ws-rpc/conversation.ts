@@ -33,15 +33,13 @@ export const conversationHandlers = {
 
 			return yield* Effect.gen(function* () {
 				const wsHandler = yield* WebSocketHandlerTag;
-				const registryOption = yield* Effect.serviceOption(ProviderRegistryTag);
-				if (registryOption._tag === "Some") {
-					const providerInstance = registryOption.value.getInstance("claude");
-					if (providerInstance?.setPermissionModeEffect) {
-						yield* providerInstance.setPermissionModeEffect(
-							request.sessionId,
-							request.mode,
-						);
-					}
+				const registry = yield* ProviderRegistryTag;
+				const providerInstance = registry.getInstance("claude");
+				if (providerInstance?.setPermissionModeEffect) {
+					yield* providerInstance.setPermissionModeEffect(
+						request.sessionId,
+						request.mode,
+					);
 				}
 				yield* setPermissionMode(request.sessionId, request.mode);
 				wsHandler.sendToSession(request.sessionId, {
@@ -122,18 +120,16 @@ export const conversationHandlers = {
 		),
 	SendMessage: (request) =>
 		Effect.gen(function* () {
-			const limiterOption = yield* Effect.serviceOption(RateLimiterTag);
-			if (limiterOption._tag === "Some") {
-				const result = yield* limiterOption.value.checkLimit(
-					request.originId ?? request.sessionId,
+			const limiter = yield* RateLimiterTag;
+			const result = yield* limiter.checkLimit(
+				request.originId ?? request.sessionId,
+			);
+			if (!result.allowed) {
+				return yield* Effect.fail(
+					new WsRpcError({
+						message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
+					}),
 				);
-				if (!result.allowed) {
-					return yield* Effect.fail(
-						new WsRpcError({
-							message: `Rate limited. Try again in ${Math.ceil((result.retryAfterMs ?? 1000) / 1000)}s`,
-						}),
-					);
-				}
 			}
 			yield* sendMessageToSession({
 				clientId: request.originId ?? "rpc",
