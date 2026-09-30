@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, waitFor } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { fileBrowserListeners } from "../../stores/ws.svelte.js";
 import { applyGetFileContentResponse } from "../../stores/ws-dispatch.js";
 import { mockFileContent } from "../../stories/mocks.js";
@@ -27,7 +27,7 @@ const meta = {
 	title: "File/FileViewer",
 	component: FileViewerHost,
 	tags: ["autodocs"],
-	parameters: { layout: "fullscreen" },
+	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	args: {
 		visible: true,
 		onClose: fn(),
@@ -49,6 +49,22 @@ export const Default: Story = {
 		await waitFor(() => {
 			expect(canvasElement.querySelector("code.hljs")).not.toBeNull();
 		});
+	},
+};
+
+export const BackToFileTree: Story = {
+	play: async ({ canvasElement, args }) => {
+		await showFile({
+			path: "src/lib/project.ts",
+			content: mockFileContent,
+		});
+		await waitFor(() => {
+			expect(canvasElement.querySelector("code.hljs")).not.toBeNull();
+		});
+		await userEvent.click(
+			within(canvasElement).getByRole("button", { name: "File browser" }),
+		);
+		await expect(args["onClose"]).toHaveBeenCalled();
 	},
 };
 

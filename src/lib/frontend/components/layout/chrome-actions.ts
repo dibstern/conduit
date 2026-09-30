@@ -1,16 +1,14 @@
 /**
- * The top bar's global actions, shared by the desktop Header and the phone
- * SessionBar's overflow menu.
+ * The session bar's global actions, shared by its title and overflow menus.
  *
  * They live here rather than being written twice because each one is a
  * contract with code somewhere else in the app: an event name, or a
  * multi-step sequence. A duplicated event name typo is silent, and a
- * duplicated sequence drifts. One copy, two bars.
+ * duplicated sequence drifts.
  */
 
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
-import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	beginCreateTab,
 	failCreateTab,
@@ -36,8 +34,9 @@ export function toggleDebugPanel(): void {
 
 /**
  * Show or hide the terminal panel. Opening it with no tabs yet also asks the
- * daemon for one, so the panel is never revealed empty; on a phone it opens
- * maximized because a split terminal and transcript leaves neither usable.
+ * daemon for one, so the panel is never revealed empty. On a phone an open
+ * terminal is the whole view (see ChatLayout), because a split terminal and
+ * transcript leaves neither usable.
  */
 export function toggleTerminal(): void {
 	const wasOpen = terminalState.panelOpen;
@@ -55,9 +54,5 @@ export function toggleTerminal(): void {
 				failCreateTab("Failed to create terminal");
 			});
 		}
-	}
-
-	if (sessionViewState.compact) {
-		window.dispatchEvent(new CustomEvent("terminal:mobile-maximize"));
 	}
 }

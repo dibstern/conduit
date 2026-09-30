@@ -22,6 +22,42 @@ const project = {
 };
 
 describe("WsRpcServerLayer project management", () => {
+	it.effect(
+		"round-trips project git state through the RPC project list",
+		() => {
+			const projectWithGit = {
+				...project,
+				git: {
+					branch: "feature",
+					worktree: "linked",
+					dirty: true,
+					ahead: 2,
+					behind: 1,
+				},
+			};
+			const config = makeMockConfig({
+				addProject: vi.fn(async () => projectWithGit),
+				getProjects: () => [projectWithGit],
+			});
+			return Effect.gen(function* () {
+				const client = yield* rpcClient;
+				const response = yield* client.AddProject({
+					projectSlug: project.slug,
+					directory: project.directory,
+					instanceId: project.instanceId,
+				});
+				expect(response.projects).toEqual([projectWithGit]);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					WsRpcServerLayer.pipe(
+						Layer.provideMerge(makeTestHandlerLayer({ config })),
+					),
+				),
+			);
+		},
+	);
+
 	it.effect("adds a project and returns the added slug", () => {
 		const addProject = vi.fn(async () => project);
 		const config = makeMockConfig({

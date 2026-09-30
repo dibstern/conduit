@@ -13,6 +13,98 @@ test.use({ recording: "chat-simple" });
 test.describe("Sidebar Layout — Desktop", () => {
 	test.use({ viewport: { width: 1440, height: 900 } });
 
+	test("desktop views rail toggles terminal and files beside chat", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		await app.goto(relayUrl);
+		const rail = page.getByTestId("views-rail");
+		const terminal = page.getByTestId("views-rail-terminal");
+		const files = page.getByTestId("views-rail-files");
+		await expect(rail).toBeVisible();
+		await expect(rail).toHaveCSS("width", "38px");
+		await page.locator("#session-list .session-item").first().click();
+		await expect(rail).toBeVisible();
+		await expect(page.getByTestId("views-rail-diff")).toBeDisabled();
+		await expect(terminal).toHaveAttribute("aria-label", "Terminal");
+		await expect(files).toHaveAttribute("aria-label", "Files");
+		await terminal.hover();
+		await expect(page.getByRole("tooltip")).toContainText("Terminal");
+		await page.getByTestId("views-rail-diff").hover({ force: true });
+		await expect(page.getByRole("tooltip")).toContainText("Diff");
+		await expect(page.locator("#file-browser-btn")).toHaveCount(0);
+		await terminal.click();
+		await expect(terminal).toHaveAttribute("aria-pressed", "true");
+		await expect(page.locator("#terminal-panel")).toBeVisible();
+		await files.click();
+		await expect(files).toHaveAttribute("aria-pressed", "true");
+		const pane = page.getByTestId("side-pane-files");
+		await expect(pane).toBeVisible();
+		const paneWidth = (await pane.boundingBox())?.width ?? 0;
+		expect(paneWidth).toBeGreaterThanOrEqual(280);
+		expect(paneWidth).toBeLessThanOrEqual(640);
+		await expect(page.locator("#messages")).toBeVisible();
+		await expect(
+			page.locator("#sidebar-panel-files .fb-entry").first(),
+		).toBeVisible();
+		const folder = pane.locator(".fb-entry[aria-expanded]").first();
+		await folder.click();
+		await expect(folder).toHaveAttribute("aria-expanded", "true");
+		await page
+			.locator("#sidebar-panel-files .fb-entry:not([aria-expanded])")
+			.first()
+			.click();
+		await expect(
+			page.getByTestId("side-pane-files").locator("#file-viewer"),
+		).toBeVisible();
+		await page
+			.getByTestId("side-pane-files")
+			.getByRole("button", { name: "File browser" })
+			.click();
+		await expect(
+			page.getByTestId("side-pane-files").locator("#file-tree"),
+		).toBeVisible();
+		await expect(folder).toHaveAttribute("aria-expanded", "true");
+		await files.click();
+		await expect(page.getByTestId("side-pane-files")).toBeHidden();
+		await terminal.click();
+		await expect(page.locator("#terminal-panel")).toBeHidden();
+	});
+
+	test("desktop panes survive the phone breakpoint and terminal wins on phones", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(relayUrl);
+		const files = page.getByTestId("views-rail-files");
+		await files.click();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByTestId("side-pane-files")).toHaveCount(0);
+		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await expect(page.getByTestId("side-pane-files")).toBeVisible();
+		await page.getByTestId("views-rail-terminal").click();
+		const terminal = page.locator("#terminal-panel");
+		const terminalHeight = async () =>
+			(await terminal.boundingBox())?.height ?? 0;
+		await expect.poll(terminalHeight).toBeLessThan(900 / 2);
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(terminal).toBeVisible();
+		await expect(page.locator("#sidebar-panel-files")).toBeHidden();
+		// A phone terminal is the whole view, not the desktop's bottom split.
+		await expect.poll(terminalHeight).toBeGreaterThan(852 * 0.7);
+		await expect
+			.poll(async () => (await terminal.boundingBox())?.width)
+			.toBe(393);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		// The phone shows one view, but the desktop panes survive the round trip,
+		// and the terminal returns to a bottom panel under the chat.
+		await expect(page.getByTestId("side-pane-files")).toBeVisible();
+		await expect(terminal).toBeVisible();
+		await expect.poll(terminalHeight).toBeLessThan(900 / 2);
+	});
+
 	test("desktop: sidebar is visible by default", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
@@ -108,7 +200,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(app.sidebar).toBeVisible();
 	});
 
-	test("header elements are appropriately visible", async ({
+	test("merged bar shows identity, status and Share", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -121,15 +213,151 @@ test.describe("Sidebar Layout — Desktop", () => {
 		// Status dot always visible
 		await expect(app.statusDot).toBeVisible();
 
-		// QR button always visible
+		await app.moreActionsBtn.click();
+		// Share lives in the desktop overflow.
 		await expect(app.qrBtn).toBeVisible();
+	});
+
+	test("desktop overflow lists global actions and Escape restores focus", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(`${relayUrl}?feats=debug`);
+		const more = page.getByTestId("session-bar-overflow");
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-compact",
+			"false",
+		);
+		await more.click();
+		const menu = page.getByTestId("session-bar-overflow-menu");
+		await expect(menu).toBeVisible();
+		await expect(menu.getByRole("menuitem")).toHaveText([
+			"Share",
+			"Settings",
+			"Debug panel",
+		]);
+		await page.keyboard.press("Escape");
+		await expect(menu).toBeHidden();
+		await expect(more).toBeFocused();
+	});
+
+	test("open desktop menus close when the viewport becomes a phone", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(relayUrl);
+		await page.getByTestId("session-bar-overflow").click();
+		await expect(page.getByTestId("session-bar-overflow-menu")).toBeVisible();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-compact",
+			"true",
+		);
+		await expect(page.getByTestId("session-bar-overflow-menu")).toHaveCount(0);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.getByTestId("session-bar-title-menu").click();
+		await expect(page.getByTestId("session-ctx-menu")).toBeVisible();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByTestId("session-bar")).toHaveAttribute(
+			"data-compact",
+			"true",
+		);
+		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
+	});
+
+	test("desktop bar renders without an open session", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		const bar = page.getByTestId("session-bar");
+		await expect(bar).toBeVisible();
+		await expect(bar).toHaveAttribute("data-compact", "false");
+		await expect(bar.getByTestId("session-bar-identity")).toBeVisible();
+		await expect(bar.locator("#status")).toBeVisible();
+		await expect(bar.getByTestId("session-bar-overflow")).toBeVisible();
+		await expect(bar.getByTestId("session-bar-title")).toHaveCount(0);
+		await expect(bar.getByTestId("session-bar-settle")).toHaveCount(0);
+	});
+
+	test("long title fits the narrow desktop bar without overlap", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 800, height: 900 });
+		await new AppPage(page).goto(relayUrl);
+		await page.getByTestId("session-bar-title-menu").click();
+		await page.getByTestId("session-ctx-rename").click();
+		const longTitle =
+			"Investigate the long running terminal session across every project and linked worktree";
+		await page.getByRole("textbox", { name: "Session name" }).fill(longTitle);
+		await page.getByRole("textbox", { name: "Session name" }).press("Enter");
+		await expect(page.getByTestId("session-bar-title")).toContainText(
+			longTitle,
+		);
+		const layout = await page.getByTestId("session-bar").evaluate((bar) => {
+			const bounds = bar.getBoundingClientRect();
+			const children = Array.from(bar.children)
+				.filter((child) => getComputedStyle(child).display !== "none")
+				.map((child) => ({
+					id: child.id || child.getAttribute("data-testid"),
+					box: child.getBoundingClientRect(),
+				}));
+			return {
+				barWidth: bar.clientWidth,
+				scrollWidth: bar.scrollWidth,
+				bounds,
+				children,
+			};
+		});
+		expect(layout.scrollWidth).toBeLessThanOrEqual(layout.barWidth);
+		for (const [index, child] of layout.children.entries()) {
+			expect(child.box.left, child.id ?? "child").toBeGreaterThanOrEqual(
+				layout.bounds.left,
+			);
+			expect(child.box.right, child.id ?? "child").toBeLessThanOrEqual(
+				layout.bounds.right,
+			);
+			const previous = layout.children[index - 1];
+			if (previous) {
+				expect(child.box.left, child.id ?? "child").toBeGreaterThanOrEqual(
+					previous.box.right,
+				);
+			}
+		}
 	});
 });
 
 test.describe("Sidebar Layout — Mobile", () => {
 	test.use({ viewport: { width: 375, height: 667 }, persistence: true });
 
-	test("mobile: overflow and title menus use bottom sheets", async ({
+	test("phone file preview returns to the Files view", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(relayUrl);
+		const viewsButton = page.getByTestId("session-bar-views-button");
+		await viewsButton.click();
+		await page.getByTestId("session-bar-view-files").click();
+		await page
+			.locator("#sidebar-panel-files .fb-entry:not([aria-expanded])")
+			.first()
+			.click();
+		await expect(page.locator("#file-viewer")).toBeVisible();
+		await page
+			.locator("#file-viewer")
+			.getByRole("button", { name: "File browser" })
+			.click();
+		await expect(page.locator("#file-viewer")).toBeHidden();
+		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
+		await viewsButton.click();
+		await expect(page.getByTestId("session-bar-view-files")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+	});
+
+	test("mobile: Views, collapsed overflow, and title menus use bottom sheets", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -137,10 +365,12 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await new AppPage(page).goto(relayUrl);
 		const bar = page.getByTestId("session-bar");
 		const overflow = page.getByTestId("session-bar-overflow");
+		const viewsButton = page.getByTestId("session-bar-views-button");
 		const titleChevron = page.getByTestId("session-bar-title-menu");
-		const menu = page.getByTestId("session-bar-overflow-menu");
+		const menu = page.getByTestId("session-bar-views-sheet");
 		const before = await bar.boundingBox();
-		await overflow.click();
+		await expect(overflow).toHaveCount(0);
+		await viewsButton.click();
 		await expect(menu).toBeVisible();
 		const sheet = await menu.boundingBox();
 		expect(sheet).not.toBeNull();
@@ -152,28 +382,28 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
 		await expect(bar).toHaveAttribute("data-collapsed", "false");
 		expect(await bar.boundingBox()).toEqual(before);
-		const items = menu.getByRole("menuitem");
+		const items = menu.getByRole("menuitemradio");
 		await expect(items.nth(0)).toContainText("Chat");
 		await expect(items.nth(1)).toContainText("Terminal");
 		await expect(items.nth(2)).toContainText("Diff");
 		await expect(items.nth(3)).toContainText("Files");
 		await expect(items.nth(2)).toHaveAttribute("aria-disabled", "true");
-		await expect(items.nth(0)).toHaveAttribute("aria-current", "true");
+		await expect(items.nth(0)).toHaveAttribute("aria-checked", "true");
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
-		await expect(overflow).toBeFocused();
-		await overflow.click();
+		await expect(viewsButton).toBeFocused();
+		await viewsButton.click();
 		await expect(page.getByTestId("menu-sheet-scrim")).not.toHaveClass(
 			/pointer-events-none/,
 		);
 		await page.mouse.click(20, 200);
 		await expect(menu).toBeHidden();
-		await expect(overflow).toBeFocused();
 
 		await titleChevron.click();
 		const titleMenu = page.getByTestId("session-action-sheet");
 		await expect(titleMenu).toBeVisible();
 		await expect(titleMenu.getByTestId("session-ctx-settle")).toBeVisible();
+		await expect(titleMenu).not.toContainText(/[⌘⇧]/);
 		await page.keyboard.press("Escape");
 		await expect(titleMenu).toBeHidden();
 		await expect(titleChevron).toBeFocused();
@@ -182,12 +412,26 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.locator("#settings-panel")).toBeVisible();
 		await page.getByTestId("settings-close-btn").click();
 
-		await overflow.click();
-		await menu.getByRole("menuitem", { name: "Terminal" }).click();
+		await viewsButton.click();
+		await menu.getByRole("menuitemradio", { name: "Terminal" }).click();
 		await expect(page.locator("#terminal-panel")).toBeVisible();
 		await expect(menu).toBeHidden();
-		await expect(overflow).toBeFocused();
-		await page.getByTestId("session-view-chat").click();
+		// The new terminal focuses itself when its tab mounts, which can land
+		// before or after the menu hands focus back (conduit-test-pgis race),
+		// so the contract is only that focus is never dropped.
+		await expect
+			.poll(() =>
+				page.evaluate(
+					() =>
+						document.activeElement?.id === "session-bar-views-button" ||
+						document
+							.getElementById("terminal-panel")
+							?.contains(document.activeElement) === true,
+				),
+			)
+			.toBe(true);
+		await viewsButton.click();
+		await menu.getByRole("menuitemradio", { name: "Chat" }).click();
 		const messages = page.locator("#messages");
 		await messages.evaluate((element) => {
 			const spacer = document.createElement("div");
@@ -202,14 +446,21 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await messages.evaluate((element) => {
 			element.scrollTop = Math.max(0, element.scrollTop - 400);
 		});
+		await expect(page.locator("#messages #scroll-btn")).toBeVisible();
 		await messages.evaluate((element) => {
 			element.scrollTop = element.scrollHeight;
 		});
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
 		const collapsedBefore = await bar.boundingBox();
+		await expect(viewsButton).toHaveCount(0);
 		await overflow.click();
-		await expect(menu.getByRole("menuitem", { name: "Chat" })).toBeVisible();
-		await expect(menu.getByRole("menuitem", { name: "Files" })).toBeVisible();
+		const overflowMenu = page.getByTestId("session-bar-overflow-menu");
+		await expect(
+			overflowMenu.getByRole("menuitem", { name: "Chat" }),
+		).toBeVisible();
+		await expect(
+			overflowMenu.getByRole("menuitem", { name: "Files" }),
+		).toBeVisible();
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
 		expect(await bar.boundingBox()).toEqual(collapsedBefore);
 	});
@@ -277,20 +528,27 @@ test.describe("Sidebar Layout — Mobile", () => {
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		await new AppPage(page).goto(relayUrl);
-		const band = page.getByTestId("session-bar-views");
-		const tabs = band.getByRole("tab");
-		await expect(tabs).toHaveCount(4);
+		const viewsButton = page.getByTestId("session-bar-views-button");
+		const sheet = page.getByTestId("session-bar-views-sheet");
+		await expect(page.locator("#session-bar-views")).toHaveCount(0);
+		await viewsButton.click();
+		const items = sheet.getByRole("menuitemradio");
+		await expect(items).toHaveCount(4);
 		for (const name of ["Chat", "Terminal", "Diff", "Files"]) {
-			await expect(band.getByRole("tab", { name })).toBeVisible();
+			await expect(sheet.getByRole("menuitemradio", { name })).toBeVisible();
 		}
-		const chat = band.getByRole("tab", { name: "Chat" });
-		const terminal = band.getByRole("tab", { name: "Terminal" });
-		const files = band.getByRole("tab", { name: "Files" });
-		await expect(chat).toHaveAttribute("aria-selected", "true");
-		await expect(band.getByRole("tab", { name: "Diff" })).toBeDisabled();
-		for (const tab of await tabs.all()) {
-			expect((await tab.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+		const chat = page.getByTestId("session-bar-view-chat");
+		const terminal = page.getByTestId("session-bar-view-terminal");
+		const files = page.getByTestId("session-bar-view-files");
+		await expect(chat).toHaveAttribute("aria-checked", "true");
+		await expect(page.getByTestId("session-bar-view-diff")).toHaveAttribute(
+			"aria-disabled",
+			"true",
+		);
+		for (const item of await items.all()) {
+			expect((await item.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 		}
+		await page.keyboard.press("Escape");
 
 		const messages = page.locator("#messages");
 		await messages.evaluate((element) => {
@@ -301,16 +559,19 @@ test.describe("Sidebar Layout — Mobile", () => {
 		});
 		const scrollTop = await messages.evaluate((element) => element.scrollTop);
 		expect(scrollTop).toBeGreaterThan(0);
+		await viewsButton.click();
 		await terminal.click();
+		await expect(sheet).toBeHidden();
 		await expect(page.locator("#terminal-panel")).toBeVisible();
-		await expect(terminal).toHaveAttribute("aria-selected", "true");
+		await viewsButton.click();
+		await expect(terminal).toHaveAttribute("aria-checked", "true");
 		await chat.click();
 		await expect(messages).toBeVisible();
-		await expect(chat).toHaveAttribute("aria-selected", "true");
 		expect(await messages.evaluate((element) => element.scrollTop)).toBe(
 			scrollTop,
 		);
 
+		await viewsButton.click();
 		await files.click();
 		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
 		const folder = page
@@ -319,22 +580,30 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(folder).toBeVisible();
 		await folder.click();
 		await expect(folder).toHaveAttribute("aria-expanded", "true");
+		await viewsButton.click();
 		await chat.click();
+		await viewsButton.click();
 		await files.click();
 		await expect(folder).toHaveAttribute("aria-expanded", "true");
 
+		await viewsButton.click();
 		await chat.click();
 		await page.setViewportSize({ width: 320, height: 852 });
-		await expect(tabs).toHaveCount(4);
-		for (const tab of await tabs.all()) await expect(tab).toBeVisible();
-		await expect(band.locator(".session-view-label").first()).toBeHidden();
+		await expect(viewsButton).toBeVisible();
+		await viewsButton.click();
+		await expect(sheet.getByRole("menuitemradio")).toHaveCount(4);
+		await page.keyboard.press("Escape");
 		expect(
 			(await page.getByTestId("session-bar-title").boundingBox())?.width,
 		).toBeGreaterThanOrEqual(110);
 		expect(
-			await band.evaluate((element) => element.scrollWidth),
+			await page
+				.getByTestId("session-bar")
+				.evaluate((element) => element.scrollWidth),
 		).toBeLessThanOrEqual(
-			await band.evaluate((element) => element.clientWidth),
+			await page
+				.getByTestId("session-bar")
+				.evaluate((element) => element.clientWidth),
 		);
 		await messages.evaluate((element) => {
 			element.scrollTop = element.scrollHeight;
@@ -349,7 +618,86 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"data-collapsed",
 			"true",
 		);
-		await expect(band).toHaveCount(0);
+		await expect(viewsButton).toHaveCount(0);
+	});
+
+	test("mobile: long-title two-row bar switches views at 390px", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await new AppPage(page).goto(relayUrl);
+		const bar = page.getByTestId("session-bar");
+		const viewsButton = page.getByTestId("session-bar-views-button");
+		const sheet = page.getByTestId("session-bar-views-sheet");
+		const titleMenuButton = page.getByTestId("session-bar-title-menu");
+		await titleMenuButton.click();
+		const actions = page.getByTestId("session-action-sheet");
+		await expect(actions).not.toContainText(/[⌘⇧]/);
+		await actions.getByTestId("session-ctx-rename").click();
+		const longTitle =
+			"Investigate the long running terminal session across every project";
+		await page.getByRole("textbox", { name: "Session name" }).fill(longTitle);
+		await page.getByRole("textbox", { name: "Session name" }).press("Enter");
+		await expect(page.getByTestId("session-bar-title")).toContainText(
+			longTitle,
+		);
+		const backBox = await page.getByTestId("session-bar-back").boundingBox();
+		const titleBox = await page.getByTestId("session-bar-title").boundingBox();
+		const hitTarget = await viewsButton.evaluate((button) => {
+			const box = button.getBoundingClientRect();
+			const target = getComputedStyle(button, "::before");
+			const width = Number.parseFloat(target.width);
+			const height = Number.parseFloat(target.height);
+			return {
+				width,
+				height,
+				left: box.left + (box.width - width) / 2,
+				right: box.right + (width - box.width) / 2,
+			};
+		});
+		expect(backBox && titleBox && titleBox.y > backBox.y).toBeTruthy();
+		expect(hitTarget.height).toBeGreaterThanOrEqual(44);
+		expect(hitTarget.width).toBeGreaterThanOrEqual(44);
+		expect(hitTarget.left).toBeGreaterThanOrEqual(0);
+		expect(hitTarget.right).toBeLessThanOrEqual(390);
+		await expect(page.locator("#session-bar-views")).toHaveCount(0);
+		await expect(page.getByTestId("session-bar-overflow")).toHaveCount(0);
+
+		await viewsButton.click();
+		const chat = page.getByTestId("session-bar-view-chat");
+		await expect(chat).toHaveAttribute("role", "menuitemradio");
+		await expect(chat).toHaveAttribute("aria-checked", "true");
+		await expect(page.getByTestId("session-bar-view-diff")).toHaveAttribute(
+			"aria-disabled",
+			"true",
+		);
+		for (const view of ["terminal", "files", "chat"] as const) {
+			await page.getByTestId(`session-bar-view-${view}`).click();
+			await expect(sheet).toBeHidden();
+			await viewsButton.click();
+			await expect(
+				page.getByTestId(`session-bar-view-${view}`),
+			).toHaveAttribute("aria-checked", "true");
+		}
+		await page.keyboard.press("Escape");
+		const messages = page.locator("#messages");
+		await messages.evaluate((element) => {
+			const spacer = document.createElement("div");
+			spacer.style.height = "1200px";
+			element.firstElementChild?.append(spacer);
+			element.scrollTop = element.scrollHeight;
+		});
+		await messages.evaluate((element) => {
+			element.scrollTop = Math.max(0, element.scrollTop - 400);
+		});
+		await expect(page.locator("#messages #scroll-btn")).toBeVisible();
+		await messages.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		await expect(viewsButton).toHaveCount(0);
+		await expect(page.getByTestId("session-bar-overflow")).toBeVisible();
 	});
 
 	test("mobile: visible list and projects controls have 44px touch targets", async ({
@@ -472,10 +820,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 			.locator("#session-list .session-list-header")
 			.getByRole("button", { name: "Done" })
 			.click();
-		await page.locator("#file-browser-btn").click();
-		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
-		await measure("#sidebar");
-		await page.locator("#file-panel-close").click();
+		await expect(page.locator("#file-browser-btn")).toHaveCount(0);
 		await page
 			.locator("#session-list .session-item")
 			.first()

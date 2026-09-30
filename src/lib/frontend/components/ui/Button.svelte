@@ -14,128 +14,20 @@
   since conduit-test-de3.3.4 -- one idiom for "styled control that is sometimes
   a link", not two.
 -->
-<script module lang="ts">
-	import {
-		HOVER_FILL_CLASSES,
-		DISABLED_CLASSES,
-		TONE_CLASSES,
-		VARIANT_RECIPES,
-		type ButtonDisabledStyle,
-		type ButtonHoverFill,
-		type ButtonTone,
-		type ButtonVariant,
-	} from "./button-recipes.js";
-
-	/**
-	 * `content` is an opt-out, not a third size: it emits no padding, radius,
-	 * weight or type scale, so the call site supplies its own ADDITIVELY via
-	 * `class`. It exists because the de3.5 audit found 64 of 81 migration
-	 * candidates need intrinsic height — `sm`/`md` hard-code `h-8`/`h-9`, and
-	 * a call site cannot reliably override that (see component-conventions.mdx:
-	 * consumer `class` is additive; beating a size utility needs `h-auto!`).
-	 * Without this, migrating the codebase onto Button means 64 `!` overrides.
-	 */
-	type ButtonSize = "sm" | "md" | "content";
-
-	type ButtonAlign = keyof typeof ALIGN_CLASSES;
-
-	// `focus-visible:outline-hidden` (not `outline-none`) keeps a transparent
-	// outline that forced-colors mode renders visibly, so the focus indicator
-	// survives when the box-shadow ring is stripped.
-	//
-	// `rounded-lg` and `font-medium` live in the size map rather than here: two
-	// utilities setting the same property collide on stylesheet order, not class
-	// order, so a size (or a consumer) could not override a base radius without
-	// `!`. Anything in BASE is therefore genuinely invariant.
-	//
-	// `justify-*` is not here either, for the same reason, but it could not just
-	// move to the size map: unlike radius, a `content`-sized button still needs
-	// SOME alignment, and every fixed-size icon box in the app was relying on
-	// the base one. It became `align` instead — see ALIGN_CLASSES below.
-	//
-	// The disabled appearance left for the same reason and by the same route:
-	// nine controls dissented on how far a dead button should dim, and none of
-	// them could win against a BASE utility. It is now `disabledStyle` — see
-	// DISABLED_CLASSES in button-recipes.ts (conduit-test-8lxm).
-	const TOUCH_TARGET_CLASSES =
-		"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden";
-
-	const BASE_CLASSES =
-		"no-underline cursor-pointer transition-colors " +
-		// Neutral, not accent. An accent ring against an accent-filled button
-		// (`primary`) is the same colour as the button, so the old
-		// `ring-accent/70` was invisible on the one variant that most needed it.
-		// `ring-text` contrasts with every surface in both themes. Keyboard only:
-		// `focus-visible` never fires on a mouse click. See conduit-test-de3.19.
-		"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text";
-
-	const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
-
-	/**
-	 * Main-axis alignment, as a prop rather than a base class, because the base
-	 * class was a coin flip nobody could see (conduit-test-ixfu).
-	 *
-	 * BASE_CLASSES used to hard-code `justify-center`, so a call site wanting
-	 * something else had to append a competing utility and hope. Whether it won
-	 * depended on Tailwind's emission order, which is not alphabetical across
-	 * groups: `justify-start` is emitted AFTER `justify-center` and wins,
-	 * `justify-between` is emitted BEFORE it and silently loses. Identical-
-	 * looking call sites, opposite outcomes, and the only way to tell was to
-	 * probe byte offsets in the built stylesheet.
-	 *
-	 * Exactly one of these is ever emitted, so there is no collision to resolve
-	 * and no order to know. `center` is the default, which is what BASE already
-	 * did, so every existing call site is unchanged to the pixel.
-	 *
-	 * This matters well beyond tidiness: an audit of the 79 native controls
-	 * still outside the design system found 34 of them are `w-full text-left`
-	 * rows. No Button VARIANT could ever have reached them — a variant appends,
-	 * and BASE had already emitted the conflict — so the largest single group in
-	 * the migration backlog was unreachable until this moved.
-	 */
-	/**
-	 * The box itself: display, cross-axis alignment, wrapping and selectability.
-	 * These four travelled together in BASE_CLASSES, and together they are the
-	 * reason a whole category of control could not migrate at all.
-	 *
-	 * A consumer cannot out-rank any of them. Measured in the built stylesheet:
-	 * `.hidden` at 22357 loses to `.inline-flex` at 22436, so a
-	 * `class:hidden` toggle silently stops working; `.items-baseline` at 29708
-	 * loses to `.items-center` at 29745. And `whitespace-nowrap` plus
-	 * `select-none` quietly redefine any button whose content is prose rather
-	 * than a label — a URL that should ellipsize, a path that should break, a
-	 * sentence the user should be able to copy.
-	 *
-	 * `flow` emits NOTHING, which hands the box back to the call site: a
-	 * `<button>` is `inline-block` by default, wraps, and is selectable, so
-	 * "emits nothing" is exactly the as-found behaviour of every control that
-	 * needs this. It is the same opt-out shape as `size="content"` and
-	 * `chrome="bare"` on the field primitives.
-	 *
-	 * `ALIGN_CLASSES` is suppressed under `flow` on purpose: `justify-content`
-	 * does nothing outside a flex or grid container, so emitting it would be
-	 * the dead-token theatre this epic keeps deleting. Under `flow` the call
-	 * site owns the box, alignment included.
-	 */
-	const LAYOUT_CLASSES = {
-		center: "inline-flex items-center whitespace-nowrap select-none",
-		baseline: "inline-flex items-baseline whitespace-nowrap select-none",
-		flow: "",
-	} as const;
-
-	type ButtonLayout = keyof typeof LAYOUT_CLASSES;
-
-	const ALIGN_CLASSES = {
-		center: "justify-center",
-		start: "justify-start",
-		between: "justify-between",
-	} as const;
-</script>
-
 <script lang="ts">
 	import type { HTMLAnchorAttributes, HTMLButtonAttributes } from "svelte/elements";
 	import type { Snippet } from "svelte";
 	import Icon from "./Icon.svelte";
+	import {
+		buttonClasses,
+		type ButtonAlign,
+		type ButtonDisabledStyle,
+		type ButtonHoverFill,
+		type ButtonLayout,
+		type ButtonSize,
+		type ButtonTone,
+		type ButtonVariant,
+	} from "./button-recipes.js";
 
 	type ButtonOwnProps = {
 		variant?: ButtonVariant;
@@ -304,79 +196,21 @@
 		...rest
 	}: ButtonProps = $props();
 
-	const sizeClasses = $derived.by(() => {
-		// Literally no classes, by design — see the ButtonSize doc comment. Not
-		// even `h-auto`: that is a button's default height anyway, so emitting it
-		// buys nothing and costs a `!` at every call site that wants an explicit
-		// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
-		// exact tax this size exists to avoid.
-		if (size === "content") return "";
-		if (iconOnly) {
-			return `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`;
-		}
-		return `${
-			size === "sm" ? "h-8 px-3 text-xs gap-1.5" : "h-9 px-4 text-sm gap-2"
-		} ${SHARED_SIZE_CLASSES}`;
-	});
-
-	/**
-	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
-	 * button is disabled, so until conduit-test-or29 a dead button still lit up
-	 * under the cursor -- in every variant, everywhere in the app. It read as
-	 * interactive at the exact moment it is not.
-	 *
-	 * Dropped in JS rather than fixed in CSS because the primitive already knows.
-	 * The two CSS routes both cost something: `disabled:pointer-events-none`
-	 * takes `cursor-not-allowed` with it (no pointer events, no cursor style),
-	 * and chaining `not-disabled:not-aria-disabled:hover:` across eleven variants
-	 * writes the inert condition a second time, in a second language, where it
-	 * can drift from the one `handleClick` already guards on. This reuses that
-	 * single flag.
-	 *
-	 * The recipe strings above stay literal, so Tailwind's scanner still emits
-	 * every hover class it always did; only whether they are APPLIED is dynamic.
-	 * That holds for the `tone` / `hoverFill` unions too -- the utilities live
-	 * as literals in TONE_CLASSES and HOVER_FILL_CLASSES, which the scanner
-	 * reads, so a wash keeps being emitted after the last hand-written call
-	 * site that spelled it out is migrated away.
-	 *
-	 * Scope is the variant. A consumer `class` that brings its own `hover:` is
-	 * left alone -- it is the call site's string, and silently editing a
-	 * prop we were handed is a worse surprise than the one being fixed.
-	 */
 	const inert = $derived(disabled || loading || ariaDisabled);
-	const variantClass = $derived.by(() => {
-		const recipe = VARIANT_RECIPES[variant];
-		const assembled = [
-			recipe.chrome,
-			tone === undefined ? recipe.tone : TONE_CLASSES[tone],
-			hoverFill === undefined
-				? recipe.hoverFill
-				: HOVER_FILL_CLASSES[hoverFill],
-		]
-			.filter(Boolean)
-			.join(" ");
-		return inert
-			? assembled
-					.split(" ")
-					.filter((cls) => !cls.startsWith("hover:"))
-					.join(" ")
-			: assembled;
-	});
-
 	const buttonClass = $derived(
-		[
-			BASE_CLASSES,
-			LAYOUT_CLASSES[layout],
-			DISABLED_CLASSES[disabledStyle],
-			layout === "flow" ? "" : ALIGN_CLASSES[align],
-			variantClass,
-			sizeClasses,
-			touchTarget ? TOUCH_TARGET_CLASSES : "",
+		buttonClasses({
+			variant,
+			tone,
+			hoverFill,
+			disabledStyle,
+			layout,
+			align,
+			size,
+			iconOnly,
+			touchTarget,
+			inert,
 			className,
-		]
-			.filter(Boolean)
-			.join(" "),
+		}),
 	);
 
 	const iconSize = $derived(iconSizeProp ?? (size === "sm" ? 14 : 16));
@@ -395,7 +229,7 @@
 	const anchorRest = $derived(rest as unknown as HTMLAnchorAttributes);
 
 	const handleClick = (event: MouseEvent) => {
-		if (disabled || loading || ariaDisabled) return;
+		if (inert) return;
 		onclick?.(event);
 	};
 

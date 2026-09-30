@@ -444,7 +444,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 	});
 
 	it("client that views a session then reconnects gets correct session on init", async () => {
-		// Bug: When client reconnects, handleClientConnectedEffect sends session_switched
+		// Bug: When client reconnects, client init sends session_switched
 		// with the GLOBAL activeSessionId, overriding the client's intended session.
 		// After reconnect, if the client sends ViewSession, it should end up on
 		// the correct session without an intermediate session_switched for the wrong one.

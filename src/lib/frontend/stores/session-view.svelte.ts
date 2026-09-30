@@ -7,6 +7,65 @@
  * `md:` utility rather than with the app's older ad-hoc `<= 768` checks.
  */
 const COMPACT_QUERY = "(max-width: 767px)";
+const FILES_PANE_STORAGE_KEY = "files-pane-by-session";
+const FILES_PANE_MEMORY_LIMIT = 100;
+export const FILES_PANE_MIN_WIDTH = 280;
+
+type FilesPaneMemory = { filesOpen: boolean; width: number | null };
+let filesPaneMemory: Map<string, FilesPaneMemory> | undefined;
+let activeSessionId: string | null = null;
+
+function loadFilesPaneMemory(): Map<string, FilesPaneMemory> {
+	if (filesPaneMemory) return filesPaneMemory;
+	filesPaneMemory = new Map();
+	try {
+		const raw: unknown = JSON.parse(
+			localStorage.getItem(FILES_PANE_STORAGE_KEY) ?? "{}",
+		);
+		if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+			return filesPaneMemory;
+		for (const [id, value] of Object.entries(raw)) {
+			if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+			const entry = value as Record<string, unknown>;
+			const filesOpen = entry["filesOpen"];
+			const width = entry["width"];
+			if (typeof filesOpen !== "boolean") continue;
+			if (
+				width !== null &&
+				(typeof width !== "number" ||
+					!Number.isFinite(width) ||
+					width < FILES_PANE_MIN_WIDTH)
+			)
+				continue;
+			filesPaneMemory.set(id, { filesOpen, width });
+		}
+		while (filesPaneMemory.size > FILES_PANE_MEMORY_LIMIT)
+			filesPaneMemory.delete(filesPaneMemory.keys().next().value ?? "");
+	} catch {
+		// Storage is optional; malformed data falls back to the defaults.
+	}
+	return filesPaneMemory;
+}
+
+function rememberFilesPane(): void {
+	if (!activeSessionId || sessionViewState.compact) return;
+	const memory = loadFilesPaneMemory();
+	memory.delete(activeSessionId);
+	memory.set(activeSessionId, {
+		filesOpen: sessionViewState.filesOpen,
+		width: sessionViewState.filesPaneWidth,
+	});
+	if (memory.size > FILES_PANE_MEMORY_LIMIT)
+		memory.delete(memory.keys().next().value ?? "");
+	try {
+		localStorage.setItem(
+			FILES_PANE_STORAGE_KEY,
+			JSON.stringify(Object.fromEntries(memory)),
+		);
+	} catch {
+		// Keep the in-memory preference if storage is unavailable.
+	}
+}
 
 export const sessionViewState = $state({
 	/** Published by MessageList from its scroll controller. Loading and settling
@@ -16,9 +75,11 @@ export const sessionViewState = $state({
 	/** The chevron's override: the bar stays expanded even at the bottom. Starts
 	 *  true so a fresh load arrives with the full bar on screen. */
 	forcedOpen: true,
-	/** Phone files layer; the transcript stays mounted behind it. */
+	/** Files view, rendered as an overlay on phones and a pane on desktop. */
 	filesOpen: false,
 	filesEverOpened: false,
+	filesPaneWidth: null as number | null,
+	filesPaneExpanded: false,
 
 	/** Phone-width viewport: the session bar replaces the global header. */
 	compact:
@@ -68,10 +129,33 @@ export function noteUserScroll(): void {
 }
 
 /** Arrive at a new session with the full bar open, whatever the last one did. */
-export function noteSessionChanged(): void {
+export function noteSessionChanged(sessionId: string | null = null): void {
 	sessionViewState.forcedOpen = true;
-	sessionViewState.filesOpen = false;
-	sessionViewState.filesEverOpened = false;
+	activeSessionId = sessionId;
+	const memory =
+		sessionId && !sessionViewState.compact
+			? loadFilesPaneMemory().get(sessionId)
+			: undefined;
+	sessionViewState.filesOpen = memory?.filesOpen ?? false;
+	sessionViewState.filesEverOpened = memory?.filesOpen ?? false;
+	sessionViewState.filesPaneWidth = memory?.width ?? null;
+	sessionViewState.filesPaneExpanded = false;
+	if (memory) rememberFilesPane();
+}
+
+export function setFilesOpen(open: boolean): void {
+	sessionViewState.filesOpen = open;
+	if (!open) sessionViewState.filesPaneExpanded = false;
+	rememberFilesPane();
+}
+
+export function setFilesPaneWidth(width: number): void {
+	if (!Number.isFinite(width)) return;
+	sessionViewState.filesPaneWidth = Math.max(
+		FILES_PANE_MIN_WIDTH,
+		Math.round(width),
+	);
+	rememberFilesPane();
 }
 
 /**

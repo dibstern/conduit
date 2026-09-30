@@ -42,6 +42,7 @@ const SESSION_METADATA_FANOUT = 4;
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
+	readonly skipMarkRead?: boolean;
 }
 
 interface NewSessionPayload {
@@ -395,42 +396,37 @@ const switchClientToSession = (
 		}
 	});
 
-export const viewSessionForClient = ({
-	clientId,
-	sessionId,
-	skipMetadata,
-}: {
-	readonly clientId: string;
-	readonly sessionId: string;
-	readonly skipMetadata?: boolean;
-}) =>
+export const recordSessionViewed = (
+	clientId: string,
+	sessionId: string,
+	{ skipMarkRead = false }: { readonly skipMarkRead?: boolean } = {},
+) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const id = sessionId;
-		if (!id) return;
-
-		yield* switchClientToSession(clientId, id);
-
 		// Broadcast session_viewed notification
 		wsHandler.broadcast({
 			type: "notification_event",
 			eventType: "session_viewed",
-			sessionId: id,
+			sessionId,
 		} as RelayMessage);
+
+		// A tab holding this session unread (desktop Mark unread) views it
+		// without recording the read.
+		if (skipMarkRead) return;
 
 		// Read state is durable but best-effort: opening the session must still
 		// succeed if recording it is temporarily unavailable. Logged rather than
 		// swallowed, because the symptom of a persistent failure here is a session
 		// that will not stop looking unread, with nothing to explain why.
 		const readRecorded = yield* Effect.either(
-			sessionManagerService.markSessionRead(id),
+			sessionManagerService.markSessionRead(sessionId),
 		);
 		if (readRecorded._tag === "Left") {
 			log.warn(
-				`client=${clientId} Failed to record read state for ${id}: ${String(readRecorded.left)}`,
+				`client=${clientId} Failed to record read state for ${sessionId}: ${String(readRecorded.left)}`,
 			);
 		} else {
 			// Re-broadcast so the unread ring clears everywhere, not just on the
@@ -444,21 +440,41 @@ export const viewSessionForClient = ({
 						Effect.catchAll((err) =>
 							Effect.sync(() =>
 								log.warn(
-									`Failed to broadcast session list after marking ${id} read: ${err}`,
+									`Failed to broadcast session list after marking ${sessionId} read: ${err}`,
 								),
 							),
 						),
 					),
 			);
 		}
+	});
+
+export const viewSessionForClient = ({
+	clientId,
+	sessionId,
+	skipMetadata,
+	skipMarkRead,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly skipMetadata?: boolean;
+	readonly skipMarkRead?: boolean;
+}) =>
+	Effect.gen(function* () {
+		if (!sessionId) return;
+		yield* switchClientToSession(clientId, sessionId);
+		yield* recordSessionViewed(clientId, sessionId, {
+			skipMarkRead: skipMarkRead === true,
+		});
 
 		// Fire-and-forget metadata (unless skipMetadata is set)
 		if (!skipMetadata) {
 			// Run metadata send as a forked fiber — non-blocking
-			yield* Effect.either(sendSessionMetadata(clientId, id));
+			yield* Effect.either(sendSessionMetadata(clientId, sessionId));
 		}
 
-		log.info(`client=${clientId} Viewing: ${id}`);
+		const log = yield* LoggerTag;
+		log.info(`client=${clientId} Viewing: ${sessionId}`);
 	});
 
 export const handleViewSession = (
@@ -469,6 +485,7 @@ export const handleViewSession = (
 	viewSessionForClient({
 		clientId,
 		sessionId: payload.sessionId,
+		...(payload.skipMarkRead === true ? { skipMarkRead: true } : {}),
 		...(skipMetadata != null ? { skipMetadata } : {}),
 	});
 

@@ -344,7 +344,7 @@ describe("session title helpers", () => {
 });
 
 describe("SessionTitleService", () => {
-	it.effect("passes constrained Haiku query options to the SDK query", () => {
+	it.effect("passes constrained Opus query options to the SDK query", () => {
 		return Effect.gen(function* () {
 			const queryCalled = yield* Deferred.make<void>();
 			const projectDir = join(tmpdir(), "conduit-title-project");
@@ -391,20 +391,29 @@ describe("SessionTitleService", () => {
 				if (!options) throw new Error("query options were not provided");
 
 				expect(options.cwd).toBe(projectDir);
-				expect(options.model).toBe("haiku");
+				expect(options.model).toBe("opus");
 				expect(options.persistSession).toBe(false);
 				expect(options.maxTurns).toBe(1);
 				expect(options.allowedTools).toEqual([]);
 				expect(options.tools).toEqual([]);
+				// User hooks, CLAUDE.md files and output styles must not reach the title prompt.
+				expect(typeof options.systemPrompt).toBe("string");
+				expect(options.settings).toEqual({
+					disableAllHooks: true,
+					outputStyle: "default",
+					claudeMdExcludes: ["**"],
+				});
 				expect(options.abortController).toBeInstanceOf(AbortController);
 				expect(options.env).toMatchObject({
 					CLAUDE_AGENT_SDK_CLIENT_APP: "conduit",
+					CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
 				});
+				expect(options.thinking).toEqual({ type: "disabled" });
 			}).pipe(Effect.provide(layer));
 		});
 	});
 
-	it.effect("truncates overlong Haiku output and applies it", () => {
+	it.effect("truncates overlong Opus output and applies it", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-apply-");
 		return Effect.gen(function* () {
 			const listsSent = yield* Deferred.make<void>();
@@ -519,7 +528,7 @@ describe("SessionTitleService", () => {
 		},
 	);
 
-	it.effect("falls back when the Haiku query fails", () => {
+	it.effect("falls back when the Opus query fails", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-fallback-");
 		return Effect.gen(function* () {
 			const listsSent = yield* Deferred.make<void>();

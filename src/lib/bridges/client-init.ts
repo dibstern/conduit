@@ -36,6 +36,7 @@ import {
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import { getSessionInputDraft } from "../handlers/index.js";
+import { recordSessionViewed } from "../handlers/session.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import {
@@ -54,7 +55,6 @@ import type { OpenCodeInstance, ProviderInfo } from "../types.js";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
 
-/** Effect-backed session bootstrap capabilities needed by client-init. */
 function toConfiguredOpenCodeProviders(
 	providerResult: OpenCodeProviderList,
 ): ProviderInfo[] {
@@ -117,6 +117,7 @@ function addClaudeProvider(
 }
 
 export interface ClientInitEffectOptions {
+	readonly skipMarkRead?: boolean;
 	readonly skipDefaultSession?: boolean;
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
@@ -276,7 +277,9 @@ const switchClientToSessionForInitEffect = (
 		return family;
 	});
 
-/** Effect-owned production client bootstrap. */
+/**
+ * Effect-owned production client bootstrap. This is the canonical relay path.
+ */
 export const handleClientConnectedEffect = (
 	clientId: string,
 	requestedSessionId?: string,
@@ -294,11 +297,33 @@ export const handleClientConnectedEffect = (
 		const engine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 
+		// An unknown requested id selects no session, never the default: a
+		// session_switched here would rewrite the URL and cancel the frontend's
+		// route resolve, which owns the not-found banner. A failed check is not a
+		// missing session, so the id is trusted and the frontend's resolve
+		// surfaces the failure.
+		const validatedRequestedSessionId = requestedSessionId
+			? yield* sessionService.sessionExists(requestedSessionId).pipe(
+					Effect.match({
+						onFailure: (err) => {
+							log.warn(
+								`Could not verify requested session ${requestedSessionId}: ${formatErrorDetail(err)}`,
+							);
+							return requestedSessionId;
+						},
+						onSuccess: (exists) => {
+							if (exists) return requestedSessionId;
+							log.info(
+								`Requested session ${requestedSessionId} not found; no session selected`,
+							);
+							return undefined;
+						},
+					}),
+				)
+			: undefined;
+
 		const activeIdResult = requestedSessionId
-			? yield* Effect.succeed({
-					_tag: "Right",
-					right: requestedSessionId,
-				} as const)
+			? ({ _tag: "Right", right: validatedRequestedSessionId } as const)
 			: options.skipDefaultSession
 				? ({ _tag: "Right", right: undefined } as const)
 				: yield* Effect.either(sessionService.getDefaultSessionId());
@@ -375,6 +400,11 @@ export const handleClientConnectedEffect = (
 					Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
 				),
 			);
+		if (validatedRequestedSessionId) {
+			yield* recordSessionViewed(clientId, validatedRequestedSessionId, {
+				skipMarkRead: options.skipMarkRead === true,
+			});
+		}
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
 		const sentPermissionIds = new Set<string>();

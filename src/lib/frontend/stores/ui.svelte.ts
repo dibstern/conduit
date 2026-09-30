@@ -10,7 +10,6 @@ const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
-const FILE_VIEWER_WIDTH_KEY = "file-viewer-width";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -25,9 +24,6 @@ function safeGetItem(key: string): string | null {
 export const SIDEBAR_DEFAULT_WIDTH = 300;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
-export const FILE_VIEWER_DEFAULT_WIDTH = 50; // percentage of layout
-export const FILE_VIEWER_MIN_WIDTH = 20; // percentage
-export const FILE_VIEWER_MAX_WIDTH = 70; // percentage
 // ─── State ──────────────────────────────────────────────────────────────────
 
 export const uiState = $state({
@@ -37,7 +33,6 @@ export const uiState = $state({
 	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
 	// Cleanup and bulk settle share one row-selection mode, entered from either sidebar surface.
 	selectMode: false,
-	sidebarPanel: "sessions" as "sessions" | "files",
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
 
 	// Toasts
@@ -77,11 +72,9 @@ export const uiState = $state({
 	// Client count
 	clientCount: 0,
 
-	// File viewer (split pane)
+	// File preview
 	fileViewerOpen: false,
 	fileViewerPath: null as string | null,
-	fileViewerWidth:
-		Number(safeGetItem(FILE_VIEWER_WIDTH_KEY)) || FILE_VIEWER_DEFAULT_WIDTH,
 });
 
 // ─── Derived getters ────────────────────────────────────────────────────────
@@ -113,10 +106,6 @@ export function toggleSidebar(): void {
 	} else {
 		collapseSidebar();
 	}
-}
-
-export function setSidebarPanel(panel: "sessions" | "files"): void {
-	uiState.sidebarPanel = panel;
 }
 
 export function setSidebarWidth(width: number): void {
@@ -298,19 +287,6 @@ export function closeFileViewer(): void {
 	uiState.fileViewerPath = null;
 }
 
-export function setFileViewerWidth(widthPercent: number): void {
-	const clamped = Math.max(
-		FILE_VIEWER_MIN_WIDTH,
-		Math.min(FILE_VIEWER_MAX_WIDTH, Math.round(widthPercent)),
-	);
-	uiState.fileViewerWidth = clamped;
-	try {
-		localStorage.setItem(FILE_VIEWER_WIDTH_KEY, String(clamped));
-	} catch {
-		/* ignore */
-	}
-}
-
 // ─── Context usage ──────────────────────────────────────────────────────────
 
 export function updateContextPercent(percent: number): void {
@@ -332,7 +308,6 @@ export function resetProjectUI(): void {
 	uiState.planApproval = null;
 	uiState.lightboxSrc = null;
 	uiState.contextPercent = 0;
-	uiState.sidebarPanel = "sessions";
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
 	uiState.openPanels = new Set();

@@ -33,8 +33,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
-	"layout-header--connected | layout-header--processing":
-		"connected and processing share the same green dot once capture freezes the processing pulse at opacity 1; the difference is title and screen-reader text",
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
 	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":
@@ -50,8 +48,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"the a11y story takes the default args untouched and asserts radiogroup/radio/aria-checked in play(); the control looks the same because the roles are invisible, which is the point",
 	"ui-tabs--announces-tab-semantics | ui-tabs--underline | ui-tabs--underline-is-drawn-by-classes":
 		"all three render the default tab strip: one asserts tablist/tab/aria-selected in play(), and one asserts the selected tab has no inline `style` attribute -- the underline it draws from `border-b-2` alone must be identical to the one the inline style used to draw, so byte equality is the proof that the dead-class fix was zero-diff",
-	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--switcher":
-		"the chevron forces the collapsed bar fully open, so its end frame must be the ordinary open bar that Switcher captures; a pixel difference would mean the forced-open bar drifted from the normal one",
 
 	// Verified legitimate (conduit-test-6owk). ToolItem is a pure dispatcher
 	// that passes each message unchanged to its selected card, and each pair uses

@@ -62,12 +62,20 @@ const {
 	sessionViewState,
 	watchCompactViewport,
 } = await import("../../../src/lib/frontend/stores/session-view.svelte.js");
+const { terminalState } = await import(
+	"../../../src/lib/frontend/stores/terminal.svelte.js"
+);
+const { uiState } = await import(
+	"../../../src/lib/frontend/stores/ui.svelte.js"
+);
 
 beforeEach(() => {
 	matchMediaState.reset();
 	sessionViewState.compact = false;
 	publishAtBottom(true);
 	noteSessionChanged();
+	terminalState.panelOpen = false;
+	uiState.fileViewerOpen = false;
 	vi.clearAllMocks();
 });
 
@@ -184,6 +192,19 @@ describe("watchCompactViewport", () => {
 		matchMediaState.setMatches(false);
 		expect(sessionViewState.compact).toBe(false);
 
+		stop();
+	});
+
+	it("keeps open views and the file preview across the breakpoint", () => {
+		const stop = watchCompactViewport();
+		sessionViewState.filesOpen = true;
+		terminalState.panelOpen = true;
+		uiState.fileViewerOpen = true;
+		matchMediaState.setMatches(true);
+		matchMediaState.setMatches(false);
+		expect(sessionViewState.filesOpen).toBe(true);
+		expect(terminalState.panelOpen).toBe(true);
+		expect(uiState.fileViewerOpen).toBe(true);
 		stop();
 	});
 

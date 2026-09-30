@@ -123,6 +123,7 @@ describe("Effect WS handler bridge", () => {
 		const detach = handler.attach(socket.asWebSocket(), {
 			clientId: "daemon-client",
 			requestedSessionId: "session-a",
+			skipMarkRead: true,
 			skipDefaultSession: true,
 		});
 		const connectedInfo = await connected;
@@ -131,6 +132,7 @@ describe("Effect WS handler bridge", () => {
 		expect(connectedInfo).toMatchObject({
 			clientId: "daemon-client",
 			requestedSessionId: "session-a",
+			skipMarkRead: true,
 			skipDefaultSession: true,
 		});
 

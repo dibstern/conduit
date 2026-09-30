@@ -1,18 +1,16 @@
 <!-- ─── File Viewer ───────────────────────────────────────────────────────────── -->
-<!-- Split-pane file content viewer with syntax highlighting, line numbers, -->
-<!-- and copy-to-clipboard. Sits beside #app on desktop, full overlay on mobile. -->
+<!-- File preview in the desktop Files pane or a full-screen phone overlay. -->
 
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import type { RelayMessage } from "../../types.js";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { setSidebarPanel, showToast, uiState } from "../../stores/ui.svelte.js";
-	import {
-		getCurrentSessionId,
-		navigate,
-	} from "../../stores/router.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { showToast, uiState } from "../../stores/ui.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getFileContentRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileContentResponse } from "../../stores/ws-dispatch.js";
 	import hljs from "highlight.js";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
@@ -20,9 +18,17 @@
 	let {
 		visible = false,
 		onClose,
+		overlay = false,
+		pane = false,
+		paneTitle,
+		paneActions,
 	}: {
 		visible?: boolean;
 		onClose?: () => void;
+		overlay?: boolean | undefined;
+		pane?: boolean;
+		paneTitle?: Snippet | undefined;
+		paneActions?: Snippet | undefined;
 	} = $props();
 
 	// ─── Font size state ──────────────────────────────────────────────────────
@@ -71,10 +77,34 @@
 	let binary = $state(false);
 	let truncated = $state(false);
 	let loading = $state(false);
+	let loadError = $state<string | null>(null);
 	let copyIcon = $state<"copy" | "check">("copy");
+	let fileContentRequestId = 0;
 
 	// DOM ref for the <code> element (for hljs)
 	let codeEl: HTMLElement | undefined = $state();
+
+	// A preview remounts when the viewport crosses the phone breakpoint.
+	$effect(() => {
+		const path = visible ? uiState.fileViewerPath : null;
+		const requestId = ++fileContentRequestId;
+		if (!path) return;
+		const slug = getCurrentSlug();
+		if (!slug) return;
+		filePath = path;
+		content = null;
+		binary = false;
+		truncated = false;
+		loadError = null;
+		loading = true;
+		void getFileContentRpc({ projectSlug: slug, path })
+			.then(applyGetFileContentResponse)
+			.catch(() => {
+				if (requestId !== fileContentRequestId) return;
+				loading = false;
+				loadError = "Failed to load file preview. Return to the file tree and try again.";
+			});
+	});
 
 	// ─── Derived ───────────────────────────────────────────────────────────────
 
@@ -123,12 +153,18 @@
 		}
 	});
 
+	// The tree behind the preview goes inert, so focus moves into the preview.
+	let regionEl: HTMLDivElement | undefined = $state(undefined);
+	$effect(() => {
+		regionEl?.focus({ preventScroll: true });
+	});
+
 	// ─── WS subscription ──────────────────────────────────────────────────────
 
 	$effect(() => {
 		if (!visible) return;
 		const unsub = onFileBrowser((msg: RelayMessage) => {
-			if (msg.type === "file_content") {
+			if (msg.type === "file_content" && (!uiState.fileViewerPath || msg.path === uiState.fileViewerPath)) {
 				const rawContent = msg.content ?? "";
 				filePath = msg.path;
 				binary = msg.binary ?? false;
@@ -136,6 +172,7 @@
 				truncated = isTruncated;
 				content = isTruncated ? rawContent.slice(0, 50_000) : rawContent;
 				loading = false;
+				loadError = null;
 			}
 		});
 		return unsub;
@@ -176,33 +213,20 @@
 		content = null;
 		binary = false;
 		truncated = false;
+		loadError = null;
 		onClose?.();
 	}
 
 	function handleOpenFileBrowser() {
-		setSidebarPanel("files");
-		if (!sessionViewState.compact) return;
 		handleClose();
-		if (getCurrentSessionId()) navigate("/");
 	}
 </script>
 
-{#if visible && (filePath || loading)}
-	<div id="file-viewer" class="file-viewer-pane" style="--file-viewer-w: {uiState.fileViewerWidth}%">
-		<!-- Header -->
-		<div class="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle shrink-0 min-h-[44px]">
-			<!-- Mobile: file browser button (opens sidebar to files panel) -->
-			<!--
-				`lg:hidden` survives migration because it is a RESPONSIVE variant:
-				Tailwind emits variants after the unprefixed utilities, so it still
-				beats BASE's `inline-flex` at the breakpoint. The unprefixed `flex`
-				did not, and was already a no-op here anyway.
-
-				Dropped throughout this header: `transition-[background,color]`,
-				which BASE's `transition-colors` already outranked (arbitrary values
-				sort BEFORE named ones), and `duration-150`, which only restates
-				Tailwind's default.
-			-->
+{#if visible && (filePath || loading || loadError)}
+	<div id="file-viewer" class="file-viewer-pane" class:phone-overlay={overlay}>
+		<div class={pane ? "flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle px-2 py-1" : "flex min-h-[44px] shrink-0 items-center gap-2 border-b border-border-subtle px-4 py-2.5"}>
+			{#if pane && paneTitle}{@render paneTitle()}{/if}
+			<!-- Back to the file tree, which stays mounted behind the preview. -->
 			<Button
 				variant="ghost"
 				size="content"
@@ -213,25 +237,25 @@
 				iconSize={16}
 				ariaLabel="File browser"
 				title="File browser"
-				class="fv-btn lg:hidden w-7 h-7 rounded-md shrink-0"
+				class={pane ? "fv-btn w-6 h-6 rounded-md shrink-0" : "fv-btn w-7 h-7 rounded-md shrink-0"}
 				onclick={handleOpenFileBrowser}
 			/>
 			<span
 				id="file-viewer-path"
-				class="flex-1 font-mono text-base text-text-secondary truncate"
+				class={pane ? "sr-only" : "flex-1 min-w-0 font-mono text-base text-text-secondary truncate"}
 				dir="rtl"
 			>
 				{filePath ?? ""}
 			</span>
 			<!-- Font size controls -->
-			<div class="flex items-center gap-0 shrink-0">
+			<div class="flex items-center gap-0 shrink-0" class:ml-auto={pane}>
 				<Button
 					variant="ghost"
 					size="content"
 					tone="dimmer"
 					hoverFill="alt"
 					disabledStyle="faint"
-					class="shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"
+					class={pane ? "shrink-0 w-6 h-6 rounded font-mono text-base duration-100" : "shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"}
 					title="Decrease font size"
 					ariaLabel="Decrease font size"
 					disabled={fontSize <= FONT_SIZE_MIN}
@@ -239,14 +263,14 @@
 				>
 					&#8722;
 				</Button>
-				<span class="text-sm text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
+				<span class="text-sm text-text-muted font-mono tabular-nums min-w-[2ch] text-center select-none">{fontSize}</span>
 				<Button
 					variant="ghost"
 					size="content"
 					tone="dimmer"
 					hoverFill="alt"
 					disabledStyle="faint"
-					class="shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"
+					class={pane ? "shrink-0 w-6 h-6 rounded font-mono text-base duration-100" : "shrink-0 w-[44px] h-[44px] rounded font-mono text-base duration-100"}
 					title="Increase font size"
 					ariaLabel="Increase font size"
 					disabled={fontSize >= FONT_SIZE_MAX}
@@ -266,10 +290,11 @@
 				iconSize={16}
 				ariaLabel="Copy contents"
 				title="Copy contents"
-				class="fv-btn w-7 h-7 rounded-md shrink-0"
+				class={pane ? "fv-btn w-6 h-6 rounded-md shrink-0" : "fv-btn w-7 h-7 rounded-md shrink-0"}
 				onclick={handleCopy}
 			/>
-			<Button
+			{#if pane && paneActions}{@render paneActions()}{/if}
+			{#if !pane}<Button
 				variant="ghost"
 				size="content"
 				tone="muted"
@@ -281,42 +306,46 @@
 				title="Close"
 				class="fv-btn w-7 h-7 rounded-md shrink-0"
 				onclick={handleClose}
-			/>
+			/>{/if}
 		</div>
 
 		<!-- Body -->
-		<!-- The region scrolls and its content is a static <pre>, so it has no tabbable
-		     descendant and must be focusable or a keyboard-only user cannot scroll it at
-		     all (axe scrollable-region-focusable); Svelte's non-interactive-tabindex
-		     heuristic does not model that case. -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div class="flex-1 overflow-auto" role="region" aria-labelledby="file-viewer-path" tabindex="0">
-			{#if loading}
-				<div class="flex items-center justify-center py-12 text-text-dimmer text-sm">
-					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-					<span class="ml-2">Loading…</span>
-				</div>
-			{:else if binary}
-				<div class="flex items-center justify-center h-full text-text-dimmer text-sm py-12">
-					Binary file — cannot preview
-				</div>
-			{:else if content !== null}
-				<!-- Code with line numbers (two-column flex) -->
-				<div class="fv-code flex min-h-0">
-					<!-- Gutter (line numbers) -->
-				<pre
-					class="fv-gutter shrink-0 py-3 pr-2 pl-3.5 text-right select-none border-r border-border-subtle min-w-[44px] sticky left-0 bg-bg z-[var(--z-raised)] font-mono leading-[1.55] text-text-dimmer/50"
-					style="font-size: {fontSize}px"
-				>{lineNumbers}</pre>
-					<!-- Code content -->
-					<pre class="fv-content flex-1 py-3 px-3.5 min-w-0 font-mono leading-[1.55] text-text-secondary" style="font-size: {fontSize}px"><code bind:this={codeEl}>{content}</code></pre>
-				</div>
-				{#if truncated}
-					<div class="text-xs text-text-dimmer italic px-4 py-2 border-t border-border-subtle">
-						File truncated — showing first 50 KB
+		<div class="file-viewer-body">
+			<!-- The region scrolls and its content is a static <pre>, so it has no tabbable
+			     descendant and must be focusable or a keyboard-only user cannot scroll it at
+			     all (axe scrollable-region-focusable); Svelte's non-interactive-tabindex
+			     heuristic does not model that case. -->
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<div bind:this={regionEl} class="flex-1 min-h-0 overflow-auto focus-visible:outline-none" role="region" aria-labelledby="file-viewer-path" tabindex="0">
+				{#if loading}
+					<div class="flex items-center justify-center py-12 text-text-muted text-sm">
+						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+						<span class="ml-2">Loading…</span>
 					</div>
+				{:else if loadError}
+					<p role="alert" class="px-4 py-12 text-center text-sm text-error">{loadError}</p>
+				{:else if binary}
+					<div class="flex items-center justify-center h-full text-text-muted text-sm py-12">
+						Binary file — cannot preview
+					</div>
+				{:else if content !== null}
+					<!-- Code with line numbers (two-column flex) -->
+					<div class="fv-code flex min-h-0">
+						<!-- Gutter (line numbers) -->
+					<pre
+						class="fv-gutter shrink-0 py-3 pr-2 pl-3.5 text-right select-none border-r border-border-subtle min-w-[44px] sticky left-0 bg-bg z-[var(--z-raised)] font-mono leading-[1.55] text-text-muted"
+						style="font-size: {fontSize}px"
+					>{lineNumbers}</pre>
+						<!-- Code content -->
+						<pre class="fv-content flex-1 py-3 px-3.5 min-w-0 font-mono leading-[1.55] text-text-secondary" style="font-size: {fontSize}px"><code bind:this={codeEl}>{content}</code></pre>
+					</div>
+					{#if truncated}
+						<div class="text-xs text-text-muted italic px-4 py-2 border-t border-border-subtle">
+							File truncated — showing first 50 KB
+						</div>
+					{/if}
 				{/if}
-			{/if}
+			</div>
 		</div>
 	</div>
 {/if}

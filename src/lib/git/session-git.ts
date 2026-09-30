@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_RECONCILIATION_INTERVAL_MS } from "../domain/relay/Services/session-status-poller.js";
-import type { SessionGit } from "../shared-types.js";
+import type { ProjectInfo, SessionGit } from "../shared-types.js";
 
 const execFileAsync = promisify(execFile);
 const git = async (
@@ -92,10 +92,27 @@ export async function readSessionGit(
 				? basename(gitDir)
 				: undefined;
 		const operation = operationAt(gitDir);
+		const [status, upstream] = await Promise.all([
+			git(directory, "status", "--porcelain=v1", "--untracked-files=normal"),
+			branch
+				? git(
+						directory,
+						"rev-list",
+						"--left-right",
+						"--count",
+						"HEAD...@{upstream}",
+					)
+				: Promise.resolve(undefined),
+		]);
+		const counts = upstream?.match(/^(\d+)\s+(\d+)$/);
 		const result: SessionGit = {
 			...(branch ? { branch } : {}),
 			...(head ? { head } : {}),
 			...(worktree ? { worktree } : {}),
+			...(status !== undefined ? { dirty: status.length > 0 } : {}),
+			...(counts
+				? { ahead: Number(counts[1]), behind: Number(counts[2]) }
+				: {}),
 			...(operation ? { operation } : {}),
 		};
 		if (!branch) return result;
@@ -180,3 +197,11 @@ export function createSessionGitCache(
 }
 
 export const daemonSessionGitCache = createSessionGitCache();
+
+export const withCachedProjectGit = <T extends ProjectInfo>(
+	projects: ReadonlyArray<T>,
+): Array<T> =>
+	projects.map((project) => {
+		const git = daemonSessionGitCache.peek(project.directory);
+		return git ? { ...project, git } : project;
+	});

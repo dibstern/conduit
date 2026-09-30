@@ -731,6 +731,7 @@ export function makeMockSessionManagerService(
 		),
 		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
 		getLastKnownSessionCount: vi.fn(() => Effect.succeed(1)),
+		sessionExists: vi.fn(() => Effect.succeed(false)),
 		listSessions: vi.fn(() =>
 			Effect.succeed([
 				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },

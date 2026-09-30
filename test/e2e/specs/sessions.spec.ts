@@ -77,30 +77,24 @@ test.describe("Session Management", () => {
 		// All action buttons should be present
 		await expect(sidebar.newSessionBtn).toBeVisible();
 		await expect(sidebar.resumeSessionBtn).toBeVisible();
-		await expect(sidebar.fileBrowserBtn).toBeVisible();
+		await expect(page.locator("#file-browser-btn")).toHaveCount(0);
 		await expect(sidebar.terminalBtn).toBeVisible();
 	});
 
-	test("file browser panel opens and closes", async ({ page, relayUrl }) => {
+	test("Files pane opens and closes beside sessions", async ({
+		page,
+		relayUrl,
+	}) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
 
-		// Sessions panel visible, files panel hidden
 		await expect(sidebar.sessionsPanel).toBeVisible();
-		await expect(sidebar.filesPanel).toBeHidden();
-
-		// Open file browser
-		await sidebar.openFilePanel();
-
-		// Files panel visible, sessions panel hidden
-		await expect(sidebar.filesPanel).toBeVisible();
-		await expect(sidebar.sessionsPanel).toBeHidden();
-
-		// Close file panel goes back to sessions
-		await sidebar.closeFilePanel();
-
+		const files = page.getByTestId("views-rail-files");
+		await files.click();
+		await expect(page.getByTestId("side-pane-files")).toBeVisible();
 		await expect(sidebar.sessionsPanel).toBeVisible();
-		await expect(sidebar.filesPanel).toBeHidden();
+		await files.click();
+		await expect(page.getByTestId("side-pane-files")).toBeHidden();
 	});
 });

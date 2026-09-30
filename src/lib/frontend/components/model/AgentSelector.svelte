@@ -267,7 +267,7 @@
 	});
 </script>
 
-<div id="agent-selector" class:hidden={shouldHide}>
+<div id="agent-selector" class="min-w-0" class:hidden={shouldHide}>
 	<!-- An attachment retains the DOM ref through Button's rest spread; bind:this would bind the component. -->
 	<Button
 		variant="ghost"
@@ -281,13 +281,13 @@
 			};
 		}}
 		data-testid="agent-selector-trigger"
-		class="gap-[2px] h-9 px-2 text-xs font-medium rounded-panel max-w-[160px] font-brand"
+		class="w-full min-w-0 gap-[2px] h-9 px-2 text-xs font-medium rounded-panel max-w-[160px] font-brand"
 		title="Switch agent"
 		onclick={toggleDropdown}
 		aria-haspopup="listbox"
 		aria-expanded={dropdownOpen}
 	>
-		<span class="overflow-hidden text-ellipsis whitespace-nowrap">
+		<span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
 			{displayName}
 		</span>
 		<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />

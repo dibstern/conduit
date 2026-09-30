@@ -158,6 +158,74 @@ function makeHistoryMessage(
 }
 
 describe("SessionManagerService", () => {
+	it.effect("checks session existence in the store when available", () => {
+		const api = makeMockOpenCodeAPI();
+		const readQuery = makeReadQueryEffect([makeRow("existing")]);
+		const layer = Layer.provideMerge(
+			SessionManagerServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeSessionManagerStateLive(),
+				DaemonEventBusLive,
+			),
+		);
+
+		return Effect.gen(function* () {
+			const service = yield* SessionManagerServiceTag;
+			expect(yield* service.sessionExists("existing")).toBe(true);
+			expect(yield* service.sessionExists("missing")).toBe(false);
+			expect(readQuery.getSession).toHaveBeenCalledTimes(2);
+			expect(api.session.get).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"checks the provider without a store and treats only 404 as absent",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			const notFound = new OpenCodeApiError({
+				message: "Not found",
+				endpoint: "/session/missing",
+				responseStatus: 404,
+			});
+			const serverError = new OpenCodeApiError({
+				message: "Server error",
+				endpoint: "/session/failing",
+				responseStatus: 500,
+			});
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				expect(yield* service.sessionExists("existing")).toBe(true);
+				vi.mocked(api.session.get)
+					.mockRejectedValueOnce(notFound)
+					.mockRejectedValueOnce(serverError);
+				expect(yield* service.sessionExists("missing")).toBe(false);
+				const failure = yield* Effect.either(service.sessionExists("failing"));
+				expect(failure._tag).toBe("Left");
+				if (failure._tag === "Left") {
+					expect(failure.left).toMatchObject({
+						_tag: "SessionManagerError",
+						operation: "sessionExists",
+						cause: serverError,
+					});
+				}
+				expect(api.session.get).toHaveBeenCalledTimes(3);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.effect("updates pending question counts in service state", () =>
 		Effect.gen(function* () {
 			const stateRef = yield* SessionManagerStateTag;

@@ -1,15 +1,19 @@
 import { it as effectIt } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { handleClientConnectedEffect } from "../../../src/lib/bridges/client-init.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import type { AgentService } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import type { PendingInteractionService } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import type {
+	OpenCodeModelService,
+	OpenCodeSessionDetail,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	type PendingInteractionService,
-	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import {
-	type OpenCodeModelService,
 	OpenCodeModelServiceTag,
+	StatusPollerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SessionManagerError,
@@ -17,8 +21,9 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	getDefaultModel,
+	type ModelOverride,
+	type OverridesStateTag,
 	setContextWindow,
-	setDefaultContextWindow,
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
@@ -27,16 +32,21 @@ import {
 	setVariant,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import type { OpenCodeTerminalService } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
+import type { Logger } from "../../../src/lib/logger.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
-import type { PermissionId } from "../../../src/lib/shared-types.js";
-import type { OpenCodeInstance, RelayMessage } from "../../../src/lib/types.js";
+import type {
+	HistoryMessage,
+	PermissionId,
+} from "../../../src/lib/shared-types.js";
 import {
+	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockStatusPoller,
@@ -48,7 +58,7 @@ import {
 const pid = (s: string) => s as PermissionId;
 
 // ─── Test-specific defaults ─────────────────────────────────────────────────
-// The local fixture provides minimal defaults. These helpers set the richer
+// The shared factory provides minimal defaults. These helpers set the richer
 // mock return values that this test file's assertions depend on.
 
 const TEST_PROVIDERS = {
@@ -69,12 +79,10 @@ const TEST_PROVIDERS = {
 };
 
 const TEST_HISTORY = {
-	messages: [{ role: "user", content: "hi" }] as unknown[],
+	messages: [{ role: "user", content: "hi" }] as unknown as HistoryMessage[],
 	hasMore: false,
 	total: 1,
-} as Effect.Effect.Success<
-	ReturnType<SessionManagerService["loadPreRenderedHistory"]>
->;
+};
 
 const makeClaudeCapabilities = (
 	overrides: Partial<ProviderCapabilities> = {},
@@ -91,15 +99,19 @@ const makeClaudeCapabilities = (
 	...overrides,
 });
 
-/** Apply test-specific mock return values on top of fixture defaults. */
-function applyTestDefaults(deps: ClientInitFixture): ClientInitFixture {
-	vi.mocked(deps.agentService.listAgents).mockResolvedValue({
-		providerScope: { id: "opencode", name: "OpenCode" },
-		agents: [{ id: "coder", name: "coder", description: "Main agent" }],
-	});
-	vi.mocked(deps.modelService.listProviders).mockResolvedValue(TEST_PROVIDERS);
-	vi.mocked(deps.sessionService.loadPreRenderedHistory).mockResolvedValue(
-		TEST_HISTORY,
+/** Apply test-specific mock return values on top of shared factory defaults. */
+function applyTestDefaults(deps: ReturnType<typeof makeClientInitEffectLayer>) {
+	vi.mocked(deps.agentService.listAgents).mockReturnValue(
+		Effect.succeed({
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [{ id: "coder", name: "coder", description: "Main agent" }],
+		}),
+	);
+	vi.mocked(deps.modelService.listProviders).mockReturnValue(
+		Effect.succeed(TEST_PROVIDERS),
+	);
+	vi.mocked(deps.sessionService.loadPreRenderedHistory).mockReturnValue(
+		Effect.succeed(TEST_HISTORY),
 	);
 	return deps;
 }
@@ -146,315 +158,350 @@ function makeEmptyHistoryReadQuery(
 	};
 }
 
-function makeDiscoveryEngine(discover: () => Promise<ProviderCapabilities>) {
-	return {
-		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
-		dispatchEffect: vi.fn(() => Effect.promise(discover)),
-	} as unknown as OrchestrationEngine;
-}
-
 function makeClientInitEffectLayer(
-	readQuery: ReadQueryEffect,
-	loadPreRenderedHistory: ReturnType<typeof vi.fn>,
+	readQuery: ReadQueryEffect = makeEmptyHistoryReadQuery("opencode"),
+	loadPreRenderedHistory: SessionManagerService["loadPreRenderedHistory"] = vi.fn(
+		() => Effect.succeed({ messages: [], hasMore: false }),
+	),
 	sessionManagerOverrides: Partial<SessionManagerService> = {},
+	log: Logger = makeMockLogger(),
 ) {
 	const wsHandler = makeMockWebSocketHandler();
+	const state: { defaultModel: ModelOverride | undefined } = {
+		defaultModel: undefined,
+	};
+	const client = makeMockOpenCodeAPI();
+	const statusPoller = makeMockStatusPoller();
 	const sessionManagerService = makeMockSessionManagerService({
+		getDefaultSessionId: vi.fn(() => Effect.succeed("session-1")),
 		loadPreRenderedHistory,
+		sessionExists: vi.fn(() => Effect.succeed(true)),
 		...sessionManagerOverrides,
 	});
-	const orchestrationEngine = makeDiscoveryEngine(async () =>
-		makeClaudeCapabilities(),
+	const modelService: OpenCodeModelService = {
+		getSession: vi.fn(() =>
+			Effect.succeed({
+				id: "session-1",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Session 1",
+				version: "1.0.0",
+				time: { created: 0, updated: 0 },
+				modelID: "gpt-4",
+				providerID: "openai",
+			}),
+		),
+		listProviders: vi.fn(() =>
+			Effect.succeed({ providers: [], defaults: {}, connected: [] }),
+		),
+		persistDefaultModel: vi.fn(() => Effect.void),
+	};
+	const agentService: AgentService = {
+		listAgents: vi.fn(() =>
+			Effect.succeed({
+				providerScope: { id: "opencode" as const, name: "OpenCode" as const },
+				agents: [],
+			}),
+		),
+		getActiveAgent: vi.fn(() => Effect.succeed(undefined)),
+		switchAgent: vi.fn(() => Effect.void),
+	};
+	const pendingQuestions: Array<{
+		requestId: string;
+		sessionId: string;
+		timestamp: number;
+		questions: Array<{
+			question: string;
+			header?: string;
+			options?: Array<{ label: string; description?: string }>;
+			multiSelect?: boolean;
+		}>;
+	}> = [];
+	const pendingInteractions = {
+		listPendingPermissions: vi.fn(() => Effect.succeed([])),
+		recoverPendingPermissions: vi.fn(() => Effect.succeed([])),
+		listPendingQuestions: vi.fn(() => Effect.succeed(pendingQuestions)),
+		recordQuestionRequest: vi.fn((input: (typeof pendingQuestions)[number]) =>
+			Effect.sync(() => {
+				const question = { ...input, timestamp: Date.now() };
+				pendingQuestions.push(question);
+				return question;
+			}),
+		),
+	} as unknown as PendingInteractionService;
+	const terminal = {
+		replay: vi.fn(() => Effect.void),
+	} as unknown as OpenCodeTerminalService;
+	const discoverClaudeCapabilities = vi.fn(() =>
+		Effect.succeed(makeClaudeCapabilities()),
 	);
+	const orchestrationEngine = {
+		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
+		dispatchEffect: vi.fn(() => discoverClaudeCapabilities()),
+	} as unknown as OrchestrationEngine;
 
 	return {
+		state,
 		wsHandler,
+		client,
+		statusPoller,
+		modelService,
+		agentService,
+		pendingInteractions,
+		terminal,
+		discoverClaudeCapabilities,
+		orchestrationEngine,
+		log,
+		sessionService: sessionManagerService,
+		sessionManagerService,
 		layer: Layer.merge(
 			makeTestHandlerLayer({
+				api: client,
 				wsHandler,
 				sessionManagerService,
+				statusPoller,
 				orchestrationEngine,
+				log,
 			}),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.mergeAll(
+				Layer.succeed(ReadQueryEffectTag, readQuery),
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(OpenCodeModelServiceTag, modelService),
+				Layer.succeed(AgentServiceTag, agentService),
+				Layer.succeed(PendingInteractionServiceTag, pendingInteractions),
+				Layer.succeed(OpenCodeTerminalServiceTag, terminal),
+				Layer.succeed(StatusPollerTag, statusPoller),
+			),
 		),
 	};
 }
 
-type ModelSession = Effect.Effect.Success<
-	ReturnType<OpenCodeModelService["getSession"]>
->;
-type ModelList = Effect.Effect.Success<
-	ReturnType<OpenCodeModelService["listProviders"]>
->;
-type PendingPermissions = Effect.Effect.Success<
-	ReturnType<PendingInteractionService["listPendingPermissions"]>
->;
-type PendingQuestions = Effect.Effect.Success<
-	ReturnType<PendingInteractionService["listPendingQuestions"]>
->;
-type RecoveredPermissions = Effect.Effect.Success<
-	ReturnType<PendingInteractionService["recoverPendingPermissions"]>
->;
-
-function makeClientInitFixture() {
-	const wsHandler = makeMockWebSocketHandler();
-	return {
-		wsHandler,
-		client: makeMockOpenCodeAPI(),
-		readQuery: makeEmptyHistoryReadQuery("opencode"),
-		sessionService: {
-			getDefaultSessionId: vi.fn(async (): Promise<string> => "session-1"),
-			getSessionFamily: vi.fn(
-				async (
-					sessionId: string,
-				): Promise<Extract<RelayMessage, { type: "session_family" }>> => ({
-					type: "session_family" as const,
-					rootId: sessionId,
-					sessions: [],
-				}),
-			),
-			loadPreRenderedHistory: vi.fn(
-				async (_sessionId: string): Promise<typeof TEST_HISTORY> => ({
-					messages: [],
-					hasMore: false,
-				}),
-			),
-			sendSessionLists: vi.fn(
-				async (
-					send: Parameters<SessionManagerService["sendSessionLists"]>[0],
-					_options?: Parameters<SessionManagerService["sendSessionLists"]>[1],
-				) => {
-					send({
-						type: "session_list",
-						sessions: [
-							{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
-						],
-						roots: true,
-					});
-				},
-			),
-		},
-		modelService: {
-			getSession: vi.fn(
-				async (_sessionId: string): Promise<ModelSession> =>
-					({
-						id: "s1",
-						projectID: "project-1",
-						directory: "/tmp/project",
-						title: "Session 1",
-						version: "1.0.0",
-						time: { created: 0, updated: 0 },
-						modelID: "gpt-4",
-						providerID: "openai",
-					}) as ModelSession,
-			),
-			listProviders: vi.fn(
-				async (): Promise<ModelList> => ({
-					providers: [],
-					defaults: {},
-					connected: [],
-				}),
-			),
-		},
-		agentService: {
-			listAgents: vi.fn<
-				(
-					sessionId: string | undefined,
-				) => Promise<
-					Effect.Effect.Success<
-						ReturnType<
-							import("../../../src/lib/domain/relay/Services/agent-service.js").AgentService["listAgents"]
-						>
-					>
-				>
-			>(async () => ({
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [],
-			})),
-		},
-		pendingInteractions: {
-			listPendingPermissions: vi.fn(
-				async (_sessionId?: string): Promise<PendingPermissions> => [],
-			),
-			recoverPendingPermissions: vi.fn(
-				async (
-					_permissions: Parameters<
-						PendingInteractionService["recoverPendingPermissions"]
-					>[0],
-				): Promise<RecoveredPermissions> => [],
-			),
-			listPendingQuestions: vi.fn(
-				async (_sessionId?: string): Promise<PendingQuestions> => [],
-			),
-		},
-		statusPoller: {
-			isProcessing: vi.fn((_sessionId: string) => false),
-			getCurrentStatuses: vi.fn(() => ({})),
-		},
-		terminal: { replay: vi.fn(async (_clientId: string) => undefined) },
-		discoverClaudeCapabilities: vi.fn(
-			async (): Promise<ProviderCapabilities> => makeClaudeCapabilities(),
-		),
-		getInstances: undefined as
-			| (() => ReadonlyArray<Readonly<OpenCodeInstance>>)
-			| undefined,
-		overrideState: {
-			getModel: vi.fn(
-				async (_sessionId: string) =>
-					undefined as { providerID: string; modelID: string } | undefined,
-			),
-			getDefaultModel: vi.fn(
-				async () =>
-					undefined as { providerID: string; modelID: string } | undefined,
-			),
-			getVariant: vi.fn(async (_sessionId: string) => ""),
-			getDefaultVariant: vi.fn(async () => ""),
-			getContextWindow: vi.fn(async (_sessionId: string) => ""),
-			getDefaultContextWindow: vi.fn(async () => ""),
-			hasActiveProcessingTimeout: vi.fn(async (_sessionId: string) => false),
-		},
-	};
-}
-
-type ClientInitFixture = ReturnType<typeof makeClientInitFixture>;
-
-function makeClientInitFixtureWith(
-	overrides: Partial<ClientInitFixture> = {},
-): ClientInitFixture {
-	return { ...makeClientInitFixture(), ...overrides };
-}
-
-async function runClientInit(
-	deps: ClientInitFixture,
+function runClientInit(
+	deps: ReturnType<typeof makeClientInitEffectLayer>,
 	clientId: string,
 	requestedSessionId?: string,
-	skipDefaultSession = false,
+	options?: Parameters<typeof handleClientConnectedEffect>[2],
+	setup: Effect.Effect<void, never, OverridesStateTag> = Effect.void,
 ) {
-	const sessionManagerService = makeMockSessionManagerService({
-		getDefaultSessionId: () =>
-			Effect.tryPromise({
-				try: () => deps.sessionService.getDefaultSessionId(),
-				catch: (cause) =>
-					new SessionManagerError({ operation: "getDefaultSessionId", cause }),
-			}),
-		getSessionFamily: (sessionId) =>
-			Effect.promise(() => deps.sessionService.getSessionFamily(sessionId)),
-		loadPreRenderedHistory: (sessionId) =>
-			Effect.tryPromise({
-				try: () => deps.sessionService.loadPreRenderedHistory(sessionId),
-				catch: (cause) =>
-					new SessionManagerError({
-						operation: "loadPreRenderedHistory",
-						cause,
-					}),
-			}),
-		sendSessionLists: (send, options) =>
-			Effect.tryPromise({
-				try: () => deps.sessionService.sendSessionLists(send, options),
-				catch: (cause) =>
-					new SessionManagerError({ operation: "sendSessionLists", cause }),
-			}),
-	});
-	const statusPoller = makeMockStatusPoller({
-		isProcessing: (sessionId) =>
-			Effect.sync(() => deps.statusPoller.isProcessing(sessionId)),
-		getCurrentStatuses: () =>
-			Effect.sync(() => deps.statusPoller.getCurrentStatuses()),
-	});
-	const orchestrationEngine = makeDiscoveryEngine(() =>
-		deps.discoverClaudeCapabilities(),
-	);
-	const layer = Layer.merge(
-		makeTestHandlerLayer({
-			api: deps.client,
-			wsHandler: deps.wsHandler,
-			sessionManagerService,
-			statusPoller,
-			orchestrationEngine,
-		}),
-		Layer.succeed(ReadQueryEffectTag, deps.readQuery),
-	);
 	return Effect.runPromise(
 		Effect.gen(function* () {
-			const modelService = yield* OpenCodeModelServiceTag;
-			const agentService = yield* AgentServiceTag;
-			const pendingInteractions = yield* PendingInteractionServiceTag;
-			const terminal = yield* OpenCodeTerminalServiceTag;
-			const activeId = requestedSessionId ?? "session-1";
-			const model = yield* Effect.promise(() =>
-				deps.overrideState.getModel(activeId),
-			);
-			const defaultModel = yield* Effect.promise(() =>
-				deps.overrideState.getDefaultModel(),
-			);
-			if (model) yield* setModel(activeId, model);
-			if (defaultModel) yield* setDefaultModel(defaultModel);
-			const variant = yield* Effect.promise(() =>
-				deps.overrideState.getVariant(activeId),
-			);
-			const defaultVariant = yield* Effect.promise(() =>
-				deps.overrideState.getDefaultVariant(),
-			);
-			const contextWindow = yield* Effect.promise(() =>
-				deps.overrideState.getContextWindow(activeId),
-			);
-			const defaultContextWindow = yield* Effect.promise(() =>
-				deps.overrideState.getDefaultContextWindow(),
-			);
-			if (variant) yield* setVariant(activeId, variant);
-			if (defaultVariant) yield* setDefaultVariant(defaultVariant);
-			if (contextWindow) yield* setContextWindow(activeId, contextWindow);
-			if (defaultContextWindow)
-				yield* setDefaultContextWindow(defaultContextWindow);
-			if (
-				yield* Effect.promise(() =>
-					deps.overrideState.hasActiveProcessingTimeout(activeId),
-				)
-			) {
-				yield* startProcessingTimeout(activeId, "2 minutes", () => Effect.void);
-			}
-			yield* handleClientConnectedEffect(clientId, requestedSessionId, {
-				skipDefaultSession,
-				...(deps.getInstances ? { getInstances: deps.getInstances } : {}),
-			}).pipe(
-				Effect.provideService(OpenCodeModelServiceTag, {
-					...modelService,
-					getSession: (sessionId) =>
-						Effect.tryPromise(() => deps.modelService.getSession(sessionId)),
-					listProviders: () =>
-						Effect.tryPromise(() => deps.modelService.listProviders()),
-				}),
-				Effect.provideService(AgentServiceTag, {
-					...agentService,
-					listAgents: (sessionId) =>
-						Effect.tryPromise(() => deps.agentService.listAgents(sessionId)),
-				}),
-				Effect.provideService(PendingInteractionServiceTag, {
-					...pendingInteractions,
-					listPendingPermissions: () =>
-						Effect.promise(() =>
-							deps.pendingInteractions.listPendingPermissions(),
-						),
-					recoverPendingPermissions: (permissions) =>
-						Effect.promise(() =>
-							deps.pendingInteractions.recoverPendingPermissions(permissions),
-						),
-					listPendingQuestions: () =>
-						Effect.promise(() =>
-							deps.pendingInteractions.listPendingQuestions(),
-						),
-				}),
-				Effect.provideService(OpenCodeTerminalServiceTag, {
-					...terminal,
-					replay: (id) => Effect.promise(() => deps.terminal.replay(id)),
-				}),
-			);
-			return yield* getDefaultModel();
-		}).pipe(Effect.provide(layer)),
+			yield* setup;
+			yield* handleClientConnectedEffect(clientId, requestedSessionId, options);
+			deps.state.defaultModel = yield* getDefaultModel();
+		}).pipe(Effect.provide(deps.layer)),
 	);
 }
 
 describe("handleClientConnectedEffect — empty projected history", () => {
+	it("records a requested session view and re-broadcasts lists", async () => {
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(sessionManagerService.sessionExists).toHaveBeenCalledWith(
+			"requested-session",
+		);
+		expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+			"client-1",
+			"requested-session",
+		);
+		expect(wsHandler.sendTo).toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "session_switched",
+				sessionId: "requested-session",
+			}),
+		);
+		expect(sessionManagerService.markSessionRead).toHaveBeenCalledWith(
+			"requested-session",
+		);
+		expect(wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "session_viewed",
+			sessionId: "requested-session",
+		});
+		await vi.waitFor(() =>
+			expect(sessionManagerService.sendSessionLists).toHaveBeenCalledTimes(2),
+		);
+		expect(wsHandler.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "session_list" }),
+		);
+	});
+
+	it("records a held session view without marking it read", async () => {
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session", {
+				skipMarkRead: true,
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "session_viewed",
+			sessionId: "requested-session",
+		});
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
+	it("does not mark a default session read", async () => {
+		const { sessionManagerService, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("opencode"),
+			vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+		);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1").pipe(Effect.provide(layer)),
+		);
+		expect(sessionManagerService.sessionExists).not.toHaveBeenCalled();
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
+	it("selects no session when the requested session does not exist", async () => {
+		const log = makeMockLogger();
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+				{ sessionExists: vi.fn(() => Effect.succeed(false)) },
+				log,
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "unknown-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(sessionManagerService.sessionExists).toHaveBeenCalledWith(
+			"unknown-session",
+		);
+		// A default-session switch would rewrite the frontend's URL and cancel
+		// the route resolve that shows the not-found banner.
+		expect(sessionManagerService.getDefaultSessionId).not.toHaveBeenCalled();
+		expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_switched" }),
+		);
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_family" }),
+		);
+		expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "notification_event",
+				sessionId: "unknown-session",
+			}),
+		);
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+		expect(log.info).toHaveBeenCalledWith(
+			"Requested session unknown-session not found; no session selected",
+		);
+	});
+
+	it("selects no session for an unknown id when the default is skipped", async () => {
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+				{ sessionExists: vi.fn(() => Effect.succeed(false)) },
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "unknown-session", {
+				skipDefaultSession: true,
+			}).pipe(Effect.provide(layer)),
+		);
+		expect(sessionManagerService.getDefaultSessionId).not.toHaveBeenCalled();
+		expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_switched" }),
+		);
+		expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({ type: "session_family" }),
+		);
+		expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "notification_event",
+				sessionId: "unknown-session",
+			}),
+		);
+		expect(sessionManagerService.markSessionRead).not.toHaveBeenCalled();
+	});
+
+	it("trusts the requested session when its existence check fails", async () => {
+		const log = makeMockLogger();
+		const { wsHandler, sessionManagerService, layer } =
+			makeClientInitEffectLayer(
+				makeEmptyHistoryReadQuery("opencode"),
+				vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+				{
+					sessionExists: vi.fn(() =>
+						Effect.fail(
+							new SessionManagerError({
+								operation: "sessionExists",
+								cause: "provider unavailable",
+							}),
+						),
+					),
+				},
+				log,
+			);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(sessionManagerService.getDefaultSessionId).not.toHaveBeenCalled();
+		expect(wsHandler.setClientSession).toHaveBeenCalledWith(
+			"client-1",
+			"requested-session",
+		);
+		expect(sessionManagerService.markSessionRead).toHaveBeenCalledWith(
+			"requested-session",
+		);
+		expect(log.warn).toHaveBeenCalledWith(
+			expect.stringContaining("provider unavailable"),
+		);
+	});
+
+	it("logs a read failure and completes requested-session init", async () => {
+		const log = makeMockLogger();
+		const markSessionRead = vi.fn(() =>
+			Effect.fail(
+				new SessionManagerError({
+					operation: "markSessionRead",
+					cause: "store unavailable",
+				}),
+			),
+		);
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			makeEmptyHistoryReadQuery("opencode"),
+			vi.fn(() => Effect.succeed({ messages: [], hasMore: false })),
+			{ markSessionRead },
+			log,
+		);
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1", "requested-session").pipe(
+				Effect.provide(layer),
+			),
+		);
+		expect(log.warn).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"client=client-1 Failed to record read state for requested-session",
+			),
+		);
+		expect(wsHandler.markClientBootstrapped).toHaveBeenCalledWith("client-1");
+	});
+
 	effectIt.effect(
 		"a sessionless daemon attach sends project lists without selecting or creating a session",
 		() =>
@@ -570,35 +617,8 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 				hasMore: false,
 			}),
 		);
-		const readQuery = makeEmptyHistoryReadQuery("opencode", "parent-session");
-		vi.mocked(readQuery.getSessionMessagesWithParts).mockReturnValue(
-			Effect.succeed([
-				{
-					id: "history-1",
-					session_id: "requested-session",
-					turn_id: "turn-1",
-					role: "user",
-					text: "",
-					cost: null,
-					tokens_in: null,
-					tokens_out: null,
-					tokens_cache_read: null,
-					tokens_cache_write: null,
-					context_window: null,
-					is_streaming: 0,
-					created_at: 1,
-					updated_at: 1,
-					parts: [],
-					modelExecution: {
-						requestedModel: "sonnet",
-						expectedModel: "claude-sonnet-5",
-						actualModel: "claude-fable-4-0",
-					},
-				},
-			]),
-		);
 		const { wsHandler, layer } = makeClientInitEffectLayer(
-			readQuery,
+			makeEmptyHistoryReadQuery("opencode", "parent-session"),
 			loadPreRenderedHistory,
 		);
 
@@ -617,19 +637,7 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 			sessionId: "requested-session",
 			parentID: "parent-session",
 			history: {
-				messages: [
-					{
-						id: "history-1",
-						role: "user",
-						text: "Recovered",
-						modelExecution: {
-							requestedModel: "sonnet",
-							expectedModel: "claude-sonnet-5",
-							actualModel: "claude-fable-4-0",
-							drifted: true,
-						},
-					},
-				],
+				messages: [{ id: "history-1", role: "user", text: "Recovered" }],
 				hasMore: false,
 			},
 		});
@@ -709,13 +717,8 @@ describe("handleClientConnectedEffect — empty projected history", () => {
 			sessionId: "requested-session",
 		});
 	});
-});
 
-// ─── Session history ─────────────────────────────────────────────────────────
-
-describe("handleClientConnectedEffect — session history", () => {
-	it("bootstraps active session through the Effect-backed session service", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+	it("projects Claude history from SQLite instead of REST", async () => {
 		const readQuery = makeEmptyHistoryReadQuery("claude-sdk");
 		vi.mocked(readQuery.getSessionMessagesWithParts).mockReturnValue(
 			Effect.succeed([
@@ -738,22 +741,24 @@ describe("handleClientConnectedEffect — session history", () => {
 				},
 			]),
 		);
-		deps.readQuery = readQuery;
-		vi.mocked(deps.sessionService.getDefaultSessionId).mockResolvedValue(
-			"claude-session",
+		const loadPreRenderedHistory = vi.fn(() =>
+			Effect.succeed({ messages: [], hasMore: false }),
 		);
-		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockRejectedValue(
-			new Error("REST fallback should not be used for Claude projection"),
+		const { wsHandler, layer } = makeClientInitEffectLayer(
+			readQuery,
+			loadPreRenderedHistory,
+			{ getDefaultSessionId: vi.fn(() => Effect.succeed("claude-session")) },
 		);
 
-		await runClientInit(deps, "client-1");
+		await Effect.runPromise(
+			handleClientConnectedEffect("client-1").pipe(Effect.provide(layer)),
+		);
 
-		expect(deps.sessionService.getDefaultSessionId).toHaveBeenCalledOnce();
 		expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
 			"claude-session",
 		);
-		expect(deps.sessionService.loadPreRenderedHistory).not.toHaveBeenCalled();
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+		expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+		expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "session_switched",
 			id: "claude-session",
 			sessionId: "claude-session",
@@ -771,9 +776,15 @@ describe("handleClientConnectedEffect — session history", () => {
 			},
 		});
 	});
+});
 
+// ─── Session with REST history ───────────────────────────────────────────────
+// MessageCache has been removed (Task 50.5). resolveSessionHistory now always
+// uses the REST path (sessionService.loadPreRenderedHistory) or SQLite.
+
+describe("handleClientConnectedEffect — session with REST history", () => {
 	it("sends session_switched with REST history on connect", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 
 		await runClientInit(deps, "client-1");
 
@@ -790,7 +801,7 @@ describe("handleClientConnectedEffect — session history", () => {
 	});
 
 	it("sends status idle after session_switched", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 
 		await runClientInit(deps, "client-1");
 
@@ -811,7 +822,7 @@ describe("handleClientConnectedEffect — session history", () => {
 
 describe("handleClientConnectedEffect — REST API history", () => {
 	it("sends session_switched with REST API history", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 
 		await runClientInit(deps, "client-1");
 
@@ -828,9 +839,14 @@ describe("handleClientConnectedEffect — REST API history", () => {
 	});
 
 	it("sends session_switched without data when REST API fails", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockRejectedValue(
-			new Error("REST fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockReturnValue(
+			Effect.fail(
+				new SessionManagerError({
+					operation: "loadPreRenderedHistory",
+					cause: new Error("REST fail"),
+				}),
+			),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -847,20 +863,22 @@ describe("handleClientConnectedEffect — REST API history", () => {
 
 describe("handleClientConnectedEffect — model info", () => {
 	it("loads session and provider models through the Effect model service", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 		vi.mocked(deps.client.session.get).mockRejectedValue(
 			new Error("legacy session.get should not be used"),
 		);
 		vi.mocked(deps.client.provider.list).mockRejectedValue(
 			new Error("legacy provider.list should not be used"),
 		);
-		vi.mocked(deps.modelService.getSession).mockResolvedValue({
-			id: "session-1",
-			modelID: "gpt-4",
-			providerID: "openai",
-		} as Awaited<ReturnType<typeof deps.modelService.getSession>>);
-		vi.mocked(deps.modelService.listProviders).mockResolvedValue(
-			TEST_PROVIDERS,
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.succeed({
+				id: "session-1",
+				modelID: "gpt-4",
+				providerID: "openai",
+			} as OpenCodeSessionDetail),
+		);
+		vi.mocked(deps.modelService.listProviders).mockReturnValue(
+			Effect.succeed(TEST_PROVIDERS),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -894,7 +912,7 @@ describe("handleClientConnectedEffect — model info", () => {
 	});
 
 	it("sends model_info when session has modelID", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 
 		await runClientInit(deps, "client-1");
 
@@ -906,17 +924,20 @@ describe("handleClientConnectedEffect — model info", () => {
 	});
 
 	it("sends model_info from Effect override state when session has no model", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.modelService.getSession).mockResolvedValue({
-			id: "s1",
-			modelID: "",
-		} as Awaited<ReturnType<typeof deps.modelService.getSession>>);
-		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
-			providerID: "anthropic",
-			modelID: "claude-3",
-		});
-
-		await runClientInit(deps, "client-1");
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.succeed({
+				id: "s1",
+				modelID: "",
+			} as OpenCodeSessionDetail),
+		);
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			setModel("session-1", { providerID: "anthropic", modelID: "claude-3" }),
+		);
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
@@ -926,16 +947,17 @@ describe("handleClientConnectedEffect — model info", () => {
 	});
 
 	it("sends Effect override model_info as fallback when getSession fails", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.modelService.getSession).mockRejectedValue(
-			new Error("session fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("session fail"))),
 		);
-		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
-			providerID: "anthropic",
-			modelID: "claude-3",
-		});
-
-		await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			setModel("session-1", { providerID: "anthropic", modelID: "claude-3" }),
+		);
 
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
@@ -953,11 +975,13 @@ describe("handleClientConnectedEffect — model info", () => {
 	});
 
 	it("does not send model_info when neither session nor override state have model", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.modelService.getSession).mockResolvedValue({
-			id: "s1",
-			modelID: "",
-		} as Awaited<ReturnType<typeof deps.modelService.getSession>>);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.succeed({
+				id: "s1",
+				modelID: "",
+			} as OpenCodeSessionDetail),
+		);
 		// overrides.model is already undefined by default
 
 		await runClientInit(deps, "client-1");
@@ -974,7 +998,7 @@ describe("handleClientConnectedEffect — model info", () => {
 
 describe("handleClientConnectedEffect — session list", () => {
 	it("sends session_list to connecting client", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 
 		await runClientInit(deps, "client-1");
 
@@ -988,7 +1012,7 @@ describe("handleClientConnectedEffect — session list", () => {
 	});
 
 	it("sends initial session_list before marking the client bootstrapped", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 
 		await runClientInit(deps, "client-1");
 
@@ -1013,9 +1037,14 @@ describe("handleClientConnectedEffect — session list", () => {
 	});
 
 	it("sends INIT_FAILED when sendSessionLists throws", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.sessionService.sendSessionLists).mockRejectedValue(
-			new Error("list fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.sessionService.sendSessionLists).mockReturnValue(
+			Effect.fail(
+				new SessionManagerError({
+					operation: "sendSessionLists",
+					cause: new Error("list fail"),
+				}),
+			),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1052,7 +1081,7 @@ describe("handleClientConnectedEffect — session list", () => {
 
 describe("handleClientConnectedEffect — agent list", () => {
 	it("sends agent_list filtering internal agents", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 
 		await runClientInit(deps, "client-1");
 
@@ -1064,16 +1093,18 @@ describe("handleClientConnectedEffect — agent list", () => {
 	});
 
 	it("sends Claude agents for a Claude-bound active session", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
-		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
-			providerScope: { id: "claude", name: "Claude" },
-			agents: [
-				{ id: "Explore", name: "Explore", description: "Explorer" },
-				{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-				{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
-			],
-			activeAgentId: "Explore",
-		});
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+		vi.mocked(deps.agentService.listAgents).mockReturnValue(
+			Effect.succeed({
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [
+					{ id: "Explore", name: "Explore", description: "Explorer" },
+					{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
+					{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
+				],
+				activeAgentId: "Explore",
+			}),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1092,11 +1123,13 @@ describe("handleClientConnectedEffect — agent list", () => {
 	});
 
 	it("clears stale agent during Claude-bound client init", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
-		vi.mocked(deps.agentService.listAgents).mockResolvedValue({
-			providerScope: { id: "claude", name: "Claude" },
-			agents: [{ id: "Explore", name: "Explore" }],
-		});
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+		vi.mocked(deps.agentService.listAgents).mockReturnValue(
+			Effect.succeed({
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [{ id: "Explore", name: "Explore" }],
+			}),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1109,9 +1142,9 @@ describe("handleClientConnectedEffect — agent list", () => {
 	});
 
 	it("sends INIT_FAILED when listAgents throws", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.agentService.listAgents).mockRejectedValue(
-			new Error("agents fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.agentService.listAgents).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("agents fail"))),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1127,7 +1160,7 @@ describe("handleClientConnectedEffect — agent list", () => {
 
 describe("handleClientConnectedEffect — model list", () => {
 	it("sends model_list with only configured providers", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 
 		await runClientInit(deps, "client-1");
 
@@ -1146,15 +1179,14 @@ describe("handleClientConnectedEffect — model list", () => {
 
 	it("sends OpenCode model_list before slow Claude discovery finishes", async () => {
 		let resolveDiscovery: (value: ProviderCapabilities) => void = () => {};
-		const deps = applyTestDefaults(
-			makeClientInitFixtureWith({
-				discoverClaudeCapabilities: vi.fn<() => Promise<ProviderCapabilities>>(
-					() =>
-						new Promise((resolve) => {
-							resolveDiscovery = resolve;
-						}),
-				),
-			}),
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+		deps.discoverClaudeCapabilities.mockImplementation(() =>
+			Effect.promise(
+				() =>
+					new Promise((resolve) => {
+						resolveDiscovery = resolve;
+					}),
+			),
 		);
 
 		const initPromise = runClientInit(deps, "client-1");
@@ -1181,21 +1213,20 @@ describe("handleClientConnectedEffect — model list", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 			{ value: "1m", label: "1M (beta)" },
 		];
-		const deps = applyTestDefaults(
-			makeClientInitFixtureWith({
-				discoverClaudeCapabilities: vi.fn(async () =>
-					makeClaudeCapabilities({
-						models: [
-							{
-								id: "claude-sonnet-4-7",
-								name: "Claude Sonnet 4.7",
-								providerId: "claude",
-								contextWindowOptions,
-							},
-						],
-					}),
-				),
-			}),
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+		deps.discoverClaudeCapabilities.mockReturnValue(
+			Effect.succeed(
+				makeClaudeCapabilities({
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							providerId: "claude",
+							contextWindowOptions,
+						},
+					],
+				}),
+			),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1223,23 +1254,22 @@ describe("handleClientConnectedEffect — model list", () => {
 	});
 
 	it("sends Claude model_list when OpenCode provider discovery fails", async () => {
-		const deps = applyTestDefaults(
-			makeClientInitFixtureWith({
-				discoverClaudeCapabilities: vi.fn(async () =>
-					makeClaudeCapabilities({
-						models: [
-							{
-								id: "claude-sonnet-4-7",
-								name: "Claude Sonnet 4.7",
-								providerId: "claude",
-							},
-						],
-					}),
-				),
-			}),
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+		deps.discoverClaudeCapabilities.mockReturnValue(
+			Effect.succeed(
+				makeClaudeCapabilities({
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							providerId: "claude",
+						},
+					],
+				}),
+			),
 		);
-		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
-			new Error("opencode offline"),
+		vi.mocked(deps.modelService.listProviders).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("opencode offline"))),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1276,29 +1306,35 @@ describe("handleClientConnectedEffect — model list", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 			{ value: "1m", label: "1M (beta)" },
 		];
-		const deps = applyTestDefaults(
-			makeClientInitFixtureWith({
-				discoverClaudeCapabilities: vi.fn(async () =>
-					makeClaudeCapabilities({
-						models: [
-							{
-								id: "claude-sonnet-4-7",
-								name: "Claude Sonnet 4.7",
-								providerId: "claude",
-								contextWindowOptions,
-							},
-						],
-					}),
-				),
-			}),
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+		deps.discoverClaudeCapabilities.mockReturnValue(
+			Effect.succeed(
+				makeClaudeCapabilities({
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Claude Sonnet 4.7",
+							providerId: "claude",
+							contextWindowOptions,
+						},
+					],
+				}),
+			),
 		);
-		vi.mocked(deps.overrideState.getModel).mockResolvedValue({
-			providerID: "claude",
-			modelID: "claude-sonnet-4-7",
-		});
-		vi.mocked(deps.overrideState.getContextWindow).mockResolvedValue("1m");
 
-		await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			Effect.all([
+				setModel("session-1", {
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				}),
+				setContextWindow("session-1", "1m"),
+			]).pipe(Effect.asVoid),
+		);
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "context_window_info",
@@ -1312,20 +1348,9 @@ describe("handleClientConnectedEffect — model list", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 			{ value: "1m", label: "1M (beta)" },
 		];
-		const overrideState = {
-			getModel: vi.fn(async () => ({
-				providerID: "claude",
-				modelID: "claude-sonnet-4-7",
-			})),
-			getDefaultModel: vi.fn(async () => undefined),
-			getVariant: vi.fn(async () => "thinking"),
-			getDefaultVariant: vi.fn(async () => ""),
-			getContextWindow: vi.fn(async () => "1m"),
-			getDefaultContextWindow: vi.fn(async () => ""),
-			hasActiveProcessingTimeout: vi.fn(async () => false),
-		};
-		const deps = makeClientInitFixtureWith({
-			discoverClaudeCapabilities: vi.fn(async () =>
+		const deps = makeClientInitEffectLayer();
+		deps.discoverClaudeCapabilities.mockReturnValue(
+			Effect.succeed(
 				makeClaudeCapabilities({
 					models: [
 						{
@@ -1338,35 +1363,51 @@ describe("handleClientConnectedEffect — model list", () => {
 					],
 				}),
 			),
-			overrideState,
-		} as unknown as Partial<ClientInitFixture>);
-		vi.mocked(deps.modelService.getSession).mockResolvedValue({
-			id: "session-1",
-			projectID: "project-1",
-			directory: "/tmp/project",
-			title: "Session 1",
-			version: "1.0.0",
-			time: { created: 0, updated: 0 },
-		});
-		vi.mocked(deps.modelService.listProviders).mockResolvedValue({
-			connected: ["openai"],
-			defaults: {},
-			providers: [
-				{
-					id: "openai",
-					name: "OpenAI",
-					models: [
-						{
-							id: "gpt-4",
-							name: "GPT-4",
-							variants: { standard: {}, fast: {} },
-						},
-					],
-				},
-			],
-		});
+		);
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.succeed({
+				id: "session-1",
+				projectID: "project-1",
+				directory: "/tmp/project",
+				title: "Session 1",
+				version: "1.0.0",
+				time: { created: 0, updated: 0 },
+			}),
+		);
+		vi.mocked(deps.modelService.listProviders).mockReturnValue(
+			Effect.succeed({
+				connected: ["openai"],
+				defaults: {},
+				providers: [
+					{
+						id: "openai",
+						name: "OpenAI",
+						models: [
+							{
+								id: "gpt-4",
+								name: "GPT-4",
+								variants: { standard: {}, fast: {} },
+							},
+						],
+					},
+				],
+			}),
+		);
 
-		await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			Effect.all([
+				setModel("session-1", {
+					providerID: "claude",
+					modelID: "claude-sonnet-4-7",
+				}),
+				setVariant("session-1", "thinking"),
+				setContextWindow("session-1", "1m"),
+			]).pipe(Effect.asVoid),
+		);
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
@@ -1386,11 +1427,11 @@ describe("handleClientConnectedEffect — model list", () => {
 	});
 
 	it("auto-selects default model when defaultModel is not set", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith());
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 
-		const defaultModel = await runClientInit(deps, "client-1");
+		await runClientInit(deps, "client-1");
 
-		expect(defaultModel).toEqual({
+		expect(deps.state.defaultModel).toEqual({
 			providerID: "openai",
 			modelID: "gpt-4",
 		});
@@ -1402,27 +1443,25 @@ describe("handleClientConnectedEffect — model list", () => {
 	});
 
 	it("does not auto-select when defaultModel is already set", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.overrideState.getDefaultModel).mockResolvedValue({
-			providerID: "anthropic",
-			modelID: "claude-3",
-		});
-
-		const defaultModel = await runClientInit(deps, "client-1");
-
-		expect(defaultModel).toEqual({
-			providerID: "anthropic",
-			modelID: "claude-3",
-		});
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({ type: "model_info" }),
+		const deps = makeClientInitEffectLayer();
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			setDefaultModel({ providerID: "anthropic", modelID: "claude-3" }),
 		);
+
+		expect(deps.state.defaultModel).toEqual({
+			providerID: "anthropic",
+			modelID: "claude-3",
+		});
 	});
 
 	it("sends INIT_FAILED when listProviders throws", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
-			new Error("providers fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.modelService.listProviders).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("providers fail"))),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1438,22 +1477,20 @@ describe("handleClientConnectedEffect — model list", () => {
 
 describe("handleClientConnectedEffect — defaultModel priority", () => {
 	it("prefers defaultModel over provider-level default", async () => {
-		const deps = applyTestDefaults(
-			makeClientInitFixtureWith({
-				overrideState: {
-					...makeClientInitFixtureWith().overrideState,
-					getDefaultModel: vi.fn().mockResolvedValue({
-						providerID: "openai",
-						modelID: "gpt-4-turbo",
-					}),
-					getDefaultVariant: vi.fn().mockResolvedValue("high"),
-				},
-			}),
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
+
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			Effect.all([
+				setDefaultModel({ providerID: "openai", modelID: "gpt-4-turbo" }),
+				setDefaultVariant("high"),
+			]).pipe(Effect.asVoid),
 		);
 
-		const defaultModel = await runClientInit(deps, "client-1");
-
-		expect(defaultModel).toEqual({
+		expect(deps.state.defaultModel).toEqual({
 			providerID: "openai",
 			modelID: "gpt-4-turbo",
 		});
@@ -1467,39 +1504,32 @@ describe("handleClientConnectedEffect — defaultModel priority", () => {
 	});
 
 	it("falls back to provider default when defaultModel provider is not connected", async () => {
-		const deps = applyTestDefaults(
-			makeClientInitFixtureWith({
-				overrideState: {
-					...makeClientInitFixtureWith().overrideState,
-					getDefaultModel: vi.fn().mockResolvedValue({
-						providerID: "google",
-						modelID: "gemini-pro",
-					}),
-				},
-			}),
-		);
+		const deps = applyTestDefaults(makeClientInitEffectLayer());
 
-		const defaultModel = await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			setDefaultModel({ providerID: "google", modelID: "gemini-pro" }),
+		);
 
 		// google is not connected — defaultModel exists but its provider isn't available.
 		// The relay should NOT override the user's persisted default just because the
 		// provider is temporarily offline. No auto-select should happen.
-		expect(defaultModel).toEqual({
+		expect(deps.state.defaultModel).toEqual({
 			providerID: "google",
 			modelID: "gemini-pro",
 		});
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({ type: "model_info" }),
-		);
 	});
 
 	it("falls back to provider default when defaultModel is undefined", async () => {
-		const deps = applyTestDefaults(makeClientInitFixtureWith()); // no defaultModel set
+		const deps = applyTestDefaults(makeClientInitEffectLayer()); // no defaultModel set
 
-		const defaultModel = await runClientInit(deps, "client-1");
+		await runClientInit(deps, "client-1");
 
 		// Should use provider default since no defaultModel
-		expect(defaultModel).toEqual({
+		expect(deps.state.defaultModel).toEqual({
 			providerID: "openai",
 			modelID: "gpt-4",
 		});
@@ -1510,7 +1540,7 @@ describe("handleClientConnectedEffect — defaultModel priority", () => {
 
 describe("handleClientConnectedEffect — PTY replay", () => {
 	it("replays terminal state through the terminal replay port", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 
 		await runClientInit(deps, "client-1");
 
@@ -1522,9 +1552,12 @@ describe("handleClientConnectedEffect — PTY replay", () => {
 
 describe("handleClientConnectedEffect — no active session", () => {
 	it("skips session info and model info when no active session", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.sessionService.getDefaultSessionId).mockReturnValue(
+			Effect.succeed(undefined as unknown as string),
+		);
 
-		await runClientInit(deps, "client-1", undefined, true);
+		await runClientInit(deps, "client-1");
 
 		// Should NOT send session_switched or model_info via sendTo
 		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
@@ -1553,27 +1586,27 @@ describe("handleClientConnectedEffect — no active session", () => {
 
 describe("handleClientConnectedEffect — pending permissions", () => {
 	it("sends pending permission requests to reconnecting client", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("perm-1"),
-				sessionId: "ses-1",
-				toolName: "file_write",
-				toolInput: { patterns: ["/tmp/*"], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-			{
-				requestId: pid("perm-2"),
-				sessionId: "ses-1",
-				toolName: "shell_exec",
-				toolInput: { patterns: [], metadata: { command: "rm -rf" } },
-				always: ["shell_exec"],
-				timestamp: 2000,
-			},
-		]);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("perm-1"),
+					sessionId: "ses-1",
+					toolName: "file_write",
+					toolInput: { patterns: ["/tmp/*"], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+				{
+					requestId: pid("perm-2"),
+					sessionId: "ses-1",
+					toolName: "shell_exec",
+					toolInput: { patterns: [], metadata: { command: "rm -rf" } },
+					always: ["shell_exec"],
+					timestamp: 2000,
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1594,7 +1627,7 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 	});
 
 	it("does not send permission_request when no pending permissions", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		// listPendingPermissions returns [] by default
 
 		await runClientInit(deps, "client-1");
@@ -1607,19 +1640,19 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 	});
 
 	it("replayed permissions include sessionId", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("perm-1"),
-				sessionId: "ses-xyz",
-				toolName: "Bash",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("perm-1"),
+					sessionId: "ses-xyz",
+					toolName: "Bash",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1637,43 +1670,47 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 
 describe("handleClientConnectedEffect — pending questions", () => {
 	it("replays grandchild questions after publishing the reconnect family", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.sessionService.getSessionFamily).mockResolvedValue({
-			type: "session_family",
-			rootId: "session-1",
-			sessions: [
-				{ id: "session-1", title: "Root", updatedAt: 0, messageCount: 0 },
-				{
-					id: "child",
-					parentID: "session-1",
-					title: "Child",
-					updatedAt: 0,
-					messageCount: 0,
-				},
-				{
-					id: "grandchild",
-					parentID: "child",
-					title: "Grandchild",
-					updatedAt: 0,
-					messageCount: 0,
-				},
-			],
-		});
-		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockResolvedValue([
-			{
-				requestId: "service-question",
-				timestamp: 0,
-				sessionId: "grandchild",
-				questions: [
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.sessionService.getSessionFamily).mockReturnValue(
+			Effect.succeed({
+				type: "session_family",
+				rootId: "session-1",
+				sessions: [
+					{ id: "session-1", title: "Root", updatedAt: 0, messageCount: 0 },
 					{
-						question: "Continue?",
-						header: "Confirm",
-						options: [],
-						multiSelect: false,
+						id: "child",
+						parentID: "session-1",
+						title: "Child",
+						updatedAt: 0,
+						messageCount: 0,
+					},
+					{
+						id: "grandchild",
+						parentID: "child",
+						title: "Grandchild",
+						updatedAt: 0,
+						messageCount: 0,
 					},
 				],
-			},
-		]);
+			}),
+		);
+		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: "service-question",
+					timestamp: 0,
+					sessionId: "grandchild",
+					questions: [
+						{
+							question: "Continue?",
+							header: "Confirm",
+							options: [],
+							multiSelect: false,
+						},
+					],
+				},
+			]),
+		);
 		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "api-question",
@@ -1713,7 +1750,7 @@ describe("handleClientConnectedEffect — pending questions", () => {
 	});
 
 	it("sends pending questions to reconnecting client", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_tool1",
@@ -1757,7 +1794,7 @@ describe("handleClientConnectedEffect — pending questions", () => {
 	});
 
 	it("does not send ask_user when no pending questions", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		// listPendingQuestions returns [] by default
 
 		await runClientInit(deps, "client-1");
@@ -1770,19 +1807,19 @@ describe("handleClientConnectedEffect — pending questions", () => {
 	});
 
 	it("sends both pending permissions and questions together", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("perm-1"),
-				sessionId: "ses-1",
-				toolName: "file_write",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("perm-1"),
+					sessionId: "ses-1",
+					toolName: "file_write",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_tool1",
@@ -1812,7 +1849,7 @@ describe("handleClientConnectedEffect — pending questions", () => {
 	});
 
 	it("filters out questions from other sessions", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		vi.mocked(deps.client.question.list).mockResolvedValue([
 			{
 				id: "que_this",
@@ -1859,9 +1896,9 @@ describe("handleClientConnectedEffect — pending questions", () => {
 
 describe("handleClientConnectedEffect — error resilience", () => {
 	it("continues sending remaining data when getSession fails", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.modelService.getSession).mockRejectedValue(
-			new Error("session fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("session fail"))),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1882,21 +1919,31 @@ describe("handleClientConnectedEffect — error resilience", () => {
 	});
 
 	it("does not crash when all API calls fail", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(deps.modelService.getSession).mockRejectedValue(
-			new Error("fail"),
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.modelService.getSession).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("fail"))),
 		);
-		vi.mocked(deps.sessionService.sendSessionLists).mockRejectedValue(
-			new Error("fail"),
+		vi.mocked(deps.sessionService.sendSessionLists).mockReturnValue(
+			Effect.fail(
+				new SessionManagerError({
+					operation: "sendSessionLists",
+					cause: new Error("fail"),
+				}),
+			),
 		);
-		vi.mocked(deps.agentService.listAgents).mockRejectedValue(
-			new Error("fail"),
+		vi.mocked(deps.agentService.listAgents).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("fail"))),
 		);
-		vi.mocked(deps.modelService.listProviders).mockRejectedValue(
-			new Error("fail"),
+		vi.mocked(deps.modelService.listProviders).mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("fail"))),
 		);
-		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockRejectedValue(
-			new Error("fail"),
+		vi.mocked(deps.sessionService.loadPreRenderedHistory).mockReturnValue(
+			Effect.fail(
+				new SessionManagerError({
+					operation: "loadPreRenderedHistory",
+					cause: new Error("fail"),
+				}),
+			),
 		);
 
 		// Should NOT throw
@@ -1920,19 +1967,19 @@ describe("handleClientConnectedEffect — error resilience", () => {
 
 describe("handleClientConnectedEffect — pending interaction integration", () => {
 	it("replays permission from the pending interaction port", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("perm-real-1"),
-				sessionId: "",
-				toolName: "file_write",
-				toolInput: { patterns: ["/tmp/test.txt"], metadata: { foo: "bar" } },
-				always: ["shell_exec"],
-				timestamp: 1000,
-			},
-		]);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("perm-real-1"),
+					sessionId: "",
+					toolName: "file_write",
+					toolInput: { patterns: ["/tmp/test.txt"], metadata: { foo: "bar" } },
+					always: ["shell_exec"],
+					timestamp: 1000,
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1947,7 +1994,7 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 	});
 
 	it("replays question from API with field mapping (multiple → multiSelect)", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 
 		// Mock the REST API to return a pending question in OpenCode's format
 		vi.mocked(deps.client.question.list).mockResolvedValue([
@@ -1994,27 +2041,27 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 	});
 
 	it("replays multiple pending permissions and API questions simultaneously", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("perm-r1"),
-				sessionId: "",
-				toolName: "shell_exec",
-				toolInput: { patterns: [], metadata: { cmd: "npm install" } },
-				always: [],
-				timestamp: 1000,
-			},
-			{
-				requestId: pid("perm-r2"),
-				sessionId: "",
-				toolName: "file_write",
-				toolInput: { patterns: ["/src/**"], metadata: {} },
-				always: [],
-				timestamp: 1001,
-			},
-		]);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("perm-r1"),
+					sessionId: "",
+					toolName: "shell_exec",
+					toolInput: { patterns: [], metadata: { cmd: "npm install" } },
+					always: [],
+					timestamp: 1000,
+				},
+				{
+					requestId: pid("perm-r2"),
+					sessionId: "",
+					toolName: "file_write",
+					toolInput: { patterns: ["/src/**"], metadata: {} },
+					always: [],
+					timestamp: 1001,
+				},
+			]),
+		);
 
 		// Mock the REST API to return 1 pending question
 		vi.mocked(deps.client.question.list).mockResolvedValue([
@@ -2051,11 +2098,11 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 
 describe("handleClientConnectedEffect — API permission rehydration", () => {
 	it("fetches permissions from API and sends them to connecting client", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		// Pending interaction service has nothing — simulates relay restart where service state is lost
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([]);
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([]),
+		);
 		// But API has a pending permission
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
@@ -2070,16 +2117,21 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 		// recoverPendingPermissions returns the recovered entries
 		vi.mocked(
 			deps.pendingInteractions.recoverPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("per_api1"),
-				sessionId: "ses-abc",
-				toolName: "file_write",
-				toolInput: { patterns: ["/src/*"], metadata: { path: "/src/foo.ts" } },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("per_api1"),
+					sessionId: "ses-abc",
+					toolName: "file_write",
+					toolInput: {
+						patterns: ["/src/*"],
+						metadata: { path: "/src/foo.ts" },
+					},
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -2109,20 +2161,20 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 	});
 
 	it("sends both service-cached and API-fetched permissions without duplicates", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		// Pending interaction service already has one permission
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("per_service1"),
-				sessionId: "ses-1",
-				toolName: "shell_exec",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("per_service1"),
+					sessionId: "ses-1",
+					toolName: "shell_exec",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 		// API returns a different permission (not in service)
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
@@ -2136,16 +2188,18 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 		]);
 		vi.mocked(
 			deps.pendingInteractions.recoverPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("per_api2"),
-				sessionId: "ses-2",
-				toolName: "file_write",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 2000,
-			},
-		]);
+		).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("per_api2"),
+					sessionId: "ses-2",
+					toolName: "file_write",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 2000,
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -2163,20 +2217,20 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 	});
 
 	it("deduplicates permissions that exist in both service and API", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		// Pending interaction service has permission per_dup
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("per_dup"),
-				sessionId: "ses-1",
-				toolName: "shell_exec",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("per_dup"),
+					sessionId: "ses-1",
+					toolName: "shell_exec",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 		// API also returns per_dup (same permission)
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
@@ -2191,7 +2245,7 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 		// recoverPendingPermissions won't return anything new since service already has it
 		vi.mocked(
 			deps.pendingInteractions.recoverPendingPermissions,
-		).mockResolvedValue([]);
+		).mockReturnValue(Effect.succeed([]));
 
 		await runClientInit(deps, "client-1");
 
@@ -2208,23 +2262,23 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 	});
 
 	it("gracefully handles API failure for permissions", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		vi.mocked(deps.client.permission.list).mockRejectedValue(
 			new Error("API down"),
 		);
 		// Pending interaction service still has a permission
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("per_service"),
-				sessionId: "ses-1",
-				toolName: "Bash",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("per_service"),
+					sessionId: "ses-1",
+					toolName: "Bash",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 
 		// Should NOT throw
 		await expect(runClientInit(deps, "client-1")).resolves.toBeUndefined();
@@ -2240,10 +2294,10 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 	});
 
 	it("maps API sessionID field to sessionId in recovered permissions", async () => {
-		const deps = makeClientInitFixtureWith();
-		vi.mocked(
-			deps.pendingInteractions.listPendingPermissions,
-		).mockResolvedValue([]);
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
+			Effect.succeed([]),
+		);
 		vi.mocked(deps.client.permission.list).mockResolvedValue([
 			{
 				id: "per_sess",
@@ -2255,16 +2309,18 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 		]);
 		vi.mocked(
 			deps.pendingInteractions.recoverPendingPermissions,
-		).mockResolvedValue([
-			{
-				requestId: pid("per_sess"),
-				sessionId: "ses_325b9c3caffeFlhLvFRycK1ruF",
-				toolName: "file_write",
-				toolInput: { patterns: [], metadata: {} },
-				always: [],
-				timestamp: 1000,
-			},
-		]);
+		).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: pid("per_sess"),
+					sessionId: "ses_325b9c3caffeFlhLvFRycK1ruF",
+					toolName: "file_write",
+					toolInput: { patterns: [], metadata: {} },
+					always: [],
+					timestamp: 1000,
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -2282,14 +2338,13 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 
 describe("handleClientConnectedEffect — processing status on connect", () => {
 	it("sends status 'processing' when active session is busy", async () => {
-		const deps = makeClientInitFixtureWith({
-			statusPoller: {
-				isProcessing: vi.fn().mockReturnValue(true),
-				getCurrentStatuses: vi
-					.fn()
-					.mockReturnValue({ "session-1": { type: "busy" } }),
-			} as unknown as ClientInitFixture["statusPoller"],
-		});
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
+			Effect.succeed(true),
+		);
+		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
+			Effect.succeed({ "session-1": { type: "busy" } }),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -2301,12 +2356,13 @@ describe("handleClientConnectedEffect — processing status on connect", () => {
 	});
 
 	it("sends status 'idle' when active session is not busy", async () => {
-		const deps = makeClientInitFixtureWith({
-			statusPoller: {
-				isProcessing: vi.fn().mockReturnValue(false),
-				getCurrentStatuses: vi.fn().mockReturnValue({}),
-			} as unknown as ClientInitFixture["statusPoller"],
-		});
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
+			Effect.succeed(false),
+		);
+		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
+			Effect.succeed({}),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -2318,18 +2374,21 @@ describe("handleClientConnectedEffect — processing status on connect", () => {
 	});
 
 	it("sends status 'processing' when Effect timeout state is active", async () => {
-		const deps = makeClientInitFixtureWith({
-			statusPoller: {
-				isProcessing: vi.fn().mockReturnValue(false),
-				getCurrentStatuses: vi.fn().mockReturnValue({}),
-			} as unknown as ClientInitFixture["statusPoller"],
-			overrideState: {
-				...makeClientInitFixtureWith().overrideState,
-				hasActiveProcessingTimeout: vi.fn().mockResolvedValue(true),
-			},
-		});
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
+			Effect.succeed(false),
+		);
+		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
+			Effect.succeed({}),
+		);
 
-		await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			startProcessingTimeout("session-1", "2 minutes", () => Effect.void),
+		);
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "status",
@@ -2339,12 +2398,13 @@ describe("handleClientConnectedEffect — processing status on connect", () => {
 	});
 
 	it("includes processing flags in initial session_list", async () => {
-		const deps = makeClientInitFixtureWith({
-			statusPoller: {
-				isProcessing: vi.fn().mockReturnValue(false),
-				getCurrentStatuses: vi.fn().mockReturnValue({ s1: { type: "busy" } }),
-			} as unknown as ClientInitFixture["statusPoller"],
-		});
+		const deps = makeClientInitEffectLayer();
+		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
+			Effect.succeed(false),
+		);
+		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
+			Effect.succeed({ s1: { type: "busy" } }),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -2371,11 +2431,11 @@ describe("handleClientConnectedEffect — instance list", () => {
 				createdAt: 1000,
 			},
 		];
-		const deps = makeClientInitFixtureWith({
+		const deps = makeClientInitEffectLayer();
+
+		await runClientInit(deps, "client-1", undefined, {
 			getInstances: vi.fn().mockReturnValue(instances),
 		});
-
-		await runClientInit(deps, "client-1");
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "instance_list",
@@ -2384,7 +2444,7 @@ describe("handleClientConnectedEffect — instance list", () => {
 	});
 
 	it("does NOT send instance_list when getInstances is omitted", async () => {
-		const deps = makeClientInitFixtureWith();
+		const deps = makeClientInitEffectLayer();
 		// getInstances is not set
 
 		await runClientInit(deps, "client-1");
@@ -2417,11 +2477,11 @@ describe("handleClientConnectedEffect — instance list", () => {
 				createdAt: 2000,
 			},
 		];
-		const deps = makeClientInitFixtureWith({
+		const deps = makeClientInitEffectLayer();
+
+		await runClientInit(deps, "client-1", undefined, {
 			getInstances: vi.fn().mockReturnValue(instances),
 		});
-
-		await runClientInit(deps, "client-1");
 
 		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
 		const instanceListCall = sendToCalls.find(
@@ -2438,11 +2498,11 @@ describe("handleClientConnectedEffect — instance list", () => {
 	});
 
 	it("sends instance_list via sendTo (not broadcast) to the specific client", async () => {
-		const deps = makeClientInitFixtureWith({
+		const deps = makeClientInitEffectLayer();
+
+		await runClientInit(deps, "client-xyz", undefined, {
 			getInstances: vi.fn().mockReturnValue([]),
 		});
-
-		await runClientInit(deps, "client-xyz");
 
 		// sendTo called with the correct clientId
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(

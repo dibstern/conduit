@@ -107,11 +107,11 @@
 				{...props}
 				variant="pill"
 				size="content"
-				class="ml-0.5"
+				class="ml-0.5 min-w-0"
 				data-testid="variant-badge"
 				title="Thinking level ({variantLabel}) — Ctrl+T to cycle"
 			>
-				{variantLabel}
+				<span class="min-w-0 truncate">{variantLabel}</span>
 				<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
 			</Button>
 		{/snippet}

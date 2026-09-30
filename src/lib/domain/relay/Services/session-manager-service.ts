@@ -305,6 +305,41 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		Effect.withSpan("session.listSessions"),
 	);
 
+/** Whether this relay's project has the requested session. */
+export const sessionExists = (sessionId: string) =>
+	Effect.gen(function* () {
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		if (readQuery._tag === "Some") {
+			const session = yield* readQuery.value
+				.getSession(sessionId)
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({ operation: "sessionExists", cause }),
+					),
+				);
+			return session !== undefined;
+		}
+
+		const api = yield* OpenCodeAPITag;
+		return yield* Effect.tryPromise({
+			try: () => api.session.get(sessionId),
+			catch: (cause) => cause,
+		}).pipe(
+			Effect.as(true),
+			Effect.catchAll((cause) =>
+				cause instanceof OpenCodeApiError && cause.responseStatus === 404
+					? Effect.succeed(false)
+					: Effect.fail(
+							new SessionManagerError({ operation: "sessionExists", cause }),
+						),
+			),
+		);
+	}).pipe(
+		Effect.annotateLogs({ operation: "sessionExists", sessionId }),
+		Effect.withSpan("session.sessionExists"),
+	);
+
 /**
  * Initialize session state from the provider and return the most recent session,
  * creating one when none exists.
@@ -1218,6 +1253,7 @@ export interface SessionManagerService {
 	listSessions(
 		options?: ListSessionsOptions,
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
+	sessionExists(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
 	getSessionFamily(
 		sessionId: string,
 	): Effect.Effect<
@@ -1693,6 +1729,19 @@ export const SessionManagerServiceLive: Layer.Layer<
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			listSessions: serviceListSessions,
+			sessionExists: (sessionId) => {
+				const base = sessionExists(sessionId).pipe(
+					Effect.provideService(OpenCodeAPITag, api),
+				);
+				return readQueryEffectOption._tag === "Some"
+					? base.pipe(
+							Effect.provideService(
+								ReadQueryEffectTag,
+								readQueryEffectOption.value,
+							),
+						)
+					: base;
+			},
 			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {

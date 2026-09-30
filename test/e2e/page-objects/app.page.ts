@@ -4,11 +4,12 @@ import { expect } from "@playwright/test";
 export class AppPage {
 	readonly page: Page;
 
-	// Header
+	// Session bar
 	readonly projectName: Locator;
 	readonly statusDot: Locator;
 	readonly sidebarExpandBtn: Locator;
 	readonly terminalToggleBtn: Locator;
+	readonly moreActionsBtn: Locator;
 	readonly qrBtn: Locator;
 	readonly notifSettingsBtn: Locator;
 	readonly clientCountBadge: Locator;
@@ -41,11 +42,12 @@ export class AppPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.projectName = page.locator("#project-name");
-		this.statusDot = page.locator("#status");
-		this.sidebarExpandBtn = page.locator("#sidebar-expand-btn");
-		this.terminalToggleBtn = page.locator("#header-terminal-btn");
-		this.qrBtn = page.locator("#qr-btn");
+		this.projectName = page.getByTestId("session-bar-identity");
+		this.statusDot = page.locator("#session-bar #status");
+		this.sidebarExpandBtn = page.getByTestId("session-bar-back");
+		this.terminalToggleBtn = page.getByTestId("views-rail-terminal");
+		this.moreActionsBtn = page.getByTestId("session-bar-overflow");
+		this.qrBtn = page.getByTestId("overflow-share");
 		this.notifSettingsBtn = page.locator("#notif-settings-btn");
 		this.clientCountBadge = page.locator("#client-count-badge");
 		this.layout = page.locator("#layout");

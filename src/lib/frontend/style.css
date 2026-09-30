@@ -554,53 +554,28 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── Header ───────────────────────────────────────────────────────────────── */
+/* ─── Session bar (design bar 20) ──────────────────────────────────────────── */
 
-/* Parent-state: sidebar expand button only visible when sidebar collapsed */
-#layout.sidebar-collapsed #sidebar-expand-btn {
-	display: flex;
-}
-
-/* ─── Header project-name — marquee scroll on hover for long names ──── */
-
-#header-project-scroll {
-	text-overflow: ellipsis;
-}
-#header-project-scroll:hover {
-	text-overflow: clip;
-}
-#header-project-scroll:hover .header-project-inner {
-	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
-}
-
-/* ─── Session bar (design bar 18) ──────────────────────────────────────────── */
-
-/* Two layouts, one DOM tree. Collapsed, the title moves out of its own row and
-   up beside the back control; expanded, it drops back down. A grid can do that
-   without re-parenting anything, which is the whole point: the <h1> never
-   unmounts, so collapsing is a state change rather than the heading vanishing
-   and a different one appearing.
-
-   Child order in the markup is back, meta, title, chevron, more — chosen so the
-   focus order matches the visual order in BOTH layouts, since grid areas move
-   boxes around without moving the DOM.
+/* On phones, the grid moves the title beside the back control when collapsed.
+   The <h1> stays mounted throughout. Identity appears before the title on
+   phones and after it on desktop, matching DOM, focus, and visual order.
 
    `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` floors at its content's
    width, and the title and the project identity both have to be allowed to
    truncate instead of pushing the back control off the edge. */
 #session-bar {
 	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	grid-template-columns: auto minmax(0, 1fr) auto;
 	grid-template-areas:
-		"back  meta  meta  more"
-		"title title title title"
-		"views views views views";
+		"back  meta  meta"
+		"title title views";
 	align-items: center;
 	column-gap: 6px;
 	padding: 3px 12px 6px;
 }
 
 #session-bar[data-collapsed="true"] {
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas: "back title chev more";
 	min-height: 46px;
 	padding: 0 12px;
@@ -615,9 +590,12 @@ body:has(dialog:modal) {
 #session-bar-back {
 	grid-area: back;
 }
+/* Stretch to the track and right-align inside it. `justify-self: end` sizes the
+   item to its nowrap content, which then overflows leftward over the back
+   control instead of truncating. */
 #session-bar-meta {
 	grid-area: meta;
-	justify-self: end;
+	justify-content: flex-end;
 }
 /* Size is a `class:` directive on the element, not a rule here. `font-size:
    var(--text-lg)` was tried and is a trap: Tailwind v4 emits a theme variable
@@ -633,22 +611,91 @@ body:has(dialog:modal) {
 #session-bar-more {
 	grid-area: more;
 }
-#session-bar-views {
+#session-bar-views-button {
 	grid-area: views;
-	min-width: 0;
-	width: 100%;
-	padding-top: 2px;
 }
-#session-bar-views [role="tab"] {
-	container-type: inline-size;
+
+/* Desktop keeps the same controls mounted in one row. Nothing grows: the title,
+   its ▾ and chip hug each other, identity follows, and an auto margin pushes
+   Settle, the status dot and ⋯ to the end. When space runs out the identity
+   yields first (its large shrink factor) down to its own floor, then the
+   title down to its 110px floor. The title row keeps the default `min-width: auto`, so its floor is
+   its real contents; a fixed floor smaller than title + ▾ + chip let the
+   chip spill out of the row and paint over the identity. */
+#session-bar[data-compact="false"] {
+	display: flex;
+	container: session-bar / inline-size;
+	min-height: 48px;
+	gap: 6px;
+	padding: 4px 12px;
+	white-space: nowrap;
 }
-@container (max-width: 76px) {
-	.session-view-label {
+#session-bar[data-compact="false"] #session-bar-title-row {
+	flex: 0 1 auto;
+}
+#session-bar[data-compact="false"] #session-bar-title {
+	min-width: 110px;
+	flex: 0 1 auto;
+}
+#session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
+	min-width: 30px;
+	min-height: 32px;
+	margin: 0;
+}
+#session-bar[data-compact="false"] #session-bar-meta {
+	flex: 0 100 auto;
+	/* Yield first, but keep a readable stub of the branch; the narrowest
+	   container query hides it outright rather than squeezing it to nothing. */
+	min-width: 96px;
+	margin-inline-end: auto;
+	justify-content: flex-start;
+	overflow: hidden;
+}
+#session-bar[data-compact="false"] #session-bar-settle {
+	flex: none;
+}
+#session-bar[data-compact="false"] #session-bar-more {
+	min-width: 32px;
+	min-height: 32px;
+}
+@container session-bar (max-width: 600px) {
+	#client-count-badge {
+		display: none;
+	}
+	#session-bar-meta [data-testid="session-bar-identity"] {
+		max-width: 96px;
+	}
+}
+@container session-bar (max-width: 500px) {
+	#session-bar-settle-label {
+		display: none;
+	}
+	#session-bar-settle {
+		min-width: 32px;
+		padding-inline: 7px;
+	}
+	.desktop-state-label {
 		display: none;
 	}
 }
-.session-view-shortcut {
-	display: none;
+@container session-bar (max-width: 390px) {
+	#session-bar-meta.desktop-session-identity {
+		display: none;
+	}
+	/* The hidden identity took the pushing margin with it. */
+	#session-bar[data-compact="false"] #session-bar-title-row {
+		margin-inline-end: auto;
+	}
+	#session-bar-title-row [data-testid="session-bar-state-chip"] {
+		min-width: 28px;
+		min-height: 32px;
+	}
+}
+@media (max-width: 800px) {
+	#session-bar[data-compact="false"] {
+		gap: 4px;
+		padding-inline: 8px;
+	}
 }
 
 /* ─── Compact route layout ─────────────────────────────────────────────────── */
@@ -1000,33 +1047,41 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── File Viewer (split pane beside chat) ────────────────────────────────── */
-
-/* Desktop: flex sibling of #app — width driven by --file-viewer-w */
-@media (min-width: 1024px) {
-	.file-viewer-pane {
-		width: var(--file-viewer-w, 50%);
-		min-width: 280px;
-		border-left: 1px solid var(--color-border);
-		background: var(--color-bg);
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
-		flex-shrink: 0;
-	}
+/* ─── File Viewer ──────────────────────────────────────────────────────────── */
+.file-viewer-pane {
+	min-width: 0;
+	min-height: 0;
+	flex: 1;
+	background: var(--color-bg);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 }
 
-/* Mobile: full-screen overlay */
-@media (max-width: 1023px) {
-	.file-viewer-pane {
-		position: fixed;
-		inset: 0;
-		background: var(--color-bg);
-		z-index: var(--z-pane);
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
-	}
+.file-viewer-pane.phone-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-pane);
+}
+
+.file-viewer-body {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* The line gutter is sticky and raised, so it paints over any outline on the
+   scroller itself. Draw the scroller's keyboard-focus ring as an overlay above it. */
+.file-viewer-body:has(> :focus-visible)::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: var(--z-raised);
+	outline: 2px solid var(--color-text);
+	outline-offset: -2px;
+	pointer-events: none;
 }
 
 /* ─── File Browser (4.4) ──────────────────────────────────────────────────── */

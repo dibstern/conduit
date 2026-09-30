@@ -104,7 +104,7 @@
 {#snippet verbDetails(item: SessionVerb)}
 	{#if item.icon}<Icon name={item.icon} size={13} />{:else if item.checked !== undefined}<span class="w-[13px] shrink-0" aria-hidden="true"></span>{/if}
 	<span>{item.label}</span>
-	{#if item.hint}<span class="ml-auto text-xs text-text-muted">{item.hint}</span>{/if}
+	{#if item.hint && presentation !== "sheet"}<span class="ml-auto text-xs text-text-muted">{item.hint}</span>{/if}
 	{#if item.disabledReason}<span class="ml-auto text-xs text-text-dimmer">{item.disabledReason}</span>{/if}
 {/snippet}
 

@@ -86,11 +86,11 @@
 				{...props}
 				variant="pill"
 				size="content"
-				class="ml-0.5"
+				class="ml-0.5 min-w-0"
 				data-testid="context-window-badge"
 				title="Context window ({currentLabel})"
 			>
-				{currentLabel}
+				<span class="min-w-0 truncate">{currentLabel}</span>
 				<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
 			</Button>
 		{/snippet}

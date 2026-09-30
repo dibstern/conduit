@@ -81,6 +81,12 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
+	isSessionUnreadHeld,
+	noteReadStateChanged,
+	noteSessionOpened,
+} from "../../../src/lib/frontend/stores/session-unread-hold.svelte.js";
+import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import {
 	connect,
 	disconnect,
 	wsState,
@@ -130,6 +136,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		routerState.search = "?p=conduit";
 		attachedProjectState.slug = null;
 		sessionState.currentId = null;
+		noteSessionOpened("__test_reset__");
+		sessionViewState.compact = false;
 	});
 
 	afterEach(async () => {
@@ -140,6 +148,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		routerState.path = "/";
 		attachedProjectState.slug = null;
 		sessionState.currentId = null;
+		noteSessionOpened("__test_reset__");
 	});
 
 	it("opens the daemon socket with the route's session and project hints", () => {
@@ -204,6 +213,37 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			p: "project-b",
 		});
 		expect(instances[1]?.url).toBe(`ws://localhost:3000/ws?${params}`);
+	});
+
+	it("rebuilds the held session read flag on reconnect", async () => {
+		vi.useFakeTimers();
+		routerState.path = "/s/session-a";
+		routerState.search = "?p=project-a";
+		sessionState.currentId = "session-a";
+		connect();
+		expect(
+			new URL(instances[0]?.url ?? "").searchParams.has("skipMarkRead"),
+		).toBe(false);
+
+		noteReadStateChanged(
+			{ id: "session-a", title: "Session A", projectSlug: "project-a" },
+			true,
+		);
+		instances[0]?.open();
+		instances[0]?.close();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(
+			new URL(instances[1]?.url ?? "").searchParams.get("skipMarkRead"),
+		).toBe("1");
+		expect(isSessionUnreadHeld("session-a")).toBe(true);
+
+		noteSessionOpened("another-session");
+		instances[1]?.open();
+		instances[1]?.close();
+		await vi.advanceTimersByTimeAsync(1_500);
+		expect(
+			new URL(instances[2]?.url ?? "").searchParams.has("skipMarkRead"),
+		).toBe(false);
 	});
 
 	it("keeps the route session if the connection drops before the first attachment", async () => {

@@ -1,6 +1,11 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Ref } from "effect";
-import { expect } from "vitest";
+import { Effect, Layer, Option, Queue, Ref } from "effect";
+import { expect, vi } from "vitest";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	HttpServerRefLive,
@@ -15,10 +20,25 @@ import {
 	DaemonConfigRefLive,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import {
+	DaemonEventBusLive,
+	subscribeToDaemonEvents,
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	addWithoutRelay,
+	makeProjectRegistryLive,
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+
+const createProjectRelayMock = vi.hoisted(() =>
+	vi.fn<(config: ProjectRelayConfig) => Promise<ProjectRelay>>(),
+);
+vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
+	createProjectRelay: createProjectRelayMock,
+}));
 
 // ─── HttpServerRefTag tests ─────────────────────────────────────────────────
 
@@ -92,7 +112,7 @@ describe("RelayFactoryTag", () => {
 	// RelayFactoryLive provides both RelayFactoryTag and HttpServerRefTag.
 	// It requires DaemonConfigRefTag from the caller.
 	const factoryLayer = RelayFactoryLive("/tmp/test-conduit").pipe(
-		Layer.provide(configLayer),
+		Layer.provideMerge(configLayer),
 	);
 
 	it.effect("resolves from the Layer", () =>
@@ -134,6 +154,70 @@ describe("RelayFactoryTag", () => {
 			}
 		}).pipe(Effect.provide(Layer.fresh(factoryLayer))),
 	);
+
+	it.effect("broadcasts project_list only when refreshed git changes", () => {
+		const directory = mkdtempSync(join(tmpdir(), "conduit-relay-git-"));
+		const server = createServer();
+		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
+			cwd: directory,
+		});
+		createProjectRelayMock.mockResolvedValue({
+			stop: async () => undefined,
+		} as ProjectRelay);
+		return Effect.gen(function* () {
+			const project = { slug: "git-project", title: "Git Project", directory };
+			yield* addWithoutRelay(project);
+			const subscription = yield* subscribeToDaemonEvents;
+			const serverRef = yield* HttpServerRefTag;
+			yield* Ref.set(serverRef, server);
+			const factory = yield* RelayFactoryTag;
+			yield* factory.create(project, "http://localhost:4096");
+			const config = createProjectRelayMock.mock.calls[0]?.[0];
+			expect(config?.refreshSessionGit).toBeTypeOf("function");
+			if (!config?.refreshSessionGit)
+				throw new Error("Missing git refresh callback");
+
+			yield* Effect.promise(config.refreshSessionGit);
+			const first = yield* Queue.take(subscription);
+			expect(first).toMatchObject({
+				_tag: "RelayBroadcast",
+				message: {
+					type: "project_list",
+					projects: [
+						{
+							slug: "git-project",
+							git: { branch: "main", dirty: false },
+						},
+					],
+				},
+			});
+			yield* Queue.take(subscription); // daemon_sessions_changed
+			yield* Effect.promise(config.refreshSessionGit);
+			expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
+
+			writeFileSync(join(directory, "untracked"), "changed");
+			yield* Effect.promise(config.refreshSessionGit);
+			const changed = yield* Queue.take(subscription);
+			expect(changed).toMatchObject({
+				_tag: "RelayBroadcast",
+				message: {
+					type: "project_list",
+					projects: [{ slug: "git-project", git: { dirty: true } }],
+				},
+			});
+			yield* Queue.take(subscription);
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(Layer.fresh(factoryLayer)),
+			Effect.ensuring(
+				Effect.sync(() => {
+					server.close();
+					rmSync(directory, { recursive: true, force: true });
+					createProjectRelayMock.mockReset();
+				}),
+			),
+		);
+	});
 });
 
 // ─── RelayFactoryError tests ────────────────────────────────────────────────

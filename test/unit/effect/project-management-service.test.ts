@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { expect, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import {
 	ProjectManagementNotSupported,
 	ProjectManagementServiceError,
@@ -12,7 +16,14 @@ import {
 	type OpenCodeSettingsService,
 	OpenCodeSettingsServiceTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
+
+const fixtureDirs: string[] = [];
+afterEach(() => {
+	for (const directory of fixtureDirs.splice(0))
+		rmSync(directory, { recursive: true, force: true });
+});
 
 const makeSettingsService = (
 	overrides: Partial<OpenCodeSettingsService> = {},
@@ -36,6 +47,42 @@ const makeLayer = (
 	);
 
 describe("ProjectManagementServiceLive", () => {
+	it.effect(
+		"adds cached git to listed projects without adding a key to uncached projects",
+		() => {
+			const directory = mkdtempSync(
+				join(tmpdir(), "conduit-project-list-git-"),
+			);
+			fixtureDirs.push(directory);
+			execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
+				cwd: directory,
+			});
+			const config = makeMockConfig({
+				getProjects: () => [
+					{ slug: "cached", title: "Cached", directory },
+					{
+						slug: "uncached",
+						title: "Uncached",
+						directory: join(directory, "other"),
+					},
+				],
+			});
+			return Effect.gen(function* () {
+				const git = yield* Effect.promise(() =>
+					daemonSessionGitCache.refresh(directory),
+				);
+				const service = yield* ProjectManagementServiceTag;
+				const projects = yield* service.list();
+				expect(
+					projects.find((project) => project.slug === "cached")?.git,
+				).toEqual(git);
+				expect(
+					projects.find((project) => project.slug === "uncached"),
+				).not.toHaveProperty("git");
+			}).pipe(Effect.provide(makeLayer(config)));
+		},
+	);
+
 	it.effect(
 		"lists config-backed projects before falling back to OpenCode",
 		() => {
@@ -88,6 +135,30 @@ describe("ProjectManagementServiceLive", () => {
 				{ slug: "p1", title: "Proj 1", directory: "/proj1" },
 			]);
 		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect("enriches an OpenCode fallback project from cached git", () => {
+		const directory = mkdtempSync(
+			join(tmpdir(), "conduit-opencode-project-git-"),
+		);
+		fixtureDirs.push(directory);
+		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
+			cwd: directory,
+		});
+		const settingsService = makeSettingsService({
+			listProjects: vi.fn(() =>
+				Effect.succeed([{ id: "p1", name: "Proj 1", path: directory }]),
+			),
+		});
+		return Effect.gen(function* () {
+			const git = yield* Effect.promise(() =>
+				daemonSessionGitCache.refresh(directory),
+			);
+			const service = yield* ProjectManagementServiceTag;
+			expect(yield* service.list()).toEqual([
+				{ slug: "p1", title: "Proj 1", directory, git },
+			]);
+		}).pipe(Effect.provide(makeLayer(makeMockConfig(), settingsService)));
 	});
 
 	it.effect("reports unsupported project additions as typed errors", () => {

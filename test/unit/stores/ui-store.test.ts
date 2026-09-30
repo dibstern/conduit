@@ -42,10 +42,8 @@ import {
 	expandSidebar,
 	openPanel,
 	removeBanner,
-	resetProjectUI,
 	resolveConfirm,
 	setSettledShelfOpen,
-	setSidebarPanel,
 	setSnoozedShelfOpen,
 	showBanner,
 	showToast,
@@ -60,7 +58,6 @@ import type { BannerConfig } from "../../../src/lib/frontend/types.js";
 beforeEach(() => {
 	// Reset UI state
 	uiState.sidebarCollapsed = false;
-	uiState.sidebarPanel = "sessions";
 	uiState.toasts = [];
 	uiState.confirmDialog = null;
 	uiState.openPanels = new Set();
@@ -388,37 +385,8 @@ describe("exitPlanMode", () => {
 	});
 });
 
-// ─── Sidebar panel switching ────────────────────────────────────────────────
-
-describe("setSidebarPanel", () => {
-	it("switches from sessions to files", () => {
-		setSidebarPanel("files");
-		expect(uiState.sidebarPanel).toBe("files");
-	});
-
-	it("switches from files to sessions", () => {
-		uiState.sidebarPanel = "files";
-		setSidebarPanel("sessions");
-		expect(uiState.sidebarPanel).toBe("sessions");
-	});
-
-	it("is idempotent", () => {
-		setSidebarPanel("files");
-		setSidebarPanel("files");
-		expect(uiState.sidebarPanel).toBe("files");
-	});
-});
-
 describe("fileBrowserOpen removal", () => {
 	it("uiState does not have fileBrowserOpen property", () => {
 		expect("fileBrowserOpen" in uiState).toBe(false);
-	});
-});
-
-describe("resetProjectUI resets sidebarPanel", () => {
-	it("resets sidebarPanel to sessions", () => {
-		uiState.sidebarPanel = "files";
-		resetProjectUI();
-		expect(uiState.sidebarPanel).toBe("sessions");
 	});
 });

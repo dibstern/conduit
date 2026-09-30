@@ -1,4 +1,5 @@
-import { Cause, Effect, Layer, Ref } from "effect";
+import { Cause, Effect, Layer, Option, Ref, Scope } from "effect";
+import { formatErrorDetail } from "../../../errors.js";
 import {
 	type SessionStateProjectionNotifier,
 	SessionStateProjectionNotifierTag,
@@ -6,8 +7,14 @@ import {
 import { WebSocketHandlerTag } from "../Services/services.js";
 import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
 
-const logFailure = (operation: string, cause: Cause.Cause<unknown>) =>
-	Effect.logError(`${operation}: ${Cause.pretty(cause)}`);
+const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
+	if (Cause.isInterruptedOnly(cause)) return Effect.interrupt;
+	const failure = Cause.failureOption(cause);
+	const detail = Option.isSome(failure)
+		? formatErrorDetail(failure.value)
+		: Cause.pretty(cause);
+	return Effect.logError(`${operation}: ${detail}\n${Cause.pretty(cause)}`);
+};
 
 export const makeSessionStateProjectionNotifierLive = (
 	refreshSessionGit: () => Promise<void> = async () => {},
@@ -16,9 +23,10 @@ export const makeSessionStateProjectionNotifierLive = (
 	never,
 	WebSocketHandlerTag | SessionManagerServiceTag
 > =>
-	Layer.effect(
+	Layer.scoped(
 		SessionStateProjectionNotifierTag,
 		Effect.gen(function* () {
+			const scope = yield* Scope.Scope;
 			const wsHandler = yield* WebSocketHandlerTag;
 			const sessionManagerService = yield* SessionManagerServiceTag;
 			const broadcastPending = yield* Ref.make(false);
@@ -57,7 +65,7 @@ export const makeSessionStateProjectionNotifierLive = (
 			const armBroadcast = Effect.gen(function* () {
 				const alreadyPending = yield* Ref.getAndSet(broadcastPending, true);
 				if (!alreadyPending) {
-					yield* Effect.forkDaemon(broadcastSessionLists);
+					yield* Effect.forkIn(broadcastSessionLists, scope);
 				}
 			});
 

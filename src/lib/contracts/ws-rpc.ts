@@ -112,6 +112,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 	instanceId: Schema.optional(Schema.String),
 });
@@ -1189,6 +1190,7 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
+			skipMarkRead: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}

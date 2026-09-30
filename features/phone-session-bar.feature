@@ -4,7 +4,7 @@ Scenario: The session owns the top bar on a phone
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup
   Then the session bar title is above the transcript
-  And the global header is not rendered
+  And only the session bar is rendered above the transcript
 
 Scenario: Back returns to the session list
   Given the viewport is a phone
@@ -29,21 +29,25 @@ Scenario: Switching back to chat keeps the transcript scroll position
   And I choose the Chat session view
   Then the transcript is visible at the remembered scroll position
 
-Scenario: The collapsed bar overflow lists the same views as the switcher
+Scenario: The collapsed bar overflow lists the same views as the Views sheet
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup
-  When I remember the session views from the switcher
+  When I remember the session views from the Views sheet
   And I scroll the transcript back to the bottom
   And I scroll the transcript up by 400 pixels
   Then the jump-to-latest control is visible
   When I scroll the transcript back to the bottom
   Then the session bar is collapsed
   When I open the session overflow menu
-  Then the menu lists the same session views as the switcher
+  Then the menu lists the same session views as the Views sheet
 
 Scenario: Activating a view from the menu switches the view
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  When I scroll the transcript back to the bottom
+  Then the session bar is collapsed
   When I open the session overflow menu
   And I choose the Terminal view from the menu
   Then the terminal panel is visible

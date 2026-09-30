@@ -1,0 +1,1525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Composer redesign: goal, harness, and controls</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+	--bg: #0d0e11; --bg-alt: #1b1e24; --surface: #141619; --input: #16181d;
+	--text: #eceef2; --text-2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--accent: #fe3781; --accent-bg: rgba(254, 55, 129, 0.12);
+	--border: #2d323b; --border-subtle: #20242b; --chip: #3a414c;
+	--error: #f4607a; --success: #3fd69a; --tool: #5aa9f5; --warning: #f4b740;
+	--claude: #d97757; --opencode: #00e5ff; --goal: #b58cf5; --goal-bg: rgba(181, 140, 245, 0.12);
+	--mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	--brand: "Chakra Petch", system-ui, sans-serif;
+	--radius: 10px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.55; -webkit-text-size-adjust: 100%; }
+a { color: var(--tool); }
+code { font-family: var(--mono); font-size: .92em; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 5px; padding: 0 5px; }
+button { font: inherit; color: inherit; }
+summary { list-style: none; } summary::-webkit-details-marker { display: none; }
+
+/* ── Page chrome ─────────────────────────────────────────── */
+.page { max-width: 1260px; margin: 0 auto; padding: 40px 24px 140px; }
+.intro h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; }
+.intro p, .intro li { color: var(--text-2); max-width: 860px; }
+.intro p { margin: 6px 0; }
+.intro b { color: var(--text); }
+nav.toc { position: sticky; top: 0; z-index: 60; background: rgba(13,14,17,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-subtle); margin: 22px -24px 0; padding: 10px 24px; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+nav.toc a { color: var(--text-2); text-decoration: none; padding: 2px 9px; border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 12px; white-space: nowrap; }
+nav.toc a:hover { color: var(--text); border-color: var(--chip); }
+nav.toc .tl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; align-self: center; margin-left: 6px; }
+h2.tier { margin: 64px 0 4px; font-size: 18px; }
+h2.tier + p { color: var(--muted); margin: 0 0 18px; max-width: 860px; }
+.reqs { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 8px 14px; margin: 14px 0; }
+.reqs div { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--surface); color: var(--text-2); }
+.reqs b { color: var(--text); display: block; margin-bottom: 2px; }
+table.t { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; }
+table.t th, table.t td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; color: var(--text-2); }
+table.t th { color: var(--muted); font-weight: 500; }
+
+.design { margin: 30px 0 48px; padding-top: 18px; border-top: 1px solid var(--border-subtle); scroll-margin-top: 60px; }
+.dh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 14px; }
+.dh h3 { margin: 0; font-size: 16px; }
+.dh .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--chip); color: var(--muted); }
+.design[data-tier=best] .tag { color: var(--success); border-color: rgba(63,214,154,.35); }
+.design[data-tier=middle] .tag { color: var(--warning); border-color: rgba(244,183,64,.35); }
+.design[data-tier=wild] .tag { color: var(--accent); border-color: rgba(254,55,129,.35); }
+.dh .pitch { flex-basis: 100%; margin: 2px 0 0; color: var(--text-2); max-width: 900px; }
+.row { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px 26px; align-items: flex-start; }
+dl.spec { display: grid; grid-template-columns: 130px 1fr 130px 1fr; gap: 6px 14px; margin: 18px 0 0; color: var(--text-2); font-size: 12px; }
+@media (max-width: 1100px) { dl.spec { grid-template-columns: 130px 1fr; } }
+dl.spec dt { color: var(--muted); } dl.spec dd { margin: 0; }
+.desk { margin: 18px auto 0; max-width: 860px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg); overflow: visible; }
+.desk > figcaption, .phone > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.desk > figcaption { padding: 7px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); border-radius: 14px 14px 0 0; }
+.desk .stage { padding: 28px 40px 26px; }
+
+/* ── Phone frame ─────────────────────────────────────────── */
+.phone { margin: 0; width: 390px; }
+.phone > figcaption { padding: 0 6px 7px; }
+.screen { height: 720px; border: 1px solid var(--border); border-radius: 36px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 0 0 6px #07080a, 0 0 0 7px var(--border-subtle); position: relative; }
+.sbar { flex: none; height: 40px; padding: 13px 26px 0; display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2); font-weight: 600; }
+.appbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px 9px; border-bottom: 1px solid var(--border-subtle); font-size: 12.5px; }
+.appbar .back { color: var(--dim); font-size: 15px; }
+.appbar .title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.appbar .more { color: var(--dim); letter-spacing: 1px; }
+.body { flex: 1; min-height: 0; overflow: hidden; padding: 12px 14px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; font-size: 12.5px; position: relative; }
+.body::before { content: ""; position: absolute; inset: 0 0 auto; height: 80px; background: linear-gradient(var(--bg), transparent); z-index: 2; pointer-events: none; }
+.dock { flex: none; padding: 8px 10px 26px; background: var(--bg); position: relative; }
+.dock.kb { padding-bottom: 0; }
+.home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 120px; height: 4px; border-radius: 3px; background: #3a3f48; }
+.kbd { height: 216px; background: #1d2026; border-top: 1px solid var(--border-subtle); display: grid; grid-template-rows: repeat(4, 1fr); gap: 8px; padding: 10px 4px 30px; flex: none; }
+.kbd div { display: flex; gap: 5px; justify-content: center; }
+.kbd i { flex: 0 0 32px; border-radius: 5px; background: #3a3f48; }
+.kbd div:nth-child(2) i:first-child { margin-left: 16px; } .kbd div:nth-child(2) i:last-child { margin-right: 16px; }
+.kbd div:last-child i { flex: 0 0 44px; } .kbd div:last-child i:nth-child(2) { flex: 1 1 auto; }
+.scrim { position: absolute; inset: 0; background: rgba(5,6,8,.55); z-index: 30; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 31; background: var(--bg-alt); border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; padding: 8px 16px 30px; box-shadow: 0 -20px 50px rgba(0,0,0,.5); }
+.sheet .grab { width: 38px; height: 4px; border-radius: 3px; background: var(--chip); margin: 0 auto 12px; }
+.sheet h4 { margin: 0 0 10px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.sheet .sub { color: var(--dim); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; margin: 14px 0 6px; }
+
+/* ── Transcript primitives (mirror conduit) ──────────────── */
+.user-msg { align-self: flex-end; max-width: 85%; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.reply p { margin: 0 0 6px; color: var(--text); }
+.ta { border-radius: var(--radius); padding: 6px 10px 8px; background: var(--surface); box-shadow: -3px 0 0 var(--warning); }
+.ta-head { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; overflow: hidden; }
+.ta-head .verb { font-weight: 600; } .ta-head .meta { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.step { display: flex; gap: 8px; color: var(--text-2); padding: 1px 0; white-space: nowrap; overflow: hidden; font-size: 12px; }
+.step .v { font-weight: 600; } .step .t { margin-left: auto; color: var(--dim); }
+.pulse { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); animation: pulse 1.2s ease-in-out infinite; flex: none; }
+@keyframes pulse { 50% { opacity: .25; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Shared composer atoms ───────────────────────────────── */
+.cmp { border: 1px solid var(--border); background: var(--input); border-radius: 20px; color: var(--dim); }
+.cmp .ph { color: var(--muted); padding: 10px 12px 6px; min-height: 42px; }
+.cmp .typed { color: var(--text); padding: 10px 12px 6px; }
+.caret { display: inline-block; width: 1.5px; height: 1.1em; background: var(--text); vertical-align: -2px; animation: pulse 1s steps(1) infinite; }
+.foot { display: flex; align-items: center; gap: 4px; padding: 4px 6px 6px; }
+.sp { flex: 1; }
+.ib { width: 34px; height: 34px; border-radius: 11px; display: inline-grid; place-items: center; color: var(--text-2); border: 1px solid transparent; flex: none; cursor: pointer; background: none; }
+.ib:hover { background: var(--bg-alt); }
+.ib.o { border-color: var(--border); }
+.send { width: 34px; height: 34px; border-radius: 11px; display: inline-grid; place-items: center; background: var(--accent); color: #fff; flex: none; border: 0; }
+.send.off { background: #4a2233; color: #b98a9c; }
+.stop { width: 34px; height: 34px; border-radius: 11px; display: inline-grid; place-items: center; background: var(--bg-alt); border: 1px solid var(--border); flex: none; }
+.stop i { width: 10px; height: 10px; border-radius: 2.5px; background: var(--warning); }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 10px; font-size: 12px; color: var(--text-2); border: 1px solid transparent; white-space: nowrap; cursor: pointer; background: none; flex: none; }
+.chip:hover { background: var(--bg-alt); }
+.chip.o { border-color: var(--border); }
+.chip.warn { color: var(--warning); border-color: rgba(244,183,64,.4); background: rgba(244,183,64,.08); }
+.chip.plan { color: var(--tool); border-color: rgba(90,169,245,.4); background: rgba(90,169,245,.08); }
+.chip .cv { opacity: .5; font-size: 9px; }
+.hm { font-family: var(--brand); font-weight: 600; font-size: 13px; color: var(--text); letter-spacing: .01em; }
+.hm small { font-family: var(--mono); font-weight: 500; font-size: 11px; color: var(--muted); }
+.logo { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; }
+.logo svg { width: 100%; height: 100%; display: block; }
+.logo.box { border-radius: 6px; background: rgba(217,119,87,.14); width: 22px; height: 22px; padding: 3px; }
+.logo.box.oc { background: rgba(0,229,255,.1); }
+.gl { color: var(--goal); }
+.goalchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--goal); border: 1px solid rgba(181,140,245,.4); background: var(--goal-bg); border-radius: 999px; padding: 1px 9px 1px 7px; white-space: nowrap; }
+.meter { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; }
+.meter i { width: 3px; border-radius: 1px; background: var(--chip); }
+.meter i:nth-child(1) { height: 5px; } .meter i:nth-child(2) { height: 8px; } .meter i:nth-child(3) { height: 10px; } .meter i:nth-child(4) { height: 12px; }
+.meter[data-l="1"] i:nth-child(-n+1), .meter[data-l="2"] i:nth-child(-n+2), .meter[data-l="3"] i:nth-child(-n+3), .meter[data-l="4"] i:nth-child(-n+4) { background: var(--text-2); }
+.menu { position: absolute; z-index: 40; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 14px; padding: 5px; min-width: 210px; box-shadow: 0 18px 44px rgba(0,0,0,.55); }
+.menu .mi { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; font-size: 12.5px; color: var(--text-2); }
+.menu .mi.on { background: var(--chip); color: var(--text); }
+.menu .mi .d { margin-left: auto; color: var(--dim); font-size: 11px; }
+.menu .mi.w { color: var(--warning); }
+.menu hr { border: 0; border-top: 1px solid var(--border-subtle); margin: 4px 6px; }
+.ring { --p: 42; width: 22px; height: 22px; border-radius: 50%; background: conic-gradient(var(--c, var(--text-2)) calc(var(--p) * 1%), var(--chip) 0); display: inline-grid; place-items: center; flex: none; }
+.ring::before { content: ""; width: 16px; height: 16px; border-radius: 50%; background: var(--input); grid-area: 1/1; }
+.ring > * { grid-area: 1/1; z-index: 1; }
+.seg { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 11px; padding: 3px; gap: 3px; }
+.seg span { flex: 1; text-align: center; padding: 6px 0; border-radius: 8px; font-size: 12px; color: var(--muted); }
+.seg span.on { background: var(--chip); color: var(--text); font-weight: 600; }
+.seg.warnon span.on { background: rgba(244,183,64,.16); color: var(--warning); }
+.srow { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--border-subtle); font-size: 12.5px; color: var(--text-2); }
+.srow:last-child { border-bottom: 0; }
+.srow b { color: var(--text); font-weight: 500; }
+.srow .r { margin-left: auto; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.tick { color: var(--accent); }
+@media (max-width: 440px) {
+	.page { padding: 20px 10px 100px; }
+	nav.toc { margin: 16px -10px 0; padding: 8px 10px; }
+	.phone { width: 100%; max-width: 390px; }
+	.desk .stage { padding: 18px 10px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="claude" viewBox="0 0 24 24"><g fill="#d97757"><rect x="11" y="1.5" width="2" height="8.5" rx="1"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(40 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(78 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(118 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(160 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(200 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(242 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(282 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(322 12 12)"/></g></symbol>
+		<symbol id="opencode" viewBox="0 0 24 24"><rect x="4" y="2.5" width="16" height="19" rx="1.5" fill="none" stroke="#00e5ff" stroke-width="2.4"/><rect x="8" y="11" width="8" height="7" fill="#00e5ff" opacity=".55"/></symbol>
+		<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-chevr" viewBox="0 0 24 24"><path d="M10 7l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-shield-open" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-brain" viewBox="0 0 24 24"><path d="M9 4a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 003 3 2 2 0 002-2V6a2 2 0 00-2-2zM15 4a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-3 3 2 2 0 01-2-2V6a2 2 0 012-2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></symbol>
+		<symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7L9.6 17.3a1.7 1.7 0 01-2.4-2.4L15 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="9" cy="10" r="1.7" fill="currentColor"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+		<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z M14 3v5h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.6" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M15.6 12v1.5a2.5 2.5 0 005 0V12a8.6 8.6 0 10-3.4 6.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-slash" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M14 8l-4 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+		<symbol id="i-bot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M12 4v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9.3" cy="13.5" r="1.2" fill="currentColor"/><circle cx="14.7" cy="13.5" r="1.2" fill="currentColor"/></symbol>
+		<symbol id="i-window" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M3.5 9.5h17" stroke="currentColor" stroke-width="1.8"/></symbol>
+		<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+		<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="8" cy="17" r="2.2" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+	</defs>
+</svg>
+
+<template id="tx-working">
+	<div class="user-msg">Make the whole acceptance suite green, then tidy the flaky phone scroll test.</div>
+	<div class="reply"><p>The composer baselines moved after the token refactor. Recapturing them, then I'll re-run the full visual pipeline.</p></div>
+	<div class="ta">
+		<div class="ta-head"><span class="pulse"></span><span class="verb">Working</span><span class="meta">· 41 tools · 3 edits</span></div>
+		<div class="step"><span class="v">Edit</span> acceptance/steps/scroll.ts<span class="t">12s</span></div>
+		<div class="step"><span class="v">Bash</span> pnpm acceptance:visual<span class="t">live</span></div>
+	</div>
+</template>
+<template id="tx-idle">
+	<div class="user-msg">Make the whole acceptance suite green, then tidy the flaky phone scroll test.</div>
+	<div class="reply"><p>Done. All 38 scenarios pass on two consecutive runs. The flake was a race between the virtual list measuring and the scroll-to-bottom effect; it now waits for the measure pass.</p><p>Three baselines were re-captured and are in the diff for review.</p></div>
+</template>
+
+<div class="page">
+<section class="intro">
+	<h1>Composer redesign: goal, harness, and controls</h1>
+	<p>Fourteen designs for the new message composer, plus three designs for the combined <b>Harness &amp; Model</b> picker, a full <b>goal lifecycle</b>, and the OpenCode story. Phones are 390px wide and a fixed height, so every pixel the composer takes is honest. Everything is clickable where it says so: effort cycles, menus open.</p>
+	<h2 class="tier" style="margin-top:28px">What must fit</h2>
+	<div class="reqs">
+		<div><b>Goal, always visible</b>When a <code>/goal</code> is active you can see what it is, how it's going, and why it isn't done yet. You can edit or clear it in one tap.</div>
+		<div><b>Live status</b>From B3: working time, the current step, and a jump back to live. Stop is always one tap away.</div>
+		<div><b>Harness &amp; Model button</b>One button showing the harness logo and model name. It opens harness, model, effort, context window, and agent. The standalone agent and context-window selectors go away.</div>
+		<div><b>Effort, quick</b>Changing effort takes one tap, without opening the picker.</div>
+		<div><b>Approvals, quick</b>One tap away, amber when elevated. It opens a menu rather than cycling, so you can't land on Full access by accident.</div>
+		<div><b>Attach</b>Files, photos, and camera, plus <code>@</code> files and <code>/</code> commands. Setting a goal also lives here.</div>
+	</div>
+	<h2 class="tier">What a goal actually is</h2>
+	<p style="color:var(--text-2)">Researched against the Claude Code docs (<a href="https://code.claude.com/docs/en/goal">code.claude.com/docs/en/goal</a>) and the installed SDK <code>0.3.280</code>.</p>
+	<table class="t">
+		<tr><th>Harness</th><th>Native goal?</th><th>What a UI can read</th></tr>
+		<tr><td>Claude</td><td><b style="color:var(--success)">Yes</b>. <code>/goal &lt;condition&gt;</code>, <code>/goal</code> for status, <code>/goal clear</code></td><td><code>active_goal</code> message: <code>condition</code>, <code>iterations</code> (turns checked), <code>set_at</code>, <code>tokens_at_start</code>, <code>last_reason</code>. <code>null</code> when cleared. After each turn a small model decides <i>not yet</i>, <i>met</i>, or <i>impossible</i>. <b style="color:var(--warning)">Catch:</b> the type is not in the public <code>query()</code> union, so we need to verify at runtime that we receive it.</td></tr>
+		<tr><td>OpenCode</td><td><b style="color:var(--error)">No</b>. Request <a href="https://github.com/anomalyco/opencode/issues/27167">#27167</a> is open. Only community plugins exist.</td><td>Nothing native. See <a href="#opencode">OpenCode</a> for options, including conduit running the goal loop itself.</td></tr>
+		<tr><td>Codex (precedent)</td><td>Yes, plus <code>pause</code> / <code>resume</code></td><td>Not a conduit harness. It's the reason pause shows up in one design.</td></tr>
+	</table>
+	<p>So the goal UI has these fields to show: <b>condition</b>, <b>elapsed</b>, <b>checks</b>, <b>tokens</b>, <b>last reason</b>, and the outcome: <b style="color:var(--success)">achieved</b>, <b style="color:var(--error)">impossible</b>, or cleared. The goal colour is violet throughout, so it never reads as working (amber), ask (pink), or elevated (amber).</p>
+</section>
+<nav class="toc">
+	<span class="tl">Best</span><a href="#a1">A1 Dock+</a><a href="#a2">A2 Tabs</a><a href="#a3">A3 Island</a><a href="#a4">A4 Meta line</a>
+	<span class="tl">Middle</span><a href="#b1">B1 Chip tray</a><a href="#b2">B2 Meter</a><a href="#b3">B3 Goal card</a><a href="#b4">B4 Accessory</a><a href="#b5">B5 Top bar</a>
+	<span class="tl">Wild</span><a href="#c1">C1 Prompt line</a><a href="#c2">C2 Fan</a><a href="#c3">C3 Deck</a><a href="#c4">C4 Goal-as-canvas</a><a href="#c5">C5 Thread</a>
+	<span class="tl">Shared</span><a href="#picker">Picker ×3</a><a href="#life">Goal lifecycle</a><a href="#opencode">OpenCode</a><a href="#pick">Recommendation</a>
+</nav>
+
+<style>
+.ib svg, .send svg { width: 18px; height: 18px; }
+.chip svg { width: 14px; height: 14px; flex: none; }
+.chip .logo svg, .logo svg { width: 100%; height: 100%; }
+.goalchip svg { width: 12px; height: 12px; }
+.menu .mi svg { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.menu .mi.on svg { color: var(--text); }
+</style>
+
+<h2 class="tier">Best</h2>
+<p>These build on B3 and keep today's layout recognisable. Each one puts the goal in a different place relative to the composer.</p>
+
+<!-- ═════════════ A1 ═════════════ -->
+<style>
+#a1 .cmp { border-radius: 18px; }
+.a1-head { padding: 8px 12px 7px; border-bottom: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 5px; }
+.a1-st, .a1-goal { display: flex; align-items: center; gap: 7px; font-size: 11.5px; white-space: nowrap; overflow: hidden; color: var(--muted); }
+.a1-st b { color: var(--text-2); font-weight: 600; }
+.a1-st .x, .a1-goal .c { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.a1-st .jump { margin-left: auto; border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; color: var(--text-2); flex: none; }
+.a1-goal { cursor: pointer; }
+.a1-goal svg { width: 13px; height: 13px; color: var(--goal); flex: none; }
+.a1-goal .c { color: var(--text); }
+.a1-goal .n { margin-left: auto; color: var(--goal); flex: none; }
+.a1-pop { position: absolute; left: 10px; right: 10px; bottom: calc(100% - 4px); z-index: 20; background: var(--bg-alt); border: 1px solid rgba(181,140,245,.35); border-radius: 16px; padding: 12px 14px; box-shadow: 0 18px 44px rgba(0,0,0,.6); font-size: 12px; color: var(--text-2); }
+.a1-pop .k { display: flex; align-items: center; gap: 7px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--goal); }
+.a1-pop .k svg { width: 13px; height: 13px; }
+.a1-pop .k .s { margin-left: auto; color: var(--muted); letter-spacing: .05em; }
+.a1-pop .cond { color: var(--text); font-size: 13px; margin: 6px 0 10px; line-height: 1.45; }
+.a1-pop .why { border-left: 2px solid var(--chip); padding: 2px 0 2px 10px; margin: 0 0 10px; }
+.a1-pop .why i { font-style: normal; color: var(--muted); display: block; font-size: 10.5px; margin-bottom: 2px; }
+.a1-pop .stats { display: flex; gap: 14px; color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+.a1-pop .stats b { color: var(--text); font-weight: 600; }
+.a1-pop .acts { display: flex; gap: 8px; }
+.a1-pop .acts span { flex: 1; text-align: center; padding: 7px 0; border: 1px solid var(--border); border-radius: 10px; color: var(--text-2); }
+.a1-pop .acts span.d { color: var(--error); border-color: rgba(244,96,122,.35); }
+</style>
+<section class="design" id="a1" data-tier="best">
+	<div class="dh"><h3>A1 · Dock+</h3><span class="tag">best</span>
+		<p class="pitch">B3's live header, with the goal as a second line inside it. Both status lines share one hairline-divided header, so the composer reads as a single object. The footer holds attach, the Harness &amp; Model button, a one-tap effort meter, approvals, and send. Tap the goal line to open its receipt.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|goal pursuing">
+			<div class="dock">
+				<div class="cmp">
+					<div class="a1-head">
+						<div class="a1-st"><span class="pulse"></span><b>Working 38m 12s</b><span class="x">· Running pnpm acceptance:visual</span><span class="jump">↓ live</span></div>
+						<div class="a1-goal"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass</span><span class="n">6 checks</span></div>
+					</div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Goal tapped|receipt">
+			<div class="dock">
+				<div class="a1-pop">
+					<div class="k"><svg><use href="#i-target"/></svg>Goal<span class="s">pursuing</span></div>
+					<div class="cond">All 38 acceptance scenarios pass on two consecutive runs of <code>pnpm acceptance:visual</code>.</div>
+					<div class="why"><i>Last check · 2m ago · not yet</i>35 of 38 pass. phone-transcript-scrolling still fails at the jump-to-live step.</div>
+					<div class="stats"><span><b>38m</b> elapsed</span><span><b>6</b> checks</span><span><b>1.24M</b> tokens</span></div>
+					<div class="acts"><span>Edit</span><span class="d">Clear goal</span></div>
+				</div>
+				<div class="cmp">
+					<div class="a1-head">
+						<div class="a1-st"><span class="pulse"></span><b>Working 38m 14s</b><span class="x">· Running pnpm acceptance:visual</span><span class="jump">↓ live</span></div>
+						<div class="a1-goal"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass</span><span class="n">6 checks</span></div>
+					</div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+						<span class="sp"></span>
+						<span class="chip warn"><svg><use href="#i-shield-open"/></svg>Edits</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<figure class="desk"><figcaption><span>Desktop · steering while working</span><span>send + stop</span></figcaption><div class="stage">
+		<div class="cmp">
+			<div class="a1-head">
+				<div class="a1-st"><span class="pulse"></span><b>Working 38m 12s</b><span class="x">· Running pnpm acceptance:visual</span><span class="jump">↓ live</span></div>
+				<div class="a1-goal"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass on two consecutive runs of pnpm acceptance:visual</span><span class="n">6 checks · 38m · last: 35 of 38 pass</span></div>
+			</div>
+			<div class="typed">Skip the mutation run, the visual gate is enough here<span class="caret"></span></div>
+			<div class="foot">
+				<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+				<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><small style="color:var(--dim)">1M</small><svg class="cv"><use href="#i-chev"/></svg></span>
+				<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+				<span class="sp"></span>
+				<span class="chip"><svg><use href="#i-shield"/></svg>Ask<svg class="cv"><use href="#i-chev"/></svg></span>
+				<span class="send"><svg><use href="#i-up"/></svg></span>
+				<span class="stop"><i></i></span>
+			</div>
+		</div>
+	</div></figure>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>Header line 2, violet target, with a check count on the right.</dd>
+		<dt>Height cost</dt><dd>+22px while a goal is active. Nothing extra when none is set.</dd>
+		<dt>Effort</dt><dd>The meter chip cycles on tap: Low → Medium → High → Max. Try it.</dd>
+		<dt>Stop / send</dt><dd>Empty and working shows stop. Typing adds send (steer) next to it.</dd>
+		<dt>Strength</dt><dd>Closest to B3, which you liked. The why-not-yet reason is one tap away.</dd>
+		<dt>Risk</dt><dd>The header grows to 3 lines if subagent or drift banners also stack there.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ A2 ═════════════ -->
+<style>
+.a2-tabs { display: flex; justify-content: space-between; gap: 6px; padding: 0 12px; margin-bottom: -1px; position: relative; z-index: 1; }
+.a2-tab { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px 10px 5px; border: 1px solid var(--border); border-bottom-color: var(--input); background: var(--input); border-radius: 10px 10px 0 0; white-space: nowrap; overflow: hidden; color: var(--muted); min-width: 0; }
+.a2-tab svg { width: 12px; height: 12px; flex: none; }
+.a2-tab .c { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.a2-tab.g { color: var(--goal); border-color: rgba(181,140,245,.45); border-bottom-color: #1b1826; background: #1b1826; }
+.a2-tab.ok { color: var(--success); border-color: rgba(63,214,154,.4); border-bottom-color: #14201c; background: #14201c; }
+.a2-tab b { color: var(--text-2); font-weight: 600; }
+#a2 .cmp { border-radius: 18px; }
+.a2-hm { display: inline-flex; align-items: stretch; height: 32px; border: 1px solid var(--border); border-radius: 11px; overflow: hidden; flex: none; }
+.a2-hm > * { display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; cursor: pointer; background: none; border: 0; font-size: 12px; color: var(--text-2); }
+.a2-hm > * + * { border-left: 1px solid var(--border); }
+.a2-hm > *:hover { background: var(--bg-alt); }
+</style>
+<section class="design" id="a2" data-tier="best">
+	<div class="dh"><h3>A2 · Folder tabs</h3><span class="tag">best</span>
+		<p class="pitch">Goal and live status sit in two tabs on the composer's top edge: goal on the left, working on the right. They cost almost no height and read as labels on the composer rather than another bar. The Harness &amp; Model button is split: the left half opens the picker, the right half cycles effort.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|goal pursuing">
+			<div class="dock">
+				<div class="a2-tabs"><span class="a2-tab g"><svg><use href="#i-target"/></svg><span class="c">38 scenarios pass</span>· 6</span><span class="a2-tab"><span class="pulse"></span><b>38m</b><span class="c">pnpm acceptance…</span></span></div>
+				<div class="cmp">
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="a2-hm"><span><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span></span><button data-cycle="Low,Med,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button></span>
+						<span class="sp"></span>
+						<span class="chip o"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Goal met|idle" data-tx="idle">
+			<div class="dock">
+				<div class="a2-tabs"><span class="a2-tab ok"><svg><use href="#i-check"/></svg><span class="c">Goal met · 52m · 9 checks</span></span><span class="a2-tab"><span class="c">Idle · 2m ago</span></span></div>
+				<div class="cmp">
+					<div class="ph">Ask anything. / for commands, @ for files</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="a2-hm"><span><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span></span><button data-cycle="Low,Med,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button></span>
+						<span class="sp"></span>
+						<span class="chip o"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="send off"><svg><use href="#i-up"/></svg></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<figure class="desk"><figcaption><span>Desktop · working with goal</span><span>tabs widen to full text</span></figcaption><div class="stage" style="padding-top:34px">
+		<div class="a2-tabs"><span class="a2-tab g"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass on two consecutive runs</span>· 6 checks · not yet: 35 of 38</span><span class="a2-tab"><span class="pulse"></span><b>Working 38m 12s</b><span class="c">· pnpm acceptance:visual</span>&nbsp;↓</span></div>
+		<div class="cmp">
+			<div class="ph">Reply to steer the agent…</div>
+			<div class="foot">
+				<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+				<span class="a2-hm"><span><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><small style="color:var(--dim)">1M · build</small></span><button data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button></span>
+				<span class="sp"></span>
+				<span class="chip o"><svg><use href="#i-shield"/></svg>Ask<svg class="cv"><use href="#i-chev"/></svg></span>
+				<span class="stop"><i></i></span>
+			</div>
+		</div>
+	</div></figure>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>The left tab. It turns green with a receipt when the goal is met and red when it's impossible.</dd>
+		<dt>Height cost</dt><dd>+22px, whether or not a goal is set, because the status tab is always there.</dd>
+		<dt>Effort</dt><dd>The right half of the split button. The picker still has the full list.</dd>
+		<dt>Strength</dt><dd>It looks distinctive, and the outcome stays visible after the run ends.</dd>
+		<dt>Risk</dt><dd>At 390px the goal text truncates hard. Tabs also need care in light mode.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ A3 ═════════════ -->
+<style>
+.a3-island { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 6px); z-index: 20; background: #000; border: 1px solid #262a31; border-radius: 999px; padding: 6px 8px 6px 12px; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+.a3-island b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.a3-island .dv { width: 1px; height: 14px; background: #2b2f37; }
+.a3-island .g { color: var(--goal); display: inline-flex; gap: 5px; align-items: center; }
+.a3-island .g svg { width: 12px; height: 12px; }
+.a3-island .dn { width: 22px; height: 22px; border-radius: 50%; background: #1a1d22; display: grid; place-items: center; }
+.a3-island .dn svg { width: 12px; height: 12px; }
+.a3-big { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); z-index: 20; background: #000; border: 1px solid #262a31; border-radius: 26px; padding: 14px 16px; box-shadow: 0 20px 50px rgba(0,0,0,.7); font-size: 12px; color: var(--text-2); }
+.a3-big .top { display: flex; align-items: center; gap: 8px; }
+.a3-big .top b { color: var(--text); }
+.a3-big .top .t { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+.a3-big .now { margin: 6px 0 12px; color: var(--muted); font-size: 11.5px; }
+.a3-big .gbox { border-radius: 16px; background: #120f1a; border: 1px solid rgba(181,140,245,.3); padding: 10px 12px; }
+.a3-big .gbox .k { color: var(--goal); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; display: flex; gap: 6px; align-items: center; }
+.a3-big .gbox .k svg { width: 12px; height: 12px; }
+.a3-big .gbox .k span { margin-left: auto; color: var(--muted); letter-spacing: .03em; text-transform: none; }
+.a3-big .gbox p { margin: 5px 0; color: var(--text); }
+.a3-big .gbox .why { color: var(--muted); font-size: 11.5px; }
+.a3-big .acts { display: flex; gap: 8px; margin-top: 12px; }
+.a3-big .acts span { flex: 1; text-align: center; border-radius: 999px; padding: 8px 0; background: #16181d; color: var(--text-2); }
+.a3-big .acts .stp { color: var(--warning); }
+.a3-cap { display: flex; align-items: center; gap: 2px; border: 1px solid var(--border); background: var(--input); border-radius: 999px; padding: 4px 4px 4px 4px; min-height: 46px; }
+.a3-cap .ph { flex: 1; padding: 0 6px; min-height: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a3-cap .ib, .a3-cap .send, .a3-cap .stop { border-radius: 999px; width: 36px; height: 36px; }
+.a3-cap .ib.warn { color: var(--warning); }
+.a3-lg { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: rgba(217,119,87,.12); border: 1px solid rgba(217,119,87,.3); flex: none; position: relative; }
+.a3-lg .logo { width: 18px; height: 18px; }
+.a3-lg .e { position: absolute; right: -3px; bottom: -3px; font-size: 8.5px; font-weight: 700; background: var(--bg-alt); border: 1px solid var(--border); color: var(--text-2); border-radius: 6px; padding: 0 3px; line-height: 12px; }
+</style>
+<section class="design" id="a3" data-tier="best">
+	<div class="dh"><h3>A3 · Status island</h3><span class="tag">best</span>
+		<p class="pitch">The status leaves the composer and floats above it as a black pill, like the iPhone's Dynamic Island. It shows the timer and the goal's check count. Tap it and it grows into a live card with the step, goal, reason, stop, and clear. The composer shrinks to a one-line capsule with icon-only effort, approvals, and harness.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|island resting">
+			<div class="dock">
+				<div class="a3-island"><span class="pulse"></span><b>38:12</b><span class="dv"></span><span class="g"><svg><use href="#i-target"/></svg>6 checks</span><span class="dn"><svg><use href="#i-down"/></svg></span></div>
+				<div class="a3-cap">
+					<span class="ib"><svg><use href="#i-plus"/></svg></span>
+					<span class="ph">Steer…</span>
+					<button class="ib" data-cycle="1,2,3,4" data-i="2" title="Effort"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span></button>
+					<span class="ib"><svg><use href="#i-shield"/></svg></span>
+					<span class="a3-lg"><span class="logo"><svg><use href="#claude"/></svg></span><span class="e">O5</span></span>
+					<span class="stop"><i></i></span>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Island tapped|expanded">
+			<div class="dock">
+				<div class="a3-big">
+					<div class="top"><span class="pulse"></span><b>Working</b><span class="t">38:14</span></div>
+					<div class="now">Running pnpm acceptance:visual · 41 tools · 3 edits</div>
+					<div class="gbox"><div class="k"><svg><use href="#i-target"/></svg>Goal<span>6 checks · 1.24M tok</span></div><p>All 38 acceptance scenarios pass on two consecutive runs.</p><div class="why">Not yet · 35 of 38 pass. phone-transcript-scrolling fails at jump-to-live.</div></div>
+					<div class="acts"><span>↓ Jump to live</span><span>Clear goal</span><span class="stp">■ Stop</span></div>
+				</div>
+				<div class="a3-cap">
+					<span class="ib"><svg><use href="#i-plus"/></svg></span>
+					<span class="ph">Steer…</span>
+					<span class="ib"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span></span>
+					<span class="ib warn"><svg><use href="#i-shield-open"/></svg></span>
+					<span class="a3-lg"><span class="logo"><svg><use href="#claude"/></svg></span><span class="e">O5</span></span>
+					<span class="stop"><i></i></span>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>In the island: a check count at rest, the full card on tap.</dd>
+		<dt>Height cost</dt><dd>0px. The island floats over the transcript's bottom fade.</dd>
+		<dt>Effort / approvals</dt><dd>Icon-only: the meter bars and the shield, amber when elevated. Desktop shows labels.</dd>
+		<dt>Strength</dt><dd>The most room for the transcript on a phone, and it feels premium and native.</dd>
+		<dt>Risk</dt><dd>The island covers the last line of the transcript. Icon-only approvals are less legible for new users.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ A4 ═════════════ -->
+<style>
+.a4-live { display: flex; flex-direction: column; gap: 3px; padding: 0 6px 8px; font-size: 11.5px; color: var(--muted); }
+.a4-live > div { display: flex; align-items: center; gap: 7px; white-space: nowrap; overflow: hidden; }
+.a4-live b { color: var(--text-2); font-weight: 600; }
+.a4-live .x { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.a4-live .g { color: var(--goal); }
+.a4-live .g svg { width: 12px; height: 12px; flex: none; }
+.a4-live .r { margin-left: auto; flex: none; color: var(--text-2); }
+#a4 .cmp { border-radius: 16px; display: flex; align-items: flex-end; gap: 4px; padding: 5px; }
+#a4 .cmp .ph { flex: 1; min-height: 0; padding: 7px 6px; }
+.a4-meta { display: flex; align-items: center; gap: 0; padding: 7px 6px 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.a4-meta .tk { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+.a4-meta .tk:hover, .a4-meta .tk.act { background: var(--bg-alt); color: var(--text); }
+.a4-meta .tk u { text-decoration: none; border-bottom: 1px dotted var(--chip); }
+.a4-meta .dot { color: var(--chip); }
+.a4-meta .logo { width: 14px; height: 14px; }
+.a4-meta .w { color: var(--warning); }
+.a4-meta .gl { color: var(--goal); }
+.a4-meta .gl svg { width: 12px; height: 12px; }
+.a4-menu { left: 90px; bottom: 34px; width: 260px; }
+.a4-menu .mi { flex-wrap: wrap; row-gap: 0; }
+.a4-menu .mi small { flex-basis: 100%; padding-left: 26px; color: var(--dim); font-size: 10.5px; }
+</style>
+<section class="design" id="a4" data-tier="best">
+	<div class="dh"><h3>A4 · Meta line</h3><span class="tag">best</span>
+		<p class="pitch">A calm, pro-tool look. The composer is only the text field, attach, and send. Status and goal read like plain text above it, and every setting reads like plain text below it: <code>opus-5 · high · ask · 42%</code>. Each word is its own tap target, which suits a monospace UI and sits closest to a terminal prompt.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|goal pursuing">
+			<div class="dock">
+				<div class="a4-live">
+					<div><span class="pulse"></span><b>Working 38m 12s</b><span class="x">· Running pnpm acceptance:visual</span><span class="r">↓ live</span></div>
+					<div class="g"><svg><use href="#i-target"/></svg><span class="x">All 38 acceptance scenarios pass</span><span class="r" style="color:var(--muted)">35/38 · 6 checks</span></div>
+				</div>
+				<div class="cmp"><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="ph">Reply to steer the agent…</span><span class="stop"><i></i></span></div>
+				<div class="a4-meta">
+					<span class="tk"><span class="logo"><svg><use href="#claude"/></svg></span><u>opus-5</u></span><span class="dot">·</span>
+					<button class="tk" data-cycle="low,medium,high,max" data-i="2" style="background:none;border:0;color:inherit"><u class="v">high</u></button><span class="dot">·</span>
+					<span class="tk"><u>ask</u></span><span class="dot">·</span>
+					<span class="tk">42%</span>
+					<span class="sp"></span>
+					<span class="tk gl"><svg><use href="#i-target"/></svg>goal</span>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Tapped “ask”|approvals menu">
+			<div class="dock">
+				<div class="menu a4-menu">
+					<div class="mi"><svg><use href="#i-pen"/></svg>Plan<span class="d">read-only</span><small>Explore and propose, no edits</small></div>
+					<div class="mi on"><svg><use href="#i-shield"/></svg>Ask<span class="d">default</span><small>Approve each edit and command</small></div>
+					<div class="mi w"><svg style="color:var(--warning)"><use href="#i-shield-open"/></svg>Edits<small>Auto-approve file edits</small></div>
+					<div class="mi w"><svg style="color:var(--warning)"><use href="#i-shield-open"/></svg>Auto<small>Classifier approves safe actions</small></div>
+					<div class="mi w"><svg style="color:var(--warning)"><use href="#i-shield-open"/></svg>Full access<small>Everything, no prompts</small></div>
+					<hr><div class="mi"><svg><use href="#i-x"/></svg>Never ask<span class="d">deny all</span></div>
+				</div>
+				<div class="a4-live">
+					<div><span class="pulse"></span><b>Working 38m 15s</b><span class="x">· Running pnpm acceptance:visual</span><span class="r">↓ live</span></div>
+					<div class="g"><svg><use href="#i-target"/></svg><span class="x">All 38 acceptance scenarios pass</span><span class="r" style="color:var(--muted)">35/38 · 6 checks</span></div>
+				</div>
+				<div class="cmp"><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="ph">Reply to steer the agent…</span><span class="stop"><i></i></span></div>
+				<div class="a4-meta">
+					<span class="tk"><span class="logo"><svg><use href="#claude"/></svg></span><u>opus-5</u></span><span class="dot">·</span>
+					<span class="tk"><u>high</u></span><span class="dot">·</span>
+					<span class="tk act"><u>ask</u></span><span class="dot">·</span>
+					<span class="tk">42%</span>
+					<span class="sp"></span>
+					<span class="tk gl"><svg><use href="#i-target"/></svg>goal</span>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<figure class="desk"><figcaption><span>Desktop · elevated approvals, context high</span><span>amber words, not boxes</span></figcaption><div class="stage">
+		<div class="a4-live">
+			<div class="g"><svg><use href="#i-target"/></svg><span class="x">All 38 acceptance scenarios pass on two consecutive runs of pnpm acceptance:visual</span><span class="r" style="color:var(--muted)">not yet: 35 of 38 · 6 checks · 38m · 1.24M tok</span></div>
+		</div>
+		<div class="cmp"><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="typed" style="flex:1;padding:7px 6px">Also run the Linux baselines before you call it done<span class="caret"></span></span><span class="send"><svg><use href="#i-up"/></svg></span></div>
+		<div class="a4-meta">
+			<span class="tk"><span class="logo"><svg><use href="#claude"/></svg></span><u>claude</u>/<u>opus-5</u></span><span class="dot">·</span>
+			<span class="tk"><u>high</u></span><span class="dot">·</span>
+			<span class="tk"><u>1M</u></span><span class="dot">·</span>
+			<span class="tk"><u>build</u></span><span class="dot">·</span>
+			<span class="tk w"><u>full access</u></span><span class="dot">·</span>
+			<span class="tk w">81% ctx</span>
+			<span class="sp"></span>
+			<span class="tk" style="color:var(--dim)">⏎ send · ⇧⏎ newline</span>
+		</div>
+	</div></figure>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>Plain text above the composer. A violet "goal" token below it opens the receipt. With no goal, the token reads "+ goal".</dd>
+		<dt>Height cost</dt><dd>+18px per live line and +26px for the meta line.</dd>
+		<dt>Effort</dt><dd>Tap the "high" word to cycle it. Try it.</dd>
+		<dt>Strength</dt><dd>The densest and most honest layout: every setting is visible as text, with nothing hidden in icons.</dd>
+		<dt>Risk</dt><dd>Tap targets are words, and some are under 44px tall. The rows need padding to be thumb-safe.</dd>
+	</dl>
+</section>
+
+<h2 class="tier">Middle</h2>
+<p>These go further from today's layout. Each one tests a single idea: a scrollable chip tray, a goal border, a pinned goal card, a keyboard toolbar, or moving the goal to the top bar.</p>
+
+<!-- ═════════════ B1 ═════════════ -->
+<style>
+#b1 .cmp { border-radius: 18px; }
+.b1-tray { display: flex; align-items: center; gap: 6px; padding: 4px 6px 6px; }
+.b1-scroll { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.b1-scroll .chip { background: var(--bg-alt); border-color: var(--border-subtle); height: 32px; border-radius: 999px; }
+.b1-scroll .chip.g { background: var(--goal-bg); color: var(--goal); border-color: rgba(181,140,245,.4); }
+.b1-scroll .chip.g svg { color: var(--goal); }
+.b1-live { display: flex; align-items: center; gap: 7px; padding: 8px 12px 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.b1-live b { color: var(--text-2); }
+.b1-sheet .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.b1-sheet .tile { border: 1px solid var(--border); border-radius: 14px; padding: 12px 8px 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); background: var(--surface); }
+.b1-sheet .tile svg { width: 22px; height: 22px; }
+.b1-sheet .tile.g { border-color: rgba(181,140,245,.45); color: var(--goal); background: var(--goal-bg); }
+.b1-sheet .recent { display: flex; gap: 8px; margin-bottom: 4px; }
+.b1-sheet .recent i { width: 64px; height: 64px; border-radius: 10px; background: linear-gradient(135deg, #2a2f38, #1b1e24); border: 1px solid var(--border); flex: none; }
+.b1-sheet .recent i:first-child { background: linear-gradient(135deg, #3a2a30, #1f2330); }
+</style>
+<section class="design" id="b1" data-tier="middle">
+	<div class="dh"><h3>B1 · Chip tray</h3><span class="tag">middle</span>
+		<p class="pitch">Every control is a labelled pill in one row you can swipe sideways, with send pinned at the end. The goal is the first pill when one is active. Nothing is icon-only and nothing needs a second tap to read. Attach opens a sheet of big tiles, and "Set goal" is one of them.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|goal chip first">
+			<div class="dock">
+				<div class="cmp">
+					<div class="b1-live"><span class="pulse"></span><b>38m 12s</b>· Running pnpm acceptance:visual<span style="margin-left:auto">↓</span></div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="b1-tray">
+						<div class="b1-scroll">
+							<span class="chip g"><svg><use href="#i-target"/></svg>35/38 · 6</span>
+							<span class="chip"><span class="logo" style="width:15px;height:15px"><svg><use href="#claude"/></svg></span><span class="hm" style="font-size:12px">Opus 5</span></span>
+							<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+							<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+							<span class="chip"><svg><use href="#i-clip"/></svg>Attach</span>
+						</div>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Attach sheet|set goal lives here" data-tx="idle">
+			<div class="scrim"></div>
+			<div class="sheet b1-sheet">
+				<div class="grab"></div>
+				<h4>Add to message</h4>
+				<div class="recent"><i></i><i></i><i></i><i></i></div>
+				<div class="sub">Attach</div>
+				<div class="tiles">
+					<div class="tile"><svg><use href="#i-image"/></svg>Photos</div>
+					<div class="tile"><svg><use href="#i-camera"/></svg>Camera</div>
+					<div class="tile"><svg><use href="#i-file"/></svg>Files</div>
+					<div class="tile"><svg><use href="#i-at"/></svg>Mention file</div>
+					<div class="tile"><svg><use href="#i-slash"/></svg>Command</div>
+					<div class="tile g"><svg><use href="#i-target"/></svg>Set goal</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>The first pill: <i>35/38 · 6</i>. Tap it for the receipt. It isn't there when no goal is set.</dd>
+		<dt>Height cost</dt><dd>+20px status line. The tray replaces today's footer.</dd>
+		<dt>Strength</dt><dd>You can scan every label and it's easy to extend. Chips can be long-pressed to reorder or pin.</dd>
+		<dt>Risk</dt><dd>Chips past the fold (Attach here) are easy to miss, and horizontal scroll conflicts with the swipe-back gesture.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ B2 ═════════════ -->
+<style>
+.b2-wrap { position: relative; padding-top: 9px; }
+.b2-notch { position: absolute; top: 0; left: 16px; z-index: 2; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; padding: 1px 8px; border-radius: 999px; background: #17131f; border: 1px solid rgba(181,140,245,.5); color: var(--goal); white-space: nowrap; }
+.b2-notch svg { width: 11px; height: 11px; }
+.b2-notch.bad { background: #1f1216; border-color: rgba(244,96,122,.5); color: var(--error); }
+.b2-notch .t { color: var(--muted); }
+#b2 .cmp { border-radius: 18px; border-color: rgba(181,140,245,.45); box-shadow: 0 0 0 3px rgba(181,140,245,.06), 0 -8px 30px -12px rgba(181,140,245,.35); }
+#b2 .cmp.bad { border-color: rgba(244,96,122,.45); box-shadow: 0 0 0 3px rgba(244,96,122,.06); }
+#b2 .cmp .ph { padding-top: 16px; }
+.b2-hm { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 6px 0 8px; border-radius: 11px; }
+.b2-hm:hover { background: var(--bg-alt); }
+.b2-hm .meter { cursor: pointer; padding: 4px; margin: -4px; }
+.b2-shield { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; position: relative; color: var(--text-2); }
+.b2-shield svg { width: 18px; height: 18px; }
+.b2-shield small { position: absolute; bottom: -1px; font-size: 7.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.b2-bad { margin: 14px 10px 4px; padding: 9px 11px; border-radius: 12px; background: rgba(244,96,122,.07); border: 1px solid rgba(244,96,122,.25); font-size: 11.5px; color: var(--text-2); }
+.b2-bad b { color: var(--error); font-weight: 600; display: block; margin-bottom: 2px; }
+.b2-bad .acts { display: flex; gap: 8px; margin-top: 8px; }
+.b2-bad .acts span { border: 1px solid var(--border); border-radius: 8px; padding: 3px 10px; color: var(--text-2); }
+</style>
+<section class="design" id="b2" data-tier="middle">
+	<div class="dh"><h3>B2 · Goal border</h3><span class="tag">middle</span>
+		<p class="pitch">An active goal gives the composer itself a violet edge and a small label on its border. You can tell a goal is running from across the room, at zero height cost. The footer is icon-dense: the effort bars sit inside the Harness &amp; Model button and are their own tap target. Approvals is a shield with a tiny caption.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|goal pursuing">
+			<div class="dock">
+				<div class="b2-wrap">
+					<span class="b2-notch"><svg><use href="#i-target"/></svg>goal · 6 checks <span class="t">· 38m</span></span>
+					<div class="cmp">
+						<div class="ph">Reply to steer the agent…</div>
+						<div class="foot">
+							<span class="ib"><svg><use href="#i-plus"/></svg></span>
+							<span class="b2-hm"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><button class="meter" data-cycle="1,2,3,4" data-i="2" data-l="3" style="background:none;border:0"><i></i><i></i><i></i><i></i></button></span>
+							<span class="sp"></span>
+							<span class="b2-shield"><svg><use href="#i-shield"/></svg><small>ask</small></span>
+							<span class="stop"><i></i></span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Goal impossible|checker gave up" data-tx="idle">
+			<div class="dock">
+				<div class="b2-wrap">
+					<span class="b2-notch bad"><svg><use href="#i-x"/></svg>goal impossible <span class="t">· 44m</span></span>
+					<div class="cmp bad">
+						<div class="b2-bad"><b>The checker says this can't be met</b>Two consecutive runs need the Linux baselines, and this machine can't render them.<div class="acts"><span>Edit goal</span><span>Dismiss</span></div></div>
+						<div class="ph" style="padding-top:6px">Ask anything…</div>
+						<div class="foot">
+							<span class="ib"><svg><use href="#i-plus"/></svg></span>
+							<span class="b2-hm"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span></span>
+							<span class="sp"></span>
+							<span class="b2-shield" style="color:var(--warning)"><svg><use href="#i-shield-open"/></svg><small style="color:var(--warning)">edits</small></span>
+							<span class="send off"><svg><use href="#i-up"/></svg></span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>The composer's border and its label. Violet while pursuing, red when impossible, green for a moment when met.</dd>
+		<dt>Height cost</dt><dd>+9px for the label.</dd>
+		<dt>Strength</dt><dd>Strongest ambient signal. The goal is part of the composer rather than a line beside it.</dd>
+		<dt>Risk</dt><dd>The edge fights the focus ring. Icon-only approvals rely on a 7.5px caption.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ B3 ═════════════ -->
+<style>
+.b3-card { border: 1px solid rgba(181,140,245,.3); background: linear-gradient(180deg, rgba(181,140,245,.09), rgba(181,140,245,.02)); border-radius: 16px; padding: 10px 12px; margin-bottom: 8px; font-size: 12px; }
+.b3-card .k { display: flex; align-items: center; gap: 7px; color: var(--goal); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; }
+.b3-card .k svg { width: 12px; height: 12px; }
+.b3-card .k .x { margin-left: auto; color: var(--dim); letter-spacing: 0; font-size: 13px; }
+.b3-card .c { color: var(--text); margin: 4px 0 6px; }
+.b3-card .bar { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; display: flex; gap: 2px; }
+.b3-card .bar i { flex: 1; background: var(--goal); opacity: .8; }
+.b3-card .bar i.n { background: var(--chip); }
+.b3-card .m { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 6px; }
+.b3-slim { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; padding: 5px 10px; border-radius: 999px; background: var(--goal-bg); color: var(--goal); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.b3-slim svg { width: 12px; height: 12px; flex: none; }
+.b3-slim .c { overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+#b3 .cmp { border-radius: 18px; }
+.b3-st { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted); padding: 8px 12px 7px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; overflow: hidden; }
+.b3-st b { color: var(--text-2); }
+</style>
+<section class="design" id="b3" data-tier="middle">
+	<div class="dh"><h3>B3 · Pinned goal card</h3><span class="tag">middle</span>
+		<p class="pitch">The goal gets its own small card pinned above the composer, holding the condition, a pass-rate bar, and the checker's reason. Treat it as the mission and the composer as the conversation. When the keyboard opens, the card shrinks to a one-line pill so typing space wins.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|card open">
+			<div class="dock">
+				<div class="b3-card">
+					<div class="k"><svg><use href="#i-target"/></svg>Goal · check 6<span class="x">⌄</span></div>
+					<div class="c">All 38 acceptance scenarios pass, twice in a row</div>
+					<div class="bar"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="n"></i><i class="n"></i></div>
+					<div class="m"><span>not yet · 35 of 38</span><span>38m · 1.24M tok</span></div>
+				</div>
+				<div class="cmp">
+					<div class="b3-st"><span class="pulse"></span><b>Working 38m 12s</b>· pnpm acceptance:visual<span style="margin-left:auto;color:var(--text-2)">↓ live</span></div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Typing|card collapses">
+			<div class="dock kb">
+				<div class="b3-slim"><svg><use href="#i-target"/></svg><span class="c">All 38 scenarios pass</span><span style="margin-left:auto">35/38</span></div>
+				<div class="cmp" style="margin-bottom:8px">
+					<div class="typed">Leave the mutation run for later, just the visual gate<span class="caret"></span></div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span></span>
+						<span class="chip"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="send"><svg><use href="#i-up"/></svg></span>
+					</div>
+				</div>
+			</div>
+			<div class="kbd"><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i></div></div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>Its own card above the composer. It becomes a pill while typing and a green receipt when met.</dd>
+		<dt>Height cost</dt><dd>+84px open, +30px as a pill. That's the most of any design here.</dd>
+		<dt>Pass-rate bar</dt><dd>Only when the reason contains a count (35 of 38). Otherwise it's one segment per check.</dd>
+		<dt>Strength</dt><dd>The clearest mental model: the goal is a separate thing from the chat.</dd>
+		<dt>Risk</dt><dd>Parsing a count out of free-text reasons is guesswork, so the bar may lie. It also takes vertical space.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ B4 ═════════════ -->
+<style>
+.b4-rest { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--input); border-radius: 999px; padding: 4px; }
+.b4-rest .ph { flex: 1; min-height: 0; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.b4-rest .stop { border-radius: 999px; width: 38px; height: 38px; }
+.b4-orb { position: relative; width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 50%; background: conic-gradient(var(--goal) 0 75%, transparent 0); }
+.b4-orb::before { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: var(--input); }
+.b4-orb .logo { position: relative; width: 20px; height: 20px; }
+.b4-orb.spin { background: conic-gradient(from 0deg, transparent 0 55%, var(--goal) 100%); animation: spin 2.4s linear infinite; }
+.b4-orb.spin .logo { animation: spin 2.4s linear infinite reverse; }
+.b4-sub { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); padding: 0 10px 7px; white-space: nowrap; overflow: hidden; }
+.b4-sub .g { color: var(--goal); }
+.b4-acc { display: flex; align-items: center; gap: 4px; padding: 6px 6px; background: #1d2026; border-top: 1px solid var(--border-subtle); overflow: hidden; }
+.b4-acc .chip { background: #2a2e36; height: 30px; border-radius: 8px; padding: 0 9px; }
+.b4-acc .chip.g { color: var(--goal); }
+#b4 .cmp { border-radius: 16px; margin: 0 0 8px; }
+</style>
+<section class="design" id="b4" data-tier="middle">
+	<div class="dh"><h3>B4 · Keyboard accessory</h3><span class="tag">middle</span>
+		<p class="pitch">The composer changes shape with focus. At rest it's one capsule. The harness logo sits inside an orbit ring that spins while the goal is being pursued. When you tap to type, every control moves to a toolbar docked on the keyboard, the way iOS Notes and Things do it. Controls are there when your thumbs are down and gone when you're reading.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Reading|at rest">
+			<div class="dock">
+				<div class="b4-sub"><span class="pulse"></span><span>38m · pnpm acceptance:visual</span><span class="g" style="margin-left:auto">◎ 35/38</span></div>
+				<div class="b4-rest">
+					<span class="b4-orb spin"><span class="logo"><svg><use href="#claude"/></svg></span></span>
+					<span class="ph">Reply to steer Opus 5…</span>
+					<span class="stop"><i></i></span>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Focused|toolbar on keyboard">
+			<div class="dock kb" style="padding-bottom:0">
+				<div class="cmp"><div class="typed">Use the Linux runner for the baselines<span class="caret"></span></div><div class="foot"><span class="sp"></span><span class="stop"><i></i></span><span class="send"><svg><use href="#i-up"/></svg></span></div></div>
+			</div>
+			<div class="b4-acc">
+				<span class="ib" style="width:30px;height:30px"><svg><use href="#i-plus"/></svg></span>
+				<span class="chip"><span class="logo" style="width:15px;height:15px"><svg><use href="#claude"/></svg></span>Opus 5</span>
+				<button class="chip" data-cycle="Low,Med,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+				<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+				<span class="chip g"><svg><use href="#i-target"/></svg>6</span>
+			</div>
+			<div class="kbd" style="height:200px"><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i></div></div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>At rest, the spinning orbit plus a small count. Focused, a goal chip on the keyboard toolbar.</dd>
+		<dt>Height cost</dt><dd>The smallest here at rest (≈64px total). Focused, it costs the toolbar height.</dd>
+		<dt>Strength</dt><dd>Reading gets the whole screen, and every control is within thumb reach while typing.</dd>
+		<dt>Risk</dt><dd>You can't check or change approvals without focusing the field. iOS's visual-viewport quirks need care. Desktop needs its own layout.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ B5 ═════════════ -->
+<style>
+.b5-bar { flex: none; padding: 4px 14px 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 10px; }
+.b5-bar .back { color: var(--dim); font-size: 15px; }
+.b5-bar .tt { flex: 1; min-width: 0; }
+.b5-bar .tt b { display: block; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b5-bar .tt span { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--goal); white-space: nowrap; overflow: hidden; }
+.b5-bar .tt span svg { width: 11px; height: 11px; flex: none; }
+.b5-bar .tt span em { font-style: normal; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.b5-hb { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 5px; border: 1px solid var(--border); border-radius: 999px; font-size: 11.5px; }
+.b5-hb .logo { width: 20px; height: 20px; }
+.b5-drop { flex: none; margin: 0 10px; padding: 12px 14px; border: 1px solid rgba(181,140,245,.3); border-top: 0; border-radius: 0 0 18px 18px; background: #16131e; font-size: 12px; color: var(--text-2); position: relative; z-index: 3; box-shadow: 0 16px 30px rgba(0,0,0,.5); }
+.b5-drop p { margin: 0 0 8px; color: var(--text); }
+.b5-drop .why { color: var(--muted); font-size: 11.5px; margin-bottom: 10px; }
+.b5-drop .acts { display: flex; gap: 8px; }
+.b5-drop .acts span { border: 1px solid var(--border); border-radius: 9px; padding: 4px 10px; }
+#b5 .cmp { border-radius: 18px; }
+</style>
+<section class="design" id="b5" data-tier="middle">
+	<div class="dh"><h3>B5 · Top-bar goal</h3><span class="tag">middle</span>
+		<p class="pitch">The goal belongs to the session, so it lives under the session title. The Harness &amp; Model button moves to the top-right as a pill, because a harness is chosen per session and rarely per message. The composer keeps only per-message things: attach, effort, approvals, send. Pull down on the title for the goal receipt.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|goal in title" data-appbar="none">
+			<div class="top b5-bar"><span class="back">‹</span><div class="tt"><b>Green acceptance suite</b><span><svg><use href="#i-target"/></svg>All 38 scenarios pass <em>· 35/38 · check 6</em></span></div><span class="b5-hb"><span class="logo"><svg><use href="#claude"/></svg></span>Opus 5</span></div>
+			<div class="dock">
+				<div class="cmp">
+					<div class="b3-st"><span class="pulse"></span><b>Working 38m 12s</b>· pnpm acceptance:visual<span style="margin-left:auto;color:var(--text-2)">↓ live</span></div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<button class="chip o" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+						<span class="chip o"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="sp"></span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Pulled title|goal receipt" data-appbar="none">
+			<div class="top b5-bar"><span class="back">‹</span><div class="tt"><b>Green acceptance suite</b><span><svg><use href="#i-target"/></svg>All 38 scenarios pass <em>· 35/38 · check 6</em></span></div><span class="b5-hb"><span class="logo"><svg><use href="#claude"/></svg></span>Opus 5</span></div>
+			<div class="top b5-drop"><p>All 38 acceptance scenarios pass on two consecutive runs of <code>pnpm acceptance:visual</code>.</p><div class="why">Check 6, 2m ago: not yet. phone-transcript-scrolling fails at jump-to-live. · 38m · 1.24M tokens</div><div class="acts"><span>Edit</span><span>Clear</span><span style="margin-left:auto;color:var(--muted);border:0">History ›</span></div></div>
+			<div class="dock">
+				<div class="cmp">
+					<div class="b3-st"><span class="pulse"></span><b>Working 38m 14s</b>· pnpm acceptance:visual<span style="margin-left:auto;color:var(--text-2)">↓ live</span></div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip o"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+						<span class="chip o"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="sp"></span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>The subtitle under the session title. It pulls down into a receipt.</dd>
+		<dt>Height cost</dt><dd>+16px in the top bar. The composer gets shorter.</dd>
+		<dt>Strength</dt><dd>Clean separation: session-level settings on top, per-message ones at the bottom.</dd>
+		<dt>Risk</dt><dd>Your eyes live at the bottom, so the top goes unnoticed. Conduit's session bar already has a view switcher competing for that row.</dd>
+	</dl>
+</section>
+
+<h2 class="tier">Wild</h2>
+<p>Riskier ideas: a shell-prompt breadcrumb, a radial long-press fan, a swipeable control deck, the goal filling the empty composer, and a timeline of the goal's checks.</p>
+
+<!-- ═════════════ C1 ═════════════ -->
+<style>
+#c1 .cmp { border-radius: 14px; background: #101216; }
+.c1-pl { display: flex; font-size: 11.5px; padding: 8px 8px 0; white-space: nowrap; overflow: hidden; }
+.c1-seg { display: inline-flex; align-items: center; gap: 5px; padding: 3px 14px 3px 13px; background: var(--sb, #1f232b); color: var(--sc, var(--text-2)); clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%, 8px 50%); margin-right: -5px; cursor: pointer; border: 0; font: inherit; }
+.c1-seg:first-child { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%); border-radius: 6px 0 0 6px; padding-left: 8px; }
+.c1-seg .logo { width: 13px; height: 13px; }
+.c1-seg svg { width: 11px; height: 11px; }
+.c1-seg.h { --sb: #2b1d17; --sc: #eba58b; }
+.c1-seg.g { --sb: #211a2e; --sc: var(--goal); }
+.c1-seg.on { --sb: #3a414c; --sc: var(--text); }
+.c1-in { display: flex; gap: 8px; padding: 10px 12px 4px; color: var(--muted); }
+.c1-in .pr { color: var(--accent); font-weight: 700; }
+.c1-ft { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; font-size: 11px; color: var(--dim); }
+.c1-ft .ib { width: 30px; height: 30px; }
+.c1-opts { display: flex; align-items: center; gap: 6px; padding: 8px 8px 0; font-size: 11.5px; white-space: nowrap; }
+.c1-opts .l { color: var(--muted); }
+.c1-opts .o { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-2); }
+.c1-opts .o.on { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+.c1-opts .esc { margin-left: auto; color: var(--dim); }
+</style>
+<section class="design" id="c1" data-tier="wild">
+	<div class="dh"><h3>C1 · Prompt line</h3><span class="tag">wild</span>
+		<p class="pitch">The settings become a powerline-style shell prompt: <code>opus-5 ❯ high ❯ ask ❯ ◎ 35/38</code>. Tap a segment and the prompt line turns into that setting's options. Pick one and it snaps back. Conduit is monospace and terminal-flavoured, so this leans into that.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|prompt at rest">
+			<div class="dock">
+				<div class="b1-live" style="padding:0 6px 8px"><span class="pulse"></span><b>38m 12s</b>· pnpm acceptance:visual<span style="margin-left:auto">↓ live</span></div>
+				<div class="cmp">
+					<div class="c1-pl"><span class="c1-seg h"><span class="logo"><svg><use href="#claude"/></svg></span>opus-5</span><span class="c1-seg">high</span><span class="c1-seg">ask</span><span class="c1-seg g"><svg><use href="#i-target"/></svg>35/38 · 6</span></div>
+					<div class="c1-in"><span class="pr">❯</span><span>steer the agent…</span></div>
+					<div class="c1-ft"><span class="ib"><svg><use href="#i-plus"/></svg></span><span>@ files · / commands</span><span class="sp"></span><span class="stop" style="width:30px;height:30px"><i></i></span></div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Tapped “high”|options inline">
+			<div class="dock">
+				<div class="b1-live" style="padding:0 6px 8px"><span class="pulse"></span><b>38m 14s</b>· pnpm acceptance:visual<span style="margin-left:auto">↓ live</span></div>
+				<div class="cmp">
+					<div class="c1-opts" data-cycle="low,medium,high,max" data-i="2"><span class="l">effort ❯</span><span class="o" data-seg>low</span><span class="o" data-seg>medium</span><span class="o on" data-seg>high</span><span class="o" data-seg>max</span><span class="esc">esc</span></div>
+					<div class="c1-in"><span class="pr">❯</span><span>steer the agent…</span></div>
+					<div class="c1-ft"><span class="ib"><svg><use href="#i-plus"/></svg></span><span>tap to cycle</span><span class="sp"></span><span class="stop" style="width:30px;height:30px"><i></i></span></div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>The last prompt segment. Tap it for the receipt, shown inline in the same way.</dd>
+		<dt>Height cost</dt><dd>+24px for the prompt line, and the footer shrinks.</dd>
+		<dt>Strength</dt><dd>One visual grammar for every setting, and very on-brand.</dd>
+		<dt>Risk</dt><dd>The harness choice has too many options to fit inline, so it needs the sheet anyway. The chevron segments crowd at 390px.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ C2 ═════════════ -->
+<style>
+#c2 .cmp { border-radius: 999px; display: flex; align-items: center; gap: 6px; padding: 5px; }
+#c2 .cmp .ph { flex: 1; min-height: 0; padding: 0 4px; }
+.c2-lb { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(217,119,87,.12); border: 1px solid rgba(217,119,87,.35); flex: none; position: relative; }
+.c2-lb .logo { width: 22px; height: 22px; }
+.c2-lb .pip { position: absolute; top: -1px; right: -1px; width: 11px; height: 11px; border-radius: 50%; background: var(--goal); border: 2px solid var(--input); }
+.c2-lb.hold { box-shadow: 0 0 0 6px rgba(217,119,87,.15), 0 0 0 14px rgba(217,119,87,.06); z-index: 33; }
+#c2 .stop { border-radius: 50%; width: 40px; height: 40px; }
+.c2-b { position: absolute; z-index: 32; display: grid; place-items: center; border-radius: 50%; font-size: 10px; color: var(--text-2); background: var(--bg-alt); border: 1px solid var(--border); box-shadow: 0 6px 16px rgba(0,0,0,.5); }
+.c2-b.i { width: 40px; height: 40px; font-weight: 700; font-size: 12px; }
+.c2-b.o { width: 44px; height: 44px; }
+.c2-b.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.c2-b.w { color: var(--warning); border-color: rgba(244,183,64,.4); }
+.c2-lab { position: absolute; z-index: 32; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+#c2 .scrim { background: rgba(5,6,8,.82); }
+.c2-tip { position: absolute; z-index: 32; right: 14px; bottom: 110px; width: 150px; font-size: 11px; color: var(--text-2); }
+.c2-tip b { color: var(--text); display: block; margin-bottom: 3px; }
+</style>
+<section class="design" id="c2" data-tier="wild">
+	<div class="dh"><h3>C2 · Long-press fan</h3><span class="tag">wild</span>
+		<p class="pitch">The composer is a pill with one big harness button. Tap it for the full Harness &amp; Model sheet. Press and hold it for a radial fan: effort on the inner ring, approvals on the outer ring. Slide to one and let go, the way you'd pick an emoji reaction. A violet pip on the logo means a goal is active.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|resting">
+			<div class="dock">
+				<div class="b4-sub" style="padding:0 8px 8px"><span class="pulse"></span><span>38m · pnpm acceptance:visual</span><span class="g" style="margin-left:auto">◎ goal · check 6</span></div>
+				<div class="cmp"><span class="c2-lb"><span class="logo"><svg><use href="#claude"/></svg></span><span class="pip"></span></span><span class="ph">Steer Opus 5 · high · ask</span><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="stop"><i></i></span></div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Press and hold logo|fan open">
+			<div class="scrim"></div>
+			<div class="dock">
+				<span class="c2-b i" style="left:17px;bottom:128px">L</span>
+				<span class="c2-b i" style="left:61.6px;bottom:116.9px">M</span>
+				<span class="c2-b i on" style="left:95.8px;bottom:86.1px">H</span>
+				<span class="c2-b i" style="left:111.5px;bottom:42.9px">X</span>
+				<span class="c2-b o" style="left:15px;bottom:206px">Plan</span>
+				<span class="c2-b o on" style="left:66.2px;bottom:198.4px">Ask</span>
+				<span class="c2-b o w" style="left:112.9px;bottom:176.1px">Edits</span>
+				<span class="c2-b o w" style="left:151px;bottom:141.1px">Auto</span>
+				<span class="c2-b o w" style="left:177.3px;bottom:96.6px">Full</span>
+				<span class="c2-b o" style="left:189.3px;bottom:46.3px">Never</span>
+				<div class="c2-tip"><b>Slide and release</b>Inner ring: effort.<br>Outer ring: approvals.<br><br>Tap the logo instead for harness, model, context, and agent.</div>
+				<div class="cmp"><span class="c2-lb hold"><span class="logo"><svg><use href="#claude"/></svg></span></span><span class="ph">Steer Opus 5 · high · ask</span><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="stop"><i></i></span></div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>A pip on the logo plus the status line. Tapping the status opens the receipt.</dd>
+		<dt>Height cost</dt><dd>The smallest composer here (≈54px).</dd>
+		<dt>Strength</dt><dd>Changing effort and approvals together is one gesture, and it's delightful once learned.</dd>
+		<dt>Risk</dt><dd>You'd never discover it without teaching. Long-press conflicts with text selection. There's no hover equivalent on desktop.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ C3 ═════════════ -->
+<style>
+#c3 .cmp { border-radius: 20px; overflow: hidden; }
+.c3-top { display: flex; align-items: center; gap: 4px; padding: 4px 4px 0; }
+.c3-top .ph { flex: 1; min-height: 0; padding: 8px 6px; }
+.c3-deck { border-top: 1px solid var(--border-subtle); background: #121418; padding: 8px 10px 8px; }
+.c3-tabs { display: flex; gap: 14px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin-bottom: 8px; padding: 0 2px; }
+.c3-tabs span.on { color: var(--text); border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+.c3-tabs span.g { color: var(--goal); }
+.c3-tabs .n { margin-left: auto; letter-spacing: 0; }
+.c3-goal { font-size: 12px; color: var(--text-2); }
+.c3-goal p { margin: 0 0 4px; color: var(--text); }
+.c3-goal .why { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; }
+.c3-goal .acts { display: flex; gap: 6px; }
+.c3-goal .acts span { flex: 1; text-align: center; border: 1px solid var(--border); border-radius: 9px; padding: 5px 0; }
+.c3-dots { display: flex; justify-content: center; gap: 5px; margin-top: 8px; }
+.c3-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--chip); }
+.c3-dots i.on { background: var(--text-2); width: 14px; border-radius: 3px; }
+</style>
+<section class="design" id="c3" data-tier="wild">
+	<div class="dh"><h3>C3 · Control deck</h3><span class="tag">wild</span>
+		<p class="pitch">The composer's bottom half is a pager: Model · Effort · Access · Goal. Swipe sideways between them. Every page is one full-width control with thumb-sized segments, so nothing is a 24px chip. The tab labels double as a readout of the current settings.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Effort page|swipe for more">
+			<div class="dock">
+				<div class="b1-live" style="padding:0 6px 8px"><span class="pulse"></span><b>38m 12s</b>· pnpm acceptance:visual<span style="margin-left:auto">↓ live</span></div>
+				<div class="cmp">
+					<div class="c3-top"><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="ph">Reply to steer the agent…</span><span class="stop"><i></i></span></div>
+					<div class="c3-deck">
+						<div class="c3-tabs"><span>✳ Opus 5</span><span class="on">Effort</span><span>Ask</span><span class="g">◎ Goal</span></div>
+						<div class="seg"><span>Low</span><span>Medium</span><span class="on">High</span><span>Max</span></div>
+						<div class="c3-dots"><i></i><i class="on"></i><i></i><i></i></div>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Goal page|swiped right">
+			<div class="dock">
+				<div class="b1-live" style="padding:0 6px 8px"><span class="pulse"></span><b>38m 14s</b>· pnpm acceptance:visual<span style="margin-left:auto">↓ live</span></div>
+				<div class="cmp">
+					<div class="c3-top"><span class="ib"><svg><use href="#i-plus"/></svg></span><span class="ph">Reply to steer the agent…</span><span class="stop"><i></i></span></div>
+					<div class="c3-deck">
+						<div class="c3-tabs"><span>✳ Opus 5</span><span>High</span><span>Ask</span><span class="on" style="color:var(--goal);border-color:var(--goal)">◎ Goal</span><span class="n">check 6</span></div>
+						<div class="c3-goal"><p>All 38 acceptance scenarios pass, twice in a row</p><div class="why">Not yet · 35 of 38. phone-transcript-scrolling fails at jump-to-live.</div><div class="acts"><span>Edit</span><span>History</span><span style="color:var(--error)">Clear</span></div></div>
+						<div class="c3-dots"><i></i><i></i><i></i><i class="on"></i></div>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>Its own page, and the tab label glows violet while it's active.</dd>
+		<dt>Height cost</dt><dd>+76px. You could collapse the deck to just its tab row (+28px) with a flick.</dd>
+		<dt>Strength</dt><dd>The best thumb ergonomics here: big targets, and one gesture reaches everything.</dd>
+		<dt>Risk</dt><dd>It's heavy for the common case of just typing. Swiping inside the composer fights iOS's back gesture.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ C4 ═════════════ -->
+<style>
+#c4 .cmp { border-radius: 18px; }
+.c4-canvas { padding: 12px 14px 6px; }
+.c4-canvas .k { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--goal); text-transform: uppercase; letter-spacing: .09em; }
+.c4-canvas .k svg { width: 12px; height: 12px; }
+.c4-canvas .k span { margin-left: auto; color: var(--dim); text-transform: none; letter-spacing: 0; }
+.c4-canvas .c { font-size: 14px; color: var(--text); line-height: 1.4; margin: 5px 0 4px; }
+.c4-canvas .why { font-size: 11.5px; color: var(--muted); }
+.c4-canvas .hint { font-size: 11.5px; color: var(--dim); margin-top: 8px; }
+#c4 .cmp.setting { border-color: rgba(181,140,245,.55); box-shadow: 0 0 0 3px rgba(181,140,245,.08); }
+.c4-cmd { display: inline-block; color: var(--goal); background: var(--goal-bg); border-radius: 5px; padding: 0 4px; }
+.c4-help { margin: 0 0 8px; padding: 10px 12px; border-radius: 14px; background: var(--bg-alt); border: 1px solid var(--border); font-size: 11.5px; color: var(--text-2); }
+.c4-help b { color: var(--goal); display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.c4-help b svg { width: 12px; height: 12px; }
+.c4-help .kb { color: var(--dim); margin-top: 6px; }
+</style>
+<section class="design" id="c4" data-tier="wild">
+	<div class="dh"><h3>C4 · Goal as canvas</h3><span class="tag">wild</span>
+		<p class="pitch">When a goal is active and you haven't started typing, the empty composer shows the goal instead of placeholder text, with the checker's latest reason under it. The moment you type, it gets out of the way. This costs no extra space, because an empty composer is wasted space anyway. The right-hand phone shows setting a goal: typing <code>/goal</code> turns the composer violet and explains what will happen.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working, empty|goal fills composer">
+			<div class="dock">
+				<div class="cmp">
+					<div class="a1-head"><div class="a1-st"><span class="pulse"></span><b>Working 38m 12s</b><span class="x">· pnpm acceptance:visual</span><span class="jump">↓ live</span></div></div>
+					<div class="c4-canvas"><div class="k"><svg><use href="#i-target"/></svg>Goal<span>check 6 · 1.24M tok</span></div><div class="c">All 38 acceptance scenarios pass, twice in a row</div><div class="why">Not yet: 35 of 38. phone-transcript-scrolling fails at jump-to-live.</div><div class="hint">Type to steer · tap goal to edit</div></div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Typing /goal|set flow" data-tx="idle">
+			<div class="dock">
+				<div class="c4-help"><b><svg><use href="#i-target"/></svg>Set a goal</b>Opus keeps working until this is true. After every turn a checker reads the transcript and decides <i>not yet</i>, <i>met</i>, or <i>impossible</i>.<div class="kb">⏎ set and start · /goal clear stops it</div></div>
+				<div class="cmp setting">
+					<div class="typed"><span class="c4-cmd">/goal</span> every acceptance scenario passes on two consecutive runs, including Linux baselines<span class="caret"></span></div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<span class="chip"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="send" style="background:var(--goal)"><svg><use href="#i-target"/></svg></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>In the empty composer. Once you type, it drops to a one-line header like A1's.</dd>
+		<dt>Height cost</dt><dd>Grows the empty composer by about 50px. Nothing extra while typing.</dd>
+		<dt>Set flow</dt><dd>Works in any design: <code>/goal</code> gets a violet send button and a what-happens-next card.</dd>
+		<dt>Risk</dt><dd>It hides the "reply here" cue. A new user may not realise they can type over the goal.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ C5 ═════════════ -->
+<style>
+.c5-rail { padding: 0 8px 10px; }
+.c5-dots { display: flex; align-items: center; gap: 0; }
+.c5-dots .d { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--chip); display: grid; place-items: center; font-size: 9px; color: var(--muted); flex: none; background: var(--bg); }
+.c5-dots .ln { flex: 1; height: 1.5px; background: var(--chip); min-width: 6px; }
+.c5-dots .d.cur { border-color: var(--goal); color: var(--goal); box-shadow: 0 0 0 4px rgba(181,140,245,.15); animation: pulse 1.6s ease-in-out infinite; }
+.c5-dots .d.sel { border-color: var(--text-2); color: var(--text); }
+.c5-dots .d.ok { border-color: var(--success); background: var(--success); color: #07130e; }
+.c5-dots .d.ok svg { width: 11px; height: 11px; }
+.c5-dots .lab { font-size: 10.5px; color: var(--goal); margin-left: 8px; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.c5-dots .lab svg { width: 11px; height: 11px; }
+.c5-bub { margin-top: 8px; padding: 7px 10px; border-radius: 10px; background: var(--bg-alt); border: 1px solid var(--border-subtle); font-size: 11.5px; color: var(--text-2); position: relative; }
+.c5-bub i { font-style: normal; color: var(--muted); }
+.c5-bub.ok { border-color: rgba(63,214,154,.35); background: rgba(63,214,154,.06); }
+.c5-bub.ok b { color: var(--success); }
+#c5 .cmp { border-radius: 18px; }
+</style>
+<section class="design" id="c5" data-tier="wild">
+	<div class="dh"><h3>C5 · Check timeline</h3><span class="tag">wild</span>
+		<p class="pitch">The goal shown as what it really is: a series of checks. Each dot is one turn the checker judged. The pulsing violet one is the check that's coming. Tap any dot to read that check's reason. It shows momentum at a glance, so you can see whether the reasons are converging or going in circles.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="Working|check 7 pending">
+			<div class="dock">
+				<div class="c5-rail">
+					<div class="c5-dots"><span class="d">1</span><span class="ln"></span><span class="d">2</span><span class="ln"></span><span class="d">3</span><span class="ln"></span><span class="d">4</span><span class="ln"></span><span class="d">5</span><span class="ln"></span><span class="d sel">6</span><span class="ln"></span><span class="d cur">7</span><span class="lab"><svg><use href="#i-target"/></svg>38 scenarios pass</span></div>
+					<div class="c5-bub"><i>#6 · not yet ·</i> 35 of 38 pass. phone-transcript-scrolling fails at jump-to-live.</div>
+				</div>
+				<div class="cmp">
+					<div class="b3-st"><span class="pulse"></span><b>Working 38m 12s</b>· pnpm acceptance:visual<span style="margin-left:auto;color:var(--text-2)">↓ live</span></div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<button class="chip" data-cycle="Low,Medium,High,Max" data-i="2"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span><span class="v">High</span></button>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="Goal met|receipt" data-tx="idle">
+			<div class="dock">
+				<div class="c5-rail">
+					<div class="c5-dots"><span class="d">1</span><span class="ln"></span><span class="d">2</span><span class="ln" style="background:none;border-top:1.5px dashed var(--chip);height:0"></span><span class="d">6</span><span class="ln"></span><span class="d">7</span><span class="ln"></span><span class="d">8</span><span class="ln" style="background:var(--success)"></span><span class="d ok"><svg><use href="#i-check"/></svg></span><span class="lab" style="color:var(--success)">met · 52m</span></div>
+					<div class="c5-bub ok"><b>Achieved</b> after 9 checks and 1.9M tokens. <i>“38 of 38 pass on runs 11 and 12.”</i></div>
+				</div>
+				<div class="cmp">
+					<div class="ph">Ask anything. / for commands, @ for files</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<span class="chip"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="send off"><svg><use href="#i-up"/></svg></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Goal lives</dt><dd>A timeline above the composer, collapsing to its first/last dots past 8 checks.</dd>
+		<dt>Height cost</dt><dd>+60px with the reason bubble, +26px without.</dd>
+		<dt>Needs</dt><dd>Each check's reason kept, not just <code>last_reason</code>. Conduit would store every <code>active_goal</code> event, which suits the event store.</dd>
+		<dt>Risk</dt><dd>The most data-hungry design, and it's noisy for goals that finish in 1–2 checks.</dd>
+	</dl>
+</section>
+
+<h2 class="tier">Shared</h2>
+<p>These pieces work with any design above: the Harness &amp; Model picker, every state a goal can be in, and OpenCode support.</p>
+
+<!-- ═════════════ PICKER ═════════════ -->
+<style>
+.p1-inst { display: flex; gap: 8px; overflow: hidden; }
+.p1-inst .c { flex: none; width: 118px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); font-size: 11.5px; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; }
+.p1-inst .c .logo { width: 20px; height: 20px; }
+.p1-inst .c small { color: var(--dim); font-size: 10.5px; }
+.p1-inst .c.on { border-color: rgba(217,119,87,.6); background: rgba(217,119,87,.08); color: var(--text); }
+.p1-inst .c.oc .logo { color: var(--harness-oc, #00e5ff); }
+.p1-m { display: flex; align-items: center; gap: 10px; padding: 8px 4px; font-size: 12.5px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); }
+.p1-m:last-child { border-bottom: 0; }
+.p1-m b { color: var(--text); font-weight: 600; }
+.p1-m small { color: var(--dim); }
+.p1-m .tick { margin-left: auto; }
+.p2-nav { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 8px; }
+.p2-nav .bk { color: var(--accent); }
+.p2-nav b { margin: 0 auto; transform: translateX(-24px); }
+.p2-grp { background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 0 12px; margin-bottom: 10px; }
+.p2-grp .srow svg.lead { width: 16px; height: 16px; color: var(--muted); }
+.p2-grp .srow .r svg { width: 12px; height: 12px; }
+.p3-pop { position: absolute; left: 40px; bottom: 150px; width: 700px; display: grid; grid-template-columns: 190px 1fr 220px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 60px rgba(0,0,0,.6); overflow: hidden; z-index: 5; font-size: 12.5px; }
+.p3-pop > div { padding: 10px; }
+.p3-pop > div + div { border-left: 1px solid var(--border-subtle); }
+.p3-pop .h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 2px 4px 8px; }
+.p3-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 9px; color: var(--text-2); }
+.p3-row.on { background: var(--chip); color: var(--text); }
+.p3-row small { margin-left: auto; color: var(--dim); font-size: 10.5px; }
+.p3-search { border: 1px solid var(--border); border-radius: 9px; padding: 6px 9px; color: var(--dim); margin-bottom: 6px; }
+.p3-pop .seg { margin-bottom: 12px; }
+.p3-pop .seg span { font-size: 11px; padding: 5px 0; }
+.p3-foot { grid-column: 1 / -1; border-top: 1px solid var(--border-subtle); border-left: 0 !important; display: flex; gap: 16px; color: var(--dim); font-size: 11px; padding: 8px 14px !important; }
+.p3-foot b { color: var(--text-2); font-weight: 500; }
+</style>
+<section class="design" id="picker">
+	<div class="dh"><h3>Harness &amp; Model picker</h3><span class="tag">shared</span>
+		<p class="pitch">One button, showing the harness logo and model name, holds everything we're removing from the input row: harness (including custom instances), model, effort, context window, and agent. Effort stays in here as well as in the quick chip. Three layouts:</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="P1 · Bottom sheet|everything on one screen" data-tx="idle">
+			<div class="scrim"></div>
+			<div class="sheet">
+				<div class="grab"></div>
+				<h4><span class="logo"><svg><use href="#claude"/></svg></span>Claude · Opus 5<span style="margin-left:auto;color:var(--dim);font-weight:400;font-size:11px">applies to this session</span></h4>
+				<div class="sub" style="margin-top:4px">Harness</div>
+				<div class="p1-inst">
+					<div class="c on"><span class="logo"><svg><use href="#claude"/></svg></span>Claude<small>personal</small></div>
+					<div class="c"><span class="logo"><svg><use href="#claude"/></svg></span>Claude<small>work</small></div>
+					<div class="c oc"><span class="logo"><svg><use href="#opencode"/></svg></span>OpenCode<small>local</small></div>
+				</div>
+				<div class="sub">Model</div>
+				<div class="p1-m"><b>Opus 5</b><small>most capable</small><span class="tick">✓</span></div>
+				<div class="p1-m">Sonnet 5<small>faster</small></div>
+				<div class="p1-m">Opus 4.7<small>previous</small></div>
+				<div class="sub">Effort</div>
+				<div class="seg"><span>Low</span><span>Med</span><span class="on">High</span><span>Max</span></div>
+				<div class="sub">Context window</div>
+				<div class="seg"><span>200K</span><span class="on">1M</span></div>
+				<div class="srow" style="margin-top:8px"><svg style="width:16px;height:16px;color:var(--muted)"><use href="#i-bot"/></svg>Agent<span class="r">Default<svg style="width:12px;height:12px"><use href="#i-chevr"/></svg></span></div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="P2 · Drill-down|settings-app list" data-tx="idle">
+			<div class="scrim"></div>
+			<div class="sheet">
+				<div class="grab"></div>
+				<div class="p2-nav"><span class="bk">Done</span><b>Harness &amp; Model</b></div>
+				<div class="p2-grp">
+					<div class="srow"><span class="logo"><svg><use href="#claude"/></svg></span>Harness<span class="r">Claude · personal<svg><use href="#i-chevr"/></svg></span></div>
+					<div class="srow"><svg class="lead"><use href="#i-sliders"/></svg>Model<span class="r">Opus 5<svg><use href="#i-chevr"/></svg></span></div>
+				</div>
+				<div class="p2-grp">
+					<div class="srow"><svg class="lead"><use href="#i-brain"/></svg>Effort<span class="r"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High<svg><use href="#i-chevr"/></svg></span></div>
+					<div class="srow"><svg class="lead"><use href="#i-window"/></svg>Context<span class="r">1M · 42% used<svg><use href="#i-chevr"/></svg></span></div>
+					<div class="srow"><svg class="lead"><use href="#i-bot"/></svg>Agent<span class="r">Default<svg><use href="#i-chevr"/></svg></span></div>
+				</div>
+				<div style="font-size:11px;color:var(--dim);padding:0 4px">Changes apply from your next message.</div>
+			</div>
+		</figure>
+	</div>
+	<figure class="desk"><figcaption><span>P3 · Desktop two-pane popover</span><span>keyboard: ⌘M, type to filter</span></figcaption><div class="stage" style="position:relative;padding-top:360px">
+		<div class="p3-pop">
+			<div>
+				<div class="h">Harness</div>
+				<div class="p3-row on"><span class="logo"><svg><use href="#claude"/></svg></span>Claude<small>personal</small></div>
+				<div class="p3-row"><span class="logo"><svg><use href="#claude"/></svg></span>Claude<small>work</small></div>
+				<div class="p3-row"><span class="logo"><svg><use href="#opencode"/></svg></span>OpenCode<small>local</small></div>
+			</div>
+			<div>
+				<div class="p3-search">Filter models…</div>
+				<div class="p3-row on"><b>Opus 5</b><small>1M · ✓</small></div>
+				<div class="p3-row">Sonnet 5<small>1M</small></div>
+				<div class="p3-row">Opus 4.7<small>1M</small></div>
+				<div class="p3-row">Sonnet 4.6<small>200K</small></div>
+			</div>
+			<div>
+				<div class="h">Effort</div>
+				<div class="seg"><span>Low</span><span>Med</span><span class="on">High</span><span>Max</span></div>
+				<div class="h">Context window</div>
+				<div class="seg"><span>200K</span><span class="on">1M</span></div>
+				<div class="h">Agent</div>
+				<div class="p3-row" style="border:1px solid var(--border)"><svg style="width:14px;height:14px"><use href="#i-bot"/></svg>Default<small>⌄</small></div>
+			</div>
+			<div class="p3-foot"><span><b>↑↓</b> move</span><span><b>←→</b> column</span><span><b>⏎</b> apply</span><span style="margin-left:auto">Opus 5 · high · 1M · default</span></div>
+		</div>
+		<div class="cmp">
+			<div class="ph">Ask anything. / for commands, @ for files</div>
+			<div class="foot">
+				<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+				<span class="chip o" style="border-color:var(--text-2)"><span class="logo"><svg><use href="#claude"/></svg></span><span class="hm">Opus 5</span><svg class="cv"><use href="#i-chev"/></svg></span>
+				<span class="chip"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+				<span class="sp"></span>
+				<span class="chip"><svg><use href="#i-shield"/></svg>Ask<svg class="cv"><use href="#i-chev"/></svg></span>
+				<span class="send off"><svg><use href="#i-up"/></svg></span>
+			</div>
+		</div>
+	</div></figure>
+	<dl class="spec">
+		<dt>P1</dt><dd>Everything is one tap away, with no back button. <b>Recommended for phone.</b> It fits in about 480px.</dd>
+		<dt>P2</dt><dd>Scales best if the model list grows long (OpenCode lists every provider's models). The cost is two taps per change.</dd>
+		<dt>P3</dt><dd>The desktop version of P1, usable entirely from the keyboard. On OpenCode, the middle column groups models by provider.</dd>
+		<dt>Button label</dt><dd>Logo plus model name only. Show context size (<code>1M</code>) as small grey text on desktop, and drop it on phone.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ LIFECYCLE ═════════════ -->
+<style>
+.life { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 16px; }
+.lc > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; display: flex; gap: 8px; }
+.lc > figcaption span { color: var(--dim); text-transform: none; letter-spacing: 0; margin-left: auto; }
+.lc { margin: 0; }
+.lc .cmp { border-radius: 14px; }
+.lc .a1-goal .n { font-size: 11px; }
+.lc .a1-goal.dim .c { color: var(--muted); }
+.lc .a1-goal.ok svg, .lc .a1-goal.ok .n { color: var(--success); }
+.lc .a1-goal.bad svg, .lc .a1-goal.bad .n { color: var(--error); }
+.lc .a1-goal.warn svg, .lc .a1-goal.warn .n { color: var(--warning); }
+.lc .why { font-size: 11px; color: var(--muted); padding-left: 20px; white-space: normal; line-height: 1.4; }
+.lc .why a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; margin-right: 8px; }
+.lc-spin { width: 11px; height: 11px; border: 1.5px solid rgba(181,140,245,.3); border-top-color: var(--goal); border-radius: 50%; animation: spin 1s linear infinite; flex: none; }
+.lc-toast { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; background: var(--bg-alt); border: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+.lc-toast a { margin-left: auto; color: var(--accent); }
+.lc .mini { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+.lc .mini .ph { flex: 1; padding: 0 4px; min-height: 0; font-size: 12px; }
+</style>
+<section class="design" id="life">
+	<div class="dh"><h3>Goal lifecycle</h3><span class="tag">shared</span>
+		<p class="pitch">Every state a Claude goal can be in, drawn in A1's header style, though any design can use the same set. Violet means active, green means met, red means impossible, and amber means paused. The goal line never grows beyond one line plus an optional reason line, so the composer's height stays predictable.</p></div>
+	<div class="life">
+		<figure class="lc"><figcaption>None<span>entry: + menu · /goal</span></figcaption>
+			<div class="cmp"><div class="mini"><span class="ib o"><svg><use href="#i-plus"/></svg></span><span class="ph">Ask anything…</span><span class="chip"><span class="logo"><svg><use href="#claude"/></svg></span>Opus 5</span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Starting<span>set, first turn running</span></figcaption>
+			<div class="cmp"><div class="a1-head"><div class="a1-goal dim"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass, twice</span><span class="n">starting…</span></div></div><div class="mini"><span class="ph">Reply to steer…</span><span class="stop" style="width:30px;height:30px"><i></i></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Pursuing<span>working between checks</span></figcaption>
+			<div class="cmp"><div class="a1-head"><div class="a1-goal"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass, twice</span><span class="n">check 6 · 38m</span></div></div><div class="mini"><span class="ph">Reply to steer…</span><span class="stop" style="width:30px;height:30px"><i></i></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Checking<span>turn ended, checker reading</span></figcaption>
+			<div class="cmp"><div class="a1-head"><div class="a1-goal"><span class="lc-spin"></span><span class="c">All 38 acceptance scenarios pass, twice</span><span class="n">checking…</span></div></div><div class="mini"><span class="ph">Reply to steer…</span><span class="stop" style="width:30px;height:30px"><i></i></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Not yet<span>reason shown for 1 turn</span></figcaption>
+			<div class="cmp"><div class="a1-head"><div class="a1-goal"><svg><use href="#i-target"/></svg><span class="c">All 38 acceptance scenarios pass, twice</span><span class="n">not yet · 6</span></div><div class="why">35 of 38 pass. phone-transcript-scrolling fails at jump-to-live.</div></div><div class="mini"><span class="ph">Reply to steer…</span><span class="stop" style="width:30px;height:30px"><i></i></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Paused<span>API error, will retry</span></figcaption>
+			<div class="cmp"><div class="a1-head"><div class="a1-goal warn"><svg><use href="#i-pause"/></svg><span class="c">All 38 acceptance scenarios pass, twice</span><span class="n">paused</span></div><div class="why">Rate limited. Retrying in 42s. <a>Retry now</a><a>Clear goal</a></div></div><div class="mini"><span class="ph">Ask anything…</span><span class="send off" style="width:30px;height:30px"><svg><use href="#i-up"/></svg></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Achieved<span>stays until dismissed or next send</span></figcaption>
+			<div class="cmp" style="border-color:rgba(63,214,154,.35)"><div class="a1-head"><div class="a1-goal ok"><svg><use href="#i-check"/></svg><span class="c">All 38 acceptance scenarios pass, twice</span><span class="n">met · 52m · 9 checks</span></div><div class="why">“38 of 38 pass on runs 11 and 12.” <a>Details</a><a>Dismiss</a></div></div><div class="mini"><span class="ph">Ask anything…</span><span class="send off" style="width:30px;height:30px"><svg><use href="#i-up"/></svg></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Impossible<span>checker gave up</span></figcaption>
+			<div class="cmp" style="border-color:rgba(244,96,122,.4)"><div class="a1-head"><div class="a1-goal bad"><svg><use href="#i-x"/></svg><span class="c">Linux baselines match on this Mac</span><span class="n">impossible</span></div><div class="why">Linux baselines need the Docker renderer, which isn't installed. <a>Edit goal</a><a>Dismiss</a></div></div><div class="mini"><span class="ph">Ask anything…</span><span class="send off" style="width:30px;height:30px"><svg><use href="#i-up"/></svg></span></div></div>
+		</figure>
+		<figure class="lc"><figcaption>Cleared<span>by /goal clear or Clear</span></figcaption>
+			<div class="lc-toast"><svg style="width:14px;height:14px;color:var(--muted)"><use href="#i-target"/></svg>Goal cleared after 6 checks<a>Undo</a></div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Source</dt><dd>Claude sends <code>active_goal</code> with the goal or <code>null</code>. Conduit derives <i>checking</i> (turn ended, no update yet) and <i>achieved</i>/<i>impossible</i> (goal went null right after a reason) from the order of events.</dd>
+		<dt>Undo</dt><dd>Re-sends <code>/goal &lt;same condition&gt;</code>. The check count restarts; say so in the toast.</dd>
+		<dt>Paused</dt><dd>Claude has no pause <i>command</i>, only an automatic pause when an error happens. If the user asks, we could add a manual pause that clears the goal and remembers the condition (Codex has this).</dd>
+		<dt>Risk</dt><dd><code>active_goal</code> isn't in the public SDK message type. Before building, confirm it actually reaches <code>query()</code> consumers in 0.3.280.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ OPENCODE ═════════════ -->
+<style>
+#opencode .cmp { border-radius: 16px; }
+.oc-menu { left: 12px; bottom: 116px; width: 250px; }
+.oc-menu .mi.dis { opacity: .5; }
+.oc-tag { font-size: 10px; color: #00e5ff; border: 1px solid rgba(0,229,255,.35); border-radius: 5px; padding: 0 5px; flex: none; }
+</style>
+<section class="design" id="opencode">
+	<div class="dh"><h3>OpenCode support</h3><span class="tag">shared</span>
+		<p class="pitch">OpenCode has no goal feature (there's an open request, <code>anomalyco/opencode#27167</code>, and a few community plugins). The composer is identical apart from the cyan logo. The question is what happens in the goal slot.</p></div>
+	<div class="row">
+		<figure class="phone" data-cap="(a) v1 · not supported|honest, zero work" data-tx="idle">
+			<div class="dock">
+				<div class="menu oc-menu">
+					<div class="mi"><svg><use href="#i-image"/></svg>Photo library</div>
+					<div class="mi"><svg><use href="#i-camera"/></svg>Camera</div>
+					<div class="mi"><svg><use href="#i-file"/></svg>File</div>
+					<hr>
+					<div class="mi dis"><svg><use href="#i-target"/></svg>Set goal<span class="d">Claude only</span></div>
+				</div>
+				<div class="cmp">
+					<div class="ph">Ask anything. / for commands, @ for files</div>
+					<div class="foot">
+						<span class="ib o" style="background:var(--chip)"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#opencode"/></svg></span><span class="hm">gpt-6-sol</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<span class="chip"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="send off"><svg><use href="#i-up"/></svg></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone" data-cap="(b) conduit runs the goal|same UI, any harness">
+			<div class="dock">
+				<div class="cmp">
+					<div class="a1-head">
+						<div class="a1-st"><span class="pulse"></span><b>Working 12m 40s</b><span class="x">· bash pnpm test:unit</span><span class="jump">↓ live</span></div>
+						<div class="a1-goal"><svg><use href="#i-target"/></svg><span class="c">pnpm test:unit is green</span><span class="oc-tag">conduit</span><span class="n" style="margin-left:6px">check 2</span></div>
+					</div>
+					<div class="ph">Reply to steer the agent…</div>
+					<div class="foot">
+						<span class="ib o"><svg><use href="#i-plus"/></svg></span>
+						<span class="chip"><span class="logo"><svg><use href="#opencode"/></svg></span><span class="hm">gpt-6-sol</span><svg class="cv"><use href="#i-chev"/></svg></span>
+						<span class="chip"><span class="meter" data-l="3"><i></i><i></i><i></i><i></i></span>High</span>
+						<span class="sp"></span>
+						<span class="chip"><svg><use href="#i-shield"/></svg>Ask</span>
+						<span class="stop"><i></i></span>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>(a) Not supported</dt><dd>Show "Set goal" greyed out with "Claude only", and treat <code>/goal</code> as an unknown command. Ships with v1 at no cost.</dd>
+		<dt>(b) Conduit-run goal</dt><dd>Conduit stores the condition. When the session goes idle, a cheap model call judges the transcript and returns not yet, met, or impossible. On "not yet", conduit sends "Continue toward the goal: …" as the next message. The small <span class="oc-tag">conduit</span> tag shows who is checking. This works for any harness, and could later replace Claude's built-in goal if we wanted identical behaviour everywhere.</dd>
+		<dt>(c) Community plugin</dt><dd>Detect a goal plugin and read its state. That ties us to someone else's format, which could change without warning. Not recommended.</dd>
+		<dt>Recommendation</dt><dd><b>(a) for v1, (b) as a follow-up.</b> (b) is a real feature: it needs a loop owner, a token budget, a stop condition, and a way to survive a daemon restart. It should get its own spec, not ride along with the redesign.</dd>
+	</dl>
+</section>
+
+<!-- ═════════════ PICK ═════════════ -->
+<section class="design" id="pick">
+	<div class="dh"><h3>Recommendation</h3><span class="tag best">pick</span>
+		<p class="pitch"><b>A1 Dock+ as the base</b>, plus four pieces taken from other designs. It keeps the B3 status line you liked, adds just one line (22px) and only while a goal is active, and every control is still a single tap on phone and desktop.</p></div>
+	<dl class="spec">
+		<dt>Base: A1</dt><dd>B3's status line, the goal on line 2, and tapping the goal opens the goal details (Edit / Clear). Footer: <b>+</b> · <b>logo + model</b> · <b>effort meter</b> (tap to cycle) · <b>approvals shield</b> · send/stop.</dd>
+		<dt>+ B1's attach sheet</dt><dd>The + button opens photo, camera, file, and <b>Set goal</b>, so goals can be found without knowing <code>/goal</code>.</dd>
+		<dt>+ C4's set-goal flow</dt><dd>Typing <code>/goal</code> turns the send button violet and shows a one-card explainer.</dd>
+		<dt>+ C5's check history</dt><dd>Put the check timeline inside the goal details, not as a permanent rail. You get the full history without paying for the height.</dd>
+		<dt>+ A4's approvals menu</dt><dd>Each mode gets a one-line description, and elevated modes stay amber.</dd>
+		<dt>Picker</dt><dd>P1 sheet on phone, P3 popover on desktop, both built from the same parts.</dd>
+		<dt>Removed</dt><dd>AgentSelector and ContextWindowSelector leave the input row and move into the picker. The context meter stays in ContextBar.</dd>
+		<dt>Runner-up</dt><dd><b>B2 goal border</b>, if you'd rather the goal be ambient (a violet frame) than a line of text. Its downside: a border can't show the reason text.</dd>
+	</dl>
+</section>
+
+<!--BODY-->
+</div>
+<script>
+// Wrap each phone's dock and overlays in a frame with a shared status bar, app bar and transcript.
+for (const f of document.querySelectorAll('figure.phone')) {
+	const [a, b] = (f.dataset.cap || '').split('|');
+	const screen = document.createElement('div');
+	screen.className = 'screen';
+	screen.innerHTML = `<div class="sbar"><span>9:41</span><span>5G&nbsp;▮▮▮</span></div><div class="appbar"><span class="back">‹</span><span class="title">${f.dataset.title || 'Green acceptance suite'}</span><span class="more">···</span></div><div class="body"></div>`;
+	if (f.dataset.appbar === 'none') screen.querySelector('.appbar').remove();
+	const body = screen.querySelector('.body');
+	body.append(document.getElementById('tx-' + (f.dataset.tx || 'working')).content.cloneNode(true));
+	for (const c of [...f.children]) {
+		if (c.classList.contains('top')) body.before(c);
+		else if (c.classList.contains('in-body')) body.append(c);
+		else screen.append(c);
+	}
+	if (!screen.querySelector('.kbd')) screen.append(Object.assign(document.createElement('div'), { className: 'home' }));
+	f.innerHTML = `<figcaption><span>${a}</span><span>${b || ''}</span></figcaption>`;
+	f.append(screen);
+}
+// Effort-style cyclers: tap to step through values.
+for (const el of document.querySelectorAll('[data-cycle]')) {
+	el.addEventListener('click', () => {
+		const vals = el.dataset.cycle.split(',');
+		const i = (Number(el.dataset.i || 0) + 1) % vals.length;
+		el.dataset.i = i;
+		const v = el.querySelector('.v'); if (v) v.textContent = vals[i];
+		const m = el.querySelector('.meter'); if (m) m.dataset.l = String(i + 1);
+		el.querySelectorAll('[data-seg]').forEach((s, j) => s.classList.toggle('on', j === i));
+	});
+}
+// Segmented controls: tap a segment to select it.
+for (const seg of document.querySelectorAll('.seg')) {
+	seg.addEventListener('click', (e) => {
+		const t = e.target.closest('span'); if (!t) return;
+		seg.querySelectorAll('span').forEach((s) => s.classList.toggle('on', s === t));
+	});
+}
+</script>
+</body>
+</html>

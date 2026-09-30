@@ -52,11 +52,45 @@ describe("readSessionGit", () => {
 			merged: false,
 		});
 	});
+	it("reports modifications to a tracked file as dirty", async () => {
+		const directory = repo();
+		commit(directory, "tracked");
+		writeFileSync(join(directory, "tracked"), "changed");
+		expect(await readSessionGit(directory)).toMatchObject({ dirty: true });
+	});
+	it("reports an untracked file as dirty", async () => {
+		const directory = repo();
+		commit(directory, "tracked");
+		writeFileSync(join(directory, "untracked"), "new");
+		expect(await readSessionGit(directory)).toMatchObject({ dirty: true });
+	});
+	it("reports ahead and behind against an upstream branch", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "checkout", "-qb", "upstream");
+		commit(directory, "upstream-only");
+		git(directory, "checkout", "-qb", "feature", "HEAD~1");
+		git(directory, "branch", "--set-upstream-to=upstream", "feature");
+		commit(directory, "feature-only");
+		expect(await readSessionGit(directory)).toMatchObject({
+			branch: "feature",
+			ahead: 1,
+			behind: 1,
+			dirty: false,
+		});
+	});
+	it("omits ahead and behind without an upstream", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		const state = await readSessionGit(directory);
+		expect(state).not.toHaveProperty("ahead");
+		expect(state).not.toHaveProperty("behind");
+	});
 	it("omits the branch for detached HEAD", async () => {
 		const directory = repo();
 		const head = commit(directory, "initial");
 		git(directory, "checkout", "--detach", "-q");
-		expect(await readSessionGit(directory)).toEqual({ head });
+		expect(await readSessionGit(directory)).toEqual({ head, dirty: false });
 	});
 	it("identifies a linked worktree", async () => {
 		const directory = repo();
@@ -147,7 +181,10 @@ describe("readSessionGit", () => {
 		});
 	});
 	it("reads an empty repository without a head", async () => {
-		expect(await readSessionGit(repo())).toEqual({ branch: "main" });
+		expect(await readSessionGit(repo())).toEqual({
+			branch: "main",
+			dirty: false,
+		});
 	});
 });
 

@@ -1,22 +1,24 @@
-<!-- ─── Sidebar File Panel ───────────────────────────────────────────────────── -->
-<!-- File browser shared by the sidebar and the phone session view. -->
+<!-- ─── File Tree Panel ─────────────────────────────────────────────────────── -->
+<!-- File browser shared by the desktop pane and phone session view. -->
 <!-- Owns WS subscriptions for file_list/file_content. -->
 
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import { untrack } from "svelte";
 	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
-	import { openFileViewer, setSidebarPanel } from "../../stores/ui.svelte.js";
+	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
+	import { setFilesOpen } from "../../stores/session-view.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getFileContentRpc, getFileListRpc } from "../../transport/ws-rpc-client.js";
-	import { applyGetFileContentResponse, applyGetFileListResponse } from "../../stores/ws-dispatch.js";
+	import { getFileListRpc } from "../../transport/ws-rpc-client.js";
+	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Button from "../ui/Button.svelte";
 	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 
-	let { onClose }: { onClose?: () => void } = $props();
+	let { onClose, pane = false, paneTitle, paneActions }: { onClose?: () => void; pane?: boolean; paneTitle?: Snippet | undefined; paneActions?: Snippet | undefined } = $props();
 
 	// ─── State ─────────────────────────────────────────────────────────────────
 
@@ -89,14 +91,21 @@
 		loadDirectory(path);
 	}
 
+	// The tree is inert while a preview covers it, so closing the preview hands
+	// focus back to the row that opened it. Found by path rather than by
+	// activeElement because Safari does not focus buttons on click.
+	let previewedPath: string | undefined;
+	$effect(() => {
+		if (uiState.fileViewerOpen || !previewedPath || !fileTreeEl) return;
+		fileTreeEl
+			.querySelector<HTMLElement>(`[data-path="${CSS.escape(previewedPath)}"]`)
+			?.focus({ preventScroll: true });
+		previewedPath = undefined;
+	});
+
 	function handleFileClick(fullPath: string) {
+		previewedPath = fullPath;
 		openFileViewer(fullPath);
-		const slug = getCurrentSlug();
-		if (slug) {
-			void getFileContentRpc({ projectSlug: slug, path: fullPath }).then(
-				applyGetFileContentResponse,
-			);
-		}
 	}
 
 	function handleDirClick(fullPath: string) {
@@ -117,7 +126,7 @@
 
 	function closePanel() {
 		if (onClose) onClose();
-		else setSidebarPanel("sessions");
+		else setFilesOpen(false);
 	}
 
 	// ─── WS message subscription ───────────────────────────────────────────────
@@ -143,22 +152,32 @@
 	id="sidebar-panel-files"
 	class="sidebar-panel flex flex-col flex-1 overflow-hidden"
 >
-	<!-- Header -->
+	{#snippet refreshButton()}
+		<Button
+			id="file-panel-refresh"
+			variant="toolbar"
+			size="content"
+			class="h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md"
+			iconOnly
+			iconSize={14}
+			icon="refresh-cw"
+			title="Refresh file tree"
+			ariaLabel="Refresh file tree"
+			onclick={refresh}
+		/>
+	{/snippet}
+	{#if pane && paneTitle && paneActions}
+		<div class="flex h-9 shrink-0 items-center gap-1 border-b border-border-subtle px-2">
+			{@render paneTitle()}
+			<span class="flex-1"></span>
+			{@render refreshButton()}
+			{@render paneActions()}
+		</div>
+	{:else if !pane}
 	<div class="session-list-header flex items-center justify-between px-4 py-1 shrink-0">
 		<span class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer">File Browser</span>
 		<div class="session-list-header-actions flex items-center gap-0.5">
-			<Button
-				id="file-panel-refresh"
-				variant="toolbar"
-				size="content"
-				class="h-6 w-6 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-md"
-				iconOnly
-				iconSize={14}
-				icon="refresh-cw"
-				title="Refresh file tree"
-				ariaLabel="Refresh file tree"
-				onclick={refresh}
-			/>
+			{@render refreshButton()}
 			<Button
 				id="file-panel-close"
 				variant="toolbar"
@@ -172,7 +191,7 @@
 				onclick={closePanel}
 			/>
 		</div>
-	</div>
+	</div>{/if}
 
 	<!-- Breadcrumbs -->
 	<div class="fb-breadcrumbs flex items-center gap-0.5 px-4 py-1.5 text-xs text-text-muted overflow-x-auto shrink-0">

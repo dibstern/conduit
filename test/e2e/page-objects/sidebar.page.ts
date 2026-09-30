@@ -6,13 +6,11 @@ export class SidebarPage {
 	readonly sessionList: Locator;
 	readonly newSessionBtn: Locator;
 	readonly resumeSessionBtn: Locator;
-	readonly fileBrowserBtn: Locator;
 	readonly terminalBtn: Locator;
 	readonly searchInput: Locator;
 	readonly searchContainer: Locator;
 	readonly fileTree: Locator;
 	readonly sessionsPanel: Locator;
-	readonly filesPanel: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
@@ -20,13 +18,11 @@ export class SidebarPage {
 		this.sessionList = page.locator("#session-list");
 		this.newSessionBtn = page.locator("#new-session-btn");
 		this.resumeSessionBtn = page.locator("#resume-session-btn");
-		this.fileBrowserBtn = page.locator("#file-browser-btn");
 		this.terminalBtn = page.locator("#terminal-sidebar-btn");
 		this.searchInput = page.locator("#session-search-input");
 		this.searchContainer = page.locator("#session-search");
 		this.fileTree = page.locator("#file-tree");
 		this.sessionsPanel = page.locator("#sidebar-panel-sessions");
-		this.filesPanel = page.locator("#sidebar-panel-files");
 	}
 
 	async getSessionItems(): Promise<Locator> {
@@ -66,13 +62,5 @@ export class SidebarPage {
 				timeout,
 			},
 		);
-	}
-
-	async openFilePanel(): Promise<void> {
-		await this.fileBrowserBtn.click();
-	}
-
-	async closeFilePanel(): Promise<void> {
-		await this.fileBrowserBtn.click();
 	}
 }

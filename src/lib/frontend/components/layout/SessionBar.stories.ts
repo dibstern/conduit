@@ -12,13 +12,16 @@ import {
 	routerState,
 } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import {
+	noteReadStateChanged,
+	noteSessionOpened,
+} from "../../stores/session-unread-hold.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	handlePtyOutput,
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
-import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import type { OpenCodeInstance } from "../../types.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
@@ -33,11 +36,10 @@ const meta = {
 	// be caught: gate it.
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	beforeEach: () => {
+		noteSessionOpened("__storybook_reset__");
 		resetNotifState();
-		// Layout/Header seeds this same module-level store, and Storybook shares
-		// it across story files. Reset or the badge appears in every story.
+		// Storybook shares module-level stores across stories.
 		instanceState.instances = [];
-		uiState.sidebarPanel = "files";
 		routerState.path = `/s/${mockSession.id}`;
 		routerState.search = "";
 		attachedProjectState.slug = "conduit";
@@ -50,7 +52,7 @@ const meta = {
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only
 		// the story that wants the collapse gets it.
-		sessionViewState.compact = false;
+		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
 		sessionViewState.forcedOpen = true;
 		sessionViewState.filesOpen = false;
@@ -75,7 +77,6 @@ export const Default: Story = {
 		const back = canvas.getByRole("button", { name: /Sessions/ });
 		await userEvent.click(back);
 		expect(routerState.path).toBe("/");
-		expect(uiState.sidebarPanel).toBe("sessions");
 
 		expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
 			"Test Session",
@@ -84,29 +85,32 @@ export const Default: Story = {
 			"conduit",
 		);
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
-		// The overflow trigger is the only route to settings, share and the
-		// terminal at this width, so its presence is not cosmetic.
-		expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
+		expect(canvas.getByTestId("session-bar-views-button")).toBeVisible();
+		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
 		expect(canvas.queryByTestId("instance-badge")).toBeNull();
 	},
 };
 
-export const Switcher: Story = {
+export const ViewsSheetOpen: Story = {
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const tabs = within(canvas.getByTestId("session-bar-views")).getAllByRole(
-			"tab",
+		await userEvent.click(canvas.getByTestId("session-bar-views-button"));
+		const sheet = await within(document.body).findByTestId(
+			"session-bar-views-sheet",
 		);
-		await expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+		await expect(sheet).toBeVisible();
+		const items = within(sheet).getAllByRole("menuitemradio");
+		expect(items.map((item) => item.textContent?.trim())).toEqual([
 			"Chat",
 			"Terminal",
 			"Diff",
 			"Files",
 		]);
-		await expect(tabs[0]).toHaveAttribute("aria-selected", "true");
-		await expect(tabs[2]).toBeDisabled();
-		for (const tab of tabs)
-			expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+		await expect(items[0]).toHaveAttribute("aria-checked", "true");
+		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
 	},
 };
 
@@ -116,28 +120,34 @@ function emitOutputFromTwoTerminals() {
 	handlePtyOutput({ type: "pty_output", ptyId: "pty-2", data: "three" });
 }
 
-export const WithTerminalBadge: Story = {
+export const WithViewBadge: Story = {
 	beforeEach: emitOutputFromTwoTerminals,
 	play: async ({ canvasElement }) => {
-		const terminal = within(canvasElement).getByRole("tab", {
-			name: "Terminal",
-		});
-		await expect(terminal).toHaveTextContent("2");
-		await expect(terminal).toHaveAttribute("aria-selected", "false");
+		const button = within(canvasElement).getByTestId(
+			"session-bar-views-button",
+		);
+		await expect(button).toHaveTextContent("2");
 	},
 };
 
 export const OpeningTerminalClearsBadge: Story = {
+	tags: ["viewport-capture"],
 	beforeEach: emitOutputFromTwoTerminals,
 	play: async ({ canvasElement }) => {
-		const terminal = within(canvasElement).getByRole("tab", {
-			name: "Terminal",
-		});
-		await expect(terminal).toHaveTextContent("2");
+		const button = within(canvasElement).getByTestId(
+			"session-bar-views-button",
+		);
+		await expect(button).toHaveTextContent("2");
 		openPanel();
 		await tick();
-		await expect(terminal).toHaveAttribute("aria-selected", "true");
-		await expect(terminal).not.toHaveTextContent("2");
+		await expect(button).not.toHaveTextContent("2");
+		await userEvent.click(button);
+		const sheet = await within(document.body).findByTestId(
+			"session-bar-views-sheet",
+		);
+		await expect(
+			within(sheet).getByTestId("session-bar-view-terminal"),
+		).toHaveAttribute("aria-checked", "true");
 		expect(terminalState.unreadPtyIds.size).toBe(0);
 	},
 };
@@ -241,7 +251,7 @@ export const NarrowestPhone: Story = {
 };
 
 // Two instances minimum: the badge is a picker, and a picker with one option is
-// noise. Mirrors Layout/Header's fixture so the two bars can be compared.
+// noise.
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
@@ -264,7 +274,7 @@ const mockInstances: OpenCodeInstance[] = [
 ];
 
 /**
- * The instance badge stays in the bar rather than moving into the overflow
+ * The instance badge stays in the bar rather than moving into a menu
  * menu: it says where this project's work runs, which is identity, and a status
  * dot that only exists behind a closed menu reports nothing.
  */
@@ -292,13 +302,17 @@ export const WithInstanceBadge: Story = {
 };
 
 /**
- * Everything the replaced global header used to offer. Without this menu those
- * actions have no route on a phone at all — the sidebar has never carried a
- * settings entry.
+ * The collapsed bar keeps its overflow while the expanded bar uses the title
+ * and Views sheets.
  */
 export const OverflowMenuOpen: Story = {
 	// The menu portals to <body>, so the capture has to frame the page.
 	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-overflow"));
@@ -320,7 +334,7 @@ export const OverflowMenuOpen: Story = {
 		await expect(
 			within(menu).getByRole("menuitem", { name: "Chat" }),
 		).toHaveAttribute("aria-current", "true");
-		// Debug is behind its feature flag, as it is in the header.
+		// Debug is behind its feature flag.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
 	},
 };
@@ -408,5 +422,116 @@ export const ExpandedByChevron: Story = {
 		// Still at the bottom: the chevron overrides the rule, it does not move
 		// the transcript.
 		expect(sessionViewState.atBottom).toBe(true);
+	},
+};
+
+export const DesktopGitIdentity: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		projectState.projects = [
+			{
+				slug: "conduit",
+				title: "conduit",
+				directory: "/src/conduit",
+				git: { branch: "feature/17xt", worktree: "linked-15", dirty: true },
+			},
+		];
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-compact", "false");
+		await expect(canvas.getByTestId("session-bar-identity")).toHaveTextContent(
+			/conduit.*feature\/17xt.*linked-15/,
+		);
+		await expect(canvas.getByTitle("Uncommitted changes")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+	},
+};
+
+export const DesktopLongTitleNarrow: Story = {
+	args: { width: 480 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		sessionState.currentId = mockSessionLongTitle.id;
+		routerState.path = `/s/${mockSessionLongTitle.id}`;
+	},
+	play: async ({ canvasElement }) => {
+		const bar = within(canvasElement).getByTestId("session-bar");
+		const title = within(bar).getByTestId("session-bar-title");
+		const label = title.querySelector("span");
+		expect(title.clientWidth).toBeGreaterThanOrEqual(110);
+		expect(label?.scrollWidth).toBeGreaterThan(label?.clientWidth ?? 0);
+		expect(bar.scrollWidth).toBe(bar.clientWidth);
+	},
+};
+
+export const DesktopSettled: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		showState({ settledAt: Date.now() - 3_600_000 });
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-state-chip")).toHaveAttribute(
+			"data-state",
+			"settled",
+		);
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			"Un-settle",
+		);
+	},
+};
+
+export const DesktopNoSession: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		sessionState.currentId = null;
+		routerState.path = "/";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-identity")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+		expect(canvas.queryByTestId("session-bar-title")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
+	},
+};
+
+export const DesktopUnread: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const session = { ...mockSession, unread: true };
+		showState(session);
+		noteReadStateChanged(session, true);
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("session-bar-unread-chip"),
+		).toBeVisible();
+	},
+};
+
+export const DesktopUnreadAndSettled: Story = {
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const session = {
+			...mockSession,
+			unread: true,
+			settledAt: Date.now() - 3_600_000,
+		};
+		showState(session);
+		noteReadStateChanged(session, true);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-state-chip")).toBeVisible();
 	},
 };

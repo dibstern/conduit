@@ -1,10 +1,21 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
+import { clearFileTreeState } from "../../stores/file-tree.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../stores/router.svelte.js";
-import { uiState } from "../../stores/ui.svelte.js";
+import {
+	sessionViewState,
+	setFilesOpen,
+	setFilesPaneWidth,
+} from "../../stores/session-view.svelte.js";
+import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
+import {
+	applyGetFileContentResponse,
+	applyGetFileListResponse,
+} from "../../stores/ws-dispatch.js";
+import { mockFileContent, mockFileTree } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import ChatLayout from "./ChatLayout.svelte";
 
@@ -14,6 +25,7 @@ import ChatLayout from "./ChatLayout.svelte";
  * number into every baseline here and break them all on the next release bump.
  */
 const STUB_VERSION = "0.0.0-storybook";
+let nativeWebSocket: typeof WebSocket;
 
 /**
  * Connecting is not enough to get off the network: ChatLayout also fetches the
@@ -53,10 +65,17 @@ const meta = {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
 		uiState.rewindActive = false;
+		uiState.fileViewerOpen = false;
+		uiState.fileViewerPath = null;
+		sessionViewState.filesOpen = false;
+		sessionViewState.filesPaneExpanded = false;
+		sessionViewState.filesPaneWidth = null;
+		clearFileTreeState();
 		routerState.path = "/";
 		routerState.search = "?p=test-project";
 		attachedProjectState.slug = null;
 		// Static Storybook hosting needs a socket that completes its connection.
+		nativeWebSocket = globalThis.WebSocket;
 		const restoreSocket = connectedSocket();
 		const restoreFetch = stubProjectFetches();
 		return () => {
@@ -127,12 +146,137 @@ export const WithRewindBanner: Story = {
 	},
 	play: async (context) => {
 		await expectLayoutVisible(context);
+		// The banner and transcript use web fonts; capture after they settle.
+		await document.fonts.ready;
 		uiState.rewindActive = true;
 		await waitFor(() => {
 			expect(
 				context.canvasElement.querySelector(".rewind-banner"),
 				"rewind banner never rendered — this baseline is indistinguishable from Default",
 			).not.toBeNull();
+		});
+	},
+};
+
+async function showFilesTree(
+	context: Parameters<NonNullable<Story["play"]>>[0],
+): Promise<void> {
+	await expectLayoutVisible(context);
+	setFilesOpen(true);
+	await waitFor(() => {
+		expect(
+			context.canvasElement.querySelector('[data-testid="side-pane-files"]'),
+		).not.toBeNull();
+	});
+	applyGetFileListResponse({
+		projectSlug: "test-project",
+		path: ".",
+		entries: mockFileTree,
+	});
+	await waitFor(() => {
+		expect(context.canvasElement.textContent).toContain("README.md");
+	});
+}
+
+export const FilesTree: Story = {
+	beforeEach: () => {
+		routerState.path = SESSION_PATH;
+	},
+	play: showFilesTree,
+};
+
+export const FilesPreview: Story = {
+	beforeEach: () => {
+		routerState.path = SESSION_PATH;
+	},
+	play: async (context) => {
+		await showFilesTree(context);
+		openFileViewer("src/lib/project.ts");
+		await waitFor(() => {
+			expect(
+				context.canvasElement.querySelector("#file-viewer"),
+			).not.toBeNull();
+		});
+		applyGetFileContentResponse({
+			projectSlug: "test-project",
+			path: "src/lib/project.ts",
+			content: mockFileContent,
+		});
+		await waitFor(() => {
+			expect(
+				context.canvasElement.querySelector("#file-viewer code.hljs"),
+			).not.toBeNull();
+			expect(
+				context.canvasElement
+					.querySelector("#files-pane-title + span[title]")
+					?.getAttribute("title"),
+			).toBe("src/lib/project.ts");
+		});
+	},
+};
+
+export const FilesPreviewError: Story = {
+	beforeEach: () => {
+		routerState.path = SESSION_PATH;
+	},
+	play: async (context) => {
+		await showFilesTree(context);
+		const storySocket = globalThis.WebSocket;
+		globalThis.WebSocket = new Proxy(storySocket, {
+			construct(target, args) {
+				return Reflect.construct(
+					String(args[0]).includes("/rpc") ? nativeWebSocket : target,
+					args,
+				);
+			},
+		});
+		try {
+			openFileViewer("src/lib/missing.ts");
+			await waitFor(
+				() => {
+					expect(
+						context.canvasElement.querySelector('#file-viewer [role="alert"]'),
+					).not.toBeNull();
+				},
+				{ timeout: 5000 },
+			);
+		} finally {
+			globalThis.WebSocket = storySocket;
+		}
+	},
+};
+
+export const FilesExpanded: Story = {
+	beforeEach: () => {
+		routerState.path = SESSION_PATH;
+	},
+	play: async (context) => {
+		await showFilesTree(context);
+		sessionViewState.filesPaneExpanded = true;
+		await waitFor(() => {
+			expect(
+				context.canvasElement
+					.querySelector("#files-pane-expand")
+					?.getAttribute("aria-pressed"),
+			).toBe("true");
+		});
+	},
+};
+
+export const FilesForcedExpanded: Story = {
+	beforeEach: () => {
+		routerState.path = SESSION_PATH;
+	},
+	play: async (context) => {
+		context.canvasElement.style.width = "800px";
+		setFilesPaneWidth(400);
+		await showFilesTree(context);
+		await waitFor(() => {
+			expect(
+				context.canvasElement
+					.querySelector("#files-pane-expand")
+					?.getAttribute("aria-label"),
+			).toBe("Not enough room to show chat beside Files");
 		});
 	},
 };

@@ -24,6 +24,7 @@ import {
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
+import { isSessionUnreadHeld } from "./session-unread-hold.svelte.js";
 import {
 	wsDebugLog,
 	wsDebugLogMessage,
@@ -241,6 +242,7 @@ function doConnect(
 	// sends the correct session_switched on init (no flash of wrong session).
 	if (sessionId) {
 		params.set("session", sessionId);
+		if (isSessionUnreadHeld(sessionId)) params.set("skipMarkRead", "1");
 	}
 	if (slug) params.set("p", slug);
 	url += `?${params.toString()}`;

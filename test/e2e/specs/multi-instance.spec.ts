@@ -191,23 +191,24 @@ async function showSessionListOnMobile(page: Page): Promise<void> {
 }
 
 /**
- * The gear. On a phone it lives in the overflow menu of whichever top bar is
- * showing (the list's or the session's), because the global header that used
- * to hold it is replaced at this width.
+ * Settings lives in the list overflow or session title sheet on a phone,
+ * and in the session bar overflow on desktop.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
-	for (const [trigger, item] of [
-		["list-bar-overflow", "list-overflow-settings"],
-		["session-bar-overflow", "overflow-settings"],
-	] as const) {
-		const overflow = page.getByTestId(trigger);
-		if (await overflow.isVisible()) {
-			await overflow.click();
-			await page.getByTestId(item).click();
-			return;
-		}
+	const listOverflow = page.getByTestId("list-bar-overflow");
+	if (await listOverflow.isVisible()) {
+		await listOverflow.click();
+		await page.getByTestId("list-overflow-settings").click();
+		return;
 	}
-	await page.locator("#settings-btn, [title='Settings']").click();
+	const titleMenu = page.getByTestId("session-bar-title-menu");
+	if (await titleMenu.isVisible()) {
+		await titleMenu.click();
+		await page.getByTestId("session-title-settings").click();
+		return;
+	}
+	await page.getByTestId("session-bar-overflow").click();
+	await page.getByTestId("overflow-settings").click();
 }
 
 /** Open project management from the desktop sidebar or phone list bar. */
@@ -1034,7 +1035,7 @@ test.describe("Settings: Instance Status Updates", () => {
 		const instanceList = page.locator("#instance-settings-list");
 		const workRow = instanceList.locator("button", { hasText: "Work" });
 		await expect(workRow).toBeVisible();
-		const workDot = workRow.locator("[class*='rounded-full']");
+		const workDot = workRow.locator(".w-2.h-2.rounded-full");
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// Send instance_status to make Work "starting" (yellow)

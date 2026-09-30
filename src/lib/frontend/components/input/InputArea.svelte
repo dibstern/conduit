@@ -40,6 +40,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { noteMessageSent } from "../../stores/session-unread-hold.svelte.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -368,6 +369,7 @@
 			}
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
+		noteMessageSent(sid);
 		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
@@ -711,7 +713,7 @@
 			{/if}
 
 			<!-- Bottom row: attach + agent + model + send -->
-			<div id="input-bottom" class="flex items-center justify-between gap-1">
+			<div id="input-bottom" class="flex min-w-0 items-center justify-between gap-1">
 				<div
 					id="input-bottom-left"
 					class="flex items-center gap-1 min-w-0"
@@ -720,7 +722,7 @@
 					<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
 
 					<!-- Agent selector -->
-					<div id="agent-selector-wrap">
+					<div id="agent-selector-wrap" class="min-w-0">
 						<AgentSelector />
 					</div>
 				</div>
