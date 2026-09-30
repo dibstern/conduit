@@ -123,13 +123,6 @@ export const makeClaudeCapabilitiesService = (
 		return makeClaudeCapabilitiesServiceWithCache(cacheRef, deps);
 	});
 
-export const makeUnsafeClaudeCapabilitiesService = (
-	deps: ClaudeCapabilitiesServiceDeps = {},
-): ClaudeCapabilitiesService => {
-	const cacheRef = Ref.unsafeMake(HashMap.empty<string, CacheEntry>());
-	return makeClaudeCapabilitiesServiceWithCache(cacheRef, deps);
-};
-
 export const ClaudeCapabilitiesServiceLive = (
 	deps: ClaudeCapabilitiesServiceDeps = {},
 ): Layer.Layer<ClaudeCapabilitiesServiceTag> =>

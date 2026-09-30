@@ -3,10 +3,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { Effect } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import {
-	makeProviderTurnService,
-	ProviderTurnServiceTag,
-} from "../domain/relay/Services/provider-turn-service.js";
+import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
 	WebSocketHandlerTag,
@@ -83,13 +80,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const originalActiveId = activeId;
 		const sessionModel = yield* getModel(activeId);
 		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
-		const providerTurnServiceOption = yield* Effect.serviceOption(
-			ProviderTurnServiceTag,
-		);
-		const providerTurnService =
-			providerTurnServiceOption._tag === "Some"
-				? providerTurnServiceOption.value
-				: yield* makeProviderTurnService;
+		const providerTurnService = yield* ProviderTurnServiceTag;
 		activeId = yield* providerTurnService.prepareTurnSession({
 			clientId,
 			commandId: input.commandId,

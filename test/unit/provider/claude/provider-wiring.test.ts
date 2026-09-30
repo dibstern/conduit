@@ -1,12 +1,13 @@
 // test/unit/provider/claude/provider-wiring.test.ts
+
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
+import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import {
 	createMockEventSink,
 	createMockQuery,
@@ -28,7 +29,9 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("registers Claude provider instance in ProviderRegistry", () => {
 		const registry = new ProviderRegistry();
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 
 		registry.registerInstance(instance);
 
@@ -38,7 +41,7 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("lists both providers when both registered", () => {
 		const registry = new ProviderRegistry();
-		const claude = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const claude = makeTestClaudeProviderInstance({ workspaceRoot: workspace });
 
 		// Create a minimal mock for opencode instance
 		const opencode = {
@@ -74,7 +77,9 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("OrchestrationEngine dispatches discover to Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		registry.registerInstance(instance);
 
 		const engine = new OrchestrationEngine({ registry });
@@ -103,7 +108,9 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("shutdownAllEffect shuts down Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		registry.registerInstance(instance);
 
 		// Should not throw
@@ -112,7 +119,9 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("session binding tracks provider for session", () => {
 		const registry = new ProviderRegistry();
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		registry.registerInstance(instance);
 
 		const engine = new OrchestrationEngine({ registry });
@@ -165,7 +174,7 @@ describe("Provider wiring with Claude provider instance", () => {
 
 		// Wire up the full stack: ProviderRegistry + ClaudeProviderInstance + OrchestrationEngine
 		const registry = new ProviderRegistry();
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 		});

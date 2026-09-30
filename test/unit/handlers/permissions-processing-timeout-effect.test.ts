@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -49,17 +50,20 @@ describe("permission/question processing timeouts through Effect state", () => {
 			const client = {
 				question: { reply: vi.fn(async () => undefined) },
 			} as unknown as OpenCodeAPI;
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-				Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
-				PendingInteractionServiceLive,
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
+					Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+					PendingInteractionServiceLive,
+					Layer.succeed(LoggerTag, createSilentLogger()),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+					makeOverridesStateLive(),
 				),
-				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {

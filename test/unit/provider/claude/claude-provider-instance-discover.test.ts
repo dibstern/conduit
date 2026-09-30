@@ -1,12 +1,13 @@
 // test/unit/provider/claude/claude-provider-instance-discover.test.ts
+
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __setProbeOverrideForTesting } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { makeUnsafeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
+import { makeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
+import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 
 describe("ClaudeProviderInstance.discoverEffect()", () => {
 	let workspace: string;
@@ -45,12 +46,16 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("returns providerId 'claude'", () => {
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		expect(instance.providerId).toBe("claude");
 	});
 
 	it("returns capabilities with models, tools, thinking, permissions, questions", async () => {
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		const caps = await Effect.runPromise(instance.discoverEffect());
 
 		expect(caps.models.length).toBeGreaterThan(0);
@@ -70,7 +75,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("enumerates built-in commands", async () => {
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		const caps = await Effect.runPromise(instance.discoverEffect());
 		const builtins = caps.commands.filter((c) => c.source === "builtin");
 		expect(builtins.length).toBeGreaterThan(0);
@@ -80,7 +87,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("enumerates project commands from .claude/commands", async () => {
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		const caps = await Effect.runPromise(instance.discoverEffect());
 		const projectCmds = caps.commands.filter(
 			(c) => c.source === "project-command",
@@ -91,7 +100,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("enumerates project skills from .claude/skills", async () => {
-		const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+		});
 		const caps = await Effect.runPromise(instance.discoverEffect());
 		const projectSkills = caps.commands.filter(
 			(c) => c.source === "project-skill",
@@ -105,7 +116,7 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 		const emptyWorkspace = join(tmpdir(), `conduit-claude-empty-${Date.now()}`);
 		mkdirSync(emptyWorkspace, { recursive: true });
 		try {
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: emptyWorkspace,
 			});
 			const caps = await Effect.runPromise(instance.discoverEffect());
@@ -138,7 +149,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				agents: [],
 			}));
 
-			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const instance = makeTestClaudeProviderInstance({
+				workspaceRoot: workspace,
+			});
 			const caps = await Effect.runPromise(instance.discoverEffect());
 			expect(caps.models).toHaveLength(1);
 			expect(caps.models[0]?.id).toBe("claude-opus-4-7");
@@ -149,7 +162,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				throw new Error("claude binary not found");
 			});
 
-			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const instance = makeTestClaudeProviderInstance({
+				workspaceRoot: workspace,
+			});
 			const caps = await Effect.runPromise(instance.discoverEffect());
 			expect(caps.models.length).toBeGreaterThan(0);
 			expect(caps.models.every((m) => m.providerId === "claude")).toBe(true);
@@ -168,13 +183,15 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				agents: [],
 			});
 			__setProbeOverrideForTesting(probe);
-			const capabilitiesService = makeUnsafeClaudeCapabilitiesService();
+			const capabilitiesService = Effect.runSync(
+				makeClaudeCapabilitiesService(),
+			);
 
-			const a1 = new ClaudeProviderInstance({
+			const a1 = makeTestClaudeProviderInstance({
 				workspaceRoot: workspace,
 				capabilitiesService,
 			});
-			const a2 = new ClaudeProviderInstance({
+			const a2 = makeTestClaudeProviderInstance({
 				workspaceRoot: workspace,
 				capabilitiesService,
 			});
@@ -192,7 +209,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				],
 			}));
 
-			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const instance = makeTestClaudeProviderInstance({
+				workspaceRoot: workspace,
+			});
 			const caps = await Effect.runPromise(instance.discoverEffect());
 			expect(caps.agents).toEqual([
 				{ id: "Explore", name: "Explore", description: "Codebase explorer" },
@@ -213,7 +232,9 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				],
 			}));
 
-			const instance = new ClaudeProviderInstance({ workspaceRoot: workspace });
+			const instance = makeTestClaudeProviderInstance({
+				workspaceRoot: workspace,
+			});
 			const caps = await Effect.runPromise(instance.discoverEffect());
 			const names = caps.commands.map((c) => c.name);
 			expect(names).toContain("new-command");

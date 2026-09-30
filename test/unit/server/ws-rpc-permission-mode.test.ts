@@ -15,7 +15,6 @@ import {
 	makeOverridesStateLive,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	ProviderRegistry,
@@ -23,6 +22,7 @@ import {
 } from "../../../src/lib/provider/provider-registry.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -75,7 +75,7 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 describe("WsRpcServerLayer SwitchPermissionMode", () => {
 	it.effect("sets, broadcasts, and hydrates the permission mode", () => {
 		const wsHandler = makeMockWebSocketHandler();
-		const claudeInstance = new ClaudeProviderInstance({
+		const claudeInstance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 		});
 		const setSdkPermissionMode = vi
@@ -137,7 +137,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 
 	it.effect("restores the switched mode after a fresh overrides layer", () => {
 		const wsHandler = makeMockWebSocketHandler();
-		const claudeInstance = new ClaudeProviderInstance({
+		const claudeInstance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 		});
 		vi.spyOn(claudeInstance, "setPermissionModeEffect").mockReturnValue(
@@ -191,7 +191,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		"leaves the stored mode unchanged when the live query rejects the update",
 		() => {
 			const wsHandler = makeMockWebSocketHandler();
-			const claudeInstance = new ClaudeProviderInstance({
+			const claudeInstance = makeTestClaudeProviderInstance({
 				workspaceRoot: "/tmp/ws",
 			});
 			vi.spyOn(claudeInstance, "setPermissionModeEffect").mockReturnValue(

@@ -9,6 +9,7 @@ import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -113,24 +114,27 @@ describe("handleMessage with Effect provider state persistence", () => {
 					],
 				})),
 			} as unknown as OrchestrationEngine;
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+					Layer.succeed(ConfigTag, {
+						httpServer: createServer(),
+						opencodeUrl: "http://127.0.0.1:1",
+						projectDir: "/tmp/project",
+						slug: "provider-state-test",
+					} satisfies ProjectRelayConfig),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					makePersistenceEffectLayer(filename),
+					makeOverridesStateLive(),
 				),
-				Layer.succeed(ConfigTag, {
-					httpServer: createServer(),
-					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: "/tmp/project",
-					slug: "provider-state-test",
-				} satisfies ProjectRelayConfig),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makePersistenceEffectLayer(filename),
-				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -203,21 +207,27 @@ describe("handleMessage with Effect provider state persistence", () => {
 				durationMs: 0,
 			})),
 		} as unknown as OrchestrationEngine;
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			Layer.succeed(ConfigTag, {
-				httpServer: createServer(),
-				opencodeUrl: "http://127.0.0.1:1",
-				projectDir: "/tmp/project",
-				slug: "history-test",
-			} satisfies ProjectRelayConfig),
-			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			makePersistenceEffectLayer(filename),
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
+				Layer.succeed(ConfigTag, {
+					httpServer: createServer(),
+					opencodeUrl: "http://127.0.0.1:1",
+					projectDir: "/tmp/project",
+					slug: "history-test",
+				} satisfies ProjectRelayConfig),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makePersistenceEffectLayer(filename),
+				makeOverridesStateLive(),
+			),
 		);
 
 		return Effect.gen(function* () {
@@ -302,21 +312,27 @@ describe("handleMessage with Effect provider state persistence", () => {
 				durationMs: 0,
 			})),
 		} as unknown as OrchestrationEngine;
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			Layer.succeed(ConfigTag, {
-				httpServer: createServer(),
-				opencodeUrl: "http://127.0.0.1:1",
-				projectDir: "/tmp/project",
-				slug: "claude-user-effect-test",
-			} satisfies ProjectRelayConfig),
-			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			makePersistenceEffectLayer(filename),
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
+				Layer.succeed(ConfigTag, {
+					httpServer: createServer(),
+					opencodeUrl: "http://127.0.0.1:1",
+					projectDir: "/tmp/project",
+					slug: "claude-user-effect-test",
+				} satisfies ProjectRelayConfig),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makePersistenceEffectLayer(filename),
+				makeOverridesStateLive(),
+			),
 		);
 
 		return Effect.gen(function* () {
@@ -405,25 +421,28 @@ describe("handleMessage with Effect provider state persistence", () => {
 					};
 				}),
 			} as unknown as OrchestrationEngine;
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+					Layer.succeed(ConfigTag, {
+						httpServer: createServer(),
+						opencodeUrl: "http://127.0.0.1:1",
+						projectDir: "/tmp/project",
+						slug: "claude-sink-effect-test",
+					} satisfies ProjectRelayConfig),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					persistence,
+					makeIngestionLayer(persistence, ws),
+					makeOverridesStateLive(),
 				),
-				Layer.succeed(ConfigTag, {
-					httpServer: createServer(),
-					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: "/tmp/project",
-					slug: "claude-sink-effect-test",
-				} satisfies ProjectRelayConfig),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				persistence,
-				makeIngestionLayer(persistence, ws),
-				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -511,22 +530,28 @@ describe("handleMessage with Effect provider state persistence", () => {
 				};
 			}),
 		} as unknown as OrchestrationEngine;
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			Layer.succeed(ConfigTag, {
-				httpServer: createServer(),
-				opencodeUrl: "http://127.0.0.1:1",
-				projectDir: "/tmp/project",
-				slug: "claude-child-sink-test",
-			} satisfies ProjectRelayConfig),
-			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			persistence,
-			makeIngestionLayer(persistence, ws),
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
+				Layer.succeed(ConfigTag, {
+					httpServer: createServer(),
+					opencodeUrl: "http://127.0.0.1:1",
+					projectDir: "/tmp/project",
+					slug: "claude-child-sink-test",
+				} satisfies ProjectRelayConfig),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				persistence,
+				makeIngestionLayer(persistence, ws),
+				makeOverridesStateLive(),
+			),
 		);
 
 		return Effect.gen(function* () {

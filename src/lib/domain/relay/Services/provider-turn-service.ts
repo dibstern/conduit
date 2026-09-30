@@ -1,15 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-	Context,
-	Deferred,
-	Effect,
-	type Fiber,
-	FiberId,
-	FiberMap,
-	Layer,
-	MutableHashMap,
-	Runtime,
-} from "effect";
+import { Context, Effect, FiberMap, Layer, Runtime } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -110,39 +100,6 @@ const makeProviderRuntimeIngestionRequiredSink = (
 		cancelSessionInteractions: () => Effect.void,
 	};
 };
-
-// Compatibility constructor support for the old prompt-handler fallback seam.
-// Production wiring uses the scoped Layer below so dispatch fibers are
-// interrupted with the relay ProviderTurnService scope.
-const makeUnsafeFiberMap = <K, A = unknown, E = unknown>(): FiberMap.FiberMap<
-	K,
-	A,
-	E
-> =>
-	({
-		[FiberMap.TypeId]: FiberMap.TypeId,
-		deferred: Deferred.unsafeMake<void, E>(FiberId.none),
-		state: {
-			_tag: "Open",
-			backing: MutableHashMap.empty<K, Fiber.RuntimeFiber<A, E>>(),
-		},
-		[Symbol.iterator](this: {
-			state:
-				| { readonly _tag: "Closed" }
-				| {
-						readonly _tag: "Open";
-						readonly backing: MutableHashMap.MutableHashMap<
-							K,
-							Fiber.RuntimeFiber<A, E>
-						>;
-				  };
-		}) {
-			if (this.state._tag === "Closed") {
-				return [][Symbol.iterator]();
-			}
-			return this.state.backing[Symbol.iterator]();
-		},
-	}) as unknown as FiberMap.FiberMap<K, A, E>;
 
 export interface ProviderTurnServiceSendInput {
 	readonly clientId: string;
@@ -260,7 +217,7 @@ function buildLegacyPrompt(input: ProviderTurnServiceSendInput): PromptOptions {
 	return prompt;
 }
 
-export const makeProviderTurnService = Effect.gen(function* () {
+const makeProviderTurnService = Effect.gen(function* () {
 	const client = yield* OpenCodeAPITag;
 	const wsHandler = yield* WebSocketHandlerTag;
 	const log = yield* LoggerTag;
@@ -270,13 +227,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
 	const overridesRef = yield* OverridesStateTag;
 	const runTimeout = Runtime.runFork(runtime);
-	const dispatchFibersOption = yield* Effect.serviceOption(
-		ProviderTurnDispatchFibersTag,
-	);
-	const dispatchFibers =
-		dispatchFibersOption._tag === "Some"
-			? dispatchFibersOption.value
-			: makeUnsafeFiberMap<string, void, unknown>();
+	const dispatchFibers = yield* ProviderTurnDispatchFibersTag;
 
 	const sendErrorMessage = (
 		input: ProviderTurnServiceSendInput,

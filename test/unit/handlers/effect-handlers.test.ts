@@ -1,4 +1,5 @@
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 // ─── Effect Handler Tests (Batch 1) ─────────────────────────────────────────
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
@@ -2358,14 +2359,17 @@ describe("handleAskUserResponse", () => {
 				question: { reply: vi.fn(async () => {}) },
 			} as unknown as OpenCodeAPI;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(ConfigTag, mockConfig()),
-				PendingInteractionServiceLive,
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(ConfigTag, mockConfig()),
+					PendingInteractionServiceLive,
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return handleAskUserResponse("client-1", {
@@ -2417,15 +2421,18 @@ describe("handleAskUserResponse", () => {
 				),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(ConfigTag, mockConfig()),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(ConfigTag, mockConfig()),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -3975,14 +3982,17 @@ describe("handleMessage", () => {
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ConfigTag, config),
-			PendingInteractionServiceLive,
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				makeOverridesStateLive(),
+			),
 		);
 
 		return handleMessage("client-1", {
@@ -4011,14 +4021,17 @@ describe("handleMessage", () => {
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ConfigTag, config),
-			PendingInteractionServiceLive,
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				makeOverridesStateLive(),
+			),
 		);
 
 		return handleMessage("client-1", { text: "" }).pipe(
@@ -4050,15 +4063,18 @@ describe("handleMessage", () => {
 			})),
 		} as unknown as OrchestrationEngine;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ConfigTag, config),
-			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makeOverridesStateLive(),
+			),
 		);
 
 		return Effect.gen(function* () {
@@ -4130,24 +4146,27 @@ describe("handleMessage", () => {
 				}),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				// Production always supplies ProviderRuntimeIngestion for Claude output
-				// (relay-stack builds it from the daemon's always-present persistence
-				// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
-				// it present to avoid the failing guard sink.
-				Layer.succeed(ProviderRuntimeIngestionTag, {
-					ingest: () => Effect.succeed(0),
-					ingestBatch: () => Effect.succeed(0),
-					drain: () => Effect.void,
-				}),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					// Production always supplies ProviderRuntimeIngestion for Claude output
+					// (relay-stack builds it from the daemon's always-present persistence
+					// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
+					// it present to avoid the failing guard sink.
+					Layer.succeed(ProviderRuntimeIngestionTag, {
+						ingest: () => Effect.succeed(0),
+						ingestBatch: () => Effect.succeed(0),
+						drain: () => Effect.void,
+					}),
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -4249,16 +4268,19 @@ describe("handleMessage", () => {
 				),
 			} satisfies ReadQueryEffect;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(ReadQueryEffectTag, readQuery),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -4343,15 +4365,18 @@ describe("handleMessage", () => {
 					providerStateUpdates: [],
 				})),
 			} as unknown as OrchestrationEngine;
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -4451,15 +4476,18 @@ describe("handleMessage", () => {
 				})),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -4516,15 +4544,18 @@ describe("handleMessage", () => {
 			})),
 		} as unknown as OrchestrationEngine;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ConfigTag, config),
-			PendingInteractionServiceLive,
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				makeOverridesStateLive(),
+			),
 		);
 
 		return Effect.gen(function* () {
@@ -4613,16 +4644,19 @@ describe("handleMessage", () => {
 				})),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(ReadQueryEffectTag, readQuery),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -4703,15 +4737,18 @@ describe("handleMessage", () => {
 				}),
 			} as unknown as OrchestrationEngine;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makeOverridesStateLive(),
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					makeOverridesStateLive(),
+				),
 			);
 
 			return Effect.gen(function* () {
@@ -4760,14 +4797,17 @@ describe("handleMessage", () => {
 			session: { prompt: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ConfigTag, config),
-			PendingInteractionServiceLive,
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, log),
+				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+				Layer.succeed(ConfigTag, config),
+				PendingInteractionServiceLive,
+				makeOverridesStateLive(),
+			),
 		);
 
 		return handleMessage("client-1", {

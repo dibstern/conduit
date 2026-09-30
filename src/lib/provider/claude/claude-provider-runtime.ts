@@ -31,13 +31,10 @@ import {
 	Deferred,
 	Duration,
 	Effect,
-	type Fiber,
-	FiberId,
 	FiberMap,
 	HashMap,
 	HashSet,
 	Layer,
-	MutableHashMap,
 	Option,
 	Ref,
 	type Scope,
@@ -76,7 +73,6 @@ import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ClaudeCapabilitiesService,
 	makeClaudeCapabilitiesService,
-	makeUnsafeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
@@ -428,39 +424,6 @@ const emptyClaudeProviderRuntimeState = (): ClaudeProviderRuntimeState => ({
 const getOrUndefined = <A>(option: Option.Option<A>): A | undefined =>
 	Option.isSome(option) ? option.value : undefined;
 
-// Compatibility constructor support for old synchronous unit seams. The scoped
-// factory below is the production path; this preserves direct test construction
-// without introducing Effect.runSync/runPromise boundaries.
-const makeUnsafeFiberMap = <K, A = unknown, E = unknown>(): FiberMap.FiberMap<
-	K,
-	A,
-	E
-> =>
-	({
-		[FiberMap.TypeId]: FiberMap.TypeId,
-		deferred: Deferred.unsafeMake<void, E>(FiberId.none),
-		state: {
-			_tag: "Open",
-			backing: MutableHashMap.empty<K, Fiber.RuntimeFiber<A, E>>(),
-		},
-		[Symbol.iterator](this: {
-			state:
-				| { readonly _tag: "Closed" }
-				| {
-						readonly _tag: "Open";
-						readonly backing: MutableHashMap.MutableHashMap<
-							K,
-							Fiber.RuntimeFiber<A, E>
-						>;
-				  };
-		}) {
-			if (this.state._tag === "Closed") {
-				return [][Symbol.iterator]();
-			}
-			return this.state.backing[Symbol.iterator]();
-		},
-	}) as unknown as FiberMap.FiberMap<K, A, E>;
-
 export class ClaudeProviderRuntimeTag extends Context.Tag(
 	"ClaudeProviderRuntime",
 )<ClaudeProviderRuntimeTag, ClaudeProviderRuntime>() {}
@@ -491,27 +454,6 @@ export const makeClaudeProviderRuntime = (
 		);
 		return runtime;
 	});
-
-export const makeUnsafeClaudeProviderRuntime = (
-	deps: ClaudeProviderInstanceDeps,
-): ClaudeProviderRuntime =>
-	new ClaudeProviderRuntime(
-		{
-			...deps,
-			// A custom queryFactory is an unsafe-constructor test seam only.
-			// Production callers must use ClaudeDriver/makeClaudeProviderRuntime so
-			// the default capabilities oracle remains wired. Tests that need drift
-			// observability must inject capabilitiesService with their queryFactory.
-			...(!deps.capabilitiesService && !deps.queryFactory
-				? { capabilitiesService: makeUnsafeClaudeCapabilitiesService() }
-				: {}),
-		},
-		Ref.unsafeMake<ClaudeProviderRuntimeState>(
-			emptyClaudeProviderRuntimeState(),
-		),
-		makeUnsafeFiberMap<string, void, unknown>(),
-		makeUnsafeFiberMap<ClaudeSubagentFinalizationFiberKey, void, never>(),
-	);
 
 export const ClaudeProviderRuntimeLive = (
 	deps: ClaudeProviderInstanceDeps,

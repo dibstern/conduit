@@ -34,7 +34,6 @@ import type {
 	MessageWithParts,
 } from "../../../src/lib/persistence/read-model-types.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -47,6 +46,7 @@ import type {
 	SessionMessage,
 } from "../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	createMockQuery,
 	makeBaseSendTurnInput,
@@ -280,7 +280,7 @@ describe("Claude subagent materialization pipeline", () => {
 						}),
 					] satisfies SDKMessage[];
 
-					const instance = new ClaudeProviderInstance({
+					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: dir,
 						queryFactory: () => createMockQuery(queryMessages),
 						materializeSubagents,
@@ -324,6 +324,7 @@ describe("Claude subagent materialization pipeline", () => {
 						SELECT id FROM sessions WHERE parent_id IS NULL ORDER BY updated_at DESC`;
 					const allSessions = yield* sql<{ id: string }>`
 						SELECT id FROM sessions ORDER BY updated_at DESC`;
+					yield* instance.shutdownEffect();
 
 					return {
 						childSessionId,
@@ -626,7 +627,7 @@ describe("Claude subagent materialization pipeline", () => {
 						throw: gen.throw.bind(gen),
 						[Symbol.asyncIterator]: () => gen,
 					}) as unknown as Query;
-					const instance = new ClaudeProviderInstance({
+					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: dir,
 						queryFactory: () => query,
 						subagentSdk: sdk,

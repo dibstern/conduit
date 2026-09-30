@@ -2,13 +2,13 @@
 // conduit keeps one SDK query() per session, so anything fixed at query
 // creation — `effort`, and the `init` message the resolved model is read from —
 // has to be refreshed explicitly when the user changes it mid-session.
+
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import type {
 	ClaudeSessionContext,
 	Query,
@@ -18,6 +18,7 @@ import type {
 	EventSink,
 	ModelInfo,
 } from "../../../../src/lib/provider/types.js";
+import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import { getClaudeRuntimeSessionForTest } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockEventSink,
@@ -202,7 +203,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			createdWithEffort = args.options?.effort;
 			return query;
 		});
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 			capabilitiesService: makeCapabilitiesService(),
@@ -273,7 +274,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		})();
 		const { query, setModel } = makeMockQuery(gen);
 
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
@@ -336,7 +337,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
@@ -436,7 +437,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		applyFlagSettings.mockRejectedValueOnce(new Error("flag settings failed"));
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
@@ -501,7 +502,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			}) as unknown as SDKMessage;
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
@@ -569,7 +570,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
 		})();
 		const { query, setModel } = makeMockQuery(gen);
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),

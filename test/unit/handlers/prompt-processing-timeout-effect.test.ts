@@ -57,14 +57,20 @@ describe("prompt processing timeouts through Effect state", () => {
 		const client = {
 			session: { prompt: vi.fn(async () => undefined) },
 		} as unknown as OpenCodeAPI;
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, createSilentLogger()),
-			Layer.succeed(ConfigTag, config as ProjectRelayConfig),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			PendingInteractionServiceLive,
-			makeOverridesStateLive(),
+		const layer = Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, ws),
+				Layer.succeed(LoggerTag, createSilentLogger()),
+				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
+				PendingInteractionServiceLive,
+				makeOverridesStateLive(),
+			),
 		);
 
 		return Effect.gen(function* () {

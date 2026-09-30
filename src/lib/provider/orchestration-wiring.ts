@@ -24,7 +24,7 @@ import {
 	defaultClaudeSubagentSdk,
 	makeClaudeSubagentMaterializer,
 } from "./claude/claude-subagent-materializer.js";
-import { ClaudeDriver, ClaudeProviderInstance } from "./claude/index.js";
+import { ClaudeDriver } from "./claude/index.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
@@ -102,42 +102,6 @@ class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
 	OrchestrationComponentsTag,
 	OrchestrationComponents
 >() {}
-
-function createOrchestrationComponents(
-	options: OrchestrationLayerOptions,
-): OrchestrationComponents {
-	const registry = new ProviderRegistry();
-
-	const openCodeInstance = new OpenCodeProviderInstance({
-		client: options.client,
-		...(options.workspaceRoot != null
-			? { workspaceRoot: options.workspaceRoot }
-			: {}),
-	});
-
-	registry.registerInstance(openCodeInstance);
-
-	const claudeInstance = new ClaudeProviderInstance({
-		workspaceRoot: options.workspaceRoot ?? process.cwd(),
-		claudeSettingsOverrides: () =>
-			loadRelaySettings(options.configDir).claudeSettings,
-	});
-	registry.registerInstance(claudeInstance);
-
-	const engine = new OrchestrationEngine({
-		registry,
-		resolveProviderDriver: (providerId) =>
-			resolveProviderRoutingDriver(
-				loadDaemonConfig(options.configDir),
-				providerId,
-			),
-		...(options.sessionBindingReadModel != null
-			? { sessionBindingReadModel: options.sessionBindingReadModel }
-			: {}),
-	});
-
-	return { engine, registry, openCodeInstance };
-}
 
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
@@ -282,19 +246,6 @@ function createOrchestrationView(
 		wireSSEToInstance,
 		drainSideEffects: () => engine.drainSideEffects(),
 	};
-}
-
-/**
- * Create an imperative view over orchestration components.
- *
- * Kept for narrow unit tests and compatibility surfaces. Production relay
- * wiring uses makeOrchestrationRuntimeLayer() so provider instance shutdown is
- * owned by the relay runtime Scope.
- */
-export function createOrchestrationLayer(
-	options: OrchestrationLayerOptions,
-): OrchestrationLayer {
-	return createOrchestrationView(createOrchestrationComponents(options));
 }
 
 export const makeOrchestrationRuntimeLayer = (
