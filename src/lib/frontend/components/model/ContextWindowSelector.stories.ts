@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	handleContextWindowInfo,
+} from "../../stores/discovery.svelte.js";
 import ContextWindowSelectorHost from "./__fixtures__/ContextWindowSelectorHost.svelte";
 
 const meta = {
@@ -14,8 +17,7 @@ const meta = {
 		reserveDropUpSpace: { control: false },
 	},
 	beforeEach: () => {
-		discoveryState.currentContextWindow = "";
-		discoveryState.availableContextWindowOptions = [];
+		clearDiscoveryState();
 	},
 } satisfies Meta<typeof ContextWindowSelectorHost>;
 
@@ -35,24 +37,33 @@ const premiumOptions = [
 /** Standard default — 200K selected until the user opts into 1M. */
 export const StandardDefault: Story = {
 	beforeEach: () => {
-		discoveryState.availableContextWindowOptions = standardOptions;
-		discoveryState.currentContextWindow = "";
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: standardOptions,
+		});
 	},
 };
 
 /** Premium default — 1M selected when no override is stored. */
 export const PremiumDefault: Story = {
 	beforeEach: () => {
-		discoveryState.availableContextWindowOptions = premiumOptions;
-		discoveryState.currentContextWindow = "";
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: premiumOptions,
+		});
 	},
 };
 
 /** User-selected 1M override. */
 export const Selected1M: Story = {
 	beforeEach: () => {
-		discoveryState.availableContextWindowOptions = standardOptions;
-		discoveryState.currentContextWindow = "1m";
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "1m",
+			options: standardOptions,
+		});
 	},
 };
 
@@ -62,8 +73,11 @@ export const Open: Story = {
 		reserveDropUpSpace: true,
 	},
 	beforeEach: () => {
-		discoveryState.availableContextWindowOptions = standardOptions;
-		discoveryState.currentContextWindow = "";
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: standardOptions,
+		});
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

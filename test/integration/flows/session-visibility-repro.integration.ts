@@ -1,23 +1,20 @@
 // ─── Integration: Session Visibility Repros ─────────────────────────────────
 // Reproduces two reported bugs at the relay-harness seam:
 //
-//  Bug A ("two tabs, one empty"): a fresh client connecting with
-//    ?session=<id> for a session that already has messages must receive a
-//    populated session_switched (events or history), not an empty one.
+//  Bug A ("two tabs, one empty"): a fresh client opening a session with
+//    messages must be able to load a populated transcript page.
 //
 //  Bug B ("new session missing from sidebar"): after CreateSession with an
-//    OpenCode providerId, the session_list broadcast that follows must
+//    OpenCode providerId, the viewed family that follows must
 //    include the new session (read-model projection race).
 
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type {
 	OpenCodeInteraction,
 	OpenCodeRecording,
@@ -32,24 +29,24 @@ import { TestWsClient } from "../helpers/test-ws-client.js";
 type DifferentialPart = {
 	id: string;
 	type: string;
-	text?: string;
-	tool?: string;
-	mime?: string;
-	filename?: string;
-	url?: string;
-	state?: { metadata?: Record<string, unknown> };
+	text?: string | undefined;
+	tool?: string | undefined;
+	mime?: string | undefined;
+	filename?: string | undefined;
+	url?: string | undefined;
+	state?: { metadata?: Record<string, unknown> } | undefined;
 };
 
 type DifferentialMessage = {
 	id: string;
-	role?: string;
-	text?: string;
-	time?: { created?: number };
-	parts?: DifferentialPart[];
+	role?: string | undefined;
+	text?: string | undefined;
+	time?: { created?: number | undefined } | undefined;
+	parts?: readonly DifferentialPart[] | undefined;
 };
 
 type DifferentialHistory = {
-	messages: DifferentialMessage[];
+	messages: readonly DifferentialMessage[];
 	hasMore: boolean;
 };
 
@@ -189,12 +186,7 @@ async function waitForProjectedMessage(
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
 		const projected = await projectedHistory(dbPath, sessionId, 200);
-		if (
-			projected.kind === "rest-history" &&
-			(projected.history as DifferentialHistory).messages.some(
-				(message) => message.id === messageId,
-			)
-		)
+		if (projected.history.messages.some((message) => message.id === messageId))
 			return;
 		if (Date.now() > deadline)
 			throw new Error(`projection never ingested ${messageId}`);
@@ -215,14 +207,24 @@ async function projectedHistory(
 	dbPath: string,
 	sessionId: string,
 	pageSize = 50,
+	before?: string,
 ) {
-	const rows = await readStore(
+	const page = await readStore(
 		dbPath,
 		Effect.flatMap(makeReadQueryEffect, (readQuery) =>
-			readQuery.getSessionMessagesWithParts(sessionId),
+			readQuery.readSessionTranscriptPage(sessionId, {
+				limit: pageSize,
+				...(before ? { before } : {}),
+			}),
 		),
 	);
-	return resolveSessionHistoryFromRows(rows, { pageSize });
+	return {
+		kind: "rest-history" as const,
+		history: {
+			messages: messageRowsToHistory(page.messages, { pageSize }).messages,
+			hasMore: page.hasMore,
+		},
+	};
 }
 
 /**
@@ -230,7 +232,7 @@ async function projectedHistory(
  * pattern). Without this the default session runs on the Claude provider and
  * never touches the mock — the "differential" would silently compare the
  * projection with itself. Returns the local session id; the first sendMessage
- * to it materializes an OpenCode session (session_switched with a new id).
+ * to it materializes an OpenCode session returned by SendMessage.
  */
 async function bindOpenCodeSession(
 	client: TestWsClient,
@@ -248,7 +250,7 @@ async function bindOpenCodeSession(
 	const model = provider.models[0];
 	if (!model) throw new Error("OpenCode provider has no models");
 
-	const created = await client.createSession(title, { providerId: "claude" });
+	const created = await client.createSession(title, { instanceId: "claude" });
 	const localId = created["id"] as string;
 	if (!localId) throw new Error("createSession returned no id");
 	await client.switchModel(model.id, provider.id, localId);
@@ -263,15 +265,12 @@ async function materializeOpenCodeTurn(
 	localId: string,
 	prompt: string,
 ): Promise<string> {
-	await client.sendMessage(prompt, {
+	const dispatchedId = await client.sendMessage(prompt, {
 		sessionId: localId,
 		originId: client.getClientId(),
 	});
-	const switched = await client.waitFor("session_switched", {
-		timeout: 15_000,
-		predicate: (message) => message["id"] !== localId,
-	});
-	return switched["id"] as string;
+	expect(dispatchedId).not.toBe(localId);
+	return dispatchedId;
 }
 
 async function runPaginationDifferential(count: number) {
@@ -279,11 +278,8 @@ async function runPaginationDifferential(count: number) {
 		`pagination-${count}`,
 		(sessionId) => paginationSse(sessionId, count),
 	);
-	const dir = mkdtempSync(join(tmpdir(), `conduit-repro-page-${count}-`));
-	const dbPath = join(dir, "events.sqlite");
-	const paginationHarness = await createRelayHarness(synthetic.recording, {
-		persistenceDbPath: dbPath,
-	});
+	const paginationHarness = await createRelayHarness(synthetic.recording);
+	const dbPath = paginationHarness.eventsDbPath;
 	let client1: TestWsClient | undefined;
 	let client2: TestWsClient | undefined;
 	try {
@@ -305,17 +301,42 @@ async function runPaginationDifferential(count: number) {
 			`ws://127.0.0.1:${paginationHarness.relayPort}/ws?session=${sessionId}`,
 		);
 		await client2.waitForOpen();
-		const switched = await client2.waitFor("session_switched", {
-			predicate: (message) => message["id"] === sessionId,
+		await client2.waitForInitialState();
+		await client2.viewSession(sessionId);
+		const served = await client2.loadMoreHistory(sessionId);
+		const providerHistory = new SessionManager({
+			client: paginationHarness.stack.client,
 		});
-		const rest = switched["history"] as DifferentialHistory;
+		const rest = await providerHistory.loadPreRenderedHistory(sessionId);
 		const projected = await projectedHistory(dbPath, sessionId, 50);
+		const before = served.messages[0]?.id;
+		if (!before) throw new Error("served page has no cursor");
+		const older = await client2.loadMoreHistory(sessionId, before);
+		const projectedOlder = await projectedHistory(
+			dbPath,
+			sessionId,
+			50,
+			before,
+		);
 		expect(projected.kind).toBe("rest-history");
 		const projectedRest =
 			projected.kind === "rest-history"
 				? (projected.history as DifferentialHistory)
 				: { messages: [], hasMore: false };
-		const summarize = (messages: DifferentialMessage[]) =>
+		const projectedOlderRest =
+			projectedOlder.kind === "rest-history"
+				? (projectedOlder.history as DifferentialHistory)
+				: { messages: [], hasMore: false };
+		const summarize = (
+			messages: readonly {
+				id: string;
+				role?: string | undefined;
+				text?: string | undefined;
+				parts?:
+					| readonly { type: string; text?: string | undefined }[]
+					| undefined;
+			}[],
+		) =>
 			messages.map((message) => ({
 				id: message.id,
 				role: message.role,
@@ -330,13 +351,17 @@ async function runPaginationDifferential(count: number) {
 
 		return {
 			restSummary: summarize(rest.messages),
+			servedSummary: summarize(served.messages),
 			projectedSummary: summarize(projectedRest.messages),
 			restHasMore: rest.hasMore,
+			servedHasMore: served.hasMore,
 			projectedHasMore: projectedRest.hasMore,
-			// Recorded creation time of the first REST message. Proves the REST
-			// side really came from the provider: the projection substitutes row
-			// wall-clock timestamps, so a schema-decode failure that silently
-			// downgraded REST to the projection fallback would not carry it.
+			olderSummary: summarize(older.messages),
+			projectedOlderSummary: summarize(projectedOlderRest.messages),
+			olderHasMore: older.hasMore,
+			projectedOlderHasMore: projectedOlderRest.hasMore,
+			// The REST timestamp proves this comparison uses provider data; the
+			// projection substitutes row wall-clock timestamps.
 			restFirstCreated: rest.messages[0]?.time?.created,
 		};
 	} finally {
@@ -348,12 +373,9 @@ async function runPaginationDifferential(count: number) {
 
 describe("Integration: Session Visibility Repros", () => {
 	let harness: RelayHarness;
-	let persistenceDbPath: string;
 
 	beforeAll(async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-"));
-		persistenceDbPath = join(dir, "events.sqlite");
-		harness = await createRelayHarness("chat-simple", { persistenceDbPath });
+		harness = await createRelayHarness("chat-simple");
 	}, 30_000);
 
 	afterAll(async () => {
@@ -384,29 +406,23 @@ describe("Integration: Session Visibility Repros", () => {
 			`ws://127.0.0.1:${harness.relayPort}/ws?session=${sessionId}`,
 		);
 		await client2.waitForOpen();
-		const switched = await client2.waitFor("session_switched", {
-			predicate: (m) => m["id"] === sessionId,
-		});
-
-		const events = switched["events"] as unknown[] | undefined;
-		const history = switched["history"] as { messages: unknown[] } | undefined;
-		const payloadSize = events?.length ?? history?.messages.length ?? 0;
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-A] session_switched kind=${events ? "events" : history ? "history" : "EMPTY"} size=${payloadSize}`,
-		);
-		expect(payloadSize).toBeGreaterThan(0);
+		await client2.waitForInitialState();
+		await client2.viewSession(sessionId as string);
+		const history = await client2.loadMoreHistory(sessionId as string);
+		expect(history.messages.length).toBeGreaterThan(0);
 		// The history must carry actual content — a skeleton of empty
 		// messages reproduces the "navigate back and the message is gone" bug.
-		expect(JSON.stringify(switched)).toContain("pong");
+		expect(JSON.stringify(history.messages)).toContain("pong");
 
 		await client2.close();
 		await client1.close();
 	}, 20_000);
 
-	it("materialized session: first send keeps message visible, lists session, and survives a second tab", async () => {
+	it("materialized session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
+		const detourId = client1.getActiveSessionId();
+		if (!detourId) throw new Error("No initial session");
 
 		// Providers come from the init model_list broadcast.
 		const modelList = await client1.waitFor("model_list");
@@ -421,7 +437,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// 1. New session → local claude placeholder row.
 		const created = await client1.createSession("Materialize Repro", {
-			providerId: "claude",
+			instanceId: "claude",
 		});
 		const localId = created["id"] as string;
 		expect(localId).toBeTruthy();
@@ -433,17 +449,16 @@ describe("Integration: Session Visibility Repros", () => {
 		client1.clearReceived();
 
 		// 3. First message → prepareTurnSession materializes an OpenCode session.
-		await client1.sendMessage("Reply with just the word 'pong'.", {
-			sessionId: localId,
-			originId: client1.getClientId(),
-		});
-
-		const switched = await client1.waitFor("session_switched", {
-			predicate: (m) => m["id"] !== localId,
-		});
-		const newId = switched["id"] as string;
+		const newId = await client1.sendMessage(
+			"Reply with just the word 'pong'.",
+			{
+				sessionId: localId,
+				originId: client1.getClientId(),
+			},
+		);
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-C] materialized ${localId} -> ${newId}`);
+		expect(newId).not.toBe(localId);
 
 		// Bug 1 (server contract): the echo for the materialized session must be
 		// renderable by the sender — the optimistic copy lives in the OLD slot,
@@ -457,10 +472,9 @@ describe("Integration: Session Visibility Repros", () => {
 		);
 		expect(userMsg["originId"]).toBeUndefined();
 
-		// Bug 2: the session_list broadcast after materialization must include
-		// the materialized session.
-		const list = await client1.waitFor("session_list", {
-			predicate: (m) => m["roots"] === true,
+		// Bug 2: the viewed family after materialization includes the session.
+		const list = await client1.waitFor("session_family", {
+			predicate: (m) => m["rootId"] === newId,
 		});
 		const ids = (list["sessions"] as Array<{ id: string }>).map((s) => s.id);
 		// eslint-disable-next-line no-console
@@ -477,39 +491,23 @@ describe("Integration: Session Visibility Repros", () => {
 			`ws://127.0.0.1:${harness.relayPort}/ws?session=${newId}`,
 		);
 		await client2.waitForOpen();
-		const switched2 = await client2.waitFor("session_switched", {
-			predicate: (m) => m["id"] === newId,
-		});
-		const events2 = switched2["events"] as unknown[] | undefined;
-		const history2 = switched2["history"] as
-			| { messages: unknown[] }
-			| undefined;
-		const size2 = events2?.length ?? history2?.messages.length ?? 0;
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-C] second-tab kind=${events2 ? "events" : history2 ? "history" : "EMPTY"} size=${size2}`,
-		);
-		expect(size2).toBeGreaterThan(0);
+		await client2.waitForInitialState();
+		await client2.viewSession(newId);
+		const history2 = await client2.loadMoreHistory(newId);
+		expect(history2.messages.length).toBeGreaterThan(0);
 		// Content, not just structure — the user's message text must survive.
-		expect(JSON.stringify(switched2)).toContain("pong");
+		expect(JSON.stringify(history2.messages)).toContain("pong");
 
 		// Same-client navigate away and back (the ViewSession path): the
 		// history must still carry the sent message, and the switch must not
 		// surface error frames.
-		const detourId = (list["sessions"] as Array<{ id: string }>).find(
-			(s) => s.id !== newId,
-		)?.id;
-		expect(detourId).toBeTruthy();
+		expect(detourId).not.toBe(newId);
 		client1.clearReceived();
-		// biome-ignore lint/style/noNonNullAssertion: guarded above
-		await client1.viewSession(detourId!);
+		await client1.viewSession(detourId);
 		client1.clearReceived();
-		const back = await client1.viewSession(newId);
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-D] navigate-back kind=${back["events"] ? "events" : back["history"] ? "history" : "EMPTY"}`,
-		);
-		expect(JSON.stringify(back)).toContain("pong");
+		await client1.viewSession(newId);
+		const back = await client1.loadMoreHistory(newId);
+		expect(JSON.stringify(back.messages)).toContain("pong");
 		const errorFrames = client1
 			.getReceived()
 			.filter((m) => m.type === "error" || m.type === "system_error");
@@ -525,11 +523,8 @@ describe("Integration: Session Visibility Repros", () => {
 		// Own harness: the projection can only contain what actually streamed
 		// through this relay, so the turn must not race other tests' replay
 		// queue consumption on the shared recording session.
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-text-"));
-		const textDbPath = join(dir, "events.sqlite");
-		const textHarness = await createRelayHarness("chat-simple", {
-			persistenceDbPath: textDbPath,
-		});
+		const textHarness = await createRelayHarness("chat-simple");
+		const textDbPath = textHarness.eventsDbPath;
 		const client1 = await textHarness.connectWsClient();
 		await client1.waitForInitialState();
 		const localId = await bindOpenCodeSession(client1, "Text Differential");
@@ -541,22 +536,14 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.waitFor("done");
 		await new Promise((r) => setTimeout(r, 750));
 
-		// REST-served history: what a fresh client currently receives.
+		// A fresh client requests its own transcript page.
 		const client2 = new TestWsClient(
 			`ws://127.0.0.1:${textHarness.relayPort}/ws?session=${sessionId}`,
 		);
 		await client2.waitForOpen();
-		const switched = await client2.waitFor("session_switched", {
-			predicate: (m) => m["id"] === sessionId,
-		});
-		const restHistory = switched["history"] as {
-			messages: Array<{
-				id: string;
-				role: string;
-				text?: string;
-				parts?: Array<{ type: string; text?: string }>;
-			}>;
-		};
+		await client2.waitForInitialState();
+		await client2.viewSession(sessionId);
+		const restHistory = await client2.loadMoreHistory(sessionId);
 
 		// Projection-served history: the exact adapter chain the resolvers use
 		// when falling back to (or preferring) the read model.
@@ -564,9 +551,11 @@ describe("Integration: Session Visibility Repros", () => {
 
 		const summarize = (
 			msgs: readonly {
-				role?: string;
-				text?: string;
-				parts?: readonly { type: string; text?: string }[];
+				role?: string | undefined;
+				text?: string | undefined;
+				parts?:
+					| readonly { type: string; text?: string | undefined }[]
+					| undefined;
 			}[],
 		) =>
 			msgs.map((m) => ({
@@ -603,11 +592,8 @@ describe("Integration: Session Visibility Repros", () => {
 	}, 45_000);
 
 	it("projected history matches REST for a tool-call turn", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-tool-"));
-		const toolDbPath = join(dir, "events.sqlite");
-		const toolHarness = await createRelayHarness("chat-tool-call", {
-			persistenceDbPath: toolDbPath,
-		});
+		const toolHarness = await createRelayHarness("chat-tool-call");
+		const toolDbPath = toolHarness.eventsDbPath;
 		try {
 			const client1 = await toolHarness.connectWsClient();
 			await client1.waitForInitialState();
@@ -627,23 +613,22 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${toolHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (m) => m["id"] === sessionId,
-			});
-			const restHistory = switched["history"] as {
-				messages: Array<{
-					role: string;
-					text?: string;
-					parts?: Array<{ type: string; text?: string; tool?: string }>;
-				}>;
-			};
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const restHistory = await client2.loadMoreHistory(sessionId);
 
 			const projected = await projectedHistory(toolDbPath, sessionId, 50);
 
 			type Msg = {
-				role?: string;
-				text?: string;
-				parts?: readonly { type: string; text?: string; tool?: string }[];
+				role?: string | undefined;
+				text?: string | undefined;
+				parts?:
+					| readonly {
+							type: string;
+							text?: string | undefined;
+							tool?: string | undefined;
+					  }[]
+					| undefined;
 			};
 			// Documented, frontend-equivalent divergences between REST and the
 			// projection (both sides render identically — see history-logic.ts):
@@ -764,11 +749,8 @@ describe("Integration: Session Visibility Repros", () => {
 				}),
 			],
 		);
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-metadata-"));
-		const dbPath = join(dir, "events.sqlite");
-		const metadataHarness = await createRelayHarness(synthetic.recording, {
-			persistenceDbPath: dbPath,
-		});
+		const metadataHarness = await createRelayHarness(synthetic.recording);
+		const dbPath = metadataHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -787,13 +769,15 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${metadataHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (message) => message["id"] === sessionId,
-			});
-			const rest = switched["history"] as DifferentialHistory;
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const served = await client2.loadMoreHistory(sessionId);
+			const rest = await new SessionManager({
+				client: metadataHarness.stack.client,
+			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
-			const summarize = (messages: DifferentialMessage[]) =>
+			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
 					text:
@@ -809,7 +793,7 @@ describe("Integration: Session Visibility Repros", () => {
 							: part.type,
 					),
 				}));
-			const restSummary = summarize(rest.messages);
+			const restSummary = summarize(rest.messages as DifferentialMessage[]);
 			const projectedSummary =
 				projected.kind === "rest-history"
 					? summarize(projected.history.messages as DifferentialMessage[])
@@ -819,6 +803,7 @@ describe("Integration: Session Visibility Repros", () => {
 				`[REPRO-G] rest=${JSON.stringify(restSummary)}\n[REPRO-G] projected=${JSON.stringify(projectedSummary)}`,
 			);
 			expect(projectedSummary).toEqual(restSummary);
+			expect(summarize(served.messages)).toEqual(projectedSummary);
 			expect(JSON.stringify(restSummary)).toContain("ses_child_differential");
 			expect(JSON.stringify(projectedSummary)).toContain(
 				"ses_child_differential",
@@ -883,11 +868,8 @@ describe("Integration: Session Visibility Repros", () => {
 				}),
 			],
 		);
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-file-"));
-		const dbPath = join(dir, "events.sqlite");
-		const fileHarness = await createRelayHarness(synthetic.recording, {
-			persistenceDbPath: dbPath,
-		});
+		const fileHarness = await createRelayHarness(synthetic.recording);
+		const dbPath = fileHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -908,13 +890,15 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${fileHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (message) => message["id"] === sessionId,
-			});
-			const rest = switched["history"] as DifferentialHistory;
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const served = await client2.loadMoreHistory(sessionId);
+			const rest = await new SessionManager({
+				client: fileHarness.stack.client,
+			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
 			expect(projected.kind).toBe("rest-history");
-			const summarize = (messages: DifferentialMessage[]) =>
+			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
 					parts: (message.parts ?? []).map((part) =>
@@ -923,7 +907,7 @@ describe("Integration: Session Visibility Repros", () => {
 							: `${part.type}:${part.text ?? ""}`,
 					),
 				}));
-			const restSummary = summarize(rest.messages);
+			const restSummary = summarize(rest.messages as DifferentialMessage[]);
 			const projectedMessages =
 				projected.kind === "rest-history"
 					? (projected.history.messages as DifferentialMessage[])
@@ -934,6 +918,7 @@ describe("Integration: Session Visibility Repros", () => {
 				`[REPRO-H] rest=${JSON.stringify(restSummary)}\n[REPRO-H] projected=${JSON.stringify(projectedSummary)}`,
 			);
 			expect(projectedSummary).toEqual(restSummary);
+			expect(summarize(served.messages)).toEqual(projectedSummary);
 			expect(
 				projectedMessages
 					.flatMap((message) => message.parts ?? [])
@@ -954,11 +939,8 @@ describe("Integration: Session Visibility Repros", () => {
 	}, 45_000);
 
 	it("REPRO-I: permission-gated history matches REST and persists permission events", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-repro-permission-"));
-		const dbPath = join(dir, "events.sqlite");
-		const permissionHarness = await createRelayHarness("permissions-bash", {
-			persistenceDbPath: dbPath,
-		});
+		const permissionHarness = await createRelayHarness("permissions-bash");
+		const dbPath = permissionHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -984,13 +966,12 @@ describe("Integration: Session Visibility Repros", () => {
 				`ws://127.0.0.1:${permissionHarness.relayPort}/ws?session=${sessionId}`,
 			);
 			await client2.waitForOpen();
-			const switched = await client2.waitFor("session_switched", {
-				predicate: (message) => message["id"] === sessionId,
-			});
-			const rest = switched["history"] as DifferentialHistory;
+			await client2.waitForInitialState();
+			await client2.viewSession(sessionId);
+			const rest = await client2.loadMoreHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId as string);
 			expect(projected.kind).toBe("rest-history");
-			const summarize = (messages: DifferentialMessage[]) =>
+			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
 					text:
@@ -1044,12 +1025,20 @@ describe("Integration: Session Visibility Repros", () => {
 			`[REPRO-J/56] rest=${JSON.stringify(result.restSummary)} hasMore=${result.restHasMore}\n[REPRO-J/56] projected=${JSON.stringify(result.projectedSummary)} hasMore=${result.projectedHasMore}`,
 		);
 		expect(result.projectedSummary).toEqual(result.restSummary);
+		expect(result.servedSummary).toEqual(result.projectedSummary);
 		expect(result.restSummary).toHaveLength(50);
 		expect(result.restSummary[0]?.id).toBe("msg-007");
 		expect(result.restSummary[49]?.id).toBe("msg-056");
 		expect(result.restFirstCreated).toBe(1_000_007);
 		expect(result.restHasMore).toBe(true);
+		expect(result.servedHasMore).toBe(true);
 		expect(result.projectedHasMore).toBe(true);
+		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
+		expect(result.olderSummary).toHaveLength(6);
+		expect(result.olderSummary[0]?.id).toBe("msg-001");
+		expect(result.olderSummary[5]?.id).toBe("msg-006");
+		expect(result.olderHasMore).toBe(false);
+		expect(result.projectedOlderHasMore).toBe(false);
 	}, 45_000);
 
 	it("REPRO-J: exactly 50 messages preserves the accepted hasMore boundary divergence", async () => {
@@ -1059,15 +1048,19 @@ describe("Integration: Session Visibility Repros", () => {
 			`[REPRO-J/50] rest=${JSON.stringify(result.restSummary)} hasMore=${result.restHasMore}\n[REPRO-J/50] projected=${JSON.stringify(result.projectedSummary)} hasMore=${result.projectedHasMore}`,
 		);
 		expect(result.projectedSummary).toEqual(result.restSummary);
+		expect(result.servedSummary).toEqual(result.projectedSummary);
 		expect(result.restSummary).toHaveLength(50);
 		expect(result.restFirstCreated).toBe(1_000_001);
 		// REST uses >= page size conservatively, while projection over-fetch is
 		// exact. REST's false positive only causes one empty older-page fetch.
 		expect(result.restHasMore).toBe(true);
+		expect(result.servedHasMore).toBe(false);
 		expect(result.projectedHasMore).toBe(false);
+		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
+		expect(result.olderSummary).toHaveLength(0);
 	}, 45_000);
 
-	it("session created with OpenCode providerId appears in the session_list broadcast", async () => {
+	it("session created with OpenCode providerId appears in its viewed family", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		client1.clearReceived();
@@ -1078,9 +1071,8 @@ describe("Integration: Session Visibility Repros", () => {
 		const newId = switched["id"] as string;
 		expect(newId).toBeTruthy();
 
-		// The creating flow broadcasts session_list (roots) after create.
-		const list = await client1.waitFor("session_list", {
-			predicate: (m) => m["roots"] === true,
+		const list = await client1.waitFor("session_family", {
+			predicate: (m) => m["rootId"] === newId,
 		});
 		const ids = (list["sessions"] as Array<{ id: string }>).map((s) => s.id);
 		// eslint-disable-next-line no-console

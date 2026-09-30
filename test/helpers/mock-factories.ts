@@ -230,10 +230,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 		incrementPendingQuestionCount: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
 		setPendingQuestionCounts: vi.fn(),
-		clearPaginationCursor: vi.fn(),
-		seedPaginationCursor: vi.fn(),
-		getForkEntry: vi.fn().mockReturnValue(undefined),
-		setForkEntry: vi.fn(),
 		addToParentMap: vi.fn(),
 		on: vi.fn().mockReturnThis(),
 	} as unknown as HandlerDeps["sessionMgr"];
@@ -311,6 +307,7 @@ export function createMockSSEWiringDeps(
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
 		slug: "test-project",
+		providerInstanceId: "opencode",
 		...overrides,
 	};
 }
@@ -670,10 +667,6 @@ export function makeMockSessionManagerShape(
 		incrementPendingQuestionCount: vi.fn(),
 		decrementPendingQuestionCount: vi.fn(),
 		setPendingQuestionCounts: vi.fn(),
-		clearPaginationCursor: vi.fn(),
-		seedPaginationCursor: vi.fn(),
-		getForkEntry: vi.fn(() => undefined),
-		setForkEntry: vi.fn(),
 		addToParentMap: vi.fn(),
 		on: vi.fn().mockReturnThis(),
 		...overrides,
@@ -702,16 +695,16 @@ export function makeMockSessionManagerService(
 			]),
 		),
 		createSession: vi.fn(() => Effect.succeed({ id: "session-new" })),
-		deleteSession: vi.fn(() => Effect.void),
+		establishOpenCodeSession: vi.fn(() => Effect.void),
+		deleteSession: vi.fn(() => Effect.succeed(true)),
 		renameSession: vi.fn(() => Effect.void),
 		markSessionRead: vi.fn(() => Effect.void),
 		markSessionUnread: vi.fn(() => Effect.void),
+		markSessionSeen: vi.fn(() => Effect.succeed(false)),
 		setSessionSettled: vi.fn(() => Effect.succeed(false)),
 		setSessionPinned: vi.fn(() => Effect.succeed(false)),
 		snoozeSession: vi.fn(() => Effect.succeed(false)),
 		unsnoozeSession: vi.fn(() => Effect.succeed(false)),
-		clearPaginationCursor: vi.fn(() => Effect.void),
-		seedPaginationCursor: vi.fn(() => Effect.void),
 		loadPreRenderedHistory: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false }),
 		),
@@ -722,22 +715,7 @@ export function makeMockSessionManagerService(
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
-		sendSessionLists: vi.fn((send) =>
-			Effect.sync(() => {
-				send({
-					type: "session_list",
-					sessions: [
-						{
-							id: "s1",
-							title: "Session 1",
-							updatedAt: 0,
-							messageCount: 0,
-						},
-					],
-					roots: true,
-				});
-			}),
-		),
+		pushViewerFamilies: vi.fn(() => Effect.void),
 		...overrides,
 	} as unknown as SessionManagerService;
 }

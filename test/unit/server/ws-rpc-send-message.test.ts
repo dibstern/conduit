@@ -90,7 +90,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 				commandId: "cmd-send-legacy-test",
 			});
 
-			expect(result).toEqual({ ok: true });
+			expect(result).toEqual({ ok: true, sessionId: "session-1" });
 			expect(recordMessageActivity).toHaveBeenCalledWith("session-1");
 			expect(prompt).toHaveBeenCalledWith("session-1", {
 				text: "hello",

@@ -4,7 +4,7 @@
 
 import type { LoadLifecycle } from "./chat.svelte.js";
 
-export type ScrollState = "loading" | "settling" | "following" | "detached";
+export type ScrollState = "loading" | "following" | "detached";
 
 export interface ScrollController {
 	readonly state: ScrollState;
@@ -19,8 +19,6 @@ export interface ScrollController {
 	onPrepend(prevScrollHeight: number, prevScrollTop: number): void;
 }
 
-const SETTLE_MAX_FRAMES = 60;
-const SETTLE_STABLE_THRESHOLD = 2;
 const DETACH_THRESHOLD = 50; // px from bottom to trigger detach via scroll position
 const REFOLLOW_THRESHOLD = 5; // px from bottom to re-follow (tight to prevent accidental re-follow from casual scrolling)
 
@@ -30,15 +28,12 @@ export function createScrollController(
 ): ScrollController {
 	let container: HTMLElement | null = null;
 	let userDetached = $state(false);
-	let settleRafId: number | null = null;
-	let settleFrameCount = 0;
 	let programmaticScrollCount = 0; // counter — prevents false detach from our own scrolls
 	let resetTimerScheduled = false; // guards against scheduling multiple reset timers
 
 	function getState(): ScrollState {
 		const lc = getLifecycle();
 		if (lc === "empty" || lc === "loading") return "loading";
-		if (lc === "committed") return "settling";
 		if (userDetached) return "detached";
 		return "following";
 	}
@@ -65,46 +60,6 @@ export function createScrollController(
 		}
 	}
 
-	function startSettle(): void {
-		if (settleRafId !== null) return;
-		settleFrameCount = 0;
-		let lastHeight = 0;
-		let stableCount = 0;
-
-		function tick() {
-			if (!container || settleFrameCount++ > SETTLE_MAX_FRAMES) {
-				stopSettle();
-				return;
-			}
-			const lc = getLifecycle();
-			if (lc !== "committed") {
-				stopSettle();
-				return;
-			}
-			scrollToBottom();
-			const h = container.scrollHeight;
-			if (h === lastHeight) {
-				stableCount++;
-				if (stableCount >= SETTLE_STABLE_THRESHOLD) {
-					stopSettle();
-					return;
-				}
-			} else {
-				stableCount = 0;
-			}
-			lastHeight = h;
-			settleRafId = requestAnimationFrame(tick);
-		}
-
-		settleRafId = requestAnimationFrame(tick);
-	}
-
-	function stopSettle(): void {
-		if (settleRafId !== null) {
-			cancelAnimationFrame(settleRafId);
-			settleRafId = null;
-		}
-	}
 	function onScroll(): void {
 		if (!container) return;
 
@@ -126,8 +81,8 @@ export function createScrollController(
 			container.scrollHeight - container.scrollTop - container.clientHeight;
 
 		// Only a scroll that left the bottom counts as user intent. The counter
-		// guard above is necessary but not sufficient: the settle loop re-pins
-		// every frame, and a coalesced scroll event from one of those writes can
+		// guard above is necessary but not sufficient: a coalesced scroll event
+		// from one of those writes can
 		// be delivered after the counter's setTimeout(0) safety reset has zeroed
 		// its slot, at which point it is indistinguishable from a real scroll.
 		// Every such stray lands at the bottom, because pinning is what caused
@@ -178,7 +133,6 @@ export function createScrollController(
 		},
 
 		detach(): void {
-			stopSettle();
 			if (container) {
 				container.removeEventListener("scroll", onScroll);
 				container = null;
@@ -187,7 +141,6 @@ export function createScrollController(
 
 		resetForSession(): void {
 			userDetached = false;
-			stopSettle();
 			// Scroll immediately so the first paint of the new session is at the
 			// bottom, not at whatever scroll position the previous session had.
 			scrollToBottom();
@@ -207,12 +160,6 @@ export function createScrollController(
 				// Using rAF would delay the scroll by one frame, causing visible
 				// jitter during streaming (snap-down-then-back-up on each delta).
 				scrollToBottom();
-			} else if (s === "settling") {
-				// Scroll synchronously first to avoid a one-frame paint at scrollTop=0,
-				// then start the rAF settle loop for any subsequent height changes
-				// (deferred markdown rendering, lazy images, etc.).
-				scrollToBottom();
-				startSettle();
 			}
 		},
 

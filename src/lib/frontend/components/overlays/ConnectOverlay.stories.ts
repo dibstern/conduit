@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	handleModelInfo,
+} from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { wsState } from "../../stores/ws.svelte.js";
@@ -33,7 +36,7 @@ type Story = StoryObj<typeof meta>;
 export const Connecting: Story = {};
 
 /**
- * Relay failed to start — overlay shows error text and a back link.
+ * Relay failed to start — overlay shows the error text.
  */
 export const RelayError: Story = {
 	beforeEach: () => {
@@ -67,7 +70,7 @@ export const RelayRegistering: Story = {
  */
 export const InstanceActions: Story = {
 	beforeEach: () => {
-		discoveryState.currentProviderId = "opencode";
+		handleModelInfo({ type: "model_info", provider: "opencode", model: "" });
 		projectState.currentSlug = "demo";
 		projectState.projects = [
 			{
@@ -103,7 +106,7 @@ export const InstanceActions: Story = {
 			},
 		];
 		return () => {
-			discoveryState.currentProviderId = "";
+			clearDiscoveryState();
 			projectState.currentSlug = null;
 			projectState.projects = [];
 			instanceState.instances = [];

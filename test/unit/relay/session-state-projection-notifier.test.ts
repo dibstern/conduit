@@ -3,6 +3,7 @@ import {
 	Deferred,
 	Effect,
 	Exit,
+	Fiber,
 	Layer,
 	Logger,
 	Scope,
@@ -38,7 +39,7 @@ describe("SessionStateProjectionNotifier", () => {
 						errors.push(String(entry.message));
 				});
 				const sessionManagerService = makeMockSessionManagerService({
-					sendSessionLists: () =>
+					pushViewerFamilies: () =>
 						Effect.gen(function* () {
 							yield* Deferred.succeed(started, undefined);
 							yield* Deferred.await(release);
@@ -87,7 +88,7 @@ describe("SessionStateProjectionNotifier", () => {
 				if (entry.logLevel._tag === "Error") errors.push(String(entry.message));
 			});
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists: () =>
+				pushViewerFamilies: () =>
 					Effect.fail(
 						new SessionManagerError({
 							operation: "listSessions",
@@ -116,12 +117,43 @@ describe("SessionStateProjectionNotifier", () => {
 		}),
 	);
 
+	it.effect("returns while git refresh is still running", () =>
+		Effect.gen(function* () {
+			let releaseRefresh: (() => void) | undefined;
+			const refreshStarted = yield* Deferred.make<void>();
+			const wsHandler = makeMockWebSocketHandler();
+			const sessionManagerService = makeMockSessionManagerService();
+			const layer = makeSessionStateProjectionNotifierLive(() => {
+				Effect.runSync(Deferred.succeed(refreshStarted, undefined));
+				return new Promise<void>((resolve) => {
+					releaseRefresh = resolve;
+				});
+			}).pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, wsHandler),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+			);
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				const call = yield* notifier
+					.sessionStateProjected("session-1", "turn.completed")
+					.pipe(Effect.fork);
+				yield* Deferred.await(refreshStarted);
+				expect((yield* Fiber.poll(call))._tag).toBe("Some");
+				releaseRefresh?.();
+				yield* Fiber.join(call);
+			}).pipe(Effect.provide(layer));
+		}),
+	);
 	it.effect("refreshes git before broadcasting a completed turn", () =>
 		Effect.gen(function* () {
 			const order: string[] = [];
 			const wsHandler = makeMockWebSocketHandler();
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists: () =>
+				pushViewerFamilies: () =>
 					Effect.sync(() => {
 						order.push("broadcast");
 					}),
@@ -139,18 +171,71 @@ describe("SessionStateProjectionNotifier", () => {
 			yield* Effect.gen(function* () {
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				yield* notifier.sessionStateProjected("session-1", "turn.completed");
+				yield* Effect.yieldNow();
 				expect(order).toEqual(["refresh"]);
 				yield* TestClock.adjust("150 millis");
 				expect(order).toEqual(["refresh", "broadcast"]);
 			}).pipe(Effect.provide(layer));
 		}),
 	);
+	it.effect(
+		"delivers refreshed git context to the list after a turn ends",
+		() =>
+			Effect.gen(function* () {
+				let branch = "before";
+				const wsHandler = makeMockWebSocketHandler();
+				const sessionManagerService = makeMockSessionManagerService({
+					pushViewerFamilies: () =>
+						Effect.sync(() =>
+							wsHandler.sendTo("viewer", {
+								type: "session_family",
+								rootId: "session-1",
+								sessions: [
+									{
+										id: "session-1",
+										title: "Session",
+										status: "idle",
+										git: { branch },
+									},
+								],
+							}),
+						),
+				});
+				const layer = makeSessionStateProjectionNotifierLive(async () => {
+					branch = "after";
+				}).pipe(
+					Layer.provide(
+						Layer.merge(
+							Layer.succeed(WebSocketHandlerTag, wsHandler),
+							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+						),
+					),
+				);
+				yield* Effect.gen(function* () {
+					const notifier = yield* SessionStateProjectionNotifierTag;
+					yield* notifier.sessionStateProjected("session-1", "turn.completed");
+					yield* TestClock.adjust("150 millis");
+					expect(wsHandler.sendTo).toHaveBeenCalledWith("viewer", {
+						type: "session_family",
+						rootId: "session-1",
+						sessions: [
+							{
+								id: "session-1",
+								title: "Session",
+								status: "idle",
+								git: { branch: "after" },
+							},
+						],
+					});
+				}).pipe(Effect.provide(layer));
+			}),
+	);
 	it.effect("broadcasts after a git refresh failure", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
-			const sendSessionLists = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionStateProjectionNotifierLive(async () => {
 				throw new Error("git unavailable");
@@ -166,20 +251,16 @@ describe("SessionStateProjectionNotifier", () => {
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				yield* notifier.sessionStateProjected("session-1", "turn.error");
 				yield* TestClock.adjust("150 millis");
-				expect(sendSessionLists).toHaveBeenCalledTimes(1);
+				expect(pushViewerFamilies).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(layer));
 		}),
 	);
 	it.effect("coalesces a burst of projected events into one broadcast", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() =>
-					send({ type: "session_list", sessions: [], roots: true }),
-				),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
@@ -197,8 +278,8 @@ describe("SessionStateProjectionNotifier", () => {
 				}
 				yield* TestClock.adjust("150 millis");
 
-				expect(sendSessionLists).toHaveBeenCalledTimes(1);
-				expect(wsHandler.broadcast).toHaveBeenCalledTimes(1);
+				expect(pushViewerFamilies).toHaveBeenCalledTimes(1);
+				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		}),
 	);
@@ -214,13 +295,13 @@ describe("SessionStateProjectionNotifier", () => {
 				const started = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
 				const wsHandler = makeMockWebSocketHandler();
-				const sendSessionLists = vi.fn(() =>
+				const pushViewerFamilies = vi.fn(() =>
 					Deferred.succeed(started, undefined).pipe(
 						Effect.zipRight(Deferred.await(release)),
 					),
 				);
 				const sessionManagerService = makeMockSessionManagerService({
-					sendSessionLists,
+					pushViewerFamilies,
 				});
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
@@ -244,71 +325,42 @@ describe("SessionStateProjectionNotifier", () => {
 					// Under a real clock that gap is microseconds against 150ms.
 					yield* Effect.yieldNow();
 					yield* TestClock.adjust("150 millis");
-					expect(sendSessionLists).toHaveBeenCalledTimes(2);
+					expect(pushViewerFamilies).toHaveBeenCalledTimes(2);
 
 					yield* Deferred.succeed(release, undefined);
 				}).pipe(Effect.provide(layer));
 			}),
 	);
 
-	it.effect(
-		"marks completed and errored turns read when the session has viewers",
-		() =>
-			Effect.gen(function* () {
-				const wsHandler = makeMockWebSocketHandler({
-					getClientsForSession: vi.fn(() => ["client-1"]),
-				});
-				const markSessionRead = vi.fn(() => Effect.void);
-				const sessionManagerService = makeMockSessionManagerService({
-					markSessionRead,
-				});
-				const layer = SessionStateProjectionNotifierLive.pipe(
-					Layer.provide(
-						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, wsHandler),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-						),
+	// A turn end is what makes a session unread; only a user's pick clears it
+	// (ADR-0004, Scope; conduit-test-hk9m.3). Main used to mark it read here
+	// whenever any window was viewing the session.
+	it.effect("never marks a turn read, even when the session has viewers", () =>
+		Effect.gen(function* () {
+			const wsHandler = makeMockWebSocketHandler({
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const markSessionRead = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				markSessionRead,
+			});
+			const layer = SessionStateProjectionNotifierLive.pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, wsHandler),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					),
-				);
+				),
+			);
 
-				yield* Effect.gen(function* () {
-					const notifier = yield* SessionStateProjectionNotifierTag;
-					yield* notifier.sessionStateProjected("session-1", "turn.completed");
-					yield* notifier.sessionStateProjected("session-1", "turn.error");
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				yield* notifier.sessionStateProjected("session-1", "turn.completed");
+				yield* notifier.sessionStateProjected("session-1", "turn.error");
 
-					expect(markSessionRead).toHaveBeenCalledTimes(2);
-					expect(markSessionRead).toHaveBeenNthCalledWith(1, "session-1");
-					expect(markSessionRead).toHaveBeenNthCalledWith(2, "session-1");
-					yield* TestClock.adjust("150 millis");
-				}).pipe(Effect.provide(layer));
-			}),
-	);
-
-	it.effect(
-		"does not mark a completed turn read when the session has no viewers",
-		() =>
-			Effect.gen(function* () {
-				const wsHandler = makeMockWebSocketHandler();
-				const markSessionRead = vi.fn(() => Effect.void);
-				const sessionManagerService = makeMockSessionManagerService({
-					markSessionRead,
-				});
-				const layer = SessionStateProjectionNotifierLive.pipe(
-					Layer.provide(
-						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, wsHandler),
-							Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-						),
-					),
-				);
-
-				yield* Effect.gen(function* () {
-					const notifier = yield* SessionStateProjectionNotifierTag;
-					yield* notifier.sessionStateProjected("session-1", "turn.completed");
-
-					expect(markSessionRead).not.toHaveBeenCalled();
-					yield* TestClock.adjust("150 millis");
-				}).pipe(Effect.provide(layer));
-			}),
+				yield* TestClock.adjust("150 millis");
+				expect(markSessionRead).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(layer));
+		}),
 	);
 });

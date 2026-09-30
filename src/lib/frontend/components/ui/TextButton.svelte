@@ -55,6 +55,7 @@
 		muted: { rest: "text-text-muted", hover: "hover:text-text" },
 		dimmer: { rest: "text-text-dimmer", hover: "hover:text-text" },
 		accent: { rest: "text-accent", hover: "hover:text-accent/80" },
+		inherit: { rest: "text-current", hover: "hover:opacity-80" },
 	} as const;
 
 	const UNDERLINE_CLASSES = {

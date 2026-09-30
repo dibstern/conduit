@@ -1,6 +1,6 @@
 // ─── Client Init (Ticket 3.6) ────────────────────────────────────────────────
 // Handles the initial handshake when a browser client connects via WebSocket.
-// Sends session info (with cached events or REST API history), model info,
+// Sends session info, model info,
 // agent list, provider/model list, and PTY replay to the new client.
 //
 // Extracted from relay-stack.ts's `client_connected` handler so the logic is
@@ -35,22 +35,8 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
-import { getSessionInputDraft } from "../handlers/index.js";
-import { recordSessionViewed } from "../handlers/session.js";
-import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { ProviderCapabilities } from "../provider/types.js";
-import {
-	addProjectedModelExecution,
-	buildSessionSwitchedMessage,
-	extractOldestMessageId,
-	patchMissingDoneForProcessingState,
-	resolveSessionHistoryFromRows,
-	type SessionHistorySource,
-} from "../session/session-switch.js";
-import {
-	findContextWindowOptions,
-	type HistoryMessage,
-} from "../shared-types.js";
+import { findContextWindowOptions } from "../shared-types.js";
 import type { OpenCodeInstance, ProviderInfo } from "../types.js";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
@@ -117,7 +103,6 @@ function addClaudeProvider(
 }
 
 export interface ClientInitEffectOptions {
-	readonly skipMarkRead?: boolean;
 	readonly skipDefaultSession?: boolean;
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
@@ -136,83 +121,6 @@ const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
 		);
 	});
 
-const resolveClientInitHistoryEffect = (sessionId: string) =>
-	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		let projectedSource: SessionHistorySource = { kind: "empty" };
-		let projectedMessages: readonly HistoryMessage[] = [];
-		if (readQueryOption._tag === "Some") {
-			const rows =
-				yield* readQueryOption.value.getSessionMessagesWithParts(sessionId);
-			projectedSource = resolveSessionHistoryFromRows(rows, { pageSize: 50 });
-			if (projectedSource.kind === "rest-history") {
-				projectedMessages = projectedSource.history.messages;
-			}
-
-			// The projection is authoritative only for relay-local (claude)
-			// sessions. OpenCode projections currently persist structure without
-			// message text, so provider REST history stays the source of truth
-			// for opencode rows; the projection is the fallback when REST fails.
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (
-				sessionRowResult._tag === "Right" &&
-				sessionRowResult.right != null &&
-				sessionRowResult.right.provider !== "opencode"
-			) {
-				return projectedSource;
-			}
-		}
-
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		const historyResult = yield* Effect.either(
-			sessionManagerService.loadPreRenderedHistory(sessionId),
-		);
-		if (historyResult._tag === "Right") {
-			return {
-				kind: "rest-history",
-				history: {
-					...historyResult.right,
-					messages: addProjectedModelExecution(
-						historyResult.right.messages,
-						projectedMessages,
-					),
-				},
-			} satisfies SessionHistorySource;
-		}
-
-		if (projectedSource.kind !== "empty") return projectedSource;
-
-		const logger = yield* LoggerTag;
-		logger.warn(
-			`Failed to load client init history for ${sessionId}: ${formatErrorDetail(historyResult.left)}`,
-		);
-		return { kind: "empty" } satisfies SessionHistorySource;
-	});
-
-const seedPaginationCursorFromHistoryEffect = (
-	sessionId: string,
-	source: SessionHistorySource,
-) =>
-	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		let oldestMessageId: string | undefined;
-
-		if (source.kind === "cached-events" && source.hasMore) {
-			oldestMessageId = extractOldestMessageId(source.events);
-		} else if (source.kind === "rest-history" && source.history.hasMore) {
-			oldestMessageId = source.history.messages[0]?.id;
-		}
-
-		if (oldestMessageId) {
-			yield* sessionManagerService.seedPaginationCursor(
-				sessionId,
-				oldestMessageId,
-			);
-		}
-	});
-
 const switchClientToSessionForInitEffect = (
 	clientId: string,
 	sessionId: string,
@@ -226,49 +134,10 @@ const switchClientToSessionForInitEffect = (
 
 		wsHandler.setClientSession(clientId, sessionId);
 
-		const sourceResult = yield* Effect.either(
-			resolveClientInitHistoryEffect(sessionId),
-		);
-		const source =
-			sourceResult._tag === "Right"
-				? sourceResult.right
-				: ({ kind: "empty" } satisfies SessionHistorySource);
-		if (sourceResult._tag === "Left") {
-			const log = yield* LoggerTag;
-			log.warn(
-				`Failed to load history for ${sessionId}: ${formatErrorDetail(sourceResult.left)}`,
-			);
-		}
-
 		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
-		const patchedSource = patchMissingDoneForProcessingState(
-			source,
-			sessionId,
-			pollerIsProcessing || hasActiveTimeout,
-		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		let parentID: string | undefined;
-		if (readQueryOption._tag === "Some") {
-			const sessionRowResult = yield* Effect.either(
-				readQueryOption.value.getSession(sessionId),
-			);
-			if (sessionRowResult._tag === "Right") {
-				parentID = sessionRowResult.right?.parent_id ?? undefined;
-			}
-		}
-		yield* seedPaginationCursorFromHistoryEffect(sessionId, patchedSource);
-
 		const sessionService = yield* SessionManagerServiceTag;
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
-		const draft = getSessionInputDraft(sessionId);
-		wsHandler.sendTo(
-			clientId,
-			buildSessionSwitchedMessage(sessionId, patchedSource, {
-				...(draft ? { draft } : {}),
-				...(parentID != null ? { parentID } : {}),
-			}),
-		);
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
@@ -293,14 +162,12 @@ export const handleClientConnectedEffect = (
 		const agentService = yield* AgentServiceTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const terminal = yield* OpenCodeTerminalServiceTag;
-		const statusPoller = yield* StatusPollerTag;
 		const engine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 
-		// An unknown requested id selects no session, never the default: a
-		// session_switched here would rewrite the URL and cancel the frontend's
-		// route resolve, which owns the not-found banner. A failed check is not a
-		// missing session, so the id is trusted and the frontend's resolve
+		// An unknown requested id selects no session, never the default: the
+		// frontend's route resolve owns the not-found banner. A failed check is
+		// not a missing session, so the id is trusted and the frontend's resolve
 		// surfaces the failure.
 		const validatedRequestedSessionId = requestedSessionId
 			? yield* sessionService.sessionExists(requestedSessionId).pipe(
@@ -358,6 +225,7 @@ export const handleClientConnectedEffect = (
 					};
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
+						sessionId: activeId,
 						model: session.modelID,
 						provider: session.providerID ?? "",
 					});
@@ -366,6 +234,7 @@ export const handleClientConnectedEffect = (
 					if (fallbackModel) {
 						wsHandler.sendTo(clientId, {
 							type: "model_info",
+							sessionId: activeId,
 							model: fallbackModel.modelID,
 							provider: fallbackModel.providerID,
 						});
@@ -381,6 +250,7 @@ export const handleClientConnectedEffect = (
 				if (fallbackModel) {
 					wsHandler.sendTo(clientId, {
 						type: "model_info",
+						sessionId: activeId,
 						model: fallbackModel.modelID,
 						provider: fallbackModel.providerID,
 					});
@@ -388,23 +258,14 @@ export const handleClientConnectedEffect = (
 			}
 		}
 
-		yield* sessionService
-			.sendSessionLists((msg) => wsHandler.sendTo(clientId, msg), {
-				statuses: yield* statusPoller.getCurrentStatuses(),
-			})
-			.pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to list sessions"),
-				),
-				Effect.ensuring(
-					Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
-				),
-			);
-		if (validatedRequestedSessionId) {
-			yield* recordSessionViewed(clientId, validatedRequestedSessionId, {
-				skipMarkRead: options.skipMarkRead === true,
-			});
-		}
+		yield* sessionService.pushViewerFamilies().pipe(
+			Effect.catchAll((err) =>
+				sendInitErrorEffect(clientId, err, "Failed to push viewed families"),
+			),
+			Effect.ensuring(
+				Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
+			),
+		);
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
 		const sentPermissionIds = new Set<string>();

@@ -36,6 +36,7 @@
         {
           "id": "ses_2d28a5d5effel1llfLkOXkrugF",
           "title": "New session - 2026-03-27T04:02:57.313Z",
+          "status": "idle",
           "updatedAt": 1774584177313,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d28a5d5effel1llfLkOXkrugF",
           "title": "New session - 2026-03-27T04:02:57.313Z",
+          "status": "idle",
           "updatedAt": 1774584177313,
           "messageCount": 0
         }
@@ -496,6 +498,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "New session - 2026-03-27T04:02:57.313Z",
+              "status": "idle",
               "updatedAt": 1774584179652,
               "messageCount": 0
             }
@@ -508,6 +511,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "New session - 2026-03-27T04:02:57.313Z",
+              "status": "idle",
               "updatedAt": 1774584179652,
               "messageCount": 0
             }
@@ -520,6 +524,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "New session - 2026-03-27T04:02:57.313Z",
+              "status": "idle",
               "updatedAt": 1774584179652,
               "messageCount": 0
             }
@@ -532,6 +537,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "New session - 2026-03-27T04:02:57.313Z",
+              "status": "idle",
               "updatedAt": 1774584179652,
               "messageCount": 0
             }
@@ -544,6 +550,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "New session - 2026-03-27T04:02:57.313Z",
+              "status": "busy",
               "updatedAt": 1774584179652,
               "messageCount": 0,
               "processing": true
@@ -562,6 +569,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "New session - 2026-03-27T04:02:57.313Z",
+              "status": "busy",
               "updatedAt": 1774584179652,
               "messageCount": 0,
               "processing": true
@@ -575,6 +583,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "Acknowledgment request",
+              "status": "busy",
               "updatedAt": 1774584179652,
               "messageCount": 0,
               "processing": true
@@ -588,6 +597,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "Acknowledgment request",
+              "status": "busy",
               "updatedAt": 1774584179652,
               "messageCount": 0,
               "processing": true
@@ -636,6 +646,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "Acknowledgment request",
+              "status": "idle",
               "updatedAt": 1774584183638,
               "messageCount": 0
             }
@@ -653,6 +664,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "Acknowledgment request",
+              "status": "idle",
               "updatedAt": 1774584183650,
               "messageCount": 0
             }
@@ -665,6 +677,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "Acknowledgment request",
+              "status": "idle",
               "updatedAt": 1774584183650,
               "messageCount": 0
             }
@@ -677,6 +690,7 @@
             {
               "id": "ses_2d28a5d5effel1llfLkOXkrugF",
               "title": "Acknowledgment request",
+              "status": "idle",
               "updatedAt": 1774584183650,
               "messageCount": 0
             }

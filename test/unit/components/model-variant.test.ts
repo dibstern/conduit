@@ -4,6 +4,7 @@ import ModelVariant from "../../../src/lib/frontend/components/model/ModelVarian
 import {
 	clearDiscoveryState,
 	discoveryState,
+	handleVariantInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -36,8 +37,11 @@ describe("ModelVariant", () => {
 	beforeEach(() => {
 		switchVariantRpcSpy.mockClear();
 		clearDiscoveryState();
-		discoveryState.currentVariant = "";
-		discoveryState.availableVariants = ["low", "medium", "high", "max"];
+		handleVariantInfo({
+			type: "variant_info",
+			variant: "",
+			variants: ["low", "medium", "high", "max"],
+		});
 		sessionState.currentId = "session-1";
 	});
 

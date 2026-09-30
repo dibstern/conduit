@@ -12,7 +12,9 @@ import {
 	replaceRoute,
 } from "./router.svelte.js";
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// This store has no client half: the project list and the current slug both
+// come from `project_list`, and `handleProjectList` below is the only writer.
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],

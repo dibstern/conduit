@@ -4,7 +4,6 @@ import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
 	recording: "chat-simple",
-	persistence: true,
 	viewport: { width: 1440, height: 900 },
 	screenshot: "off",
 });
@@ -41,7 +40,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
-	await expect(toggle).toHaveText(/Settled/);
+	await expect(toggle).toHaveText(/^\s*Settled\s*$/);
 	await expect(row).toHaveCount(0);
 	// Other live regions exist ("Connected", the composer); only one may speak
 	// about the settle.

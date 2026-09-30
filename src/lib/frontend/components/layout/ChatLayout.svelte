@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { attachProjectRpc, resolveSessionRpc, viewSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc, listSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -44,16 +44,17 @@
 		wsState,
 		onNavigateToSession,
 		clearNavigateToSession,
-		initSWNavigationListener,
+		initSWMessageListener,
+		reconcilePushActive,
 		onPlanMode,
-		onRewind,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
-	import { applyListSessionsResponse, clearSessionState, findSession, loadDaemonSessions, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { clearAllPermissions } from "../../stores/permissions.svelte.js";
+	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { attachSessionList, detachSessionList } from "../../stores/session-list.svelte.js";
+	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
@@ -63,7 +64,10 @@
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import type { RelayMessage } from "../../types.js";
-	import { noteSessionOpened } from "../../stores/session-unread-hold.svelte.js";
+	import {
+		observeOpenSession,
+		trackSeen,
+	} from "../../utils/attention.js";
 	import DeepSearch from "../session/DeepSearch.svelte";
 
 	// ─── Local state ──────────────────────────────────────────────────────────
@@ -377,7 +381,6 @@
 			if (slug !== previousSlug) {
 				clearMessages();
 				clearSessionState();
-				clearAllPermissions();
 				destroyAll();
 				clearDiscoveryState();
 				clearTodoState();
@@ -391,14 +394,7 @@
 			// Request initial state from server
 			// First page only. The cross-project read is keyset-paged now; the
 			// sidebar's scroll sentinel asks for the rest.
-			void loadDaemonSessions();
-			void listSessionsRpc({ projectSlug: slug, roots: true })
-				.then((response) => {
-					if (generation === attachGeneration) applyListSessionsResponse(response);
-				})
-				.catch(() => {
-					if (generation === attachGeneration) showToast("Failed to load sessions", { variant: "error" });
-				});
+			attachSessionList(slug);
 			const routeSessionId = getCurrentSessionId();
 			// With no session in the route, scope the agent fetch to the
 			// client-persisted harness draft so the agent list matches the
@@ -455,10 +451,11 @@
 				.catch(() => undefined);
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
-		initSWNavigationListener();
+		initSWMessageListener();
 		connect();
 		return () => {
 			attachGeneration++;
+			detachSessionList();
 			unsubscribe();
 			clearNavigateToSession();
 			interruptStream();
@@ -472,16 +469,21 @@
 		wsState.status === "connected" || wsState.status === "processing",
 	);
 	$effect(() => {
+		const project = attachedProjectState.slug ?? "";
+		const sessionId = project ? sessionState.currentId : null;
+		untrack(() => viewTranscript(project, sessionId));
+		return () => viewTranscript(project, null);
+	});
+	$effect(() => {
 		const route = getCurrentRoute();
 		const projectHint = getCurrentSearchParams().get("p");
+		const attachedSlug = attachedProjectState.slug;
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
 			if (!route.sessionId) {
 				if (sessionState.currentId !== null) {
 					sessionState.currentId = null;
-					clearMessages();
-					clearAllPermissions();
 					clearTodoState();
 				}
 				if (projectHint && (projectHint !== attachedProjectState.slug || requestedProject !== null)) {
@@ -491,9 +493,10 @@
 				}
 				return;
 			}
+			if (!attachedSlug) return;
 			if (route.sessionId === sessionState.currentId) return;
 			const sessionId = route.sessionId;
-			void resolveSessionRpc({ sessionId }).then(({ projectSlug }) => {
+			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
 				if (cancelled) return;
 				if (sessionState.currentId === sessionId) return;
 				if (projectSlug === null) {
@@ -501,7 +504,7 @@
 					replaceRoute("/");
 					return;
 				}
-				return viewSessionRpc({ projectSlug, sessionId, originId: getBrowserClientId(), ...noteSessionOpened(sessionId) });
+				switchToSession(sessionId, projectSlug);
 			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
 		});
 		return () => { cancelled = true; };
@@ -544,20 +547,6 @@
 						onReject: () => wsSend({ type: "plan_reject" }),
 					};
 					break;
-			}
-		});
-		return unsub;
-	});
-
-	// ─── Rewind result subscription ──────────────────────────────────────────
-
-	$effect(() => {
-		const unsub = onRewind((msg: RelayMessage) => {
-			if (msg.type === "rewind_result") {
-				// Rewind completed — clear messages and show feedback
-				clearMessages();
-				const mode = msg.mode ?? "both";
-				showToast(`Rewound ${mode === "both" ? "conversation & files" : mode}`);
 			}
 		});
 		return unsub;
@@ -652,6 +641,12 @@
 		return () => window.removeEventListener("keydown", handleViewShortcut);
 	});
 
+	// A dot marked unread holds against touches until the user switches away
+	// (utils/attention.ts, conduit-test-hk9m.5).
+	$effect(() => {
+		observeOpenSession(sessionState.currentId ? findSession(sessionState.currentId) : undefined);
+	});
+
 	// ─── Show debug panel when feature flag enabled ────────────────────────────
 	$effect(() => {
 		if (featureFlags.debug) {
@@ -740,7 +735,8 @@
 			<div bind:this={paneRowEl} class="relative flex flex-1 min-h-0 min-w-0">
 				<!-- Lift horizontal clipping while the in-DOM 404px model picker overhangs a narrow chat column. -->
 				<div id="chat-area" class="flex flex-col flex-1 min-h-0 min-w-0 has-[#model-picker]:overflow-x-visible" class:overflow-x-clip={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded} class:relative={!filesPaneExpanded} class:absolute={filesPaneExpanded} class:inset-0={filesPaneExpanded} class:invisible={filesPaneExpanded} class:island-transcript={isBarCollapsed() && phoneView === "chat"} inert={filesPaneExpanded} style:min-width={!sessionViewState.compact && sessionViewState.filesOpen && !filesPaneExpanded ? `${CHAT_MIN_WIDTH}px` : undefined}>
-					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized}>
+					<!-- Touches here clear the unread dot (conduit-test-hk9m.4). -->
+					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 						<MessageList {topClearance} />
 						<InputArea />
 					</div>

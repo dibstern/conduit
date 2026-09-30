@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Deferred, Effect, Fiber, Layer } from "effect";
+import { Chunk, Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -11,6 +11,11 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	type SessionEventBus,
+	SessionEventBusLive,
+	SessionEventBusTag,
+} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
 	type EventStoreEffect,
 	EventStoreEffectTag,
@@ -60,9 +65,15 @@ function makeHarness(options?: {
 		event: StoredEvent,
 		callIndex: number,
 	) => Effect.Effect<void, ProjectionRunnerError | SqlError>;
+	readonly projectBatchEffect?: (
+		events: readonly StoredEvent[],
+		callIndex: number,
+	) => Effect.Effect<void, ProjectionRunnerError | SqlError>;
 }) {
 	const appended: CanonicalEvent[] = [];
 	const projected: StoredEvent[] = [];
+	const batchProjected: StoredEvent[] = [];
+	let projectBatchCallIndex = 0;
 	const append = vi.fn((event: CanonicalEvent) => {
 		appended.push(event);
 		const stored = {
@@ -78,9 +89,34 @@ function makeHarness(options?: {
 	const appendBatch = vi.fn((events: readonly CanonicalEvent[]) =>
 		Effect.forEach(events, append),
 	);
-	const projectEvent = vi.fn((event: StoredEvent) => {
-		projected.push(event);
-		return options?.projectEffect?.(event, projected.length) ?? Effect.void;
+	const projectEvent = vi.fn((event: StoredEvent) =>
+		Effect.suspend(() => {
+			projected.push(event);
+			return (
+				options?.projectEffect?.(event, projected.length) ?? Effect.void
+			).pipe(
+				Effect.as({
+					version: event.sequence,
+					sessionIds: [event.sessionId],
+					removedSessionIds: [],
+				}),
+			);
+		}),
+	);
+	const projectBatch = vi.fn((events: readonly StoredEvent[]) => {
+		projectBatchCallIndex += 1;
+		projected.push(...events);
+		batchProjected.push(...events);
+		return (
+			options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
+			Effect.void
+		).pipe(
+			Effect.as({
+				version: events[events.length - 1]?.sequence ?? 0,
+				sessionIds: [...new Set(events.map((event) => event.sessionId))],
+				removedSessionIds: [],
+			}),
+		);
 	});
 
 	const eventStore = {
@@ -93,7 +129,7 @@ function makeHarness(options?: {
 	} satisfies EventStoreEffect;
 	const projectionRunner = {
 		projectEvent,
-		projectBatch: vi.fn(() => Effect.void),
+		projectBatch,
 		recover: vi.fn(() =>
 			Effect.succeed({
 				startCursor: 0,
@@ -105,6 +141,7 @@ function makeHarness(options?: {
 		getFailures: vi.fn(() => Effect.succeed([])),
 		isRecovered: vi.fn(() => Effect.succeed(true)),
 		markRecovered: vi.fn(() => Effect.void),
+		nextVersion: Effect.succeed(0),
 	} satisfies ProjectionRunnerEffect;
 
 	const executeSql = vi.fn(() => Effect.succeed([]));
@@ -125,9 +162,11 @@ function makeHarness(options?: {
 	return {
 		appended,
 		projected,
+		batchProjected,
 		append,
 		appendBatch,
 		projectEvent,
+		projectBatch,
 		executeSql,
 		depsLayer,
 		layer,
@@ -174,6 +213,207 @@ describe("ProviderRuntimeIngestion", () => {
 				messageId: "message-1",
 				partId: "text-1",
 			},
+		]);
+	});
+
+	it("publishes committed stored events to the session event bus post-commit", async () => {
+		const harness = makeHarness();
+		const layer = ProviderRuntimeIngestionLive.pipe(
+			Layer.provide(harness.depsLayer),
+			Layer.provideMerge(SessionEventBusLive),
+		);
+
+		const received = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const bus = yield* SessionEventBusTag;
+					// Subscribe before ingesting so the committed event buffers.
+					const stream = yield* bus.subscribe({ sessionId: "session-123" });
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					yield* ingestion.ingest(
+						runtimeEvent({
+							eventId: "committed-1",
+							type: "message.created",
+							turnId: "turn-1",
+							data: { messageId: "message-1", role: "assistant" },
+						}),
+					);
+					return yield* stream.pipe(Stream.take(1), Stream.runCollect);
+				}).pipe(Effect.provide(layer)),
+			),
+		);
+
+		expect(Chunk.toReadonlyArray(received)).toEqual([
+			expect.objectContaining({ eventId: "committed-1", sequence: 1 }),
+		]);
+	});
+
+	it.each([
+		{
+			name: "publishes to both sinks by default",
+			options: undefined,
+			expectedBusCalls: 1,
+			expectedRelayCalls: 1,
+		},
+		{
+			name: "publishes only to the bus when relay publishing is disabled",
+			options: { publishToRelay: false },
+			expectedBusCalls: 1,
+			expectedRelayCalls: 0,
+		},
+		{
+			name: "publishes only to the relay when bus publishing is disabled",
+			options: { publishToBus: false },
+			expectedBusCalls: 0,
+			expectedRelayCalls: 1,
+		},
+	])("$name", async ({ options, expectedBusCalls, expectedRelayCalls }) => {
+		const harness = makeHarness();
+		const busPublish = vi.fn(() => Effect.void);
+		const relayPublish = vi.fn(() => Effect.void);
+		const busLayer = Layer.succeed(SessionEventBusTag, {
+			publish: busPublish,
+			publishAdvance: () => Effect.void,
+			subscribe: () => Effect.succeed(Stream.empty),
+			subscribeAdvances: () => Effect.succeed(Stream.empty),
+		} satisfies SessionEventBus);
+		const layer = makeProviderRuntimeIngestionLive({
+			relayPublisher: { publish: relayPublish },
+		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingestBatch(
+					[
+						runtimeEvent({
+							eventId: "publication-matrix-delta",
+							type: "text.delta",
+							turnId: "turn-1",
+							data: {
+								messageId: "message-1",
+								partId: "text-1",
+								text: "hello",
+							},
+						}),
+					],
+					options,
+				);
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(busPublish).toHaveBeenCalledTimes(expectedBusCalls);
+		expect(relayPublish).toHaveBeenCalledTimes(expectedRelayCalls);
+	});
+
+	it("single stored events fail ingestion and do not publish when projectBatch fails", async () => {
+		const harness = makeHarness({
+			projectBatchEffect: () =>
+				Effect.fail(
+					new ProjectionRunnerError({
+						operation: "projectBatch",
+						cause: new Error("projection failed"),
+					}),
+				),
+		});
+		const busPublish = vi.fn(() => Effect.void);
+		const relayPublish = vi.fn(() => Effect.void);
+		const busLayer = Layer.succeed(SessionEventBusTag, {
+			publish: busPublish,
+			publishAdvance: () => Effect.void,
+			subscribe: () => Effect.succeed(Stream.empty),
+			subscribeAdvances: () => Effect.succeed(Stream.empty),
+		} satisfies SessionEventBus);
+		const layer = makeProviderRuntimeIngestionLive({
+			relayPublisher: { publish: relayPublish },
+		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				return yield* ingestion
+					.ingest(
+						runtimeEvent({
+							eventId: "single-event-projection-failure",
+							type: "message.created",
+							turnId: "turn-1",
+							data: {
+								messageId: "message-1",
+								role: "assistant",
+							},
+						}),
+					)
+					.pipe(Effect.either);
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(result._tag).toBe("Left");
+		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
+		expect(harness.projectBatch).toHaveBeenCalledWith([
+			expect.objectContaining({
+				eventId: "single-event-projection-failure",
+				sequence: 1,
+			}),
+		]);
+		expect(harness.projectEvent).not.toHaveBeenCalled();
+		expect(busPublish).not.toHaveBeenCalled();
+		expect(relayPublish).not.toHaveBeenCalled();
+	});
+
+	it("an interrupt cannot split ingestion projection from its bus signal", async () => {
+		const publishStarted = await Effect.runPromise(Deferred.make<void>());
+		const publishGate = await Effect.runPromise(Deferred.make<void>());
+		const published: StoredEvent[] = [];
+		let projectedCountAtPublish = 0;
+		const harness = makeHarness();
+		const busLayer = Layer.succeed(SessionEventBusTag, {
+			publish: (events) =>
+				Effect.gen(function* () {
+					yield* Deferred.succeed(publishStarted, undefined);
+					yield* Deferred.await(publishGate);
+					published.push(...events);
+				}),
+			publishAdvance: () => Effect.void,
+			subscribe: () => Effect.succeed(Stream.empty),
+			subscribeAdvances: () => Effect.succeed(Stream.empty),
+		} satisfies SessionEventBus);
+		const layer = ProviderRuntimeIngestionLive.pipe(
+			Layer.provide(harness.depsLayer),
+			Layer.provideMerge(busLayer),
+		);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const fiber = yield* Effect.fork(
+					ingestion.ingest(
+						runtimeEvent({
+							eventId: "interrupt-during-bus-publish",
+							type: "message.created",
+							turnId: "turn-1",
+							data: {
+								messageId: "message-1",
+								role: "assistant",
+							},
+						}),
+					),
+				);
+
+				yield* Deferred.await(publishStarted);
+				projectedCountAtPublish = harness.projected.length;
+				yield* Fiber.interruptFork(fiber);
+				yield* Effect.yieldNow();
+				yield* Deferred.succeed(publishGate, undefined);
+				yield* Fiber.await(fiber);
+			}).pipe(Effect.provide(layer)),
+		);
+
+		expect(projectedCountAtPublish).toBe(1);
+		expect(published).toEqual([
+			expect.objectContaining({
+				eventId: "interrupt-during-bus-publish",
+				sequence: 1,
+			}),
 		]);
 	});
 
@@ -283,7 +523,7 @@ describe("ProviderRuntimeIngestion", () => {
 			expect.arrayContaining(["subagent-session", "claude"]),
 		);
 		expect(harness.executeSql.mock.invocationCallOrder[0]).toBeLessThan(
-			harness.projectEvent.mock.invocationCallOrder[0] as number,
+			harness.projectBatch.mock.invocationCallOrder[0] as number,
 		);
 	});
 
@@ -327,8 +567,9 @@ describe("ProviderRuntimeIngestion", () => {
 				},
 			}),
 		]);
-		expect(harness.projectEvent).toHaveBeenCalledTimes(1);
-		expect(harness.projected).toEqual([
+		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
+		expect(harness.projectEvent).not.toHaveBeenCalled();
+		expect(harness.batchProjected).toEqual([
 			expect.objectContaining({
 				eventId: "runtime-event-1",
 				sequence: 1,
@@ -536,13 +777,13 @@ describe("ProviderRuntimeIngestion", () => {
 		]);
 	});
 
-	it("advances mapper state after append even when eager projection fails", async () => {
+	it("does not advance mapper state when eager projection fails", async () => {
 		const harness = makeHarness({
-			projectEffect: (_event, callIndex) =>
+			projectBatchEffect: (_events, callIndex) =>
 				callIndex === 1
 					? Effect.fail(
 							new ProjectionRunnerError({
-								operation: "projectEvent",
+								operation: "projectBatch",
 								cause: new Error("projection failed"),
 							}),
 						)
@@ -588,12 +829,13 @@ describe("ProviderRuntimeIngestion", () => {
 				eventId: "thinking-start",
 				type: "thinking.start",
 				data: {
-					messageId: "message-1",
+					messageId: "provider-message-123",
 					partId: "thinking-1",
 				},
 			}),
 		]);
-		expect(harness.projectEvent).toHaveBeenCalledTimes(2);
+		expect(harness.projectBatch).toHaveBeenCalledTimes(2);
+		expect(harness.projectEvent).not.toHaveBeenCalled();
 	});
 
 	it("appends all domain events from one runtime event as a single durable batch", async () => {

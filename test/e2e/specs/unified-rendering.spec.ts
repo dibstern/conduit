@@ -37,8 +37,9 @@ test.describe("Unified Rendering: No Duplication", () => {
 		const usersBefore = await chat.userMessages.count();
 		const assistantsBefore = await chat.assistantMessages.count();
 
-		// Send a single message
-		await app.sendMessage("Show me a tool call");
+		// Send the recording's own prompt: the mock replays the recorded user
+		// message, and a bubble only reconciles with a row of the same text.
+		await app.sendMessage("Hello, reply with just the word pong");
 		await chat.waitForAssistantMessage();
 		await chat.waitForStreamingComplete();
 

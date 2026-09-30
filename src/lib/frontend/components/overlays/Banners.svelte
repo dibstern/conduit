@@ -11,12 +11,14 @@
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 	import { assertNever } from "../../../utils.js";
-	let { banners = uiState.banners, ondismiss = removeBanner, showHealthWarning = true }: {
+	let { banners, ondismiss = removeBanner, showHealthWarning = true }: {
 		banners?: BannerConfig[];
 		ondismiss?: (id: string) => void;
 		showHealthWarning?: boolean;
 	} = $props();
+	const visibleBanners = $derived(banners ?? uiState.banners);
 
 	// ─── Instance health check ─────────────────────────────────────────────────
 	// Show the warning banner only when ALL instances are "unhealthy" — meaning
@@ -82,9 +84,9 @@
 	</div>
 {/if}
 
-{#if banners.length > 0}
+{#if visibleBanners.length > 0}
 	<div class="banners flex flex-col">
-		{#each banners as banner (banner.id)}
+		{#each visibleBanners as banner (banner.id)}
 			<div
 				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)}"
 				data-banner-id={banner.id}
@@ -104,6 +106,18 @@
 					>
 						npm
 					</a>
+				{/if}
+				{#if banner.action}
+					<TextButton
+						type="button"
+						tone="inherit"
+						underline="always"
+						class="shrink-0"
+						data-testid="banner-action"
+						onclick={banner.action.run}
+					>
+						{banner.action.label}
+					</TextButton>
 				{/if}
 				{#if banner.dismissible}
 					<!-- Inherit keeps the banner's own colour without adding a hover colour. -->

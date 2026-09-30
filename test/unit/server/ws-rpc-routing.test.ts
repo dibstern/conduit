@@ -7,11 +7,17 @@ import {
 	Layer,
 	ManagedRuntime,
 	Scope,
+	Stream,
 } from "effect";
 import { expect, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
@@ -23,6 +29,60 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("routed RPC server", () => {
+	it.scoped("keeps two project shell streams on their own read models", () =>
+		Effect.gen(function* () {
+			const contexts = new Map<string, Context.Context<unknown>>();
+			for (const slug of ["project-a", "project-b"]) {
+				const bus = makeSessionEventBusLive();
+				const context = yield* Layer.build(
+					Layer.merge(
+						bus,
+						makePersistenceEffectLayer(":memory:", undefined, bus),
+					),
+				);
+				contexts.set(slug, context as Context.Context<unknown>);
+				yield* Effect.gen(function* () {
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.recover();
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent(
+							"session.created",
+							slug,
+							{
+								sessionId: slug,
+								title: slug,
+								provider: "claude",
+							},
+							{ provider: "claude", createdAt: 1 },
+						),
+					]);
+				}).pipe(Effect.provide(context));
+			}
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+				Effect.provide(
+					makeRoutedWsRpcServerLayer((slug) => {
+						const context = contexts.get(slug);
+						return context
+							? Effect.succeed(context)
+							: Effect.fail(
+									new WsRpcError({ message: `Unknown project ${slug}` }),
+								);
+					}),
+				),
+			);
+			for (const slug of ["project-a", "project-b"]) {
+				const envelopes = yield* client
+					.SubscribeShell({ projectSlug: slug })
+					.pipe(Stream.take(2), Stream.runCollect);
+				expect(Array.from(envelopes)).toMatchObject([
+					{ _tag: "snapshot", rows: [{ id: slug }] },
+					{ _tag: "synchronized" },
+				]);
+			}
+		}),
+	);
+
 	it.scoped.each([true, false])(
 		"AttachProject returns ok without resolving a relay context when reattached=%s",
 		(reattached) =>
@@ -74,7 +134,7 @@ describe("routed RPC server", () => {
 						sessionId: "session-b",
 						originId: "daemon-client",
 					}),
-				).toEqual({ ok: true });
+				).toEqual({ ok: true, draft: "" });
 				expect(reattach).toHaveBeenCalledWith(
 					expect.objectContaining({
 						projectSlug: "project-b",
@@ -105,7 +165,7 @@ describe("routed RPC server", () => {
 						sessionId: "session-a",
 						originId: "relay-client",
 					}),
-				).toEqual({ ok: true });
+				).toEqual({ ok: true, draft: "" });
 				expect(reattach).toHaveBeenCalledTimes(1);
 				expect(resolve).toHaveBeenCalledWith("project-a");
 			}),

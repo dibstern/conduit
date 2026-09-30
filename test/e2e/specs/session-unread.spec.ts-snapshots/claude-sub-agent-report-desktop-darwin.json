@@ -1,0 +1,42 @@
+[
+  {
+    "provider": "claude",
+    "scenario": "sub-agent",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": null,
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "sub-agent",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 1",
+    "seenVersion": null,
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "claude",
+    "scenario": "sub-agent",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": null,
+    "seenVersion": null,
+    "unread": 0,
+    "session": "sub-agent"
+  },
+  {
+    "provider": "claude",
+    "scenario": "sub-agent",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": null,
+    "seenVersion": null,
+    "unread": 0,
+    "session": "sub-agent"
+  }
+]

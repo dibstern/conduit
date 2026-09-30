@@ -17,7 +17,8 @@
 			"!.beads/backup",
 			"!.beads/export-state.json",
 			"!test/e2e/fixtures/recorded/*.json",
-			"!test/e2e/fixtures/subagent-snapshot.json"
+			"!test/e2e/fixtures/subagent-snapshot.json",
+			"!test/e2e/specs/*-snapshots/*.json"
 		]
 	},
 	"css": {

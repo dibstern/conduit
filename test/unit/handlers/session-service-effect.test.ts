@@ -19,7 +19,6 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	SessionManagerError,
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -29,6 +28,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	handleViewSession,
+	loadMoreHistoryForSession,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 } from "../../../src/lib/handlers/session.js";
@@ -52,6 +52,7 @@ function makeSessionMetadataLayer(options: {
 	readonly modelService?: OpenCodeModelService;
 	readonly sessionMgr?: SessionManagerShape;
 	readonly sessionManagerService?: SessionManagerService;
+	readonly clientSession?: string;
 }) {
 	const api =
 		options.api ??
@@ -84,7 +85,11 @@ function makeSessionMetadataLayer(options: {
 			),
 			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		} satisfies OpenCodeModelService);
-	const wsHandler = makeMockWebSocketHandler();
+	const wsHandler = makeMockWebSocketHandler(
+		options.clientSession === undefined
+			? {}
+			: { getClientSession: vi.fn(() => options.clientSession) },
+	);
 	const _sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
@@ -123,56 +128,13 @@ function makeSessionMetadataLayer(options: {
 	};
 }
 
-function makeEmptySessionReadQuery(provider: string): ReadQueryEffect {
-	return {
-		getToolContent: vi.fn(() => Effect.succeed(undefined)),
-		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-		getSession: vi.fn(() =>
-			Effect.succeed({
-				id: "session-1",
-				provider,
-				provider_sid: null,
-				title: "Session 1",
-				status: "idle",
-				parent_id: null,
-				forked_from: null,
-				fork_point_event: null,
-				last_message_at: null,
-				last_turn_error_at: null,
-				permission_mode: null,
-				read_at: null,
-				settled_at: null,
-				pinned_at: null,
-				snoozed_at: null,
-				snoozed_until: null,
-				woken_at: null,
-				woken_reason: null,
-				created_at: 1,
-				updated_at: 1,
-			}),
-		),
-		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-		getSessionsForReconciliation: () => Effect.succeed([]),
-		listSessions: vi.fn(() => Effect.succeed([])),
-		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-		getSessionFamily: () => Effect.succeed([]),
-		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
-	};
-}
-
 describe("session handlers with Effect-native model service", () => {
 	for (const changed of [true, false]) {
-		it.effect(`broadcasts triage lists only when changed=${changed}`, () => {
+		it.effect(`refreshes viewed families only when changed=${changed}`, () => {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: vi.fn(() => Effect.succeed(changed)),
 				setSessionPinned: vi.fn(() => Effect.succeed(changed)),
-				sendSessionLists: vi.fn((send) =>
-					Effect.sync(() =>
-						send({ type: "session_list", sessions: [], roots: true }),
-					),
-				),
+				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const { wsHandler, layer } = makeSessionMetadataLayer({
 				sessionManagerService: service,
@@ -192,288 +154,50 @@ describe("session handlers with Effect-native model service", () => {
 					settled: true,
 				});
 				expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
-				expect(wsHandler.broadcast).toHaveBeenCalledTimes(changed ? 2 : 0);
+				expect(service.pushViewerFamilies).toHaveBeenCalledTimes(
+					changed ? 2 : 0,
+				);
+				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		});
 	}
-	it.effect(
-		"loads view-session REST history through SessionManagerService",
-		() => {
-			const legacyLoadPreRenderedHistory = vi.fn(async () => {
-				throw new Error("legacy loadPreRenderedHistory should not be used");
-			});
-			const loadPreRenderedHistory = vi.fn(() =>
-				Effect.succeed({
-					messages: [
-						{
-							id: "msg-1",
-							role: "assistant" as const,
-							parts: [{ id: "part-1", type: "text" as const, text: "hello" }],
-						},
-					],
-					hasMore: false,
-				}),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory,
-			});
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				sessionMgr: makeMockSessionManagerShape({
-					loadPreRenderedHistory: legacyLoadPreRenderedHistory,
-				}),
-				sessionManagerService,
-			});
-
-			return handleViewSession(
-				"client-1",
-				{ sessionId: "session-1" },
-				/* skipMetadata */ true,
-			).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-					expect(legacyLoadPreRenderedHistory).not.toHaveBeenCalled();
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "session-1",
-						sessionId: "session-1",
-						history: {
-							messages: [
-								{
-									id: "msg-1",
-									role: "assistant",
-									parts: [{ id: "part-1", type: "text", text: "hello" }],
-								},
-							],
-							hasMore: false,
-						},
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect("opening a session records read state best-effort", () => {
-		const markSessionRead = vi.fn(() =>
-			Effect.fail(
-				new SessionManagerError({
-					operation: "markSessionRead",
-					cause: "store unavailable",
-				}),
-			),
-		);
-		const sessionManagerService = makeMockSessionManagerService({
-			markSessionRead,
-			loadPreRenderedHistory: vi.fn(() =>
-				Effect.succeed({ messages: [], hasMore: false }),
-			),
-		});
-		const { wsHandler, layer } = makeSessionMetadataLayer({
-			sessionManagerService,
-		});
-
-		return handleViewSession(
-			"client-1",
-			{ sessionId: "session-1" },
-			/* skipMetadata */ true,
-		).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(markSessionRead).toHaveBeenCalledWith("session-1");
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "notification_event",
-					eventType: "session_viewed",
-					sessionId: "session-1",
-				});
-			}),
-		);
-	});
-
-	it.effect(
-		"loads view-session SQLite history through ReadQueryEffectTag for relay-local sessions",
-		() => {
-			const loadPreRenderedHistory = vi.fn(() =>
-				Effect.succeed({ messages: [], hasMore: false }),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory,
-			});
-			const readQueryEffect = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
-				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-				getSession: vi.fn(() =>
-					Effect.succeed({
-						id: "session-1",
-						provider: "claude",
-						provider_sid: "provider-session-1",
-						title: "Child session",
-						status: "idle",
-						parent_id: "parent-session",
-						forked_from: null,
-						fork_point_event: null,
-						last_message_at: 11,
-						last_turn_error_at: null,
-						permission_mode: null,
-						read_at: null,
-						settled_at: null,
-						pinned_at: null,
-						snoozed_at: null,
-						snoozed_until: null,
-						woken_at: null,
-						woken_reason: null,
-						created_at: 10,
-						updated_at: 11,
-					}),
-				),
-				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-				getSessionsForReconciliation: () => Effect.succeed([]),
-				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-				getSessionFamily: () => Effect.succeed([]),
-				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() =>
-					Effect.succeed([
-						{
-							id: "msg-sqlite-1",
-							session_id: "session-1",
-							turn_id: "turn-1",
-							role: "user",
-							text: "Earlier prompt",
-							cost: null,
-							tokens_in: null,
-							tokens_out: null,
-							tokens_cache_read: null,
-							tokens_cache_write: null,
-							context_window: null,
-							is_streaming: 0,
-							created_at: 10,
-							updated_at: 11,
-							parts: [
-								{
-									id: "part-sqlite-1",
-									message_id: "msg-sqlite-1",
-									type: "text",
-									text: "Earlier prompt",
-									tool_name: null,
-									call_id: null,
-									input: null,
-									result: null,
-									metadata: null,
-									duration: null,
-									status: null,
-									sort_order: 0,
-									created_at: 10,
-									updated_at: 11,
-								},
-							],
-						},
-					]),
-				),
-			} satisfies ReadQueryEffect;
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				sessionManagerService,
-			});
-
-			return handleViewSession(
-				"client-1",
-				{ sessionId: "session-1" },
-				/* skipMetadata */ true,
-			).pipe(
-				Effect.provide(
-					Layer.merge(
-						layer,
-						Layer.succeed(ReadQueryEffectTag, readQueryEffect),
-					),
-				),
-				Effect.tap(() => {
-					expect(
-						readQueryEffect.getSessionMessagesWithParts,
-					).toHaveBeenCalledWith("session-1");
-					expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "session-1",
-						sessionId: "session-1",
-						parentID: "parent-session",
-						history: {
-							messages: [
-								{
-									id: "msg-sqlite-1",
-									role: "user",
-									text: "Earlier prompt",
-									time: { created: 10, completed: 11 },
-									parts: [
-										{
-											id: "part-sqlite-1",
-											type: "text",
-											time: { start: 10, end: 11 },
-											text: "Earlier prompt",
-										},
-									],
-								},
-							],
-							hasMore: false,
-						},
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect("falls back when OpenCode projected history is empty", () => {
-		const loadPreRenderedHistory = vi.fn(() =>
-			Effect.succeed({
-				messages: [
-					{ id: "history-1", role: "user" as const, text: "Recovered" },
-				],
-				hasMore: false,
-			}),
-		);
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory,
-		});
-		const readQueryEffect = makeEmptySessionReadQuery("opencode");
-		const { wsHandler, layer } = makeSessionMetadataLayer({
-			sessionManagerService,
-		});
-
-		return handleViewSession(
-			"client-1",
-			{ sessionId: "session-1" },
-			/* skipMetadata */ true,
-		).pipe(
-			Effect.provide(
-				Layer.merge(layer, Layer.succeed(ReadQueryEffectTag, readQueryEffect)),
-			),
-			Effect.tap(() => {
-				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "session_switched",
-					id: "session-1",
-					sessionId: "session-1",
-					history: {
-						messages: [{ id: "history-1", role: "user", text: "Recovered" }],
-						hasMore: false,
-					},
-				});
-			}),
-		);
-	});
-
-	const makeSkeletonRowsReadQuery = () =>
-		({
+	const makeOpenCodeRowsReadQuery = (
+		historyComplete: number,
+		count = 1,
+		provider = "opencode",
+	) => {
+		const projectedRows = Array.from({ length: count }, (_, index) => ({
+			id: `msg-projected-${index + 1}`,
+			session_id: "session-1",
+			turn_id: "turn-1",
+			role: "assistant",
+			text: `Projected message ${index + 1}`,
+			cost: null,
+			tokens_in: null,
+			tokens_out: null,
+			tokens_cache_read: null,
+			tokens_cache_write: null,
+			context_window: null,
+			version: 0,
+			is_streaming: 0,
+			is_backfilled: index === 0 ? 1 : 0,
+			created_at: 10,
+			updated_at: 11,
+			parts: [],
+		}));
+		return {
 			getToolContent: vi.fn(() => Effect.succeed(undefined)),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSession: vi.fn(() =>
 				Effect.succeed({
 					id: "session-1",
-					provider: "opencode",
+					provider,
+					history_complete: historyComplete,
 					provider_sid: "provider-session-1",
-					title: "Skeleton session",
+					version: 0,
+					title: "OpenCode session",
 					status: "idle",
 					parent_id: null,
-					forked_from: null,
 					fork_point_event: null,
 					last_message_at: 11,
 					last_turn_error_at: null,
@@ -492,161 +216,77 @@ describe("session handlers with Effect-native model service", () => {
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-			// Rows exist but carry no text — the shape the OpenCode runtime
-			// projection produces today (structure without content).
-			getSessionMessagesWithParts: vi.fn(() =>
-				Effect.succeed([
-					{
-						id: "msg-skeleton-1",
-						session_id: "session-1",
-						turn_id: "turn-1",
-						role: "assistant",
-						text: "",
-						cost: null,
-						tokens_in: null,
-						tokens_out: null,
-						tokens_cache_read: null,
-						tokens_cache_write: null,
-						context_window: null,
-						is_streaming: 0,
-						created_at: 10,
-						updated_at: 11,
-						parts: [],
-					},
-				]),
+			// A complete OpenCode projection carries message text and backfill origin.
+			readSessionTranscript: vi.fn(() =>
+				Effect.succeed({ messages: [], version: 0 }),
 			),
-		}) satisfies ReadQueryEffect;
-
-	it.effect(
-		"prefers provider REST history over projected rows for OpenCode sessions",
-		() => {
-			const loadPreRenderedHistory = vi.fn(() =>
-				Effect.succeed({
-					messages: [
-						{ id: "history-1", role: "user" as const, text: "Real prompt" },
-					],
-					hasMore: false,
-				}),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory,
-			});
-			const readQueryEffect = makeSkeletonRowsReadQuery();
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				sessionManagerService,
-			});
-
-			return handleViewSession(
-				"client-1",
-				{ sessionId: "session-1" },
-				/* skipMetadata */ true,
-			).pipe(
-				Effect.provide(
-					Layer.merge(
-						layer,
-						Layer.succeed(ReadQueryEffectTag, readQueryEffect),
-					),
-				),
-				Effect.tap(() => {
-					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "session-1",
-						sessionId: "session-1",
-						history: {
-							messages: [
-								{ id: "history-1", role: "user", text: "Real prompt" },
-							],
-							hasMore: false,
-						},
+			readSessionTranscriptPage: vi.fn(
+				(
+					_sessionId: string,
+					options: { readonly before?: string; readonly limit: number },
+				) => {
+					const beforeIndex =
+						options.before === undefined
+							? projectedRows.length
+							: projectedRows.findIndex((row) => row.id === options.before);
+					const older = projectedRows.slice(0, Math.max(beforeIndex, 0));
+					return Effect.succeed({
+						messages: older.slice(-options.limit),
+						hasMore: older.length > options.limit,
+						version: 0,
 					});
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"falls back to projected rows when REST fails for an OpenCode session",
-		() => {
-			const loadPreRenderedHistory = vi.fn(() =>
-				Effect.fail(
-					new SessionManagerError({
-						operation: "loadPreRenderedHistory",
-						cause: "opencode unreachable",
-					}),
-				),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory,
-			});
-			const readQueryEffect = makeSkeletonRowsReadQuery();
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				sessionManagerService,
-			});
-
-			return handleViewSession(
-				"client-1",
-				{ sessionId: "session-1" },
-				/* skipMetadata */ true,
-			).pipe(
-				Effect.provide(
-					Layer.merge(
-						layer,
-						Layer.succeed(ReadQueryEffectTag, readQueryEffect),
-					),
-				),
-				Effect.tap(() => {
-					expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1");
-					const historyCall = vi
-						.mocked(wsHandler.sendTo)
-						.mock.calls.find(([, msg]) => msg.type === "session_switched");
-					expect(historyCall).toBeDefined();
-					const sent = historyCall?.[1] as {
-						history?: { messages: Array<{ id: string }> };
-					};
-					expect(sent.history?.messages[0]?.id).toBe("msg-skeleton-1");
-				}),
-			);
-		},
-	);
-
-	it.effect("keeps empty projected history for a Claude session", () => {
-		const loadPreRenderedHistory = vi.fn(() =>
-			Effect.succeed({
-				messages: [{ id: "history-1", role: "user" as const, text: "Wrong" }],
-				hasMore: false,
-			}),
-		);
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory,
-		});
-		const readQueryEffect = makeEmptySessionReadQuery("claude");
-		const { wsHandler, layer } = makeSessionMetadataLayer({
-			sessionManagerService,
-		});
-
-		return handleViewSession(
-			"client-1",
-			{ sessionId: "session-1" },
-			/* skipMetadata */ true,
-		).pipe(
-			Effect.provide(
-				Layer.merge(layer, Layer.succeed(ReadQueryEffectTag, readQueryEffect)),
+				},
 			),
-			Effect.tap(() => {
-				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "session_switched",
-					id: "session-1",
-					sessionId: "session-1",
+			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			getSessionMessagesWithParts: vi.fn(() => Effect.succeed(projectedRows)),
+		} satisfies ReadQueryEffect;
+	};
+
+	for (const historyComplete of [1, 0]) {
+		it.effect(
+			`serves SQLite older page for OpenCode history_complete=${historyComplete}`,
+			() => {
+				const loadPreRenderedHistory = vi.fn(() =>
+					Effect.succeed({
+						messages: [
+							{ id: "rest-older", role: "user" as const, text: "REST older" },
+						],
+						hasMore: false,
+					}),
+				);
+				const { layer } = makeSessionMetadataLayer({
+					sessionManagerService: makeMockSessionManagerService({
+						loadPreRenderedHistory,
+					}),
 				});
-			}),
+				const readQueryEffect = makeOpenCodeRowsReadQuery(historyComplete, 51);
+				return loadMoreHistoryForSession({
+					sessionId: "session-1",
+					before: "msg-projected-2",
+				}).pipe(
+					Effect.provide(
+						Layer.merge(
+							layer,
+							Layer.succeed(ReadQueryEffectTag, readQueryEffect),
+						),
+					),
+					Effect.tap((result) => {
+						expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+						expect(result).toMatchObject({
+							messages: [{ id: "msg-projected-1", isBackfilled: true }],
+							hasMore: false,
+						});
+						expect(result).not.toHaveProperty("total");
+					}),
+				);
+			},
 		);
-	});
+	}
 
 	it.effect("loads session model metadata through the model service", () => {
 		const { api, modelService, wsHandler, layer } = makeSessionMetadataLayer(
@@ -660,6 +300,7 @@ describe("session handlers with Effect-native model service", () => {
 				expect(api.session.get).not.toHaveBeenCalled();
 				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "model_info",
+					sessionId: "session-1",
 					model: "gpt-4",
 					provider: "openai",
 				});
@@ -678,11 +319,7 @@ describe("session handlers with Effect-native model service", () => {
 					"2 minutes",
 					() => Effect.void,
 				);
-				yield* handleViewSession(
-					"client-1",
-					{ sessionId: "session-1" },
-					/* skipMetadata */ true,
-				);
+				yield* handleViewSession("client-1", { sessionId: "session-1" });
 
 				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "status",
@@ -734,11 +371,18 @@ describe("session handlers with Effect-native model service", () => {
 		"sends family before switching and replays descendant permissions",
 		() => {
 			const sessions = [
-				{ id: "session-1", title: "Root", updatedAt: 0, messageCount: 0 },
+				{
+					id: "session-1",
+					title: "Root",
+					status: "idle" as const,
+					updatedAt: 0,
+					messageCount: 0,
+				},
 				{
 					id: "child",
 					parentID: "session-1",
 					title: "Child",
+					status: "idle" as const,
 					updatedAt: 0,
 					messageCount: 0,
 				},
@@ -746,6 +390,7 @@ describe("session handlers with Effect-native model service", () => {
 					id: "grandchild",
 					parentID: "child",
 					title: "Grandchild",
+					status: "idle" as const,
 					updatedAt: 0,
 					messageCount: 0,
 				},
@@ -789,9 +434,7 @@ describe("session handlers with Effect-native model service", () => {
 				const messages = vi
 					.mocked(wsHandler.sendTo)
 					.mock.calls.map((call) => call[1].type);
-				expect(messages.indexOf("session_family")).toBeLessThan(
-					messages.indexOf("session_switched"),
-				);
+				expect(messages).toContain("session_family");
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -844,7 +487,7 @@ describe("session handlers with Effect-native model service", () => {
 				throw new Error("legacy session manager sendDual should not be called");
 			});
 			const sessionManagerService = makeMockSessionManagerService({
-				sendSessionLists: vi.fn(() => Effect.void),
+				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const logger = makeMockLogger();
 			const modelService: OpenCodeModelService = {
@@ -879,7 +522,7 @@ describe("session handlers with Effect-native model service", () => {
 						provider: "openai",
 					});
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(sessionManagerService.sendSessionLists).toHaveBeenCalled();
+					expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalled();
 				}),
 			);
 		},
@@ -913,6 +556,35 @@ describe("session handlers with Effect-native model service", () => {
 					model: "gpt-4",
 					provider: "openai",
 				});
+			}),
+		);
+	});
+});
+
+// A switch also fires on restore, reload and reconnect, so it writes no read
+// state; the browser reports a user's pick instead (ADR-0004, Scope;
+// conduit-test-hk9m.3).
+describe("viewing a session", () => {
+	it.effect("writes no read state and sends no broad list broadcast", () => {
+		const markSessionRead = vi.fn(() => Effect.void);
+		const markSessionSeen = vi.fn(() => Effect.succeed(true));
+		const service = makeMockSessionManagerService({
+			markSessionRead,
+			markSessionSeen,
+		});
+		const { wsHandler, layer } = makeSessionMetadataLayer({
+			clientSession: "session-left",
+			sessionManagerService: service,
+		});
+		return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(markSessionRead).not.toHaveBeenCalled();
+				expect(markSessionSeen).not.toHaveBeenCalled();
+				expect(service.pushViewerFamilies).toHaveBeenCalledOnce();
+				expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
+					expect.objectContaining({ type: "session_list", roots: false }),
+				);
 			}),
 		);
 	});

@@ -148,16 +148,6 @@ describe("Scroll behavior regression suite", () => {
 			expect(ctrl.isDetached).toBe(false);
 			ctrl.detach();
 		});
-
-		it("resetForSession stops any active settle loop", () => {
-			const ctrl = makeCtrl();
-			lifecycle = "committed";
-			const div = document.createElement("div");
-			ctrl.attach(div);
-			ctrl.onNewContent();
-			ctrl.resetForSession();
-			ctrl.detach();
-		});
 	});
 
 	describe("Loading state suppresses scroll", () => {

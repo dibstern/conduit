@@ -1,3 +1,10 @@
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	seedDaemonSessions,
+	seedFamilySessions,
+	seedRootSessions,
+	seedSearchResults,
+} from "../stores/session-fixtures.js";
 // The sidebar must say how many sessions matched without ever claiming to know
 // the size of the whole match set: a trailing "+" is what keeps the number
 // honest while pages remain.
@@ -14,24 +21,20 @@ import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js
 
 describe("SessionList search summary", () => {
 	beforeEach(() => {
+		clearSessionState();
 		routerState.path = "/";
 		attachedProjectState.slug = "current-project";
 		routerState.search = "";
 		routerState.sessionNotFound = false;
-		sessionState.rootSessions = [];
-		sessionState.familySessions = [];
-		sessionState.daemonSessions = [];
-		sessionState.daemonUnavailableProjects = [];
+		seedRootSessions([]);
+		seedFamilySessions("root-a", []);
+		seedDaemonSessions([]);
 		sessionState.currentId = null;
-		sessionState.sessions.clear();
 		sessionState.searchQuery = "report";
-		sessionState.searchCursor = null;
-		sessionState.searchHasMore = false;
-		sessionState.searchLoading = false;
-		sessionState.searchResults = [
+		seedSearchResults([
 			{ id: "a", title: "Report one", projectSlug: "other-project" },
 			{ id: "b", title: "Report two", projectSlug: "other-project" },
-		];
+		]);
 		projectState.projects = [
 			{
 				slug: "current-project",
@@ -73,7 +76,7 @@ describe("SessionList search summary", () => {
 	});
 
 	it("says at-least rather than a total while more pages remain", () => {
-		sessionState.searchHasMore = true;
+		seedSearchResults(sessionState.searchResults ?? [], true);
 		render(SessionList);
 
 		expect(screen.getByTestId("session-search-summary").textContent).toContain(
@@ -82,7 +85,7 @@ describe("SessionList search summary", () => {
 	});
 
 	it("reads as no match rather than an empty list when nothing matched", () => {
-		sessionState.searchResults = [];
+		seedSearchResults([]);
 		render(SessionList);
 
 		expect(screen.getByTestId("session-search-summary").textContent).toContain(

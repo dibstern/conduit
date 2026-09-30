@@ -11,6 +11,10 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "../../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -40,6 +44,7 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
+	ClaudeSessionLifecycleError,
 } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
 	type ProviderStateEffect,
@@ -51,6 +56,7 @@ import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
+import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -160,7 +166,9 @@ const historyRow = (text: string) => ({
 	tokens_cache_read: null,
 	tokens_cache_write: null,
 	context_window: null,
+	version: 0,
 	is_streaming: 0,
+	is_backfilled: 0,
 	created_at: 1,
 	updated_at: 1,
 	parts: [
@@ -199,11 +207,19 @@ const makeReadQuery = (
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
+	listSessionInfos: vi.fn(() => Effect.succeed([])),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
+	readSessionTranscriptPage: vi.fn(() =>
+		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+	),
+	readSessionTranscript: vi.fn(() =>
+		Effect.succeed({ messages: [], version: 0 }),
+	),
+	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 });
 
 const makePersistService = (
@@ -297,6 +313,7 @@ const serviceLayer = (input: {
 		),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
+		PendingSendOwnershipLive,
 		makeOverridesStateLive(),
 		Layer.succeed(
 			SessionTitleServiceTag,
@@ -1060,6 +1077,53 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
+		"fails the turn without dispatch when Claude user-message persistence rejects the lifecycle",
+		() => {
+			const engine = makeEngine({ providerId: "claude" });
+			const persist = makePersistService(
+				vi.fn(() =>
+					Effect.fail(
+						new ClaudeSessionLifecycleError({
+							operation: "persistUserMessage",
+							sessionId: "session-1",
+							role: "existing-session",
+							reason: "missing-session",
+						}),
+					),
+				),
+			);
+			const titleService = makeTitleService();
+			const { layer, log } = serviceLayer({ engine, persist, titleService });
+
+			return Effect.gen(function* () {
+				const result = yield* Effect.either(sendTurn());
+
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						_tag: "ClaudeSessionLifecycleError",
+						sessionId: "session-1",
+					}),
+				});
+				expect(log.error).toHaveBeenCalledWith(
+					"Claude turn persistence rejected by session lifecycle: " +
+						"session=session-1 operation=persistUserMessage " +
+						"role=existing-session reason=missing-session",
+				);
+				expect(log.warn).not.toHaveBeenCalledWith(
+					expect.stringContaining(
+						"Non-fatal persistence error for Claude user message",
+					),
+				);
+				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).not.toHaveBeenCalledWith(
+					expect.objectContaining({ type: "send_turn" }),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"logs provider-state save failures without failing the turn or sending a browser error",
 		() => {
 			const engine = makeEngine({
@@ -1097,6 +1161,42 @@ describe("ProviderTurnService", () => {
 					"session-1",
 					expect.objectContaining({ type: "done", code: 1 }),
 				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"clears ownership when a thrown OpenCode prompt returns error status",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			api.session.prompt = vi.fn(async () => {
+				throw new Error("prompt unavailable");
+			});
+			const registry = new ProviderRegistry();
+			registry.registerInstance(new OpenCodeProviderInstance({ client: api }));
+			const engine = new OrchestrationEngine({ registry });
+			engine.bindSession("session-1", "opencode");
+			const { layer, wsHandler } = serviceLayer({ engine, api });
+			return Effect.gen(function* () {
+				const ownership = yield* PendingSendOwnershipTag;
+				ownership.register("session-1", {
+					commandId: "cmd-error",
+					originId: "browser",
+					text: "ok",
+				});
+				yield* sendTurn({
+					commandId: "cmd-error",
+					text: "ok",
+					model: { providerID: "opencode", modelID: "test" },
+				});
+				expect(api.session.prompt).toHaveBeenCalledOnce();
+				expect(wsHandler.sendTo).toHaveBeenCalledWith(
+					"client-1",
+					expect.objectContaining({ code: "SEND_FAILED" }),
+				);
+				expect(
+					ownership.resolve("session-1", "later-message", "ok"),
+				).toBeUndefined();
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1267,6 +1367,60 @@ describe("ProviderTurnService", () => {
 	});
 
 	it.effect(
+		"interrupt clears pending sends without losing confirmed ownership or other sessions",
+		() => {
+			const { layer } = serviceLayer({});
+			return Effect.gen(function* () {
+				const ownership = yield* PendingSendOwnershipTag;
+				ownership.register("session-1", {
+					commandId: "cmd-confirmed",
+					originId: "confirmed-browser",
+					text: "confirmed",
+				});
+				expect(
+					ownership.resolve("session-1", "confirmed-message", "confirmed"),
+				).toBe("confirmed-browser");
+				ownership.register("session-2", {
+					commandId: "cmd-other",
+					originId: "other-browser",
+					text: "other",
+				});
+				for (const commandId of ["cmd-send-1", "cmd-send-2"]) {
+					ownership.register("session-1", {
+						commandId,
+						originId: "cancelled-browser",
+						text: "cancelled",
+					});
+					yield* sendTurn({ commandId, text: "cancelled" });
+				}
+				yield* interruptTurn();
+				expect(
+					ownership.resolve("session-1", "late-echo", "cancelled"),
+				).toBeUndefined();
+				ownership.register("session-1", {
+					commandId: "cmd-send-2",
+					originId: "duplicate-browser",
+					text: "cancelled",
+				});
+				ownership.register("session-1", {
+					commandId: "cmd-next",
+					originId: "next-browser",
+					text: "next",
+				});
+				expect(ownership.resolve("session-1", "next-message", "next")).toBe(
+					"next-browser",
+				);
+				expect(
+					ownership.resolve("session-1", "confirmed-message", "confirmed"),
+				).toBe("confirmed-browser");
+				expect(ownership.resolve("session-2", "other-message", "other")).toBe(
+					"other-browser",
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
 		"falls back to OpenCode abort, clears processing timeout, and broadcasts done when no engine is present",
 		() => {
 			const api = {
@@ -1386,9 +1540,13 @@ describe("ProviderTurnService", () => {
 								sessionId: "session-1",
 								data: { partId: "recovered-0", result: null },
 							},
+							{
+								type: "question.resolved",
+								data: { id: "recovered-0", answers: {} },
+							},
 						]);
-						const [start, completion] = events;
-						if (!start || !completion)
+						const [start, completion, resolution] = events;
+						if (!start || !completion || !resolution)
 							return yield* Effect.fail(
 								new Error("Missing recovered tool events"),
 							);
@@ -1402,6 +1560,12 @@ describe("ProviderTurnService", () => {
 						);
 						expect(completed.events.map((event) => event.type)).toEqual([
 							"tool.completed",
+						]);
+						expect(
+							translateProviderRuntimeEventToDomain(resolution, completed.state)
+								.events,
+						).toMatchObject([
+							{ type: "question.resolved", data: { id: "recovered-0" } },
 						]);
 						expect(
 							(yield* interactions.listPendingQuestions("session-1")).filter(
@@ -1454,17 +1618,23 @@ describe("ProviderTurnService", () => {
 					"session-1",
 					"toolu-1",
 				);
-				expect(ingestion.ingest).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "tool.completed",
-						providerId: "claude",
-						data: {
-							messageId: "assistant-message-1",
-							partId: "part-1",
-							result: 'Answer to your question "Which colour?": red',
-							duration: 0,
-						},
-					}),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "tool.completed",
+							providerId: "claude",
+							data: {
+								messageId: "assistant-message-1",
+								partId: "part-1",
+								result: 'Answer to your question "Which colour?": red',
+								duration: 0,
+							},
+						}),
+						expect.objectContaining({
+							type: "question.resolved",
+							data: { id: "toolu-1", answers: {} },
+						}),
+					]),
 				);
 			}).pipe(Effect.provide(layer));
 		},

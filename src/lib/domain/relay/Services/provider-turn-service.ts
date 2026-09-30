@@ -48,6 +48,10 @@ import {
 	type PendingQuestion,
 } from "./pending-interaction-service.js";
 import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "./pending-send-ownership.js";
+import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
@@ -179,6 +183,7 @@ export interface ProviderTurnService {
 	readonly completeRecoveredQuestion?: (
 		question: PendingQuestion,
 		result: string | null,
+		answers?: Record<string, unknown>,
 	) => Effect.Effect<void, unknown>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
@@ -262,6 +267,7 @@ function buildLegacyPrompt(input: ProviderTurnServiceSendInput): PromptOptions {
 
 export const makeProviderTurnService = Effect.gen(function* () {
 	const client = yield* OpenCodeAPITag;
+	const ownership = yield* PendingSendOwnershipTag;
 	const wsHandler = yield* WebSocketHandlerTag;
 	const log = yield* LoggerTag;
 	const sessionManagerService = yield* SessionManagerServiceTag;
@@ -347,9 +353,19 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				});
 			}
 			if (persistResult._tag === "Left") {
-				log.warn(
-					`Non-fatal persistence error for Claude user message: ${formatErrorDetail(persistResult.left)}`,
-				);
+				const error = persistResult.left;
+				if (error._tag === "ClaudeSessionLifecycleError") {
+					log.error(
+						`Claude turn persistence rejected by session lifecycle: ` +
+							`session=${error.sessionId} operation=${error.operation} ` +
+							`role=${error.role} reason=${error.reason}`,
+					);
+					return yield* error;
+				} else {
+					log.warn(
+						`Non-fatal persistence error for Claude user message: ${formatErrorDetail(error)}`,
+					);
+				}
 			}
 		});
 
@@ -384,7 +400,20 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					Effect.provideService(OverridesStateTag, overridesRef),
 				),
 			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
-			...(ingestion ? { ingestion } : {}),
+			// The SDK calls canUseTool from a bare Promise, so the asks this sink
+			// records arrive with no services at all. Fill them in from the relay,
+			// or the commit finds no notifier and the woken session never reaches
+			// the sidebar.
+			ingestion: {
+				ingest: (event) =>
+					ingestion
+						.ingest(event)
+						.pipe(
+							Effect.mapInputContext((caller: Context.Context<never>) =>
+								Context.merge(runtime.context, caller),
+							),
+						),
+			},
 			pendingInteractions: {
 				beginPermissionRequest: (request) =>
 					pendingInteractionService.beginPermissionRequest(request),
@@ -412,6 +441,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 		sendErr: unknown,
 	) =>
 		Effect.gen(function* () {
+			ownership.remove(input.sessionId, input.commandId);
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 				formatErrorDetail(sendErr),
@@ -447,6 +477,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
 			// the reason.
 			if (result.status !== "completed") {
+				ownership.remove(input.sessionId, input.commandId);
 				const msg =
 					result.error?.message ??
 					(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
@@ -511,6 +542,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 				const inferred =
 					models.find((model) => model.id === "default") ?? models[0];
 				if (inferred === undefined) {
+					ownership.remove(input.sessionId, input.commandId);
 					const reason =
 						discovery._tag === "Left"
 							? `discovery failed: ${formatErrorDetail(discovery.left)}`
@@ -681,6 +713,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const completeRecoveredQuestion = (
 		question: PendingQuestion,
 		result: string | null,
+		answers: Record<string, unknown> = {},
 	) =>
 		Effect.gen(function* () {
 			let messageId = question.messageId;
@@ -729,6 +762,12 @@ export const makeProviderTurnService = Effect.gen(function* () {
 					duration: 0,
 				},
 			};
+			const resolvedEvent = {
+				...completedEvent,
+				eventId: createEventId(),
+				type: "question.resolved" as const,
+				data: { id: question.requestId, answers },
+			};
 			if (question.messageId) {
 				// A fresh mapper has not seen the stored tool start. Seed its identity
 				// so completion updates the existing card without an Unknown tool.
@@ -746,9 +785,10 @@ export const makeProviderTurnService = Effect.gen(function* () {
 						},
 					},
 					completedEvent,
+					resolvedEvent,
 				]);
 			} else {
-				yield* ingestion.value.ingest(completedEvent);
+				yield* ingestion.value.ingestBatch([completedEvent, resolvedEvent]);
 			}
 		});
 
@@ -795,9 +835,6 @@ export const makeProviderTurnService = Effect.gen(function* () {
 						sessionId: input.sessionId,
 						toolId: question.requestId,
 					});
-					yield* sessionManagerService.decrementPendingQuestionCount(
-						input.sessionId,
-					);
 				}
 				return input.sessionId;
 			}
@@ -834,19 +871,14 @@ export const makeProviderTurnService = Effect.gen(function* () {
 			}
 			orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
 			wsHandler.setClientSession(input.clientId, session.id);
-			wsHandler.sendTo(input.clientId, {
-				type: "session_switched",
-				id: session.id,
-				sessionId: session.id,
-			});
 			yield* Effect.forkDaemon(
 				sessionManagerService
-					.sendSessionLists((msg) => wsHandler.broadcast(msg))
+					.pushViewerFamilies()
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.sync(() =>
 								log.warn(
-									`Failed to broadcast session list after OpenCode materialization: ${err}`,
+									`Failed to push viewed families after OpenCode materialization: ${err}`,
 								),
 							),
 						),
@@ -921,6 +953,7 @@ export const makeProviderTurnService = Effect.gen(function* () {
 	const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		Effect.gen(function* () {
 			log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
+			ownership.clear(input.sessionId);
 			yield* clearProcessingTimeout(input.sessionId);
 
 			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -990,7 +1023,7 @@ const ProviderTurnDispatchFibersLive = Layer.scoped(
 );
 
 export const ProviderTurnServiceLive: Layer.Layer<
-	ProviderTurnServiceTag,
+	ProviderTurnServiceTag | PendingSendOwnershipTag,
 	never,
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
@@ -1001,4 +1034,5 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| OverridesStateTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
+	Layer.provideMerge(PendingSendOwnershipLive),
 );

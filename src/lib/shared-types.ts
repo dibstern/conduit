@@ -215,6 +215,14 @@ export interface FileEntry {
 
 // ─── Session ────────────────────────────────────────────────────────────────
 
+/** The `sessions` projection's lifecycle status, as the row stores it. */
+export const SessionStatusSchema = Schema.Literal(
+	"idle",
+	"busy",
+	"retry",
+	"error",
+);
+
 export const SESSION_ATTENTION_TIERS = [
 	"needs-approval",
 	"needs-reply",
@@ -253,46 +261,44 @@ export const SessionGitSchema = Schema.Struct({
 	),
 });
 
-export interface SessionInfo {
-	id: string;
-	title: string;
-	/** Registered project that owns this session in daemon-wide listings. */
-	projectSlug?: string;
-	createdAt?: string | number | undefined;
-	updatedAt?: string | number | undefined;
-	messageCount?: number | undefined;
-	processing?: boolean | undefined;
-	/** Subagent parent session ID. */
-	parentID?: string | undefined;
-	/** Session this top-level fork originated from. */
-	forkedFrom?: string | undefined;
+/** One wire shape for projected sessions and daemon-wide lists. */
+export const SessionInfoSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	status: SessionStatusSchema,
+	projectSlug: Schema.optional(Schema.String),
+	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
+	messageCount: Schema.optional(Schema.Number),
+	processing: Schema.optional(Schema.Boolean),
+	/** Parent session ID — set when this session was forked from another. */
+	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
-	forkMessageId?: string | undefined;
-	/** Unix-ms timestamp of the fork-point message. Messages created before
-	 *  this time are inherited context from the parent session. */
-	forkPointTimestamp?: number | undefined;
-	/**
-	 * Sessions waiting on someone. Both are projected from the event log rather
-	 * than read out of a relay's memory, so they are populated for a project
-	 * whose relay has never started. Absent means not waiting; never zero.
-	 * Separate because "approve this command" and "answer this question" are
-	 * different asks and the row says which.
-	 */
-	pendingQuestionCount?: number | undefined;
-	pendingPermissionCount?: number | undefined;
-	/** The adapter is the only producer; tier order is also the sort order. */
-	attention?: SessionAttention | undefined;
-	unread?: boolean | undefined;
-	settledAt?: number | undefined;
-	settledAutomatically?: boolean | undefined;
-	autoSettleDisabled?: boolean | undefined;
-	pinnedAt?: number | undefined;
-	snoozedAt?: number | undefined;
-	git?: SessionGit | undefined;
-	snoozedUntil?: number | undefined;
-	wokenAt?: number | undefined;
-	wokeBecause?: "time" | "approval" | "question" | "error" | "turn" | undefined;
-}
+	forkMessageId: Schema.optional(Schema.String),
+	/** Inclusive boundary in transcript (created_at, id) order. */
+	forkPointTimestamp: Schema.optional(Schema.Number),
+	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
+	forkPointMessageId: Schema.optional(Schema.String),
+	pendingQuestionCount: Schema.optional(Schema.Number),
+	pendingPermissionCount: Schema.optional(Schema.Number),
+	attention: Schema.optional(SessionAttentionSchema),
+	unread: Schema.optional(Schema.Boolean),
+	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
+	lastTurnEndVersion: Schema.optional(Schema.Number),
+	settledAt: Schema.optional(Schema.Number),
+	settledAutomatically: Schema.optional(Schema.Boolean),
+	autoSettleDisabled: Schema.optional(Schema.Boolean),
+	pinnedAt: Schema.optional(Schema.Number),
+	snoozedAt: Schema.optional(Schema.Number),
+	git: Schema.optional(SessionGitSchema),
+	snoozedUntil: Schema.optional(Schema.Number),
+	wokenAt: Schema.optional(Schema.Number),
+	wokeBecause: Schema.optional(
+		Schema.Literal("time", "approval", "question", "error", "turn"),
+	),
+});
+
+export type SessionInfo = typeof SessionInfoSchema.Type;
 
 export interface DaemonSessionQueryOptions {
 	readonly limit?: number;
@@ -361,8 +367,8 @@ export interface PtyInfo {
 }
 
 // ─── History Types ──────────────────────────────────────────────────────────
-// These are relay-specific transport types for the session_switched / history_page
-// WebSocket messages. They represent a loose superset of the SDK's Part and Message
+// These are relay-specific history types for paged transcript RPC responses.
+// They represent a loose superset of the SDK's Part and Message
 // types with relay-specific extensions (renderedHtml, index signatures).
 //
 // SDK type mapping (Task 10):
@@ -425,6 +431,8 @@ export interface ModelExecution {
 export interface HistoryMessage {
 	id: string;
 	role: "user" | "assistant";
+	/** True when reconstructed from provider REST history rather than observed live. */
+	isBackfilled?: boolean;
 	parts?: HistoryMessagePart[];
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
@@ -436,6 +444,11 @@ export interface HistoryMessage {
 		cache?: { read?: number; write?: number };
 		context_window?: number;
 	};
+	/** OpenCode: the user message this assistant step answers. */
+	parentID?: string;
+	/** OpenCode: why the step stopped; "tool-calls" means the turn goes on. */
+	finish?: string;
+	error?: unknown;
 	modelExecution?: ModelExecution;
 	[key: string]: unknown;
 }
@@ -472,99 +485,6 @@ export interface FileVersion {
 
 // -- Helper schemas for embedded types --
 
-const ToolStateSchema = Schema.Struct({
-	status: Schema.optional(
-		Schema.Literal("pending", "running", "completed", "error"),
-	),
-	input: Schema.optional(Schema.Unknown),
-	output: Schema.optional(Schema.String),
-	error: Schema.optional(Schema.String),
-});
-
-const PartTypeSchema = Schema.Literal(
-	"text",
-	"reasoning",
-	"file",
-	"tool",
-	"step-start",
-	"step-finish",
-	"snapshot",
-	"patch",
-	"agent",
-	"retry",
-	"compaction",
-	"subtask",
-	"thinking",
-);
-
-const HistoryMessagePartSchema = Schema.Struct({
-	id: Schema.String,
-	type: PartTypeSchema,
-	text: Schema.optional(Schema.String),
-	renderedHtml: Schema.optional(Schema.String),
-	state: Schema.optional(ToolStateSchema),
-	callID: Schema.optional(Schema.String),
-	tool: Schema.optional(Schema.String),
-	time: Schema.optional(
-		Schema.Struct({
-			start: Schema.optional(Schema.Number),
-			end: Schema.optional(Schema.Number),
-		}),
-	),
-	preTokens: Schema.optional(Schema.Number),
-	postTokens: Schema.optional(Schema.Number),
-});
-
-const ModelExecutionSchema = Schema.Struct({
-	requestedModel: Schema.optional(Schema.String),
-	expectedModel: Schema.optional(Schema.String),
-	actualModel: Schema.String,
-	drifted: Schema.optional(Schema.Boolean),
-}).pipe(
-	Schema.filter(
-		(execution) =>
-			execution.drifted === undefined ||
-			(execution.expectedModel !== undefined &&
-				(execution.drifted === false ||
-					execution.actualModel !== execution.expectedModel)),
-		{
-			// Not a biconditional: two ids that differ only by the `[1m]`
-			// context-window suffix name the same model, so equal-identity /
-			// unequal-string is a legitimate `drifted: false`. Claiming drift
-			// between two identical ids is still nonsense.
-			message: () =>
-				"drifted requires expectedModel, and drifted=true requires actualModel to differ from expectedModel",
-		},
-	),
-);
-
-const HistoryMessageSchema = Schema.Struct({
-	id: Schema.String,
-	role: Schema.Literal("user", "assistant"),
-	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
-	time: Schema.optional(
-		Schema.Struct({
-			created: Schema.optional(Schema.Number),
-			completed: Schema.optional(Schema.Number),
-		}),
-	),
-	cost: Schema.optional(Schema.Number),
-	tokens: Schema.optional(
-		Schema.Struct({
-			input: Schema.optional(Schema.Number),
-			output: Schema.optional(Schema.Number),
-			cache: Schema.optional(
-				Schema.Struct({
-					read: Schema.optional(Schema.Number),
-					write: Schema.optional(Schema.Number),
-				}),
-			),
-			context_window: Schema.optional(Schema.Number),
-		}),
-	),
-	modelExecution: Schema.optional(ModelExecutionSchema),
-});
-
 const AskUserQuestionSchema = Schema.Struct({
 	question: Schema.String,
 	header: Schema.String,
@@ -584,34 +504,6 @@ const UsageInfoSchema = Schema.Struct({
 	cache_read: Schema.Number,
 	cache_creation: Schema.Number,
 	context_window: Schema.optional(Schema.Number),
-});
-
-const SessionInfoSchema = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	messageCount: Schema.optional(Schema.Number),
-	processing: Schema.optional(Schema.Boolean),
-	parentID: Schema.optional(Schema.String),
-	forkedFrom: Schema.optional(Schema.String),
-	forkMessageId: Schema.optional(Schema.String),
-	forkPointTimestamp: Schema.optional(Schema.Number),
-	pendingQuestionCount: Schema.optional(Schema.Number),
-	pendingPermissionCount: Schema.optional(Schema.Number),
-	attention: Schema.optional(SessionAttentionSchema),
-	unread: Schema.optional(Schema.Boolean),
-	settledAt: Schema.optional(Schema.Number),
-	settledAutomatically: Schema.optional(Schema.Boolean),
-	autoSettleDisabled: Schema.optional(Schema.Boolean),
-	pinnedAt: Schema.optional(Schema.Number),
-	snoozedAt: Schema.optional(Schema.Number),
-	git: Schema.optional(SessionGitSchema),
-	snoozedUntil: Schema.optional(Schema.Number),
-	wokenAt: Schema.optional(Schema.Number),
-	wokeBecause: Schema.optional(
-		Schema.Literal("time", "approval", "question", "error", "turn"),
-	),
 });
 
 const ContextWindowOptionSchema = Schema.Struct({
@@ -864,6 +756,7 @@ const ResultSchema = Schema.Struct({
 	duration: Schema.Number,
 	sessionId: Schema.String,
 	messageId: Schema.optional(Schema.String),
+	midTurn: Schema.optional(Schema.Literal(true)),
 });
 
 const StatusSchema = Schema.Struct({
@@ -883,30 +776,9 @@ const CompactionSchema = Schema.Struct({
 
 const DoneSchema = Schema.Struct({
 	type: Schema.Literal("done"),
+	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.Number,
-});
-
-// Keep cached events unknown here to avoid a circular Schema.suspend reference
-// that causes TS7022 implicit-any errors. Replay validates each event against
-// RelayMessageSchema before dispatching it.
-const SessionSwitchedSchema = Schema.Struct({
-	type: Schema.Literal("session_switched"),
-	id: Schema.String,
-	sessionId: Schema.String,
-	parentID: Schema.optional(Schema.String),
-	forkedFrom: Schema.optional(Schema.String),
-	requestId: Schema.optional(RequestId),
-	events: Schema.optional(Schema.Array(Schema.Unknown)),
-	eventsHasMore: Schema.optional(Schema.Boolean),
-	history: Schema.optional(
-		Schema.Struct({
-			messages: Schema.Array(HistoryMessageSchema),
-			hasMore: Schema.Boolean,
-			total: Schema.optional(Schema.Number),
-		}),
-	),
-	inputText: Schema.optional(Schema.String),
 });
 
 const SessionListSchema = Schema.Struct({
@@ -914,6 +786,8 @@ const SessionListSchema = Schema.Struct({
 	sessions: Schema.Array(SessionInfoSchema),
 	roots: Schema.Boolean,
 	search: Schema.optional(Schema.Boolean),
+	// No notification map beside the sessions: ni8.23 made the three badge facts
+	// columns on the session row itself, derived server-side.
 });
 
 const SessionFamilySchema = Schema.Struct({
@@ -925,22 +799,16 @@ const SessionFamilySchema = Schema.Struct({
 const SessionForkedSchema = Schema.Struct({
 	type: Schema.Literal("session_forked"),
 	sessionId: Schema.String,
-	session: SessionInfoSchema,
-	forkedFrom: Schema.String,
+	forkMessageId: Schema.optional(Schema.String),
+	forkPointTimestamp: Schema.optional(Schema.Number),
+	parentId: Schema.String,
 	parentTitle: Schema.String,
-});
-
-const HistoryPageSchema = Schema.Struct({
-	type: Schema.Literal("history_page"),
-	sessionId: Schema.String,
-	messages: Schema.Array(HistoryMessageSchema),
-	hasMore: Schema.Boolean,
-	total: Schema.optional(Schema.Number),
 });
 
 // ── Model / Agent / Commands ───────────────────────────────────────────
 const ModelInfoMsgSchema = Schema.Struct({
 	type: Schema.Literal("model_info"),
+	sessionId: Schema.optional(Schema.String),
 	model: Schema.String,
 	provider: Schema.String,
 });
@@ -1123,16 +991,12 @@ const FileHistoryResultSchema = Schema.Struct({
 	versions: Schema.Array(FileVersionSchema),
 });
 
-const RewindResultSchema = Schema.Struct({
-	type: Schema.Literal("rewind_result"),
-	mode: Schema.String,
-});
-
 // ── Cache / Replay ────────────────────────────────────────────────────
 const UserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user_message"),
 	sessionId: Schema.String,
 	text: Schema.String,
+	messageId: Schema.optional(Schema.String),
 	originId: Schema.optional(Schema.String),
 });
 
@@ -1145,6 +1009,7 @@ const SessionDeletedSchema = Schema.Struct({
 // ── Misc ────────────────────────────────────────────────────────────────
 const ErrorSchema = Schema.Struct({
 	type: Schema.Literal("error"),
+	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.String,
 	message: Schema.String,
@@ -1174,7 +1039,7 @@ const ClientCountSchema = Schema.Struct({
  *  frontend can detect a stale daemon that predates the change. The daemon
  *  sends this to each client on connect; the frontend warns on mismatch —
  *  and on absence, which marks a daemon older than the handshake itself. */
-export const WS_PROTOCOL_VERSION = 1;
+export const WS_PROTOCOL_VERSION = 2;
 
 const ProtocolVersionSchema = Schema.Struct({
 	type: Schema.Literal("protocol_version"),
@@ -1254,6 +1119,7 @@ const ScanResultSchema = Schema.Struct({
 // ── Cross-session notifications ──────────────────────────────────────
 const NotificationEventSchema = Schema.Struct({
 	type: Schema.Literal("notification_event"),
+	alertId: Schema.optional(Schema.String),
 	eventType: Schema.String,
 	message: Schema.optional(Schema.String),
 	sessionId: Schema.optional(Schema.String),
@@ -1283,11 +1149,9 @@ export const RelayMessageSchema = Schema.Union(
 	StatusSchema,
 	CompactionSchema,
 	DoneSchema,
-	SessionSwitchedSchema,
 	SessionListSchema,
 	SessionFamilySchema,
 	SessionForkedSchema,
-	HistoryPageSchema,
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
 	DefaultModelInfoSchema,
@@ -1327,9 +1191,8 @@ export const RelayMessageSchema = Schema.Union(
 	// Banners
 	SkipPermissionsSchema,
 	BannerSchema,
-	// File history / Rewind
+	// File history
 	FileHistoryResultSchema,
-	RewindResultSchema,
 	// Cache / Replay
 	UserMessageSchema,
 	// Session deletion
@@ -1392,9 +1255,7 @@ export type PerSessionEventType =
 	| "ask_user_error"
 	| "permission_request"
 	| "permission_resolved"
-	| "session_switched"
 	| "session_forked"
-	| "history_page"
 	| "provider_session_reloaded"
 	| "session_deleted";
 

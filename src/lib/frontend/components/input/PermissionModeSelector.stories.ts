@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	discoveryState,
+	handlePermissionModeInfo,
+} from "../../stores/discovery.svelte.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
 const meta = {
@@ -9,7 +12,7 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
 	beforeEach: () => {
-		discoveryState.permissionMode = "ask";
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "ask" });
 		discoveryState.pendingPermissionMode = null;
 	},
 } satisfies Meta<typeof PermissionModeSelector>;
@@ -21,13 +24,16 @@ export const Default: Story = {};
 
 export const AcceptEdits: Story = {
 	beforeEach: () => {
-		discoveryState.permissionMode = "acceptEdits";
+		handlePermissionModeInfo({
+			type: "permission_mode_info",
+			mode: "acceptEdits",
+		});
 	},
 };
 
 export const AutoApprove: Story = {
 	beforeEach: () => {
-		discoveryState.permissionMode = "auto";
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "auto" });
 	},
 };
 

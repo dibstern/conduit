@@ -4,7 +4,9 @@
 
 import type { RelayMessage, TodoItem } from "../types.js";
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// This store has no client half: the todo list is whatever the last
+// `todo_state` (or TodoWrite tool result) said it was.
 
 export const todoState = $state({
 	items: [] as TodoItem[],

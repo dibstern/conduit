@@ -5,7 +5,10 @@ import {
 	type SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../contracts/providers/provider-runtime-event.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import type {
 	CanonicalEvent,
@@ -241,7 +244,7 @@ function runtimeEventsToDomain(
 	return domainEvents;
 }
 
-function providerRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
+function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

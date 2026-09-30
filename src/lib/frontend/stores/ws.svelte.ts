@@ -14,17 +14,16 @@ import {
 } from "../transport/runtime.js";
 import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { phaseToIdle } from "./chat.svelte.js";
+import { phaseCurrentSessionToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { clearInstanceState } from "./instance.svelte.js";
-import { dispatch } from "./notification-reducer.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentSessionId,
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
-import { isSessionUnreadHeld } from "./session-unread-hold.svelte.js";
+import { sessionActivityBridge } from "./session-activity.svelte.js";
 import {
 	wsDebugLog,
 	wsDebugLogMessage,
@@ -46,16 +45,15 @@ export {
 	onPlanMode,
 	onProject,
 	onProjectAttached,
-	onRewind,
 	planModeListeners,
 	projectListeners,
-	rewindListeners,
 } from "./ws-listeners.js";
 export {
 	clearNavigateToSession,
-	initSWNavigationListener,
+	initSWMessageListener,
 	isPushActive,
 	onNavigateToSession,
+	reconcilePushActive,
 	setPushActive,
 	triggerNotifications,
 } from "./ws-notifications.js";
@@ -239,10 +237,9 @@ function doConnect(
 	let url = `${protocol}//${window.location.host}/ws`;
 
 	// If the URL has a session ID, pass it as a query param so the server
-	// sends the correct session_switched on init (no flash of wrong session).
+	// binds the session named by the URL on init (no flash of another session).
 	if (sessionId) {
 		params.set("session", sessionId);
-		if (isSessionUnreadHeld(sessionId)) params.set("skipMarkRead", "1");
 	}
 	if (slug) params.set("p", slug);
 	url += `?${params.toString()}`;
@@ -269,11 +266,8 @@ function doConnect(
 			clearTimeout(_connectTimeout);
 			_connectTimeout = null;
 		}
-		// Resolutions sent while offline are lost; this socket's roots
-		// snapshot restores attention, rolled up onto each root. Reset on
-		// open, not close: a resume can replace a closing socket, whose
-		// close handler then never runs.
-		dispatch({ type: "reset" });
+		// The incoming roots and family snapshots reconcile row state after
+		// reconnect. Keep the previous rows visible until they arrive.
 		setStatus("connected", "Connected");
 		wsDebugLog("ws:open", wsState.status);
 		wsDebugResetMessageCount();
@@ -299,10 +293,14 @@ function doConnect(
 		setStatus("disconnected", "Disconnected");
 		wsDebugLog("ws:close", wsState.status);
 		_ws = null;
+		sessionActivityBridge.clear();
 		disarmProtocolVersionCheck();
 
-		// Reset chat streaming/processing state so UI isn't stuck
-		phaseToIdle();
+		// End the on-screen turn so the UI isn't stuck mid-stream. This bumps
+		// turnEpoch, so a message queued during that turn stops rendering as
+		// queued; the status:idle after reconnect then finds an idle slot and
+		// correctly declines to end the turn a second time.
+		phaseCurrentSessionToIdle();
 
 		// Clear instance state — will be re-populated on reconnect
 		clearInstanceState();
@@ -422,6 +420,7 @@ if (typeof document !== "undefined") {
 
 /** Disconnect and stop reconnecting. */
 export function disconnect(): void {
+	sessionActivityBridge.clear();
 	wsDebugLog("disconnect", wsState.status);
 	_active = false;
 	_connectionGeneration++;

@@ -1,4 +1,8 @@
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 // ─── Effect Handler Tests (Batch 1) ─────────────────────────────────────────
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
@@ -9,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
@@ -103,6 +107,7 @@ import {
 	handleForkSession,
 	handleNewSession,
 	loadMoreHistoryForSession,
+	markSessionSeenForClient,
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
@@ -125,8 +130,10 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
+import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
+import { diffAndSynthesize } from "../../../src/lib/relay/message-poller.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
-import type { PermissionId, RequestId } from "../../../src/lib/shared-types.js";
+import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeMockOpenCodeAPI,
@@ -834,6 +841,7 @@ describe("sendModelsStateToClient", () => {
 				});
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "model_info",
+					sessionId: "session-1",
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
@@ -929,10 +937,10 @@ describe("switchModelForSession", () => {
 						id: "ses-local-placeholder",
 						provider: "claude",
 						provider_sid: null,
+						version: 0,
 						title: "Untitled",
 						status: "idle",
 						parent_id: null,
-						forked_from: null,
 						fork_point_event: null,
 						last_message_at: null,
 						last_turn_error_at: null,
@@ -951,6 +959,14 @@ describe("switchModelForSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -1300,8 +1316,6 @@ function mockSessionManager(
 		})),
 		sendSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
-		clearPaginationCursor: vi.fn(),
-		decrementPendingQuestionCount: vi.fn(),
 		...overrides,
 	} as unknown as SessionManagerShape;
 }
@@ -1353,6 +1367,7 @@ function makeForkSessionLayer(options?: {
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
+		PendingSendOwnershipLive,
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(
 			StatusPollerTag,
@@ -1399,6 +1414,7 @@ function makeSessionLifecycleLayer(options?: {
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
+		PendingSendOwnershipLive,
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(
 			StatusPollerTag,
@@ -1434,6 +1450,14 @@ describe("handleGetToolContent", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -1491,6 +1515,99 @@ describe("handleGetToolContent", () => {
 
 describe("handleForkSession", () => {
 	it.effect(
+		"uses the canonical fork seam without duplicate establishment",
+		() => {
+			const establishOpenCodeSession = vi.fn(() => Effect.void);
+			const setForkEntry = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
+			const ws = mockWsHandler();
+			const client = {
+				session: {
+					fork: vi.fn(async () => ({
+						id: "ses-child",
+						title: "Forked Session",
+						time: { created: 200, updated: 201 },
+					})),
+					message: vi.fn(async () => ({ time: { created: 123 } })),
+					messagesPage: vi.fn(async () => [{ id: "msg-last" }]),
+					get: vi.fn(async () => ({})),
+				},
+				permission: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const layer = makeForkSessionLayer({
+				client,
+				ws,
+				sessionManagerService: makeMockSessionManagerService({
+					establishOpenCodeSession,
+					setForkEntry,
+					pushViewerFamilies,
+				}),
+			});
+
+			return Effect.gen(function* () {
+				yield* handleForkSession("client-1", {
+					sessionId: "ses-parent",
+					messageId: "msg-1",
+				}).pipe(Effect.provide(layer));
+
+				expect(client.session.fork).toHaveBeenCalledWith("ses-parent", {
+					messageID: "msg-1",
+				});
+				expect(establishOpenCodeSession).not.toHaveBeenCalled();
+				expect(setForkEntry).not.toHaveBeenCalled();
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "session_forked" }),
+				);
+				expect(ws.setClientSession).not.toHaveBeenCalled();
+				expect(pushViewerFamilies).toHaveBeenCalled();
+			});
+		},
+	);
+
+	it.effect(
+		"does not expose a fork when the canonical upstream fork fails",
+		() => {
+			const setForkEntry = vi.fn(() => Effect.void);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
+			const ws = mockWsHandler();
+			const client = {
+				session: {
+					fork: vi.fn(async () => {
+						throw new Error("fork unavailable");
+					}),
+					message: vi.fn(async () => ({ time: { created: 123 } })),
+					messagesPage: vi.fn(async () => []),
+					get: vi.fn(async () => ({})),
+				},
+				permission: { list: vi.fn(async () => []) },
+			} as unknown as OpenCodeAPI;
+			const layer = makeForkSessionLayer({
+				client,
+				ws,
+				sessionManagerService: makeMockSessionManagerService({
+					setForkEntry,
+					pushViewerFamilies,
+				}),
+			});
+
+			return Effect.exit(
+				handleForkSession("client-1", {
+					sessionId: "ses-parent",
+					messageId: "msg-1",
+				}).pipe(Effect.provide(layer)),
+			).pipe(
+				Effect.tap((exit) => {
+					expect(Exit.isFailure(exit)).toBe(true);
+					expect(setForkEntry).not.toHaveBeenCalled();
+					expect(ws.broadcast).not.toHaveBeenCalled();
+					expect(ws.sendTo).not.toHaveBeenCalled();
+					expect(pushViewerFamilies).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
+
+	it.effect(
 		"clears Effect override state for the forked source session",
 		() => {
 			const layer = makeForkSessionLayer();
@@ -1518,11 +1635,11 @@ describe("handleForkSession", () => {
 	);
 
 	it.effect(
-		"stores explicit fork metadata through SessionManagerService",
+		"broadcasts the persisted fork boundary instead of recomputing metadata",
 		() => {
 			const legacySetForkEntry = vi.fn();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -1532,32 +1649,25 @@ describe("handleForkSession", () => {
 					{
 						id: "ses-parent",
 						title: "Parent Session",
+						status: "idle" as const,
 						updatedAt: 100,
 						messageCount: 1,
+					},
+					{
+						id: "ses-child",
+						title: "Forked Session",
+						status: "idle" as const,
+						updatedAt: 201,
+						parentID: "ses-parent",
+						forkMessageId: "msg-1",
+						forkPointTimestamp: 456,
 					},
 				]),
 			);
 			const serviceSetForkEntry = vi.fn(() => Effect.void);
-			const serviceSendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "ses-parent",
-								title: "Parent Session",
-								updatedAt: 100,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const serviceSendSessionLists = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
 			const sessionMgr = mockSessionManager({
-				setForkEntry: legacySetForkEntry,
-				sendSessionLists: legacySendSessionLists,
 				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
 					messages: [],
@@ -1567,7 +1677,7 @@ describe("handleForkSession", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions: serviceListSessions,
 				setForkEntry: serviceSetForkEntry,
-				sendSessionLists: serviceSendSessionLists,
+				pushViewerFamilies: serviceSendSessionLists,
 			});
 			const layer = makeForkSessionLayer({
 				sessionMgr,
@@ -1581,56 +1691,22 @@ describe("handleForkSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(serviceSetForkEntry).toHaveBeenCalledWith("ses-child", {
-						forkMessageId: "msg-1",
-						parentID: "ses-parent",
-						forkPointTimestamp: 123,
-					});
+					expect(serviceSetForkEntry).not.toHaveBeenCalled();
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
 					expect(serviceListSessions).toHaveBeenCalledWith();
 					expect(legacyListSessions).not.toHaveBeenCalled();
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_forked",
 						sessionId: "ses-child",
-						session: {
-							id: "ses-child",
-							title: "Forked Session",
-							updatedAt: 201,
-							forkedFrom: "ses-parent",
-							forkMessageId: "msg-1",
-							forkPointTimestamp: 123,
-						},
-						forkedFrom: "ses-parent",
+						forkMessageId: "msg-1",
+						forkPointTimestamp: 456,
+						parentId: "ses-parent",
 						parentTitle: "Parent Session",
 					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "ses-child",
-						sessionId: "ses-child",
-						history: {
-							messages: [],
-							hasMore: false,
-						},
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "status",
-						sessionId: "ses-child",
-						status: "idle",
-					});
+					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(serviceSendSessionLists).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "ses-parent",
-								title: "Parent Session",
-								updatedAt: 100,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).toHaveBeenCalledTimes(1);
 				}),
 			);
 		},
@@ -1653,7 +1729,6 @@ describe("handleForkSession", () => {
 			permission: { list: vi.fn(async () => []) },
 		} as unknown as OpenCodeAPI;
 		const sessionMgr = mockSessionManager({
-			setForkEntry: legacySetForkEntry,
 			listSessions: vi.fn(async () => []),
 			loadPreRenderedHistory: vi.fn(async () => ({
 				messages: [],
@@ -1675,11 +1750,7 @@ describe("handleForkSession", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(messagesPage).toHaveBeenCalledWith("ses-child", { limit: 1 });
-				expect(serviceSetForkEntry).toHaveBeenCalledWith("ses-child", {
-					forkMessageId: "msg-last",
-					parentID: "ses-parent",
-					forkPointTimestamp: 200,
-				});
+				expect(serviceSetForkEntry).not.toHaveBeenCalled();
 				expect(legacySetForkEntry).not.toHaveBeenCalled();
 			}),
 		);
@@ -1699,7 +1770,7 @@ describe("handleForkSession", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const sessionMgr = mockSessionManager({ setForkEntry });
+			const sessionMgr = mockSessionManager();
 			const layer = makeForkSessionLayer({ client, ws, sessionMgr });
 
 			return handleForkSession("client-1", {}).pipe(
@@ -1815,6 +1886,7 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1870,6 +1942,7 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1933,6 +2006,7 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(ConfigTag, config),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 			);
 
 			return Effect.gen(function* () {
@@ -2024,6 +2098,7 @@ describe("handlePermissionResponse", () => {
 					Layer.succeed(ConfigTag, config),
 					Layer.succeed(OrchestrationEngineTag, engine),
 					PendingInteractionServiceLive,
+					PendingSendOwnershipLive,
 				);
 
 				yield* Effect.gen(function* () {
@@ -2080,6 +2155,7 @@ describe("handlePermissionResponse", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 		);
 
 		return Effect.gen(function* () {
@@ -2124,6 +2200,7 @@ describe("handlePermissionResponse", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 		);
 
 		return handlePermissionResponse("client-1", {
@@ -2166,10 +2243,7 @@ describe("handleQuestionReject", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			decrementPendingQuestionCount,
-		});
+		const sessionManagerService = makeMockSessionManagerService();
 		const client = {
 			question: { reject: vi.fn(async () => {}) },
 		} as unknown as OpenCodeAPI;
@@ -2192,7 +2266,6 @@ describe("handleQuestionReject", () => {
 						toolId: "que-1",
 					}),
 				);
-				expect(decrementPendingQuestionCount).toHaveBeenCalledWith("session-1");
 			}),
 		);
 	});
@@ -2204,10 +2277,7 @@ describe("handleQuestionReject", () => {
 				getClientSession: vi.fn(() => "visible-session"),
 			});
 			const log = mockLogger();
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				decrementPendingQuestionCount,
-			});
+			const sessionManagerService = makeMockSessionManagerService();
 			const client = {
 				question: {
 					reject: vi.fn(async () => {}),
@@ -2228,6 +2298,7 @@ describe("handleQuestionReject", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
@@ -2263,7 +2334,6 @@ describe("handleQuestionReject", () => {
 							toolId: "que-claude",
 						}),
 					);
-					expect(decrementPendingQuestionCount).not.toHaveBeenCalled();
 					expect(pending).toHaveLength(1);
 					expect(pending[0]?.requestId).toBe("que-claude");
 				}),
@@ -2282,7 +2352,6 @@ describe("handleAskUserResponse", () => {
 			});
 			const completeRecoveredQuestion = vi.fn(() => Effect.void);
 			const sendTurn = vi.fn(() => Effect.void);
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
 			const turns: ProviderTurnService = {
 				completeRecoveredQuestion,
 				prepareTurnSession: ({ sessionId }) => Effect.succeed(sessionId),
@@ -2290,18 +2359,17 @@ describe("handleAskUserResponse", () => {
 				interruptTurn: () => Effect.void,
 			};
 			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, {
-					question: { reply: vi.fn() },
-				} as unknown as OpenCodeAPI),
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(ConfigTag, mockConfig()),
 				Layer.succeed(LoggerTag, mockLogger()),
 				Layer.succeed(
 					SessionManagerServiceTag,
-					makeMockSessionManagerService({ decrementPendingQuestionCount }),
+					makeMockSessionManagerService(),
 				),
 				Layer.succeed(ProviderTurnServiceTag, turns),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 			);
 			return Effect.gen(function* () {
@@ -2323,6 +2391,7 @@ describe("handleAskUserResponse", () => {
 				expect(completeRecoveredQuestion).toHaveBeenCalledWith(
 					expect.objectContaining({ requestId: "toolu-1", recovered: true }),
 					'Answer to your question "Which colour?": red',
+					{ "0": "red" },
 				);
 				expect(sendTurn).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -2336,61 +2405,50 @@ describe("handleAskUserResponse", () => {
 						toolId: "toolu-1",
 					}),
 				);
-				expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
-					"question-session",
-				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
 			}).pipe(Effect.provide(layer));
 		},
 	);
-	it.effect(
-		"answers question via REST API and decrements through service",
-		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
-			const log = mockLogger();
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				decrementPendingQuestionCount,
-			});
-			const client = {
-				question: { reply: vi.fn(async () => {}) },
-			} as unknown as OpenCodeAPI;
+	it.effect("answers question via REST API and broadcasts resolution", () => {
+		const ws = mockWsHandler({
+			getClientSession: vi.fn(() => "session-1"),
+		});
+		const log = mockLogger();
+		const sessionManagerService = makeMockSessionManagerService();
+		const client = {
+			question: { reply: vi.fn(async () => {}) },
+		} as unknown as OpenCodeAPI;
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(ConfigTag, mockConfig()),
-				PendingInteractionServiceLive,
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				makeOverridesStateLive(),
-			);
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, client),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(ConfigTag, mockConfig()),
+			Layer.succeed(LoggerTag, log),
+			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
+			makeOverridesStateLive(),
+		);
 
-			return handleAskUserResponse("client-1", {
-				toolId: "que-1",
-				answers: { "1": "Approve", "0": "Yes" },
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(client.question.reply).toHaveBeenCalledWith("que-1", [
-						["Yes"],
-						["Approve"],
-					]);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "ask_user_resolved",
-							toolId: "que-1",
-						}),
-					);
-					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
-						"session-1",
-					);
-				}),
-			);
-		},
-	);
+		return handleAskUserResponse("client-1", {
+			toolId: "que-1",
+			answers: { "1": "Approve", "0": "Yes" },
+		}).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(client.question.reply).toHaveBeenCalledWith("que-1", [
+					["Yes"],
+					["Approve"],
+				]);
+				expect(ws.broadcast).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "ask_user_resolved",
+						toolId: "que-1",
+					}),
+				);
+			}),
+		);
+	});
 
 	it.effect(
 		"uses the pending question session when answering a Claude question from another visible session",
@@ -2399,10 +2457,7 @@ describe("handleAskUserResponse", () => {
 				getClientSession: vi.fn(() => "visible-session"),
 			});
 			const log = mockLogger();
-			const decrementPendingQuestionCount = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				decrementPendingQuestionCount,
-			});
+			const sessionManagerService = makeMockSessionManagerService();
 			const client = {
 				question: {
 					reply: vi.fn(async () => {}),
@@ -2424,6 +2479,7 @@ describe("handleAskUserResponse", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
@@ -2453,9 +2509,6 @@ describe("handleAskUserResponse", () => {
 							sessionId: "question-session",
 						}),
 					);
-					expect(decrementPendingQuestionCount).toHaveBeenCalledWith(
-						"question-session",
-					);
 				}),
 			);
 		},
@@ -2464,12 +2517,12 @@ describe("handleAskUserResponse", () => {
 
 describe("handleNewSession", () => {
 	it.effect(
-		"creates and switches before broadcasting lists through SessionManagerService",
+		"creates and switches before refreshing viewed families through SessionManagerService",
 		() => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyCreateSession = vi.fn(async () => {
 				throw new Error("legacy createSession should not be used");
@@ -2488,25 +2541,10 @@ describe("handleNewSession", () => {
 					time: { created: 100, updated: 200 },
 				}),
 			);
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "new-session-1",
-								title: "New Session",
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -2517,7 +2555,6 @@ describe("handleNewSession", () => {
 
 			return handleNewSession("client-1", {
 				title: "New Session",
-				requestId: "request-1" as RequestId,
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
@@ -2527,31 +2564,18 @@ describe("handleNewSession", () => {
 						"client-1",
 						"new-session-1",
 					);
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "new-session-1",
-						sessionId: "new-session-1",
-						requestId: "request-1",
-					});
+					expect(ws.sendTo).toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type: "session_family" }),
+					);
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "status",
 						sessionId: "new-session-1",
 						status: "idle",
 					});
-					expect(sendSessionLists).toHaveBeenCalled();
+					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "new-session-1",
-								title: "New Session",
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
 					);
@@ -2560,7 +2584,7 @@ describe("handleNewSession", () => {
 		},
 	);
 
-	it.effect("does not wait for session list refresh before completing", () => {
+	it.effect("does not wait for viewed family refresh before completing", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
 		const serviceCreateSession = vi.fn(() =>
@@ -2573,10 +2597,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendSessionLists = vi.fn(() => Effect.never);
+		const pushViewerFamilies = vi.fn(() => Effect.never);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2588,18 +2612,15 @@ describe("handleNewSession", () => {
 			const result = yield* Effect.either(
 				handleNewSession("client-1", {
 					title: "New Session",
-					requestId: "request-fast" as RequestId,
 				}).pipe(Effect.timeout(Duration.millis(50)), Effect.provide(layer)),
 			);
 
 			expect(result._tag).toBe("Right");
-			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-				type: "session_switched",
-				id: "new-session-fast",
-				sessionId: "new-session-fast",
-				requestId: "request-fast",
-			});
-			expect(sendSessionLists).toHaveBeenCalled();
+			expect(ws.setClientSession).toHaveBeenCalledWith(
+				"client-1",
+				"new-session-fast",
+			);
+			expect(pushViewerFamilies).toHaveBeenCalled();
 		});
 	});
 
@@ -2616,10 +2637,10 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -2629,7 +2650,6 @@ describe("handleNewSession", () => {
 
 		return handleNewSession("client-1", {
 			title: "OpenCode Session",
-			requestId: "request-opencode" as RequestId,
 			providerId: "opencode",
 		}).pipe(
 			Effect.provide(layer),
@@ -2666,10 +2686,10 @@ describe("handleNewSession", () => {
 						id: "ses-local-placeholder",
 						provider: "claude",
 						provider_sid: null,
+						version: 0,
 						title: "Untitled",
 						status: "idle",
 						parent_id: null,
-						forked_from: null,
 						fork_point_event: null,
 						last_message_at: null,
 						last_turn_error_at: null,
@@ -2688,6 +2708,14 @@ describe("handleNewSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -2701,6 +2729,7 @@ describe("handleNewSession", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(
 					StatusPollerTag,
 					makeMockStatusPoller({
@@ -2720,159 +2749,14 @@ describe("handleNewSession", () => {
 			return viewSessionForClient({
 				clientId: "client-1",
 				sessionId: "ses-local-placeholder",
-				skipMetadata: true,
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "ses-local-placeholder",
-						sessionId: "ses-local-placeholder",
-					});
-					expect(startPolling).not.toHaveBeenCalled();
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"adds projected model execution to OpenCode history on session view",
-		() => {
-			const ws = mockWsHandler();
-			const log = mockLogger();
-			const client = {
-				session: { get: vi.fn(async () => ({})) },
-				provider: { list: vi.fn(async () => ({ providers: [] })) },
-				permission: { list: vi.fn(async () => []) },
-				question: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
-			const sessionManagerService = makeMockSessionManagerService({
-				loadPreRenderedHistory: vi.fn(() =>
-					Effect.succeed({
-						messages: [
-							{
-								id: "user-1",
-								role: "user" as const,
-								text: "Earlier prompt",
-								parts: [],
-							},
-						],
-						hasMore: false,
-					}),
-				),
-			});
-			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
-				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
-				getSession: vi.fn(() =>
-					Effect.succeed({
-						id: "session-1",
-						provider: "opencode",
-						provider_sid: "provider-session-1",
-						title: "OpenCode",
-						status: "idle",
-						parent_id: null,
-						forked_from: null,
-						fork_point_event: null,
-						last_message_at: 1,
-						last_turn_error_at: null,
-						permission_mode: null,
-						read_at: null,
-						settled_at: null,
-						pinned_at: null,
-						snoozed_at: null,
-						snoozed_until: null,
-						woken_at: null,
-						woken_reason: null,
-						created_at: 1,
-						updated_at: 1,
-					}),
-				),
-				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-				getSessionsForReconciliation: () => Effect.succeed([]),
-				listSessions: vi.fn(() => Effect.succeed([])),
-				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-				getSessionFamily: () => Effect.succeed([]),
-				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() =>
-					Effect.succeed([
-						{
-							id: "user-1",
-							session_id: "session-1",
-							turn_id: "turn-1",
-							role: "user",
-							text: "",
-							cost: null,
-							tokens_in: null,
-							tokens_out: null,
-							tokens_cache_read: null,
-							tokens_cache_write: null,
-							context_window: null,
-							is_streaming: 0,
-							created_at: 1,
-							updated_at: 1,
-							parts: [],
-							modelExecution: {
-								requestedModel: "sonnet",
-								expectedModel: "claude-sonnet-5",
-								actualModel: "claude-fable-4-0",
-							},
-						},
-					]),
-				),
-			} satisfies ReadQueryEffect;
-			const layer = Layer.mergeAll(
-				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				PendingInteractionServiceLive,
-				Layer.succeed(
-					StatusPollerTag,
-					makeMockStatusPoller({
-						isProcessing: vi.fn(() => Effect.succeed(false)),
-					}),
-				),
-				Layer.succeed(PollerManagerTag, {
-					on: vi.fn(),
-					isPolling: vi.fn(() => true),
-					startPolling: vi.fn(),
-					stopPolling: vi.fn(),
-					notifySSEEvent: vi.fn(),
-				}),
-				makeOverridesStateLive(),
-			);
-
-			return viewSessionForClient({
-				clientId: "client-1",
-				sessionId: "session-1",
-				skipMetadata: true,
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(ws.sendTo).toHaveBeenCalledWith(
 						"client-1",
-						expect.objectContaining({
-							type: "session_switched",
-							history: {
-								messages: [
-									expect.objectContaining({
-										id: "user-1",
-										text: "Earlier prompt",
-										modelExecution: {
-											requestedModel: "sonnet",
-											expectedModel: "claude-sonnet-5",
-											actualModel: "claude-fable-4-0",
-											drifted: true,
-										},
-									}),
-								],
-								hasMore: false,
-							},
-						}),
+						expect.objectContaining({ type: "session_family" }),
 					);
+					expect(startPolling).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -2899,10 +2783,10 @@ describe("handleNewSession", () => {
 						id: "session-in-flight",
 						provider: "opencode",
 						provider_sid: null,
+						version: 0,
 						title: "In flight",
 						status: "processing",
 						parent_id: null,
-						forked_from: null,
 						fork_point_event: null,
 						last_message_at: null,
 						last_turn_error_at: null,
@@ -2921,6 +2805,14 @@ describe("handleNewSession", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -2942,6 +2834,7 @@ describe("handleNewSession", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(
 					OrchestrationEngineTag,
 					withDispatchEffect({
@@ -2968,7 +2861,6 @@ describe("handleNewSession", () => {
 			return viewSessionForClient({
 				clientId: "client-1",
 				sessionId: "session-in-flight",
-				skipMetadata: true,
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
@@ -2983,11 +2875,11 @@ describe("handleNewSession", () => {
 		},
 	);
 
-	it.effect("logs and completes when the service list broadcast fails", () => {
+	it.effect("logs and completes when the viewed family refresh fails", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
 		const legacySendSessionLists = vi.fn(async () => {
-			throw new Error("legacy sendSessionLists should not be used");
+			throw new Error("legacy pushViewerFamilies should not be used");
 		});
 		const legacyCreateSession = vi.fn(async () => {
 			throw new Error("legacy createSession should not be used");
@@ -3006,17 +2898,17 @@ describe("handleNewSession", () => {
 				time: { created: 100, updated: 200 },
 			}),
 		);
-		const sendSessionLists = vi.fn(() =>
+		const pushViewerFamilies = vi.fn(() =>
 			Effect.fail(
 				new SessionManagerError({
-					operation: "sendSessionLists",
+					operation: "pushViewerFamilies",
 					cause: new Error("service unavailable"),
 				}),
 			),
 		);
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: serviceCreateSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const layer = makeSessionLifecycleLayer({
 			ws,
@@ -3034,11 +2926,11 @@ describe("handleNewSession", () => {
 				);
 				expect(serviceCreateSession).toHaveBeenCalledWith(undefined);
 				expect(legacyCreateSession).not.toHaveBeenCalled();
-				expect(sendSessionLists).toHaveBeenCalled();
+				expect(pushViewerFamilies).toHaveBeenCalled();
 				expect(legacySendSessionLists).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining(
-						"Failed to broadcast session list after CreateSession",
+						"Failed to push viewed families after CreateSession",
 					),
 				);
 				expect(log.info).toHaveBeenCalledWith(
@@ -3051,14 +2943,62 @@ describe("handleNewSession", () => {
 
 describe("handleDeleteSession", () => {
 	it.effect(
-		"deletes and broadcasts lists through SessionManagerService",
+		"does not repeat client-side deletion effects for a coalesced caller",
+		() => {
+			const ws = mockWsHandler({
+				getClientsForSession: vi.fn(() => ["viewer-1"]),
+			});
+			const log = mockLogger();
+			const deleteSession = vi.fn(() => Effect.succeed(false));
+			const listSessions = vi.fn(() =>
+				Effect.succeed([
+					{
+						id: "remaining-session",
+						title: "Remaining Session",
+						status: "idle" as const,
+						updatedAt: 200,
+						messageCount: 0,
+					},
+				]),
+			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
+			const sessionManagerService = makeMockSessionManagerService({
+				deleteSession,
+				listSessions,
+				pushViewerFamilies,
+			});
+			const layer = makeSessionLifecycleLayer({
+				ws,
+				sessionManagerService,
+				log,
+			});
+
+			return handleDeleteSession("client-1", {
+				sessionId: "deleted-session",
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
+					expect(listSessions).not.toHaveBeenCalled();
+					expect(ws.setClientSession).not.toHaveBeenCalled();
+					expect(ws.sendTo).not.toHaveBeenCalled();
+					expect(ws.broadcast).not.toHaveBeenCalled();
+					expect(pushViewerFamilies).not.toHaveBeenCalled();
+					expect(log.info).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
+
+	it.effect(
+		"deletes and refreshes viewed families through SessionManagerService",
 		() => {
 			const ws = mockWsHandler({
 				getClientsForSession: vi.fn(() => []),
 			});
 			const log = mockLogger();
 			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
+				throw new Error("legacy pushViewerFamilies should not be used");
 			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -3067,25 +3007,17 @@ describe("handleDeleteSession", () => {
 			const legacyDeleteSession = vi.fn(async () => {
 				throw new Error("legacy deleteSession should not be used");
 			});
-			const serviceDeleteSession = vi.fn(() => Effect.void);
+			const serviceDeleteSession = vi.fn(() => Effect.succeed(true));
 			const sessionMgr = mockSessionManager({
 				deleteSession: legacyDeleteSession,
 				listSessions: legacyListSessions,
 				sendSessionLists: legacySendSessionLists,
 			});
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
 				listSessions: serviceListSessions,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const layer = makeSessionLifecycleLayer({
 				ws,
@@ -3099,24 +3031,18 @@ describe("handleDeleteSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(ws.getClientsForSession).toHaveBeenCalledWith(
-						"deleted-session",
-					);
+					expect(ws.getClientsForSession).not.toHaveBeenCalled();
 					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
 					expect(legacyListSessions).not.toHaveBeenCalled();
+					expect(ws.broadcast).toHaveBeenCalledTimes(1);
 					expect(ws.broadcast).toHaveBeenCalledWith({
 						type: "session_deleted",
 						sessionId: "deleted-session",
 					});
-					expect(sendSessionLists).toHaveBeenCalled();
+					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [],
-						roots: true,
-					});
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Deleted: deleted-session",
 					);
@@ -3125,162 +3051,34 @@ describe("handleDeleteSession", () => {
 		},
 	);
 
-	it.effect(
-		"switches every viewer and replays metadata before the service list broadcast",
-		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
-			});
-			const log = mockLogger();
-			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
-			});
-			const legacyListSessions = vi.fn(async () => {
-				throw new Error("legacy listSessions should not be used");
-			});
-			const serviceListSessions = vi.fn(() =>
-				Effect.succeed([
-					{
-						id: "remaining-session",
-						title: "Remaining Session",
-						updatedAt: 200,
-						messageCount: 0,
-					},
-				]),
-			);
-			const legacyDeleteSession = vi.fn(async () => {
-				throw new Error("legacy deleteSession should not be used");
-			});
-			const serviceDeleteSession = vi.fn(() => Effect.void);
-			const sessionMgr = mockSessionManager({
-				deleteSession: legacyDeleteSession,
-				listSessions: legacyListSessions,
-				loadPreRenderedHistory: vi.fn(async () => ({
-					messages: [],
-					hasMore: false,
-				})),
-				sendSessionLists: legacySendSessionLists,
-			});
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "remaining-session",
-								title: "Remaining Session",
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
-			const sessionManagerService = makeMockSessionManagerService({
-				deleteSession: serviceDeleteSession,
-				listSessions: serviceListSessions,
-				sendSessionLists,
-			});
-			const client = {
-				session: {
-					get: vi.fn(async () => ({
-						id: "remaining-session",
-						modelID: "claude-sonnet-4-5",
-						providerID: "anthropic",
-					})),
-				},
-				permission: { list: vi.fn(async () => []) },
-				question: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
-			const layer = makeSessionLifecycleLayer({
-				client,
-				ws,
-				sessionMgr,
-				sessionManagerService,
-				log,
-			});
-
-			return handleDeleteSession("client-1", {
-				sessionId: "deleted-session",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.getClientsForSession).toHaveBeenCalledWith(
-						"deleted-session",
-					);
-					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
-					expect(legacyDeleteSession).not.toHaveBeenCalled();
-					expect(serviceListSessions).toHaveBeenCalledWith();
-					expect(legacyListSessions).not.toHaveBeenCalled();
-					expect(ws.setClientSession).toHaveBeenCalledWith(
-						"client-1",
-						"remaining-session",
-					);
-					expect(ws.setClientSession).toHaveBeenCalledWith(
-						"client-2",
-						"remaining-session",
-					);
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session_switched",
-						id: "remaining-session",
-						sessionId: "remaining-session",
-						history: {
-							messages: [],
-							hasMore: false,
-						},
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
-						type: "session_switched",
-						id: "remaining-session",
-						sessionId: "remaining-session",
-						history: {
-							messages: [],
-							hasMore: false,
-						},
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "model_info",
-						model: "claude-sonnet-4-5",
-						provider: "anthropic",
-					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
-						type: "model_info",
-						model: "claude-sonnet-4-5",
-						provider: "anthropic",
-					});
-					// Two viewers get reassigned, and each reassignment goes through
-					// the same view path a human click does -- so each also records
-					// the session read and re-broadcasts the list, which is how the
-					// unread ring clears on other tabs. Three before this feature
-					// plus one per reassigned viewer.
-					expect(sendSessionLists).toHaveBeenCalledTimes(5);
-					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_deleted",
-						sessionId: "deleted-session",
-					});
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "remaining-session",
-								title: "Remaining Session",
-								updatedAt: 200,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
-		},
-	);
+	it.effect("does not move viewers after deleting their session", () => {
+		const ws = mockWsHandler({
+			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
+		});
+		const sessionManagerService = makeMockSessionManagerService({
+			deleteSession: vi.fn(() => Effect.succeed(true)),
+			listSessions: vi.fn(() => Effect.die("unexpected list")),
+			pushViewerFamilies: vi.fn(() => Effect.void),
+		});
+		return handleDeleteSession("client-1", {
+			sessionId: "deleted-session",
+		}).pipe(
+			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService })),
+			Effect.tap(() => {
+				expect(ws.setClientSession).not.toHaveBeenCalled();
+				expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
+				expect(ws.broadcast).toHaveBeenCalledWith({
+					type: "session_deleted",
+					sessionId: "deleted-session",
+				});
+			}),
+		);
+	});
 });
 
 describe("renameSessionForClient", () => {
 	it.effect(
-		"renames through SessionManagerService and broadcasts lists",
+		"renames through SessionManagerService and refreshes viewed families",
 		() => {
 			const log = mockLogger();
 			const legacyRenameSession = vi.fn(async () => {
@@ -3296,26 +3094,12 @@ describe("renameSessionForClient", () => {
 					calls.push("rename");
 				}),
 			);
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					calls.push("broadcast");
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "session-1",
-								title: "New Title",
-								updatedAt: 100,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
+			const pushViewerFamilies = vi.fn(() =>
+				Effect.sync(() => calls.push("broadcast")),
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				renameSession,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 
 			const layer = Layer.mergeAll(
@@ -3333,20 +3117,9 @@ describe("renameSessionForClient", () => {
 				Effect.tap(() => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
-					expect(sendSessionLists).toHaveBeenCalled();
+					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(calls).toEqual(["rename", "broadcast"]);
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_list",
-						sessions: [
-							{
-								id: "session-1",
-								title: "New Title",
-								updatedAt: 100,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
+					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalled();
 				}),
 			);
@@ -3358,10 +3131,10 @@ describe("renameSessionForClient", () => {
 		const _sessionMgr = mockSessionManager();
 		const ws = mockWsHandler();
 		const renameSession = vi.fn(() => Effect.void);
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 
 		const layer = Layer.mergeAll(
@@ -3378,7 +3151,7 @@ describe("renameSessionForClient", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendSessionLists).not.toHaveBeenCalled();
+				expect(pushViewerFamilies).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -3400,10 +3173,10 @@ describe("loadMoreHistoryForSession", () => {
 					id: "session-1",
 					provider: "claude",
 					provider_sid: null,
+					version: 0,
 					title: "Claude",
 					status: "idle",
 					parent_id: null,
-					forked_from: null,
 					fork_point_event: null,
 					last_message_at: 1,
 					last_turn_error_at: null,
@@ -3422,6 +3195,43 @@ describe("loadMoreHistoryForSession", () => {
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
+			listSessionInfos: vi.fn(() => Effect.succeed([])),
+			readSessionTranscript: vi.fn(() =>
+				Effect.succeed({ messages: [], version: 0 }),
+			),
+			readSessionTranscriptPage: vi.fn(() =>
+				Effect.succeed({
+					messages: [
+						{
+							id: "user-1",
+							session_id: "session-1",
+							turn_id: "turn-1",
+							role: "user" as const,
+							text: "Earlier prompt",
+							cost: null,
+							tokens_in: null,
+							tokens_out: null,
+							tokens_cache_read: null,
+							tokens_cache_write: null,
+							context_window: null,
+							version: 0,
+							is_streaming: 0,
+							is_backfilled: 0,
+							created_at: 1,
+							updated_at: 1,
+							parts: [],
+							modelExecution: {
+								requestedModel: "sonnet",
+								expectedModel: "claude-sonnet-5",
+								actualModel: "claude-fable-4-0",
+							},
+						},
+					],
+					hasMore: false,
+					version: 0,
+				}),
+			),
+			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -3440,7 +3250,9 @@ describe("loadMoreHistoryForSession", () => {
 						tokens_cache_read: null,
 						tokens_cache_write: null,
 						context_window: null,
+						version: 0,
 						is_streaming: 0,
+						is_backfilled: 0,
 						created_at: 1,
 						updated_at: 1,
 						parts: [],
@@ -3460,7 +3272,6 @@ describe("loadMoreHistoryForSession", () => {
 
 		return loadMoreHistoryForSession({
 			sessionId: "session-1",
-			offset: 0,
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap((result) => {
@@ -3470,152 +3281,9 @@ describe("loadMoreHistoryForSession", () => {
 					actualModel: "claude-fable-4-0",
 					drifted: true,
 				});
-				expect(result).toMatchObject({ hasMore: false, total: 1 });
+				expect(result).toMatchObject({ hasMore: false });
+				expect(result).not.toHaveProperty("total");
 				expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-			}),
-		);
-	});
-
-	it.effect("adds projected model execution to OpenCode history", () => {
-		const loadPreRenderedHistory = vi.fn(() =>
-			Effect.succeed({
-				messages: [
-					{
-						id: "user-1",
-						role: "user" as const,
-						text: "Earlier prompt",
-						parts: [],
-					},
-				],
-				hasMore: false,
-				total: 1,
-			}),
-		);
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory,
-		});
-		const readQuery = {
-			getToolContent: vi.fn(() => Effect.succeed(undefined)),
-			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-			getSession: vi.fn(() =>
-				Effect.succeed({
-					id: "session-1",
-					provider: "opencode",
-					provider_sid: "provider-session-1",
-					title: "OpenCode",
-					status: "idle",
-					parent_id: null,
-					forked_from: null,
-					fork_point_event: null,
-					last_message_at: 1,
-					last_turn_error_at: null,
-					permission_mode: null,
-					read_at: null,
-					settled_at: null,
-					pinned_at: null,
-					snoozed_at: null,
-					snoozed_until: null,
-					woken_at: null,
-					woken_reason: null,
-					created_at: 1,
-					updated_at: 1,
-				}),
-			),
-			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-			getSessionsForReconciliation: () => Effect.succeed([]),
-			listSessions: vi.fn(() => Effect.succeed([])),
-			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-			getSessionFamily: () => Effect.succeed([]),
-			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-			getSessionMessagesWithParts: vi.fn(() =>
-				Effect.succeed([
-					{
-						id: "user-1",
-						session_id: "session-1",
-						turn_id: "turn-1",
-						role: "user",
-						text: "",
-						cost: null,
-						tokens_in: null,
-						tokens_out: null,
-						tokens_cache_read: null,
-						tokens_cache_write: null,
-						context_window: null,
-						is_streaming: 0,
-						created_at: 1,
-						updated_at: 1,
-						parts: [],
-						modelExecution: {
-							requestedModel: "sonnet",
-							expectedModel: "claude-sonnet-5",
-							actualModel: "claude-fable-4-0",
-						},
-					},
-				]),
-			),
-		} satisfies ReadQueryEffect;
-		const layer = Layer.merge(
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			Layer.succeed(ReadQueryEffectTag, readQuery),
-		);
-
-		return loadMoreHistoryForSession({
-			sessionId: "session-1",
-			offset: 0,
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap((result) => {
-				expect(result.messages[0]).toMatchObject({
-					id: "user-1",
-					text: "Earlier prompt",
-					modelExecution: {
-						requestedModel: "sonnet",
-						expectedModel: "claude-sonnet-5",
-						actualModel: "claude-fable-4-0",
-						drifted: true,
-					},
-				});
-				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 0);
-			}),
-		);
-	});
-
-	it.effect("loads history page through SessionManagerService", () => {
-		const page = {
-			messages: [
-				{
-					id: "msg-1",
-					role: "assistant" as const,
-					parts: [{ id: "part-1", type: "text" as const, text: "hello" }],
-				},
-			],
-			hasMore: true,
-			total: 10,
-		};
-		const loadPreRenderedHistory = vi.fn(() => Effect.succeed(page));
-		const sessionManagerService = makeMockSessionManagerService({
-			loadPreRenderedHistory,
-		});
-
-		const layer = Layer.succeed(
-			SessionManagerServiceTag,
-			sessionManagerService,
-		);
-
-		return loadMoreHistoryForSession({
-			sessionId: "session-1",
-			offset: 50,
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap((result) => {
-				expect(loadPreRenderedHistory).toHaveBeenCalledWith("session-1", 50);
-				expect(result).toEqual({
-					sessionId: "session-1",
-					messages: page.messages,
-					hasMore: true,
-					total: 10,
-				});
 			}),
 		);
 	});
@@ -3697,20 +3365,7 @@ describe("sendMessageToSession", () => {
 						text: "Continue",
 						commandId: "cmd1",
 					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
-					expect(ws.broadcast).toHaveBeenCalledTimes(
-						settled || snoozed ? 1 : 0,
-					);
-					if (settled || snoozed)
-						expect(ws.broadcast).toHaveBeenCalledWith(
-							expect.objectContaining({
-								type: "session_list",
-								sessions: [
-									expect.not.objectContaining({
-										settledAt: expect.any(Number),
-									}),
-								],
-							}),
-						);
+					expect(ws.broadcast).not.toHaveBeenCalled();
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(
@@ -3729,10 +3384,11 @@ describe("sendMessageToSession", () => {
 	function makeLayer(
 		ws: WebSocketHandlerShape,
 		prepareTurnSession: ProviderTurnService["prepareTurnSession"],
+		sendTurn: ProviderTurnService["sendTurn"] = () => Effect.void,
 	) {
 		const providerTurnService: ProviderTurnService = {
 			prepareTurnSession,
-			sendTurn: vi.fn(() => Effect.void),
+			sendTurn,
 			interruptTurn: vi.fn(() => Effect.void),
 		};
 		return Layer.mergeAll(
@@ -3743,6 +3399,7 @@ describe("sendMessageToSession", () => {
 			Layer.succeed(ConfigTag, mockConfig()),
 			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 	}
@@ -3771,6 +3428,7 @@ describe("sendMessageToSession", () => {
 			Layer.succeed(ConfigTag, mockConfig()),
 			Layer.succeed(SessionManagerServiceTag, service),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 		return sendMessageToSession({
@@ -3783,6 +3441,260 @@ describe("sendMessageToSession", () => {
 			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
 		);
 	});
+
+	it.effect(
+		"removes only the failed command on a propagated Effect failure",
+		() => {
+			const layer = makeLayer(
+				mockWsHandler(),
+				(input) => Effect.succeed(input.sessionId),
+				(input) =>
+					input.commandId === "failed"
+						? Effect.fail(
+								new SessionManagerError({
+									operation: "sendTurn",
+									cause: "rejected",
+								}),
+							)
+						: Effect.void,
+			);
+			return Effect.gen(function* () {
+				for (const commandId of ["before", "failed", "after"]) {
+					const exit = yield* Effect.exit(
+						sendMessageToSession({
+							clientId: commandId,
+							originId: commandId,
+							sessionId: "effect-failed",
+							commandId,
+							text: "ok",
+						}),
+					);
+					expect(Exit.isFailure(exit)).toBe(commandId === "failed");
+				}
+				for (const [messageId, originId] of [
+					["first", "before"],
+					["second", "after"],
+					["tui", undefined],
+				]) {
+					const event = translateMessageCreated(
+						{
+							type: "message.created",
+							properties: {
+								sessionID: "effect-failed",
+								messageID: messageId,
+								info: { role: "user", parts: [{ type: "text", text: "ok" }] },
+							},
+						},
+						(yield* PendingSendOwnershipTag).resolve,
+					);
+					if (originId) expect(event).toMatchObject({ originId });
+					else expect(event).not.toHaveProperty("originId");
+				}
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"correlates provider user messages by session FIFO across SSE and polling",
+		() => {
+			const ws = mockWsHandler();
+			const layer = makeLayer(ws, (input) => Effect.succeed(input.sessionId));
+			return Effect.gen(function* () {
+				for (const [sessionId, originId, commandId] of [
+					["fifo-a", "browser-1", "fifo-command-1"],
+					["fifo-b", "browser-3", "fifo-command-3"],
+					["fifo-a", "browser-2", "fifo-command-2"],
+				] as const) {
+					yield* sendMessageToSession({
+						clientId: originId,
+						sessionId,
+						originId,
+						commandId,
+						text: "ok",
+					});
+				}
+				const event = {
+					type: "message.created",
+					properties: {
+						sessionID: "fifo-a",
+						messageID: "msg-first",
+						info: { role: "user", parts: [{ type: "text", text: "ok" }] },
+					},
+				};
+				expect(
+					translateMessageCreated(
+						event,
+						(yield* PendingSendOwnershipTag).resolve,
+					),
+				).toMatchObject({
+					messageId: "msg-first",
+					originId: "browser-1",
+				});
+				expect(
+					translateMessageCreated(
+						event,
+						(yield* PendingSendOwnershipTag).resolve,
+					),
+				).toMatchObject({
+					messageId: "msg-first",
+					originId: "browser-1",
+				});
+				const { events } = diffAndSynthesize(
+					new Map(),
+					[
+						{
+							id: "msg-first",
+							sessionID: "fifo-a",
+							role: "user",
+							parts: [{ id: "part-1", type: "text", text: "ok" }],
+						},
+						{
+							id: "msg-second",
+							sessionID: "fifo-a",
+							role: "user",
+							parts: [{ id: "part-2", type: "text", text: "ok" }],
+						},
+						{
+							id: "msg-third",
+							sessionID: "fifo-b",
+							role: "user",
+							parts: [{ id: "part-3", type: "text", text: "ok" }],
+						},
+					],
+					(yield* PendingSendOwnershipTag).resolve,
+				);
+				expect(events).toEqual([
+					{
+						type: "user_message",
+						text: "ok",
+						messageId: "msg-first",
+						originId: "browser-1",
+					},
+					{
+						type: "user_message",
+						text: "ok",
+						messageId: "msg-second",
+						originId: "browser-2",
+					},
+					{
+						type: "user_message",
+						text: "ok",
+						messageId: "msg-third",
+						originId: "browser-3",
+					},
+				]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"drops a stale FIFO owner on different text across SSE and polling",
+		() => {
+			const layer = makeLayer(mockWsHandler(), (input) =>
+				Effect.succeed(input.sessionId),
+			);
+			return Effect.gen(function* () {
+				for (const transport of ["sse", "poll"] as const) {
+					const sessionId = `stale-${transport}`;
+					for (const [commandId, text] of [
+						["stale", "unsent"],
+						["next", "TUI text"],
+					] as const) {
+						yield* sendMessageToSession({
+							clientId: "browser",
+							originId: "browser",
+							sessionId,
+							commandId,
+							text,
+						});
+					}
+					const providerMessage = {
+						id: "foreign",
+						sessionID: sessionId,
+						role: "user" as const,
+						parts: [{ id: "p", type: "text" as const, text: "TUI text" }],
+					};
+					const event = {
+						type: "message.created",
+						properties: {
+							sessionID: sessionId,
+							messageID: "foreign",
+							info: providerMessage,
+						},
+					};
+					const first =
+						transport === "sse"
+							? translateMessageCreated(
+									event,
+									(yield* PendingSendOwnershipTag).resolve,
+								)
+							: diffAndSynthesize(
+									new Map(),
+									[providerMessage],
+									(yield* PendingSendOwnershipTag).resolve,
+								).events[0];
+					expect(first).toEqual({
+						type: "user_message",
+						messageId: "foreign",
+						text: "TUI text",
+					});
+					expect(
+						translateMessageCreated(
+							event,
+							(yield* PendingSendOwnershipTag).resolve,
+						),
+					).not.toHaveProperty("originId");
+					expect(
+						diffAndSynthesize(
+							new Map(),
+							[providerMessage],
+							(yield* PendingSendOwnershipTag).resolve,
+						).events[0],
+					).not.toHaveProperty("originId");
+					expect(
+						translateMessageCreated(
+							{
+								...event,
+								properties: { ...event.properties, messageID: "next" },
+							},
+							(yield* PendingSendOwnershipTag).resolve,
+						),
+					).toMatchObject({ originId: "browser", messageId: "next" });
+				}
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"still attributes same-text TUI messages when an unobservable failed send left an owner",
+		() => {
+			const layer = makeLayer(mockWsHandler(), (input) =>
+				Effect.succeed(input.sessionId),
+			);
+			return Effect.gen(function* () {
+				yield* sendMessageToSession({
+					clientId: "browser",
+					originId: "browser",
+					sessionId: "same-text-stale",
+					commandId: "unsent",
+					text: "ok",
+				});
+				expect(
+					translateMessageCreated(
+						{
+							type: "message.created",
+							properties: {
+								sessionID: "same-text-stale",
+								messageID: "tui",
+								info: { role: "user", parts: [{ type: "text", text: "ok" }] },
+							},
+						},
+						(yield* PendingSendOwnershipTag).resolve,
+					),
+				).toMatchObject({ originId: "browser", messageId: "tui" });
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"omits originId when preparing the turn changes the session id",
@@ -3927,25 +3839,17 @@ describe("syncInputDraftForSession", () => {
 });
 
 describe("rewindSessionToMessage", () => {
-	it.effect("reverts to a specific message and clears cursor", () => {
+	it.effect("reverts to a specific message", () => {
 		const log = mockLogger();
-		const legacyClearPaginationCursor = vi.fn(() => {
-			throw new Error("legacy clearPaginationCursor should not be used");
-		});
-		const _sessionMgr = mockSessionManager({
-			clearPaginationCursor: legacyClearPaginationCursor,
-		});
-		const clearPaginationCursor = vi.fn(() => Effect.void);
-		const sessionManagerService = makeMockSessionManagerService({
-			clearPaginationCursor,
-		});
 		const client = {
-			session: { revert: vi.fn(async () => {}) },
+			session: {
+				messages: vi.fn(async () => [{ id: "msg-1" }]),
+				revert: vi.fn(async () => {}),
+			},
 		} as unknown as OpenCodeAPI;
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(LoggerTag, log),
 		);
 
@@ -3959,8 +3863,6 @@ describe("rewindSessionToMessage", () => {
 				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
 					messageID: "msg-1",
 				});
-				expect(clearPaginationCursor).toHaveBeenCalledWith("session-1");
-				expect(legacyClearPaginationCursor).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalled();
 			}),
 		);
@@ -3982,6 +3884,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 
@@ -4018,6 +3921,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 
@@ -4057,6 +3961,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
@@ -4137,6 +4042,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				// Production always supplies ProviderRuntimeIngestion for Claude output
 				// (relay-stack builds it from the daemon's always-present persistence
 				// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
@@ -4205,6 +4111,14 @@ describe("handleMessage", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -4223,7 +4137,9 @@ describe("handleMessage", () => {
 							tokens_cache_read: null,
 							tokens_cache_write: null,
 							context_window: null,
+							version: 0,
 							is_streaming: 0,
+							is_backfilled: 0,
 							created_at: 1,
 							updated_at: 1,
 							parts: [
@@ -4256,6 +4172,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				makeOverridesStateLive(),
@@ -4350,6 +4267,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
@@ -4411,32 +4329,18 @@ describe("handleMessage", () => {
 					{
 						id: "session-1",
 						title: "Untitled",
+						status: "idle" as const,
 						updatedAt: 100,
 						messageCount: 0,
 					},
 				]),
 			);
 			const renameSession = vi.fn(() => Effect.void);
-			const sendSessionLists = vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "session-1",
-								title: "First prompt",
-								updatedAt: 200,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
-				}),
-			);
+			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				listSessions,
 				renameSession,
-				sendSessionLists,
+				pushViewerFamilies,
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -4458,6 +4362,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
@@ -4471,7 +4376,7 @@ describe("handleMessage", () => {
 
 				expect(listSessions).not.toHaveBeenCalled();
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(sendSessionLists).not.toHaveBeenCalled();
+				expect(pushViewerFamilies).not.toHaveBeenCalled();
 				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
@@ -4491,17 +4396,18 @@ describe("handleMessage", () => {
 				{
 					id: "session-1",
 					title: "User named this",
+					status: "idle" as const,
 					updatedAt: 100,
 					messageCount: 0,
 				},
 			]),
 		);
 		const renameSession = vi.fn(() => Effect.void);
-		const sendSessionLists = vi.fn(() => Effect.void);
+		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions,
 			renameSession,
-			sendSessionLists,
+			pushViewerFamilies,
 		});
 		const config = mockConfig();
 		const client = {} as unknown as OpenCodeAPI;
@@ -4523,6 +4429,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
 		);
@@ -4536,7 +4443,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-			expect(sendSessionLists).not.toHaveBeenCalled();
+			expect(pushViewerFamilies).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -4561,7 +4468,7 @@ describe("handleMessage", () => {
 			);
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
-				sendSessionLists: vi.fn(() => Effect.void),
+				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const config = mockConfig();
 			const client = {} as unknown as OpenCodeAPI;
@@ -4573,10 +4480,10 @@ describe("handleMessage", () => {
 						id: "ses-local-placeholder",
 						provider: "claude",
 						provider_sid: null,
+						version: 0,
 						title: "Untitled",
 						status: "idle",
 						parent_id: null,
-						forked_from: null,
 						fork_point_event: null,
 						last_message_at: null,
 						last_turn_error_at: null,
@@ -4595,6 +4502,14 @@ describe("handleMessage", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
@@ -4620,6 +4535,7 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				makeOverridesStateLive(),
@@ -4631,11 +4547,14 @@ describe("handleMessage", () => {
 					modelID: "big-pickle",
 				});
 
-				yield* handleMessage("client-1", {
+				const dispatchedSessionId = yield* sendMessageToSession({
+					clientId: "client-1",
+					sessionId: "ses-local-placeholder",
 					text: "Test query",
 					commandId: "cmd-materialize-opencode",
 				});
 				yield* flushDispatchContinuation();
+				expect(dispatchedSessionId).toBe("ses-opencode-created");
 
 				expect(serviceCreateSession).toHaveBeenCalledWith("Untitled", {
 					providerId: "opencode",
@@ -4648,11 +4567,6 @@ describe("handleMessage", () => {
 					"client-1",
 					"ses-opencode-created",
 				);
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "session_switched",
-					id: "ses-opencode-created",
-					sessionId: "ses-opencode-created",
-				});
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",
@@ -4710,34 +4624,144 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
-				yield* handleMessage("client-1", {
+				yield* sendMessageToSession({
+					clientId: "client-1",
+					originId: "browser-rejected",
+					sessionId: "session-rejected",
 					text: "First prompt",
 					commandId: "cmd-dispatch-rejection",
 				});
 				yield* flushDispatchContinuation();
+				expect(
+					translateMessageCreated(
+						{
+							type: "message.created",
+							properties: {
+								sessionID: "session-rejected",
+								messageID: "tui-after-rejection",
+								info: {
+									role: "user",
+									parts: [{ type: "text", text: "First prompt" }],
+								},
+							},
+						},
+						(yield* PendingSendOwnershipTag).resolve,
+					),
+				).not.toHaveProperty("originId");
 
-				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
+				expect(yield* hasActiveProcessingTimeout("session-rejected")).toBe(
+					false,
+				);
+				expect(ws.sendToSession).toHaveBeenCalledWith("session-rejected", {
 					type: "done",
-					sessionId: "session-1",
+					sessionId: "session-rejected",
 					code: 1,
 				});
 				expect(ws.sendTo).toHaveBeenCalledWith(
 					"client-1",
 					expect.objectContaining({
 						type: "error",
-						sessionId: "session-1",
+						sessionId: "session-rejected",
 						code: "SEND_FAILED",
 					}),
 				);
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	it.effect(
+		"clears ownership after a legacy prompt failure before a same-text TUI message",
+		() => {
+			const client = {
+				session: {
+					prompt: vi.fn(async () => {
+						throw new Error("dispatch rejected");
+					}),
+				},
+			} as unknown as OpenCodeAPI;
+			const layer = Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(WebSocketHandlerTag, mockWsHandler()),
+				Layer.succeed(LoggerTag, mockLogger()),
+				Layer.succeed(
+					SessionManagerServiceTag,
+					makeMockSessionManagerService(),
+				),
+				Layer.succeed(ConfigTag, mockConfig()),
+				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
+				makeOverridesStateLive(),
+			);
+			return Effect.gen(function* () {
+				yield* sendMessageToSession({
+					clientId: "browser",
+					originId: "browser",
+					sessionId: "legacy-failed",
+					commandId: "failed",
+					text: "ok",
+				});
+				expect(
+					translateMessageCreated(
+						{
+							type: "message.created",
+							properties: {
+								sessionID: "legacy-failed",
+								messageID: "tui",
+								info: { role: "user", parts: [{ type: "text", text: "ok" }] },
+							},
+						},
+						(yield* PendingSendOwnershipTag).resolve,
+					),
+				).not.toHaveProperty("originId");
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect("clears ownership when model discovery prevents dispatch", () => {
+		const engine = withDispatchEffect({
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
+			dispatch: vi.fn(async () => ({ models: [] })),
+		} as unknown as OrchestrationEngine);
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
+			Layer.succeed(WebSocketHandlerTag, mockWsHandler()),
+			Layer.succeed(LoggerTag, mockLogger()),
+			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+			Layer.succeed(ConfigTag, mockConfig()),
+			Layer.succeed(OrchestrationEngineTag, engine),
+			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
+			makeOverridesStateLive(),
+		);
+		return Effect.gen(function* () {
+			yield* sendMessageToSession({
+				clientId: "browser",
+				originId: "browser",
+				sessionId: "no-model",
+				commandId: "no-model-command",
+				text: "ok",
+			});
+			expect(
+				translateMessageCreated(
+					{
+						type: "message.created",
+						properties: {
+							sessionID: "no-model",
+							messageID: "tui",
+							info: { role: "user", parts: [{ type: "text", text: "ok" }] },
+						},
+					},
+					(yield* PendingSendOwnershipTag).resolve,
+				),
+			).not.toHaveProperty("originId");
+		}).pipe(Effect.provide(layer));
+	});
 
 	it.effect("sends message via legacy path when no engine", () => {
 		const ws = mockWsHandler({
@@ -4767,6 +4791,7 @@ describe("handleMessage", () => {
 			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
+			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 
@@ -4784,4 +4809,48 @@ describe("handleMessage", () => {
 			}),
 		);
 	});
+});
+
+// A failed save fails toward unread: the caller gets the typed error, the
+// failure is logged, and nothing retries it (conduit-test-hk9m.6).
+describe("markSessionSeenForClient", () => {
+	it.effect(
+		"returns a failed save as a typed error, logged once, not retried",
+		() => {
+			const ws = mockWsHandler();
+			const log = mockLogger();
+			const failure = new SessionManagerError({
+				operation: "markSessionSeen",
+				cause: new Error("SQLITE_BUSY"),
+			});
+			const sessionManagerService = makeMockSessionManagerService({
+				markSessionSeen: vi.fn(() => Effect.fail(failure)),
+			});
+
+			return markSessionSeenForClient({
+				clientId: "client-1",
+				sessionId: "session-1",
+				upTo: 4,
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						Layer.succeed(WebSocketHandlerTag, ws),
+						Layer.succeed(LoggerTag, log),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+				Effect.flip,
+				Effect.tap((error) => {
+					expect(error).toBe(failure);
+					expect(sessionManagerService.markSessionSeen).toHaveBeenCalledOnce();
+					expect(log.warn).toHaveBeenCalledOnce();
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining("session-1"),
+						failure,
+					);
+					expect(ws.broadcast).not.toHaveBeenCalled();
+				}),
+			);
+		},
+	);
 });

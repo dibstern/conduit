@@ -4,14 +4,15 @@
 // the default OpenCode instance via probeOpenCode().
 //
 // Verifies:
-// - With smartDefault=true and no opencodeUrl, daemon probes the built-in
-//   default OpenCode URL.
-// - Probe succeeds → creates unmanaged "Default" instance on the default port.
+// - With smartDefault=true and no opencodeUrl, daemon probes the smart
+//   default URL (pointed at OPENCODE_URL here; http://localhost:4096 in prod).
+// - Probe succeeds → creates unmanaged "Default" instance on that port.
 // - Instance becomes healthy (auth-aware health check works)
 // - Browser can connect and use the relay normally
 //
 // Requires:
-//   - OpenCode running at localhost:4096
+//   - OPENCODE_URL set to a disposable OpenCode server. There is no fallback
+//     to localhost:4096: that is usually someone's live instance.
 //   - OPENCODE_SERVER_PASSWORD set
 //   - Project built (`pnpm run build`)
 
@@ -25,7 +26,7 @@ import {
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
 
-const SMART_DEFAULT_OPENCODE_URL = "http://localhost:4096";
+const SMART_DEFAULT_OPENCODE_URL = process.env["OPENCODE_URL"];
 
 interface SmartDaemonInfo {
 	daemon: ForegroundDaemonHandle;
@@ -40,6 +41,10 @@ const test = base.extend<{
 	smartDaemonProjectUrl: string;
 }>({
 	smartDaemon: async ({ browserName: _browserName }, use, testInfo) => {
+		if (!SMART_DEFAULT_OPENCODE_URL) {
+			testInfo.skip(true, "OPENCODE_URL is not set");
+			return;
+		}
 		const available = await isOpenCodeReachable(SMART_DEFAULT_OPENCODE_URL);
 		if (!available) {
 			testInfo.skip(
@@ -67,6 +72,7 @@ const test = base.extend<{
 			staticDir,
 			logLevel: "error",
 			// No opencodeUrl! Smart default should auto-detect.
+			smartDefaultUrl: SMART_DEFAULT_OPENCODE_URL,
 		});
 
 		// Register a project so we have a route
@@ -126,9 +132,11 @@ test.describe("Smart Default Detection", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(defaultInst!.managed).toBe(false);
 
-		// Should be on port 4096 (the default OpenCode port)
+		// Should be on the port smart default probed
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(defaultInst!.port).toBe(4096);
+		expect(defaultInst!.port).toBe(
+			Number(new URL(SMART_DEFAULT_OPENCODE_URL ?? "").port),
+		);
 
 		// Should be healthy (auth-aware health check passed)
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -138,15 +146,17 @@ test.describe("Smart Default Detection", () => {
 	test("browser connects to smart-default daemon and receives instance_list", async ({
 		page,
 		smartDaemonProjectUrl,
+		isNarrow,
 	}) => {
 		await page.goto(smartDaemonProjectUrl);
 
 		// SPA should load
 		await expect(page).toHaveTitle("Conduit", { timeout: 10_000 });
 
-		// Connect overlay should disappear
+		// Connect overlay unmounts once connected (a phone's list route hides
+		// it, so "hidden" would not prove the socket connected)
 		await page.locator(".connect-overlay").waitFor({
-			state: "hidden",
+			state: "detached",
 			timeout: 15_000,
 		});
 
@@ -156,7 +166,10 @@ test.describe("Smart Default Detection", () => {
 		});
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
 
-		// Chat input should be visible — full pipeline works
-		await expect(page.locator("#input")).toBeVisible({ timeout: 5_000 });
+		// Full pipeline works. On a phone `/` is the session list screen and the
+		// chat input lives at /s/<id> (d9da0776), so check the list.
+		await expect(
+			page.locator(isNarrow ? "#sidebar-panel-sessions" : "#input"),
+		).toBeVisible({ timeout: 5_000 });
 	});
 });

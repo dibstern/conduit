@@ -87,7 +87,7 @@
 		align="start"
 		tone="inherit"
 		hoverFill="overlay-soft"
-		class="fb-entry gap-1.5 w-full py-1 px-2 text-left text-base text-text-secondary rounded duration-100 {hiddenClass}"
+		class="fb-entry gap-1.5 w-full min-h-[44px] md:min-h-0 py-1 px-2 text-left text-base text-text-secondary rounded duration-100 {hiddenClass}"
 		style="padding-left: {depth * 16 + 8}px"
 		aria-expanded={isDir ? expanded : undefined}
 		data-path={fullPath}

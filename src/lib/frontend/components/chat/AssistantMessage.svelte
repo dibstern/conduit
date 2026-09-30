@@ -20,7 +20,7 @@
 	import type { AssistantMessage } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading } from "../../stores/chat.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { forkSessionRpc } from "../../transport/ws-rpc-client.js";
@@ -340,7 +340,8 @@
 				originId: getBrowserClientId(),
 				...(sessionState.currentId ? { sessionId: sessionState.currentId } : {}),
 				messageId: forkMessageId,
-			}).catch(() => showToast("Failed to fork session", { variant: "error" }));
+			}).then((response) => switchToSession(response.sessionId, response.projectSlug))
+				.catch(() => showToast("Failed to fork session", { variant: "error" }));
 		}
 	}
 

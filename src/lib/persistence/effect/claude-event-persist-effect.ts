@@ -7,10 +7,7 @@ import {
 	EventId,
 	type StoredEvent,
 } from "../events.js";
-import type { EventStoreError } from "./event-store-effect.js";
-import { EventStoreEffectTag } from "./event-store-effect.js";
-import type { ProjectionRunnerError } from "./projection-runner-effect.js";
-import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
+import { makeCommitAndSignal } from "./commit-and-signal.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
 	"ClaudeEventPersistEffectError",
@@ -19,19 +16,39 @@ export class ClaudeEventPersistEffectError extends Data.TaggedError(
 	readonly cause: unknown;
 }> {}
 
+export class ClaudeSessionLifecycleError extends Data.TaggedError(
+	"ClaudeSessionLifecycleError",
+)<{
+	readonly operation:
+		| "persistEvent"
+		| "persistEvents"
+		| "persistUserMessage"
+		| "ensureClaudeSubagentSession";
+	readonly sessionId: string;
+	readonly role: "existing-session" | "subagent-parent" | "subagent-child";
+	readonly reason: "missing-session" | "conflicting-subagent-session";
+}> {}
+
+export type ClaudeEventPersistFailure =
+	| ClaudeEventPersistEffectError
+	| ClaudeSessionLifecycleError;
+
 export interface ClaudeEventPersistEffect {
 	readonly persistEvent: (
 		event: CanonicalEvent,
-	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+		options?: { readonly publish?: boolean },
+	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistEvents: (
 		events: readonly CanonicalEvent[],
-	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+		options?: { readonly publish?: boolean },
+	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistUserMessage: (
 		sessionId: string,
 		text: string,
-	) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+		options?: { readonly publish?: boolean },
+	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistClaudeSubagent: (input: {
 		readonly childSessionId: string;
@@ -39,26 +56,33 @@ export interface ClaudeEventPersistEffect {
 		readonly providerSessionId: string;
 		readonly title: string;
 		readonly events: readonly CanonicalEvent[];
-	}) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+	}) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly ensureClaudeSubagentSession: (input: {
 		readonly childSessionId: string;
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
 		readonly title: string;
-	}) => Effect.Effect<void, ClaudeEventPersistEffectError>;
+	}) => Effect.Effect<void, ClaudeEventPersistFailure>;
 }
 
 export class ClaudeEventPersistEffectTag extends Context.Tag(
 	"ClaudeEventPersistEffect",
 )<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
 
-type PersistFailure = EventStoreError | ProjectionRunnerError | SqlError;
 type ExistingMessagePart = {
 	readonly id: string;
 	readonly text: string | null;
 	readonly status: string | null;
 };
+
+/**
+ * Terminal events that may act on an existing read-model session without a
+ * durable lifecycle root. Keep this list narrow: content events must prove
+ * canonical creation or an active provider binding before persistence.
+ */
+const LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES: ReadonlySet<CanonicalEvent["type"]> =
+	new Set(["session.deleted"]);
 
 function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 	return Schema.decodeSync(EventId)(
@@ -68,137 +92,202 @@ function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 
 export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	const eventStore = yield* EventStoreEffectTag;
-	const projectionRunner = yield* ProjectionRunnerEffectTag;
 
-	const withSql = <A, E>(
-		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-	): Effect.Effect<A, E> =>
-		effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-	const ensureRecovered = (): Effect.Effect<void, PersistFailure> =>
-		Effect.gen(function* () {
-			const recovered = yield* projectionRunner.isRecovered();
-			if (!recovered) {
-				yield* withSql(projectionRunner.recover()).pipe(Effect.asVoid);
-			}
-		});
-
-	const ensureSession = (
-		sessionId: string,
-		provider: string,
-		opts?: { parentId?: string; providerSessionId?: string; title?: string },
-	): Effect.Effect<void, SqlError> => {
+	const seedClaudeSubagentSession = (input: {
+		readonly childSessionId: string;
+		readonly parentSessionId: string;
+		readonly providerSessionId: string;
+		readonly title: string;
+	}): Effect.Effect<void, SqlError> => {
 		const now = Date.now();
 		return sql`
 			INSERT OR IGNORE INTO sessions
 			(id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-			VALUES (${sessionId}, ${provider}, ${opts?.providerSessionId ?? null}, ${opts?.title ?? "Untitled"}, 'idle', ${opts?.parentId ?? null}, ${now}, ${now})`.pipe(
+			VALUES (${input.childSessionId}, 'claude', ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
 			Effect.asVoid,
 		);
 	};
 
-	const projectEvent = (
-		stored: StoredEvent,
-	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
-		withSql(projectionRunner.projectEvent(stored));
+	const requireSession = (
+		sessionId: string,
+		operation: ClaudeSessionLifecycleError["operation"],
+		role: ClaudeSessionLifecycleError["role"],
+	): Effect.Effect<void, SqlError | ClaudeSessionLifecycleError> =>
+		sql<{ readonly id: string }>`
+			SELECT sessions.id
+			FROM sessions
+			WHERE sessions.id = ${sessionId}
+				AND (
+					EXISTS (
+						SELECT 1
+						FROM events
+						WHERE events.session_id = sessions.id
+							AND events.type = 'session.created'
+					)
+					OR EXISTS (
+						SELECT 1
+						FROM session_providers
+						WHERE session_providers.session_id = sessions.id
+							AND session_providers.status = 'active'
+					)
+				)
+			LIMIT 1
+		`.pipe(
+			Effect.flatMap((rows) =>
+				rows.length > 0
+					? Effect.void
+					: Effect.fail(
+							new ClaudeSessionLifecycleError({
+								operation,
+								sessionId,
+								role,
+								reason: "missing-session",
+							}),
+						),
+			),
+		);
 
-	const projectBatch = (
-		stored: readonly StoredEvent[],
-	): Effect.Effect<void, ProjectionRunnerError | SqlError> =>
-		withSql(projectionRunner.projectBatch(stored));
+	const requireReadModelSession = (
+		sessionId: string,
+		operation: ClaudeSessionLifecycleError["operation"],
+		role: ClaudeSessionLifecycleError["role"],
+	): Effect.Effect<void, SqlError | ClaudeSessionLifecycleError> =>
+		sql<{ readonly id: string }>`
+			SELECT id FROM sessions WHERE id = ${sessionId} LIMIT 1
+		`.pipe(
+			Effect.flatMap((rows) =>
+				rows.length > 0
+					? Effect.void
+					: Effect.fail(
+							new ClaudeSessionLifecycleError({
+								operation,
+								sessionId,
+								role,
+								reason: "missing-session",
+							}),
+						),
+			),
+		);
+
+	const commitAndSignal = yield* makeCommitAndSignal;
 
 	const mapPersistError =
 		(operation: string) =>
-		(cause: unknown): ClaudeEventPersistEffectError =>
-			cause instanceof ClaudeEventPersistEffectError
+		(cause: unknown): ClaudeEventPersistFailure =>
+			cause instanceof ClaudeEventPersistEffectError ||
+			cause instanceof ClaudeSessionLifecycleError
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
 
 	const persistEvent = (
 		event: CanonicalEvent,
-	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
+		options?: { readonly publish?: boolean },
+	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
-			yield* ensureRecovered();
-			yield* ensureSession(event.sessionId, "claude");
-			const stored = yield* eventStore.append(event);
-			yield* projectEvent(stored);
+			yield* LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES.has(event.type)
+				? requireReadModelSession(
+						event.sessionId,
+						"persistEvent",
+						"existing-session",
+					)
+				: requireSession(event.sessionId, "persistEvent", "existing-session");
+			yield* commitAndSignal([event], options);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistEvents = (
 		events: readonly CanonicalEvent[],
-	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
+		options?: { readonly publish?: boolean },
+	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
 			if (events.length === 0) return;
-			yield* ensureRecovered();
+
 			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
-				yield* ensureSession(sessionId, "claude");
+				yield* requireSession(sessionId, "persistEvents", "existing-session");
 			}
-			const stored = yield* eventStore.appendBatch(events);
-			yield* projectBatch(stored);
+			yield* commitAndSignal(events, options);
 		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
 
 	const persistUserMessage = (
 		sessionId: string,
 		text: string,
-	): Effect.Effect<void, ClaudeEventPersistEffectError> =>
+		options?: { readonly publish?: boolean },
+	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
-			yield* ensureRecovered();
-			yield* ensureSession(sessionId, "claude");
+			yield* requireSession(
+				sessionId,
+				"persistUserMessage",
+				"existing-session",
+			);
 
 			const now = Date.now();
 			const userMsgId = crypto.randomUUID();
-			const stored = yield* eventStore.appendBatch([
-				canonicalEvent(
-					"session.created",
-					sessionId,
-					{
+			yield* commitAndSignal(
+				[
+					canonicalEvent(
+						"message.created",
 						sessionId,
-						title: "Claude Session",
-						provider: "claude",
-					},
-					{ provider: "claude", createdAt: now },
-				),
-				canonicalEvent(
-					"message.created",
-					sessionId,
-					{
-						messageId: userMsgId,
-						role: "user",
+						{
+							messageId: userMsgId,
+							role: "user",
+							sessionId,
+						},
+						{ provider: "claude", createdAt: now },
+					),
+					canonicalEvent(
+						"text.delta",
 						sessionId,
-					},
-					{ provider: "claude", createdAt: now },
-				),
-				canonicalEvent(
-					"text.delta",
-					sessionId,
-					{
-						messageId: userMsgId,
-						partId: `${userMsgId}-0`,
-						text,
-					},
-					{ provider: "claude", createdAt: now },
-				),
-			]);
-			yield* projectBatch(stored);
+						{
+							messageId: userMsgId,
+							partId: `${userMsgId}-0`,
+							text,
+						},
+						{ provider: "claude", createdAt: now },
+					),
+				],
+				options,
+			);
 		}).pipe(Effect.mapError(mapPersistError("persistUserMessage")));
 
 	const ensureClaudeSubagentSession: ClaudeEventPersistEffect["ensureClaudeSubagentSession"] =
 		(input) =>
-			sql
-				.withTransaction(
+			// Through the seam rather than the runner: this append is an idempotent
+			// INSERT OR IGNORE, not an appendBatch, and it is reached directly from
+			// claude-provider-runtime — so without this it would project a new
+			// subagent session that nobody was told about.
+			commitAndSignal
+				.write((project) =>
 					Effect.gen(function* () {
-						yield* ensureRecovered();
-						yield* ensureSession(input.parentSessionId, "claude");
-						const existingChildRows = yield* sql<{ id: string }>`
-							SELECT id FROM sessions WHERE id = ${input.childSessionId} LIMIT 1`;
-						if (existingChildRows.length > 0) return;
-
-						yield* ensureSession(input.childSessionId, "claude", {
-							parentId: input.parentSessionId,
-							providerSessionId: input.providerSessionId,
-							title: input.title,
-						});
+						yield* requireSession(
+							input.parentSessionId,
+							"ensureClaudeSubagentSession",
+							"subagent-parent",
+						);
+						const existingChildRows = yield* sql<{
+							provider: string;
+							parent_id: string | null;
+							provider_sid: string | null;
+						}>`
+							SELECT provider, parent_id, provider_sid
+							FROM sessions
+							WHERE id = ${input.childSessionId}
+							LIMIT 1`;
+						const existingChild = existingChildRows[0];
+						if (!existingChild) {
+							yield* seedClaudeSubagentSession(input);
+						} else if (
+							existingChild.provider !== "claude" ||
+							existingChild.parent_id !== input.parentSessionId ||
+							existingChild.provider_sid !== input.providerSessionId
+						) {
+							return yield* Effect.fail(
+								new ClaudeSessionLifecycleError({
+									operation: "ensureClaudeSubagentSession",
+									sessionId: input.childSessionId,
+									role: "subagent-child",
+									reason: "conflicting-subagent-session",
+								}),
+							);
+						}
 
 						const event = canonicalEvent(
 							"session.created",
@@ -248,7 +337,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							sequence: row.sequence,
 							streamVersion: row.stream_version,
 						};
-						yield* projectEvent(stored);
+						yield* project([stored]);
 					}),
 				)
 				.pipe(Effect.mapError(mapPersistError("ensureClaudeSubagentSession")));
@@ -274,8 +363,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					existingMessageIds,
 					existingParts,
 				);
-				const stored = yield* eventStore.appendBatch(events);
-				yield* projectBatch(stored);
+				yield* commitAndSignal(events);
 			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
 
 	return {

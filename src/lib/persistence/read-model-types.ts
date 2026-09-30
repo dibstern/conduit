@@ -2,18 +2,23 @@
 
 export interface SessionRow {
 	id: string;
+	version: number;
 	provider: string;
 	provider_sid: string | null;
 	title: string;
 	status: string;
+	history_complete?: number;
 	parent_id: string | null;
-	forked_from: string | null;
 	fork_point_event: string | null;
+	fork_point_timestamp?: number | null;
+	fork_point_message_id?: string | null;
 	last_message_at: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
-	read_at: number | null;
-	marked_unread_at?: number | null;
+	last_turn_end_version?: number | null;
+	seen_version?: number | null;
+	/** Generated: 1 while a root or fork has a turn end newer than seen. */
+	unread?: number;
 	settled_at: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
@@ -44,6 +49,7 @@ export interface PendingClaudeQuestionToolRow {
 
 export interface MessageRow {
 	id: string;
+	version: number;
 	session_id: string;
 	turn_id: string | null;
 	role: string;
@@ -55,6 +61,13 @@ export interface MessageRow {
 	tokens_cache_write: number | null;
 	context_window: number | null;
 	is_streaming: number;
+	is_backfilled: number;
+	rest_digest?: string | null;
+	rest_event_id?: string | null;
+	rest_payload?: string | null;
+	parent_id?: string | null;
+	finish?: string | null;
+	error?: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -74,6 +87,7 @@ export interface MessagePartRow {
 	sort_order: number;
 	created_at: number;
 	updated_at: number;
+	rest_payload?: string | null;
 }
 
 export interface MessageWithParts extends MessageRow {

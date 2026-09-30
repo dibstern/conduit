@@ -1,25 +1,13 @@
 <!-- ─── History Loader ─────────────────────────────────────────────────────── -->
 <!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
-<!-- Sends LoadMoreHistory RPC requests; responses are handled by ws-dispatch -->
-<!-- which converts and prepends into the session's message list. -->
+<!-- Pages older projected rows through the transcript module. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
-	import {
-		consumeReplayBuffer,
-		currentChat,
-		getOrCreateSessionSlot,
-		getReplayBuffer,
-		prependMessages,
-	} from "../../stores/chat.svelte.js";
+	import { currentChat } from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { handleMessage } from "../../stores/ws-dispatch.js";
-	import { loadMoreHistoryRpc } from "../../transport/ws-rpc-client.js";
-	import type { RelayMessage } from "../../types.js";
-
-	const HISTORY_PAGE_SIZE = 50;
+	import { loadOlderTranscript } from "../../stores/transcript.svelte.js";
 
 	let {
 		sentinelEl,
@@ -62,55 +50,7 @@
 		)
 			return;
 
-		// Buffer-first: consume from replay buffer before hitting the server.
-		// After replay paging (commitReplayFinal), older messages may be in
-		// a local buffer — reading from it is instant (no network round-trip).
-		const sessionId = sessionState.currentId;
-		const slot = getOrCreateSessionSlot(sessionId);
-		const buffer = getReplayBuffer(slot.activity, slot.messages, sessionId);
-		if (buffer && buffer.length > 0) {
-			const page = consumeReplayBuffer(slot.activity, slot.messages, sessionId, HISTORY_PAGE_SIZE);
-			prependMessages(slot.activity, slot.messages, page);
-			const remaining = getReplayBuffer(slot.activity, slot.messages, sessionId);
-			if (remaining !== undefined && remaining.length > 0) {
-				// Buffer still has messages — keep paging locally.
-				return;
-			}
-			// Buffer exhausted — always ask the server whether older messages
-			// exist. The event cache may not cover the full session (eviction
-			// at MAX_EVENTS, relay started after session creation, missed SSE
-			// events, etc.). The server is the source of truth: it will return
-			// { messages: [], hasMore: false } when this truly is the beginning.
-			// Ensure offset > 0 so the server uses cursor-based pagination
-			// rather than returning the most recent page (already displayed).
-			if (slot.messages.historyMessageCount === 0) {
-				slot.messages.historyMessageCount = 1;
-			}
-		}
-
-		// Server request for older messages.
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
-		slot.messages.historyLoading = true;
-		// offset = number of messages already loaded (tracked by ws-dispatch).
-		// For cache→server transitions, messageCount was seeded above.
-		void loadMoreHistoryRpc({
-			projectSlug,
-			sessionId,
-			offset: slot.messages.historyMessageCount,
-		})
-			.then((response) => {
-				handleMessage({
-					type: "history_page",
-					sessionId: response.sessionId,
-					messages: response.messages,
-					hasMore: response.hasMore,
-					...(response.total != null ? { total: response.total } : {}),
-				} as Extract<RelayMessage, { type: "history_page" }>);
-			})
-			.catch(() => {
-				slot.messages.historyLoading = false;
-			});
+		void loadOlderTranscript(sessionState.currentId).catch(() => undefined);
 	}
 </script>
 

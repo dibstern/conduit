@@ -1,5 +1,5 @@
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
@@ -12,6 +12,11 @@ import { makeStored } from "../../helpers/persistence-factories.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
+
+// Each property builds a fresh SQLite harness per run: seconds alone, but past
+// the 10s default when the machine is loaded (full suite, parallel worktrees).
+// conduit-test-997y
+vi.setConfig({ testTimeout: 30_000 });
 
 // ─── Arbitraries ────────────────────────────────────────────────────────────
 

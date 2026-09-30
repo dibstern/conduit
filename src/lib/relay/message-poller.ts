@@ -1,5 +1,5 @@
-// ─── Message Poller Synthesis (Pure Functions) ───────────────────────────────
-// Pure diff/synthesize logic for converting REST message snapshots into relay
+// ─── Message Poller Synthesis ───────────────────────────────────────────────
+// Diff/synthesize logic for converting REST message snapshots into relay
 // events. These functions compare current messages against previous state and
 // emit synthetic RelayMessages (delta, tool_start, tool_executing, tool_result,
 // thinking_*, result, done, etc.).
@@ -8,7 +8,11 @@
 
 import type { Message } from "../instance/sdk-types.js";
 import type { UntaggedRelayMessage } from "../shared-types.js";
-import { mapToolName } from "./event-translator.js";
+import {
+	endsOpenCodeTurn,
+	mapToolName,
+	openCodeTurnTotals,
+} from "./event-translator.js";
 
 // ─── Part Snapshot ───────────────────────────────────────────────────────────
 
@@ -242,22 +246,22 @@ function extractUserText(msg: Message): string {
 }
 
 /**
- * Synthesize a result event from an assistant message's cost/token metadata.
- * Only emits when the message has been completed (has cost or token data).
+ * Synthesize the result for a completed assistant step. The step that ends
+ * its turn bills for the whole turn; an earlier step only reports usage for
+ * the context meter (`midTurn`). See `endsOpenCodeTurn`.
  */
-function synthesizeResultEvent(msg: Message): UntaggedRelayMessage | null {
-	const hasCost = msg.cost !== undefined && msg.cost > 0;
-	const hasTokens =
-		msg.tokens?.input !== undefined ||
-		msg.tokens?.output !== undefined ||
-		msg.tokens?.contextWindow !== undefined;
+function synthesizeResultEvent(
+	msg: Message,
+	messages: readonly Message[],
+): UntaggedRelayMessage | null {
+	if (msg.time?.completed === undefined) return null;
 
-	if (!hasCost && !hasTokens) return null;
-
-	const duration =
-		msg.time?.created !== undefined && msg.time?.completed !== undefined
-			? msg.time.completed - msg.time.created
-			: 0;
+	const turnSteps =
+		msg.parentID === undefined
+			? [msg]
+			: messages.filter(
+					(m) => m.role === "assistant" && m.parentID === msg.parentID,
+				);
 
 	return {
 		type: "result",
@@ -270,21 +274,26 @@ function synthesizeResultEvent(msg: Message): UntaggedRelayMessage | null {
 				? { context_window: msg.tokens.contextWindow }
 				: {}),
 		},
-		cost: msg.cost ?? 0,
-		duration,
+		...openCodeTurnTotals(msg, turnSteps),
 		sessionId: msg.sessionID,
 		...(msg.id != null && { messageId: msg.id }),
+		...(!endsOpenCodeTurn(msg) && { midTurn: true as const }),
 	};
 }
 
 /**
  * Compare current messages against previous snapshot, synthesize events
- * for any changes detected. Pure function — returns new snapshot instead
- * of mutating state.
+ * for any changes detected. Returns a new snapshot without mutating the old
+ * snapshot. New user messages also resolve their pending send's owner.
  */
 export function diffAndSynthesize(
 	previousSnapshot: Map<string, MessageSnapshot>,
 	messages: Message[],
+	resolveOrigin?: (
+		sessionId: string | undefined,
+		messageId: string | undefined,
+		text: string,
+	) => string | undefined,
 ): {
 	events: UntaggedRelayMessage[];
 	newSnapshot: Map<string, MessageSnapshot>;
@@ -307,7 +316,13 @@ export function diffAndSynthesize(
 		if (!prevMsg && msg.role === "user") {
 			const text = extractUserText(msg);
 			if (text) {
-				events.push({ type: "user_message", text });
+				const originId = resolveOrigin?.(msg.sessionID, msgId, text);
+				events.push({
+					type: "user_message",
+					text,
+					messageId: msgId,
+					...(originId != null ? { originId } : {}),
+				});
 			}
 		}
 
@@ -326,9 +341,9 @@ export function diffAndSynthesize(
 			}
 		}
 
-		// Emit result event for assistant messages with cost/token info
+		// Emit a result once each assistant step completes
 		if (msg.role === "assistant" && !msgSnap.emittedResult) {
-			const resultEvent = synthesizeResultEvent(msg);
+			const resultEvent = synthesizeResultEvent(msg, messages);
 			if (resultEvent) {
 				events.push(resultEvent);
 				msgSnap.emittedResult = true;
@@ -359,11 +374,8 @@ export function buildSeedSnapshot(
 			id: msg.id,
 			role: msg.role,
 			parts: new Map(),
-			// Mark result as already emitted if the message has cost/token data
-			emittedResult:
-				(msg.cost !== undefined && msg.cost > 0) ||
-				msg.tokens?.input !== undefined ||
-				msg.tokens?.output !== undefined,
+			// A completed step has already had its result
+			emittedResult: msg.time?.completed !== undefined,
 		};
 
 		for (const part of msg.parts ?? []) {

@@ -3,6 +3,9 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import {
 	clearDiscoveryState,
 	discoveryState,
+	handleAgentList,
+	handleModelList,
+	handleVisibilityInfo,
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { handleInstanceList } from "../../stores/instance.svelte.js";
@@ -87,43 +90,49 @@ export const VisibilityEmpty: Story = {
 export const VisibilityPopulated: Story = {
 	args: { initialTab: "visibility" },
 	beforeEach: () => {
-		discoveryState.providers = [
-			{
-				id: "anthropic",
-				name: "Anthropic",
-				configured: true,
-				models: [
-					{
-						id: "claude-sonnet-4",
-						name: "Claude Sonnet 4",
-						provider: "anthropic",
-					},
-					{
-						id: "claude-haiku-3-5",
-						name: "Claude Haiku 3.5",
-						provider: "anthropic",
-					},
-				],
-			},
-		];
-		discoveryState.hiddenModels = ["anthropic/claude-haiku-3-5"];
-		discoveryState.agentProviderScope = {
-			id: "anthropic",
-			name: "Anthropic",
-		};
-		discoveryState.agents = [
-			{
-				id: "code",
-				name: "Code",
-				description: "Write and edit code",
-			},
-			{
-				id: "review",
-				name: "Review",
-				description: "Review changes without editing",
-			},
-		];
-		discoveryState.hiddenAgents = ["anthropic/review"];
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{
+							id: "claude-sonnet-4",
+							name: "Claude Sonnet 4",
+							provider: "anthropic",
+						},
+						{
+							id: "claude-haiku-3-5",
+							name: "Claude Haiku 3.5",
+							provider: "anthropic",
+						},
+					],
+				},
+			],
+		});
+		handleVisibilityInfo({
+			type: "visibility_info",
+			hiddenModels: ["anthropic/claude-haiku-3-5"],
+			hiddenAgents: ["anthropic/review"],
+		});
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "anthropic", name: "Anthropic" },
+			agents: [
+				{
+					id: "code",
+					name: "Code",
+					description: "Write and edit code",
+				},
+				{
+					id: "review",
+					name: "Review",
+					description: "Review changes without editing",
+				},
+			],
+		});
 	},
 };
 

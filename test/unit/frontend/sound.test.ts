@@ -52,29 +52,32 @@ describe("playDoneSound", () => {
 	});
 
 	test("creates oscillator with 880 Hz sine wave", async () => {
-		const { playDoneSound } = await import(
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 
 		expect(mockCtx.osc.type).toBe("sine");
 		expect(mockCtx.osc.frequency.value).toBe(880);
 	});
 
 	test("sets gain to 0.1", async () => {
-		const { playDoneSound } = await import(
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 
 		expect(mockCtx.gain.gain.value).toBe(0.1);
 	});
 
 	test("ramps to near-zero over 0.3s", async () => {
-		const { playDoneSound } = await import(
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 
 		expect(mockCtx.gain.gain.exponentialRampToValueAtTime).toHaveBeenCalledWith(
 			0.001,
@@ -83,19 +86,21 @@ describe("playDoneSound", () => {
 	});
 
 	test("stops oscillator at 0.3s", async () => {
-		const { playDoneSound } = await import(
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 
 		expect(mockCtx.osc.stop).toHaveBeenCalledWith(0.3);
 	});
 
 	test("connects oscillator → gain → destination", async () => {
-		const { playDoneSound } = await import(
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 
 		expect(mockCtx.osc.connect).toHaveBeenCalledWith(mockCtx.gain);
 		expect(mockCtx.gain.connect).toHaveBeenCalledWith(mockCtx.ctx.destination);
@@ -103,31 +108,36 @@ describe("playDoneSound", () => {
 
 	test("resumes suspended AudioContext", async () => {
 		mockCtx.ctx.state = "suspended";
-		const { playDoneSound } = await import(
+		mockCtx.ctx.resume.mockImplementation(async () => {
+			mockCtx.ctx.state = "running";
+		});
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 
 		expect(mockCtx.ctx.resume).toHaveBeenCalled();
 	});
 
-	test("does not throw when AudioContext is unavailable", async () => {
+	test("reports when AudioContext is unavailable", async () => {
 		vi.stubGlobal("AudioContext", undefined);
 		// Need fresh module since AudioContext is checked at call time
-		const { playDoneSound } = await import(
+		const { readyDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
 
-		expect(() => playDoneSound()).not.toThrow();
+		await expect(readyDoneSound()).rejects.toThrow();
 	});
 
 	test("creates AudioContext lazily on first call", async () => {
-		const { playDoneSound } = await import(
+		const { readyDoneSound, emitDoneSound } = await import(
 			"../../../src/lib/frontend/utils/sound.js"
 		);
 
 		expect(AudioContextMock).not.toHaveBeenCalled();
-		playDoneSound();
+		await readyDoneSound();
+		emitDoneSound();
 		expect(AudioContextMock).toHaveBeenCalledTimes(1);
 	});
 });

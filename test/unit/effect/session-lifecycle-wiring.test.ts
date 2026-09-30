@@ -1,4 +1,8 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test mocks use `as any` for partial service shapes
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, PubSub } from "effect";
 import { expect, vi } from "vitest";
@@ -21,6 +25,8 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
 	handleSessionCreated,
@@ -28,6 +34,7 @@ import {
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
 import {
+	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
@@ -106,10 +113,11 @@ function makeTestLayer(
 	return Layer.provideMerge(wiringLayer, bridgeLayers);
 }
 
-function makeServiceLifecycleTestLayer(
+function makeServiceLifecycleLayers<ROut, E, RIn>(
 	services: ReturnType<typeof makeMockServices>,
 	deps: ReturnType<typeof makeMockDeps>,
-	api = makeMockOpenCodeAPI(),
+	api: ReturnType<typeof makeMockOpenCodeAPI>,
+	persistenceLayer: Layer.Layer<ROut, E, RIn>,
 ) {
 	const wiringLayer = makeSessionLifecycleWiringLive({
 		translator: deps.translator as any,
@@ -126,11 +134,42 @@ function makeServiceLifecycleTestLayer(
 		Layer.succeed(LoggerTag, services.log),
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
+		persistenceLayer,
 	);
 
-	return Layer.mergeAll(wiringLayer, SessionManagerServiceLive).pipe(
-		Layer.provide(baseLayer),
+	const serviceLayer = Layer.mergeAll(wiringLayer, SessionManagerServiceLive);
+	return { baseLayer, serviceLayer };
+}
+
+function makeServiceLifecycleTestLayer(
+	services: ReturnType<typeof makeMockServices>,
+	deps: ReturnType<typeof makeMockDeps>,
+	api = makeMockOpenCodeAPI(),
+	dbFile?: string,
+) {
+	const persistenceLayer = makePersistenceEffectLayer(dbFile ?? ":memory:");
+	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
+		services,
+		deps,
+		api,
+		persistenceLayer,
 	);
+	return serviceLayer.pipe(Layer.provideMerge(baseLayer));
+}
+
+function makeDurableServiceLifecycleTestLayer(
+	services: ReturnType<typeof makeMockServices>,
+	deps: ReturnType<typeof makeMockDeps>,
+	api: ReturnType<typeof makeMockOpenCodeAPI>,
+	dbFile: string,
+) {
+	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
+		services,
+		deps,
+		api,
+		makePersistenceEffectLayer(dbFile),
+	);
+	return Layer.provideMerge(serviceLayer, baseLayer);
 }
 
 function makePinoSpies() {
@@ -235,7 +274,9 @@ describe("SessionLifecycleWiringLive", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				yield* Effect.sleep("10 millis");
-				yield* service.createSession("Service Created");
+				yield* service.createSession("Service Created", {
+					providerId: "opencode",
+				});
 				yield* Effect.sleep("50 millis");
 
 				expect(api.session.create).toHaveBeenCalledWith({
@@ -263,9 +304,15 @@ describe("SessionLifecycleWiringLive", () => {
 	it.live(
 		"SessionManagerServiceLive deleteSession drives lifecycle cleanup without SessionEventBridgeLive",
 		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-lifecycle-delete-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
 			const services = makeMockServices();
 			const deps = makeMockDeps();
 			const api = makeMockOpenCodeAPI();
+			const logger = makeMockLogger();
+			services.log = logger;
 			deps.monitoringState.current = {
 				sessions: new Map([["service-deleted", { phase: "idle" as const }]]),
 			};
@@ -275,8 +322,15 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* Effect.sleep("10 millis");
 				yield* service.deleteSession("service-deleted");
 				yield* Effect.sleep("50 millis");
+				const sql = yield* SqlClient.SqlClient;
+				const events = yield* sql<{
+					readonly type: string;
+					readonly data: string;
+					readonly provider: string;
+				}>`SELECT type, data, provider FROM events
+					WHERE session_id = 'service-deleted' ORDER BY sequence ASC`;
 
-				expect(api.session.delete).toHaveBeenCalledWith("service-deleted");
+				expect(api.session.delete).not.toHaveBeenCalled();
 				expect(deps.translator.reset).toHaveBeenCalledWith("service-deleted");
 				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith(
 					"service-deleted",
@@ -288,10 +342,75 @@ describe("SessionLifecycleWiringLive", () => {
 				expect(
 					deps.monitoringState.current.sessions.has("service-deleted"),
 				).toBe(false);
+				expect(events.map((event) => event.type)).toEqual([
+					"session.provider_cleanup_failed",
+				]);
+				const receipt = events[0];
+				expect(receipt?.provider).toBe("unknown");
+				expect(receipt?.data).toContain('"sessionId":"service-deleted"');
+				expect(receipt?.data).toContain('"provider":"unknown"');
+				expect(receipt?.data).toContain(
+					'"reason":"provider_route: no provider route could be determined, so cleanup was skipped"',
+				);
+				expect(logger.warn).toHaveBeenCalledOnce();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
-					Layer.fresh(makeServiceLifecycleTestLayer(services, deps, api)),
+					Layer.fresh(
+						makeServiceLifecycleTestLayer(services, deps, api, dbFile),
+					),
+				),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.live(
+		"deletes a raw-seeded session through durable tombstone persistence",
+		() => {
+			const tmpDir = mkdtempSync(
+				join(tmpdir(), "conduit-session-lifecycle-legacy-delete-"),
+			);
+			const dbFile = join(tmpDir, "events.sqlite");
+			const sessionId = "legacy-raw-seeded-session";
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const api = makeMockOpenCodeAPI();
+
+			return Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const service = yield* SessionManagerServiceTag;
+				yield* sql`
+					INSERT INTO sessions (
+						id, provider, provider_sid, title, status, created_at, updated_at
+					) VALUES (
+						${sessionId}, 'opencode', ${sessionId}, 'Legacy raw seed', 'idle', 1, 1
+					)`;
+				const didDelete = yield* service
+					.deleteSession(sessionId)
+					.pipe(Effect.provideService(ClaudeEventPersistEffectTag, persist));
+				const events = yield* sql<{ readonly type: string }>`
+					SELECT type FROM events
+					WHERE session_id = ${sessionId}
+					ORDER BY sequence ASC`;
+				const sessions = yield* sql<{ readonly count: number }>`
+					SELECT COUNT(*) AS count FROM sessions WHERE id = ${sessionId}`;
+
+				expect(didDelete).toBe(true);
+				expect(events.map((event) => event.type)).toContain("session.deleted");
+				expect(sessions[0]?.count).toBe(0);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.fresh(
+						makeDurableServiceLifecycleTestLayer(services, deps, api, dbFile),
+					),
+				),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(tmpDir, { recursive: true, force: true })),
 				),
 			);
 		},

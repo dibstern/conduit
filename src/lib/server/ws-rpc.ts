@@ -1,4 +1,5 @@
-import { type Context, Effect } from "effect";
+import { Rpc } from "@effect/rpc";
+import { type Context, Effect, Stream } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
@@ -22,6 +23,8 @@ import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
+import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import {
 	persistSessionPermissionMode,
 	SessionManagerServiceTag,
@@ -30,6 +33,7 @@ import {
 	getPermissionMode,
 	setPermissionMode,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import {
 	getClaudeSettingsOverrides,
@@ -51,6 +55,7 @@ import {
 } from "../handlers/permissions.js";
 import {
 	cancelSessionById,
+	getSessionInputDraft,
 	rewindSessionToMessage,
 	sendMessageToSession,
 	syncInputDraftForSession,
@@ -62,6 +67,7 @@ import {
 	forkSessionForClient,
 	loadMoreHistoryForSession,
 	markSessionReadForClient,
+	markSessionSeenForClient,
 	markSessionUnreadForClient,
 	renameSessionForClient,
 	setSessionAutoSettleForClient,
@@ -126,11 +132,10 @@ export {
 	ListDirectories,
 	type ListDirectoriesResponse,
 	ListPtys,
-	ListSessions,
-	type ListSessionsResponse,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
 	MarkSessionRead,
+	MarkSessionSeen,
 	MarkSessionUnread,
 	type ModelInfo,
 	type ProjectMutationResponse,
@@ -234,6 +239,39 @@ const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
 	});
 
 export const wsRpcHandlers = WsRpcGroup.of({
+	SubscribeShell: (request) =>
+		Rpc.fork(
+			subscribeShell(
+				request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence },
+			).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeShell failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribeSessionDetail: (request) =>
+		Rpc.fork(
+			subscribeSessionDetail({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}).pipe(
+				(stream) =>
+					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeSessionDetail failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
 	AttachProject: (_request: AttachProject) =>
 		Effect.succeed({ ok: true as const }),
 	ResolveSession: (request) =>
@@ -923,6 +961,21 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
+	MarkSessionSeen: (request) =>
+		markSessionSeenForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			upTo: request.upTo,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `MarkSessionSeen failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
 	MarkSessionRead: (request) =>
 		markSessionReadForClient({
 			clientId: request.originId ?? "rpc",
@@ -1109,41 +1162,10 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
-	ListSessions: (request) =>
-		Effect.gen(function* () {
-			const sessionManager = yield* SessionManagerServiceTag;
-			const roots = request.roots ?? false;
-			const query = request.query?.trim() ?? "";
-			const normalizedQuery = query.toLowerCase();
-			const sessions = yield* sessionManager.listSessions({ roots });
-			const filtered =
-				normalizedQuery.length === 0
-					? sessions
-					: sessions.filter(
-							(session) =>
-								(session.title ?? "").toLowerCase().includes(normalizedQuery) ||
-								session.id.toLowerCase().includes(normalizedQuery),
-						);
-			return {
-				projectSlug: request.projectSlug,
-				sessions: filtered,
-				roots,
-				...(query.length > 0 ? { search: true } : {}),
-			};
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `ListSessions failed: ${String(error)}`,
-					}),
-				),
-			),
-		),
 	CreateSession: (request) =>
 		createSessionForClient({
 			clientId: request.originId,
 			...(request.title != null ? { title: request.title } : {}),
-			...(request.requestId != null ? { requestId: request.requestId } : {}),
 			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
 			...(request.providerId != null ? { providerId: request.providerId } : {}),
 		}).pipe(
@@ -1163,9 +1185,8 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		viewSessionForClient({
 			clientId: request.originId,
 			sessionId: request.sessionId,
-			...(request.skipMarkRead === true ? { skipMarkRead: true } : {}),
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.map(({ draft }) => ({ ok: true as const, draft })),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -1276,14 +1297,13 @@ export const wsRpcHandlers = WsRpcGroup.of({
 	LoadMoreHistory: (request) =>
 		loadMoreHistoryForSession({
 			sessionId: request.sessionId,
-			offset: request.offset,
+			...(request.before ? { before: request.before } : {}),
 		}).pipe(
 			Effect.map((page) => ({
 				projectSlug: request.projectSlug,
 				sessionId: page.sessionId,
 				messages: page.messages,
 				hasMore: page.hasMore,
-				...(page.total != null ? { total: page.total } : {}),
 			})),
 			Effect.catchAll((error) =>
 				Effect.fail(
@@ -1299,7 +1319,11 @@ export const wsRpcHandlers = WsRpcGroup.of({
 			sessionId: request.sessionId,
 			messageId: request.messageId,
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.as({
+				ok: true as const,
+				sessionId: request.sessionId,
+				messageId: request.messageId,
+			}),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -1323,7 +1347,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					);
 				}
 			}
-			yield* sendMessageToSession({
+			const sessionId = yield* sendMessageToSession({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				text: request.text,
@@ -1332,7 +1356,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.originId ? { originId: request.originId } : {}),
 				errorDelivery: "session",
 			});
-			return { ok: true as const };
+			return { ok: true as const, sessionId: sessionId ?? request.sessionId };
 		}).pipe(
 			Effect.catchAll((error) =>
 				Effect.fail(
@@ -1433,8 +1457,10 @@ export const makeRoutedWsRpcServerLayer = (
 
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
+	const { SubscribeShell, SubscribeSessionDetail, ...unaryHandlers } =
+		wsRpcHandlers;
 	const handlers = Object.fromEntries(
-		Object.entries({ ...wsRpcHandlers, ...daemonHandlers }).map(
+		Object.entries({ ...unaryHandlers, ...daemonHandlers }).map(
 			([name, handler]) => [
 				name,
 				daemonHandlers && Object.hasOwn(daemonHandlers, name)
@@ -1443,11 +1469,11 @@ export const makeRoutedWsRpcServerLayer = (
 			],
 		),
 	) as {
-		-readonly [K in keyof typeof wsRpcHandlers]: (
-			payload: Parameters<(typeof wsRpcHandlers)[K]>[0],
+		-readonly [K in keyof typeof unaryHandlers]: (
+			payload: Parameters<(typeof unaryHandlers)[K]>[0],
 		) => Effect.Effect<
-			Effect.Effect.Success<ReturnType<(typeof wsRpcHandlers)[K]>>,
-			Effect.Effect.Error<ReturnType<(typeof wsRpcHandlers)[K]>> | WsRpcError
+			Effect.Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
+			Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError
 		>;
 	};
 	handlers.AttachProject = (payload) =>
@@ -1462,10 +1488,53 @@ export const makeRoutedWsRpcServerLayer = (
 			reattachViewSession(payload).pipe(
 				Effect.flatMap((reattached) =>
 					reattached
-						? Effect.succeed({ ok: true as const })
+						? Effect.succeed({
+								ok: true as const,
+								draft: getSessionInputDraft(payload.sessionId),
+							})
 						: routeViewSession(payload),
 				),
 			);
 	}
-	return WsRpcGroup.toLayer(handlers);
+	const routeStream = <A, E, R>(
+		projectSlug: string,
+		make: () => Stream.Stream<A, E, R>,
+	) =>
+		Rpc.fork(
+			Stream.unwrap(
+				Effect.map(resolveContext(projectSlug), (context) =>
+					Stream.provideContext(make(), context).pipe(
+						Stream.mapError(
+							(error) =>
+								new WsRpcError({
+									message: `Subscription failed: ${String(error)}`,
+								}),
+						),
+					),
+				),
+			),
+		);
+	return WsRpcGroup.toLayer({
+		...handlers,
+		SubscribeShell: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeShell(
+					request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence },
+				),
+			),
+		SubscribeSessionDetail: (request) =>
+			routeStream(request.projectSlug, () => {
+				const source = subscribeSessionDetail({
+					sessionId: request.sessionId,
+					...(request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence }),
+				});
+				return request.textSuffixes === true
+					? encodeSessionDetail(source)
+					: source;
+			}),
+	});
 };

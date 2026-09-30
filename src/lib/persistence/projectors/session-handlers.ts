@@ -1,19 +1,92 @@
+// How a session leaves the read model, and why that is not a rule anyone has to
+// remember.
+//
+// A row that moves announces itself by its version stamp. A row that is deleted
+// leaves nothing behind to stamp, and the `ON DELETE CASCADE` on
+// sessions.parent_id takes the subagent subtree *inside SQLite*, where no
+// statement names it and `RETURNING` never sees it — a recursive-CTE delete
+// still reports only the row it started from, because the cascade has already
+// taken the descendants by the time the statement reaches them. So the removal
+// has to be named before it happens. It is named here, once.
+//
+// The discipline cannot spread to callers, because there is no per-caller step
+// to spread:
+//
+//   - A handler declares `{ removeSession }` rather than writing DELETE SQL, and
+//     the Effect projector's removal arm reads the subtree, performs the
+//     delete, and reports every id. (The legacy projector executes the same
+//     statement but reports nothing; it has no advance to report into.) The
+//     cascade still does all the actual cleanup, in every dependent table; the
+//     pre-read exists only so the bus can be told.
+//   - Anything else that removes a session is reported anyway: the projector
+//     classifies a row a statement wrote but could not stamp afterwards as
+//     removed. Inside the projection path, "delete and say nothing" is not a
+//     thing a statement can do.
+//   - The one remaining way to remove a session silently is to write a second
+//     delete statement. That is what fails loudly:
+//     test/unit/persistence/session-removal-boundary-grep.test.ts allows
+//     exactly one `DELETE FROM sessions` in the whole of src — the
+//     REMOVE_SESSION_SQL declaration below — and allows it to be executed only
+//     by the two projectors. Being inside this file buys nothing: a raw delete
+//     here would be run as an ordinary write, with `RETURNING id` appended, and
+//     would report the row it deleted while the cascade took the subtree in
+//     silence. So a new delete path anywhere, inside the seam or outside it,
+//     breaks the suite the moment it is written, with the fix named in the
+//     failure message. The legacy skeleton migration delete sits outside and is
+//     listed there with its reason; adding another gap is a deliberate act.
+//
+// Bead conduit-test-ni8.5.12.
+
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
 	StoredEvent,
 } from "../events.js";
 
-export interface SessionStatement {
+/** A write against `sessions`, executed with `RETURNING id` appended. */
+export interface SessionWrite {
 	readonly sql: string;
 	readonly params: readonly (string | number | null)[];
 }
 
+/**
+ * A session to remove, named rather than written as SQL. The projector owns the
+ * removal because reporting it needs a read the cascade would otherwise make
+ * impossible — see the note at the top of this file.
+ */
+export interface SessionRemoval {
+	readonly removeSession: string;
+}
+
+export type SessionStatement = SessionWrite | SessionRemoval;
+
+export const isSessionRemoval = (
+	statement: SessionStatement,
+): statement is SessionRemoval => "removeSession" in statement;
+
+/**
+ * The only statement in the source that removes session rows. Every projector
+ * that executes a removal runs this one, so the boundary grep has a single
+ * place to allow and a new delete path has nowhere quiet to live.
+ */
+export const REMOVE_SESSION_SQL = "DELETE FROM sessions WHERE id = ?";
+
+/**
+ * The session and every subagent beneath it, read before the removal — the
+ * cascade takes the descendants without naming them, and reports nothing once
+ * they are gone. It returns nothing for a session that is already absent, which
+ * is what keeps a replayed delete quiet.
+ */
+export const SESSION_SUBTREE_SQL = `WITH RECURSIVE subtree(id) AS (
+	SELECT id FROM sessions WHERE id = ?
+	UNION
+	SELECT child.id FROM sessions child JOIN subtree ON child.parent_id = subtree.id
+)
+SELECT id FROM subtree`;
+
 type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
-	| "session.read"
-	| "session.unread"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -77,10 +150,19 @@ export const sessionHandlers: {
 		// other code paths.
 		return [
 			{
-				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?)
-				 ON CONFLICT (id) DO UPDATE SET
-				     provider = excluded.provider,
+				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, fork_point_event, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?, ?)
+					 ON CONFLICT (id) DO UPDATE SET
+					     provider = CASE
+					       WHEN EXISTS (
+					         SELECT 1 FROM session_providers
+					         WHERE session_id = sessions.id AND status = 'active'
+					       )
+					       THEN sessions.provider
+					       WHEN sessions.provider NOT IN ('opencode', 'claude', 'claude-sdk')
+					       THEN sessions.provider
+					       ELSE excluded.provider
+					     END,
 				     provider_sid = COALESCE(excluded.provider_sid, sessions.provider_sid),
 				     title = CASE
 				       WHEN sessions.title IS NULL
@@ -93,6 +175,7 @@ export const sessionHandlers: {
 				       ELSE sessions.title
 				     END,
 				     parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
+				     fork_point_event = COALESCE(excluded.fork_point_event, sessions.fork_point_event),
 				     updated_at = excluded.updated_at`,
 				params: [
 					event.data.sessionId,
@@ -100,6 +183,7 @@ export const sessionHandlers: {
 					event.data.providerSessionId ?? null,
 					event.data.title,
 					event.data.parentId ?? null,
+					event.data.forkPointEvent ?? null,
 					event.createdAt,
 					event.createdAt,
 				],
@@ -145,27 +229,6 @@ export const sessionHandlers: {
 			},
 		];
 	},
-
-	// Last transition wins, and these need no guard against an earlier one
-	// overwriting a later one: every replay path is ORDER BY sequence ASC, so the
-	// events arrive in the order they happened. The lookahead subquery this
-	// briefly had was pure cost. Deliberately does NOT touch `updated_at` --
-	// that is the list's sort key, so reading a session must not reorder it.
-	"session.read": (event) => [
-		{
-			sql: "UPDATE sessions SET read_at = ?, marked_unread_at = NULL WHERE id = ?",
-			// The event's own timestamp, never Date.now(): the same log has to
-			// project to the same table every time.
-			params: [event.createdAt, event.data.sessionId],
-		},
-	],
-
-	"session.unread": (event) => [
-		{
-			sql: "UPDATE sessions SET read_at = NULL, marked_unread_at = ? WHERE id = ?",
-			params: [event.createdAt, event.data.sessionId],
-		},
-	],
 
 	"session.settled": (event) => [
 		{
@@ -230,13 +293,10 @@ export const sessionHandlers: {
 		// message_parts.message_id, and every other FK into sessions/turns carry
 		// ON DELETE CASCADE (see 0010_session_cascade_deletes.sql), so deleting
 		// the session row alone removes every dependent row, including subagent
-		// children reachable through parent_id.
-		return [
-			{
-				sql: "DELETE FROM sessions WHERE id = ?",
-				params: [event.data.sessionId],
-			},
-		];
+		// children reachable through parent_id. The cascade keeps doing that; the
+		// projector names the session subtree first so the removal can be
+		// announced. See the note at the top of this file.
+		return [{ removeSession: event.data.sessionId }];
 	},
 
 	// Lineage only. The row itself is brought into being by session.created —
@@ -246,8 +306,7 @@ export const sessionHandlers: {
 		return [
 			{
 				sql: `UPDATE sessions SET
-					forked_from = ?,
-					parent_id = NULL,
+					parent_id = ?,
 					fork_point_event = COALESCE(?, fork_point_event),
 					updated_at = ?
 				 WHERE id = ?`,
@@ -296,8 +355,8 @@ export const sessionHandlers: {
 		return [
 			wakeSession(event.sessionId, event.createdAt, "turn"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL WHERE id = ?",
-				params: [event.createdAt, event.sessionId],
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
+				params: [event.createdAt, event.streamVersion, event.sessionId],
 			},
 		];
 	},
@@ -305,8 +364,13 @@ export const sessionHandlers: {
 		return [
 			wakeSession(event.sessionId, event.createdAt, "error"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ? WHERE id = ?",
-				params: [event.createdAt, event.createdAt, event.sessionId],
+				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ?, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
+				params: [
+					event.createdAt,
+					event.createdAt,
+					event.streamVersion,
+					event.sessionId,
+				],
 			},
 		];
 	},
@@ -348,5 +412,32 @@ export function getSessionStatements<K extends CanonicalEventType>(
 			event: StoredEvent & { type: T; data: EventPayloadMap[T] },
 		) => readonly SessionStatement[];
 	} = sessionHandlers;
-	return handlers[event.type]?.(event) ?? [];
+	const statements = handlers[event.type]?.(event) ?? [];
+	if (event.type !== "session.created" && event.type !== "session.forked") {
+		return statements;
+	}
+	// Both projector implementations execute this writer before publishing the
+	// session. Reads never need the parent message again.
+	return [
+		...statements,
+		{
+			sql: `UPDATE sessions SET fork_point_timestamp = COALESCE(
+			fork_point_timestamp, ?,
+			(SELECT created_at FROM messages
+			 WHERE session_id = sessions.parent_id AND id = sessions.fork_point_event)
+		), fork_point_message_id = COALESCE(fork_point_message_id, ?, fork_point_event)
+		WHERE id = ?`,
+			params: [
+				"forkPointTimestamp" in event.data &&
+				typeof event.data.forkPointTimestamp === "number"
+					? event.data.forkPointTimestamp
+					: null,
+				"forkPointMessageId" in event.data &&
+				typeof event.data.forkPointMessageId === "string"
+					? event.data.forkPointMessageId
+					: null,
+				event.sessionId,
+			],
+		},
+	];
 }

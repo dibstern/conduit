@@ -3,14 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
 	currentChat,
-	getOrCreateSessionActivity,
-	getOrCreateSessionMessages,
 	getOrCreateSessionSlot,
+	inputSyncState,
 	sessionActivity,
 	sessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import {
+	applyGetAgentsResponse,
+	chooseModel,
+	clearDiscoveryState,
+	discoveryState,
+} from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
 	attachedProjectState,
@@ -18,18 +22,14 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
-	applyListSessionsResponse,
 	clearSessionState,
 	completeNewSession,
 	ERROR_DISPLAY_MS,
 	failNewSession,
-	findSession,
 	getFilteredSessions,
 	groupSessionsByAttention,
+	groupSessionsByDate,
 	handleSessionFamily,
-	handleSessionForked,
-	handleSessionList,
-	handleSessionSwitched,
 	isSessionSnoozed,
 	isSessionWoken,
 	NEW_SESSION_TIMEOUT_MS,
@@ -42,21 +42,25 @@ import {
 	setSearchQuery,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
+import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
+import {
+	applySessionChange,
+	sessionSubscription,
+} from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
+import type { CreateSessionResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
-import type {
-	RelayMessage,
-	SessionInfo,
-} from "../../../src/lib/frontend/types.js";
+import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
-
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
-}
+import {
+	applySessionRemoved,
+	applySessionSnapshot,
+	applySessionUpsert,
+	seedSearchResults,
+	seedSessions,
+} from "./session-fixtures.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -65,93 +69,182 @@ function makeSession(
 ): SessionInfo {
 	return {
 		title: `Session ${overrides.id}`,
+		status: "idle",
 		...overrides,
 	};
+}
+
+/** Create a Date for "today at hour H" relative to a reference date. */
+function todayAt(ref: Date, hour: number): Date {
+	const d = new Date(ref);
+	d.setHours(hour, 0, 0, 0);
+	return d;
+}
+
+/** Create a Date for "yesterday at hour H" relative to a reference date. */
+function yesterdayAt(ref: Date, hour: number): Date {
+	const d = new Date(ref);
+	d.setDate(d.getDate() - 1);
+	d.setHours(hour, 0, 0, 0);
+	return d;
+}
+
+/** Create a Date for N days ago at hour H relative to a reference date. */
+function daysAgoAt(ref: Date, days: number, hour: number): Date {
+	const d = new Date(ref);
+	d.setDate(d.getDate() - days);
+	d.setHours(hour, 0, 0, 0);
+	return d;
 }
 
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
-	attachedProjectState.slug = "project-a";
-	sessionState.sessions.clear();
-	sessionState.rootSessions = [];
-	sessionState.familySessions = [];
-	sessionState.daemonSessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";
-	sessionState.daemonHasMore = false;
-	sessionState.daemonCursor = null;
-	discoveryState.currentProviderId = "";
-	discoveryState.currentModelId = "";
-	discoveryState.defaultProviderId = "";
-	discoveryState.defaultModelId = "";
+	clearDiscoveryState();
 	routerState.path = "/s/old-session";
+	routerState.search = "";
+	attachedProjectState.slug = "project-a";
 });
 
-describe("clearSessionState", () => {
-	it("clears evicted activity, replay generations and timers on project reset", () => {
-		vi.useFakeTimers();
-		try {
-			for (const id of new Set([
-				...sessionActivity.keys(),
-				...sessionMessages.keys(),
-			]))
-				clearSessionChatState(id);
-			const evicted = getOrCreateSessionSlot("evicted");
-			evicted.activity.replayGeneration = 7;
-			const render = vi.fn();
-			evicted.activity.renderTimer = setTimeout(() => render(), 100);
-			for (let i = 0; i < 21; i++) getOrCreateSessionSlot(`visited-${i}`);
-			const activityOnly = getOrCreateSessionActivity("activity-only");
-			activityOnly.renderTimer = setTimeout(() => render(), 100);
-			getOrCreateSessionMessages("messages-only");
-			expect(sessionMessages.has("evicted")).toBe(false);
-			expect(sessionActivity.has("evicted")).toBe(true);
+it("seedSessions settles the versioned map and derives sidebar roots", () => {
+	seedSessions([
+		{ id: "root", title: "Root" },
+		{ id: "child", title: "Child", parentID: "root" },
+	]);
 
-			clearSessionState();
-
-			expect(sessionActivity.size).toBe(0);
-			expect(sessionMessages.size).toBe(0);
-			expect(evicted.activity.replayGeneration).toBe(8);
-			expect(activityOnly.replayGeneration).toBe(1);
-			vi.advanceTimersByTime(100);
-			expect(render).not.toHaveBeenCalled();
-		} finally {
-			vi.useRealTimers();
-		}
+	expect([...sessionSubscription.rows.keys()]).toEqual(["root", "child"]);
+	expect(sessionSubscription.settled).toBe(true);
+	expect(sessionState.rootSessions.map((row) => row.id)).toEqual(["root"]);
+	expect(sessionState.familySessions).toEqual([]);
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 0,
+		item: { id: "stale", title: "Stale", status: "idle" },
 	});
+	expect(sessionSubscription.rows.has("stale")).toBe(false);
+});
+
+it("keeps a newer root row when an older family arrives", () => {
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [{ id: "root", title: "New title", status: "busy" }],
+	});
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "root",
+		sessions: [
+			{ id: "root", title: "Old title", status: "idle" },
+			{ id: "child", title: "Child", status: "idle", parentID: "root" },
+		],
+	});
+
+	expect(sessionState.sessions.get("root")?.title).toBe("New title");
+	expect(sessionState.sessions.get("root")?.status).toBe("busy");
+	expect(sessionState.sessions.has("child")).toBe(false);
+	expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+		"root",
+		"child",
+	]);
+});
+
+it("forgets chat and selection when the subscription snapshot omits a session", () => {
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [{ id: "gone", title: "Gone", status: "idle" }],
+	});
+	getOrCreateSessionSlot("gone");
+	sessionState.currentId = "gone";
+
+	applySessionChange({ _tag: "snapshot", sequence: 11, rows: [] });
+
+	expect(sessionState.sessions.has("gone")).toBe(false);
+	expect(sessionActivity.has("gone")).toBe(false);
+	expect(sessionMessages.has("gone")).toBe(false);
+	expect(sessionState.currentId).toBeNull();
+});
+
+it("forgets chat and selection when the subscription removes a session", () => {
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 10,
+		item: { id: "gone", title: "Gone", status: "idle" },
+	});
+	getOrCreateSessionSlot("gone");
+	sessionState.currentId = "gone";
+
+	applySessionChange({ _tag: "remove", sequence: 11, id: "gone" });
+
+	expect(sessionState.sessions.has("gone")).toBe(false);
+	expect(sessionActivity.has("gone")).toBe(false);
+	expect(sessionMessages.has("gone")).toBe(false);
+	expect(sessionState.currentId).toBeNull();
+});
+
+it("does not write a row from a fork notice", () => {
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [{ id: "ses_original", title: "Original", status: "idle" }],
+	});
+	handleMessage({
+		type: "session_forked",
+		sessionId: "fork",
+		parentId: "ses_original",
+		parentTitle: "Original",
+	});
+
+	expect(sessionState.sessions.has("fork")).toBe(false);
+	expect(sessionState.sessions.get("ses_original")?.title).toBe("Original");
+});
+
+it("keeps the family list owned by session_family messages", () => {
+	const original = {
+		id: "root",
+		title: "Family title",
+		status: "idle",
+	} as const;
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "root",
+		sessions: [original],
+	});
+	applySessionSnapshot(
+		[{ id: "root", title: "Snapshot title", status: "idle" }],
+		"complete",
+	);
+	expect(sessionState.familySessions).toEqual([original]);
+	applySessionUpsert({ id: "root", title: "Upsert title", status: "idle" });
+	expect(sessionState.familySessions).toEqual([original]);
+	applySessionRemoved("root");
+	expect(sessionState.familySessions).toEqual([original]);
 });
 
 describe("switchToSession", () => {
-	it("builds the session route and RPC from the attached project", () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		const viewSession = vi.fn();
-		attachedProjectState.slug = "attached-project";
-		routerState.path = "/";
-		switchToSession("new-session", undefined, viewSession);
-		expect(routerState.path).toBe("/s/new-session");
-		expect(viewSession).toHaveBeenCalledWith({
-			projectSlug: "attached-project",
-			sessionId: "new-session",
-			originId: expect.any(String),
-		});
-		vi.unstubAllGlobals();
+	it("keeps the list query when the URL already names the session", () => {
+		const pushState = vi.fn();
+		vi.stubGlobal("window", { history: { pushState } });
+		try {
+			routerState.path = "/s/current";
+			routerState.search = "?group=project";
+			switchToSession(
+				"current",
+				"project-a",
+				vi.fn().mockResolvedValue({ ok: true }),
+			);
+			expect(routerState.search).toBe("?group=project");
+			expect(pushState).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
-	it("views a foreign row through its explicit project", () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		const viewSession = vi.fn();
-		attachedProjectState.slug = "project-a";
-		switchToSession("foreign-session", "project-b", viewSession);
-		expect(routerState.path).toBe("/s/foreign-session");
-		expect(viewSession).toHaveBeenCalledWith({
-			projectSlug: "project-b",
-			sessionId: "foreign-session",
-			originId: expect.any(String),
-		});
-		vi.unstubAllGlobals();
-	});
+
 	it("ignores session discovery returned after attaching another project", async () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		let finish: (
 			response: Awaited<ReturnType<typeof sessionRpc.getAgentsRpc>>,
 		) => void = () => {};
@@ -161,29 +254,73 @@ describe("switchToSession", () => {
 					finish = resolve;
 				}),
 		);
-		attachedProjectState.slug = "project-a";
-		routerState.path = "/s/session-a";
-		switchToSession("session-a", undefined, vi.fn());
-		attachedProjectState.slug = "project-b";
-		clearSessionState();
-		discoveryState.activeAgentId = "agent-b";
-		finish({
-			projectSlug: "project-a",
-			providerScope: { id: "a", name: "A" },
-			agents: [],
-			activeAgentId: "agent-a",
-		});
-		await Promise.resolve();
-		expect(discoveryState.activeAgentId).toBe("agent-b");
-		spy.mockRestore();
+		try {
+			attachedProjectState.slug = "project-a";
+			switchToSession(
+				"session-a",
+				undefined,
+				vi.fn().mockResolvedValue({ ok: true }),
+			);
+			attachedProjectState.slug = "project-b";
+			clearSessionState();
+			applyGetAgentsResponse({
+				projectSlug: "project-b",
+				providerScope: { id: "b", name: "B" },
+				agents: [],
+				activeAgentId: "agent-b",
+			});
+			finish({
+				projectSlug: "project-a",
+				providerScope: { id: "a", name: "A" },
+				agents: [],
+				activeAgentId: "agent-a",
+			});
+			await Promise.resolve();
+			expect(discoveryState.activeAgentId).toBe("agent-b");
+		} finally {
+			spy.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+	it("builds the session route and RPC from the attached project", () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		try {
+			const viewSession = vi.fn().mockResolvedValue({ ok: true });
+			attachedProjectState.slug = "attached-project";
+			routerState.path = "/";
+			switchToSession("new-session", undefined, viewSession);
+			expect(routerState.path).toBe("/s/new-session");
+			expect(viewSession).toHaveBeenCalledWith({
+				projectSlug: "attached-project",
+				sessionId: "new-session",
+				originId: expect.any(String),
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 
+	it("views a foreign row through its explicit project", () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		try {
+			const viewSession = vi.fn().mockResolvedValue({ ok: true });
+			switchToSession("foreign", "project-b", viewSession);
+			expect(viewSession).toHaveBeenCalledWith({
+				projectSlug: "project-b",
+				sessionId: "foreign",
+				originId: expect.any(String),
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 	it("views the session through RPC after changing local state", () => {
-		const viewSession = vi.fn();
+		const viewSession = vi.fn().mockResolvedValue({ ok: true });
 		sessionState.currentId = "old-session";
 		routerState.path = "/s/new-session";
+		attachedProjectState.slug = "project-a";
 
-		switchToSession("new-session", undefined, viewSession);
+		switchToSession("new-session", "project-a", viewSession);
 
 		expect(viewSession).toHaveBeenCalledWith({
 			projectSlug: "project-a",
@@ -193,7 +330,7 @@ describe("switchToSession", () => {
 	});
 
 	it("keeps cached target session messages visible while loading fresh history", () => {
-		const viewSession = vi.fn();
+		const viewSession = vi.fn().mockResolvedValue({ ok: true });
 		const target = getOrCreateSessionSlot("parent-with-subagents");
 		setMessages(target.messages, [
 			createToolMessage({
@@ -206,8 +343,9 @@ describe("switchToSession", () => {
 		]);
 		sessionState.currentId = "child-subagent";
 		routerState.path = "/s/parent-with-subagents";
+		attachedProjectState.slug = "project-a";
 
-		switchToSession("parent-with-subagents", undefined, viewSession);
+		switchToSession("parent-with-subagents", "project-a", viewSession);
 
 		const tool = currentChat().messages.find((m) => m.type === "tool");
 		expect(tool?.type).toBe("tool");
@@ -218,314 +356,256 @@ describe("switchToSession", () => {
 		clearSessionChatState("parent-with-subagents");
 		clearSessionChatState("child-subagent");
 	});
+
+	it("applies the returned draft and flushes a pending permission mode", async () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		const sendMode = vi
+			.spyOn(sessionRpc, "switchPermissionModeRpc")
+			.mockResolvedValue({ projectSlug: "project-a", mode: "acceptEdits" });
+		try {
+			discoveryState.pendingPermissionMode = "acceptEdits";
+			switchToSession("draft-session", "project-a", () =>
+				Promise.resolve({ ok: true, draft: "saved text" }),
+			);
+			await Promise.resolve();
+			expect(inputSyncState.text).toBe("saved text");
+			expect(discoveryState.pendingPermissionMode).toBeNull();
+			expect(sendMode).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: "draft-session",
+					projectSlug: "project-a",
+					mode: "acceptEdits",
+				}),
+			);
+		} finally {
+			sendMode.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("replaces a superseded session URL and resets session chrome", () => {
+		const replaceState = vi.fn();
+		vi.stubGlobal("window", { history: { replaceState, pushState: vi.fn() } });
+		try {
+			sessionState.currentId = "old-session";
+			routerState.path = "/s/old-session";
+			uiState.contextPercent = 70;
+			todoState.items = [{ id: "one", subject: "old", status: "pending" }];
+			switchToSession(
+				"replacement",
+				"project-a",
+				() => Promise.resolve({ ok: true }),
+				{ replace: true },
+			);
+			expect(sessionState.currentId).toBe("replacement");
+			expect(routerState.path).toBe("/s/replacement");
+			expect(replaceState).toHaveBeenCalledTimes(1);
+			expect(uiState.contextPercent).toBe(0);
+			expect(todoState.items).toEqual([]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 });
 
-// ─── groupSessionsByAttention (pure function) ───────────────────────────────
+// ─── groupSessionsByDate (pure function) ────────────────────────────────────
 
-describe("groupSessionsByAttention", () => {
-	it("places snoozed after pinned and settled, ordered by deadline", () => {
-		const now = 1_000;
+describe("groupSessionsByDate", () => {
+	// Use a reference "now" at noon local time to avoid edge cases
+	const now = new Date();
+	now.setHours(12, 0, 0, 0);
+
+	it("puts sessions updated today into the 'today' group", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({ id: "1", updatedAt: todayAt(now, 10).getTime() }),
+		];
+		const groups = groupSessionsByDate(sessions, now);
+		expect(groups.today).toHaveLength(1);
+		expect(groups.yesterday).toHaveLength(0);
+		expect(groups.older).toHaveLength(0);
+	});
+
+	it("puts sessions from yesterday into the 'yesterday' group", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({ id: "1", updatedAt: yesterdayAt(now, 15).getTime() }),
+		];
+		const groups = groupSessionsByDate(sessions, now);
+		expect(groups.today).toHaveLength(0);
+		expect(groups.yesterday).toHaveLength(1);
+		expect(groups.older).toHaveLength(0);
+	});
+
+	it("puts older sessions into the 'older' group", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({ id: "1", updatedAt: daysAgoAt(now, 5, 10).getTime() }),
+		];
+		const groups = groupSessionsByDate(sessions, now);
+		expect(groups.today).toHaveLength(0);
+		expect(groups.yesterday).toHaveLength(0);
+		expect(groups.older).toHaveLength(1);
+	});
+
+	it("falls back to createdAt when updatedAt is missing", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({ id: "1", createdAt: todayAt(now, 8).getTime() }),
+		];
+		const groups = groupSessionsByDate(sessions, now);
+		expect(groups.today).toHaveLength(1);
+	});
+
+	it("falls back to epoch 0 when both timestamps are missing", () => {
+		const sessions: SessionInfo[] = [makeSession({ id: "1" })];
+		const groups = groupSessionsByDate(sessions, now);
+		expect(groups.older).toHaveLength(1);
+	});
+
+	it("handles empty array", () => {
+		const groups = groupSessionsByDate([]);
+		expect(groups.today).toHaveLength(0);
+		expect(groups.yesterday).toHaveLength(0);
+		expect(groups.older).toHaveLength(0);
+	});
+
+	it("distributes mixed timestamps correctly", () => {
+		const sessions: SessionInfo[] = [
+			makeSession({ id: "t", updatedAt: todayAt(now, 9).getTime() }),
+			makeSession({ id: "y", updatedAt: yesterdayAt(now, 14).getTime() }),
+			makeSession({ id: "o", updatedAt: daysAgoAt(now, 30, 10).getTime() }),
+		];
+		const groups = groupSessionsByDate(sessions, now);
+		expect(groups.today).toHaveLength(1);
+		expect(groups.yesterday).toHaveLength(1);
+		expect(groups.older).toHaveLength(1);
+	});
+});
+
+describe("attention placement and daemon rows", () => {
+	it("files each tier under its section and orders approvals before replies", () => {
+		const groups = groupSessionsByAttention([
+			makeSession({ id: "failed", attention: "error" }),
+			makeSession({ id: "reply", attention: "needs-reply" }),
+			makeSession({ id: "approve", attention: "needs-approval" }),
+			makeSession({ id: "busy", attention: "working" }),
+			makeSession({ id: "unread", attention: "done-unread" }),
+			makeSession({ id: "quiet", attention: "idle" }),
+			makeSession({ id: "legacy" }),
+		]);
+		expect(groups.needsYou.map((row) => row.id)).toEqual([
+			"approve",
+			"reply",
+			"failed",
+		]);
+		expect(groups.running.map((row) => row.id)).toEqual(["busy"]);
+		expect(groups.doneUnread.map((row) => row.id)).toEqual(["unread"]);
+		expect(groups.idle.map((row) => row.id)).toEqual(["quiet", "legacy"]);
+	});
+
+	it("keeps incoming order within a tier and shelves pinned, settled, and snoozed rows", () => {
 		const groups = groupSessionsByAttention(
 			[
-				makeSession({ id: "indefinite", snoozedAt: 1, attention: "working" }),
-				makeSession({ id: "later", snoozedAt: 1, snoozedUntil: 3_000 }),
-				makeSession({ id: "pinned", pinnedAt: 1, snoozedAt: 1 }),
-				makeSession({ id: "soon", snoozedAt: 1, snoozedUntil: 2_000 }),
-				makeSession({ id: "settled", settledAt: 1, snoozedAt: 1 }),
-				makeSession({ id: "newer-idle", attention: "idle" }),
-				makeSession({
-					id: "woken",
-					snoozedAt: 1,
-					snoozedUntil: now,
-					attention: "idle",
-				}),
-				makeSession({ id: "older-idle", attention: "idle" }),
+				makeSession({ id: "newer", attention: "needs-reply" }),
+				makeSession({ id: "older", attention: "needs-reply" }),
+				makeSession({ id: "pin", pinnedAt: 10, attention: "needs-approval" }),
+				makeSession({ id: "settled", settledAt: 20, attention: "error" }),
+				makeSession({ id: "later", snoozedAt: 1, snoozedUntil: 3000 }),
+				makeSession({ id: "soon", snoozedAt: 1, snoozedUntil: 2000 }),
+				makeSession({ id: "indefinite", snoozedAt: 1 }),
 			],
-			now,
+			1000,
 		);
-		expect(groups.pinned.map((row) => row.id)).toEqual(["pinned"]);
+		expect(groups.needsYou.map((row) => row.id)).toEqual(["newer", "older"]);
+		expect(groups.pinned.map((row) => row.id)).toEqual(["pin"]);
 		expect(groups.settled.map((row) => row.id)).toEqual(["settled"]);
 		expect(groups.snoozed.map((row) => row.id)).toEqual([
 			"soon",
 			"later",
 			"indefinite",
 		]);
-		expect(groups.idle.map((row) => row.id)).toEqual([
-			"newer-idle",
-			"woken",
-			"older-idle",
-		]);
-	});
-	it("keeps pinned and settled sessions out of every attention tier", () => {
-		const groups = groupSessionsByAttention([
-			makeSession({
-				id: "second-pin",
-				pinnedAt: 20,
-				attention: "working",
-				updatedAt: 999,
-			}),
-			makeSession({
-				id: "first-pin",
-				pinnedAt: 0,
-				settledAt: 40,
-				attention: "needs-approval",
-				updatedAt: 1,
-			}),
-			makeSession({
-				id: "old-settle",
-				settledAt: 0,
-				attention: "done-unread",
-				updatedAt: 999,
-			}),
-			makeSession({
-				id: "new-settle",
-				settledAt: 30,
-				attention: "needs-reply",
-				updatedAt: 1,
-			}),
-		]);
-		expect(groups.pinned.map((s) => s.id)).toEqual(["first-pin", "second-pin"]);
-		expect(groups.settled.map((s) => s.id)).toEqual([
-			"new-settle",
-			"old-settle",
-		]);
-		expect(groups.needsYou).toEqual([]);
-		expect(groups.running).toEqual([]);
-		expect(groups.doneUnread).toEqual([]);
-		expect(groups.idle).toEqual([]);
 	});
 
-	it("files each tier under its section", () => {
-		const groups = groupSessionsByAttention([
-			makeSession({ id: "approve", attention: "needs-approval" }),
-			makeSession({ id: "reply", attention: "needs-reply" }),
-			makeSession({ id: "failed", attention: "error" }),
-			makeSession({ id: "busy", attention: "working" }),
-			makeSession({ id: "unread", attention: "done-unread" }),
-			makeSession({ id: "quiet", attention: "idle" }),
-		]);
-
-		expect(groups.needsYou.map((s) => s.id)).toEqual([
-			"approve",
-			"reply",
-			"failed",
-		]);
-		expect(groups.running.map((s) => s.id)).toEqual(["busy"]);
-		expect(groups.doneUnread.map((s) => s.id)).toEqual(["unread"]);
-		expect(groups.idle.map((s) => s.id)).toEqual(["quiet"]);
-	});
-
-	it("orders 'Needs you' by tier, approvals first", () => {
-		const groups = groupSessionsByAttention([
-			makeSession({ id: "failed", attention: "error" }),
-			makeSession({ id: "reply", attention: "needs-reply" }),
-			makeSession({ id: "approve", attention: "needs-approval" }),
-		]);
-
-		expect(groups.needsYou.map((s) => s.id)).toEqual([
-			"approve",
-			"reply",
-			"failed",
-		]);
-	});
-
-	// The list arrives sorted by recency and the tier sort must not disturb that
-	// within a tier, or the newest thing needing you could sink below the oldest.
-	it("keeps the incoming order between two sessions of the same tier", () => {
-		const groups = groupSessionsByAttention([
-			makeSession({ id: "newer", attention: "needs-reply" }),
-			makeSession({ id: "older", attention: "needs-reply" }),
-		]);
-
-		expect(groups.needsYou.map((s) => s.id)).toEqual(["newer", "older"]);
-	});
-
-	it("treats a session with no attention field as idle", () => {
-		const groups = groupSessionsByAttention([makeSession({ id: "legacy" })]);
-
-		expect(groups.idle.map((s) => s.id)).toEqual(["legacy"]);
-		expect(groups.needsYou).toHaveLength(0);
-	});
-
-	it("handles empty array", () => {
-		const groups = groupSessionsByAttention([]);
-
-		expect(groups.needsYou).toHaveLength(0);
-		expect(groups.running).toHaveLength(0);
-		expect(groups.doneUnread).toHaveLength(0);
-		expect(groups.idle).toHaveLength(0);
-	});
-});
-
-describe("snooze clock predicates", () => {
-	it("keeps an indefinite snooze asleep and wakes at the exact deadline", () => {
-		const indefinite = makeSession({ id: "a", snoozedAt: 1 });
-		const timed = makeSession({ id: "b", snoozedAt: 1, snoozedUntil: 100 });
-		expect(isSessionSnoozed(indefinite, 1_000)).toBe(true);
-		expect(isSessionWoken(indefinite, 1_000)).toBe(false);
+	it("keeps an indefinite snooze asleep and wakes a timed snooze at its deadline", () => {
+		const indefinite = makeSession({ id: "indefinite", snoozedAt: 1 });
+		const timed = makeSession({ id: "timed", snoozedAt: 1, snoozedUntil: 100 });
+		expect(isSessionSnoozed(indefinite, 1000)).toBe(true);
+		expect(isSessionWoken(indefinite, 1000)).toBe(false);
 		expect(isSessionSnoozed(timed, 99)).toBe(true);
 		expect(isSessionSnoozed(timed, 100)).toBe(false);
 		expect(isSessionWoken(timed, 100)).toBe(true);
-		expect(
-			isSessionWoken(
-				makeSession({ id: "c", wokenAt: 50, wokeBecause: "question" }),
-				1_000,
-			),
-		).toBe(true);
-	});
-});
-
-// ─── handleSessionList ──────────────────────────────────────────────────────
-
-describe("handleSessionList", () => {
-	it("keeps git context through ListSessions RPC responses", () => {
-		applyListSessionsResponse({
-			projectSlug: "project-a",
-			roots: true,
-			sessions: [
-				{
-					id: "git-session",
-					title: "Git",
-					git: { branch: "feature", head: "abc1234", merged: false },
-				},
-			],
-		});
-		expect(sessionState.rootSessions[0]?.git).toEqual({
-			branch: "feature",
-			head: "abc1234",
-			merged: false,
-		});
-	});
-	it("sets rootSessions when roots is true", () => {
-		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
-		handleSessionList({ type: "session_list", sessions, roots: true });
-		expect(sessionState.rootSessions).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(sessionState.rootSessions[0]!.id).toBe("a");
 	});
 
-	it("ignores obsolete all-session lists", () => {
-		const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
-		handleSessionList({ type: "session_list", sessions, roots: false });
-		expect(sessionState.familySessions).toEqual([]);
-	});
-
-	it("applies ListSessions RPC responses through the same session-list path", () => {
-		applyListSessionsResponse({
-			projectSlug: "project-a",
-			roots: true,
-			sessions: [
-				{
-					id: "rpc-root",
-					title: "RPC Root",
-					updatedAt: 123,
-					pendingQuestionCount: 2,
-					pendingPermissionCount: 1,
-					attention: "needs-approval",
-				},
-			],
-		});
-
-		expect(sessionState.rootSessions).toEqual([
-			{
-				id: "rpc-root",
-				title: "RPC Root",
-				updatedAt: 123,
-				pendingQuestionCount: 2,
-				pendingPermissionCount: 1,
-				attention: "needs-approval",
-			},
+	it("combines local roots with foreign daemon roots without duplicating local rows", () => {
+		projectState.projects = [];
+		seedSessions([
+			makeSession({ id: "local", title: "Warm title", updatedAt: 100 }),
 		]);
-		expect(sessionState.sessions.get("rpc-root")?.title).toBe("RPC Root");
-	});
-
-	it("keeps pin, settle, snooze and wake fields through ListSessions RPC responses", () => {
-		// A reload's first list arrives this way; dropping the fields here
-		// silently unpins and unsettles every row until the next broadcast.
-		applyListSessionsResponse({
+		applyListDaemonSessionsResponse({
 			projectSlug: "project-a",
-			roots: true,
 			sessions: [
-				{ id: "pinned", title: "P", pinnedAt: 10 },
-				{ id: "settled", title: "S", settledAt: 20 },
-				{ id: "snoozed", title: "Z", snoozedAt: 30, snoozedUntil: 40 },
-				{ id: "woken", title: "W", wokenAt: 50, wokeBecause: "approval" },
+				makeSession({
+					id: "local",
+					title: "Cold title",
+					projectSlug: "project-a",
+				}),
+				makeSession({
+					id: "foreign",
+					projectSlug: "project-b",
+					updatedAt: 400,
+				}),
+				makeSession({
+					id: "foreign-created",
+					projectSlug: "project-b",
+					createdAt: 300,
+				}),
+				makeSession({
+					id: "foreign-child",
+					parentID: "foreign",
+					projectSlug: "project-b",
+					updatedAt: 500,
+				}),
 			],
+			availability: [{ projectSlug: "project-b", available: true }],
+			hasMore: false,
+			nextCursor: null,
 		});
-
-		expect(sessionState.rootSessions).toEqual([
-			{ id: "pinned", title: "P", pinnedAt: 10 },
-			{ id: "settled", title: "S", settledAt: 20 },
-			{ id: "snoozed", title: "Z", snoozedAt: 30, snoozedUntil: 40 },
-			{ id: "woken", title: "W", wokenAt: 50, wokeBecause: "approval" },
+		expect(getFilteredSessions().map((row) => row.id)).toEqual([
+			"foreign",
+			"foreign-created",
+			"local",
 		]);
-	});
-
-	it("ignores non-array sessions payload", () => {
-		sessionState.rootSessions = [makeSession({ id: "existing" })];
-		handleSessionList(
-			msg({ type: "session_list", sessions: "not-array", roots: true }),
+		expect(getFilteredSessions().find((row) => row.id === "local")?.title).toBe(
+			"Warm title",
 		);
-		expect(sessionState.rootSessions).toHaveLength(1);
 	});
 
-	it("untagged session_list only populates roots", () => {
-		const root = makeSession({ id: "root1" });
-		const child = makeSession({ id: "child1", parentID: "root1" });
-		// Simulate an untagged message (no `roots` field) — e.g. from legacy sources
-		handleSessionList(msg({ type: "session_list", sessions: [root, child] }));
-		// rootSessions should contain only non-subagent sessions
-		expect(sessionState.rootSessions).toHaveLength(1);
-		expect(sessionState.rootSessions[0]?.id).toBe("root1");
-		// Family membership only comes from session_family.
-		expect(sessionState.familySessions).toEqual([]);
-	});
-});
-
-// ─── handleSessionSwitched ──────────────────────────────────────────────────
-
-describe("handleSessionSwitched", () => {
-	it("sets currentId from message id field (server sends 'id')", () => {
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "abc",
-			sessionId: "abc",
+	it("returns only reconciled root search results, never family children", () => {
+		const root = makeSession({ id: "root", title: "Match" });
+		const child = makeSession({
+			id: "child",
+			title: "Match child",
+			parentID: "root",
 		});
-		expect(sessionState.currentId).toBe("abc");
-	});
-
-	it("records selected subagent metadata without changing the family", () => {
-		handleSessionSwitched(
-			msg({
-				type: "session_switched",
-				id: "child-session",
-				sessionId: "child-session",
-				parentID: "parent-session",
-			}),
-		);
-
-		expect(sessionState.sessions.get("child-session")).toEqual({
-			id: "child-session",
-			title: "",
-			parentID: "parent-session",
+		seedSessions([root]);
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "root",
+			sessions: [root, child],
 		});
-		expect(findSession("child-session")?.parentID).toBe("parent-session");
-	});
-
-	it("does not add a parent-less switched session to familySessions", () => {
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "root-session",
-			sessionId: "root-session",
+		applyListDaemonSessionsResponse({
+			projectSlug: "project-a",
+			sessions: [
+				makeSession({
+					id: "foreign-match",
+					title: "Match abroad",
+					projectSlug: "project-b",
+				}),
+			],
+			availability: [{ projectSlug: "project-b", available: true }],
+			hasMore: false,
+			nextCursor: null,
 		});
-
-		expect(sessionState.familySessions).toEqual([]);
-	});
-
-	it("ignores missing id", () => {
-		sessionState.currentId = "existing";
-		handleSessionSwitched(msg({ type: "session_switched" }));
-		expect(sessionState.currentId).toBe("existing");
+		sessionState.searchQuery = "match";
+		seedSearchResults([root, child]);
+		expect(getFilteredSessions().map((row) => row.id)).toEqual(["root"]);
 	});
 });
 
@@ -559,208 +639,47 @@ describe("setCurrentSession", () => {
 	});
 });
 
-// ─── handleSessionForked (ticket 5.3) ───────────────────────────────────────
+// ─── Root subscription view ──────────────────────────────────────────────────
 
-describe("handleSessionForked (ticket 5.3)", () => {
-	it("does not insert a fork outside the supplied family", () => {
-		sessionState.familySessions = [
-			{ id: "ses_original", title: "Original", updatedAt: 1000 },
-		];
-
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "s1",
-			session: {
-				id: "ses_forked",
-				title: "Forked from Original",
-				updatedAt: 2000,
-				forkedFrom: "ses_original",
-			},
-			forkedFrom: "ses_original",
-			parentTitle: "Original",
-		});
-
-		expect(sessionState.familySessions).toHaveLength(1);
-	});
-
-	it("does not duplicate if session already exists", () => {
-		sessionState.familySessions = [
-			{ id: "ses_forked", title: "Already Here", updatedAt: 1000 },
-		];
-
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "s1",
-			session: {
-				id: "ses_forked",
-				title: "Forked from Original",
-				updatedAt: 2000,
-				forkedFrom: "ses_original",
-			},
-			forkedFrom: "ses_original",
-			parentTitle: "Original",
-		});
-
-		expect(sessionState.familySessions).toHaveLength(1);
-	});
-
-	it("preserves forkMessageId on the selected fork", () => {
-		sessionState.currentId = "fork-1";
-		handleSessionForked({
-			type: "session_forked",
-			sessionId: "s1",
-			session: {
-				id: "fork-1",
-				title: "Forked",
-				updatedAt: Date.now(),
-				forkedFrom: "parent-1",
-				forkMessageId: "msg_42",
-			},
-			forkedFrom: "parent-1",
-			parentTitle: "Parent",
-		});
-		const found = findSession("fork-1");
-		expect(found?.forkedFrom).toBe("parent-1");
-		expect(found?.parentID).toBeUndefined();
-		expect(found?.forkMessageId).toBe("msg_42");
-	});
-});
-
-// ─── getFilteredSessions — subagent toggle ──────────────────────────────────
-
-describe("roots-only sidebar", () => {
-	it("never shows family children, including search results", () => {
-		const root = makeSession({ id: "root", title: "Parent" });
+describe("getFilteredSessions root view", () => {
+	it("shows roots while the family view contains descendants", () => {
+		const root = makeSession({ id: "a", title: "Parent", updatedAt: 1000 });
 		const child = makeSession({
-			id: "child",
+			id: "b",
 			title: "Child",
-			parentID: "root",
+			parentID: "a",
+			updatedAt: 2000,
 		});
-		handleSessionList({ type: "session_list", roots: true, sessions: [root] });
+		seedSessions([root]);
 		handleSessionFamily({
 			type: "session_family",
-			rootId: "root",
+			rootId: "a",
 			sessions: [root, child],
 		});
-		expect(getFilteredSessions()).toEqual([root]);
-		sessionState.searchResults = [root, child, makeSession({ id: "deleted" })];
-		expect(getFilteredSessions()).toEqual([root]);
-	});
-});
-
-describe("getFilteredSessions — daemon sessions", () => {
-	beforeEach(() => {
-		sessionState.daemonSessions = [];
-		sessionState.searchResults = null;
-		sessionState.searchQuery = "";
-		sessionState.sessions.clear();
-		routerState.path = "/";
-	});
-
-	it("includes foreign project sessions", () => {
-		sessionState.rootSessions = [makeSession({ id: "local" })];
-		sessionState.daemonSessions = [
-			makeSession({ id: "foreign", projectSlug: "project-b" }),
-			makeSession({ id: "missing-slug" }),
-		];
-
-		expect(getFilteredSessions().map((session) => session.id)).toEqual([
-			"local",
-			"foreign",
+		expect(getFilteredSessions().map((session) => session.id)).toEqual(["a"]);
+		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
+			"a",
+			"b",
 		]);
 	});
 
-	it("does not duplicate the warm local row from the daemon response", () => {
-		sessionState.rootSessions = [
-			makeSession({ id: "local", title: "Warm title" }),
-		];
-		sessionState.daemonSessions = [
-			makeSession({
-				id: "local",
-				title: "Cold title",
-				projectSlug: "project-a",
-			}),
-		];
-
-		expect(getFilteredSessions()).toEqual([
-			expect.objectContaining({ id: "local", title: "Warm title" }),
-		]);
-	});
-
-	it("orders local and foreign sessions by updatedAt then createdAt", () => {
-		sessionState.rootSessions = [
-			makeSession({ id: "local-old", updatedAt: 100 }),
-			makeSession({ id: "local-created", createdAt: 300 }),
-		];
-		sessionState.daemonSessions = [
-			makeSession({
-				id: "foreign-new",
-				projectSlug: "project-b",
-				updatedAt: 400,
-			}),
-			makeSession({ id: "foreign-undated", projectSlug: "project-b" }),
-		];
-
-		expect(getFilteredSessions().map((session) => session.id)).toEqual([
-			"foreign-new",
-			"local-created",
-			"local-old",
-			"foreign-undated",
-		]);
-	});
-
-	it("filters foreign child sessions when subagents are hidden", () => {
-		sessionState.daemonSessions = [
-			makeSession({ id: "foreign-root", projectSlug: "project-b" }),
-			makeSession({
-				id: "foreign-child",
-				projectSlug: "project-b",
-				parentID: "foreign-root",
-			}),
-		];
-
-		expect(getFilteredSessions().map((session) => session.id)).toEqual([
-			"foreign-root",
-		]);
-	});
-
-	it("returns only reconciled server results during an active search", () => {
-		const result = makeSession({ id: "search-result", title: "Match" });
-		sessionState.searchQuery = "match";
-		sessionState.searchResults = [result];
-		sessionState.rootSessions = [result];
-		sessionState.daemonSessions = [
-			makeSession({
-				id: "foreign-match",
-				title: "Match abroad",
-				projectSlug: "project-b",
-			}),
-		];
-
-		expect(getFilteredSessions().map((session) => session.id)).toEqual([
-			"search-result",
-		]);
-	});
-
-	it("renders an applied daemon response without matching project metadata", () => {
-		projectState.projects = [];
-		applyListDaemonSessionsResponse({
-			projectSlug: "project-a",
-			sessions: [
-				{
-					id: "foreign",
-					title: "Foreign session",
-					projectSlug: "unknown-project",
-				},
-			],
-			availability: [{ projectSlug: "unknown-project", available: true }],
-			hasMore: false,
-			nextCursor: null,
+	it("an omitted family member does not leave a row in the session map", () => {
+		const root = makeSession({ id: "a" });
+		const child = makeSession({ id: "b", parentID: "a" });
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "a",
+			sessions: [root, child],
 		});
-
-		expect(getFilteredSessions().map((session) => session.id)).toContain(
-			"foreign",
-		);
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "a",
+			sessions: [root],
+		});
+		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
+			"a",
+		]);
+		expect(sessionState.sessions.has("b")).toBe(false);
 	});
 });
 
@@ -924,9 +843,11 @@ describe("SessionCreationStatus state machine", () => {
 // ─── sendNewSession (centralized guard + send) ──────────────────────────────
 
 describe("sendNewSession", () => {
-	let sent: Record<string, unknown>[];
-	const mockStart = (data: CreateSessionRpcInput) =>
-		sent.push(data as unknown as Record<string, unknown>);
+	let sent: CreateSessionRpcInput[];
+	const mockStart = (data: CreateSessionRpcInput) => {
+		sent.push(data);
+		return new Promise<CreateSessionResponse>(() => {});
+	};
 
 	beforeEach(() => {
 		sent = [];
@@ -934,13 +855,12 @@ describe("sendNewSession", () => {
 		discoveryState.selectedInstanceId = null;
 	});
 
-	it("sends CreateSession input with requestId and returns requestId", () => {
+	it("sends CreateSession input and returns a local requestId", () => {
 		const requestId = sendNewSession(mockStart);
 		expect(requestId).not.toBeNull();
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toEqual({
 			projectSlug: "project-a",
-			requestId,
 			originId: expect.any(String),
 			instanceId: expect.any(String),
 		});
@@ -948,8 +868,7 @@ describe("sendNewSession", () => {
 
 	it("binds the session to the harness derived from the active provider", () => {
 		discoveryState.selectedInstanceId = null;
-		discoveryState.currentProviderId = "claude";
-		discoveryState.currentModelId = "claude-sonnet-4-5";
+		chooseModel({ modelId: "claude-sonnet-4-5", providerId: "claude" });
 
 		const requestId = sendNewSession(mockStart);
 
@@ -957,7 +876,6 @@ describe("sendNewSession", () => {
 		expect(sent).toEqual([
 			{
 				projectSlug: "project-a",
-				requestId,
 				originId: expect.any(String),
 				instanceId: "claude",
 			},
@@ -966,7 +884,7 @@ describe("sendNewSession", () => {
 
 	it("binds the session to the selected harness instance draft", () => {
 		discoveryState.selectedInstanceId = "opencode";
-		discoveryState.currentProviderId = "claude";
+		chooseModel({ modelId: "", providerId: "claude" });
 
 		const requestId = sendNewSession(mockStart);
 
@@ -974,7 +892,6 @@ describe("sendNewSession", () => {
 		expect(sent).toEqual([
 			{
 				projectSlug: "project-a",
-				requestId,
 				originId: expect.any(String),
 				instanceId: "opencode",
 			},
@@ -984,6 +901,28 @@ describe("sendNewSession", () => {
 	it("transitions to creating phase", () => {
 		sendNewSession(mockStart);
 		expect(sessionCreation.value.phase).toBe("creating");
+	});
+
+	it("completes creation and selects the session returned by the callback", async () => {
+		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
+		try {
+			let finish: (response: CreateSessionResponse) => void = () => {};
+			const start = vi.fn(
+				() =>
+					new Promise<CreateSessionResponse>((resolve) => {
+						finish = resolve;
+					}),
+			);
+			const requestId = sendNewSession(start);
+			expect(requestId).not.toBeNull();
+			finish({ sessionId: "created", projectSlug: "project-a" });
+			await Promise.resolve();
+			expect(sessionCreation.value.phase).toBe("idle");
+			expect(sessionState.currentId).toBe("created");
+			expect(routerState.path).toBe("/s/created");
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it("returns null and sends nothing when already creating", () => {
@@ -1013,74 +952,5 @@ describe("sendNewSession", () => {
 		sent = [];
 		expect(sendNewSession(mockStart)).not.toBeNull();
 		expect(sent).toHaveLength(1);
-	});
-});
-
-// ─── handleSessionSwitched — requestId completion (co-located) ──────────────
-
-describe("handleSessionSwitched — requestId completion", () => {
-	beforeEach(() => {
-		resetSessionCreation();
-		sessionState.currentId = null;
-	});
-
-	it("completes session creation when requestId matches", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "new-sess",
-			sessionId: "new-sess",
-			requestId,
-		});
-
-		expect(sessionState.currentId).toBe("new-sess");
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	it("leaves creation state alone when requestId is absent", () => {
-		requestNewSession();
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "other-sess",
-			sessionId: "other-sess",
-		});
-
-		expect(sessionState.currentId).toBe("other-sess");
-		expect(sessionCreation.value.phase).toBe("creating"); // NOT completed
-	});
-
-	it("leaves creation state alone when requestId doesn't match", () => {
-		requestNewSession();
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "other-sess",
-			sessionId: "other-sess",
-			requestId:
-				"wrong-id" as import("../../../src/lib/shared-types.js").RequestId,
-		});
-
-		expect(sessionState.currentId).toBe("other-sess");
-		expect(sessionCreation.value.phase).toBe("creating"); // NOT completed
-	});
-
-	it("is a no-op for creation state when not in creating phase", () => {
-		// Not creating — requestId on msg should be harmless
-		handleSessionSwitched({
-			type: "session_switched",
-			id: "sess-1",
-			sessionId: "sess-1",
-			requestId:
-				"some-id" as import("../../../src/lib/shared-types.js").RequestId,
-		});
-
-		expect(sessionState.currentId).toBe("sess-1");
-		expect(sessionCreation.value.phase).toBe("idle"); // Still idle
 	});
 });

@@ -40,7 +40,6 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { noteMessageSent } from "../../stores/session-unread-hold.svelte.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -87,6 +86,7 @@
 				// Restore draft for the session we're entering
 				inputText = inputDrafts.get(currentId ?? "") ?? "";
 				previousSessionId = currentId;
+				lastLocalEditAt = 0;
 				// Cancel any pending outgoing sync from the previous session
 				if (inputSyncTimer) {
 					clearTimeout(inputSyncTimer);
@@ -369,16 +369,19 @@
 			}
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
-		noteMessageSent(sid);
 		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		const sentToSessionId = sid;
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
 				projectSlug,
-				sessionId: sid,
+				sessionId: sentToSessionId,
 				text: messageText,
 				commandId: crypto.randomUUID(),
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
+			}).then((response) => {
+				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
+					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 			}).catch(() => {
 				showToast("Failed to send message", { variant: "error" });
 			});
@@ -588,7 +591,7 @@
 			listboxId={commandListboxId}
 			query={commandQuery}
 			visible={commandMenuVisible}
-			commands={discoveryState.commands}
+			commands={[...discoveryState.commands]}
 			onSelect={handleCommandSelect}
 			onClose={handleCommandClose}
 		/>

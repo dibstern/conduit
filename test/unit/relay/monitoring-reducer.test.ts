@@ -14,7 +14,7 @@ import type {
 	SessionMonitorPhase,
 } from "../../../src/lib/relay/monitoring-types.js";
 import type { SessionSSETracker } from "../../../src/lib/relay/session-sse-tracker.js";
-import { computeAugmentedStatuses } from "../../../src/lib/session/status-augmentation.js";
+import { busySessionIds } from "../../../src/lib/session-busy.js";
 
 // Minimal SSE tracker stub for tests
 function stubTracker(data: Record<string, number> = {}): SessionSSETracker {
@@ -117,6 +117,7 @@ describe("selectMonitoringCandidates", () => {
 			effect: "notify-idle",
 			sessionId: "deleted",
 			isSubagent: false,
+			busySince: 0,
 		});
 		expect(result.state.sessions.has("deleted")).toBe(false);
 		expect(result.state.sessions.get("grace")?.phase).toBe("busy-polling");
@@ -128,15 +129,18 @@ describe("selectMonitoringCandidates", () => {
 	});
 
 	it("includes a parent made busy by its child", () => {
-		const { augmented } = computeAugmentedStatuses({
-			raw: { parent: { type: "idle" }, child: { type: "busy" } },
-			parentMap: new Map([["child", "parent"]]),
-			childToParentResolved: new Map(),
-			messageActivityTimestamps: new Map(),
-			sseIdleSessions: new Set(),
-			now: 1,
-			messageActivityTtlMs: 10000,
-		});
+		const busy = busySessionIds(
+			new Map([
+				["parent", { status: "idle" }],
+				["child", { status: "busy", parentID: "parent" }],
+			]),
+		);
+		const augmented = Object.fromEntries(
+			["parent", "child"].map((id) => [
+				id,
+				busy.has(id) ? { type: "busy" as const } : { type: "idle" as const },
+			]),
+		);
 		expect(
 			selectMonitoringCandidates(initialMonitoringState(), augmented),
 		).toEqual(["parent", "child"]);
@@ -231,7 +235,12 @@ describe("selectMonitoringCandidates", () => {
 		const result = evaluateAll(state, new Map([["s1", ctx()]]), DEFAULT_CONFIG);
 		expect(result.effects).toEqual([
 			{ effect: "stop-poller", sessionId: "s1", reason: "idle-no-viewers" },
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: false,
+				busySince: 0,
+			},
 		]);
 		expect(result.state.sessions.size).toBe(0);
 		expect(selectMonitoringCandidates(result.state, statuses)).toEqual([]);
@@ -267,6 +276,45 @@ function ctx(overrides: Partial<SessionEvalContext> = {}): SessionEvalContext {
 		...overrides,
 	};
 }
+
+it("notifies parent idle once, only after the last busy descendant finishes", () => {
+	const parents = new Map([
+		["child", "parent"],
+		["sibling", "parent"],
+	]);
+	const contexts = new Map([
+		["parent", ctx({ status: { type: "busy" } })],
+		["child", ctx({ status: { type: "busy" }, isSubagent: true })],
+		["sibling", ctx({ status: { type: "busy" }, isSubagent: true })],
+	]);
+	let result = evaluateAll(
+		initialMonitoringState(),
+		contexts,
+		DEFAULT_CONFIG,
+		parents,
+	);
+	contexts.set("parent", ctx());
+	result = evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents);
+	expect(result.effects).not.toContainEqual(
+		expect.objectContaining({ effect: "notify-idle", sessionId: "parent" }),
+	);
+	contexts.set("child", ctx({ isSubagent: true }));
+	result = evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents);
+	expect(result.effects).not.toContainEqual(
+		expect.objectContaining({ effect: "notify-idle", sessionId: "parent" }),
+	);
+	contexts.set("sibling", ctx({ isSubagent: true }));
+	result = evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents);
+	expect(result.effects).toContainEqual({
+		effect: "notify-idle",
+		sessionId: "parent",
+		isSubagent: false,
+		busySince: 1000,
+	});
+	expect(
+		evaluateAll(result.state, contexts, DEFAULT_CONFIG, parents).effects,
+	).toEqual([]);
+});
 
 describe("evaluateSession", () => {
 	// ── from idle ────────────────────────────────────────────────────────
@@ -339,7 +387,12 @@ describe("evaluateSession", () => {
 		);
 		expect(result.phase).toEqual({ phase: "idle" });
 		expect(result.effects).toEqual([
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: false,
+				busySince: 0,
+			},
 		]);
 	});
 
@@ -351,7 +404,12 @@ describe("evaluateSession", () => {
 			DEFAULT_CONFIG,
 		);
 		expect(result.effects).toEqual([
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: true },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: true,
+				busySince: 0,
+			},
 		]);
 	});
 
@@ -450,7 +508,12 @@ describe("evaluateSession", () => {
 		);
 		expect(result.phase).toEqual({ phase: "idle" });
 		expect(result.effects).toEqual([
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: false,
+				busySince: 0,
+			},
 		]);
 	});
 
@@ -511,7 +574,12 @@ describe("evaluateSession", () => {
 		expect(result.phase).toEqual({ phase: "idle" });
 		expect(result.effects).toEqual([
 			{ effect: "stop-poller", sessionId: "s1", reason: "idle-no-viewers" },
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: false,
+				busySince: 0,
+			},
 		]);
 	});
 
@@ -531,6 +599,7 @@ describe("evaluateSession", () => {
 			effect: "notify-idle",
 			sessionId: "s1",
 			isSubagent: false,
+			busySince: 0,
 		});
 	});
 
@@ -577,7 +646,12 @@ describe("evaluateSession", () => {
 		);
 		expect(result.phase).toEqual({ phase: "idle" });
 		expect(result.effects).toEqual([
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: false,
+				busySince: 0,
+			},
 		]);
 	});
 
@@ -650,6 +724,7 @@ describe("evaluateAll", () => {
 			effect: "notify-idle",
 			sessionId: "s1",
 			isSubagent: false,
+			busySince: 0,
 		});
 		expect(result.state.sessions.has("s1")).toBe(false);
 	});
@@ -668,6 +743,7 @@ describe("evaluateAll", () => {
 			effect: "notify-idle",
 			sessionId: "s1",
 			isSubagent: false,
+			busySince: 0,
 		});
 		expect(result.effects.filter((e) => e.effect === "stop-poller")).toEqual(
 			[],
@@ -685,6 +761,7 @@ describe("evaluateAll", () => {
 			effect: "notify-idle",
 			sessionId: "s1",
 			isSubagent: false,
+			busySince: 0,
 		});
 	});
 
@@ -699,6 +776,7 @@ describe("evaluateAll", () => {
 			effect: "notify-idle",
 			sessionId: "s1",
 			isSubagent: false,
+			busySince: 0,
 		});
 	});
 

@@ -377,7 +377,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 					? requestedClientId
 					: randomBytes(8).toString("hex");
 				const requestedSessionId = params.get("session") || undefined;
-				const skipMarkRead = params.get("skipMarkRead") === "1";
 				const requestedProjectSlug = params.get("p") || undefined;
 				const onError = (error: Error) => {
 					Runtime.runCallback(runtime)(
@@ -433,10 +432,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 					clientId,
 					skipDefaultSession: true,
 					...(sessionSlug != null &&
-						requestedSessionId != null && {
-							requestedSessionId,
-							...(skipMarkRead && { skipMarkRead }),
-						}),
+						requestedSessionId != null && { requestedSessionId }),
 				});
 				const attached = yield* daemonWsClients.setAttachment(
 					clientId,

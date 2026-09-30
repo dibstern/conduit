@@ -266,7 +266,8 @@ function fork(session: SessionInfo) {
 	if (!input) return;
 	void forkSessionRpc(input)
 		.then((response) => {
-			if (!sessionState.currentId)
+			// The fork response selects the new session in this tab.
+			if (sessionState.currentId !== response.sessionId)
 				switchToSession(response.sessionId, response.projectSlug);
 		})
 		.catch(() => showToast("Failed to fork session", { variant: "error" }));

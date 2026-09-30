@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import { handleCommandList } from "../../stores/discovery.svelte.js";
 import {
 	mockUserMessage,
 	mockUserMessageLong,
@@ -32,10 +32,13 @@ export const LongText: Story = {
  *  composer would have underlined) and `/qwerty` stay plain once sent. */
 export const WithSkills: Story = {
 	beforeEach: () => {
-		discoveryState.commands = [
-			{ name: "commit", description: "Create a git commit" },
-			{ name: "code-review", description: "Review the current diff" },
-		];
+		handleCommandList({
+			type: "command_list",
+			commands: [
+				{ name: "commit", description: "Create a git commit" },
+				{ name: "code-review", description: "Review the current diff" },
+			],
+		});
 	},
 	args: {
 		message: {

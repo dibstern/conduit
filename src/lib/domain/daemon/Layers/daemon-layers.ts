@@ -39,6 +39,7 @@ import {
 	writePidFile,
 } from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
+import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -150,8 +151,16 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 	cause: unknown;
 }> {
 	get message(): string {
-		const inner =
-			this.cause instanceof Error ? this.cause.message : String(this.cause);
+		let inner: string;
+		if (this.cause instanceof Error) inner = this.cause.message;
+		else if (Cause.isCause(this.cause)) inner = Cause.pretty(this.cause);
+		else {
+			try {
+				inner = String(this.cause);
+			} catch {
+				inner = "unknown error";
+			}
+		}
 		return `${this.operation} failed: ${inner}`;
 	}
 }
@@ -698,6 +707,7 @@ export interface DaemonLiveOptions {
 	portScanner?: Parameters<typeof PortScannerLive>[0];
 	defaultOpencodeUrl?: string;
 	smartDefault?: boolean;
+	smartDefaultUrl?: string;
 
 	// DaemonOptions-derived values (computed by caller from DaemonOptions)
 	configDir: string;
@@ -732,6 +742,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		Layer.effectDiscard(migrateForkLineage(configDir)),
 		DaemonEventBusLive,
 		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
@@ -805,6 +816,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		}),
 		...(options.smartDefault !== undefined && {
 			smartDefault: options.smartDefault,
+		}),
+		...(options.smartDefaultUrl !== undefined && {
+			smartDefaultUrl: options.smartDefaultUrl,
 		}),
 	};
 	const instanceManagerLayer = options.configPath

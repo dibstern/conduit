@@ -1,9 +1,7 @@
-// ─── protocol_version → stale-daemon banner wiring ───────────────────────────
-// The daemon sends protocol_version on connect. A mismatched version — or no
-// message at all within the grace window, which marks a daemon predating the
-// handshake — must surface the stale-daemon banner; a matching version must
-// clear it. Guards against the fail-open where a stale daemon silently
-// reinterprets wire literals (conduit-test-l12).
+// ─── protocol_version → version banner wiring ────────────────────────────────
+// The daemon sends protocol_version on connect. Older daemons need a restart;
+// older pages need a reload. No message within the grace window still marks
+// a daemon predating the handshake (conduit-test-l12).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
@@ -82,17 +80,38 @@ describe("protocol_version dispatch", () => {
 		vi.useRealTimers();
 	});
 
-	it("shows the stale-daemon banner on version mismatch", () => {
+	it("shows the stale-daemon banner for an older daemon and clears the reload banner", () => {
+		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION + 1));
+		showBannerMock.mockClear();
+		removeBannerMock.mockClear();
 		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION - 1));
 		expect(showBannerMock).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "stale-daemon", variant: "warning" }),
 		);
+		expect(removeBannerMock).toHaveBeenCalledWith("stale-page");
 	});
 
-	it("clears the stale-daemon banner on matching version", () => {
+	it("shows the reload banner for a newer daemon and clears the stale-daemon banner", () => {
+		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION - 1));
+		showBannerMock.mockClear();
+		removeBannerMock.mockClear();
+		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION + 1));
+		expect(removeBannerMock).toHaveBeenCalledWith("stale-daemon");
+		expect(showBannerMock).toHaveBeenCalledWith({
+			id: "stale-page",
+			variant: "update",
+			icon: "refresh-cw",
+			text: "Conduit was updated. Reload this tab to keep things working.",
+			dismissible: true,
+			action: { label: "Reload", run: expect.any(Function) },
+		});
+	});
+
+	it("clears both version banners on matching version", () => {
 		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION));
 		expect(showBannerMock).not.toHaveBeenCalled();
 		expect(removeBannerMock).toHaveBeenCalledWith("stale-daemon");
+		expect(removeBannerMock).toHaveBeenCalledWith("stale-page");
 	});
 
 	it("shows the banner when no protocol_version arrives in the grace window", () => {

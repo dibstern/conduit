@@ -35,7 +35,7 @@ async function setupWithVariants(
 	baseURL?: string,
 ): Promise<VariantSetupControl> {
 	const rpcCalls: Record<string, unknown>[] = [];
-	await mockWsRpc(page, {
+	const rpc = await mockWsRpc(page, {
 		handlers: {
 			SwitchVariant: (params) => {
 				rpcCalls.push(params);
@@ -55,6 +55,12 @@ async function setupWithVariants(
 	});
 	await page.goto(`${baseURL ?? "http://localhost:4173"}/s/sess-var-001`);
 	await waitForChatReady(page);
+	await rpc.waitForRequest((request) => request.tag === "ViewSession");
+	const modelInfo = variantInitMessages.find(
+		(message) => message.type === "model_info",
+	);
+	if (modelInfo)
+		control.sendMessage({ ...modelInfo, sessionId: "sess-var-001" });
 	return Object.assign(control, { rpcCalls });
 }
 
@@ -63,7 +69,7 @@ async function setupWithoutVariants(
 	page: Page,
 	baseURL?: string,
 ): Promise<WsMockControl> {
-	await mockWsRpc(page, {
+	const rpc = await mockWsRpc(page, {
 		handlers: {
 			SwitchVariant: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
@@ -80,6 +86,12 @@ async function setupWithoutVariants(
 	});
 	await page.goto(`${baseURL ?? "http://localhost:4173"}/s/sess-novar-001`);
 	await waitForChatReady(page);
+	await rpc.waitForRequest((request) => request.tag === "ViewSession");
+	const modelInfo = noVariantInitMessages.find(
+		(message) => message.type === "model_info",
+	);
+	if (modelInfo)
+		control.sendMessage({ ...modelInfo, sessionId: "sess-novar-001" });
 	return control;
 }
 

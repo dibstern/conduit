@@ -50,6 +50,30 @@ function tsFiles(dir: string): string[] {
 }
 
 describe("ProviderRuntimeEvent contracts", () => {
+	it("accepts a content-addressed OpenCode REST snapshot envelope", () => {
+		expect(
+			Either.isRight(
+				decodeEither({
+					...baseEvent,
+					eventId: "evt_opencode_snapshot_msg_1_digest",
+					type: "message.snapshot",
+					providerId: "opencode",
+					rawSource: { kind: "opencode.rest", endpoint: "session.messages" },
+					data: {
+						messageId: "msg_1",
+						digest: "digest",
+						message: {
+							id: "msg_1",
+							sessionID: "session_1",
+							role: "user",
+							parts: [{ id: "part_1", type: "step-start" }],
+						},
+					},
+				}),
+			),
+		).toBe(true);
+	});
+
 	it("rejects missing base envelope identity", () => {
 		expect(Either.isRight(decodeEither(baseEvent))).toBe(true);
 
@@ -80,6 +104,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		// deliberately absent from the provider runtime event union.
 		const explicitlyReclassified: readonly string[] = [
 			"session.deleted",
+			"session.provider_cleanup_failed",
 			"session.forked",
 			"session.permission_mode_changed",
 			"session.read",

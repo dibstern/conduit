@@ -2,13 +2,11 @@ import { cleanup, render } from "@testing-library/svelte";
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
-import {
-	chatState,
-	getOrCreateSessionSlot,
-} from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/components/chat/HistoryLoader.svelte",
@@ -37,7 +35,6 @@ describe("MessageList session-view publication", () => {
 
 	afterEach(() => {
 		cleanup();
-		sessionState.sessions.delete("fork-with-deleted-origin");
 		vi.clearAllTimers();
 		vi.useRealTimers();
 	});
@@ -61,27 +58,6 @@ describe("MessageList session-view publication", () => {
 		transcript.dispatchEvent(new Event("scroll"));
 		flushSync();
 	}
-
-	it("links the fork divider to its origin even when the origin is not loaded", () => {
-		sessionState.currentId = "fork-with-deleted-origin";
-		sessionState.sessions.set("fork-with-deleted-origin", {
-			id: "fork-with-deleted-origin",
-			title: "Fork",
-			forkedFrom: "deleted-origin",
-			forkPointTimestamp: 2,
-		});
-		const slot = getOrCreateSessionSlot("fork-with-deleted-origin");
-		slot.messages.loadLifecycle = "ready";
-		slot.messages.messages = [
-			{ type: "user", uuid: "inherited", text: "Earlier", createdAt: 1 },
-			{ type: "user", uuid: "new", text: "Later", createdAt: 3 },
-		];
-		const { container } = mountTranscript();
-		const divider = container.querySelector(".fork-divider");
-		expect(divider?.querySelector("button")?.textContent?.trim()).toBe(
-			"parent session",
-		);
-	});
 
 	it("publishes detach, re-follow and programmatic follow without false detach", () => {
 		const { transcript, getByRole } = mountTranscript();
@@ -109,12 +85,12 @@ describe("MessageList session-view publication", () => {
 		expect(sessionViewState.atBottom).toBe(false);
 	});
 
-	it("counts loading and settling as at-bottom even after detaching", () => {
+	it("counts loading as at-bottom even after detaching", () => {
 		const { transcript } = mountTranscript();
 		scrollTo(transcript, 200);
 		expect(sessionViewState.atBottom).toBe(false);
 
-		for (const lifecycle of ["empty", "loading", "committed"] as const) {
+		for (const lifecycle of ["empty", "loading"] as const) {
 			getOrCreateSessionSlot("session-view-first").messages.loadLifecycle =
 				lifecycle;
 			flushSync();
@@ -142,7 +118,6 @@ describe("MessageList session-view publication", () => {
 		"tool",
 	])("renders resumed %s activity as working after a result", (kind) => {
 		const slot = getOrCreateSessionSlot("session-view-first");
-		chatState.phase = "processing";
 		slot.activity.phase = "processing";
 		slot.messages.messages = [
 			{ type: "user", uuid: "prompt", text: "Check the files" },
@@ -198,7 +173,6 @@ describe("MessageList session-view publication", () => {
 		if (kind === "assistant")
 			expect(container.querySelector(".result-bar")).not.toBeNull();
 		slot.messages.messages = [];
-		chatState.phase = "idle";
 		slot.activity.phase = "idle";
 	});
 });
@@ -213,10 +187,10 @@ describe("MessageList pending questions", () => {
 	});
 
 	beforeEach(() => {
-		sessionState.familySessions = [
-			{ id: "root-a", title: "A" },
-			{ id: "child-a", title: "A child", parentID: "root-a" },
-		];
+		seedSessionsWithFamily([
+			{ id: "root-a", title: "A", status: "idle" },
+			{ id: "child-a", title: "A child", status: "idle", parentID: "root-a" },
+		]);
 		getOrCreateSessionSlot("root-a").messages.loadLifecycle = "ready";
 		getOrCreateSessionSlot("root-b").messages.loadLifecycle = "ready";
 		permissionsState.pendingQuestions = [
@@ -228,7 +202,7 @@ describe("MessageList pending questions", () => {
 	afterEach(() => {
 		cleanup();
 		permissionsState.pendingQuestions = [];
-		sessionState.familySessions = [];
+		seedSessionsWithFamily([]);
 	});
 
 	it("shows questions from the viewed session's family", () => {
@@ -246,7 +220,7 @@ describe("MessageList pending questions", () => {
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");
 
-		sessionState.familySessions = [{ id: "root-b", title: "B" }];
+		seedSessionsWithFamily([{ id: "root-b", title: "B", status: "idle" }]);
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");
 	});

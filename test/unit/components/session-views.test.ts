@@ -6,7 +6,11 @@ import {
 	viewShortcutHint,
 } from "../../../src/lib/frontend/components/layout/session-views.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
-import { terminalState } from "../../../src/lib/frontend/stores/terminal.svelte.js";
+import {
+	closePanel,
+	openPanel,
+	terminalState,
+} from "../../../src/lib/frontend/stores/terminal.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 
 const chat = sessionViews.find((view) => view.id === "chat");
@@ -15,7 +19,7 @@ const files = sessionViews.find((view) => view.id === "files");
 beforeEach(() => {
 	sessionViewState.compact = false;
 	sessionViewState.filesOpen = false;
-	terminalState.panelOpen = false;
+	closePanel();
 	uiState.fileViewerOpen = false;
 });
 
@@ -75,7 +79,7 @@ describe("session view registry", () => {
 
 	it("lets Terminal win on phones without discarding the file preview", () => {
 		sessionViewState.filesOpen = true;
-		terminalState.panelOpen = true;
+		openPanel();
 		uiState.fileViewerOpen = true;
 		sessionViewState.compact = true;
 		expect(activeSessionView()).toBe("terminal");

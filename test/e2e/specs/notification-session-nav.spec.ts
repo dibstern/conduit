@@ -16,7 +16,7 @@
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -30,23 +30,24 @@ const SESS_B = "sess-notif-B";
 
 /** Init messages with two sessions, starting on sess-A. */
 const twoSessionInit: MockMessage[] = [
-	{ type: "session_switched", id: SESS_A },
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
 				id: SESS_A,
 				title: "Session A — current",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 2,
 			},
 			{
 				id: SESS_B,
 				title: "Session B — target",
+				status: "idle",
 				updatedAt: Date.now() - 3600_000,
 				messageCount: 5,
 			},
@@ -105,27 +106,13 @@ test.describe("Notification → Session Navigation", () => {
 		page,
 		baseURL,
 	}) => {
-		// Set up WS mock and respond to ViewSession RPC with relay events.
-		let control!: WsMockControl;
+		// Set up WS mock and respond to ViewSession RPC.
 		const rpc = await mockWsRpc(page, {
 			handlers: {
-				ViewSession: (params) => {
-					const sessionId = String(params["sessionId"] ?? "");
-					control.sendMessage({
-						type: "session_switched",
-						id: sessionId,
-					});
-					control.sendMessage({
-						type: "history_page",
-						sessionId,
-						messages: [],
-						hasMore: false,
-					});
-					return { ok: true };
-				},
+				ViewSession: () => ({ ok: true }),
 			},
 		});
-		control = await mockRelayWebSocket(page, {
+		const control = await mockRelayWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -135,8 +122,7 @@ test.describe("Notification → Session Navigation", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// Verify we start on sess-A — URL should be the project root or /s/sess-A
-		// The init sends session_switched for sess-A, so the URL gets updated
+		// The URL selects sess-A on entry.
 		await page.waitForFunction(
 			(sessId) =>
 				window.location.pathname.includes(`/s/${sessId}`) ||
@@ -158,7 +144,7 @@ test.describe("Notification → Session Navigation", () => {
 
 		// Simulate the notification click path: dispatch a navigate_to_session
 		// message on navigator.serviceWorker, which is where
-		// initSWNavigationListener() registers its handler.
+		// initSWMessageListener() registers its handler.
 		//
 		// In a real flow: push notification click → SW notificationclick →
 		// SW posts navigate_to_session → frontend listener → switchToSession()
@@ -205,26 +191,12 @@ test.describe("Notification → Session Navigation", () => {
 		// Since we can't create real Notification objects in Playwright,
 		// we test the onNavigateToSession callback is wired up by
 		// directly calling it via the session list click path.
-		let control!: WsMockControl;
 		const rpc = await mockWsRpc(page, {
 			handlers: {
-				ViewSession: (params) => {
-					const sessionId = String(params["sessionId"] ?? "");
-					control.sendMessage({
-						type: "session_switched",
-						id: sessionId,
-					});
-					control.sendMessage({
-						type: "history_page",
-						sessionId,
-						messages: [],
-						hasMore: false,
-					});
-					return { ok: true };
-				},
+				ViewSession: () => ({ ok: true }),
 			},
 		});
-		control = await mockRelayWebSocket(page, {
+		await mockRelayWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,

@@ -59,7 +59,7 @@ describe("Integration: Error Handling", () => {
 			});
 			await vi.waitFor(() => {
 				expect(
-					messages.some((message) => message["type"] === "session_switched"),
+					messages.some((message) => message["type"] === "session_family"),
 				).toBe(true);
 			});
 			expect(messages[0]).toEqual({

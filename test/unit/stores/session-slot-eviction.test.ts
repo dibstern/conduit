@@ -131,11 +131,9 @@ describe("Tier 2 LRU cap", () => {
 		const reconstructed = getOrCreateSessionMessages("session-A");
 		expect(reconstructed.contextPercent).toBe(0);
 		expect(reconstructed.historyHasMore).toBe(false);
-		expect(reconstructed.historyMessageCount).toBe(0);
 		expect(reconstructed.historyLoading).toBe(false);
 		expect(reconstructed.messages).toHaveLength(0);
-		expect(reconstructed.replayBatch).toBeNull();
-		expect(reconstructed.replayBuffer).toBeNull();
+		expect(reconstructed.transcript).toBeNull();
 	});
 });
 

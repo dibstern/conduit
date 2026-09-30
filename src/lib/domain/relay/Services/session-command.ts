@@ -10,7 +10,6 @@
 //
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
-import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
 import {
@@ -19,7 +18,7 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
-import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
@@ -33,6 +32,7 @@ import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
+import { markSeen } from "./session-attention.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
@@ -56,8 +56,6 @@ export class SessionCommandError extends Data.TaggedError(
 type SessionCommandType =
 	| "session.created"
 	| "session.renamed"
-	| "session.read"
-	| "session.unread"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -90,6 +88,15 @@ export interface SessionUpstreamAdapter {
 	readonly sync: (command: SessionCommand) => Effect.Effect<void, unknown>;
 }
 
+export interface ApplySessionCommandOptions {
+	/**
+	 * Override the provider adapter while retaining the canonical
+	 * append/project/sync pipeline. SessionManager uses this to fold its richer
+	 * end-session and named-instance cleanup into the command seam.
+	 */
+	readonly upstreamAdapter?: SessionUpstreamAdapter | null;
+}
+
 export const openCodeUpstreamAdapter = (
 	api: OpenCodeAPI,
 ): SessionUpstreamAdapter => ({
@@ -99,22 +106,23 @@ export const openCodeUpstreamAdapter = (
 			case "session.deleted":
 				// No retry: delete is not idempotent, and upstream cleanup is
 				// best-effort.
-				return Effect.tryPromise(() =>
-					api.session.delete(command.data.sessionId),
-				);
+				return Effect.tryPromise({
+					try: () => api.session.delete(command.data.sessionId),
+					catch: (cause) => cause,
+				});
 			case "session.renamed":
-				return Effect.tryPromise(() =>
-					api.session.update(command.data.sessionId, {
-						title: command.data.title,
-					}),
-				);
+				return Effect.tryPromise({
+					try: () =>
+						api.session.update(command.data.sessionId, {
+							title: command.data.title,
+						}),
+					catch: (cause) => cause,
+				});
 			case "session.created":
 				// Whoever created the session chose its id — upstream for
 				// OpenCode-backed sessions, locally for the rest — so by the time this
 				// event exists upstream already has it. Nothing to replicate.
 				return Effect.void;
-			case "session.read":
-			case "session.unread":
 			case "session.settled":
 			case "session.unsettled":
 			case "session.pinned":
@@ -159,7 +167,10 @@ export const isClaudeSessionRow = (
  * store) the local write is skipped and only upstream sync runs, which is the
  * behaviour every mutating method had before this module existed.
  */
-export const applySessionCommand = (command: SessionCommand) =>
+export const applySessionCommand = (
+	command: SessionCommand,
+	options: ApplySessionCommandOptions = {},
+) =>
 	Effect.gen(function* () {
 		// Optional: a Claude-only relay never wires the OpenCode API, and a
 		// mutation on a Claude-backed session has no upstream to reach anyway.
@@ -183,27 +194,18 @@ export const applySessionCommand = (command: SessionCommand) =>
 			projectionRunnerOption._tag === "Some" &&
 			sqlOption._tag === "Some"
 		) {
-			const eventStore = eventStoreOption.value;
-			const projectionRunner = projectionRunnerOption.value;
-			const sql = sqlOption.value;
-			const withSql = <A, E>(
-				effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-			): Effect.Effect<A, E> =>
-				effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-			const recovered = yield* projectionRunner.isRecovered();
-			if (!recovered) {
-				yield* withSql(projectionRunner.recover()).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({
-								operation: `${command.type}.recover`,
-								cause,
-							}),
-					),
-					Effect.asVoid,
-				);
-			}
+			// One append+project+announce pipeline, shared with every other
+			// producer. The command path used to own a copy of it plus its own
+			// publish; the read model announces itself now, so there is nothing
+			// left here that could drift from the other pipeline.
+			const commitAndSignal = yield* makeCommitAndSignal.pipe(
+				Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+				Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+				Effect.provideService(
+					ProjectionRunnerEffectTag,
+					projectionRunnerOption.value,
+				),
+			);
 
 			row = yield* readQueryOption.value.getSession(sessionId).pipe(
 				Effect.mapError(
@@ -229,29 +231,19 @@ export const applySessionCommand = (command: SessionCommand) =>
 					: row?.provider;
 
 			if (appendProvider !== undefined) {
-				const stored = yield* eventStore
-					.append(
-						canonicalEvent(command.type, sessionId, command.data, {
-							provider: appendProvider,
-							createdAt: Date.now(),
-							metadata: { source: "relay" },
-						}),
-					)
-					.pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionCommandError({
-									operation: `${command.type}.append`,
-									cause,
-								}),
-						),
-					);
-
-				yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+				yield* commitAndSignal([
+					canonicalEvent(command.type, sessionId, command.data, {
+						provider: appendProvider,
+						createdAt: Date.now(),
+						metadata: { source: "relay" },
+					}),
+				]).pipe(
+					// Projection failures still reach the caller: a user told the
+					// session was deleted must not find it still listed.
 					Effect.mapError(
 						(cause) =>
 							new SessionCommandError({
-								operation: `${command.type}.project`,
+								operation: `${command.type}.commit`,
 								cause,
 							}),
 					),
@@ -262,7 +254,7 @@ export const applySessionCommand = (command: SessionCommand) =>
 		// No adapter means no upstream to sync: the relay has no OpenCode API
 		// wired at all, so there is no session registry anywhere to fall out of
 		// step with.
-		const adapter =
+		const defaultAdapter =
 			row !== undefined &&
 			isClaudeSessionRow(
 				row,
@@ -272,8 +264,12 @@ export const applySessionCommand = (command: SessionCommand) =>
 				: apiOption._tag === "Some"
 					? openCodeUpstreamAdapter(apiOption.value)
 					: undefined;
+		const adapter =
+			options.upstreamAdapter === undefined
+				? defaultAdapter
+				: options.upstreamAdapter;
 
-		if (adapter !== undefined) {
+		if (adapter !== undefined && adapter !== null) {
 			yield* adapter.sync(command).pipe(
 				Effect.catchAll((cause) =>
 					Effect.sync(() => {
@@ -360,8 +356,8 @@ export const createOpenCodeSession = (
  * only if the provider event stream happened to mention it — with no parent, so
  * it surfaced as a root session in the sidebar (conduit-test-o5vp).
  *
- * The fork point itself follows as `session.forked`, once the caller has
- * resolved which message it was.
+ * Resolve tip forks before publishing creation so the first subscription row
+ * already carries the fork point.
  */
 export const forkOpenCodeSession = (
 	parentSessionId: string,
@@ -370,6 +366,31 @@ export const forkOpenCodeSession = (
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		// An explicit fork must not succeed upstream before its ordering key is
+		// known. Otherwise a provider read failure creates a new legacy fallback.
+		const requestedBoundary =
+			messageId === undefined
+				? undefined
+				: yield* Effect.tryPromise(() =>
+						api.session.message(parentSessionId, messageId),
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "session.forked.boundary",
+									cause,
+								}),
+						),
+					);
+		if (
+			messageId !== undefined &&
+			requestedBoundary?.time?.created === undefined
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.boundary",
+				cause: "OpenCode fork boundary has no creation timestamp",
+			});
+		}
 
 		// No retry: fork is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
@@ -395,6 +416,50 @@ export const forkOpenCodeSession = (
 						.getSession(parentSessionId)
 						.pipe(Effect.orElseSucceed(() => undefined))
 				: undefined;
+		const providerForkPointEvent =
+			messageId ??
+			(yield* Effect.tryPromise(() =>
+				api.session.messagesPage(session.id, { limit: 1 }),
+			).pipe(
+				Effect.map((messages) => messages.at(-1)?.id),
+				Effect.catchAll((error) =>
+					Effect.logWarning(
+						`Could not determine fork point for ${session.id}: ${String(error)}`,
+					).pipe(Effect.as(undefined)),
+				),
+			));
+		let forkPointTimestamp =
+			requestedBoundary?.time?.created ??
+			(providerForkPointEvent === undefined
+				? undefined
+				: yield* Effect.tryPromise(() =>
+						api.session.message(parentSessionId, providerForkPointEvent),
+					).pipe(
+						Effect.map((message) => message.time?.created),
+						Effect.catchAll((error) =>
+							Effect.logWarning(
+								`Could not read fork boundary ${providerForkPointEvent}: ${String(error)}`,
+							).pipe(Effect.as(undefined)),
+						),
+					));
+
+		let forkPointEvent = providerForkPointEvent;
+		if (
+			(forkPointEvent === undefined || forkPointTimestamp === undefined) &&
+			readQueryOption._tag === "Some"
+		) {
+			const parentMessages =
+				yield* readQueryOption.value.getSessionMessagesWithParts(
+					parentSessionId,
+				);
+			// A lagging projection cannot replace a known provider boundary.
+			const localBoundary =
+				forkPointEvent === undefined
+					? parentMessages.at(-1)
+					: parentMessages.find((message) => message.id === forkPointEvent);
+			forkPointEvent ??= localBoundary?.id;
+			forkPointTimestamp ??= localBoundary?.created_at;
+		}
 
 		yield* applySessionCommand({
 			type: "session.created",
@@ -402,105 +467,132 @@ export const forkOpenCodeSession = (
 				sessionId: session.id,
 				title: normalizeSessionTitle(session.title),
 				provider: parent?.provider ?? "opencode",
+				parentId: parentSessionId,
+				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
+				...(forkPointTimestamp === undefined ? {} : { forkPointTimestamp }),
 				providerSessionId: session.id,
 			},
 		});
 
-		return session;
+		return { ...session, forkMessageId: forkPointEvent, forkPointTimestamp };
 	}).pipe(
 		Effect.annotateLogs("operation", "forkOpenCodeSession"),
 		Effect.withSpan("session.forkOpenCodeSession"),
 	);
 
-const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
+/** Route forks by the persisted parent provider, before contacting a runtime. */
+export const forkSession = (parentSessionId: string, messageId?: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const providerStateOption = yield* Effect.serviceOption(
-			ProviderStateEffectTag,
-		);
-		const persistOption = yield* Effect.serviceOption(
-			ClaudeEventPersistEffectTag,
-		);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
+		const readOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const config = yield* Effect.serviceOption(ConfigTag);
+		const parent =
+			readOption._tag === "Some"
+				? yield* readOption.value.getSession(parentSessionId)
+				: undefined;
 		if (
-			readQueryOption._tag === "None" ||
-			providerStateOption._tag === "None" ||
-			persistOption._tag === "None" ||
-			eventStoreOption._tag === "None" ||
-			configOption._tag === "None"
+			!parent ||
+			!isClaudeSessionRow(
+				parent,
+				config._tag === "Some" ? config.value.configDir : undefined,
+			)
 		) {
-			return yield* Effect.fail(
-				new SessionCommandError({
-					operation: "session.forked.services",
-					cause: parentSessionId,
-					message: "Claude session fork services are unavailable",
-				}),
-			);
+			const api = yield* Effect.serviceOption(OpenCodeAPITag);
+			if (api._tag === "None") {
+				return yield* new SessionCommandError({
+					operation: "session.forked.opencode",
+					cause: "OpenCode API is unavailable",
+				});
+			}
+			return {
+				...(yield* forkOpenCodeSession(parentSessionId, messageId).pipe(
+					Effect.provideService(OpenCodeAPITag, api.value),
+				)),
+				provider: "opencode" as const,
+			};
 		}
-		const readQuery = readQueryOption.value;
-		const providerState = providerStateOption.value;
-		const persist = persistOption.value;
-		const eventStore = eventStoreOption.value;
-		const config = configOption.value;
-		const parent = yield* readQuery.getSession(parentSessionId);
-		if (!parent) {
-			return yield* Effect.fail(
-				new SessionCommandError({
-					operation: "session.forked.parent",
-					cause: parentSessionId,
-					message: `Parent session ${parentSessionId} was not found`,
-				}),
-			);
+		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (
+			readOption._tag === "None" ||
+			stateOption._tag === "None" ||
+			eventStore._tag === "None" ||
+			projections._tag === "None" ||
+			sql._tag === "None"
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude fork requires provider state persistence",
+			});
 		}
-		const { resumeSessionId } = yield* providerState.getState(parentSessionId);
-		if (!resumeSessionId) {
-			return yield* Effect.fail(
-				new SessionCommandError({
-					operation: "session.forked.transcript",
-					cause: parentSessionId,
-					message: `Session ${parentSessionId} has no Claude transcript yet`,
-				}),
-			);
+		const state = stateOption.value;
+		if (config._tag === "None") {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude fork requires project configuration",
+			});
 		}
-		const title = `${parent.title} (fork)`;
-		const id = `ses_${randomUUID().replaceAll("-", "")}`;
-		const parentEvents = yield* eventStore.readBySession(parentSessionId);
-		const history = copyForkHistory(parentEvents, {
-			newSessionId: id,
-			...(messageId !== undefined && { upToMessageId: messageId }),
-		});
-		if (!history) {
-			return yield* Effect.fail(
-				new SessionCommandError({
-					operation: "session.forked.point",
-					cause: messageId,
-					message: `Fork point ${messageId} was not found in the session history`,
-				}),
-			);
-		}
-		const instanceConfigDir = resolveClaudeInstanceConfigDir(
-			loadDaemonConfig(config.configDir),
+		const claudeConfigDir = resolveClaudeInstanceConfigDir(
+			loadDaemonConfig(config.value.configDir),
 			parent.provider,
 		);
-		const sdkFork = yield* Effect.tryPromise({
+		const commitAndSignal = yield* makeCommitAndSignal.pipe(
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+		);
+		const parentState = yield* state.getState(parentSessionId);
+		const providerSessionId = parentState["resumeSessionId"];
+		if (!providerSessionId) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude parent has no SDK resume session",
+				message: `Session ${parentSessionId} has no Claude transcript yet`,
+			});
+		}
+		const parentMessages =
+			yield* readOption.value.getSessionMessagesWithParts(parentSessionId);
+		const forkPointMessage =
+			messageId === undefined
+				? parentMessages.at(-1)
+				: parentMessages.find((message) => message.id === messageId);
+		if (!forkPointMessage) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.claude",
+				cause: "Claude fork boundary has no persisted message ordering key",
+				message: `Fork point ${messageId} was not found in the session history`,
+			});
+		}
+		const title = `${parent.title} (fork)`;
+		const parentEvents =
+			yield* eventStore.value.readAllBySession(parentSessionId);
+		if (
+			messageId !== undefined &&
+			!copyForkHistory(parentEvents, {
+				newSessionId: parentSessionId,
+				upToMessageId: messageId,
+			})
+		) {
+			return yield* new SessionCommandError({
+				operation: "session.forked.point",
+				cause: `Fork point ${messageId} was not found in the session history`,
+				message: `Fork point ${messageId} was not found in the session history`,
+			});
+		}
+		const forked = yield* Effect.tryPromise({
 			try: () =>
 				forkClaudeTranscript({
-					parentSdkId: resumeSessionId,
-					projectDir: config.projectDir,
-					...(instanceConfigDir !== undefined && {
-						configDir: instanceConfigDir,
-					}),
+					parentSdkId: providerSessionId,
+					projectDir: config.value.projectDir,
+					...(claudeConfigDir !== undefined && { configDir: claudeConfigDir }),
 					title,
 					...(messageId !== undefined && { messageId }),
 					...(messageId !== undefined && {
-						fallbackMessageIds: history.events
-							.flatMap((event) =>
-								event.type === "message.created" &&
-								event.data.role === "assistant" &&
-								event.data.messageId !== `${messageId}_${id}`
-									? [event.data.messageId.slice(0, -id.length - 1)]
-									: [],
+						fallbackMessageIds: parentMessages
+							.slice(0, parentMessages.indexOf(forkPointMessage))
+							.flatMap((message) =>
+								message.role === "assistant" ? [message.id] : [],
 							)
 							.reverse(),
 					}),
@@ -512,95 +604,58 @@ const forkClaudeSession = (parentSessionId: string, messageId?: string) =>
 					message: cause instanceof Error ? cause.message : String(cause),
 				}),
 		});
-		yield* applySessionCommand({
-			type: "session.created",
-			data: {
-				sessionId: id,
-				title,
-				provider: parent.provider,
-				providerSessionId: sdkFork.sdkSessionId,
-			},
+		const history = copyForkHistory(parentEvents, {
+			newSessionId: forked.sdkSessionId,
+			...(messageId !== undefined && { upToMessageId: messageId }),
 		});
-		// A fork that cannot resume or has no history must not linger, so undo
-		// the session exactly as a user delete would (cascades to its messages).
-		yield* Effect.gen(function* () {
-			yield* providerState.saveUpdates(id, [
-				{ key: "resumeSessionId", value: sdkFork.sdkSessionId },
-			]);
-			yield* persist.persistEvents(history.events);
-		}).pipe(
-			Effect.tapErrorCause(() =>
-				applySessionCommand({
-					type: "session.deleted",
-					data: { sessionId: id },
-				}).pipe(Effect.ignore),
-			),
+		const forkPointEvent = messageId ?? forkPointMessage.id;
+		// Creation and the SDK resume cursor must commit before the first row
+		// is announced, or a prompt could start a fresh Claude conversation.
+		yield* commitAndSignal.write((project) =>
+			Effect.gen(function* () {
+				const stored = yield* eventStore.value.appendBatch([
+					canonicalEvent(
+						"session.created",
+						forked.sdkSessionId,
+						{
+							sessionId: forked.sdkSessionId,
+							title,
+							provider: parent.provider,
+							providerSessionId: forked.sdkSessionId,
+							parentId: parentSessionId,
+							forkPointEvent,
+							forkPointTimestamp: forkPointMessage.created_at,
+							forkPointMessageId: forkPointMessage.id,
+						},
+						{
+							provider: parent.provider,
+							createdAt: Date.now(),
+							metadata: { source: "relay" },
+						},
+					),
+					...(history?.events ?? []),
+				]);
+				yield* project(stored);
+				yield* state.saveUpdates(forked.sdkSessionId, [
+					{ key: "resumeSessionId", value: forked.sdkSessionId },
+				]);
+			}),
 		);
-		const forkPointTimestamp = Date.now();
+		// The copied turns were the parent's to read, so the fork starts seen up
+		// to its last imported turn end rather than with a dot. SessionAttention
+		// caps at the committed turn end, so this has to follow the commit.
+		yield* markSeen(forked.sdkSessionId, Number.MAX_SAFE_INTEGER).pipe(
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+		);
+		const now = Date.now();
 		return {
-			id,
+			id: forked.sdkSessionId,
 			title,
-			forkMessageId: history.forkMessageId,
-			forkPointTimestamp,
-			time: { created: forkPointTimestamp, updated: forkPointTimestamp },
+			time: { created: now, updated: now },
+			provider: "claude" as const,
+			forkMessageId: forkPointEvent,
+			forkPointTimestamp: forkPointMessage.created_at,
 		};
-	}).pipe(
-		Effect.annotateLogs("operation", "forkClaudeSession"),
-		Effect.withSpan("session.forkClaudeSession"),
-	);
-
-export const forkSession = (parentSessionId: string, messageId?: string) =>
-	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const parent =
-			readQueryOption._tag === "Some"
-				? yield* readQueryOption.value
-						.getSession(parentSessionId)
-						.pipe(Effect.orElseSucceed(() => undefined))
-				: undefined;
-		if (
-			parent &&
-			isClaudeSessionRow(
-				parent,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
-		) {
-			return yield* forkClaudeSession(parentSessionId, messageId);
-		}
-
-		const forked = yield* forkOpenCodeSession(parentSessionId, messageId);
-		const client = yield* OpenCodeAPITag;
-		const log = yield* LoggerTag;
-		let forkMessageId: string | undefined = messageId;
-		let forkPointTimestamp: number | undefined;
-		if (messageId) {
-			const msgResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.session.message(parentSessionId, messageId),
-				),
-			);
-			if (msgResult._tag === "Right" && msgResult.right?.time?.created) {
-				forkPointTimestamp = msgResult.right.time.created;
-			} else if (msgResult._tag === "Left") {
-				log.warn(
-					`Could not look up fork-point message ${messageId} in ${parentSessionId}`,
-				);
-			}
-		} else {
-			forkPointTimestamp = forked.time?.created ?? forked.time?.updated;
-
-			const msgsResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.session.messagesPage(forked.id, { limit: 1 }),
-				),
-			);
-			if (msgsResult._tag === "Right" && msgsResult.right.length > 0) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				forkMessageId = msgsResult.right[msgsResult.right.length - 1]!.id;
-			} else if (msgsResult._tag === "Left") {
-				log.warn(`Could not determine fork-point for ${forked.id}`);
-			}
-		}
-		return { ...forked, forkMessageId, forkPointTimestamp };
 	});

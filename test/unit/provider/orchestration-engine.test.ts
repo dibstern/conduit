@@ -325,6 +325,95 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("dispatch: end_session", () => {
+		it("routes endSession to an explicit target without a binding", async () => {
+			await dispatch(engine, {
+				type: "end_session",
+				commandId: "cmd-end-session-targeted",
+				sessionId: "s-targeted",
+				targetProviderId: "opencode",
+				unbind: true,
+			});
+
+			expect(opencode.endSessionEffect).toHaveBeenCalledWith("s-targeted");
+			expect(
+				await Effect.runPromise(
+					engine.getProviderForSessionEffect("s-targeted"),
+				),
+			).toBeUndefined();
+		});
+
+		it("preserves a newer same-provider binding installed during targeted endSession", async () => {
+			engine.bindSession("s-rebound", "opencode");
+			opencode.endSessionEffect.mockReturnValueOnce(
+				Effect.sync(() => engine.bindSession("s-rebound", "opencode")),
+			);
+
+			await dispatch(engine, {
+				type: "end_session",
+				commandId: "cmd-end-session-rebound",
+				sessionId: "s-rebound",
+				targetProviderId: "opencode",
+				unbind: true,
+			});
+
+			expect(
+				await Effect.runPromise(
+					engine.getProviderForSessionEffect("s-rebound"),
+				),
+			).toBe("opencode");
+		});
+
+		it("clears its targeted binding when provider cleanup fails", async () => {
+			opencode.endSessionEffect.mockReturnValueOnce(
+				Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: "opencode",
+						operation: "endSession",
+						cause: new Error("provider instance boom"),
+					}),
+				),
+			);
+			engine.bindSession("s-target-error", "opencode");
+
+			await expect(
+				dispatch(engine, {
+					type: "end_session",
+					commandId: "cmd-end-session-target-error",
+					sessionId: "s-target-error",
+					targetProviderId: "opencode",
+					unbind: true,
+				}),
+			).rejects.toThrow("provider instance boom");
+
+			expect(
+				await Effect.runPromise(
+					engine.getProviderForSessionEffect("s-target-error"),
+				),
+			).toBeUndefined();
+		});
+
+		it("clears its targeted binding when provider resolution fails", async () => {
+			engine.bindSession("s-missing-target", "missing-provider");
+
+			await expect(
+				dispatch(engine, {
+					type: "end_session",
+					commandId: "cmd-end-session-missing-target",
+					sessionId: "s-missing-target",
+					targetProviderId: "missing-provider",
+					unbind: true,
+				}),
+			).rejects.toThrow(
+				"No provider instance registered for provider: missing-provider",
+			);
+
+			expect(
+				await Effect.runPromise(
+					engine.getProviderForSessionEffect("s-missing-target"),
+				),
+			).toBeUndefined();
+		});
+
 		it("routes endSession to the bound provider", async () => {
 			engine.bindSession("s-end-1", "opencode");
 

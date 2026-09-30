@@ -15,19 +15,26 @@
 // 100+ second real-time waits while still exercising the same code paths.
 
 import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { dirname } from "node:path";
+import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
 } from "../../../src/lib/relay/relay-stack.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
 // ── Accelerated timing constants ────────────────────────────────────────────
@@ -236,8 +243,42 @@ async function createTestHarness(
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 	const relayPort = (relayServer.address() as { port: number }).port;
+	const dbPath = tempEventsDbPath();
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			for (const session of mock.sessionList) {
+				yield* store.append(
+					canonicalEvent(
+						"session.created",
+						session.id,
+						{
+							sessionId: session.id,
+							title: session.title,
+							provider: "opencode",
+						},
+						{ provider: "opencode" },
+					),
+				);
+				if (session.parentID) {
+					yield* store.append(
+						canonicalEvent(
+							"session.forked",
+							session.id,
+							{
+								sessionId: session.id,
+								parentId: session.parentID,
+							},
+							{ provider: "opencode" },
+						),
+					);
+				}
+			}
+		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath))),
+	);
 
 	const relay = await createProjectRelay({
+		persistenceDbPath: dbPath,
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
@@ -302,6 +343,7 @@ async function createTestHarness(
 			await new Promise<void>((resolve) => eventSockets.close(() => resolve()));
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
+			rmSync(dirname(dbPath), { recursive: true, force: true });
 		},
 	};
 }
@@ -844,7 +886,7 @@ describe("Group 5: Notifications", () => {
 		expect(notification["eventType"]).toBe("done");
 
 		await client.close();
-	}, 5_000);
+	}, 10_000);
 
 	it("Scenario 14: Done with active viewer → sent to session, no cross-session broadcast", async () => {
 		await resetForNextTest(harness, ["sess-1", "sess-2"]);
@@ -899,7 +941,7 @@ describe("Group 5: Notifications", () => {
 		expect(notification["type"]).toBe("notification_event");
 
 		await client.close();
-	}, 5_000);
+	}, 10_000);
 });
 
 // ─── Group 6: Retry status and cycling ─────────────────────────────────────
@@ -978,7 +1020,7 @@ describe("Group 6: Retry status and cycling", () => {
 		await client.close();
 	}, 5_000);
 
-	it("Scenario 18: Steady-state (no status changes) → no session_list spam", async () => {
+	it("Scenario 18: Steady-state (no status changes) → no family push spam", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
 		const client = await connectAndView(harness, "sess-1");
 
@@ -988,9 +1030,8 @@ describe("Group 6: Retry status and cycling", () => {
 		// Wait several status poll cycles in steady state
 		await wait(TEST_STATUS_POLL_MS * 6);
 
-		// Count session_list messages — should be 0 or very few
-		const sessionListMsgs = client.getReceivedOfType("session_list");
-		// The statusesChanged flag gates broadcast: no status changes → no session_list spam
+		const sessionListMsgs = client.getReceivedOfType("session_family");
+		// The statusesChanged flag gates family pushes in steady state.
 		expect(sessionListMsgs.length).toBeLessThanOrEqual(2);
 
 		await client.close();

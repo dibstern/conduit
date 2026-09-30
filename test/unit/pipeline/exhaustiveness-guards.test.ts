@@ -7,10 +7,10 @@ import {
 describe("Exhaustiveness guards", () => {
 	// ─── DB constraint guard ─────────────────────────────────────────────
 
-	describe("DB schema CHECK constraint — message_parts.type", () => {
+	describe("DB schema accepts provider message part types", () => {
 		let harness: TestHarness;
 
-		it("rejects invalid part type 'reasoning' — CHECK constraint violation", async () => {
+		it("accepts REST reasoning parts", async () => {
 			harness = createTestHarness();
 			try {
 				await harness.seedSession("ses-check");
@@ -20,19 +20,19 @@ describe("Exhaustiveness guards", () => {
 					["msg-check", "ses-check", "assistant", 1000, 1000],
 				);
 
-				// Attempt to insert type='reasoning' — schema CHECK rejects it
+				// REST reasoning is a distinct part type from Claude's thinking.
 				await expect(
 					harness.execute(
 						"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 						["part-bad", "msg-check", "reasoning", "test", 0, 1000, 1000],
 					),
-				).rejects.toThrow(); // CHECK(type IN ('text', 'thinking', 'tool'))
+				).resolves.toBeUndefined();
 			} finally {
 				await harness?.close();
 			}
 		});
 
-		it("rejects unknown part type 'unknown' — CHECK constraint violation", async () => {
+		it("retains future provider part types without a schema change", async () => {
 			harness = createTestHarness();
 			try {
 				await harness.seedSession("ses-check-2");
@@ -46,7 +46,7 @@ describe("Exhaustiveness guards", () => {
 						"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 						["part-bad-2", "msg-check-2", "unknown", "test", 0, 1000, 1000],
 					),
-				).rejects.toThrow();
+				).resolves.toBeUndefined();
 			} finally {
 				await harness?.close();
 			}

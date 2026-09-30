@@ -1,7 +1,7 @@
 // ─── Composer Large Paste ───────────────────────────────────────────────────
 // Regression coverage for: pasting a log dump into the composer froze the tab.
 // Two costs scaled with the draft, both on the input event's critical path —
-// `autoResize()` read `scrollHeight`, forcing a synchronous layout of the whole
+// the old auto-resize read `scrollHeight`, forcing a synchronous layout of the whole
 // value, and the highlight mirror laid the same text out a second time. A 1MB
 // paste took ~320ms to settle and 16MB took ~5s, linear in size.
 //
@@ -47,8 +47,8 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 	await expect(mirror).toHaveText("");
 	// …and the textarea shows its own text instead, so the draft stays visible.
 	await expect(textarea).not.toHaveClass(/text-transparent/);
-	// Height is pinned to the cap without reading scrollHeight.
-	await expect(textarea).toHaveAttribute("style", /height:\s*120px/);
+	// CSS pins the row to the cap without reading scrollHeight.
+	await expect(textarea.locator("..")).toHaveClass(/h-\[120px\]/);
 	// The draft itself is untouched.
 	expect(await textarea.inputValue()).toBe(LARGE_DRAFT);
 });

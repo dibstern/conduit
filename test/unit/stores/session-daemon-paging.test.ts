@@ -1,3 +1,12 @@
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionList } from "../../../src/lib/frontend/stores/session-list.svelte.js";
+import {
+	applySessionRemoved,
+	seedDaemonSessions,
+	seedFamilySessions,
+	seedRootSessions,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Cross-project session paging and search (store level) ──────────────────
 // These assert over the store's data, not over rendering: paging and ordering
 // are properties of the accumulator, and a DOM test would only be able to see
@@ -42,6 +51,7 @@ function row(index: number, projectSlug: string) {
 	return {
 		id: `s${index}`,
 		title: `Session ${index}`,
+		status: "idle" as const,
 		projectSlug,
 		updatedAt: 1000 - index,
 	};
@@ -70,25 +80,34 @@ function page(
 			options.hasMore && last
 				? { updatedAt: last.updatedAt, id: last.id }
 				: null,
-	} as ListDaemonSessionsResponse;
+	};
 }
 
 beforeEach(() => {
+	clearSessionState();
 	rpc.mockReset();
-	sessionState.rootSessions = [];
-	sessionState.familySessions = [];
-	sessionState.daemonSessions = [];
-	sessionState.daemonUnavailableProjects = [];
-	sessionState.daemonCursor = null;
-	sessionState.daemonHasMore = false;
-	sessionState.daemonLoading = false;
+	seedRootSessions([]);
+	seedFamilySessions("root-a", []);
+	seedDaemonSessions([]);
 	sessionState.currentId = null;
-	sessionState.sessions.clear();
 	sessionState.searchQuery = "";
 	clearSessionSearch();
 	routerState.path = "/";
 	attachedProjectState.slug = "project-a";
 	routerState.search = "";
+});
+
+it("keeps search results separate from live session rows", async () => {
+	seedSessions([{ id: "local", title: "Live", projectSlug: "project-a" }]);
+	rpc.mockResolvedValueOnce(
+		page([1], { hasMore: false, projectSlug: "project-b" }),
+	);
+
+	const query = sessionList.search("match");
+	await query.ready;
+	expect(query.results.map((row) => row.id)).toEqual(["s1"]);
+	expect(sessionState.sessions.has("s1")).toBe(false);
+	expect(sessionState.rootSessions.map((row) => row.id)).toEqual(["local"]);
 });
 
 describe("cross-project browse paging", () => {
@@ -264,22 +283,31 @@ describe("cross-project search", () => {
 			title: "Local session",
 			projectSlug: "project-a",
 		};
-		sessionState.rootSessions = [local];
-		sessionState.sessions.set(local.id, local);
+		seedRootSessions([local]);
 		rpc.mockResolvedValueOnce({
 			...page([], { hasMore: false }),
 			sessions: [
-				{ id: "local", title: "Local session", projectSlug: "project-a" },
-				{ id: "s1", title: "Session 1", projectSlug: "project-b" },
+				{
+					id: "local",
+					title: "Local session",
+					status: "idle",
+					projectSlug: "project-a",
+				},
+				{
+					id: "s1",
+					title: "Session 1",
+					status: "idle",
+					projectSlug: "project-b",
+				},
 			],
-		} as ListDaemonSessionsResponse);
+		});
 		await searchSessions("session", true);
 
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["local", "s1"]);
 
 		// The delete paths only ever touch the live map and the local arrays.
-		sessionState.sessions.delete("local");
-		sessionState.rootSessions = [];
+		applySessionRemoved("local");
+		seedRootSessions([]);
 
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);
 	});
@@ -290,8 +318,7 @@ describe("project scope", () => {
 
 	beforeEach(() => {
 		routerState.search = "?p=project-b";
-		sessionState.rootSessions = [local];
-		sessionState.sessions.set(local.id, local);
+		seedRootSessions([local]);
 	});
 
 	it("asks the daemon for the scoped project only, from the first page", async () => {

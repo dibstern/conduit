@@ -2,14 +2,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { expect, vi } from "vitest";
 import {
 	handleDeleteSession,
 	handleNewSession,
 	handleViewSession,
 } from "../../../src/lib/handlers/session.js";
-import { RequestId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
@@ -69,9 +68,8 @@ describe("session handler wire snapshots", () => {
 		);
 	});
 
-	it("keeps the CreateSession switch and broadcast envelopes stable", async () => {
+	it("keeps the CreateSession metadata envelopes stable", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const requestId = Schema.decodeUnknownSync(RequestId)("req-1");
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession: vi.fn(() =>
 				Effect.succeed({
@@ -83,26 +81,11 @@ describe("session handler wire snapshots", () => {
 					time: { created: 300, updated: 300 },
 				}),
 			),
-			sendSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "new-session",
-								title: "New Session",
-								updatedAt: 300,
-								messageCount: 0,
-							},
-						],
-						roots: true,
-					});
-				}),
-			),
+			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		await Effect.runPromise(
-			handleNewSession("client-1", { requestId }).pipe(
+			handleNewSession("client-1", {}).pipe(
 				Effect.provide(
 					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
 				),
@@ -117,23 +100,8 @@ describe("session handler wire snapshots", () => {
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
-			deleteSession: vi.fn(() => Effect.void),
-			sendSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "remaining-session",
-								title: "Remaining Session",
-								updatedAt: 400,
-								messageCount: 1,
-							},
-						],
-						roots: true,
-					});
-				}),
-			),
+			deleteSession: vi.fn(() => Effect.succeed(true)),
+			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		await Effect.runPromise(

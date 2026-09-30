@@ -7,19 +7,17 @@
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
-		getFilteredSessions,
 		projectSessionList,
 		sessionMatchesStatus,
 		isSessionSnoozed,
+		isSessionWoken,
 		setSearchQuery,
 		setCurrentSession,
 		switchToSession,
 		sendNewSession,
 		sessionCreation,
-		clearSessionSearch,
-		loadDaemonSessions,
-		searchSessions,
 	} from "../../stores/session.svelte.js";
+	import { currentSearchQuery, refreshSessionList, sessionList } from "../../stores/session-list.svelte.js";
 	import {
 		getSessionGrouping,
 		getSessionScope,
@@ -53,6 +51,7 @@
 		setSnoozedShelfOpen,
 	} from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
+	import { touch } from "../../utils/attention.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionItem from "./SessionItem.svelte";
@@ -114,7 +113,16 @@
 
 	// ─── Derived ────────────────────────────────────────────────────────────────
 
-	const filtered = $derived(getFilteredSessions());
+	const filtered = $derived(sessionList.groups.flatMap((group) => group.rows));
+	let feedStale = $state(false);
+	$effect(() => {
+		const staleSince = sessionList.staleSince;
+		feedStale = false;
+		if (staleSince === null) return;
+		const remaining = Math.max(0, staleSince + 3_000 - Date.now());
+		const timer = setTimeout(() => { feedStale = true; }, remaining);
+		return () => clearTimeout(timer);
+	});
 	const statusFilter = $derived(getSessionStatusFilter());
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
@@ -165,15 +173,16 @@
 	// least this many" and never claims to be the size of the whole match set.
 	// Counting the full set is exactly what this list must never do.
 	const searchSummary = $derived.by(() => {
-		if (sessionState.searchResults === null) return null;
-		if (sessionState.searchHasMore) return `${filtered.length}+ matches`;
+		const query = currentSearchQuery();
+		if (query === null) return null;
+		if (query.hasMore) return `${filtered.length}+ matches`;
 		return filtered.length === 1 ? "1 match" : `${filtered.length} matches`;
 	});
 
 	const pagerLoading = $derived(
-		sessionState.searchResults === null
+		currentSearchQuery() === null
 			? sessionState.daemonLoading
-			: sessionState.searchLoading,
+			: currentSearchQuery()?.loading,
 	);
 
 	const selectionCount = $derived(selectedSessionIds.size);
@@ -214,7 +223,7 @@
 	$effect(() => {
 		if (scope === loadedScope) return;
 		loadedScope = scope;
-		void loadDaemonSessions();
+		void refreshSessionList();
 		const query = untrack(() => localSearchValue);
 		if (query.trim()) requestRemoteSearch(query);
 	});
@@ -259,7 +268,7 @@
 	// the matches. The store drops responses for a superseded query, so the
 	// debounce does not need to re-check what was typed since.
 	function requestRemoteSearch(query: string) {
-		void searchSessions(query, true);
+		sessionList.search(query);
 	}
 
 	// A session belonging to a project other than the one this socket is attached
@@ -302,7 +311,7 @@
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 		localSearchValue = "";
 		setSearchQuery("");
-		clearSessionSearch();
+		sessionList.search("");
 	}
 
 	function handleSearchInput(text: string) {
@@ -320,9 +329,23 @@
 		}
 	}
 
-	function handleSwitchSession(id: string, projectSlug?: string) {
-		if (id !== sessionState.currentId) {
-			switchToSession(id, projectSlug);
+	// A user's pick clears the turn-end dot, so it is reported even when the
+	// session is already open; switching alone writes no read state (ADR-0004,
+	// Scope; conduit-test-hk9m.3, .4).
+	function handleSwitchSession(session: SessionInfo) {
+		touch(session, "sidebar-pick");
+		// Opening a woken session is what clears its Woke badge; hovering or
+		// clicking its open view does not (conduit-test-hk9m.9).
+		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		if (projectSlug && isSessionWoken(session, sessionState.now)) {
+			unsnoozeSessionRpc({
+				projectSlug,
+				sessionId: session.id,
+				originId: getBrowserClientId(),
+			}).catch(() => showToast("Couldn't clear the wake", { variant: "error" }));
+		}
+		if (session.id !== sessionState.currentId) {
+			switchToSession(session.id, session.projectSlug);
 		}
 	}
 
@@ -722,7 +745,7 @@
 				projectLabel={getProjectLabel(s)}
 				projectAccent={getProjectAccent(s)}
 				branch={s.git?.branch}
-				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
+				onswitchsession={() => handleSwitchSession(s)}
 				oncontextmenu={handleContextMenu}
 				menuOpen={ctxMenuSession?.id === s.id}
 				onmarkread={() => { void toggleSessionRead(s); }}
@@ -748,7 +771,7 @@
 				heldSessionId={heldSessionId}
 				menuOpen={ctxMenuSession?.id === s.id}
 				onholdchange={(id) => { heldSessionId = id; }}
-				onswitchsession={(id) => handleSwitchSession(id, s.projectSlug)}
+				onswitchsession={() => handleSwitchSession(s)}
 				ontoggleselection={handleToggleSelection}
 				oncontextmenu={handleContextMenu}
 				onsettle={(_id, next) => { void sessionVerbActions.settle(s, next); }}
@@ -762,6 +785,9 @@
 		{/if}
 	{/snippet}
 
+	{#if feedStale}
+		<div class="px-3.5 py-1 text-xs text-text-dimmer font-brand" data-testid="session-list-stale">May be out of date</div>
+	{/if}
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={() => { heldSessionId = null; }}>
 		{#if isEmpty}

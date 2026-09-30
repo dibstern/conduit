@@ -1,3 +1,9 @@
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
+	seedFamilySessions,
+	seedRootSessions,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Concurrent Session Dispatch Tests ──────────────────────────────────────
 // Verifies that interleaved per-session events for sessions A/B/C are routed
 // independently. Covers: live event buffering during replay, notification_event
@@ -39,18 +45,24 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
+	getOrCreateSessionSlot,
 	isStreaming,
 	phaseToStreaming,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { getNotifState } from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
+import { featureFlags } from "../../../src/lib/frontend/stores/feature-flags.svelte.js";
 import {
 	clearAllPermissions,
 	permissionsState,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	clearSessionState,
+	getAttentionSessions,
+	getSessionIndicator,
+	isSessionBusy,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	handleMessage,
 	isPerSessionEvent,
@@ -65,14 +77,20 @@ import type {
 beforeEach(() => {
 	clearMessages();
 	clearAllPermissions();
-	sessionState.rootSessions = ["session-a", "session-b", "session-c"].map(
-		(id) => ({ id, title: "" }),
+	clearSessionState();
+	seedRootSessions(
+		["session-a", "session-b", "session-c"].map((id) => ({ id, title: "" })),
 	);
-	sessionState.familySessions = [];
+	seedFamilySessions("root-a", []);
 	sessionState.currentId = "session-a";
-	for (const id of ["session-a", "session-b", "session-c"]) {
-		sessionState.sessions.set(id, { id, title: "" });
-	}
+	seedSessions([
+		...sessionState.sessions.values(),
+		...["session-a", "session-b", "session-c"].map((id) => ({
+			id,
+			title: "",
+			status: "idle" as const,
+		})),
+	]);
 	vi.useFakeTimers();
 });
 
@@ -81,33 +99,7 @@ afterEach(() => {
 	clearMessages();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.sessions.clear();
-});
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
-describe("Interleaved deltas for A/B/C — each slot independent", () => {
-	it("interleaved deltas from three sessions all create assistant messages", () => {
-		handleMessage({
-			type: "delta",
-			sessionId: "session-a",
-			text: "A says hello",
-		} as RelayMessage);
-		handleMessage({
-			type: "delta",
-			sessionId: "session-b",
-			text: "B says hello",
-		} as RelayMessage);
-		handleMessage({
-			type: "delta",
-			sessionId: "session-c",
-			text: "C says hello",
-		} as RelayMessage);
-
-		// All deltas went through — chat state has messages
-		// (during transition, all go to legacy chatState.messages)
-		expect(chatState.messages.length).toBeGreaterThan(0);
-	});
+	clearSessionState();
 });
 
 describe("notification_event — non-routing (global dispatch)", () => {
@@ -122,7 +114,7 @@ describe("notification_event — non-routing (global dispatch)", () => {
 	});
 
 	it("notification_event does not update chat state", () => {
-		phaseToStreaming();
+		phaseToStreaming(getOrCreateSessionSlot("session-a").activity);
 		handleMessage({
 			type: "notification_event",
 			eventType: "done",
@@ -138,8 +130,8 @@ describe("Missing sessionId — dev throws, prod drops", () => {
 		// Events with per-session types but no sessionId should throw in dev
 		expect(() => {
 			handleMessage({
-				type: "delta",
-				text: "no session",
+				type: "status",
+				status: "processing",
 			} as RelayMessage);
 		}).toThrow(/routePerSession: missing sessionId/);
 	});
@@ -147,22 +139,50 @@ describe("Missing sessionId — dev throws, prod drops", () => {
 	it("throws in dev mode when sessionId is empty string", () => {
 		expect(() => {
 			handleMessage({
-				type: "delta",
+				type: "status",
 				sessionId: "",
-				text: "empty session",
+				status: "processing",
 			} as RelayMessage);
 		}).toThrow(/routePerSession: missing sessionId/);
 	});
 });
 
 describe("Unknown-session guard — drops events silently", () => {
+	it("logs and drops an unknown event without replaying it after the snapshot", () => {
+		clearSessionState();
+		sessionState.currentId = "viewed";
+		featureFlags.debug = true;
+		const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+		try {
+			handleMessage({
+				type: "status",
+				sessionId: "background",
+				status: "processing",
+			});
+			expect(debug).toHaveBeenCalledWith(
+				"[ws]",
+				"routePerSession: unknown sessionId %s for event %s",
+				"background",
+				"status",
+			);
+			expect(sessionMessages.has("background")).toBe(false);
+
+			seedSessions([{ id: "background", title: "Background", status: "busy" }]);
+			expect(isSessionBusy("background")).toBe(true);
+			expect(sessionMessages.has("background")).toBe(false);
+		} finally {
+			featureFlags.debug = false;
+			debug.mockRestore();
+		}
+	});
+
 	it("drops events for unknown sessionId without throwing", () => {
 		// "unknown-session" is not in sessionState.sessions
 		expect(() => {
 			handleMessage({
-				type: "delta",
+				type: "status",
 				sessionId: "unknown-session",
-				text: "should be dropped",
+				status: "processing",
 			} as RelayMessage);
 		}).not.toThrow();
 
@@ -172,19 +192,22 @@ describe("Unknown-session guard — drops events silently", () => {
 
 	it("processes events after session is registered", () => {
 		// Register the session
-		sessionState.sessions.set("new-session", {
-			id: "new-session",
-			title: "",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "new-session",
+				title: "",
+				status: "idle",
+			},
+		]);
 
 		handleMessage({
-			type: "delta",
+			type: "status",
 			sessionId: "new-session",
-			text: "now it works",
+			status: "processing",
 		} as RelayMessage);
 
-		// Message should have been created
-		expect(chatState.messages.length).toBeGreaterThan(0);
+		expect(sessionActivity.get("new-session")?.phase).toBe("processing");
 	});
 });
 
@@ -211,9 +234,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"ask_user_error",
 			"permission_request",
 			"permission_resolved",
-			"session_switched",
 			"session_forked",
-			"history_page",
 			"provider_session_reloaded",
 			"session_deleted",
 		];
@@ -279,12 +300,12 @@ describe("family attention before membership", () => {
 			type: "session_family",
 			rootId: "root",
 			sessions: [
-				{ id: "root", title: "Root" },
-				{ id: "new-child", title: "Child", parentID: "root" },
+				{ id: "root", title: "Root", status: "idle" },
+				{ id: "new-child", title: "Child", status: "idle", parentID: "root" },
 			],
 		});
 		routerState.path = "/s/root";
-		handleMessage({ type: "session_switched", sessionId: "root", id: "root" });
+		sessionState.currentId = "root";
 		expect(
 			permissionsState.pendingQuestions.map((question) => question.toolId),
 		).toEqual(["question-1"]);
@@ -334,30 +355,26 @@ describe("family attention before membership", () => {
 	});
 
 	it("roots-only reconciliation preserves child indicators and uses rolled root counts", () => {
-		handleMessage({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: "new-child",
-		});
-		handleMessage({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				{
-					id: "root",
-					title: "Root",
-					pendingPermissionCount: 2,
-					pendingQuestionCount: 1,
-				},
-			],
-		});
-		expect(getNotifState("new-child")).toEqual({
-			kind: "attention",
-			questions: 1,
-			permissions: 0,
-		});
-		expect(getNotifState("root")).toEqual({
-			kind: "attention",
+		seedFamilySessions("root", [
+			{ id: "root", title: "Root" },
+			{
+				id: "new-child",
+				title: "Child",
+				parentID: "root",
+				pendingQuestionCount: 1,
+			},
+		]);
+		seedSessions([
+			{
+				id: "root",
+				title: "Root",
+				status: "idle",
+				pendingPermissionCount: 2,
+				pendingQuestionCount: 1,
+			},
+		]);
+		expect(getSessionIndicator("new-child", null)).toBe("attention");
+		expect(getAttentionSessions(null, () => new Set()).get("root")).toEqual({
 			questions: 1,
 			permissions: 2,
 		});

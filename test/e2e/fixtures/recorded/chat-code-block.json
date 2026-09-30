@@ -36,6 +36,7 @@
         {
           "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
           "title": "New session - 2026-03-27T04:02:33.721Z",
+          "status": "idle",
           "updatedAt": 1774584153721,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
           "title": "New session - 2026-03-27T04:02:33.721Z",
+          "status": "idle",
           "updatedAt": 1774584153721,
           "messageCount": 0
         }
@@ -494,6 +496,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "idle",
               "updatedAt": 1774584156068,
               "messageCount": 0
             }
@@ -506,6 +509,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "idle",
               "updatedAt": 1774584156068,
               "messageCount": 0
             }
@@ -518,6 +522,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "idle",
               "updatedAt": 1774584156068,
               "messageCount": 0
             }
@@ -530,6 +535,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "idle",
               "updatedAt": 1774584156068,
               "messageCount": 0
             }
@@ -542,6 +548,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "busy",
               "updatedAt": 1774584156068,
               "messageCount": 0,
               "processing": true
@@ -560,6 +567,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "busy",
               "updatedAt": 1774584156068,
               "messageCount": 0,
               "processing": true
@@ -640,6 +648,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
+              "status": "idle",
               "updatedAt": 1774584159999,
               "messageCount": 0
             }
@@ -657,6 +666,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
+              "status": "idle",
               "updatedAt": 1774584160012,
               "messageCount": 0
             }
@@ -669,6 +679,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
+              "status": "idle",
               "updatedAt": 1774584160012,
               "messageCount": 0
             }
@@ -681,6 +692,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
+              "status": "idle",
               "updatedAt": 1774584160012,
               "messageCount": 0
             }
@@ -693,6 +705,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
+              "status": "idle",
               "updatedAt": 1774584160012,
               "messageCount": 0
             }
@@ -705,6 +718,7 @@
             {
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
+              "status": "idle",
               "updatedAt": 1774584160012,
               "messageCount": 0
             }

@@ -8,21 +8,27 @@
 // never sent a `status` message to update `isProcessing`.
 
 import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { dirname } from "node:path";
 import { Effect, Ref } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
 } from "../../../src/lib/relay/relay-stack.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
 // ── Mock OpenCode Server with controllable session status ────────────────────
@@ -231,8 +237,29 @@ async function createTestHarness(): Promise<TestHarness> {
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 	const relayPort = (relayServer.address() as { port: number }).port;
+	const dbPath = tempEventsDbPath();
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			for (const sessionId of ["sess-A", "sess-B"]) {
+				yield* store.append(
+					canonicalEvent(
+						"session.created",
+						sessionId,
+						{
+							sessionId,
+							title: sessionId,
+							provider: "opencode",
+						},
+						{ provider: "opencode" },
+					),
+				);
+			}
+		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath))),
+	);
 
 	const relay = await createProjectRelay({
+		persistenceDbPath: dbPath,
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
@@ -307,6 +334,7 @@ async function createTestHarness(): Promise<TestHarness> {
 			}
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
+			rmSync(dirname(dbPath), { recursive: true, force: true });
 		},
 	};
 }

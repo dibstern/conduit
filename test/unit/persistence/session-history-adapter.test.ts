@@ -51,7 +51,9 @@ function makeMessageWithParts(
 		tokens_cache_read: null,
 		tokens_cache_write: null,
 		context_window: null,
+		version: 0,
 		is_streaming: 0,
+		is_backfilled: 0,
 		created_at: 1_000_000_000_000,
 		updated_at: 1_000_000_000_000,
 		parts: [],
@@ -202,6 +204,7 @@ describe("messageRowsToHistory", () => {
 						tool_name: "bash",
 						call_id: "c1",
 						input: JSON.stringify({ command: "ls" }),
+						result: JSON.stringify("file.txt"),
 						status: "completed",
 						sort_order: 1,
 					}),
@@ -224,6 +227,7 @@ describe("messageRowsToHistory", () => {
 		});
 		expect(toolPart?.state?.status).toBe("completed");
 		expect(toolPart?.state?.input).toEqual({ command: "ls" });
+		expect(toolPart?.state?.output).toBe("file.txt");
 	});
 
 	it("handles invalid JSON in tool input gracefully", () => {

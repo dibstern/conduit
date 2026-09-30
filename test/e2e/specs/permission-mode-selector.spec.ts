@@ -2,7 +2,7 @@
 // Tests the Ask/Edits/Full access approvals pill in the input area via WS mock.
 //
 // Regression coverage for: selecting "Full access" before any session is bound
-// (e.g. PWA cold start before session_switched arrives) was silently dropped —
+// (e.g. PWA cold start before a session is selected) was silently dropped —
 // the pill showed "Full access" locally but the server never received the switch, so
 // the first turn still asked permissions and any re-sync flipped the pill
 // back to "Ask".
@@ -21,12 +21,13 @@ const PROJECT_URL = "/s/sess-pm-001";
 const BASE = "http://localhost:4173";
 
 const sessionList: MockMessage = {
-	type: "session_list",
+	type: "shell_snapshot",
 	roots: true,
 	sessions: [
 		{
 			id: "sess-pm-001",
 			title: "Existing session",
+			status: "idle",
 			updatedAt: Date.now(),
 			messageCount: 4,
 		},
@@ -51,29 +52,36 @@ const modelList: MockMessage = {
 	],
 };
 
+const projectList: MockMessage = {
+	type: "project_list",
+	projects: [{ slug: "myapp", title: "myapp", directory: "/tmp/myapp" }],
+	current: "myapp",
+};
+
 /** Init state WITH a bound session (normal connected flow). */
 const boundInit: MockMessage[] = [
-	{ type: "session_switched", id: "sess-pm-001" },
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	sessionList,
 	modelList,
+	projectList,
 ];
 
 const claudeBoundInit: MockMessage[] = [
-	{ type: "session_switched", id: "sess-pm-001" },
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "claude" },
 	sessionList,
 	modelList,
+	projectList,
 ];
 
-/** Init state WITHOUT a session bind (cold start, session_switched pending). */
+/** Init state without a selected session. */
 const unboundInit: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	sessionList,
 	modelList,
+	projectList,
 ];
 
 interface PermissionModeHarness {
@@ -100,14 +108,8 @@ async function setup(
 				serverModes.set(String(params["sessionId"]), String(params["mode"]));
 				return { projectSlug: "myapp", mode: params["mode"] };
 			},
-			SendMessage: (params) => ({
-				projectSlug: "myapp",
-				sessionId: params["sessionId"],
-			}),
-			ViewSession: (params) => ({
-				projectSlug: "myapp",
-				sessionId: params["sessionId"],
-			}),
+			SendMessage: (params) => ({ ok: true, sessionId: params["sessionId"] }),
+			ViewSession: () => ({ ok: true }),
 			GetAgents: () => ({ projectSlug: "myapp", agents: [] }),
 			GetCommands: () => ({ projectSlug: "myapp", commands: [] }),
 			GetModels: (params) => ({
@@ -118,13 +120,25 @@ async function setup(
 				permissionMode: serverModes.get(String(params["sessionId"])) ?? "ask",
 			}),
 			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
-			GetProjects: () => ({ projects: [] }),
+			GetProjects: () => ({
+				projects: [{ slug: "myapp", title: "myapp", directory: "/tmp/myapp" }],
+				current: "myapp",
+			}),
 			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
 			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},
 	});
-	await page.goto(`${BASE}${PROJECT_URL}`);
+	const bound = initMessages !== unboundInit;
+	await page.goto(`${BASE}${bound ? PROJECT_URL : "/"}`);
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
+	if (bound) {
+		await rpc.waitForRequest((request) => request.tag === "ViewSession");
+		const modelInfo = initMessages.find(
+			(message) => message.type === "model_info",
+		);
+		if (modelInfo)
+			relay.sendMessage({ ...modelInfo, sessionId: "sess-pm-001" });
+	}
 	return { relay, rpc, serverModes };
 }
 
@@ -271,7 +285,7 @@ test.describe("Permission mode with a bound session", () => {
 });
 
 test.describe("Permission mode selected before session bind (regression)", () => {
-	test("selection made while no session is bound is flushed on session_switched", async ({
+	test("selection made while no session is bound is flushed on selection", async ({
 		page,
 	}) => {
 		const { relay, rpc, serverModes } = await setup(page, unboundInit);
@@ -281,9 +295,7 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 		await expect(pill(page)).toContainText("Full access");
 		expect(switchCalls(rpc)).toHaveLength(0);
 
-		// Session binds (server session_switched, e.g. connect completes or the
-		// pending New Session resolves).
-		relay.sendMessage({ type: "session_switched", id: "sess-pm-001" });
+		await page.locator('[data-session-id="sess-pm-001"]').click();
 
 		// The pending selection must be flushed to the server for that session.
 		await expect
@@ -301,14 +313,14 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 	test("re-selecting Ask before bind clears the pending elevated mode", async ({
 		page,
 	}) => {
-		const { relay, rpc } = await setup(page, unboundInit);
+		const { rpc } = await setup(page, unboundInit);
 
 		await selectFullAccess(page);
 		await pill(page).click();
 		await page.locator("[data-testid='permission-mode-option-ask']").click();
 		await expect(pill(page)).toContainText("Ask");
 
-		relay.sendMessage({ type: "session_switched", id: "sess-pm-001" });
+		await page.locator('[data-session-id="sess-pm-001"]').click();
 
 		// Flushing "ask" (or nothing) is acceptable; flushing "full" is not.
 		await page.waitForTimeout(500);

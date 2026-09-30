@@ -17,6 +17,7 @@ import {
 import {
 	LEGACY_SKELETON_CUTOFF_MS,
 	MAX_PURGEABLE_SKELETON_SESSIONS,
+	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
@@ -117,26 +118,105 @@ describe("Persistence Effect", () => {
 					AND name NOT LIKE 'sqlite_%'
 					AND name != 'effect_sql_migrations'
 				ORDER BY name`;
-			expect(tables.map((row) => row.name)).toEqual([
-				"activities",
-				"command_receipts",
-				"events",
-				"message_parts",
-				"messages",
-				"pending_approvals",
-				"projector_cursors",
-				"provider_command_interactions",
-				"provider_command_meta",
-				"provider_command_outbox",
-				"provider_command_sessions",
-				"provider_command_tombstones",
-				"provider_command_turns",
-				"provider_state",
-				"session_providers",
-				"sessions",
-				"tool_content",
-				"turns",
-			]);
+			const projectionFailureColumns = yield* sql<{
+				cid: number;
+				name: string;
+				type: string;
+				notnull: number;
+				dflt_value: string | null;
+				pk: number;
+			}>`PRAGMA table_info(projection_failures)`;
+			const projectionFailures = yield* sql<Record<string, unknown>>`
+				SELECT * FROM projection_failures`;
+			expect({
+				tables: tables.map((row) => row.name),
+				projectionFailureColumns,
+				projectionFailures,
+			}).toEqual({
+				tables: [
+					"activities",
+					"command_receipts",
+					"events",
+					"message_parts",
+					"message_tombstones",
+					"messages",
+					"pending_approvals",
+					"projection_failures",
+					"projector_cursors",
+					"provider_command_interactions",
+					"provider_command_meta",
+					"provider_command_outbox",
+					"provider_command_sessions",
+					"provider_command_tombstones",
+					"provider_command_turns",
+					"provider_state",
+					"read_model_counter",
+					"sent_alerts",
+					"session_providers",
+					"sessions",
+					"tool_content",
+					"turns",
+				],
+				projectionFailureColumns: [
+					{
+						cid: 0,
+						name: "id",
+						type: "INTEGER",
+						notnull: 0,
+						dflt_value: null,
+						pk: 1,
+					},
+					{
+						cid: 1,
+						name: "projector_name",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 2,
+						name: "event_sequence",
+						type: "INTEGER",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 3,
+						name: "event_type",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 4,
+						name: "session_id",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 5,
+						name: "error",
+						type: "TEXT",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+					{
+						cid: 6,
+						name: "failed_at",
+						type: "INTEGER",
+						notnull: 1,
+						dflt_value: null,
+						pk: 0,
+					},
+				],
+				projectionFailures: [],
+			});
 
 			const eventColumns = yield* sql<{
 				name: string;
@@ -184,8 +264,18 @@ describe("Persistence Effect", () => {
 				{ migration_id: 15, name: "sessions_settled_pinned" },
 				{ migration_id: 16, name: "sessions_snoozed" },
 				{ migration_id: 17, name: "sessions_auto_settle" },
-				{ migration_id: 18, name: "sessions_marked_unread" },
-				{ migration_id: 19, name: "sessions_forked_from" },
+				{ migration_id: 18, name: "create_projection_failures" },
+				{ migration_id: 19, name: "read_model_version" },
+				{ migration_id: 20, name: "read_model_counter" },
+				{ migration_id: 21, name: "sent_alerts" },
+				{ migration_id: 22, name: "fork_point_timestamp" },
+				{ migration_id: 23, name: "sessions_marked_unread" },
+				{ migration_id: 24, name: "session_attention" },
+				{ migration_id: 25, name: "read_state_to_turn_ends" },
+				{ migration_id: 26, name: "sessions_forked_from" },
+				{ migration_id: 27, name: "messages_backfilled" },
+				{ migration_id: 28, name: "sessions_history_complete" },
+				{ migration_id: 29, name: "message_tombstones" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -288,29 +378,38 @@ describe("Persistence Effect", () => {
 		},
 	);
 
-	it.effect("diagnostic failure cannot prevent startup", () =>
-		Effect.gen(function* () {
-			yield* PersistenceServiceTag;
-		}).pipe(
-			Effect.provide(
-				makePersistenceLayer((filename) =>
-					seedDatabase(filename, (db) => {
-						seedLegacyEventStore(db);
-						db.exec(`
+	it.effect(
+		"rejects an unknown migration ledger before changing the database",
+		() =>
+			Effect.gen(function* () {
+				const result = yield* Effect.either(
+					Effect.gen(function* () {
+						yield* PersistenceServiceTag;
+					}).pipe(
+						Effect.provide(
+							makePersistenceLayer((filename) =>
+								seedDatabase(filename, (db) => {
+									seedLegacyEventStore(db);
+									db.exec(`
 							CREATE TABLE effect_sql_migrations (
 								migration_id INTEGER PRIMARY KEY NOT NULL,
 								created_at DATETIME NOT NULL DEFAULT current_timestamp,
 								name VARCHAR(255) NOT NULL
 							);
 							INSERT INTO effect_sql_migrations (migration_id, name)
-							VALUES (11, 'session_cascade_deletes');
+							VALUES (13, 'foreign_migration');
 							DROP TABLE message_parts;
 							DROP TABLE messages;
 						`);
-					}),
-				),
-			),
-		),
+								}),
+							),
+						),
+					),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expectMigrationFailure(result.left, "Unknown recorded migration");
+			}),
 	);
 
 	it.effect("diagnostic defect cannot prevent startup", () =>
@@ -343,6 +442,33 @@ describe("Persistence Effect", () => {
 		),
 	);
 
+	it("diagnostic failure cannot prevent startup", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-diagnostic-failure-"));
+		const filename = join(dir, "events.db");
+		try {
+			await Effect.runPromise(
+				makeEffectSqlMigrator().pipe(
+					Effect.provide(EffectSqliteClient.layer({ filename })),
+				),
+			);
+			seedDatabase(filename, (db) => db.exec("DROP TABLE messages"));
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					yield* PersistenceServiceTag;
+				}).pipe(
+					Effect.provide(
+						Layer.provideMerge(
+							makePersistenceServiceLive,
+							EffectSqliteClient.layer({ filename }),
+						),
+					),
+				),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it.effect("startup migration refuses readonly Effect SQLite layers", () =>
 		Effect.gen(function* () {
 			const result = yield* Effect.either(
@@ -370,29 +496,6 @@ describe("Persistence Effect", () => {
 			const persistence = yield* PersistenceServiceTag;
 			const healthy = yield* persistence.healthCheck;
 			expect(healthy).toBe(true);
-		}).pipe(Effect.provide(makePersistenceLayer())),
-	);
-
-	it.effect("evictBefore deletes old events", () =>
-		Effect.gen(function* () {
-			const persistence = yield* PersistenceServiceTag;
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES ('s-evict', 'opencode', 'Evict', 'idle', 1000, 1000)`;
-			yield* sql`INSERT INTO events (
-					event_id, session_id, stream_version, type, data, metadata, provider, created_at
-				) VALUES (
-					'evt-old', 's-evict', 0, 'session.created', '{}', '{}', 'opencode', 1000
-				)`;
-			yield* sql`INSERT INTO events (
-					event_id, session_id, stream_version, type, data, metadata, provider, created_at
-				) VALUES (
-					'evt-new', 's-evict', 1, 'session.status', '{}', '{}', 'opencode', 9999999999
-				)`;
-			const deleted = yield* persistence.evictBefore(5000);
-			expect(deleted).toBe(1);
-			const remaining = yield* sql`SELECT * FROM events`;
-			expect(remaining.length).toBe(1);
 		}).pipe(Effect.provide(makePersistenceLayer())),
 	);
 

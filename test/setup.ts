@@ -2,6 +2,15 @@
 // in JSON log lines or console noise. Only "error" remains visible so
 // critical failures are still surfaced.
 
+// 0. Git hooks (lefthook pre-commit runs the suite) export GIT_DIR,
+//    GIT_INDEX_FILE and friends. A test that inherits them and runs `git init`
+//    or `git commit` in a temp dir acts on the committing repo instead: it
+//    rewrote the shared .git/config and committed onto a real branch
+//    (conduit-test-3rvb). Tests must only ever see their own repos.
+for (const key of Object.keys(process.env)) {
+	if (key.startsWith("GIT_")) delete process.env[key];
+}
+
 // 1. Backend (pino) — set minimum level to "error".
 import { setLogLevel } from "../src/lib/logger.js";
 

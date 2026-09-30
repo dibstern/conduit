@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedSessions } from "../stores/session-fixtures.js";
 
 const { handleMessageMock, instances, replaceStateMock } = vi.hoisted(() => ({
 	handleMessageMock: vi.fn(),
@@ -70,22 +71,15 @@ vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", () => ({
 
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import {
-	dispatch,
-	getAttentionSessions,
-	resetNotifState,
-} from "../../../src/lib/frontend/stores/notification-reducer.svelte.js";
-import {
 	attachedProjectState,
 	getCurrentSlug,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
-	isSessionUnreadHeld,
-	noteReadStateChanged,
-	noteSessionOpened,
-} from "../../../src/lib/frontend/stores/session-unread-hold.svelte.js";
-import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+	clearSessionState,
+	getAttentionSessions,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	connect,
 	disconnect,
@@ -128,6 +122,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			if (message.type === "project_attached") {
 				attachedProjectState.slug = message.slug;
 			}
+			if (message.type === "session_list" && message.roots === true)
+				seedSessions(message.sessions);
 		});
 		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 		replaceStateMock.mockClear();
@@ -135,9 +131,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		routerState.path = "/";
 		routerState.search = "?p=conduit";
 		attachedProjectState.slug = null;
+		clearSessionState();
 		sessionState.currentId = null;
-		noteSessionOpened("__test_reset__");
-		sessionViewState.compact = false;
 	});
 
 	afterEach(async () => {
@@ -148,7 +143,6 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		routerState.path = "/";
 		attachedProjectState.slug = null;
 		sessionState.currentId = null;
-		noteSessionOpened("__test_reset__");
 	});
 
 	it("opens the daemon socket with the route's session and project hints", () => {
@@ -213,37 +207,6 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			p: "project-b",
 		});
 		expect(instances[1]?.url).toBe(`ws://localhost:3000/ws?${params}`);
-	});
-
-	it("rebuilds the held session read flag on reconnect", async () => {
-		vi.useFakeTimers();
-		routerState.path = "/s/session-a";
-		routerState.search = "?p=project-a";
-		sessionState.currentId = "session-a";
-		connect();
-		expect(
-			new URL(instances[0]?.url ?? "").searchParams.has("skipMarkRead"),
-		).toBe(false);
-
-		noteReadStateChanged(
-			{ id: "session-a", title: "Session A", projectSlug: "project-a" },
-			true,
-		);
-		instances[0]?.open();
-		instances[0]?.close();
-		await vi.advanceTimersByTimeAsync(1_000);
-		expect(
-			new URL(instances[1]?.url ?? "").searchParams.get("skipMarkRead"),
-		).toBe("1");
-		expect(isSessionUnreadHeld("session-a")).toBe(true);
-
-		noteSessionOpened("another-session");
-		instances[1]?.open();
-		instances[1]?.close();
-		await vi.advanceTimersByTimeAsync(1_500);
-		expect(
-			new URL(instances[2]?.url ?? "").searchParams.has("skipMarkRead"),
-		).toBe(false);
 	});
 
 	it("keeps the route session if the connection drops before the first attachment", async () => {
@@ -449,24 +412,48 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		expect(instances).toHaveLength(1);
 	});
 
-	// Resolutions can be missed while offline, so the reconnect's roots
-	// snapshot is the authority; a still-pending child question survives
-	// as its root's rolled-up count.
+	// Socket open preserves the last row until the next roots snapshot arrives.
 	it.each([
 		["after a disconnect", () => instances[0]?.close()],
 		["when a resume replaces a closing socket", () => connect()],
-	])("drops attention indicators on the next open %s", (_, reconnect) => {
-		resetNotifState();
+	])("reconciles attention from rows after reconnect %s", async (_, reconnect) => {
 		connect();
 		instances[0]?.open();
-		dispatch({ type: "question_appeared", sessionId: "child-c" });
+		seedSessions([
+			{
+				id: "root-a",
+				title: "Root",
+				status: "idle",
+				pendingQuestionCount: 1,
+			},
+		]);
 
 		reconnect();
 		connect();
 		expect(getAttentionSessions(null, () => new Set()).size).toBe(1);
 		instances.at(-1)?.open();
 
-		expect(getAttentionSessions(null, () => new Set()).size).toBe(0);
+		expect(getAttentionSessions(null, () => new Set()).size).toBe(1);
+		await vi.waitFor(() =>
+			expect(instances.at(-1)?.listenerCount("message")).toBeGreaterThan(0),
+		);
+		instances.at(-1)?.emitMessage(
+			JSON.stringify({
+				type: "session_list",
+				roots: true,
+				sessions: [
+					{
+						id: "root-a",
+						title: "Root",
+						status: "idle",
+						pendingQuestionCount: 0,
+					},
+				],
+			}),
+		);
+		await vi.waitFor(() =>
+			expect(getAttentionSessions(null, () => new Set()).size).toBe(0),
+		);
 	});
 
 	it("removes the old message stream before the replacement stream handles messages", async () => {

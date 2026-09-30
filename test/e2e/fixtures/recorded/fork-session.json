@@ -36,6 +36,7 @@
         {
           "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
           "title": "New session - 2026-03-27T04:01:34.140Z",
+          "status": "idle",
           "updatedAt": 1774584094140,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
           "title": "New session - 2026-03-27T04:01:34.140Z",
+          "status": "idle",
           "updatedAt": 1774584094140,
           "messageCount": 0
         }
@@ -494,6 +496,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584096468,
               "messageCount": 0
             }
@@ -506,6 +509,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584096468,
               "messageCount": 0
             }
@@ -518,6 +522,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584096468,
               "messageCount": 0
             }
@@ -530,6 +535,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584096468,
               "messageCount": 0
             }
@@ -542,6 +548,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "busy",
               "updatedAt": 1774584096468,
               "messageCount": 0,
               "processing": true
@@ -560,6 +567,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "busy",
               "updatedAt": 1774584096468,
               "messageCount": 0,
               "processing": true
@@ -628,6 +636,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098148,
               "messageCount": 0
             }
@@ -645,6 +654,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098148,
               "messageCount": 0
             }
@@ -657,6 +667,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098159,
               "messageCount": 0
             }
@@ -669,6 +680,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098159,
               "messageCount": 0
             }
@@ -703,6 +715,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098677,
               "messageCount": 0
             }
@@ -715,6 +728,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098677,
               "messageCount": 0
             }
@@ -727,6 +741,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098677,
               "messageCount": 0
             }
@@ -739,6 +754,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584098677,
               "messageCount": 0
             }
@@ -751,6 +767,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "busy",
               "updatedAt": 1774584098677,
               "messageCount": 0,
               "processing": true
@@ -769,6 +786,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "busy",
               "updatedAt": 1774584098677,
               "messageCount": 0,
               "processing": true
@@ -837,6 +855,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100132,
               "messageCount": 0
             }
@@ -854,6 +873,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100132,
               "messageCount": 0
             }
@@ -866,6 +886,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -878,6 +899,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -912,6 +934,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584102222,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -920,6 +943,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -932,6 +956,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584102222,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -940,6 +965,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -952,6 +978,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584102222,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -960,6 +987,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -972,6 +1000,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584102222,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -980,6 +1009,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -992,6 +1022,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "busy",
               "updatedAt": 1774584102222,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -1001,6 +1032,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -1018,6 +1050,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "busy",
               "updatedAt": 1774584102222,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -1027,6 +1060,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -1094,6 +1128,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584103749,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -1102,6 +1137,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -1119,6 +1155,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584103749,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -1127,6 +1164,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -1139,6 +1177,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584103760,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -1147,6 +1186,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }
@@ -1159,6 +1199,7 @@
             {
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
+              "status": "idle",
               "updatedAt": 1774584103760,
               "messageCount": 0,
               "parentID": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
@@ -1167,6 +1208,7 @@
             {
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
+              "status": "idle",
               "updatedAt": 1774584100143,
               "messageCount": 0
             }

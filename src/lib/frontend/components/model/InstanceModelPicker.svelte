@@ -15,8 +15,12 @@
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import {
+		applyDefaultModelSet,
 		applyGetModelsResponse,
 		applyGetAgentsResponse,
+		applyModelSwitched,
+		chooseDefaultModel,
+		chooseModel,
 		discoveryState,
 		getActiveModel,
 		getAvailableInstances,
@@ -39,7 +43,7 @@
 		setDefaultModelRpc,
 		switchModelRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import type { ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
+	import type { Immutable, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
@@ -96,8 +100,13 @@
 			.filter((g) => g.models.length > 0);
 	});
 
-	const activeModel = $derived(getActiveModel());
-	const hasModel = $derived(!!discoveryState.currentModelId);
+	const activeModelId = $derived(
+		sessionState.currentId
+			? discoveryState.currentModelId
+			: discoveryState.defaultModelId,
+	);
+	const activeModel = $derived(getActiveModel(activeModelId));
+	const hasModel = $derived(!!activeModelId);
 	$effect(() => {
 		const turnEpoch = currentChat().turnEpoch;
 		const projectSlug = getCurrentSlug();
@@ -119,12 +128,12 @@
 		if (activeModel) {
 			const base = stripDateSuffix(formatModelName(activeModel));
 			const scope = activeModel.routingOptions?.find(
-				(option) => option.value === discoveryState.currentModelId,
+				(option) => option.value === activeModelId,
 			);
 			return scope ? `${base} · ${scope.label}` : base;
 		}
-		if (discoveryState.currentModelId) {
-			return stripDateSuffix(discoveryState.currentModelId);
+		if (activeModelId) {
+			return stripDateSuffix(activeModelId);
 		}
 		return "Select model";
 	});
@@ -158,16 +167,16 @@
 		return Number.parseFloat(value.toFixed(6)).toString();
 	}
 
-	function isActiveModel(model: ModelInfo): boolean {
+	function isActiveModel(model: Immutable<ModelInfo>): boolean {
 		return (
-			model.id === discoveryState.currentModelId ||
+			model.id === activeModelId ||
 			!!model.routingOptions?.some(
-				(option) => option.value === discoveryState.currentModelId,
+				(option) => option.value === activeModelId,
 			)
 		);
 	}
 
-	function isDefaultModel(model: ModelInfo): boolean {
+	function isDefaultModel(model: Immutable<ModelInfo>): boolean {
 		return (
 			model.id === discoveryState.defaultModelId &&
 			model.provider === discoveryState.defaultProviderId
@@ -190,7 +199,7 @@
 			: `${instance.label}${status}`;
 	}
 
-	function providerSectionClass(group: ProviderGroup): string {
+	function providerSectionClass(group: Immutable<ProviderGroup>): string {
 		const base = "model-provider";
 		if (!isProviderConfigured(group.provider)) {
 			return `${base} model-provider-disabled opacity-45`;
@@ -219,7 +228,7 @@
 	 * locates the active row through it -- and the accent checkmark inside the
 	 * row is a separate element that does render.
 	 */
-	function modelItemClass(model: ModelInfo): string {
+	function modelItemClass(model: Immutable<ModelInfo>): string {
 		const base =
 			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 text-base text-left duration-100 leading-[1.4]";
 		return isActiveModel(model) ? `${base} model-item-active` : base;
@@ -253,15 +262,13 @@
 		}
 	}
 
-	function handleModelClick(model: ModelInfo, e: MouseEvent, modelId?: string) {
+	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
 		e.stopPropagation();
 		const targetId = modelId ?? model.id;
-		const previousModelId = discoveryState.currentModelId;
-		const previousProviderId = discoveryState.currentProviderId;
-		const previousVariant = discoveryState.currentVariant;
-		const previousVariants = discoveryState.availableVariants;
-		discoveryState.currentModelId = targetId;
-		discoveryState.currentProviderId = model.provider;
+		const undoModel = chooseModel({
+			modelId: targetId,
+			providerId: model.provider,
+		});
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
@@ -272,32 +279,22 @@
 				providerId: model.provider,
 			})
 				.then((response) => {
-					discoveryState.currentModelId = response.model;
-					discoveryState.currentProviderId = response.provider;
-					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = [...response.variants];
+					applyModelSwitched(response);
 					void getAgentsRpc({ projectSlug, sessionId })
 						.then(applyGetAgentsResponse)
 						.catch(() => undefined);
 				})
-				.catch(() => {
-					discoveryState.currentModelId = previousModelId;
-					discoveryState.currentProviderId = previousProviderId;
-					discoveryState.currentVariant = previousVariant;
-					discoveryState.availableVariants = previousVariants;
-				});
+				.catch(undoModel);
 		}
 		closePicker();
 	}
 
-	function handleSetDefault(model: ModelInfo, e: MouseEvent) {
+	function handleSetDefault(model: Immutable<ModelInfo>, e: MouseEvent) {
 		e.stopPropagation();
-		const previousDefaultModelId = discoveryState.defaultModelId;
-		const previousDefaultProviderId = discoveryState.defaultProviderId;
-		const previousVariant = discoveryState.currentVariant;
-		const previousVariants = discoveryState.availableVariants;
-		discoveryState.defaultModelId = model.id;
-		discoveryState.defaultProviderId = model.provider;
+		const undoDefault = chooseDefaultModel({
+			modelId: model.id,
+			providerId: model.provider,
+		});
 		const projectSlug = getCurrentSlug();
 		if (projectSlug) {
 			void setDefaultModelRpc({
@@ -305,18 +302,8 @@
 				model: model.id,
 				provider: model.provider,
 			})
-				.then((response) => {
-					discoveryState.defaultModelId = response.model;
-					discoveryState.defaultProviderId = response.provider;
-					discoveryState.currentVariant = response.variant;
-					discoveryState.availableVariants = [...response.variants];
-				})
-				.catch(() => {
-					discoveryState.defaultModelId = previousDefaultModelId;
-					discoveryState.defaultProviderId = previousDefaultProviderId;
-					discoveryState.currentVariant = previousVariant;
-					discoveryState.availableVariants = previousVariants;
-				});
+				.then(applyDefaultModelSet)
+				.catch(undoDefault);
 		}
 	}
 

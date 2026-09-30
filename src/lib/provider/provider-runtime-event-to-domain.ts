@@ -7,6 +7,7 @@ import {
 	type EventId,
 	type EventMetadata,
 	type MessageRole,
+	type MessageSnapshotPayload,
 	type PermissionDecision,
 	SESSION_PERMISSION_MODES,
 	type SessionCreatedPayload,
@@ -41,9 +42,61 @@ export function translateProviderRuntimeEventToDomain(
 	const data = dataRecord(event);
 
 	switch (event.type) {
+		case "message.removed": {
+			return {
+				events: [
+					canonicalEvent(
+						"message.removed",
+						event.sessionId,
+						{ messageId: messageIdFromData(event, data) },
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		case "message.part.removed": {
+			return {
+				events: [
+					canonicalEvent(
+						"message.part.removed",
+						event.sessionId,
+						{
+							messageId: messageIdFromData(event, data),
+							partId: partIdFromData(event, data),
+						},
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
+		case "message.snapshot": {
+			if (!isSnapshotPayload(event.data)) {
+				throw new TypeError("Invalid OpenCode message snapshot");
+			}
+			return {
+				events: [
+					canonicalEvent(
+						"message.snapshot",
+						event.sessionId,
+						event.data,
+						eventOptions(event),
+					),
+				],
+				state,
+			};
+		}
+
 		case "message.created": {
 			const messageId = messageIdFromData(event, data);
 			const role = messageRole(data["role"]);
+			const parentID =
+				event.providerId === "opencode"
+					? stringField(data["parentID"])
+					: undefined;
 			const nextState =
 				role === "assistant"
 					? withCurrentAssistantMessageId(event, state, messageId)
@@ -57,7 +110,9 @@ export function translateProviderRuntimeEventToDomain(
 							messageId,
 							role,
 							sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+							...(parentID ? { parentID } : {}),
 							...(event.turnId ? { turnId: event.turnId } : {}),
+							...(data["backfilled"] === true ? { backfilled: true } : {}),
 						},
 						eventOptions(event),
 					),
@@ -167,7 +222,14 @@ export function translateProviderRuntimeEventToDomain(
 								? { metadata: data["metadata"] }
 								: {}),
 							// Refreshed input for tools whose args stream after tool.started
-							...(isRecord(data["input"]) ? { input: data["input"] } : {}),
+							...(isRecord(data["input"])
+								? {
+										input: normalizeToolInput(
+											stringField(data["toolName"]) ?? "Unknown",
+											data["input"],
+										),
+									}
+								: {}),
 							...(typeof data["callId"] === "string"
 								? { callId: data["callId"] }
 								: {}),
@@ -216,7 +278,12 @@ export function translateProviderRuntimeEventToDomain(
 						// On an orphan completion the input belongs to the synthesized
 						// tool.started above instead.
 						...(toolWasStarted && isRecord(data["input"])
-							? { input: data["input"] }
+							? {
+									input: normalizeToolInput(
+										stringField(data["toolName"]) ?? "Unknown",
+										data["input"],
+									),
+								}
 							: {}),
 					},
 					eventOptions(event),
@@ -415,6 +482,26 @@ export function translateProviderRuntimeEventToDomain(
 			return { events: [], state };
 		}
 	}
+}
+
+function isSnapshotPayload(value: unknown): value is MessageSnapshotPayload {
+	if (typeof value !== "object" || value === null) return false;
+	if (!("messageId" in value) || typeof value.messageId !== "string")
+		return false;
+	if (!("digest" in value) || typeof value.digest !== "string") return false;
+	if (
+		!("message" in value) ||
+		typeof value.message !== "object" ||
+		value.message === null
+	)
+		return false;
+	const message = value.message;
+	return (
+		"id" in message &&
+		typeof message.id === "string" &&
+		"parts" in message &&
+		Array.isArray(message.parts)
+	);
 }
 
 const sessionPermissionModes = new Set<string>(SESSION_PERMISSION_MODES);

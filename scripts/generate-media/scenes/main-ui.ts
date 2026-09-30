@@ -2,6 +2,7 @@
 // Generates GENERATE-MAIN-UI.png — iPhone chat with a completed conversation
 // showing tool calls and assistant response.
 
+import { mockWsRpc } from "../../../test/e2e/helpers/rpc-mock.js";
 import {
 	freezeAnimations,
 	waitForFonts,
@@ -23,6 +24,16 @@ export const mainUiScene: SceneDefinition = {
 
 	async run({ page, previewUrl, phase, assert }) {
 		await phase("setup-ws-mock", async () => {
+			await mockWsRpc(page, {
+				handlers: {
+					ListDaemonSessions: () => ({
+						sessions: [],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
+				},
+			});
 			await mockRelayWebSocket(page, {
 				initMessages: mainUiInit,
 				responses: new Map([

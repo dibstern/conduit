@@ -81,6 +81,7 @@ describe("WsRpcServerLayer SwitchModel", () => {
 				);
 				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
 					type: "model_info",
+					sessionId: "session-1",
 					model: "gpt-4",
 					provider: "openai",
 				});

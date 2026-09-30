@@ -28,11 +28,11 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 
 	it("delivers tool_start, tool_executing, tool_result in order", async () => {
 		const client = await harness.connectWsClient();
-		const switchMsg = await client.waitFor("session_switched");
-		const sessionId = switchMsg["id"] as string;
-		expect(sessionId).toBeTruthy();
-
 		await client.waitForInitialState();
+		const sessionId = client.getActiveSessionId();
+		expect(sessionId).toBeTruthy();
+		if (!sessionId) throw new Error("No initial session");
+
 		client.clearReceived();
 
 		// Inject SSE pending event — translator sees new part → emits tool_start
@@ -127,11 +127,11 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 
 	it("handles history+SSE overlap without errors", async () => {
 		const client = await harness.connectWsClient();
-		const switchMsg = await client.waitFor("session_switched");
-		const sessionId = switchMsg["id"] as string;
-		expect(sessionId).toBeTruthy();
-
 		await client.waitForInitialState();
+		const sessionId = client.getActiveSessionId();
+		expect(sessionId).toBeTruthy();
+		if (!sessionId) throw new Error("No initial session");
+
 		client.clearReceived();
 
 		// Simulate a full tool lifecycle (as if from history replay via SSE)

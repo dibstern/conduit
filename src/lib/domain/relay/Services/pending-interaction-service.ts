@@ -31,6 +31,8 @@ export class PendingInteractionCancelled extends Data.TaggedError(
 	readonly requestId: string;
 	readonly sessionId: string;
 	readonly reason: string;
+	/** The question outlives its waiter as a recovered question, still pending. */
+	readonly recovered?: true;
 }> {}
 
 export interface PendingPermissionRequestInput {
@@ -466,6 +468,9 @@ export const makePendingInteractionServiceLive = (
 											requestId: entry.requestId,
 											sessionId: entry.sessionId,
 											reason,
+											...(options?.recoverQuestions
+												? { recovered: true as const }
+												: {}),
 										}),
 									).pipe(Effect.ignore)
 								: Effect.void,

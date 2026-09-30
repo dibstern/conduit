@@ -21,7 +21,7 @@ const MIGRATIONS_DIR = join(
 	"../../../src/lib/persistence/migrations",
 );
 
-const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
+const SHIPPED_MIGRATION_HASHES = {
 	"0001_current_event_store.sql":
 		"2758f4b08c34b1acab9c151b2e80daf94e2e85bd802e0a8464ef15b6b1d78d1b",
 	"0002_message_part_metadata.sql":
@@ -54,11 +54,31 @@ const SHIPPED_MIGRATION_HASHES: Record<string, string> = {
 		"9e476e07945b4ea923b832a5b69b2cb204fc082e99932ab87f8c33cc0e89f58a",
 	"0016_sessions_auto_settle.sql":
 		"33ba2a35044d1f57cdfa812ad28ba71cb290e5e28f4b4e7e1e05fddc69d93ceb",
-	"0017_sessions_marked_unread.sql":
+	"0017_projection_failures.sql":
+		"ade689f16ce4c5a201fc872718f4f6c678923ca07e55a0774b5991fdd07ac173",
+	"0018_read_model_version.sql":
+		"b643e63439f45ef732258efb12ccfd40ccc8f6b85ee2ad8e6a9713537ab137af",
+	"0019_read_model_counter.sql":
+		"b83d069271c9161783e71f5dbd0330622e6cc83340d13ec31e396da591813769",
+	"0020_sent_alerts.sql":
+		"094c38bd9dccf2799076feb9dce6196a83cf1699e58bee296e14e86b1e729068",
+	"0021_fork_point_timestamp.sql":
+		"55e06b7e72140b5dfca14caa81625574c7132d9e26420e7074297a69f3afb113",
+	"0022_sessions_marked_unread.sql":
 		"c424314faa1dacf6bb00f9043a9c83bc36136ef5bcdc791814e135d84151f958",
-	"0018_sessions_forked_from.sql":
-		"d3cb4343d5a27f3506cd63977cabb0d876bad86ce363bce35e15f34d38d0487d",
-};
+	"0023_session_attention.sql":
+		"42461e73eb8c43e20db3a2570a9b06fb36ae0692353442cecb68f909ec494cc2",
+	"0024_read_state_to_turn_ends.sql":
+		"2f5154cc5928c3df40633d9526c6ae22d1d28f33aed616f7b3d11082d1b81d98",
+	"0025_sessions_forked_from.sql":
+		"6ad03148727ef382f1f8d3958910ada6eadf2bce56987ad173eace9b8ba7d32c",
+	"0026_messages_backfilled.sql":
+		"5249e2f101d80480898a842eb7ef27c824071ce4507fcb9610e99763f9c5aba9",
+	"0027_sessions_history_complete.sql":
+		"7b07ce8f2b5f7224574acecced69d6241df2e7d4bf2d92a55907589ef41a1198",
+	"0028_message_tombstones.sql":
+		"54bcb95d358a1b8563a3de2dbf2732b332bd6a45cd33906155d813724db92a76",
+} satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {
 	it("every shipped migration file matches its pinned hash", () => {

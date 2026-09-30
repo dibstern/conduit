@@ -35,19 +35,13 @@ export const wireRelayWebSocketCallbacksEffect = ({
 
 			wsHandler.on(
 				"client_connected",
-				({
-					clientId,
-					requestedSessionId,
-					skipMarkRead,
-					skipDefaultSession,
-				}) => {
+				({ clientId, requestedSessionId, skipDefaultSession }) => {
 					log.info(
 						`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
 					);
 					runFork(
 						handleClientConnectedEffect(clientId, requestedSessionId, {
 							...clientInitOptions,
-							...(skipMarkRead != null && { skipMarkRead }),
 							...(skipDefaultSession != null && { skipDefaultSession }),
 						}).pipe(
 							Effect.catchAllCause((cause) =>

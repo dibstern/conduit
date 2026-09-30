@@ -8,12 +8,14 @@ import type {
 	RelayMessage,
 } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { dispatch } from "./notification-reducer.svelte.js";
 import { sessionState } from "./session.svelte.js";
 
 const log = createFrontendLogger("permissions");
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// This store has no client half: every entry is a request the server is waiting
+// on. Which option the user has highlighted lives in the card component until
+// it is submitted.
 
 export const permissionsState = $state({
 	pendingPermissions: [] as (PermissionRequest & { id: string })[],
@@ -277,32 +279,17 @@ export function removeQuestion(toolId: string): void {
 }
 
 /** Clear all pending items (e.g. on disconnect).
- *  Also resets the notification reducer (cross-session indicators). */
+ *  Cross-session indicators need no clearing: they are on the session rows, and
+ *  the next snapshot replaces them wholesale. */
 export function clearAll(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	dispatch({ type: "reset" });
 }
 
-/** Clear only session-local pending items (for session switch).
- *  Keeps remote permissions so the AttentionBanner persists. */
-export function clearSessionLocal(previousSessionId: string | null): void {
-	if (previousSessionId) {
-		permissionsState.pendingPermissions =
-			permissionsState.pendingPermissions.filter(
-				(p) => p.sessionId !== previousSessionId,
-			);
-	}
-	permissionsState.pendingQuestions = [];
-	permissionsState.questionErrors = new Map();
-}
-
-/** Clear all permissions state (for project switch).
- *  Also resets the notification reducer (cross-session indicators). */
+/** Clear all permissions state (for project switch). */
 export function clearAllPermissions(): void {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
-	dispatch({ type: "reset" });
 }

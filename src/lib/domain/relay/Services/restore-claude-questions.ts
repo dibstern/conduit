@@ -2,7 +2,6 @@ import { Effect } from "effect";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { PendingQuestionInput } from "./pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
-import { SessionManagerServiceTag } from "./session-manager-service.js";
 
 /** Rebuild answerable Claude questions from the one durable tool snapshot. */
 export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
@@ -56,10 +55,4 @@ export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
 	}
 	const pendingInteractions = yield* PendingInteractionServiceTag;
 	yield* pendingInteractions.recoverPendingQuestions(questions);
-	const counts = new Map<string, number>();
-	for (const question of questions) {
-		counts.set(question.sessionId, (counts.get(question.sessionId) ?? 0) + 1);
-	}
-	const sessions = yield* SessionManagerServiceTag;
-	yield* sessions.setPendingQuestionCounts(counts);
 });

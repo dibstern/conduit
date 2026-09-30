@@ -8,8 +8,10 @@ import { mapToolName } from "../../relay/event-translator.js";
 import type { SSEEvent } from "../../relay/opencode-events.js";
 import {
 	isMessageCreatedEvent,
+	isMessageRemovedEvent,
 	isMessageUpdatedEvent,
 	isPartDeltaEvent,
+	isPartRemovedEvent,
 	isPartUpdatedEvent,
 	isPermissionAskedEvent,
 	isPermissionRepliedEvent,
@@ -23,6 +25,7 @@ import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 interface TrackedPart {
+	readonly messageId: string;
 	readonly type: string;
 	readonly status?: string;
 	readonly thinkingStarted?: boolean;
@@ -32,33 +35,117 @@ interface TrackedPart {
 
 const defaultLog = createLogger("opencode-runtime-event-translator");
 
+/** One session's translation state: the messages already announced, what is
+ *  known about each part, and the text already emitted for it. It is a value so
+ *  a caller can translate into a fork and keep the fork only once the events it
+ *  produced are durable — a batch that rolled back must translate again. */
+export interface SessionTranslation {
+	droppedRewrite: boolean;
+	/** The reconnect generation this copy was forked from. A fork translated
+	 *  before a reconnect may not restore the announcements that reconnect
+	 *  deliberately discarded. */
+	readonly epoch: number;
+	readonly parts: Map<string, TrackedPart>;
+	readonly seenMessages: Set<string>;
+	/** Text already emitted per part. Owns what used to be an emitted-character
+	 *  count: a count can only answer "is there more?", and answering it by
+	 *  length is what let a rewritten part splice. */
+	readonly emitted: MonotoneText;
+}
+
 export class OpenCodeRuntimeEventTranslator {
-	private readonly sessions = new Map<string, Map<string, TrackedPart>>();
-	private readonly seenMessages = new Map<string, Set<string>>();
-	/** Text already emitted per part, one ledger per session. Owns what used to
-	 *  be an emitted-character count: a count can only answer "is there more?",
-	 *  and answering it by length is what let a rewritten part splice. */
-	private readonly emitted = new Map<string, MonotoneText>();
+	private readonly committed = new Map<string, SessionTranslation>();
+	/** Bumped by every reconnect. A number rather than a lock: it is written and
+	 *  read synchronously, so no fiber can observe it half-applied and a reset
+	 *  cannot interleave with a translation that is already in flight. */
+	private epoch = 0;
 
 	constructor(private readonly log: Logger = defaultLog) {}
 
+	/** Translate and keep what was learned. Callers that persist the events must
+	 *  use `forkSession`/`translateInto`/`commitSession` instead, so translation
+	 *  state advances only when the events it produced do. */
 	translate(
 		event: SSEEvent,
 		sessionId: string | undefined,
 	): ProviderRuntimeEvent[] | null {
 		if (!sessionId) return null;
+		const working = this.forkSession(sessionId);
+		const events = this.translateInto(event, sessionId, working);
+		this.commitSession(sessionId, working);
+		return events;
+	}
 
+	/** A working copy of a session's committed translation state. */
+	forkSession(sessionId: string): SessionTranslation {
+		const committed = this.committed.get(sessionId);
+		return {
+			droppedRewrite: false,
+			epoch: this.epoch,
+			parts: new Map(committed?.parts),
+			seenMessages: new Set(committed?.seenMessages),
+			emitted: committed?.emitted.clone() ?? new MonotoneText(),
+		};
+	}
+
+	/** Make a working copy the session's state. A copy forked before a reconnect
+	 *  keeps only its text ledger: the events it emitted are durable, so the
+	 *  ledger must record them, but the announcements the reconnect dropped stay
+	 *  dropped, or the reconnect would be silently undone for that session. */
+	commitSession(sessionId: string, state: SessionTranslation): void {
+		this.committed.set(
+			sessionId,
+			state.epoch === this.epoch
+				? state
+				: {
+						droppedRewrite: false,
+						epoch: this.epoch,
+						parts: new Map(),
+						seenMessages: new Set(),
+						emitted: state.emitted,
+					},
+		);
+	}
+
+	translateInto(
+		event: SSEEvent,
+		sessionId: string,
+		state: SessionTranslation,
+	): ProviderRuntimeEvent[] | null {
 		if (isMessageCreatedEvent(event)) {
-			return this.translateMessageCreated(event, sessionId);
+			return this.translateMessageCreated(event, sessionId, state);
+		}
+		if (isMessageRemovedEvent(event)) {
+			state.seenMessages.delete(event.properties.messageID);
+			for (const [partId, part] of state.parts) {
+				if (part.messageId !== event.properties.messageID) continue;
+				state.parts.delete(partId);
+				state.emitted.forget(partId);
+			}
+			return [
+				opencodeRuntimeEvent("message.removed", sessionId, event, {
+					messageId: event.properties.messageID,
+				}),
+			];
+		}
+		if (isPartRemovedEvent(event)) {
+			state.parts.delete(event.properties.partID);
+			state.emitted.forget(event.properties.partID);
+			return [
+				opencodeRuntimeEvent("message.part.removed", sessionId, event, {
+					messageId: event.properties.messageID,
+					partId: event.properties.partID,
+				}),
+			];
 		}
 		if (isPartDeltaEvent(event)) {
-			return this.translatePartDelta(event, sessionId);
+			return this.translatePartDelta(event, sessionId, state);
 		}
 		if (isPartUpdatedEvent(event)) {
-			return this.translatePartUpdated(event, sessionId);
+			return this.translatePartUpdated(event, sessionId, state);
 		}
 		if (isMessageUpdatedEvent(event)) {
-			return this.translateMessageUpdated(event, sessionId);
+			return this.translateMessageUpdated(event, sessionId, state);
 		}
 		if (isSessionStatusEvent(event)) {
 			return this.translateSessionStatus(event, sessionId);
@@ -75,6 +162,24 @@ export class OpenCodeRuntimeEventTranslator {
 		if (isQuestionAskedEvent(event)) {
 			return this.translateQuestionAsked(event, sessionId);
 		}
+		if (
+			event.type === "question.replied" ||
+			event.type === "question.rejected"
+		) {
+			const requestId = event.properties["requestID"];
+			if (typeof requestId !== "string") return null;
+			const answers = event.properties["answers"];
+			return [
+				opencodeRuntimeEvent("question.resolved", sessionId, event, {
+					id: requestId,
+					answers: Array.isArray(answers)
+						? Object.fromEntries(
+								answers.map((answer, index) => [String(index), answer]),
+							)
+						: {},
+				}),
+			];
+		}
 		if (event.type === "session.updated") {
 			return this.translateSessionUpdated(event, sessionId);
 		}
@@ -82,40 +187,22 @@ export class OpenCodeRuntimeEventTranslator {
 		return null;
 	}
 
-	reset(sessionId?: string): void {
-		if (sessionId != null) {
-			this.sessions.delete(sessionId);
-			this.seenMessages.delete(sessionId);
-			this.emitted.delete(sessionId);
-		} else {
-			this.sessions.clear();
-			this.seenMessages.clear();
-			this.emitted.clear();
+	/** Announce every message and part again, because a reconnected stream may
+	 *  have dropped the events that explain them. The text ledger survives: it
+	 *  records text already appended to the store, and re-emitting text is the
+	 *  one thing the read model cannot absorb twice — "hello" would land as
+	 *  "hellohello". Announcements are idempotent upserts, text is not. */
+	resetAnnouncements(): void {
+		this.epoch++;
+		for (const [sessionId, state] of this.committed) {
+			this.committed.set(sessionId, {
+				droppedRewrite: false,
+				epoch: this.epoch,
+				parts: new Map(),
+				seenMessages: new Set(),
+				emitted: state.emitted,
+			});
 		}
-	}
-
-	getTrackedParts(
-		sessionId: string,
-	): ReadonlyMap<string, TrackedPart> | undefined {
-		return this.sessions.get(sessionId);
-	}
-
-	private getOrCreateParts(sessionId: string): Map<string, TrackedPart> {
-		let parts = this.sessions.get(sessionId);
-		if (!parts) {
-			parts = new Map();
-			this.sessions.set(sessionId, parts);
-		}
-		return parts;
-	}
-
-	private getOrCreateEmitted(sessionId: string): MonotoneText {
-		let emitted = this.emitted.get(sessionId);
-		if (!emitted) {
-			emitted = new MonotoneText();
-			this.emitted.set(sessionId, emitted);
-		}
-		return emitted;
 	}
 
 	/** What a refreshed part may still emit, or null when it may emit nothing.
@@ -123,14 +210,16 @@ export class OpenCodeRuntimeEventTranslator {
 	 *  upstream: report it and send nothing, because slicing it at the old
 	 *  length is what splices the tail of one text onto another. */
 	private emittableSuffix(
+		state: SessionTranslation,
 		sessionId: string,
 		partId: string,
 		partText: string,
 		kind: "text" | "reasoning",
 	): string | null {
-		const offer = this.getOrCreateEmitted(sessionId).offer(partId, partText);
+		const offer = state.emitted.offer(partId, partText);
 		if (offer.kind === "emit") return offer.suffix;
 		if (offer.kind === "diverged") {
+			state.droppedRewrite = true;
 			this.log.warn(
 				`opencode ${kind} part no longer extends the text already sent; dropping it`,
 				{
@@ -144,34 +233,35 @@ export class OpenCodeRuntimeEventTranslator {
 		return null;
 	}
 
-	private markMessageSeen(sessionId: string, messageId: string): boolean {
-		let messages = this.seenMessages.get(sessionId);
-		if (!messages) {
-			messages = new Set();
-			this.seenMessages.set(sessionId, messages);
-		}
-		if (messages.has(messageId)) return false;
-		messages.add(messageId);
+	private markMessageSeen(
+		state: SessionTranslation,
+		messageId: string,
+	): boolean {
+		if (state.seenMessages.has(messageId)) return false;
+		state.seenMessages.add(messageId);
 		return true;
 	}
 
 	private translateMessageCreated(
 		event: SSEEvent,
 		sessionId: string,
+		state: SessionTranslation,
 	): ProviderRuntimeEvent[] | null {
 		if (!isMessageCreatedEvent(event)) return null;
 		const props = event.properties;
 		const msg = props.info ?? props.message;
 		const role = msg?.role;
 		if (role !== "user" && role !== "assistant") return null;
+		const parentID = role === "assistant" ? msg?.parentID : undefined;
 
 		const messageId = props.messageID ?? "";
-		if (!this.markMessageSeen(sessionId, messageId)) return null;
+		if (!this.markMessageSeen(state, messageId)) return null;
 		return [
 			opencodeRuntimeEvent("message.created", sessionId, event, {
 				messageId,
 				role,
 				sessionId,
+				...(parentID ? { parentID } : {}),
 			}),
 		];
 	}
@@ -179,24 +269,31 @@ export class OpenCodeRuntimeEventTranslator {
 	private translatePartDelta(
 		event: SSEEvent,
 		sessionId: string,
+		state: SessionTranslation,
 	): ProviderRuntimeEvent[] | null {
 		if (!isPartDeltaEvent(event)) return null;
 		const props = event.properties;
 		const messageId = props.messageID ?? "";
 		const partId = props.partID;
-		const parts = this.getOrCreateParts(sessionId);
+		const parts = state.parts;
 		const tracked = parts.get(partId);
 
 		if (tracked?.type === "reasoning") {
 			parts.set(
 				partId,
-				trackedPart(tracked.type, tracked.status, tracked.thinkingStarted),
+				trackedPart(
+					tracked.type,
+					tracked.status,
+					tracked.thinkingStarted,
+					undefined,
+					messageId,
+				),
 			);
 			return [
 				opencodeRuntimeEvent("thinking.delta", sessionId, event, {
 					messageId,
 					partId,
-					text: this.getOrCreateEmitted(sessionId).append(partId, props.delta),
+					text: state.emitted.append(partId, props.delta),
 				}),
 			];
 		}
@@ -208,13 +305,15 @@ export class OpenCodeRuntimeEventTranslator {
 					tracked?.type ?? props.field,
 					tracked?.status,
 					tracked?.thinkingStarted,
+					undefined,
+					messageId,
 				),
 			);
 			return [
 				opencodeRuntimeEvent("text.delta", sessionId, event, {
 					messageId,
 					partId,
-					text: this.getOrCreateEmitted(sessionId).append(partId, props.delta),
+					text: state.emitted.append(partId, props.delta),
 				}),
 			];
 		}
@@ -225,6 +324,7 @@ export class OpenCodeRuntimeEventTranslator {
 	private translatePartUpdated(
 		event: SSEEvent,
 		sessionId: string,
+		state: SessionTranslation,
 	): ProviderRuntimeEvent[] | null {
 		if (!isPartUpdatedEvent(event)) return null;
 		const props = event.properties;
@@ -235,7 +335,7 @@ export class OpenCodeRuntimeEventTranslator {
 		// SDK 1.17.18 EventMessagePartUpdated.properties = { part, delta? }; the
 		// message id lives on the part, not at the top level (same as part id).
 		const messageId = rawPart.messageID ?? props.messageID ?? "";
-		const parts = this.getOrCreateParts(sessionId);
+		const parts = state.parts;
 		const existing = parts.get(partId);
 		const partText =
 			"text" in rawPart && typeof rawPart.text === "string"
@@ -249,6 +349,7 @@ export class OpenCodeRuntimeEventTranslator {
 				rawPart.state?.status,
 				existing?.thinkingStarted,
 				existing?.toolInputEmpty,
+				messageId,
 			),
 		);
 
@@ -257,7 +358,13 @@ export class OpenCodeRuntimeEventTranslator {
 			if (!existing?.thinkingStarted) {
 				parts.set(
 					partId,
-					trackedPart(rawPart.type, rawPart.state?.status, true),
+					trackedPart(
+						rawPart.type,
+						rawPart.state?.status,
+						true,
+						undefined,
+						messageId,
+					),
 				);
 				events.push(
 					opencodeRuntimeEvent("thinking.start", sessionId, event, {
@@ -269,7 +376,13 @@ export class OpenCodeRuntimeEventTranslator {
 			const suffix =
 				partText == null
 					? null
-					: this.emittableSuffix(sessionId, partId, partText, "reasoning");
+					: this.emittableSuffix(
+							state,
+							sessionId,
+							partId,
+							partText,
+							"reasoning",
+						);
 			if (suffix != null) {
 				events.push(
 					opencodeRuntimeEvent("thinking.delta", sessionId, event, {
@@ -291,7 +404,13 @@ export class OpenCodeRuntimeEventTranslator {
 		}
 
 		if (rawPart.type === "text" && partText != null) {
-			const suffix = this.emittableSuffix(sessionId, partId, partText, "text");
+			const suffix = this.emittableSuffix(
+				state,
+				sessionId,
+				partId,
+				partText,
+				"text",
+			);
 			if (suffix != null) {
 				return [
 					opencodeRuntimeEvent("text.delta", sessionId, event, {
@@ -329,6 +448,7 @@ export class OpenCodeRuntimeEventTranslator {
 						rawPart.state?.status,
 						existing?.thinkingStarted,
 						toolInputEmpty,
+						messageId,
 					),
 				);
 
@@ -382,7 +502,21 @@ export class OpenCodeRuntimeEventTranslator {
 					rawPart.time?.end && rawPart.time?.start
 						? rawPart.time.end - rawPart.time.start
 						: 0;
+				// First seen already settled (attached mid-tool, or a backfill of
+				// final state): announce it like the running branch does, or the
+				// domain mapper invents an orphan "Unknown" tool.started.
 				return [
+					...(existing
+						? []
+						: [
+								opencodeRuntimeEvent("tool.started", sessionId, event, {
+									messageId,
+									partId,
+									toolName,
+									callId,
+									input: normalizeToolInput(toolName, rawPart.state?.input),
+								}),
+							]),
 					opencodeRuntimeEvent("tool.completed", sessionId, event, {
 						messageId,
 						partId,
@@ -423,6 +557,7 @@ export class OpenCodeRuntimeEventTranslator {
 	private translateMessageUpdated(
 		event: SSEEvent,
 		sessionId: string,
+		state: SessionTranslation,
 	): ProviderRuntimeEvent[] | null {
 		if (!isMessageUpdatedEvent(event)) return null;
 		const msg = event.properties.info ?? event.properties.message;
@@ -430,12 +565,15 @@ export class OpenCodeRuntimeEventTranslator {
 
 		const messageId = msg.id ?? "";
 		const events: ProviderRuntimeEvent[] = [];
-		if (this.markMessageSeen(sessionId, messageId)) {
+		if (this.markMessageSeen(state, messageId)) {
 			events.push(
 				opencodeRuntimeEvent("message.created", sessionId, event, {
 					messageId,
 					role: msg.role,
 					sessionId,
+					...(msg.role === "assistant" && msg.parentID
+						? { parentID: msg.parentID }
+						: {}),
 				}),
 			);
 		}
@@ -585,9 +723,11 @@ export class OpenCodeRuntimeEventTranslator {
 
 export function opencodeSessionCreatedRuntimeEvent(
 	sessionId: string,
+	providerInstanceId: string,
+	parentId?: string,
 ): ProviderRuntimeEvent {
 	return {
-		eventId: createEventId(),
+		eventId: `evt_opencode_session_created_${sessionId}`,
 		type: "session.created",
 		providerId: "opencode",
 		sessionId,
@@ -597,7 +737,8 @@ export function opencodeSessionCreatedRuntimeEvent(
 		data: {
 			sessionId,
 			title: "Untitled",
-			provider: "opencode",
+			provider: providerInstanceId,
+			...(parentId === undefined ? {} : { parentId }),
 		},
 		metadata: {
 			synthetic: true,
@@ -658,9 +799,11 @@ function trackedPart(
 	status?: string,
 	thinkingStarted?: boolean,
 	toolInputEmpty?: boolean,
+	messageId = "",
 ): TrackedPart {
 	return {
 		type,
+		messageId,
 		...(status != null ? { status } : {}),
 		...(thinkingStarted != null ? { thinkingStarted } : {}),
 		...(toolInputEmpty != null ? { toolInputEmpty } : {}),

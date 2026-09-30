@@ -1,8 +1,13 @@
+import {
+	applySessionChange,
+	seedSearchResults,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Ghost Session Cleanup ────────────────────────────────────────────────────
 // Verifies that clearSessionChatState is wired to:
 // 1. session_deleted relay events
-// 2. handleSessionList drop path (diff logic)
-// 3. Search-payload guard (search results don't trigger cleanup)
+// 2. shell snapshot omission and its chat cleanup
+// 3. Search query results never trigger cleanup
 // 4. Active-session teardown
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,8 +53,8 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	clearSessionState,
 	handleSessionFamily,
-	handleSessionList,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
@@ -62,11 +67,9 @@ beforeEach(() => {
 	sessionMessages.clear();
 	_resetLRU();
 	sessionState.currentId = "current-session";
-	sessionState.rootSessions = [];
-	sessionState.familySessions = [];
-	sessionState.searchResults = null;
+	clearSessionState();
 	sessionState.searchQuery = "";
-	sessionState.sessions.clear();
+	clearSessionState();
 	clearMessages();
 });
 
@@ -75,18 +78,22 @@ afterEach(() => {
 	sessionMessages.clear();
 	_resetLRU();
 	sessionState.currentId = null;
-	sessionState.sessions.clear();
+	clearSessionState();
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("clearSessionChatState wired to session_deleted", () => {
-	it("session_deleted event cleans up per-session chat state", () => {
+describe("clearSessionChatState wired to the shell feed", () => {
+	it("feed removal cleans up per-session chat state", () => {
 		// Pre-populate a session slot
-		sessionState.sessions.set("deleted-session", {
-			id: "deleted-session",
-			title: "To Delete",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "deleted-session",
+				title: "To Delete",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("deleted-session");
 
 		expect(sessionActivity.has("deleted-session")).toBe(true);
@@ -98,6 +105,8 @@ describe("clearSessionChatState wired to session_deleted", () => {
 			sessionId: "deleted-session",
 		} as RelayMessage);
 
+		expect(sessionState.sessions.has("deleted-session")).toBe(true);
+		applySessionChange({ _tag: "remove", id: "deleted-session" });
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has("deleted-session")).toBe(false);
 		expect(sessionMessages.has("deleted-session")).toBe(false);
@@ -119,114 +128,137 @@ describe("clearSessionChatState wired to session_deleted", () => {
 	});
 });
 
-describe("handleSessionList drop path", () => {
-	it("removes membership without evicting cached chat state", () => {
+describe("shell snapshot omission", () => {
+	it("removes membership and evicts cached chat state", () => {
 		// Pre-populate sessions map with sessions A, B, C
-		sessionState.sessions.set("session-A", {
-			id: "session-A",
-			title: "A",
-		});
-		sessionState.sessions.set("session-B", {
-			id: "session-B",
-			title: "B",
-		});
-		sessionState.sessions.set("session-C", {
-			id: "session-C",
-			title: "C",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-A",
+				title: "A",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-B",
+				title: "B",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-C",
+				title: "C",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 		getOrCreateSessionSlot("session-C");
 
-		// Incoming session_list with only A and C (B was deleted)
-		// A root-session list is authoritative for membership.
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [
-				{ id: "session-A", title: "A" },
-				{ id: "session-C", title: "C" },
+		applySessionChange({
+			_tag: "snapshot",
+			rows: [
+				{ id: "session-A", title: "A", status: "idle" },
+				{ id: "session-C", title: "C", status: "idle" },
 			],
-		} as Extract<RelayMessage, { type: "session_list" }>);
+		});
 
-		// session-B should be cleaned up
-		expect(sessionActivity.has("session-B")).toBe(true);
-		expect(sessionMessages.has("session-B")).toBe(true);
+		expect(sessionActivity.has("session-B")).toBe(false);
+		expect(sessionMessages.has("session-B")).toBe(false);
 		expect(sessionState.sessions.has("session-B")).toBe(false);
+		expect(
+			sessionState.rootSessions.some((session) => session.id === "session-B"),
+		).toBe(false);
 
 		// session-A and session-C should still exist
 		expect(sessionState.sessions.has("session-A")).toBe(true);
 		expect(sessionState.sessions.has("session-C")).toBe(true);
 	});
 
-	it("search-payload guard: search results do not trigger cleanup", () => {
+	it("search query results do not trigger cleanup", () => {
 		// Pre-populate sessions map
-		sessionState.sessions.set("session-A", {
-			id: "session-A",
-			title: "A",
-		});
-		sessionState.sessions.set("session-B", {
-			id: "session-B",
-			title: "B",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-A",
+				title: "A",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-B",
+				title: "B",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 
 		// Search results only contain session-A — session-B should NOT be cleaned up
-		handleSessionList({
-			type: "session_list",
-			roots: true,
-			sessions: [{ id: "session-A", title: "A" }],
-			search: true,
-		} as Extract<RelayMessage, { type: "session_list" }>);
+		seedSearchResults([{ id: "session-A", title: "A" }]);
 
 		// session-B should still exist (search results are filtered, not authoritative)
 		expect(sessionActivity.has("session-B")).toBe(true);
 		expect(sessionMessages.has("session-B")).toBe(true);
 		expect(sessionState.sessions.has("session-B")).toBe(true);
 
-		// Search results should be set
-		expect(sessionState.searchResults).toHaveLength(1);
+		expect(sessionState.searchResults?.map((row) => row.id)).toEqual([
+			"session-A",
+		]);
 	});
 
-	it("roots=true session_list does not trigger diff cleanup", () => {
+	it("an authoritative snapshot triggers cleanup", () => {
 		// Pre-populate
-		sessionState.sessions.set("session-A", {
-			id: "session-A",
-			title: "A",
-		});
-		sessionState.sessions.set("session-B", {
-			id: "session-B",
-			title: "B",
-		});
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-A",
+				title: "A",
+				status: "idle",
+			},
+		]);
+		seedSessions([
+			...sessionState.sessions.values(),
+			{
+				id: "session-B",
+				title: "B",
+				status: "idle",
+			},
+		]);
 		getOrCreateSessionSlot("session-A");
 		getOrCreateSessionSlot("session-B");
 
-		// roots=true list with only session-A — should NOT clean up session-B
-		// because roots=true is a partial list (only root sessions)
-		handleSessionList({
-			type: "session_list",
-			sessions: [{ id: "session-A", title: "A" }],
-			roots: true,
-		} as Extract<RelayMessage, { type: "session_list" }>);
+		applySessionChange({
+			_tag: "snapshot",
+			rows: [{ id: "session-A", title: "A", status: "idle" }],
+		});
 
-		// session-B should still exist
-		expect(sessionActivity.has("session-B")).toBe(true);
-		expect(sessionMessages.has("session-B")).toBe(true);
+		expect(sessionActivity.has("session-B")).toBe(false);
+		expect(sessionMessages.has("session-B")).toBe(false);
 	});
 });
 
 describe("active-session teardown", () => {
-	it("session_deleted for the active session cleans up state", () => {
+	it("feed removal for the active session cleans up state", () => {
 		const activeId = "active-session";
 		sessionState.currentId = activeId;
-		sessionState.sessions.set(activeId, { id: activeId, title: "Active" });
+		seedSessions([
+			...sessionState.sessions.values(),
+			{ id: activeId, title: "Active", status: "idle" },
+		]);
 		getOrCreateSessionSlot(activeId);
 
 		handleMessage({
 			type: "session_deleted",
 			sessionId: activeId,
 		} as RelayMessage);
+		applySessionChange({ _tag: "remove", id: activeId });
 
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has(activeId)).toBe(false);
@@ -234,13 +266,14 @@ describe("active-session teardown", () => {
 	});
 });
 
+// Direct legacy family handler behavior is kept deliberately for R4/R6 deletion.
 it("switching families preserves the target transcript and removes old family membership", () => {
 	handleSessionFamily({
 		type: "session_family",
 		rootId: "old-root",
 		sessions: [
-			{ id: "old-root", title: "Old" },
-			{ id: "old-child", title: "Child", parentID: "old-root" },
+			{ id: "old-root", title: "Old", status: "idle" },
+			{ id: "old-child", title: "Child", status: "idle", parentID: "old-root" },
 		],
 	});
 	const target = getOrCreateSessionSlot("new-child");
@@ -252,14 +285,25 @@ it("switching families preserves the target transcript and removes old family me
 		type: "session_family",
 		rootId: "new-root",
 		sessions: [
-			{ id: "new-root", title: "New" },
-			{ id: "new-child", title: "Target", parentID: "new-root" },
+			{ id: "new-root", title: "New", status: "idle" },
+			{
+				id: "new-child",
+				title: "Target",
+				status: "idle",
+				parentID: "new-root",
+			},
 		],
 	});
 	expect(getOrCreateSessionSlot("new-child").messages.messages).toEqual(
 		target.messages.messages,
 	);
 	expect(getOrCreateSessionSlot("new-child").messages.messages).toHaveLength(1);
+	expect(
+		sessionState.familySessions.some((session) => session.id === "old-child"),
+	).toBe(false);
 	expect(sessionState.sessions.has("old-child")).toBe(false);
-	expect(sessionState.sessions.get("new-child")?.title).toBe("Target");
+	expect(sessionState.sessions.has("new-child")).toBe(false);
+	expect(
+		sessionState.familySessions.find((row) => row.id === "new-child")?.title,
+	).toBe("Target");
 });

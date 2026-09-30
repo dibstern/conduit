@@ -4,12 +4,6 @@
 // storage. This layer proxies session CRUD and maintains in-memory active state.
 
 import { EventEmitter } from "node:events";
-import {
-	type ForkEntry,
-	loadForkMetadata,
-	saveForkMetadata,
-} from "../daemon/fork-metadata.js";
-import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -29,7 +23,7 @@ export interface SessionManagerOptions {
 	directory?: string;
 	/** Optional getter for current session statuses (for processing indicators) */
 	getStatuses?: () => Record<string, SessionStatus>;
-	/** Config directory for fork metadata persistence */
+	/** Retained for compatibility with legacy callers. */
 	configDir?: string;
 }
 
@@ -60,7 +54,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly log: Logger;
 	private readonly directory: string | undefined;
 	private readonly getStatuses: (() => Record<string, SessionStatus>) | null;
-	private readonly configDir: string | undefined;
 
 	/**
 	 * Cached child→parent map built from the most recent session list fetch.
@@ -77,31 +70,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private lastMessageAt = new Map<string, number>();
 
 	/**
-	 * Fork-point metadata: maps forked sessionId → messageId at the fork point.
-	 * Loaded from disk on construction, updated on fork, saved on mutation.
-	 */
-	private forkMeta: Map<string, ForkEntry>;
-
-	/**
 	 * Session count from the most recent listSessions() call.
 	 * Used by the daemon to report session counts without an API call.
 	 */
 	private _lastKnownSessionCount = 0;
-
-	/**
-	 * Tracks the number of pending questions per session.
-	 * Updated from SSE events (question.asked, ask_user_resolved) and
-	 * bulk-set on SSE reconnect from listPendingQuestions.
-	 */
-	private pendingQuestionCounts = new Map<string, number>();
-
-	/**
-	 * Cursor for paginated history loading. Maps sessionId → oldest message ID
-	 * from the last loaded page. Used by loadHistory(offset>0) to fetch the
-	 * next page of older messages via getMessagesPage({ before }).
-	 * Reset on session switch (when offset=0 is loaded for a new session).
-	 */
-	private paginationCursors = new Map<string, string>();
 
 	constructor(options: SessionManagerOptions) {
 		super();
@@ -110,8 +82,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.log = options.log ?? createSilentLogger();
 		this.directory = options.directory;
 		this.getStatuses = options.getStatuses ?? null;
-		this.configDir = options.configDir;
-		this.forkMeta = loadForkMetadata(options.configDir);
 	}
 
 	// ─── Queries ──────────────────────────────────────────────────────────
@@ -178,143 +148,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				.map((s) => s.id.slice(0, 12))
 				.join(",")}${sessions.length > 5 ? "..." : ""}]`,
 		);
-		return toSessionInfoList(
-			sessions,
-			resolvedStatuses,
-			this.lastMessageAt,
-			this.forkMeta,
-			this.pendingQuestionCounts,
-		);
+		return toSessionInfoList(sessions, resolvedStatuses, this.lastMessageAt);
 	}
 
-	/**
-	 * Clear the stored pagination cursor for a session.
-	 * Must be called after rewind/fork — those operations delete messages,
-	 * invalidating any cursor that pointed to a now-deleted message ID.
-	 */
-	clearPaginationCursor(sessionId: string): void {
-		this.paginationCursors.delete(sessionId);
-	}
-
-	/**
-	 * Seed a pagination cursor for a session loaded from the event cache.
-	 *
-	 * When a session is served via cached SSE events (not REST history),
-	 * no initial loadHistory() call occurs so no cursor is set. This method
-	 * pre-seeds the cursor from the oldest messageId found in the events so
-	 * that subsequent LoadMoreHistory RPC requests can paginate correctly.
-	 *
-	 * Only seeds if no cursor already exists (avoids overwriting a cursor
-	 * from a client that has already paginated further back).
-	 */
-	seedPaginationCursor(sessionId: string, messageId: string): void {
-		if (!this.paginationCursors.has(sessionId)) {
-			this.paginationCursors.set(sessionId, messageId);
-		}
-	}
-
-	/**
-	 * Load a page of message history for a session using paginated API.
-	 *
-	 * Messages are returned in chronological order (oldest first).
-	 * Uses cursor-based pagination via the `before` message ID:
-	 *   offset=0  → most recent pageSize messages (no cursor)
-	 *   offset>0  → next page of older messages (uses tracked cursor)
-	 *
-	 * This avoids fetching ALL messages (which can be 40MB+ for large sessions)
-	 * and prevents OOM when many project relays are loaded.
-	 */
-	async loadHistory(sessionId: string, offset = 0): Promise<HistoryPage> {
-		const before =
-			offset > 0 ? this.paginationCursors.get(sessionId) : undefined;
-
-		// If caller wants an older page but we have no cursor, we can't paginate.
-		// This happens if the initial page was never loaded. Return empty.
-		if (offset > 0 && !before) {
-			return { messages: [], hasMore: false };
-		}
-
-		let page: Awaited<ReturnType<typeof this.client.session.messagesPage>>;
-		try {
-			page = await this.client.session.messagesPage(sessionId, {
-				limit: this.historyPageSize,
-				...(before ? { before } : {}),
-			});
-		} catch (err: unknown) {
-			// Stale/unsupported cursor → clear and fall back.
-			// OpenCode returns 400 "Invalid cursor" when the before ID
-			// doesn't exist or when cursor-based pagination is unsupported.
-			if (
-				before &&
-				err instanceof OpenCodeApiError &&
-				err.responseStatus === 400
-			) {
-				this.log.warn(
-					`Pagination cursor failed for ${sessionId.slice(0, 12)} — falling back to full fetch`,
-				);
-				this.paginationCursors.delete(sessionId);
-
-				if (offset > 0) {
-					// Continuation request: cursor-based pagination failed.
-					// Fall back to fetching all messages and returning only
-					// those older than the cursor boundary.
-					return this.loadHistoryByCursorScan(sessionId, before);
-				}
-
-				// For initial loads (offset = 0), retry without cursor to get
-				// the latest page (e.g. after rewind/fork).
-				page = await this.client.session.messagesPage(sessionId, {
-					limit: this.historyPageSize,
-				});
-			} else {
-				throw err;
-			}
-		}
-
-		// Track the oldest message ID for cursor-based "load more"
-		const oldest = page[0];
-		if (oldest) {
-			this.paginationCursors.set(sessionId, oldest.id);
-		}
-
+	/** Load the newest REST page for initial OpenCode history while backfill runs. */
+	async loadHistory(sessionId: string): Promise<HistoryPage> {
+		const page = await this.client.session.messagesPage(sessionId, {
+			limit: this.historyPageSize,
+		});
 		return {
 			messages: page as unknown as HistoryMessage[],
 			hasMore: page.length >= this.historyPageSize,
-		};
-	}
-
-	/**
-	 * Fallback when cursor-based pagination fails (e.g. OpenCode version
-	 * doesn't support the `before` parameter).  Fetches all messages in a
-	 * single request and returns only those older than `cursorId`.
-	 *
-	 * Returns ALL older messages at once (not paginated) with hasMore=false
-	 * so the frontend reaches "Beginning of session" in one step.  This is
-	 * less efficient than cursor-based pagination but guarantees the user
-	 * can scroll to the real beginning of the session.
-	 */
-	private async loadHistoryByCursorScan(
-		sessionId: string,
-		cursorId: string,
-	): Promise<HistoryPage> {
-		// Fetch all messages (API returns chronological order, oldest first).
-		const all = await this.client.session.messagesPage(sessionId, {
-			limit: 10_000,
-		});
-
-		// Find cursor position — everything before it is "older" content.
-		const cursorIdx = all.findIndex((m) => m.id === cursorId);
-		if (cursorIdx <= 0) {
-			// Cursor is the first message or not found — nothing older.
-			return { messages: [], hasMore: false };
-		}
-
-		// Return ALL messages before the cursor.  No further pagination
-		// needed — this single response covers everything to the beginning.
-		const olderMessages = all.slice(0, cursorIdx);
-		return {
-			messages: olderMessages as unknown as HistoryMessage[],
-			hasMore: false,
 		};
 	}
 
@@ -324,11 +168,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 * pre-rendering is never accidentally omitted from a call site.
 	 * @perf-guard — removing preRenderHistoryMessages degrades session switch latency
 	 */
-	async loadPreRenderedHistory(
-		sessionId: string,
-		offset?: number,
-	): Promise<HistoryPage> {
-		const page = await this.loadHistory(sessionId, offset);
+	async loadPreRenderedHistory(sessionId: string): Promise<HistoryPage> {
+		const page = await this.loadHistory(sessionId);
 		// Dynamic import avoids pulling jsdom/dompurify/marked into every
 		// module that imports session-manager (saves ~300-500ms at load time).
 		const { preRenderHistoryMessages } = await import(
@@ -361,7 +202,30 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		sessionId: string,
 		opts?: { silent?: boolean },
 	): Promise<void> {
+		// The provider's delete takes the descendants too, and pending counts now
+		// ride the `session_list` message rather than the sessions in it, so the
+		// whole lineage has to be forgotten here — a count left behind rebuilds an
+		// attention badge for a session the browser can no longer show. Read the
+		// lineage from the provider before the delete rather than from
+		// `cachedParentMap`, which is only a by-product of the last listSessions()
+		// call and may be missing the child→parent edge that matters.
+		const sessions = await this.listSessions();
+		const deleted = new Set([sessionId]);
+		const pendingParents = [sessionId];
+		for (const parentId of pendingParents) {
+			for (const candidate of sessions) {
+				if (candidate.parentID === parentId && !deleted.has(candidate.id)) {
+					deleted.add(candidate.id);
+					pendingParents.push(candidate.id);
+				}
+			}
+		}
+
 		await this.client.session.delete(sessionId);
+
+		for (const deletedId of deleted) {
+			this.cachedParentMap.delete(deletedId);
+		}
 
 		this.emit("session_lifecycle", { type: "deleted", sessionId });
 
@@ -392,13 +256,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				s.id.toLowerCase().includes(q)
 			);
 		});
-		return toSessionInfoList(
-			matches,
-			this.getStatuses?.(),
-			this.lastMessageAt,
-			this.forkMeta,
-			this.pendingQuestionCounts,
-		);
+		return toSessionInfoList(matches, this.getStatuses?.(), this.lastMessageAt);
 	}
 
 	/**
@@ -465,40 +323,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	/** Get the last-message-at map (for passing to toSessionInfoList). */
 	getLastMessageAtMap(): ReadonlyMap<string, number> {
 		return this.lastMessageAt;
-	}
-
-	/** Look up fork-point metadata for a session. Returns undefined if not a fork. */
-	getForkEntry(sessionId: string): ForkEntry | undefined {
-		return this.forkMeta.get(sessionId);
-	}
-
-	/** Record fork-point metadata for a forked session and persist to disk. */
-	setForkEntry(sessionId: string, entry: ForkEntry): void {
-		this.forkMeta.set(sessionId, entry);
-		saveForkMetadata(this.forkMeta, this.configDir);
-	}
-
-	// ─── Pending Question Counts ──────────────────────────────────────────
-
-	/** Increment pending question count (called from SSE wiring on question.asked). */
-	incrementPendingQuestionCount(sessionId: string): void {
-		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
-		this.pendingQuestionCounts.set(sessionId, current + 1);
-	}
-
-	/** Decrement pending question count (called from handlers on answer/reject). */
-	decrementPendingQuestionCount(sessionId: string): void {
-		const current = this.pendingQuestionCounts.get(sessionId) ?? 0;
-		if (current <= 1) {
-			this.pendingQuestionCounts.delete(sessionId);
-		} else {
-			this.pendingQuestionCounts.set(sessionId, current - 1);
-		}
-	}
-
-	/** Bulk-set pending question counts (called on SSE reconnect from listPendingQuestions). */
-	setPendingQuestionCounts(counts: Map<string, number>): void {
-		this.pendingQuestionCounts = counts;
 	}
 
 	/**

@@ -1,0 +1,112 @@
+// ─── The shell subscription's map ────────────────────────────────────────────
+// Every session the server has told us about, and the one door changes come
+// through. The session store is a view over this; it holds no copy of its own.
+//
+// The split against `subscription-state.ts` is deliberate: the applier is pure
+// and Svelte-free so it can be driven as a function (ni8.5 T-14), and this
+// module is the imperative half that reassigns reactive state — the shape the
+// notification reducer established.
+
+import type { Stream } from "effect";
+import { forgetSession } from "../stores/session.svelte.js";
+import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
+import type { SessionInfo } from "../types.js";
+import type { WsRpcSubscriptions } from "./shared-client.js";
+import {
+	type Change,
+	emptySubscription,
+	reduce,
+	type SubscriptionState,
+} from "./subscription-state.js";
+import type { FeedStatus } from "./supervise.js";
+
+/**
+ * One thing `subscriptions.shell()` delivers, typed off the subscription
+ * itself rather than restated.
+ */
+export type ShellEnvelope = Stream.Stream.Success<
+	ReturnType<WsRpcSubscriptions["shell"]>
+>;
+
+const identify = (session: SessionInfo): string => session.id;
+
+// `$state.raw`, not `$state`: the applier replaces the state whole and never
+// mutates it, so a deep proxy would cost work to track writes that cannot
+// happen.
+let applied = $state.raw<SubscriptionState<SessionInfo>>(emptySubscription());
+
+let feedStatus = $state<FeedStatus>({ _tag: "cold" });
+let transportFailureSince = $state<number | null>(null);
+
+export function setShellFeedStatus(status: FeedStatus): void {
+	feedStatus = status;
+	if (status._tag === "cold") transportFailureSince = null;
+}
+
+export function noteTransportDrop(): void {
+	transportFailureSince ??= Date.now();
+}
+
+/** Settled reactive state. Envelope vocabulary does not travel past here. */
+export const sessionSubscription = {
+	/** Every session the server has told us about, keyed by id. */
+	get rows(): ReadonlyMap<string, SessionInfo> {
+		return applied.rows;
+	},
+	/** Whether the server has said we hold everything. ni8.5.20/T-11 keys the
+	 *  switching state off this. */
+	get settled(): boolean {
+		return applied.settled;
+	},
+	get status(): FeedStatus {
+		return transportFailureSince === null
+			? feedStatus
+			: {
+					_tag: "failing",
+					since: transportFailureSince,
+					lastError: "Connection lost",
+				};
+	},
+};
+
+/**
+ * Apply one change to the session map. The only writer.
+ *
+ * Takes only the versioned shell envelope.
+ */
+export function applySessionChange(change: Change<SessionInfo>): void {
+	if (change._tag === "synchronized") transportFailureSince = null;
+	const next = reduce(applied, change, identify);
+	if (next === applied) return;
+	const receivedSequence = sessionActivityBridge.observe();
+	// Only accepted shell changes retire activity. A duplicate or stale
+	// envelope must not affect client state independently of the row applier.
+	if (change._tag === "upsert")
+		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
+	if (change._tag === "remove") {
+		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
+		forgetSession(change.id);
+	}
+	if (change._tag === "snapshot") {
+		for (const id of new Set([
+			...applied.rows.keys(),
+			...sessionActivityBridge.pending.keys(),
+		])) {
+			if (!next.rows.has(id)) {
+				sessionActivityBridge.retire(id, receivedSequence, "omission");
+				if (applied.rows.has(id)) forgetSession(id);
+			}
+		}
+		for (const row of next.rows.values())
+			sessionActivityBridge.retire(row.id, receivedSequence, "row");
+	}
+	applied = next;
+}
+
+/** Forget the project we were watching. */
+export function resetSessionSubscription(): void {
+	sessionActivityBridge.clear();
+	applied = emptySubscription();
+	feedStatus = { _tag: "cold" };
+	transportFailureSince = null;
+}

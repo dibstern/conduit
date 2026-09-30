@@ -3,32 +3,35 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import UserMessage from "../../../src/lib/frontend/components/chat/UserMessage.svelte";
 import {
 	clearDiscoveryState,
-	discoveryState,
+	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import type { UserMessage as UserMessageType } from "../../../src/lib/frontend/types.js";
 
 describe("UserMessage model drift marker", () => {
 	beforeEach(() => {
 		clearDiscoveryState();
-		discoveryState.providers = [
-			{
-				id: "claude",
-				name: "Claude",
-				configured: true,
-				models: [
-					{
-						id: "sonnet",
-						name: "Sonnet 5",
-						provider: "claude",
-					},
-					{
-						id: "fable",
-						name: "Fable 5",
-						provider: "claude",
-					},
-				],
-			},
-		];
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{
+							id: "sonnet",
+							name: "Sonnet 5",
+							provider: "claude",
+						},
+						{
+							id: "fable",
+							name: "Fable 5",
+							provider: "claude",
+						},
+					],
+				},
+			],
+		});
 	});
 
 	afterEach(cleanup);

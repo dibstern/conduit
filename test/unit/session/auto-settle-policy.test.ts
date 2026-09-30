@@ -20,7 +20,7 @@ const eligible = (): AutoSettleFacts => ({
 	hasViewer: false,
 	isSnoozed: false,
 	pinnedAt: null,
-	readAt: NOW,
+	unread: false,
 	autoSettleDisabledAt: null,
 	unsettledAt: null,
 });
@@ -37,7 +37,7 @@ describe("automatic idle settlement policy", () => {
 		["live background work", { hasLiveBackgroundWork: true }],
 		["pinned", { pinnedAt: NOW - DAY }],
 		["open in a browser", { hasViewer: true }],
-		["unread", { readAt: null }],
+		["unread", { unread: true }],
 		["auto-settle disabled", { autoSettleDisabledAt: NOW - DAY }],
 		["already settled", { settledAt: NOW - DAY }],
 		["missing", { exists: false }],
@@ -166,13 +166,9 @@ describe("automatic idle settlement policy", () => {
 		).toBe(true);
 	});
 
-	it("does not treat rename, pin, or read timestamps as activity", () => {
+	it("does not treat rename or pin timestamps as activity", () => {
 		expect(
-			shouldSettleIdleSession(
-				{ ...eligible(), readAt: NOW, pinnedAt: null },
-				NOW,
-				idle,
-			),
+			shouldSettleIdleSession({ ...eligible(), pinnedAt: null }, NOW, idle),
 		).toBe(true);
 	});
 });

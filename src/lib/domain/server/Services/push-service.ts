@@ -169,6 +169,7 @@ export const PushNotificationManagerLive = (configDir: string) =>
 					Effect.sync(() => manager.removeSubscription(id)),
 				broadcast: (payload: PushPayload) =>
 					Effect.tryPromise(() => manager.sendToAll(payload)).pipe(
+						Effect.asVoid,
 						Effect.catchAll((cause) =>
 							Effect.logWarning(`Push broadcast failed: ${String(cause)}`),
 						),
@@ -180,6 +181,7 @@ export const PushNotificationManagerLive = (configDir: string) =>
 					Effect.sync(() => manager.removeSubscription(endpoint)),
 				sendToAll: (payload) =>
 					Effect.tryPromise(() => manager.sendToAll(payload)).pipe(
+						Effect.asVoid,
 						Effect.catchAll((cause) =>
 							Effect.logWarning(`Push send failed: ${String(cause)}`),
 						),

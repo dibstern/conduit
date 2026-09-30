@@ -32,7 +32,7 @@ export function makeSessionCreatedEvent(
 		title?: string;
 		provider?: string;
 	},
-): CanonicalEvent {
+): Extract<CanonicalEvent, { type: "session.created" }> {
 	return canonicalEvent(
 		"session.created",
 		sessionId,
@@ -59,7 +59,7 @@ export function makeTextDelta(
 		metadata?: EventMetadata;
 		createdAt?: number;
 	},
-): CanonicalEvent {
+): Extract<CanonicalEvent, { type: "text.delta" }> {
 	return canonicalEvent(
 		"text.delta",
 		sessionId,
@@ -85,7 +85,7 @@ export function makeMessageCreatedEvent(
 		metadata?: EventMetadata;
 		createdAt?: number;
 	},
-): CanonicalEvent {
+): Extract<CanonicalEvent, { type: "message.created" }> {
 	return canonicalEvent(
 		"message.created",
 		sessionId,
@@ -110,7 +110,7 @@ export function makeSessionStatusEvent(
 		metadata?: EventMetadata;
 		createdAt?: number;
 	},
-): CanonicalEvent {
+): Extract<CanonicalEvent, { type: "session.status" }> {
 	return canonicalEvent(
 		"session.status",
 		sessionId,

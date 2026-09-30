@@ -1,6 +1,10 @@
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { PendingInteractionCancelled } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
@@ -11,7 +15,7 @@ import type { RelayMessage } from "../../../src/lib/types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeEvent<T extends ProviderRuntimeEvent["type"]>(
+function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
 	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
@@ -228,7 +232,7 @@ describe("createRelayEventSink — translation", () => {
 					partId: "part_1",
 					toolName: "Bash",
 					callId: "call_1",
-					input: { command: "ls" },
+					input: { tool: "Bash", command: "ls" },
 				}),
 			),
 		);
@@ -829,31 +833,115 @@ describe("createRelayEventSink — permission delegation", () => {
 		);
 	});
 
-	it("no longer fabricates auto-approval audit events", async () => {
-		// Accepted consequence of delegating: the SDK emits no auto-allow event,
-		// so an approval conduit never made is no longer recorded as if it had.
-		// What ran is still durable via the tool-call stream.
-		const persistEvent = vi.fn((_event: CanonicalEvent) => Effect.void);
+	// The ask and however it ends are canonical events, as for OpenCode: they
+	// wake a snoozed session and clear its pending approval. Nothing more: the
+	// SDK's own auto-allows never reach here, so none is fabricated.
+	const recorded = async (
+		ask: (
+			sink: ReturnType<typeof createRelayEventSink>,
+		) => Effect.Effect<unknown, unknown>,
+		port: Parameters<typeof createRelayEventSink>[0]["pendingInteractions"],
+	) => {
 		const persistEvents = vi.fn(
 			(_events: readonly CanonicalEvent[]) => Effect.void,
 		);
-		const { port } = makePendingInteractions();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			providerId: "claude",
 			send: vi.fn(),
-			persist: { persistEvent, persistEvents },
-			pendingInteractions: port,
+			persist: { persistEvent: () => Effect.void, persistEvents },
+			...(port ? { pendingInteractions: port } : {}),
 		});
+		await Effect.runPromise(Effect.exit(ask(sink)));
+		return persistEvents.mock.calls
+			.flatMap(([events]) => events)
+			.map((event) => ({ type: event.type, data: event.data }));
+	};
 
-		await expect(
-			Effect.runPromise(sink.requestPermission(request)),
-		).resolves.toEqual({ decision: "once" });
-
-		const persisted = persistEvents.mock.calls.flatMap(([events]) => events);
+	it("records the ask and the answer", async () => {
+		const { port } = makePendingInteractions();
 		expect(
-			persisted.filter((event) => String(event.type).startsWith("permission.")),
-		).toEqual([]);
+			await recorded((sink) => sink.requestPermission(request), port),
+		).toEqual([
+			{
+				type: "permission.asked",
+				data: {
+					id: "req_auto",
+					sessionId: "ses-1",
+					toolName: "Edit",
+					input: { file_path: "/tmp/example.ts" },
+				},
+			},
+			{
+				type: "permission.resolved",
+				data: { id: "req_auto", decision: "once" },
+			},
+		]);
+	});
+
+	it("records an ask that ends unanswered as rejected", async () => {
+		const { port } = makePendingInteractions();
+		const cancelled = {
+			...port,
+			beginPermissionRequest: () =>
+				Effect.succeed({ awaitResponse: Effect.fail(new Error("cancelled")) }),
+		};
+		expect(
+			(await recorded((sink) => sink.requestPermission(request), cancelled)).at(
+				-1,
+			),
+		).toEqual({
+			type: "permission.resolved",
+			data: { id: "req_auto", decision: "reject" },
+		});
+	});
+
+	const question = {
+		requestId: "toolu_q",
+		toolUseId: "toolu_q",
+		questions: [{ question: "Carry on?", header: "Carry on", options: [] }],
+	};
+	const cancelledQuestion = (recovered: boolean) => {
+		const { port } = makePendingInteractions();
+		return {
+			...port,
+			beginQuestionRequest: () =>
+				Effect.succeed({
+					awaitAnswers: Effect.fail(
+						new PendingInteractionCancelled({
+							requestId: "toolu_q",
+							sessionId: "ses-1",
+							reason: "disposed",
+							...(recovered ? { recovered: true as const } : {}),
+						}),
+					),
+				}),
+		};
+	};
+
+	it("leaves a question kept for recovery pending", async () => {
+		expect(
+			(
+				await recorded(
+					(sink) => sink.requestQuestion(question),
+					cancelledQuestion(true),
+				)
+			).map((event) => event.type),
+		).toEqual(["question.asked"]);
+	});
+
+	it("records a question cancelled for good as resolved with no answers", async () => {
+		expect(
+			(
+				await recorded(
+					(sink) => sink.requestQuestion(question),
+					cancelledQuestion(false),
+				)
+			).at(-1),
+		).toEqual({
+			type: "question.resolved",
+			data: { id: "toolu_q", answers: {} },
+		});
 	});
 
 	it("fails closed when an ask arrives with no interaction port", async () => {

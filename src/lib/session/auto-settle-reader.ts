@@ -1,7 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { deriveSessionSnooze } from "../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../persistence/read-model-types.js";
-import { deriveSessionSnooze } from "../persistence/session-list-adapter.js";
 import {
 	type AutoSettleFacts,
 	type AutoSettleTurn,

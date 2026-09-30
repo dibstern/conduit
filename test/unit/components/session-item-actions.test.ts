@@ -8,7 +8,12 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-function item(session: SessionInfo = { id: "a", title: "Alpha" }) {
+function item(
+	session: Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo> = {
+		id: "a",
+		title: "Alpha",
+	},
+) {
 	const onsettle = vi.fn();
 	const onpin = vi.fn();
 	const onsnooze = vi.fn();
@@ -18,7 +23,7 @@ function item(session: SessionInfo = { id: "a", title: "Alpha" }) {
 	const oncontextmenu = vi.fn();
 	render(SessionItem, {
 		props: {
-			session,
+			session: { status: "idle", ...session },
 			href: "/s/a",
 			onsettle,
 			onpin,

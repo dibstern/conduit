@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN history_complete INTEGER NOT NULL DEFAULT 0;

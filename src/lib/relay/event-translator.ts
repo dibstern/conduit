@@ -399,7 +399,12 @@ export function translateSessionStatus(
 		const delayMs =
 			nextMs && nextMs > Date.now() ? nextMs - Date.now() : undefined;
 		const retryMsg = formatRetryMessage(reason, attempt, delayMs);
-		return { type: "error", code: "RETRY", message: retryMsg };
+		return {
+			type: "error",
+			code: "RETRY",
+			message: retryMsg,
+			alertId: crypto.randomUUID(),
+		};
 	}
 
 	return null;
@@ -408,9 +413,20 @@ export function translateSessionStatus(
 /** Translate message.created event → user_message (for TUI-originated messages) */
 export function translateMessageCreated(
 	event: SSEEvent,
+	resolveOrigin?: (
+		sessionId: string | undefined,
+		messageId: string | undefined,
+		text: string,
+	) => string | undefined,
 ): UntaggedRelayMessage | null {
 	if (!isMessageCreatedEvent(event)) return null;
 	const { properties: props } = event;
+
+	// Like the other optional gap-event IDs, absence is tolerated but cannot create a bubble.
+	if (!props.messageID) {
+		console.debug("Skipping message.created without messageID");
+		return null;
+	}
 
 	// OpenCode wraps message data under "info" or "message"
 	const msg = props.info ?? props.message;
@@ -423,13 +439,67 @@ export function translateMessageCreated(
 		.join("\n");
 
 	if (!text) return null;
+	const originId = resolveOrigin?.(props.sessionID, props.messageID, text);
 
-	return { type: "user_message", text };
+	return {
+		type: "user_message",
+		text,
+		...(props.messageID != null ? { messageId: props.messageID } : {}),
+		...(originId != null ? { originId } : {}),
+	};
 }
 
-/** Translate message.updated event (usage/cost data) */
+/** The part of an OpenCode assistant message a turn's bill is made from. */
+interface OpenCodeStep {
+	cost?: number;
+	time?: { created?: number; completed?: number };
+}
+
+/**
+ * OpenCode runs one turn as a chain of assistant messages, one per model step,
+ * all answering the same user message (`parentID`). A step that finishes with
+ * "tool-calls" or "unknown" hands straight to the next step; any other finish,
+ * or an error, ends the turn. This mirrors OpenCode's own prompt-loop exit.
+ */
+export function endsOpenCodeTurn(step: {
+	finish?: unknown;
+	error?: unknown;
+}): boolean {
+	return (
+		step.error != null ||
+		(step.finish !== "tool-calls" && step.finish !== "unknown")
+	);
+}
+
+/**
+ * A whole turn's bill: every step's cost, and the time from its first step
+ * starting to `last` completing. OpenCode prices each step on its own.
+ */
+export function openCodeTurnTotals(
+	last: OpenCodeStep,
+	steps: Iterable<OpenCodeStep>,
+): { cost: number; duration: number } {
+	let cost = 0;
+	let start = last.time?.created;
+	for (const step of steps) {
+		cost += step.cost ?? 0;
+		const created = step.time?.created;
+		if (created != null && (start == null || created < start)) start = created;
+	}
+	const end = last.time?.completed;
+	return { cost, duration: end != null && start != null ? end - start : 0 };
+}
+
+/**
+ * Translate message.updated into the turn's result. Only a completed step has
+ * final numbers, and only the step that ends the turn closes it; an earlier
+ * step still reports its usage, marked `midTurn`, for the context meter.
+ *
+ * @param turnSteps  Every step of this turn seen so far, including this one.
+ */
 export function translateMessageUpdated(
 	event: SSEEvent,
+	turnSteps?: Iterable<OpenCodeStep>,
 ): Extract<RelayMessage, { type: "result" }> | null {
 	if (!isMessageUpdatedEvent(event)) return null;
 	// OpenCode sends message data under "info" (observed in live SSE events),
@@ -437,7 +507,9 @@ export function translateMessageUpdated(
 	const { properties: props } = event;
 
 	const msg = props.info ?? props.message;
-	if (!msg || msg.role !== "assistant") return null;
+	if (!msg || msg.role !== "assistant" || msg.time?.completed == null) {
+		return null;
+	}
 
 	const messageId = msg.id;
 	return {
@@ -451,13 +523,10 @@ export function translateMessageUpdated(
 				? { context_window: msg.tokens.contextWindow }
 				: {}),
 		},
-		cost: msg.cost ?? 0,
-		duration:
-			msg.time?.completed && msg.time?.created
-				? msg.time.completed - msg.time.created
-				: 0,
+		...openCodeTurnTotals(msg, turnSteps ?? [msg]),
 		sessionId: props.sessionID ?? "",
 		...(messageId != null && { messageId }),
+		...(!endsOpenCodeTurn(msg) && { midTurn: true as const }),
 	};
 }
 
@@ -589,12 +658,42 @@ export interface Translator {
 	): void;
 }
 
-export function createTranslator(): Translator {
+export function createTranslator(
+	resolveOrigin?: (
+		sessionId: string | undefined,
+		messageId: string | undefined,
+		text: string,
+	) => string | undefined,
+): Translator {
 	const DEFAULT_SESSION = "__default__";
 	const sessionParts = new Map<
 		string,
 		Map<string, { type: PartType; status?: ToolStatus }>
 	>();
+
+	// Each session's turn in flight: the user message it answers, and its steps.
+	const sessionTurns = new Map<
+		string,
+		{ parentID: string; steps: Map<string, OpenCodeStep> }
+	>();
+
+	/** Record an assistant step against its turn; returns the turn's steps. */
+	function recordTurnStep(event: SSEEvent): Iterable<OpenCodeStep> | undefined {
+		if (!isMessageUpdatedEvent(event)) return undefined;
+		const msg = event.properties.info ?? event.properties.message;
+		if (msg?.role !== "assistant" || msg.id == null || msg.parentID == null) {
+			return undefined;
+		}
+		// OpenCode puts the session on the message itself, not on the event.
+		const key = msg.sessionID ?? event.properties.sessionID ?? DEFAULT_SESSION;
+		let turn = sessionTurns.get(key);
+		if (turn?.parentID !== msg.parentID) {
+			turn = { parentID: msg.parentID, steps: new Map() };
+			sessionTurns.set(key, turn);
+		}
+		turn.steps.set(msg.id, msg);
+		return turn.steps.values();
+	}
 
 	function getOrCreateSessionParts(
 		sessionId: string | undefined,
@@ -643,16 +742,16 @@ export function createTranslator(): Translator {
 			// Message created (user messages from TUI)
 			if (eventType === "message.created") {
 				return wrapResult(
-					translateMessageCreated(event),
-					"message created: not a user message or no text",
+					translateMessageCreated(event, resolveOrigin),
+					"message created: missing id, not a user message, or no text",
 				);
 			}
 
 			// Message updated (cost/tokens)
 			if (eventType === "message.updated") {
 				return wrapResult(
-					translateMessageUpdated(event),
-					"message updated: not an assistant message",
+					translateMessageUpdated(event, recordTurnStep(event)),
+					"message updated: not an assistant message, or still running",
 				);
 			}
 
@@ -720,7 +819,14 @@ export function createTranslator(): Translator {
 				const errMsg = sessionErrorText(event.properties.error);
 				return {
 					ok: true,
-					messages: [{ type: "error", code: errName, message: errMsg }],
+					messages: [
+						{
+							type: "error",
+							code: errName,
+							message: errMsg,
+							alertId: crypto.randomUUID(),
+						},
+					],
 				};
 			}
 
@@ -780,8 +886,10 @@ export function createTranslator(): Translator {
 		reset(sessionId?: string) {
 			if (sessionId != null) {
 				sessionParts.delete(sessionId);
+				sessionTurns.delete(sessionId);
 			} else {
 				sessionParts.clear();
+				sessionTurns.clear();
 			}
 		},
 

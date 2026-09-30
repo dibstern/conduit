@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { tick } from "svelte";
-	import type { ListDaemonSessionsResponse } from "../../../contracts/ws-rpc.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
@@ -11,8 +10,9 @@
 	import TextInput from "../ui/TextInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 
-	type SearchResult = ListDaemonSessionsResponse["sessions"][number];
 	type SearchRpc = typeof listDaemonSessionsRpc;
+	type SearchResponse = Awaited<ReturnType<SearchRpc>>;
+	type SearchResult = SearchResponse["sessions"][number];
 
 	// The story supplies a transport stub; the app uses the daemon RPC directly.
 	let { search = listDaemonSessionsRpc }: { search?: SearchRpc } = $props();
@@ -21,7 +21,7 @@
 	let query = $state("");
 	let activeQuery = "";
 	let results = $state<SearchResult[]>([]);
-	let cursor = $state<ListDaemonSessionsResponse["nextCursor"]>(null);
+	let cursor = $state<SearchResponse["nextCursor"]>(null);
 	let hasMore = $state(false);
 	let loading = $state(false);
 	let failed = $state(false);

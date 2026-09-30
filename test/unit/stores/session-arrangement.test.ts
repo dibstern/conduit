@@ -14,6 +14,7 @@ import type {
 	SessionStatusFilter,
 } from "../../../src/lib/frontend/stores/session-scope.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
+import { seedDaemonSessions, seedRootSessions } from "./session-fixtures.js";
 
 const now = new Date(2030, 9, 7, 12).getTime();
 const at = (day: number, hour: number) =>
@@ -24,6 +25,7 @@ const row = (
 ): SessionInfo => ({
 	id,
 	title: id,
+	status: "idle",
 	updatedAt: at(7, 10),
 	...overrides,
 });
@@ -149,8 +151,8 @@ describe("projectSessionList", () => {
 	it("composes with the existing project scope and title search", () => {
 		attachedProjectState.slug = "local";
 		routerState.search = "?p=a";
-		sessionState.rootSessions = [];
-		sessionState.daemonSessions = [
+		seedRootSessions([]);
+		seedDaemonSessions([
 			row("wanted", {
 				title: "Fix sidebar",
 				projectSlug: "a",
@@ -166,7 +168,7 @@ describe("projectSessionList", () => {
 				projectSlug: "a",
 				attention: "working",
 			}),
-		];
+		]);
 		sessionState.searchQuery = "Fix";
 		expect(
 			ids(
@@ -176,7 +178,7 @@ describe("projectSessionList", () => {
 			),
 		).toEqual(["wanted"]);
 		sessionState.searchQuery = "";
-		sessionState.daemonSessions = [];
+		seedDaemonSessions([]);
 		routerState.search = "";
 	});
 });
@@ -212,7 +214,14 @@ describe("groupSessionsByDate", () => {
 
 	it("falls back to createdAt when updatedAt is missing", () => {
 		const groups = groupSessionsByDate(
-			[{ id: "created", title: "created", createdAt: at(7, 8) }],
+			[
+				{
+					id: "created",
+					title: "created",
+					status: "idle",
+					createdAt: at(7, 8),
+				},
+			],
 			new Date(now),
 		);
 		expect(ids(groups.today)).toEqual(["created"]);
@@ -220,7 +229,7 @@ describe("groupSessionsByDate", () => {
 
 	it("falls back to epoch when both timestamps are missing", () => {
 		const groups = groupSessionsByDate(
-			[{ id: "undated", title: "undated" }],
+			[{ id: "undated", title: "undated", status: "idle" }],
 			new Date(now),
 		);
 		expect(ids(groups.older)).toEqual(["undated"]);

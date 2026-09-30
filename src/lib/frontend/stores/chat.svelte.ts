@@ -6,21 +6,19 @@
 // ws-dispatch.ts resolves the correct session slot by event.sessionId.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { PerSessionEvent } from "../../shared-types.js";
+import type { FeedStatus } from "../transport/supervise.js";
 import type {
-	AssistantMessage,
 	ChatMessage,
+	HistoryMessage,
 	RelayMessage,
-	ResultMessage,
 	SystemMessage,
 	SystemMessageVariant,
-	ThinkingMessage,
 	ToolMessage,
 	UserMessage,
 } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { renderMarkdown } from "../utils/markdown.js";
+import { getBrowserClientId } from "./client-identity.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
@@ -31,13 +29,14 @@ import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 export type SessionActivity = {
 	phase: ChatPhase;
 	turnEpoch: number;
+	turnGeneration: number;
+	endedGeneration: number;
+	terminalTurnIds: ReadonlySet<string>;
 	currentMessageId: string | null;
 	currentPartId: string | null;
 	replayGeneration: number;
 	doneMessageIds: SvelteSet<string>;
 	seenMessageIds: SvelteSet<string>;
-	liveEventBuffer: PerSessionEvent[] | null;
-	eventsHasMore: boolean;
 	renderTimer: ReturnType<typeof setTimeout> | null;
 	thinkingStartTime: number;
 };
@@ -46,19 +45,24 @@ export type SessionActivity = {
 // from the server's event log.
 export type SessionMessages = {
 	messages: ChatMessage[];
+	transcript: {
+		rows: HistoryMessage[];
+		hwm: number | null;
+		hasMore: boolean;
+		cursor?: string;
+		status: FeedStatus;
+		project: string;
+		carriedUsers: Map<
+			string,
+			Pick<UserMessage, "sentDuringEpoch" | "originId" | "images">
+		>;
+	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;
 	contextPercent: number;
 	historyHasMore: boolean;
-	historyMessageCount: number;
 	historyLoading: boolean;
 	toolRegistry: ToolRegistry;
-	/** Working copy of messages during replay. Null when not replaying.
-	 *  Moved from module-level in Task 3 to enable per-session replay. */
-	replayBatch: ChatMessage[] | null;
-	/** Per-session buffer of older messages from large replays.
-	 *  HistoryLoader pages through this before hitting the server. */
-	replayBuffer: ChatMessage[] | null;
 };
 
 // Composite read shape for the chat view. NEVER instantiated as storage.
@@ -70,13 +74,14 @@ export function createEmptySessionActivity(): SessionActivity {
 	return {
 		phase: "idle",
 		turnEpoch: 0,
+		turnGeneration: 0,
+		endedGeneration: -1,
+		terminalTurnIds: new Set(),
 		currentMessageId: null,
 		currentPartId: null,
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
-		liveEventBuffer: null,
-		eventsHasMore: false,
 		renderTimer: null,
 		thinkingStartTime: 0,
 	};
@@ -85,15 +90,13 @@ export function createEmptySessionActivity(): SessionActivity {
 export function createEmptySessionMessages(): SessionMessages {
 	return {
 		messages: [],
+		transcript: null,
 		currentAssistantText: "",
 		loadLifecycle: "empty",
 		contextPercent: 0,
 		historyHasMore: false,
-		historyMessageCount: 0,
 		historyLoading: false,
 		toolRegistry: createToolRegistry(),
-		replayBatch: null,
-		replayBuffer: null,
 	};
 }
 
@@ -239,7 +242,6 @@ export function clearSessionChatState(id: string): void {
 	const activity = sessionActivity.get(id);
 	if (activity) {
 		activity.replayGeneration++;
-		activity.liveEventBuffer = null;
 		if (activity.renderTimer) {
 			clearTimeout(activity.renderTimer);
 		}
@@ -308,25 +310,48 @@ export function findMessage<T extends ChatMessage["type"]>(
  *  Impossible boolean combinations are unrepresentable. */
 export type ChatPhase = "idle" | "processing" | "streaming";
 
-export type LoadLifecycle = "empty" | "loading" | "committed" | "ready";
+export type LoadLifecycle = "empty" | "loading" | "ready";
 
-export const chatState = $state({
-	messages: [] as ChatMessage[],
-	/** Raw text of the currently streaming assistant message. */
-	currentAssistantText: "",
-	/** Single source of truth for the chat pipeline phase. */
-	phase: "idle" as ChatPhase,
-	/** Tracks the lifecycle of loading session data into the chat store. */
-	loadLifecycle: "empty" as LoadLifecycle,
-	/** Monotonically increasing counter, bumped on each turn boundary.
-	 *  Provides an explicit, reliable turn-boundary signal for logic that
-	 *  needs to distinguish "same turn" from "new turn" (e.g. queued-flag
-	 *  clearing, future turn-aware features). Reset to 0 on clearMessages. */
-	turnEpoch: 0,
-	/** The messageId of the current OpenCode response.  When a new event
-	 *  arrives with a different messageId, that's a turn boundary.  Reset
-	 *  to null on clearMessages and done. */
-	currentMessageId: null as string | null,
+/** The six fields the legacy global mirror ever exposed. */
+type ChatMirror = Readonly<
+	Pick<
+		SessionChatState,
+		| "messages"
+		| "currentAssistantText"
+		| "phase"
+		| "loadLifecycle"
+		| "turnEpoch"
+		| "currentMessageId"
+	>
+>;
+
+/** Legacy global view of the current session's chat state.
+ *
+ *  Frozen by ni8.5 §13: this holds no storage of its own and nothing writes
+ *  it — every getter resolves against `currentChat()`, i.e. the per-session
+ *  slot for `sessionState.currentId`. The object is frozen, so an assignment
+ *  is a compile error under `Readonly<…>` and a TypeError at runtime under
+ *  strict mode. New code reads `currentChat()` directly; when the last reader
+ *  has moved, delete this. */
+export const chatState: ChatMirror = Object.freeze({
+	get messages() {
+		return currentChat().messages;
+	},
+	get currentAssistantText() {
+		return currentChat().currentAssistantText;
+	},
+	get phase() {
+		return currentChat().phase;
+	},
+	get loadLifecycle() {
+		return currentChat().loadLifecycle;
+	},
+	get turnEpoch() {
+		return currentChat().turnEpoch;
+	},
+	get currentMessageId() {
+		return currentChat().currentMessageId;
+	},
 });
 
 // ─── Derived phase flags ────────────────────────────────────────────────────
@@ -334,15 +359,28 @@ export const chatState = $state({
 // We expose the derived values as exported functions that return the current
 // reactive value.  Call sites read them as `isProcessing()`.
 
+/** Is the LLM working on this slot's turn? The one definition of "busy",
+ *  shared by the current-session flag below and by dispatch paths that must
+ *  answer the same question for a *background* session's slot. */
+export function isLlmActive(
+	phase: ChatPhase,
+	loadLifecycle: LoadLifecycle,
+): boolean {
+	return (
+		loadLifecycle !== "loading" &&
+		(phase === "processing" || phase === "streaming")
+	);
+}
+
 const _isProcessing = $derived(
-	chatState.loadLifecycle !== "loading" &&
-		(chatState.phase === "processing" || chatState.phase === "streaming"),
+	isLlmActive(_currentChat.phase, _currentChat.loadLifecycle),
 );
 const _isStreaming = $derived(
-	chatState.loadLifecycle !== "loading" && chatState.phase === "streaming",
+	_currentChat.loadLifecycle !== "loading" &&
+		_currentChat.phase === "streaming",
 );
-const _isReplaying = $derived(chatState.loadLifecycle === "loading");
-const _isLoading = $derived(chatState.loadLifecycle === "loading");
+const _isReplaying = $derived(_currentChat.loadLifecycle === "loading");
+const _isLoading = $derived(_currentChat.loadLifecycle === "loading");
 
 /** LLM is active (processing or streaming). */
 export function isProcessing(): boolean {
@@ -367,69 +405,46 @@ export function isLoading(): boolean {
 // Tests may still set booleans directly for arbitrary state setup.
 
 /** Session is idle — no LLM activity, no streaming. */
-export function phaseToIdle(_activity?: SessionActivity): void {
-	if (_activity) _activity.phase = "idle";
-	chatState.phase = "idle";
+export function phaseToIdle(activity: SessionActivity): void {
+	activity.phase = "idle";
 }
 
 /** LLM is active, awaiting first delta. */
-export function phaseToProcessing(_activity?: SessionActivity): void {
-	if (_activity) _activity.phase = "processing";
-	chatState.phase = "processing";
+export function phaseToProcessing(activity: SessionActivity): void {
+	if (activity.phase === "idle") {
+		activity.turnGeneration++;
+	}
+	activity.phase = "processing";
 }
 
 /** Receiving deltas — assistant message being built. */
-export function phaseToStreaming(_activity?: SessionActivity): void {
-	if (_activity) _activity.phase = "streaming";
-	chatState.phase = "streaming";
-}
-
-/** Start event replay. */
-export function phaseStartReplay(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
-): void {
-	if (_messages) _messages.loadLifecycle = "loading";
-	chatState.loadLifecycle = "loading";
-}
-
-/** End event replay, reconcile phase based on current phase
- *  and external processing signals.
- *  loadLifecycle stays at "committed" — renderDeferredMarkdown will
- *  transition to "ready" once all deferred markdown is rendered.
- *  If there are no deferred messages, renderDeferredMarkdown sets
- *  "ready" on its first (and only) batch.
- *  @param llmActive — whether the replayed event stream ended mid-turn */
-export function phaseEndReplay(
-	_activity: SessionActivity | undefined,
-	llmActive: boolean,
-): void {
-	// Don't set loadLifecycle here — leave at "committed" so the
-	// scroll controller's settle phase can run while deferred markdown
-	// rendering completes. renderDeferredMarkdown sets "ready" when done.
-	const phase = _activity?.phase ?? chatState.phase;
-	if (llmActive && phase === "idle") {
-		if (_activity) _activity.phase = "processing";
-		chatState.phase = "processing";
+export function phaseToStreaming(activity: SessionActivity): void {
+	if (activity.phase === "idle") {
+		activity.turnGeneration++;
 	}
+	activity.phase = "streaming";
 }
 
-/** Full reset — used by clearMessages on session switch. */
-function phaseReset(): void {
-	chatState.phase = "idle";
-	chatState.loadLifecycle = "empty";
+/** End the visible turn on socket close through the same idempotent reducer.
+ * Background sessions retain their phase until server reconciliation. */
+export function phaseCurrentSessionToIdle(): void {
+	const id = sessionState.currentId;
+	if (id === null) return;
+	const activity = sessionActivity.get(id);
+	const messages = sessionMessages.get(id);
+	if (!activity || !messages) return;
+	if (activity.phase === "idle") return;
+	applyTerminalTurn(activity, messages);
 }
 
 /** Pagination state for history loading (shared between HistoryLoader and dispatch). */
 export const historyState = $state({
 	/** Whether there are more history pages to fetch from the server.
 	 *  Defaults to false (disarmed). Set to true only when the server
-	 *  explicitly says there are more pages (REST fallback with hasMore). */
+	 *  explicitly says there are more pages. */
 	hasMore: false,
 	/** Whether a history page request is in-flight. */
 	loading: false,
-	/** Count of REST-level messages loaded via history (for pagination offset). */
-	messageCount: 0,
 });
 
 // ─── Input Sync State ───────────────────────────────────────────────────────
@@ -458,13 +473,13 @@ export function handleInputSyncReceived(msg: {
 
 /** Get the number of messages in current conversation. */
 export function getMessageCount(): number {
-	return chatState.messages.length;
+	return currentChat().messages.length;
 }
 
 const log = createFrontendLogger("chat");
 
 /** Append a new tool message to the session's message list. */
-function applyToolCreate(
+function _applyToolCreate(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
 	tool: ToolMessage,
@@ -513,27 +528,16 @@ export function updateLastMessage<T extends ChatMessage["type"]>(
 	return { messages: out, found: false };
 }
 
-/** Flush the debounced render timer, render pending markdown, finalize the
- *  current assistant part (or the last unfinalized assistant when partless),
- *  and reset streaming state.
- *  Returns the finalized message's `messageId` (if any) for dedup tracking.
- *
- *  Consolidates the pattern previously duplicated in handleDone,
- *  handleToolStart, and addUserMessage. */
+/** Finalize the current assistant part and reset streaming state.
+ *  Returns its `messageId` (if any) for dedup tracking. */
 function flushAndFinalizeAssistant(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
 ): string | undefined {
-	// Check the phase flag
-	if (_activity.phase !== "streaming") return undefined;
-
 	// Clear per-session renderTimer
 	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
 		clearTimeout(_activity.renderTimer);
 		_activity.renderTimer = null;
-	}
-	if (_messages.currentAssistantText) {
-		flushAssistantRender(_activity, _messages);
 	}
 
 	let finalizedMessageId: string | undefined;
@@ -550,159 +554,21 @@ function flushAndFinalizeAssistant(
 	);
 	if (found) setMessages(_messages, messages);
 
-	// Clear assistant text. Phase transition is the caller's responsibility
-	// (handleDone → phaseToIdle, handleToolStart → phaseToProcessing, etc.)
+	// Phase transition is the caller's responsibility.
 	_messages.currentAssistantText = "";
-	chatState.currentAssistantText = "";
 	_activity.currentPartId = null;
 	return finalizedMessageId;
 }
 
-// ─── Abort hook ─────────────────────────────────────────────────────────────
-// Used by ws-dispatch.ts to abort in-flight async replays when clearMessages
-// is called. Avoids circular imports (ws-dispatch → chat.svelte, not vice versa).
-
-let onClearMessages: ((sessionId: string | null) => void) | null = null;
-
-export function registerClearMessagesHook(
-	fn: (sessionId: string | null) => void,
-): void {
-	onClearMessages = fn;
-}
-
-// replayBatch: per-session only (messages.replayBatch). Module-level variable removed in Task 6.
-
-export function beginReplayBatch(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
-): void {
-	if (_messages) {
-		_messages.replayBatch = [];
-	}
-}
-
-export function discardReplayBatch(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
-): void {
-	if (_messages) {
-		_messages.replayBatch = null;
-	}
-}
-
-// ─── Replay Paging ──────────────────────────────────────────────────────────
-// When a replay produces more than INITIAL_PAGE_SIZE messages, only the last
-// page is committed to the session's message list. Older messages are stored
-// in a per-session buffer for HistoryLoader to page through on demand.
-
-const INITIAL_PAGE_SIZE = 50;
-
-/** Check if a session's event cache was marked as incomplete by the server. */
-export function isEventsHasMore(
-	_activity: SessionActivity | undefined,
-	_messages: SessionMessages | undefined,
-	_sessionId: string,
-): boolean {
-	if (_activity) return _activity.eventsHasMore;
-	return false;
-}
-
-export function getReplayBuffer(
-	_activity: SessionActivity | undefined,
-	_messages: SessionMessages | undefined,
-	_sessionId: string,
-): ChatMessage[] | undefined {
-	return _messages?.replayBuffer ?? undefined;
-}
-
-export function consumeReplayBuffer(
-	_activity: SessionActivity | undefined,
-	_messages: SessionMessages | undefined,
-	_sessionId: string,
-	count: number,
-): ChatMessage[] {
-	const buffer = _messages?.replayBuffer;
-	if (!buffer || buffer.length === 0) return [];
-	const page = buffer.splice(buffer.length - count, count);
-	if (buffer.length === 0) {
-		if (_messages) _messages.replayBuffer = null;
-	}
-	// Render deferred markdown on buffered messages before they enter
-	// the session's message list.  During replay, assistant messages store
-	// raw text in `html` with `needsRender: true` to avoid blocking.  The
-	// initial renderDeferredMarkdown() only processes the last
-	// INITIAL_PAGE_SIZE messages, so buffered messages must be rendered
-	// here when they're consumed for display.
-	return page.map((m) => {
-		if (m.type === "assistant" && m.needsRender) {
-			const { needsRender: _, ...rest } = m;
-			return { ...rest, html: renderMarkdown(m.rawText) };
-		}
-		return m;
-	});
-}
-
-/**
- * @param eventsHasMore - When true, the server's event cache does not cover
- *   the full session. After the local replay buffer is exhausted, the frontend
- *   should fall through to server-based pagination for older messages.
- *   When false (default), buffer exhaustion means "beginning of session".
- */
-export function commitReplayFinal(
-	_activity: SessionActivity | undefined,
-	_messages: SessionMessages | undefined,
-	_sessionId: string,
-	eventsHasMore = false,
-): void {
-	const batch = _messages?.replayBatch;
-	if (batch === null || batch === undefined) return;
-	const all = batch;
-	if (_messages) _messages.replayBatch = null;
-
-	if (all.length <= INITIAL_PAGE_SIZE) {
-		if (_messages) {
-			_messages.messages = all;
-			_messages.historyHasMore = eventsHasMore;
-		}
-		chatState.messages = all;
-		historyState.hasMore = eventsHasMore;
-	} else {
-		const cutoff = all.length - INITIAL_PAGE_SIZE;
-		const bufferSlice = all.slice(0, cutoff);
-		if (_messages) {
-			_messages.replayBuffer = bufferSlice;
-			_messages.messages = all.slice(cutoff);
-			_messages.historyHasMore = true;
-		}
-		chatState.messages = all.slice(cutoff);
-		historyState.hasMore = true;
-	}
-	if (eventsHasMore) {
-		if (_activity) _activity.eventsHasMore = true;
-	}
-	if (_messages) _messages.loadLifecycle = "committed";
-	chatState.loadLifecycle = "committed";
-}
-
-export function getMessages(_messages?: SessionMessages): ChatMessage[] {
-	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
-		return _messages.replayBatch;
-	}
-	return _messages?.messages ?? chatState.messages;
+export function getMessages(messages?: SessionMessages): ChatMessage[] {
+	return messages?.messages ?? [];
 }
 
 export function setMessages(
-	_messages: SessionMessages,
+	messages: SessionMessages,
 	msgs: ChatMessage[],
 ): void {
-	if (_messages?.replayBatch !== null && _messages?.replayBatch !== undefined) {
-		_messages.replayBatch = msgs;
-	} else if (_messages) {
-		_messages.messages = msgs;
-		chatState.messages = msgs;
-	} else {
-		chatState.messages = msgs;
-	}
+	messages.messages = msgs;
 }
 
 // ─── Turn boundary detection ────────────────────────────────────────────────
@@ -741,12 +607,14 @@ export function advanceTurnIfNewMessage(
 	// have changed back from a different message) but don't bump epoch.
 	if (activity.seenMessageIds.has(messageId)) {
 		activity.currentMessageId = messageId;
-		chatState.currentMessageId = messageId;
 		return;
 	}
 
 	// ── First event of a genuinely new message ─────────────────────────
 	activity.seenMessageIds.add(messageId);
+	const previousTurnAlreadyEnded =
+		activity.endedGeneration === activity.turnGeneration;
+	activity.turnGeneration++;
 
 	// Finalize any in-progress assistant streaming from the previous turn.
 	if (activity.phase === "streaming") {
@@ -759,11 +627,11 @@ export function advanceTurnIfNewMessage(
 
 	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
 	// during the previous turn (sentDuringEpoch < turnEpoch).
-	// Only bump if this isn't the very first message in the session.
+	// A terminal event may already have released the previous turn's queue.
+	// Only infer a missing boundary when it has not been applied yet.
 	const prevId = activity.currentMessageId;
-	if (prevId != null) {
+	if (prevId != null && !previousTurnAlreadyEnded) {
 		activity.turnEpoch++;
-		chatState.turnEpoch = activity.turnEpoch;
 		log.debug(
 			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
 			messageId,
@@ -780,148 +648,9 @@ export function advanceTurnIfNewMessage(
 	}
 
 	activity.currentMessageId = messageId;
-	chatState.currentMessageId = messageId;
 }
 
 // ─── Message handlers ───────────────────────────────────────────────────────
-
-export function handleDelta(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "delta" }>,
-): void {
-	const { text, messageId, partId } = msg;
-
-	// ── Deduplicate: skip deltas for a messageId that was already finalized ──
-	// This prevents the message poller from creating a second AssistantMessage
-	// for content that SSE already delivered. The poller can re-synthesize the
-	// entire response when its snapshot is stale (SSE silence gap > 2s).
-	if (messageId && activity.doneMessageIds.has(messageId)) {
-		return;
-	}
-
-	if (partId != null) {
-		const isContinuingCurrentPart =
-			activity.phase === "streaming" && activity.currentPartId === partId;
-		if (activity.phase === "streaming" && !isContinuingCurrentPart) {
-			flushAndFinalizeAssistant(activity, messages);
-		}
-
-		const currentMessages = getMessages(messages);
-		let matchingIndex = -1;
-		let matchingMessage: AssistantMessage | undefined;
-		for (let i = currentMessages.length - 1; i >= 0; i--) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const message = currentMessages[i]!;
-			if (message.type === "assistant" && message.partId === partId) {
-				matchingIndex = i;
-				matchingMessage = message;
-				break;
-			}
-		}
-
-		if (matchingIndex >= 0 && matchingMessage) {
-			const updated = [...currentMessages];
-			updated[matchingIndex] = {
-				...matchingMessage,
-				finalized: false,
-				...(messageId != null && { messageId }),
-			};
-			setMessages(messages, updated);
-			if (!isContinuingCurrentPart || matchingMessage.finalized) {
-				messages.currentAssistantText = matchingMessage.rawText;
-				chatState.currentAssistantText = matchingMessage.rawText;
-			}
-			activity.currentPartId = partId;
-			if (messageId != null) {
-				activity.seenMessageIds.add(messageId);
-				activity.currentMessageId = messageId;
-				chatState.currentMessageId = messageId;
-			}
-			phaseToStreaming(activity);
-		} else {
-			const assistantMsg: AssistantMessage = {
-				type: "assistant",
-				uuid: generateUuid(),
-				rawText: "",
-				html: "",
-				finalized: false,
-				createdAt: Date.now(),
-				partId,
-				...(messageId != null && { messageId }),
-			};
-			setMessages(messages, [...currentMessages, assistantMsg]);
-			phaseToStreaming(activity);
-			activity.currentPartId = partId;
-			messages.currentAssistantText = "";
-			chatState.currentAssistantText = "";
-		}
-	} else if (activity.phase !== "streaming") {
-		const uuid = generateUuid();
-		const assistantMsg: AssistantMessage = {
-			type: "assistant",
-			uuid,
-			rawText: "",
-			html: "",
-			finalized: false,
-			createdAt: Date.now(),
-			...(messageId != null && { messageId }),
-		};
-		setMessages(messages, [...getMessages(messages), assistantMsg]);
-		phaseToStreaming(activity);
-		activity.currentPartId = null;
-		messages.currentAssistantText = "";
-		chatState.currentAssistantText = "";
-	} else {
-		activity.currentPartId = null;
-	}
-
-	messages.currentAssistantText += text;
-	chatState.currentAssistantText = messages.currentAssistantText;
-
-	// Debounced markdown render (80ms)
-	if (activity?.renderTimer !== null && activity?.renderTimer !== undefined) {
-		clearTimeout(activity.renderTimer);
-	}
-	const timer = setTimeout(() => {
-		activity.renderTimer = null;
-		flushAssistantRender(activity, messages);
-	}, 80);
-	activity.renderTimer = timer;
-}
-
-export function handleThinkingStart(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "thinking_start" }>,
-): void {
-	const now = Date.now();
-	_activity.thinkingStartTime = now;
-	const uuid = generateUuid();
-	const thinkingMsg: ThinkingMessage = {
-		type: "thinking",
-		uuid,
-		text: "",
-		done: false,
-		createdAt: now,
-		...(msg.messageId != null && { messageId: msg.messageId }),
-	};
-	setMessages(messages, [...getMessages(messages), thinkingMsg]);
-}
-
-export function handleThinkingDelta(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "thinking_delta" }>,
-): void {
-	const { messages: updated, found } = updateLastMessage(
-		getMessages(messages),
-		"thinking",
-		(m) => !m.done,
-		(m) => ({ ...m, text: m.text + msg.text }),
-	);
-	if (found) setMessages(messages, updated);
-}
 
 export function handleThinkingStop(
 	_activity: SessionActivity,
@@ -941,35 +670,6 @@ export function handleThinkingStop(
 	if (found) setMessages(messages, updated);
 }
 
-export function handleToolStart(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "tool_start" }>,
-): void {
-	const { id, name, messageId } = msg;
-
-	const result = messages.toolRegistry.start(id, name || "unknown", messageId);
-
-	if (result.action === "duplicate") {
-		return;
-	}
-
-	if (result.action !== "create") {
-		return;
-	}
-
-	// Finalize current assistant text before inserting tool.
-	// Transition to processing — LLM is still active, just not streaming text.
-	// (advanceTurnIfNewMessage already handles cross-turn finalization, but
-	// same-turn tool calls still need to finalize the text block.)
-	if (activity.phase === "streaming") {
-		flushAndFinalizeAssistant(activity, messages);
-		phaseToProcessing(activity);
-	}
-
-	applyToolCreate(activity, messages, result.tool);
-}
-
 export function handleToolExecuting(
 	activity: SessionActivity,
 	messages: SessionMessages,
@@ -985,92 +685,6 @@ export function handleToolExecuting(
 	if (result.action === "update") {
 		applyToolUpdate(activity, messages, result.uuid, result.tool);
 	}
-}
-
-export function handleToolResult(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "tool_result" }>,
-): void {
-	const result = messages.toolRegistry.complete(
-		msg.id,
-		msg.content,
-		msg.is_error,
-		{
-			...(msg.isTruncated != null && { isTruncated: msg.isTruncated }),
-			...(msg.fullContentLength != null && {
-				fullContentLength: msg.fullContentLength,
-			}),
-		},
-	);
-	if (result.action === "update") {
-		applyToolUpdate(activity, messages, result.uuid, result.tool);
-	}
-}
-
-export function handleResult(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "result" }>,
-): void {
-	const { usage, cost, duration } = msg;
-	const messageId = "messageId" in msg ? msg.messageId : undefined;
-
-	// ── Deduplicate result bars ─────────────────────────────────────────
-	// OpenCode sends multiple message.updated events for the same assistant
-	// message (first with cost/tokens, then again with duration). Instead
-	// of appending a new ResultMessage each time, update the existing one
-	// in-place. Only merge when the last message is a result for the SAME
-	// OpenCode message (or when neither carries a messageId, for backward
-	// compatibility).
-	const currentMessages = getMessages(messages);
-	const lastMsg = currentMessages[currentMessages.length - 1];
-	if (lastMsg?.type === "result") {
-		const sameMessage =
-			messageId == null ||
-			lastMsg.messageId == null ||
-			messageId === lastMsg.messageId;
-		if (sameMessage) {
-			const msgs = [...currentMessages];
-			const dur = duration ?? lastMsg.duration;
-			msgs[msgs.length - 1] = {
-				...lastMsg,
-				cost: cost ?? lastMsg.cost,
-				...(dur != null && { duration: dur }),
-				inputTokens: usage?.input ?? lastMsg.inputTokens,
-				outputTokens: usage?.output ?? lastMsg.outputTokens,
-				cacheRead: usage?.cache_read ?? lastMsg.cacheRead,
-				cacheWrite: usage?.cache_creation ?? lastMsg.cacheWrite,
-				...(usage?.context_window != null
-					? { context_window: usage.context_window }
-					: {}),
-				...(messageId != null && { messageId }),
-			};
-			setMessages(messages, msgs);
-			// Update context usage bar
-			updateContextFromTokens(messages, usage);
-			return;
-		}
-	}
-
-	const uuid = generateUuid();
-	const resultMsg: ResultMessage = {
-		type: "result",
-		uuid,
-		cost,
-		duration,
-		inputTokens: usage?.input,
-		outputTokens: usage?.output,
-		cacheRead: usage?.cache_read,
-		cacheWrite: usage?.cache_creation,
-		...(usage?.context_window != null
-			? { context_window: usage.context_window }
-			: {}),
-		...(messageId != null && { messageId }),
-	};
-	setMessages(messages, [...getMessages(messages), resultMsg]);
-	// Update context usage bar: per-session + legacy
-	updateContextFromTokens(messages, usage);
 }
 
 /** Compute context usage from token counts and the turn's effective window,
@@ -1122,9 +736,7 @@ function currentContextLimit(): number | undefined {
 	return undefined;
 }
 
-/** Restore the context usage bar from the last result message after a
- *  history replay — live turns update it via handleResult, but a page
- *  reload otherwise leaves contextPercent at 0 until the next turn. */
+/** Restore the context usage bar from the projected transcript. */
 export function restoreContextFromMessages(messages: SessionMessages): void {
 	const msgs = getMessages(messages);
 	for (let i = msgs.length - 1; i >= 0; i--) {
@@ -1167,6 +779,34 @@ export function handleDone(
 	messages: SessionMessages,
 	_msg: Extract<RelayMessage, { type: "done" }>,
 ): void {
+	applyTerminalTurn(activity, messages);
+}
+
+/** Apply durable terminal state without delivering alerts. `turnId` must be
+ * turns.id (the user message id), not the provider runtime's turnId.
+ * Legacy push events lack that identity; their fallback identifies the
+ * current monotone generation, not an old envelope.
+ * The turn projection currently has no per-turn revision. */
+export function applyTerminalTurn(
+	activity: SessionActivity,
+	messages: SessionMessages,
+	terminal?: {
+		readonly turnId?: string;
+		readonly error?: Extract<RelayMessage, { type: "error" }>;
+	},
+): boolean {
+	if (terminal?.turnId !== undefined) {
+		if (activity.terminalTurnIds.has(terminal.turnId)) return false;
+		// Bound replay dedup to recent turns. An evicted id costs at worst one
+		// redundant idempotent re-finalize, never a stuck session.
+		activity.terminalTurnIds = new Set(
+			[...activity.terminalTurnIds, terminal.turnId].slice(-8),
+		);
+	} else if (activity.endedGeneration === activity.turnGeneration) {
+		return false;
+	}
+	activity.endedGeneration = activity.turnGeneration;
+
 	// Finalize the assistant message and record messageId for dedup
 	const finalizedId = flushAndFinalizeAssistant(activity, messages);
 	if (finalizedId) {
@@ -1204,6 +844,15 @@ export function handleDone(
 		if (mutated) setMessages(messages, patched);
 	}
 
+	if (terminal?.error) {
+		const { code, message, statusCode, details } = terminal.error;
+		addSystemMessage(activity, messages, message, "error", {
+			code,
+			...(statusCode !== undefined ? { statusCode } : {}),
+			...(details !== undefined ? { details } : {}),
+		});
+	}
+
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
 	// messageId against it. Resetting to null makes every post-done turn
@@ -1215,41 +864,9 @@ export function handleDone(
 	// phase to "idle" synchronously, so when the batched effect fires,
 	// isProcessing() is false and the guard skips the scroll.
 	requestScrollOnNextContent();
-	finalizeTurn(activity, "done");
-}
-
-/** The single turn-end choke point. EVERY path that ends a turn — done,
- *  non-RETRY error, server-authoritative idle — must funnel through here.
- *  The turnEpoch bump is what releases user messages from the "Queued"
- *  shimmer (`turnEpoch <= sentDuringEpoch`); a turn-ending path that skips
- *  it leaves queued messages shimmering forever (the 2026-07-15 bug, where
- *  only handleDone bumped). Do not bump the epoch or call phaseToIdle
- *  directly from a new turn-ending handler — call this. */
-function finalizeTurn(activity: SessionActivity, source: string): void {
 	activity.turnEpoch++;
-	chatState.turnEpoch = activity.turnEpoch;
-	log.debug(
-		"finalizeTurn source=%s turnEpoch=%d currentMessageId=%s phase=%s",
-		source,
-		activity.turnEpoch,
-		activity.currentMessageId,
-		activity.phase,
-	);
 	phaseToIdle(activity);
-}
-
-// ─── REST history queued-state fallback ──────────────────────────────────────
-// The REST history path (historyToChatMessages) has no event-level data, so it
-// cannot determine which messages were queued.  When status:processing arrives
-// after a REST history load, we set sentDuringEpoch on the last unresponded
-// user message.  This flag is ONLY set by the REST history load path in
-// ws-dispatch.ts and consumed by the first status:processing after it.
-let _pendingHistoryQueuedFallback = false;
-
-/** Signal that the current session was loaded via REST history (no events).
- *  The next status:processing will apply the queued-state fallback. */
-export function markPendingHistoryQueuedFallback(): void {
-	_pendingHistoryQueuedFallback = true;
+	return true;
 }
 
 export function handleStatus(
@@ -1259,100 +876,21 @@ export function handleStatus(
 ): void {
 	if (msg.status === "processing") {
 		// Don't downgrade from "streaming" — it's a more specific phase.
-		// status:processing from a queued message send (prompt.ts) arrives
-		// while deltas are still flowing; overriding to "processing" would
-		// cause handleDelta to create a new assistant message, splitting
-		// the response around the queued user message.
+		// A queued send can report processing while a projected row streams.
 		if (activity.phase !== "streaming") {
 			phaseToProcessing(activity);
 		}
-		// Fallback ONLY for REST history loads — the one path where messages
-		// don't go through addUserMessage and sentDuringEpoch can't be set
-		// from event ordering.  Events replay and live sends both go through
-		// addUserMessage, which sets the correct sentDuringEpoch already.
-		if (_pendingHistoryQueuedFallback) {
-			_pendingHistoryQueuedFallback = false;
-			ensureSentDuringEpochOnLastUnrespondedUser(activity, messages);
-		}
 	} else if (msg.status === "idle") {
-		// F2 fix: full cleanup when the server says idle.
-		// The server's status is authoritative — if it says idle, clean
-		// up all streaming/processing state for this session.
-		//
-		// 1. If a live in-flight message is pending, finalize it via handleDone
-		//    helper path (flushAndFinalizeAssistant).
-		if (activity.currentMessageId != null && activity.phase === "streaming") {
-			flushAndFinalizeAssistant(activity, messages);
-		}
-
-		// 2. End the turn. If a turn was live (processing/streaming), this is
-		// a turn-ending path like done/error — it must go through finalizeTurn
-		// or user messages queued into the dead turn shimmer forever (e.g. a
-		// turn that died without done/error, surfaced only by reconnect).
-		// A redundant idle while already idle is not a turn end — no bump.
 		if (activity.phase !== "idle") {
-			finalizeTurn(activity, "status-idle");
-		} else {
-			phaseToIdle(activity);
+			applyTerminalTurn(activity, messages);
 		}
 
 		// 3. Clear in-flight state
 		activity.currentMessageId = null;
-		chatState.currentMessageId = null;
 		messages.currentAssistantText = "";
-		chatState.currentAssistantText = "";
 		activity.thinkingStartTime = 0;
 
-		// 4. Drain liveEventBuffer if non-null
-		if (activity.liveEventBuffer !== null) {
-			activity.liveEventBuffer = null;
-		}
-
-		// 5. seenMessageIds / doneMessageIds remain (cross-turn dedup)
-	}
-}
-
-/** Set `sentDuringEpoch` on the last unresponded user message if not
- *  already set.  Called ONLY after REST history loads when the session
- *  is processing — the only path where queued state can't be inferred. */
-function ensureSentDuringEpochOnLastUnrespondedUser(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-): void {
-	const msgs = getMessages(messages);
-	if (msgs.length === 0) return;
-
-	for (let i = msgs.length - 1; i >= 0; i--) {
-		const m = msgs[i];
-		if (!m) continue;
-		if (m.type === "user") {
-			// Already has sentDuringEpoch — write-once, don't touch
-			if (m.sentDuringEpoch != null) return;
-			// Any assistant-side content after it means the turn was answered.
-			// historyToChatMessages emits type:"assistant" only for TEXT parts,
-			// so a turn answered with only tool calls / thinking / a result bar
-			// has no "assistant" message. Checking for "assistant" alone would
-			// mistake those answered turns for queued ones and shimmer "Queued"
-			// on reload (rest-history is the only reload path for Claude sessions).
-			const hasResponse = msgs
-				.slice(i + 1)
-				.some(
-					(msg) =>
-						msg.type === "assistant" ||
-						msg.type === "tool" ||
-						msg.type === "thinking" ||
-						msg.type === "result",
-				);
-			if (hasResponse) return;
-			// No sentDuringEpoch and no response — set it
-			setMessages(
-				messages,
-				msgs.map((msg, idx) =>
-					idx === i ? { ...msg, sentDuringEpoch: _activity.turnEpoch } : msg,
-				),
-			);
-			return;
-		}
+		// seenMessageIds / doneMessageIds remain (cross-turn dedup)
 	}
 }
 
@@ -1391,30 +929,16 @@ export function handleError(
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "error" }>,
 ): void {
-	const { code, message, statusCode, details } = msg;
-	const errorMeta = {
-		code,
-		...(statusCode !== undefined ? { statusCode } : {}),
-		...(details !== undefined ? { details } : {}),
-	};
-
-	if (code === "RETRY") {
-		// Subtle retry message — request scroll before adding so the
-		// content-change effect scrolls even though phase stays unchanged.
+	if (msg.code === "RETRY") {
 		requestScrollOnNextContent();
-		addSystemMessage(activity, messages, message, "info");
+		addSystemMessage(activity, messages, msg.message, "info");
 	} else {
-		// Prominent error — request scroll before phaseToIdle kills the
-		// isProcessing guard that the content-change effect relies on.
-		requestScrollOnNextContent();
-		addSystemMessage(activity, messages, message, "error", errorMeta);
-		// The turn is over — a non-RETRY error terminates it just like done.
-		finalizeTurn(activity, "error");
+		applyTerminalTurn(activity, messages, { error: msg });
 	}
 }
 
 export function handleCompaction(
-	activity: SessionActivity,
+	_activity: SessionActivity,
 	messages: SessionMessages,
 	msg: Extract<RelayMessage, { type: "compaction" }>,
 ): void {
@@ -1455,6 +979,9 @@ export function handleCompaction(
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
+// Keep per-origin FIFO entries even when a provisional bubble is removed.
+const pendingUserMessages = new WeakMap<SessionMessages, Map<string, string>>();
+
 /** Add a user message to the chat.
  *  When `sentWhileProcessing` is true the message records the current
  *  `turnEpoch` in `sentDuringEpoch` — a write-once, immutable fact.
@@ -1472,14 +999,39 @@ export function addUserMessage(
 	text: string,
 	images?: string[],
 	sentWhileProcessing?: boolean,
+	messageId?: string,
+	isOwnMessage = true,
+	originId = isOwnMessage ? getBrowserClientId() : undefined,
 ): void {
-	// A live (non-replay) addUserMessage call means addUserMessage is
-	// setting the correct sentDuringEpoch — consume the history fallback
-	// flag so a subsequent status:processing doesn't override it.
-	if (messages.loadLifecycle !== "loading") {
-		_pendingHistoryQueuedFallback = false;
+	if (messageId) {
+		const current = getMessages(messages);
+		if (
+			current.some(
+				(message) => message.type === "user" && message.messageId === messageId,
+			)
+		)
+			return;
+		const pendingIds = pendingUserMessages.get(messages);
+		const pendingId = originId
+			? [...(pendingIds ?? [])].find(([, origin]) => origin === originId)?.[0]
+			: undefined;
+		if (pendingId) pendingIds?.delete(pendingId);
+		const pending = current.find(
+			(message) =>
+				message.type === "user" &&
+				!message.messageId &&
+				message.uuid === pendingId,
+		);
+		if (pending?.type === "user" && pending.text === text) {
+			setMessages(
+				messages,
+				current.map((message) =>
+					message.uuid === pending.uuid ? { ...pending, messageId } : message,
+				),
+			);
+			return;
+		}
 	}
-
 	// Finalize the in-progress assistant message only during replay,
 	// where user_message events can appear between delta events without
 	// an intervening done event.  During live streaming the assistant
@@ -1491,9 +1043,17 @@ export function addUserMessage(
 	}
 
 	const uuid = generateUuid();
+	if (originId && !messageId) {
+		const pendingIds =
+			pendingUserMessages.get(messages) ?? new Map<string, string>();
+		pendingIds.set(uuid, originId);
+		pendingUserMessages.set(messages, pendingIds);
+	}
 	const msg: UserMessage = {
 		type: "user",
 		uuid,
+		...(messageId != null && { messageId }),
+		...(originId != null && { originId }),
 		text,
 		createdAt: Date.now(),
 		...(images != null && { images }),
@@ -1513,7 +1073,7 @@ export function addUserMessage(
 	// action, never a background event. When the session is idle (e.g.
 	// between turns), isProcessing() is false and the content-change
 	// effect guard would skip the scroll without this request.
-	// Skip during replay — the settle loop handles replay scrolling.
+	// Skip while the transcript is loading; its ready transition handles scrolling.
 	if (messages.loadLifecycle !== "loading") {
 		requestScrollOnNextContent();
 	}
@@ -1560,31 +1120,8 @@ export function addSystemMessage(
 /** Reset all chat state (for stories/tests). Alias for clearMessages. */
 export const resetChatState = clearMessages;
 
-/**
- * Flush any pending debounced assistant render immediately.
- * Called after replaying events so mid-stream content is visible.
- */
-export function flushPendingRender(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
-): void {
-	// Clear per-session renderTimer
-	if (_activity?.renderTimer !== null && _activity?.renderTimer !== undefined) {
-		clearTimeout(_activity.renderTimer);
-		_activity.renderTimer = null;
-	}
-	flushAssistantRender(
-		_activity as SessionActivity,
-		_messages as SessionMessages,
-	);
-}
-
-/**
- * Seed the ToolRegistry from chat messages loaded via REST history.
- * Without this, SSE events arriving for history-loaded tools would be
- * rejected as "unknown tool" since the registry only knows about tools
- * registered via handleToolStart (the live event path).
- */
+/** Sync the tool registry with projected transcript tools so retained tool
+ *  events can update them. */
 export function seedRegistryFromMessages(
 	_activity: SessionActivity,
 	_messages: SessionMessages,
@@ -1596,31 +1133,11 @@ export function seedRegistryFromMessages(
 	}
 }
 
-export function abortSessionReplay(sessionId: string): void {
-	const activity = sessionActivity.get(sessionId);
-	if (!activity) return;
-	activity.replayGeneration++;
-	activity.liveEventBuffer = null;
-	if (activity.renderTimer) {
-		clearTimeout(activity.renderTimer);
-		activity.renderTimer = null;
-	}
-}
-
 export function activateSessionChatState(sessionId: string): void {
-	const activity = sessionActivity.get(sessionId);
 	const messages = sessionMessages.get(sessionId);
-
-	chatState.phase = activity?.phase ?? "idle";
-	chatState.turnEpoch = activity?.turnEpoch ?? 0;
-	chatState.currentMessageId = activity?.currentMessageId ?? null;
-	chatState.messages = messages?.messages ?? [];
-	chatState.currentAssistantText = messages?.currentAssistantText ?? "";
-	chatState.loadLifecycle = messages?.loadLifecycle ?? "empty";
 
 	historyState.hasMore = messages?.historyHasMore ?? false;
 	historyState.loading = messages?.historyLoading ?? false;
-	historyState.messageCount = messages?.historyMessageCount ?? 0;
 }
 
 /**
@@ -1631,14 +1148,6 @@ export function activateSessionChatState(sessionId: string): void {
  * from event callbacks or inside `untrack()`, as ChatLayout does.
  */
 export function clearMessages(): void {
-	phaseReset(); // must be cleared before abort hook — stops replay generation check
-	onClearMessages?.(sessionState.currentId); // abort in-flight async replays
-	cancelDeferredMarkdown(); // abort in-flight deferred renders
-	chatState.messages = [];
-	chatState.currentAssistantText = "";
-	chatState.turnEpoch = 0;
-	chatState.currentMessageId = null;
-	_pendingHistoryQueuedFallback = false;
 	// Also clear per-session state for the current session
 	const currentId = sessionState.currentId;
 	if (currentId) {
@@ -1646,11 +1155,13 @@ export function clearMessages(): void {
 		if (activity) {
 			activity.phase = "idle";
 			activity.turnEpoch = 0;
+			activity.turnGeneration = 0;
+			activity.endedGeneration = -1;
+			activity.terminalTurnIds = new Set();
 			activity.currentMessageId = null;
 			activity.currentPartId = null;
 			activity.doneMessageIds.clear();
 			activity.seenMessageIds.clear();
-			activity.liveEventBuffer = null;
 			activity.replayGeneration++;
 			if (activity.renderTimer) {
 				clearTimeout(activity.renderTimer);
@@ -1662,142 +1173,9 @@ export function clearMessages(): void {
 			messages.messages = [];
 			messages.currentAssistantText = "";
 			messages.loadLifecycle = "empty";
-			messages.replayBatch = null;
-			messages.replayBuffer = null;
 			messages.toolRegistry.clear();
 		}
 	}
 	historyState.hasMore = false;
 	historyState.loading = false;
-	historyState.messageCount = 0;
-}
-
-// ─── Part/message removal handlers ───────────────────────────────────────────
-
-export function handlePartRemoved(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "part_removed" }>,
-): void {
-	const { partId } = msg;
-	if (!partId) return;
-	setMessages(
-		messages,
-		getMessages(messages).filter((m) => m.type !== "tool" || m.id !== partId),
-	);
-	messages.toolRegistry.remove(partId);
-}
-
-export function handleMessageRemoved(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "message_removed" }>,
-): void {
-	const { messageId } = msg;
-	if (!messageId) return;
-	setMessages(
-		messages,
-		getMessages(messages).filter(
-			(m) => !("messageId" in m) || m.messageId !== messageId,
-		),
-	);
-}
-
-// ─── Internal helpers ───────────────────────────────────────────────────────
-
-/** Flush the current assistant text to the current assistant part's HTML. */
-function flushAssistantRender(
-	_activity: SessionActivity,
-	_messages: SessionMessages,
-): void {
-	if (!_messages.currentAssistantText) return;
-
-	const rawText = _messages.currentAssistantText;
-	const isReplay = _messages.loadLifecycle === "loading";
-	const html = isReplay ? rawText : renderMarkdown(rawText);
-
-	const currentPartId = _activity.currentPartId;
-	const { messages: updated, found } = updateLastMessage(
-		getMessages(_messages),
-		"assistant",
-		(m) =>
-			!m.finalized && (currentPartId == null || m.partId === currentPartId),
-		(m) => ({
-			...m,
-			rawText,
-			html,
-			...(isReplay ? { needsRender: true as const } : {}),
-		}),
-	);
-	if (found) setMessages(_messages, updated);
-}
-
-// ─── Deferred Markdown Rendering ────────────────────────────────────────────
-// After replay completes, messages marked with `needsRender` have raw text
-// in their `html` field. renderDeferredMarkdown processes them in batches
-// via requestIdleCallback/setTimeout to avoid blocking the main thread.
-
-// deferredGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
-
-export function cancelDeferredMarkdown(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
-): void {
-	if (_activity) _activity.replayGeneration++;
-}
-
-export function renderDeferredMarkdown(
-	_activity?: SessionActivity,
-	_messages?: SessionMessages,
-): void {
-	if (_activity) _activity.replayGeneration++;
-	const activityGen = _activity?.replayGeneration ?? 0;
-	const BATCH_SIZE = 5;
-
-	function processBatch(): void {
-		// Per-session abort check
-		if (_activity && _activity.replayGeneration !== activityGen) return;
-
-		const source = _messages?.messages ?? chatState.messages;
-		const updated = [...source];
-		let rendered = 0;
-		for (let i = 0; i < updated.length && rendered < BATCH_SIZE; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const m = updated[i]!;
-			if (m.type === "assistant" && m.needsRender) {
-				// Use spread-omit to remove needsRender (exactOptionalPropertyTypes)
-				const { needsRender: _, ...rest } = m;
-				updated[i] = { ...rest, html: renderMarkdown(m.rawText) };
-				rendered++;
-			}
-		}
-		if (rendered > 0) {
-			if (_messages) {
-				_messages.messages = updated;
-				chatState.messages = updated;
-			} else {
-				chatState.messages = updated;
-			}
-		}
-
-		// Continue if more unrendered messages remain
-		const hasMore = updated.some(
-			(m) => m.type === "assistant" && (m as AssistantMessage).needsRender,
-		);
-		if (hasMore) {
-			setTimeout(processBatch, 0);
-		} else {
-			const lc = _messages?.loadLifecycle ?? chatState.loadLifecycle;
-			if (lc === "committed") {
-				if (_messages) _messages.loadLifecycle = "ready";
-				chatState.loadLifecycle = "ready";
-			}
-		}
-	}
-
-	if (typeof requestIdleCallback === "function") {
-		requestIdleCallback(() => processBatch());
-	} else {
-		setTimeout(processBatch, 0);
-	}
 }

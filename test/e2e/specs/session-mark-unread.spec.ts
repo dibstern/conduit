@@ -1,4 +1,5 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -9,40 +10,36 @@ async function markCurrentUnreadFromTitle(page: Page): Promise<void> {
 
 test.use({
 	recording: "chat-simple",
-	persistence: true,
 	viewport: { width: 1440, height: 900 },
 	screenshot: "off",
 });
 
-test("a direct session URL marks it read in another tab and after reload", async ({
-	page,
-	context,
-	relayUrl,
-}) => {
-	await gotoRelay(page, new URL("/", relayUrl).toString());
-	const row = page.locator("#session-list .session-item").first();
-	await row.click();
-	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
-	const sessionUrl = await row.getAttribute("href");
-	expect(sessionUrl).toBeTruthy();
-	await row.click({ button: "right" });
-	await page.getByTestId("session-ctx-mark-unread").click();
-	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
-
-	const directPage = await context.newPage();
-	await gotoRelay(directPage, new URL(sessionUrl!, relayUrl).toString());
-	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
-	await page.reload();
-	await expect(row).toBeVisible();
-	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
-});
+// Unread is relative to a turn end (ADR-0004, Scope; conduit-test-hk9m.3), and
+// the recorded session has none until its prompt replays. The replay also
+// reorders the list, so the returned row is pinned to that session.
+async function finishTurn(harness: ReplayHarness, firstRow: Locator) {
+	const id = await firstRow.getAttribute("data-session-id");
+	if (!id) throw new Error("the recorded session has no row id");
+	const row = firstRow
+		.page()
+		.locator(`#session-list .session-item[data-session-id="${id}"]`);
+	harness.mock.triggerPromptSse(id);
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible({
+		timeout: 20_000,
+	});
+	return row;
+}
 
 test("context menu, focused row and transcript toggle read state with undo", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
 	await gotoRelay(page, new URL("/", relayUrl).toString());
-	const row = page.locator("#session-list .session-item").first();
+	const row = await finishTurn(
+		harness,
+		page.locator("#session-list .session-item").first(),
+	);
 	await expect(row).toBeVisible();
 	await row.click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
@@ -82,12 +79,34 @@ test("context menu, focused row and transcript toggle read state with undo", asy
 	await expect(page.locator("#input")).toHaveValue("u");
 });
 
-test("settling and un-settling preserve unread while the menu hides the action", async ({
+// A session whose turn never ended has nothing to be unread relative to, but
+// the user asked for a dot, so it gets one until the next pick (hk9m.7).
+test("marking unread before any turn end shows a dot until the next pick", async ({
 	page,
 	relayUrl,
 }) => {
 	await gotoRelay(page, new URL("/", relayUrl).toString());
 	const row = page.locator("#session-list .session-item").first();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+	await row.click({ button: "right" });
+	await page.getByTestId("session-ctx-mark-unread").click();
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
+	await row.click();
+	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
+});
+
+test("settling and un-settling preserve unread while the menu hides the action", async ({
+	page,
+	relayUrl,
+	harness,
+}) => {
+	await gotoRelay(page, new URL("/", relayUrl).toString());
+	const row = await finishTurn(
+		harness,
+		page.locator("#session-list .session-item").first(),
+	);
 	await row.click();
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-mark-unread").click();
@@ -122,14 +141,16 @@ test("settling and un-settling preserve unread while the menu hides the action",
 	await expect(page.getByTestId("session-ctx-mark-read")).toHaveCount(0);
 });
 
-test("desktop hold survives reload, has one keyboard-accessible read action, and ends on another session", async ({
+test("desktop unread chip survives reload, has one keyboard-accessible read action, and ends on another session", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
 	await gotoRelay(page, new URL("/", relayUrl).toString());
 	const sidebar = new SidebarPage(page);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
+	await finishTurn(harness, rows.first());
 	const firstId = await rows.first().getAttribute("data-session-id");
 	if (!firstId) throw new Error("missing first session id");
 	await sidebar.createNewSession();
@@ -200,42 +221,19 @@ test("desktop hold survives reload, has one keyboard-accessible read action, and
 	await expect(firstRow.getByTestId("session-unread-dot")).toHaveCount(0);
 });
 
-test("another tab reading the session clears the first tab's hold for later unread changes", async ({
-	page,
-	relayUrl,
-}) => {
-	await gotoRelay(page, new URL("/", relayUrl).toString());
-	const firstRow = page.locator("#session-list .session-item").first();
-	await expect(firstRow).toBeVisible();
-	const id = await firstRow.getAttribute("data-session-id");
-	if (!id) throw new Error("missing session id");
-	await firstRow.click();
-	await markCurrentUnreadFromTitle(page);
-	await expect(page.getByTestId("session-bar-unread-chip")).toBeVisible();
-
-	const secondPage = await page.context().newPage();
-	await gotoRelay(secondPage, new URL("/", relayUrl).toString());
-	const secondRow = secondPage.locator(
-		`#session-list [data-session-id="${id}"]`,
-	);
-	await expect(secondRow).toBeVisible();
-	await secondRow.click();
-	await expect(page.getByTestId("session-bar-unread-chip")).toHaveCount(0);
-	await expect(firstRow.getByTestId("session-unread-dot")).toHaveCount(0);
-	await markCurrentUnreadFromTitle(secondPage);
-	await expect(firstRow.getByTestId("session-unread-dot")).toBeVisible();
-	await expect(page.getByTestId("session-bar-unread-chip")).toHaveCount(0);
-});
-
 test.describe("phone", () => {
 	test.use({ viewport: { width: 375, height: 740 } });
 
 	test("title sheet and composer shortcut return to the list with undo", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
 		await gotoRelay(page, new URL("/", relayUrl).toString());
-		const row = page.locator("#session-list .session-item").first();
+		const row = await finishTurn(
+			harness,
+			page.locator("#session-list .session-item").first(),
+		);
 		await row.click();
 		await page.getByTestId("session-bar-title-menu").click();
 		const sheet = page.getByTestId("session-action-sheet");
@@ -262,9 +260,13 @@ test.describe("phone", () => {
 	test("marking unread never shows the desktop chip", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
 		await gotoRelay(page, new URL("/", relayUrl).toString());
-		const row = page.locator("#session-list .session-item").first();
+		const row = await finishTurn(
+			harness,
+			page.locator("#session-list .session-item").first(),
+		);
 		await row.click();
 		await markCurrentUnreadFromTitle(page);
 		await expect(page.getByTestId("session-bar-unread-chip")).toHaveCount(0);

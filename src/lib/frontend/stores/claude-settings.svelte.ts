@@ -17,98 +17,157 @@ export type ClaudeSettingsResolutionStatus =
 	| "error"
 	| "unavailable";
 
-export const claudeSettingsState = $state({
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// What the relay says this project's Claude settings are. The `apply*`,
+// `handle*` and resolution functions below are the only writers.
+
+const serverClaudeSettings = $state({
 	projectSlug: null as string | null,
 	overrides: {} as ClaudeSettingsOverrides,
 	resolved: {} as Partial<ResolvedClaudeSettings>,
 	resolutionStatus: "idle" as ClaudeSettingsResolutionStatus,
+});
+
+// ─── Client-owned state ─────────────────────────────────────────────────────
+// The panel shows a toggle's new position the moment it is clicked, before the
+// relay has confirmed the write: `pendingOverrides` is that unconfirmed value,
+// and reads fall through to the server's when it is null. `editedKeys` is the
+// set of settings this user has touched, which drives the "set here" marks.
+// Applying a relay response never touches `editedKeys`.
+
+const clientClaudeSettings = $state({
+	pendingOverrides: null as ClaudeSettingsOverrides | null,
 	editedKeys: [] as ClaudeSettingKey[],
 });
+
+/** Which write `pendingOverrides` belongs to, so a rejection can tell whether
+ *  it is still undoing its own optimism. Plain, not `$state`: nothing shows it. */
+let pendingWrite: symbol | null = null;
+
+/** Read view over both halves. The server half is readable but has no setter:
+ *  write it by applying a relay response. */
+export const claudeSettingsState = {
+	get projectSlug(): string | null {
+		return serverClaudeSettings.projectSlug;
+	},
+	/** The value of an in-flight write if there is one, else the relay's. */
+	get overrides(): ClaudeSettingsOverrides {
+		return (
+			clientClaudeSettings.pendingOverrides ?? serverClaudeSettings.overrides
+		);
+	},
+	get resolved(): Partial<ResolvedClaudeSettings> {
+		return serverClaudeSettings.resolved;
+	},
+	get resolutionStatus(): ClaudeSettingsResolutionStatus {
+		return serverClaudeSettings.resolutionStatus;
+	},
+	get editedKeys(): readonly ClaudeSettingKey[] {
+		return clientClaudeSettings.editedKeys;
+	},
+};
+
+/** The relay has spoken, so an in-flight write is now either confirmed or
+ *  overtaken — either way it is no longer the value to show. */
+function setServerOverrides(overrides: ClaudeSettingsOverrides): void {
+	serverClaudeSettings.overrides = { ...overrides };
+	clientClaudeSettings.pendingOverrides = null;
+	pendingWrite = null;
+}
 
 export function applyClaudeSettingsResponse(
 	response: ClaudeSettingsResponse,
 ): void {
 	if (
-		claudeSettingsState.projectSlug !== null &&
-		claudeSettingsState.projectSlug !== response.projectSlug
+		serverClaudeSettings.projectSlug !== null &&
+		serverClaudeSettings.projectSlug !== response.projectSlug
 	) {
 		return;
 	}
-	claudeSettingsState.projectSlug = response.projectSlug;
-	claudeSettingsState.overrides = { ...response.overrides };
+	serverClaudeSettings.projectSlug = response.projectSlug;
+	setServerOverrides(response.overrides);
 }
 
 export function handleClaudeSettingsInfo(
 	message: Extract<RelayMessage, { type: "claude_settings_info" }>,
 ): void {
-	claudeSettingsState.overrides = { ...message.overrides };
+	setServerOverrides(message.overrides);
 }
 
-export function setClaudeSettingsOverridesOptimistically(
+/**
+ * Show a write before the relay has confirmed it, and hand back the undo for
+ * *that* write: call it when the relay refuses. It drops back to the relay's
+ * value rather than to a remembered one, and does nothing at all once a newer
+ * write — or a broadcast that landed meanwhile — owns what is on screen.
+ */
+export function proposeClaudeSettingsOverrides(
 	overrides: ClaudeSettingsOverrides,
-): void {
-	claudeSettingsState.overrides = { ...overrides };
+): () => void {
+	const write = Symbol("claude settings write");
+	pendingWrite = write;
+	clientClaudeSettings.pendingOverrides = { ...overrides };
+	return () => {
+		if (pendingWrite !== write) return;
+		pendingWrite = null;
+		clientClaudeSettings.pendingOverrides = null;
+	};
 }
 
 export function beginClaudeSettingsResolution(projectSlug: string): void {
-	if (claudeSettingsState.projectSlug !== projectSlug) {
-		claudeSettingsState.overrides = {};
-	}
-	claudeSettingsState.projectSlug = projectSlug;
-	claudeSettingsState.resolved = {};
-	claudeSettingsState.resolutionStatus = "loading";
+	if (serverClaudeSettings.projectSlug !== projectSlug) setServerOverrides({});
+	serverClaudeSettings.projectSlug = projectSlug;
+	serverClaudeSettings.resolved = {};
+	serverClaudeSettings.resolutionStatus = "loading";
 }
 
 export function applyResolvedClaudeSettingsResponse(
 	response: ResolveClaudeSettingsResponse,
 ): void {
-	if (claudeSettingsState.projectSlug !== response.projectSlug) return;
-	claudeSettingsState.resolved = Object.fromEntries(
+	if (serverClaudeSettings.projectSlug !== response.projectSlug) return;
+	serverClaudeSettings.resolved = Object.fromEntries(
 		Object.entries(response.resolved).map(([key, value]) => [
 			key,
 			{ ...value },
 		]),
 	) as Partial<ResolvedClaudeSettings>;
-	claudeSettingsState.resolutionStatus = "ready";
+	serverClaudeSettings.resolutionStatus = "ready";
 }
 
 export function failClaudeSettingsResolution(projectSlug: string): void {
-	if (claudeSettingsState.projectSlug !== projectSlug) return;
-	claudeSettingsState.resolved = {};
-	claudeSettingsState.resolutionStatus = "error";
+	if (serverClaudeSettings.projectSlug !== projectSlug) return;
+	serverClaudeSettings.resolved = {};
+	serverClaudeSettings.resolutionStatus = "error";
 }
 
 export function markClaudeSettingsResolutionUnavailable(
 	projectSlug: string,
 ): void {
-	if (claudeSettingsState.projectSlug !== projectSlug) {
-		claudeSettingsState.overrides = {};
-	}
-	claudeSettingsState.projectSlug = projectSlug;
-	claudeSettingsState.resolved = {};
-	claudeSettingsState.resolutionStatus = "unavailable";
+	if (serverClaudeSettings.projectSlug !== projectSlug) setServerOverrides({});
+	serverClaudeSettings.projectSlug = projectSlug;
+	serverClaudeSettings.resolved = {};
+	serverClaudeSettings.resolutionStatus = "unavailable";
 }
 
 export function clearClaudeSettingsState(): void {
-	claudeSettingsState.projectSlug = null;
-	claudeSettingsState.overrides = {};
-	claudeSettingsState.resolved = {};
-	claudeSettingsState.resolutionStatus = "idle";
-	claudeSettingsState.editedKeys = [];
+	serverClaudeSettings.projectSlug = null;
+	serverClaudeSettings.resolved = {};
+	serverClaudeSettings.resolutionStatus = "idle";
+	setServerOverrides({});
+	clientClaudeSettings.editedKeys = [];
 }
 
 export function setClaudeSettingEdited(
 	key: ClaudeSettingKey,
 	edited: boolean,
 ): void {
-	const keys = new Set(claudeSettingsState.editedKeys);
+	const keys = new Set(clientClaudeSettings.editedKeys);
 	if (edited) keys.add(key);
 	else keys.delete(key);
-	claudeSettingsState.editedKeys = [...keys];
+	clientClaudeSettings.editedKeys = [...keys];
 }
 
 export function clearClaudeSettingEdits(): void {
-	claudeSettingsState.editedKeys = [];
+	clientClaudeSettings.editedKeys = [];
 }
 
 const SOURCE_LABELS = {

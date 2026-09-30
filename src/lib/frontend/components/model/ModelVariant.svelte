@@ -9,6 +9,8 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import {
+		applyVariantSwitched,
+		chooseVariant,
 		discoveryState,
 		getActiveModelVariants,
 	} from "../../stores/discovery.svelte.js";
@@ -20,7 +22,6 @@
 
 	let { onOpen }: { onOpen?: (() => void) | undefined } = $props();
 
-	const variantState: { availableVariants: readonly string[] } = discoveryState;
 
 	// ─── State ──────────────────────────────────────────────────────────────────
 
@@ -40,8 +41,7 @@
 	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function switchVariant(variant: string) {
-		const previousVariant = discoveryState.currentVariant;
-		discoveryState.currentVariant = variant;
+		const undoVariant = chooseVariant(variant);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
@@ -50,13 +50,8 @@
 				sessionId,
 				variant,
 			})
-				.then((response) => {
-					discoveryState.currentVariant = response.variant;
-					variantState.availableVariants = response.variants;
-				})
-				.catch(() => {
-					discoveryState.currentVariant = previousVariant;
-				});
+				.then(applyVariantSwitched)
+				.catch(undoVariant);
 		}
 	}
 

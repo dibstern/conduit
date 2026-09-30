@@ -87,8 +87,6 @@ describe("getOrCreateSessionSlot", () => {
 		expect(activity.turnEpoch).toBe(0);
 		expect(activity.doneMessageIds.size).toBe(0);
 		expect(activity.seenMessageIds.size).toBe(0);
-		expect(activity.liveEventBuffer).toBeNull();
-		expect(activity.eventsHasMore).toBe(false);
 		expect(activity.renderTimer).toBeNull();
 		expect(activity.thinkingStartTime).toBe(0);
 	});
@@ -100,7 +98,6 @@ describe("getOrCreateSessionSlot", () => {
 		expect(messages.loadLifecycle).toBe("empty");
 		expect(messages.contextPercent).toBe(0);
 		expect(messages.historyHasMore).toBe(false);
-		expect(messages.historyMessageCount).toBe(0);
 		expect(messages.historyLoading).toBe(false);
 		expect(messages.toolRegistry).toBeDefined();
 	});

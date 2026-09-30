@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import { handleVariantInfo } from "../../stores/discovery.svelte.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const meta = {
@@ -9,8 +9,11 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
 	beforeEach: () => {
-		discoveryState.availableVariants = ["low", "medium", "high", "max"];
-		discoveryState.currentVariant = "";
+		handleVariantInfo({
+			type: "variant_info",
+			variant: "",
+			variants: ["low", "medium", "high", "max"],
+		});
 	},
 } satisfies Meta<typeof ModelVariant>;
 
@@ -21,7 +24,11 @@ export const Default: Story = {};
 
 export const High: Story = {
 	beforeEach: () => {
-		discoveryState.currentVariant = "high";
+		handleVariantInfo({
+			type: "variant_info",
+			variant: "high",
+			variants: ["low", "medium", "high", "max"],
+		});
 	},
 };
 

@@ -8,27 +8,34 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyListDaemonSessionsResponse,
+	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	clearSessionSearch,
+	seedDaemonSessions,
+	seedFamilySessions,
+	seedRootSessions,
+} from "../stores/session-fixtures.js";
 
 describe("SessionList daemon sessions", () => {
 	beforeEach(() => {
+		clearSessionState();
 		routerState.path = "/";
 		attachedProjectState.slug = "current-project";
 		routerState.search = "";
-		sessionState.rootSessions = [
+		seedRootSessions([
 			{
 				id: "local-session",
 				title: "Local session",
 				updatedAt: Date.now(),
 			},
-		];
-		sessionState.familySessions = [...sessionState.rootSessions];
-		sessionState.daemonSessions = [];
-		sessionState.searchResults = null;
+		]);
+		seedFamilySessions("root-a", [...sessionState.rootSessions]);
+		seedDaemonSessions([]);
+		clearSessionSearch();
 		sessionState.searchQuery = "";
 		sessionState.currentId = "local-session";
-		sessionState.sessions.clear();
 		projectState.projects = [
 			{
 				slug: "current-project",
@@ -54,6 +61,7 @@ describe("SessionList daemon sessions", () => {
 				{
 					id: "foreign-session",
 					title: "Foreign session",
+					status: "idle",
 					projectSlug: "unlisted-project",
 					updatedAt: Date.now() - 1,
 				},
@@ -113,9 +121,7 @@ describe("SessionList daemon sessions", () => {
 		expect(within(localRow).getByText("Current project")).toBeDefined();
 	});
 
-	// The provenance line always leads with the project square (vik1.22), so a
-	// lone project is named too rather than leaving the line headless.
-	it("names the project on every row even when only one project is registered", () => {
+	it("names the project even when only one project is registered", () => {
 		projectState.projects = [
 			{
 				slug: "current-project",
@@ -157,8 +163,8 @@ describe("SessionList daemon sessions", () => {
 	// The case the notice exists for: an unreadable project leaves nothing to
 	// show, and the empty message would otherwise claim there is nothing to see.
 	it("still says a project is missing when that leaves the list empty", () => {
-		sessionState.rootSessions = [];
-		sessionState.familySessions = [];
+		seedRootSessions([]);
+		seedFamilySessions("root-a", []);
 		applyListDaemonSessionsResponse({
 			projectSlug: "current-project",
 			sessions: [],

@@ -17,6 +17,7 @@ interface MessageRow {
 	session_id: string;
 	role: string;
 	is_streaming: number;
+	version: number;
 }
 
 interface PartRow {
@@ -59,7 +60,7 @@ describe("session.compaction projection (real ingestion path)", () => {
 
 	const compactionMessages = () =>
 		harness.query<MessageRow>(
-			"SELECT id, session_id, role, is_streaming FROM messages WHERE id LIKE 'compaction-%' ORDER BY id",
+			"SELECT id, session_id, role, is_streaming, version FROM messages WHERE id LIKE 'compaction-%' ORDER BY id",
 		);
 
 	const compactionParts = () =>
@@ -87,6 +88,7 @@ describe("session.compaction projection (real ingestion path)", () => {
 			role: "assistant",
 			is_streaming: 0,
 		});
+		expect(messages[0]?.version).toBeGreaterThan(0);
 
 		const parts = await compactionParts();
 		expect(parts).toHaveLength(1);

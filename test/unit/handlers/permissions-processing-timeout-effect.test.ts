@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -54,6 +55,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 				Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
 				PendingInteractionServiceLive,
+				PendingSendOwnershipLive,
 				Layer.succeed(LoggerTag, createSilentLogger()),
 				Layer.succeed(
 					SessionManagerServiceTag,

@@ -1,5 +1,11 @@
 // Regression guard: relay-stack should use Effect OpenCode runtime ingress only.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
@@ -7,8 +13,11 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
+import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { OpenCodeInstanceClientsTag } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -22,6 +31,9 @@ interface MockOpenCode {
 	readonly injectSSE: (
 		events: readonly { type: string; properties: Record<string, unknown> }[],
 	) => void;
+	readonly disconnectSse: () => void;
+	readonly sseConnectionCount: () => number;
+	readonly historyRequestCount: () => number;
 	readonly close: () => Promise<void>;
 }
 
@@ -33,6 +45,8 @@ const closeServer = (server: ReturnType<typeof createServer>) =>
 
 async function createMockOpenCode(): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
+	let sseConnections = 0;
+	let historyRequests = 0;
 	let resolveSseClient: (() => void) | undefined;
 	const sseClientConnected = new Promise<void>((resolve) => {
 		resolveSseClient = resolve;
@@ -42,12 +56,15 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
 		if (url.pathname === "/event") {
+			sseConnections++;
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
 				Connection: "keep-alive",
 			});
-			res.write(": heartbeat\n\n");
+			res.write(
+				`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+			);
 			sseClients.add(res);
 			resolveSseClient?.();
 			req.on("close", () => sseClients.delete(res));
@@ -106,6 +123,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			url.pathname.match(/^\/session\/[\w-]+\/message$/) &&
 			req.method === "GET"
 		) {
+			historyRequests++;
 			res.end(JSON.stringify([]));
 			return;
 		}
@@ -154,6 +172,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 				}
 			}
 		},
+		disconnectSse() {
+			for (const client of sseClients) client.end();
+		},
+		sseConnectionCount: () => sseConnections,
+		historyRequestCount: () => historyRequests,
 		async close() {
 			for (const client of sseClients) client.end();
 			sseClients.clear();
@@ -215,6 +238,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 						},
 					},
 					"test-session",
+					"opencode",
 				),
 			);
 
@@ -313,6 +337,163 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 			if (relay != null) await relay.stop();
 			await closeServer(relayServer);
 			await mock.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps named OpenCode stream provider bindings isolated through the shared ingress", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-named-ingress-"));
+		const projectDir = join(dir, "project");
+		const personalSessionId = "sess-relay-personal";
+		const workSessionId = "sess-relay-work";
+		mkdirSync(join(projectDir, ".conduit"), { recursive: true });
+		const dbPath = join(projectDir, ".conduit", "events.db");
+		const defaultMock = await createMockOpenCode();
+		const workMock = await createMockOpenCode();
+		const personalMock = await createMockOpenCode();
+		writeFileSync(
+			join(dir, "daemon.json"),
+			JSON.stringify({
+				pid: 1234,
+				port: 2633,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: [],
+				instances: [
+					{
+						id: "work-oc",
+						name: "Work OpenCode",
+						port: 0,
+						managed: false,
+						driver: "opencode",
+						url: workMock.url,
+					},
+					{
+						id: "personal-oc",
+						name: "Personal OpenCode",
+						port: 0,
+						managed: false,
+						driver: "opencode",
+						url: personalMock.url,
+					},
+				],
+			} satisfies DaemonConfig),
+		);
+		const relayServer = createServer();
+		await listenOnRandomPort(relayServer);
+
+		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
+		try {
+			relay = await createProjectRelay({
+				httpServer: relayServer,
+				opencodeUrl: defaultMock.url,
+				projectDir,
+				persistenceDbPath: dbPath,
+				configDir: dir,
+				slug: "named-runtime-ingress",
+				log: createSilentLogger(),
+				statusPollerInterval: 60_000,
+				messagePollerInterval: 60_000,
+			});
+
+			await relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					const instanceClients = yield* OpenCodeInstanceClientsTag;
+					yield* instanceClients.clientFor("work-oc");
+					yield* instanceClients.clientFor("personal-oc");
+				}),
+			);
+
+			personalMock.injectSSE([
+				{
+					type: "message.created",
+					properties: {
+						sessionID: personalSessionId,
+						messageID: "msg-relay-personal",
+						info: { role: "assistant", parts: [] },
+					},
+				},
+			]);
+			workMock.injectSSE([
+				{
+					type: "message.created",
+					properties: {
+						sessionID: workSessionId,
+						messageID: "msg-relay-work",
+						info: { role: "assistant", parts: [] },
+					},
+				},
+			]);
+
+			const providerBindings = await eventually(
+				() =>
+					relay?.effectRuntime.runtime.runPromise(
+						Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							return yield* sql<{
+								session_id: string;
+								session_provider: string;
+								binding_provider: string;
+							}>`
+								SELECT
+									sessions.id AS session_id,
+									sessions.provider AS session_provider,
+									session_providers.provider AS binding_provider
+								FROM sessions
+								JOIN session_providers ON session_providers.session_id = sessions.id
+								WHERE sessions.id IN (${personalSessionId}, ${workSessionId})
+									AND session_providers.status = 'active'
+								ORDER BY sessions.id`;
+						}),
+					) ?? Promise.resolve([]),
+				(rows) => rows.length === 2,
+			);
+
+			expect(providerBindings).toEqual([
+				{
+					session_id: personalSessionId,
+					session_provider: "personal-oc",
+					binding_provider: "personal-oc",
+				},
+				{
+					session_id: workSessionId,
+					session_provider: "work-oc",
+					binding_provider: "work-oc",
+				},
+			]);
+			const historyBeforeReconnect = workMock.historyRequestCount();
+			const connectsBeforeReconnect = workMock.sseConnectionCount();
+			workMock.disconnectSse();
+			await eventually(
+				async () => workMock.sseConnectionCount(),
+				(count) => count > connectsBeforeReconnect,
+				10_000,
+			);
+			workMock.injectSSE([
+				{
+					type: "message.created",
+					properties: {
+						sessionID: workSessionId,
+						messageID: "msg-relay-work-after-reconnect",
+						info: { role: "assistant", parts: [] },
+					},
+				},
+			]);
+			expect(
+				await eventually(
+					async () => workMock.historyRequestCount(),
+					(count) => count > historyBeforeReconnect,
+				),
+			).toBeGreaterThan(historyBeforeReconnect);
+		} finally {
+			if (relay != null) await relay.stop();
+			await closeServer(relayServer);
+			await defaultMock.close();
+			await workMock.close();
+			await personalMock.close();
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});

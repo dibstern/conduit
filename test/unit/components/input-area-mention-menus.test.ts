@@ -7,7 +7,7 @@ import {
 	phaseToIdle,
 	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { discoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { applyGetCommandsResponse } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { fileTreeState } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
 import {
 	handleAskUserResolved,
@@ -36,15 +36,18 @@ function keydown(textarea: HTMLTextAreaElement, key: string) {
 describe("InputArea detached listboxes", () => {
 	beforeEach(() => {
 		sessionState.currentId = testSessionId;
-		phaseToIdle();
+		phaseToIdle(getOrCreateSessionActivity(testSessionId));
 		permissionsState.pendingQuestions = [];
 		getOrCreateSessionActivity(testSessionId).phase = "idle";
 		getOrCreateSessionMessages(testSessionId).contextPercent = 0;
-		discoveryState.commands = [
-			{ name: "review", description: "Review a pull request" },
-			{ name: "compact", description: "Compact conversation history" },
-			{ name: "config", description: "View configuration" },
-		];
+		applyGetCommandsResponse({
+			projectSlug: "test",
+			commands: [
+				{ name: "review", description: "Review a pull request" },
+				{ name: "compact", description: "Compact conversation history" },
+				{ name: "config", description: "View configuration" },
+			],
+		});
 		fileTreeState.entries = ["README.md", "src/index.ts"];
 		fileTreeState.loading = false;
 		fileTreeState.loaded = true;
@@ -57,10 +60,10 @@ describe("InputArea detached listboxes", () => {
 
 	afterEach(() => {
 		cleanup();
-		phaseToIdle();
+		phaseToIdle(getOrCreateSessionActivity(testSessionId));
 		sessionState.currentId = null;
+		applyGetCommandsResponse({ projectSlug: "test", commands: [] });
 		permissionsState.pendingQuestions = [];
-		discoveryState.commands = [];
 		fileTreeState.entries = [];
 		fileTreeState.loading = false;
 		fileTreeState.loaded = false;
@@ -68,7 +71,7 @@ describe("InputArea detached listboxes", () => {
 	});
 
 	it("labels the send button Reply only for a question in the current session", async () => {
-		phaseToProcessing();
+		phaseToProcessing(getOrCreateSessionActivity(testSessionId));
 		permissionsState.pendingQuestions = [
 			{ toolId: "other-question", sessionId: "other-session", questions: [] },
 		];

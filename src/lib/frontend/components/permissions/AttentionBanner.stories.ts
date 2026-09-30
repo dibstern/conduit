@@ -1,14 +1,34 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { flushSync } from "svelte";
 import {
-	dispatch,
-	resetNotifState,
-} from "../../stores/notification-reducer.svelte.js";
-import { permissionsState } from "../../stores/permissions.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
+	clearAllPermissions,
+	handlePermissionRequest,
+} from "../../stores/permissions.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
-import type { PermissionId } from "../../types.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type { PermissionId, SessionInfo } from "../../types.js";
 import NotificationStack from "../overlays/NotificationStack.svelte";
+
+let sequence = 0;
+
+type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
+
+function seedSessions(rows: readonly Row[]): void {
+	const sessions: SessionInfo[] = rows.map((row) => ({
+		status: "idle",
+		...row,
+	}));
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -24,26 +44,24 @@ function setupState(opts: {
 }) {
 	flushSync(() => {
 		sessionState.currentId = opts.currentId ?? "ses_current";
-		sessionState.familySessions = Object.entries(opts.sessionTitles ?? {}).map(
-			([id, title]) => ({
+		seedSessions(
+			Object.entries(opts.sessionTitles ?? {}).map(([id, title]) => ({
 				id,
 				title,
-				// Fixed epoch, not Date.now(): stories with committed baselines must
-				// be deterministic even where the value is not currently rendered.
+				status: "idle" as const,
 				createdAt: 1_735_689_600_000,
-			}),
-		) as typeof sessionState.familySessions;
+				pendingQuestionCount: opts.questionSessions?.includes(id) ? 1 : 0,
+			})),
+		);
 
-		permissionsState.pendingPermissions = (opts.permissions ?? []).map((p) => ({
-			...p,
-			requestId: p.id as PermissionId,
-			toolName: p.toolName,
-			toolInput: {},
-		}));
-
-		resetNotifState();
-		for (const sid of opts.questionSessions ?? []) {
-			dispatch({ type: "question_appeared", sessionId: sid });
+		for (const p of opts.permissions ?? []) {
+			handlePermissionRequest({
+				type: "permission_request",
+				requestId: p.id as PermissionId,
+				sessionId: p.sessionId,
+				toolName: p.toolName,
+				toolInput: {},
+			});
 		}
 	});
 }
@@ -59,8 +77,8 @@ const meta = {
 	},
 	beforeEach: () => {
 		uiState.toasts = [];
-		permissionsState.pendingPermissions = [];
-		resetNotifState();
+		clearAllPermissions();
+		clearSessionState();
 	},
 } satisfies Meta<typeof NotificationStack>;
 

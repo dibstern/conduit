@@ -1,5 +1,10 @@
-import { Effect, Layer } from "effect";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -7,17 +12,23 @@ import {
 	makePollerStateLive,
 	type SessionStatusPollerService,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	wireMonitoring,
 	wireMonitoringEffect,
 } from "../../../src/lib/relay/monitoring-wiring.js";
+import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
+import type { PushNotificationSender } from "../../../src/lib/server/push.js";
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function createHarness() {
+function createHarness(parentMap = new Map<string, string>()) {
+	const broadcastPerSessionEvent = vi.fn();
+	const clearProcessingTimeout = vi.fn();
 	let changed: ChangedCallback | undefined;
 	let resolveMessages: ((messages: []) => void) | undefined;
 	const messages = vi.fn(
@@ -28,23 +39,24 @@ function createHarness() {
 	);
 	const startPolling = vi.fn();
 	const getClientsForSession = vi.fn((_sessionId: string): string[] => []);
+	const broadcast = vi.fn();
 
 	const result = wireMonitoring({
 		client: {
 			session: { messages },
 		},
 		wsHandler: {
-			broadcast: vi.fn(),
+			broadcast,
 			sendToSession: vi.fn(),
 			getClientsForSession,
-			broadcastPerSessionEvent: vi.fn(),
+			broadcastPerSessionEvent,
 		},
 		sessionService: {
-			sendSessionLists: vi.fn(async () => {}),
-			getSessionParentMap: () => new Map(),
+			pushViewerFamilies: vi.fn(async () => {}),
+			getSessionParentMap: () => parentMap,
 		},
 		processingTimeouts: {
-			clearProcessingTimeout: vi.fn(),
+			clearProcessingTimeout,
 			resetProcessingTimeout: vi.fn(),
 		},
 		statusPoller: {
@@ -81,6 +93,9 @@ function createHarness() {
 	});
 
 	return {
+		broadcast,
+		broadcastPerSessionEvent,
+		clearProcessingTimeout,
 		result,
 		messages,
 		startPolling,
@@ -91,6 +106,76 @@ function createHarness() {
 		},
 	};
 }
+
+it("broadcasts a synthetic root done when its session has no viewer", async () => {
+	const harness = createHarness();
+	harness.result.setMonitoringState({
+		sessions: new Map([
+			["root", { phase: "busy-polling", busySince: 0, pollerStartedAt: 1 }],
+		]),
+	});
+	await harness.emitStatus({ root: { type: "idle" } });
+	expect(harness.broadcast).toHaveBeenCalledWith(
+		expect.objectContaining({
+			type: "notification_event",
+			eventType: "done",
+			sessionId: "root",
+		}),
+	);
+});
+
+it("uses the busy cycle to identify anonymous poller broadcasts", async () => {
+	const harness = createHarness();
+	for (const busySince of [101, 202]) {
+		harness.result.setMonitoringState({
+			sessions: new Map([
+				[
+					"root",
+					{ phase: "busy-polling", busySince, pollerStartedAt: busySince },
+				],
+			]),
+		});
+		await harness.emitStatus({ root: { type: "idle" } });
+	}
+	expect(
+		harness.broadcast.mock.calls.map(([message]) =>
+			message.type === "notification_event" ? message.alertId : undefined,
+		),
+	).toEqual(['["root","poller",101,"done"]', '["root","poller",202,"done"]']);
+});
+
+it("defers parent completion and synthetic done until its last busy child finishes", async () => {
+	const harness = createHarness(new Map([["child", "parent"]]));
+	await harness.emitStatus({
+		parent: { type: "busy" },
+		child: { type: "busy" },
+	});
+	await harness.emitStatus({
+		parent: { type: "idle" },
+		child: { type: "busy" },
+	});
+	expect(
+		harness.result.getMonitoringState().sessions.get("parent")?.phase,
+	).not.toBe("idle");
+	expect(harness.broadcastPerSessionEvent).not.toHaveBeenCalledWith(
+		"parent",
+		expect.objectContaining({ type: "done" }),
+	);
+	expect(harness.clearProcessingTimeout).not.toHaveBeenCalledWith("parent");
+	await harness.emitStatus({
+		parent: { type: "idle" },
+		child: { type: "idle" },
+	});
+	await harness.emitStatus({
+		parent: { type: "idle" },
+		child: { type: "idle" },
+	});
+	expect(
+		harness.broadcastPerSessionEvent.mock.calls.filter(
+			([id, event]) => id === "parent" && event.type === "done",
+		),
+	).toHaveLength(1);
+});
 
 describe("wireMonitoring shutdown", () => {
 	// The harnesses use a zero grace period, which expires only once the clock
@@ -232,6 +317,185 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
+	it("production wiring broadcasts a synthetic root done without a viewer", async () => {
+		const harness = await createEffectHarness();
+		harness.result.setMonitoringState({
+			sessions: new Map([
+				["root", { phase: "busy-polling", busySince: 0, pollerStartedAt: 1 }],
+			]),
+		});
+		harness.emitStatus({ root: { type: "idle" } }, true);
+		await flushPromises();
+		expect(harness.broadcast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "notification_event",
+				eventType: "done",
+				sessionId: "root",
+			}),
+		);
+		harness.result.stopMonitoring();
+	});
+
+	it("production poller pushes a root completion once using the primary alert identity", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "conduit-poller-alert-"));
+		const dbPath = join(directory, "events.db");
+		const sendToAll = vi.fn(async () => ({
+			delivered: ["device"],
+			failed: [],
+			expired: [],
+		}));
+		const pushManager = {
+			getPublicKey: () => null,
+			addSubscription: vi.fn(),
+			removeSubscription: vi.fn(),
+			sendToAll,
+		};
+		try {
+			for (let relay = 0; relay < 2; relay++) {
+				const harness = await createEffectHarness(
+					() => Effect.void,
+					pushManager,
+					dbPath,
+					relay === 0,
+				);
+				try {
+					harness.result.setMonitoringState({
+						sessions: new Map([
+							[
+								"root",
+								{ phase: "busy-polling", busySince: 0, pollerStartedAt: 1 },
+							],
+						]),
+					});
+					harness.emitStatus({ root: { type: "idle" } });
+					await flushPromises();
+					if (!harness.runtime) throw new Error("Missing test runtime");
+					await harness.runtime.runPromise(
+						sendPushForEventEffect(
+							pushManager,
+							{
+								type: "done",
+								sessionId: "root",
+								code: 0,
+								alertId: '["root","message-1","done"]',
+							},
+							createSilentLogger(),
+							{ sessionId: "root" },
+						),
+					);
+					expect(sendToAll).toHaveBeenCalledOnce();
+					expect(harness.broadcast).toHaveBeenCalledWith(
+						expect.objectContaining({ alertId: '["root","message-1","done"]' }),
+					);
+				} finally {
+					harness.result.stopMonitoring();
+					await harness.dispose();
+				}
+			}
+			expect(sendToAll).toHaveBeenCalledWith(
+				expect.objectContaining({ alertId: '["root","message-1","done"]' }),
+			);
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("matches a primary error completion whose origin is the event ID", async () => {
+		const sendToAll = vi.fn(async () => ({
+			delivered: ["device"],
+			failed: [],
+			expired: [],
+		}));
+		const pushManager = {
+			getPublicKey: () => null,
+			addSubscription: vi.fn(),
+			removeSubscription: vi.fn(),
+			sendToAll,
+		};
+		const harness = await createEffectHarness(() => Effect.void, pushManager);
+		try {
+			if (!harness.runtime) throw new Error("Missing test runtime");
+			await harness.runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO events
+						(event_id, session_id, stream_version, type, data, provider, created_at)
+						VALUES ('error-event', 'root', 1, 'turn.error', '{"messageId":""}', 'opencode', 2)`;
+				}),
+			);
+			harness.result.setMonitoringState({
+				sessions: new Map([
+					["root", { phase: "busy-polling", busySince: 1, pollerStartedAt: 1 }],
+				]),
+			});
+			harness.emitStatus({ root: { type: "idle" } });
+			await flushPromises();
+			expect(sendToAll).toHaveBeenCalledWith(
+				expect.objectContaining({ alertId: '["root","error-event","done"]' }),
+			);
+		} finally {
+			harness.result.stopMonitoring();
+			await harness.dispose();
+		}
+	});
+
+	it("uses the provider message when the completion has not reached the store", async () => {
+		const sendToAll = vi.fn(async () => ({
+			delivered: ["device"],
+			failed: [],
+			expired: [],
+		}));
+		const pushManager = {
+			getPublicKey: () => null,
+			addSubscription: vi.fn(),
+			removeSubscription: vi.fn(),
+			sendToAll,
+		};
+		const harness = await createEffectHarness(() => Effect.void, pushManager);
+		try {
+			if (!harness.runtime) throw new Error("Missing test runtime");
+			await harness.runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`DELETE FROM turns WHERE session_id = 'root'`;
+				}),
+			);
+			harness.messages.mockResolvedValue([
+				{ id: "provider-message", role: "assistant", sessionID: "root" },
+			]);
+			harness.result.setMonitoringState({
+				sessions: new Map([
+					["root", { phase: "busy-polling", busySince: 1, pollerStartedAt: 1 }],
+				]),
+			});
+			harness.emitStatus({ root: { type: "idle" } });
+			await vi.waitFor(() =>
+				expect(sendToAll).toHaveBeenCalledWith(
+					expect.objectContaining({
+						alertId: '["root","provider-message","done"]',
+					}),
+				),
+			);
+			await harness.runtime.runPromise(
+				sendPushForEventEffect(
+					pushManager,
+					{
+						type: "done",
+						sessionId: "root",
+						code: 0,
+						alertId: '["root","provider-message","done"]',
+					},
+					createSilentLogger(),
+					{ sessionId: "root" },
+				),
+			);
+			expect(sendToAll).toHaveBeenCalledOnce();
+		} finally {
+			harness.result.stopMonitoring();
+			await harness.dispose();
+		}
+	});
+
 	it("stops B and broadcasts its completion while A's seed never resolves", async () => {
 		const broadcast = vi.fn(() => Effect.void);
 		const harness = await createEffectHarness(broadcast);
@@ -341,12 +605,17 @@ describe("wireMonitoring shutdown", () => {
 	});
 });
 
-async function createEffectHarness(sendSessionLists = () => Effect.void) {
+async function createEffectHarness(
+	pushViewerFamilies = () => Effect.void,
+	pushManager?: PushNotificationSender,
+	dbPath = ":memory:",
+	seedTurn = true,
+) {
 	let changed: ChangedCallback | undefined;
-	let resolveMessages: ((messages: []) => void) | undefined;
+	let resolveMessages: ((messages: Message[]) => void) | undefined;
 	const messages = vi.fn(
 		() =>
-			new Promise<[]>((resolve) => {
+			new Promise<Message[]>((resolve) => {
 				resolveMessages = resolve;
 			}),
 	);
@@ -356,6 +625,7 @@ async function createEffectHarness(sendSessionLists = () => Effect.void) {
 		pollerEvents.push(`start:${id}`);
 	});
 	const getClientsForSession = vi.fn((_id: string): string[] => []);
+	const broadcast = vi.fn();
 	const unused = () => Effect.die("Unexpected service call");
 	const layer = Layer.mergeAll(
 		Layer.succeed(SessionManagerServiceTag, {
@@ -365,26 +635,23 @@ async function createEffectHarness(sendSessionLists = () => Effect.void) {
 			getLastKnownSessionCount: unused,
 			sessionExists: unused,
 			listSessions: unused,
+			establishOpenCodeSession: unused,
 			createSession: unused,
 			deleteSession: unused,
 			renameSession: unused,
 			markSessionRead: unused,
 			markSessionUnread: unused,
+			markSessionSeen: unused,
 			setSessionSettled: unused,
 			setSessionAutoSettleDisabled: unused,
 			setSessionPinned: unused,
 			snoozeSession: unused,
 			unsnoozeSession: unused,
-			clearPaginationCursor: unused,
-			seedPaginationCursor: unused,
 			loadPreRenderedHistory: unused,
 			recordMessageActivity: unused,
 			addToParentMap: unused,
-			incrementPendingQuestionCount: unused,
-			decrementPendingQuestionCount: unused,
-			setPendingQuestionCounts: unused,
 			setForkEntry: unused,
-			sendSessionLists,
+			pushViewerFamilies,
 			getSessionParentMap: () => Effect.succeed(new Map<string, string>()),
 		}),
 		Layer.succeed(StatusPollerTag, {
@@ -405,37 +672,59 @@ async function createEffectHarness(sendSessionLists = () => Effect.void) {
 		makePollerStateLive(),
 		makeOverridesStateLive(),
 	);
-	const result = await Effect.runPromise(
-		wireMonitoringEffect({
-			client: { session: { messages } },
-			wsHandler: {
-				broadcast: vi.fn(),
-				sendToSession: (_id, message) => {
-					if (message.type === "status") delivered.push(message.status);
-				},
-				getClientsForSession,
-				broadcastPerSessionEvent: (_id, message) => {
-					if (message.type === "done") delivered.push("done");
-				},
+	const persistence = makePersistenceEffectLayer(dbPath);
+	const monitoring = wireMonitoringEffect({
+		client: { session: { messages } },
+		wsHandler: {
+			broadcast,
+			sendToSession: (_id, message) => {
+				if (message.type === "status") delivered.push(message.status);
 			},
-			pollerManager: {
-				startPolling,
-				stopPolling: (id) => {
-					pollerEvents.push(`stop:${id}`);
-				},
+			getClientsForSession,
+			broadcastPerSessionEvent: (_id, message) => {
+				if (message.type === "done") delivered.push("done");
 			},
-			sseStream: { isConnected: () => false },
-			config: {
-				slug: "test",
-				pollerGatingConfig: { sseGracePeriodMs: 0, sseActiveThresholdMs: 0 },
+		},
+		pollerManager: {
+			startPolling,
+			stopPolling: (id) => {
+				pollerEvents.push(`stop:${id}`);
 			},
-			statusLog: createSilentLogger(),
-			sseLog: createSilentLogger(),
-			pipelineLog: createSilentLogger(),
-		}).pipe(Effect.provide(layer)),
-	);
+		},
+		sseStream: { isConnected: () => false },
+		config: {
+			slug: "test",
+			pollerGatingConfig: { sseGracePeriodMs: 0, sseActiveThresholdMs: 0 },
+			...(pushManager && { pushManager }),
+		},
+		statusLog: createSilentLogger(),
+		sseLog: createSilentLogger(),
+		pipelineLog: createSilentLogger(),
+	});
+	const runtime = pushManager
+		? ManagedRuntime.make(
+				Layer.merge(layer, Layer.provideMerge(AlertLedgerLive, persistence)),
+			)
+		: undefined;
+	const result = runtime
+		? await runtime.runPromise(
+				Effect.gen(function* () {
+					if (seedTurn) {
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
+							VALUES ('root', 'root', 'opencode', 1, 1)`;
+						yield* sql`INSERT INTO turns (id, session_id, state, assistant_message_id, requested_at)
+							VALUES ('turn-1', 'root', 'completed', 'message-1', 1)`;
+					}
+					return yield* monitoring;
+				}),
+			)
+		: await Effect.runPromise(monitoring.pipe(Effect.provide(layer)));
 	return {
+		broadcast,
 		result,
+		runtime,
+		dispose: () => runtime?.dispose() ?? Promise.resolve(),
 		messages,
 		startPolling,
 		getClientsForSession,

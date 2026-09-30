@@ -48,7 +48,10 @@ import {
 	decodeClaudeSDKOptionsJsonShape,
 	decodeClaudeSDKUserMessage,
 } from "../../contracts/providers/claude-agent-sdk.js";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -120,7 +123,7 @@ const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 const MAX_DECODE_ERROR_LENGTH = 800;
 const MAX_DECODE_PAYLOAD_LOG_LENGTH = 1200;
 
-function claudeRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
+function claudeRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -1594,17 +1597,6 @@ export class ClaudeProviderRuntime {
 				});
 			const task = ctx.subagentTasks?.get(message.task_id);
 			let sessionReady = false;
-			if (ctx.subagentTasks) {
-				ctx.subagentTasks.set(message.task_id, {
-					toolUseId: message.tool_use_id,
-					childSessionId,
-					...(task?.parentMessageId
-						? { parentMessageId: task.parentMessageId }
-						: {}),
-					...(task?.description ? { description: task.description } : {}),
-					...(task?.subagentType ? { subagentType: task.subagentType } : {}),
-				});
-			}
 
 			const ensureClaudeSubagentSession =
 				yield* this.resolveEnsureClaudeSubagentSessionEffect();
@@ -1628,6 +1620,19 @@ export class ClaudeProviderRuntime {
 					),
 				);
 				sessionReady = ensured;
+			}
+			if (!sessionReady) return;
+
+			if (ctx.subagentTasks) {
+				ctx.subagentTasks.set(message.task_id, {
+					toolUseId: message.tool_use_id,
+					childSessionId,
+					...(task?.parentMessageId
+						? { parentMessageId: task.parentMessageId }
+						: {}),
+					...(task?.description ? { description: task.description } : {}),
+					...(task?.subagentType ? { subagentType: task.subagentType } : {}),
+				});
 			}
 
 			if (ctx.eventSink) {

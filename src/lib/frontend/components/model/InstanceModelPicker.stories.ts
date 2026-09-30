@@ -1,6 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
+import {
+	clearDiscoveryState,
+	discoveryState,
+	handleDefaultModelInfo,
+	handleModelInfo,
+	handleModelList,
+	handleVariantInfo,
+} from "../../stores/discovery.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import type { ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
@@ -37,11 +44,18 @@ function bottomRightFrame(): () => void {
 
 /** Seed a single configured Anthropic provider with Sonnet selected. */
 function seedClaude(): void {
-	discoveryState.providers = [anthropic];
-	discoveryState.currentProviderId = "claude";
-	discoveryState.currentModelId = "claude-sonnet-4-5";
-	discoveryState.defaultProviderId = "claude";
-	discoveryState.defaultModelId = "claude-sonnet-4-5";
+	handleModelList({ type: "model_list", providers: [anthropic] });
+	handleModelInfo({
+		type: "model_info",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+	});
+	handleDefaultModelInfo({
+		type: "default_model_info",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+		variant: "",
+	});
 }
 
 /**
@@ -77,16 +91,7 @@ const meta = {
 	beforeEach: () => {
 		// Reset state for each story. `selectedInstanceId` is normally rehydrated
 		// from localStorage, so it has to be pinned or a stale draft leaks in.
-		discoveryState.providers = [];
-		discoveryState.currentProviderId = "";
-		discoveryState.currentModelId = "";
-		discoveryState.defaultProviderId = "";
-		discoveryState.defaultModelId = "";
-		discoveryState.currentVariant = "";
-		discoveryState.availableVariants = [];
-		discoveryState.currentContextWindow = "";
-		discoveryState.availableContextWindowOptions = [];
-		discoveryState.hiddenModels = [];
+		clearDiscoveryState();
 		discoveryState.selectedInstanceId = "claude";
 		// Locked mode keys off an active session, so leaving this set would dim
 		// the rail in every story that ran after `Locked`.
@@ -121,8 +126,11 @@ export const Open: Story = {
 export const WithVariants: Story = {
 	beforeEach: () => {
 		seedClaude();
-		discoveryState.availableVariants = ["low", "medium", "high"];
-		discoveryState.currentVariant = "high";
+		handleVariantInfo({
+			type: "variant_info",
+			variant: "high",
+			variants: ["low", "medium", "high"],
+		});
 	},
 };
 
@@ -155,27 +163,41 @@ export const FavoritesOn: Story = {
 export const RoutingOptions: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
-		discoveryState.providers = [
-			{
-				...anthropic,
-				models: [
-					{
-						id: "claude-sonnet-4-5",
-						name: "Claude Sonnet 4.5",
-						provider: "claude",
-						routingOptions: [
-							{ value: "claude-sonnet-4-5", label: "global", isDefault: true },
-							{ value: "claude-sonnet-4-5-eu", label: "eu" },
-							{ value: "claude-sonnet-4-5-us", label: "us" },
-						],
-					},
-				],
-			},
-		];
-		discoveryState.currentProviderId = "claude";
-		discoveryState.currentModelId = "claude-sonnet-4-5-eu";
-		discoveryState.defaultProviderId = "claude";
-		discoveryState.defaultModelId = "claude-sonnet-4-5";
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					...anthropic,
+					models: [
+						{
+							id: "claude-sonnet-4-5",
+							name: "Claude Sonnet 4.5",
+							provider: "claude",
+							routingOptions: [
+								{
+									value: "claude-sonnet-4-5",
+									label: "global",
+									isDefault: true,
+								},
+								{ value: "claude-sonnet-4-5-eu", label: "eu" },
+								{ value: "claude-sonnet-4-5-us", label: "us" },
+							],
+						},
+					],
+				},
+			],
+		});
+		handleModelInfo({
+			type: "model_info",
+			provider: "claude",
+			model: "claude-sonnet-4-5-eu",
+		});
+		handleDefaultModelInfo({
+			type: "default_model_info",
+			provider: "claude",
+			model: "claude-sonnet-4-5",
+			variant: "",
+		});
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -205,15 +227,18 @@ export const Locked: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
-		discoveryState.providers = [
-			anthropic,
-			{
-				id: "opencode",
-				name: "OpenCode",
-				configured: true,
-				models: [{ id: "gpt-5", name: "GPT-5", provider: "opencode" }],
-			},
-		];
+		handleModelList({
+			type: "model_list",
+			providers: [
+				anthropic,
+				{
+					id: "opencode",
+					name: "OpenCode",
+					configured: true,
+					models: [{ id: "gpt-5", name: "GPT-5", provider: "opencode" }],
+				},
+			],
+		});
 		sessionState.currentId = "session-1";
 		return bottomRightFrame();
 	},
@@ -285,21 +310,24 @@ export const UnconfiguredProvider: Story = {
 		// configured and an unconfigured group side by side. That pairing is the
 		// real shape: an OpenCode instance exposes whatever providers it knows
 		// about, set up or not.
-		discoveryState.providers = [
-			anthropic,
-			{
-				id: "google",
-				name: "Google",
-				configured: true,
-				models: [{ id: "gemini-3", name: "Gemini 3", provider: "google" }],
-			},
-			{
-				id: "openai",
-				name: "OpenAI",
-				configured: false,
-				models: [{ id: "gpt-5", name: "GPT-5", provider: "openai" }],
-			},
-		];
+		handleModelList({
+			type: "model_list",
+			providers: [
+				anthropic,
+				{
+					id: "google",
+					name: "Google",
+					configured: true,
+					models: [{ id: "gemini-3", name: "Gemini 3", provider: "google" }],
+				},
+				{
+					id: "openai",
+					name: "OpenAI",
+					configured: false,
+					models: [{ id: "gpt-5", name: "GPT-5", provider: "openai" }],
+				},
+			],
+		});
 		discoveryState.selectedInstanceId = "opencode";
 		return bottomRightFrame();
 	},

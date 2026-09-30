@@ -18,9 +18,10 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 35 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(35);
+	it("exports all 37 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(39);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
+		expect(CANONICAL_EVENT_TYPES).toContain("message.snapshot");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");
 		expect(CANONICAL_EVENT_TYPES).toContain("thinking.delta");
@@ -49,6 +50,7 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("session.status");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.compaction");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_changed");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_cleanup_failed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.permission_mode_changed");
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.asked");
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.resolved");
@@ -167,5 +169,23 @@ describe("Canonical Event Types", () => {
 		expect(() => validateEventPayload(missingMode)).toThrow(
 			"missing required fields: mode",
 		);
+	});
+
+	it("validates provider cleanup failure required fields while instanceId stays optional", () => {
+		const event = canonicalEvent("session.provider_cleanup_failed", "s1", {
+			sessionId: "s1",
+			provider: "opencode",
+			reason: "provider_delete: unavailable",
+		});
+		expect(() => validateEventPayload(event)).not.toThrow();
+
+		for (const field of ["sessionId", "provider", "reason"] as const) {
+			const { [field]: _removed, ...data } = event.data;
+			const malformed = { ...event, data };
+			// @ts-expect-error Deliberately malformed payload verifies runtime validation.
+			expect(() => validateEventPayload(malformed)).toThrow(
+				`missing required fields: ${field}`,
+			);
+		}
 	});
 });

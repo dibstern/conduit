@@ -2,29 +2,43 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { tick } from "svelte";
 import { instanceState } from "../../stores/instance.svelte.js";
-import {
-	dispatch,
-	resetNotifState,
-} from "../../stores/notification-reducer.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../stores/router.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import {
-	noteReadStateChanged,
-	noteSessionOpened,
-} from "../../stores/session-unread-hold.svelte.js";
+	clearSessionState,
+	sessionState,
+} from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
+	destroyAll,
 	handlePtyOutput,
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
-import type { OpenCodeInstance } from "../../types.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type { OpenCodeInstance, SessionInfo } from "../../types.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
+
+let sequence = 0;
+
+type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
+
+function seedSessions(rows: readonly Row[]): void {
+	const sessions: SessionInfo[] = rows.map((row) => ({
+		status: "idle",
+		...row,
+	}));
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
+}
 
 // Rendered through a phone-width frame; see the fixture for why.
 const meta = {
@@ -36,9 +50,9 @@ const meta = {
 	// be caught: gate it.
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	beforeEach: () => {
-		noteSessionOpened("__storybook_reset__");
-		resetNotifState();
-		// Storybook shares module-level stores across stories.
+		clearSessionState();
+		// Layout/Header seeds this same module-level store, and Storybook shares
+		// it across story files. Reset or the badge appears in every story.
 		instanceState.instances = [];
 		routerState.path = `/s/${mockSession.id}`;
 		routerState.search = "";
@@ -46,8 +60,7 @@ const meta = {
 		projectState.projects = [
 			{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
 		];
-		sessionState.familySessions = [mockSession, mockSessionLongTitle];
-		sessionState.rootSessions = sessionState.familySessions;
+		seedSessions([mockSession, mockSessionLongTitle]);
 		sessionState.currentId = mockSession.id;
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only
@@ -57,8 +70,7 @@ const meta = {
 		sessionViewState.forcedOpen = true;
 		sessionViewState.filesOpen = false;
 		sessionViewState.filesEverOpened = false;
-		terminalState.panelOpen = false;
-		terminalState.unreadPtyIds = new Set();
+		destroyAll();
 		return () => {
 			attachedProjectState.slug = null;
 		};
@@ -152,8 +164,7 @@ export const OpeningTerminalClearsBadge: Story = {
 
 function showState(overrides: Partial<typeof mockSession>) {
 	const session = { ...mockSession, ...overrides };
-	sessionState.familySessions = [session];
-	sessionState.rootSessions = [session];
+	seedSessions([session]);
 	sessionState.currentId = session.id;
 }
 
@@ -194,8 +205,12 @@ export const NeedsAttention: Story = {
 	beforeEach: () => {
 		// Attention elsewhere, deliberately not in the open session: the badge
 		// counts what the back control would take you to, not what you can see.
-		dispatch({ type: "question_appeared", sessionId: "sess_other_a" });
-		dispatch({ type: "permission_appeared", sessionId: "sess_other_b" });
+		seedSessions([
+			mockSession,
+			mockSessionLongTitle,
+			{ ...mockSession, id: "sess_other_a", pendingQuestionCount: 1 },
+			{ ...mockSession, id: "sess_other_b", pendingPermissionCount: 1 },
+		]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -507,7 +522,6 @@ export const DesktopUnread: Story = {
 		sessionViewState.compact = false;
 		const session = { ...mockSession, unread: true };
 		showState(session);
-		noteReadStateChanged(session, true);
 	},
 	play: async ({ canvasElement }) => {
 		await expect(
@@ -526,7 +540,6 @@ export const DesktopUnreadAndSettled: Story = {
 			settledAt: Date.now() - 3_600_000,
 		};
 		showState(session);
-		noteReadStateChanged(session, true);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

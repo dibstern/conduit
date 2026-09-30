@@ -4,13 +4,12 @@ import {
 	navigate,
 	previousHistoryEntryIsSessionList,
 } from "../stores/router.svelte.js";
+import { isSessionSnoozed, sessionState } from "../stores/session.svelte.js";
 import {
-	isSessionSnoozed,
-	loadDaemonSessions,
-	searchSessions,
-	sessionState,
-} from "../stores/session.svelte.js";
-import { noteReadStateChanged } from "../stores/session-unread-hold.svelte.js";
+	currentSearchQuery,
+	refreshSessionList,
+	sessionList,
+} from "../stores/session-list.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
 import { showToast } from "../stores/ui.svelte.js";
 import {
@@ -34,9 +33,9 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 	if (!projectSlug) return;
 	const foreign = projectSlug !== getCurrentSlug();
 	const refreshForeign = () =>
-		sessionState.searchResults === null
-			? loadDaemonSessions()
-			: searchSessions(sessionState.searchQuery, true);
+		currentSearchQuery() === null
+			? refreshSessionList()
+			: sessionList.search(sessionState.searchQuery).ready;
 	const input = {
 		projectSlug,
 		sessionId: session.id,
@@ -51,7 +50,6 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 		await (markUnread
 			? markSessionUnreadRpc(input)
 			: markSessionReadRpc(input));
-		noteReadStateChanged(session, markUnread);
 		if (foreign) await refreshForeign();
 		if (
 			markUnread &&
@@ -73,7 +71,6 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 								: markSessionUnreadRpc(input)
 						)
 							.then(async () => {
-								noteReadStateChanged(session, !markUnread);
 								if (foreign) await refreshForeign();
 							})
 							.catch(() => {

@@ -1,10 +1,14 @@
-import type { ProviderRuntimeEvent } from "../../src/lib/contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../src/lib/contracts/providers/provider-runtime-event.js";
+import { PROVIDER_RUNTIME_EVENT_TYPES } from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
 } from "../../src/lib/persistence/events.js";
 
-export function providerRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
+export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -36,25 +40,12 @@ export function providerRuntimeEventFromCanonical(
 	} = {},
 ): ProviderRuntimeEvent {
 	const metadata = metadataRecord(event.metadata);
-	if (
-		event.type === "session.deleted" ||
-		event.type === "session.forked" ||
-		event.type === "session.permission_mode_changed" ||
-		event.type === "session.read" ||
-		event.type === "session.unread" ||
-		event.type === "session.settled" ||
-		event.type === "session.unsettled" ||
-		event.type === "session.pinned" ||
-		event.type === "session.unpinned" ||
-		event.type === "session.snoozed" ||
-		event.type === "session.auto_settle_set" ||
-		event.type === "session.unsnoozed"
-	) {
+	if (!PROVIDER_RUNTIME_EVENT_TYPES.some((type) => type === event.type)) {
 		throw new Error(`${event.type} is not a provider runtime event`);
 	}
 	return {
 		eventId: event.eventId,
-		type: event.type,
+		type: event.type as ProviderRuntimeEventType,
 		providerId: event.provider,
 		sessionId: event.sessionId,
 		providerRefs: {},

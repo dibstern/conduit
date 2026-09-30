@@ -55,6 +55,29 @@ export type {
 	UsageInfo,
 } from "../shared-types.js";
 
+// ─── Server-owned reads ──────────────────────────────────────────────────────
+
+/**
+ * A value the server owns, seen from the outside: read-only all the way down.
+ *
+ * The stores keep the server's rows and hand them out through getters. Marking
+ * the getter read-only stops `state.x = …` but not `state.rows[0].title = …`,
+ * which edits the shared copy every other component is reading. Wrap the read
+ * type in this and the whole shape — rows, their fields, nested lists — is
+ * closed to callers, while the `apply*` functions keep writing plain values.
+ */
+export type Immutable<T> = T extends (...args: never[]) => unknown
+	? T
+	: T extends ReadonlyMap<infer K, infer V>
+		? ReadonlyMap<K, Immutable<V>>
+		: T extends ReadonlySet<infer E>
+			? ReadonlySet<Immutable<E>>
+			: T extends ReadonlyArray<infer E>
+				? ReadonlyArray<Immutable<E>>
+				: T extends object
+					? { readonly [K in keyof T]: Immutable<T[K]> }
+					: T;
+
 // ─── Derived type aliases ────────────────────────────────────────────────────
 
 /** Cost breakdown for a model (derived from shared ModelInfo). */
@@ -69,17 +92,23 @@ export interface FileTreeEntry extends FileEntry {
 
 // ─── Chat Message Types ──────────────────────────────────────────────────────
 
-export type ChatMessage =
+export type ChatMessage = (
 	| UserMessage
 	| AssistantMessage
 	| ThinkingMessage
 	| ToolMessage
 	| ResultMessage
-	| SystemMessage;
+	| SystemMessage
+) & {
+	/** Persisted message ordering, independent of each activity's display time. */
+	messageOrder?: { createdAt: number; id: string };
+};
 
 export interface UserMessage {
 	type: "user";
 	uuid: string;
+	messageId?: string;
+	originId?: string;
 	text: string;
 	images?: string[];
 	/** The `turnEpoch` at which this message was sent, present only when it
@@ -184,6 +213,11 @@ export interface SystemMessage {
 
 // ─── Session Types (frontend-only) ──────────────────────────────────────────
 
+export interface DateGroups {
+	today: Immutable<SessionInfo>[];
+	yesterday: Immutable<SessionInfo>[];
+	older: Immutable<SessionInfo>[];
+}
 /** The sidebar's sections. Coarser than the server's six attention tiers: a
  *  failure and a pending approval both mean "a human is needed", and one
  *  heading for that reads faster than three. */
@@ -300,6 +334,7 @@ export interface BannerConfig {
 	text: string;
 	dismissible: boolean;
 	link?: string;
+	action?: { label: string; run: () => void };
 }
 
 // ─── Info Panel Types ────────────────────────────────────────────────────────

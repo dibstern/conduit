@@ -200,6 +200,7 @@ const wokenStory = (
 		session: {
 			id: `woken-${reason}`,
 			title: `Woken by ${reason}`,
+			status: "idle",
 			attention: "idle",
 			wokenAt: WOKEN_STORY_NOW,
 			wokeBecause: reason,

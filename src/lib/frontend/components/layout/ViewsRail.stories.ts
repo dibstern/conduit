@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
-import { terminalState } from "../../stores/terminal.svelte.js";
+import { closePanel } from "../../stores/terminal.svelte.js";
 import ViewsRail from "./ViewsRail.svelte";
 
 const meta = {
@@ -11,7 +11,7 @@ const meta = {
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		sessionViewState.filesOpen = false;
-		terminalState.panelOpen = false;
+		closePanel();
 	},
 } satisfies Meta<typeof ViewsRail>;
 

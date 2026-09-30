@@ -22,7 +22,10 @@
  */
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeEventType,
+} from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger, type Logger } from "../../logger.js";
 import type {
 	CanonicalToolInput,
@@ -55,7 +58,7 @@ const defaultLog = createLogger("claude-event-translator");
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
 
-function makeProviderRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
+function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

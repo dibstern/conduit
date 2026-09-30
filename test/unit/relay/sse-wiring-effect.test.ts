@@ -59,53 +59,34 @@ const makeEffectDeps = (
 };
 
 describe("handleSSEEventEffect", () => {
-	it("keeps recovered Claude counts when OpenCode questions rehydrate", async () => {
-		const { effectDeps } = makeEffectDeps();
-		const deps = {
-			...effectDeps,
-			listPendingQuestions: vi.fn(async () => [
-				{ id: "que-open", sessionID: "opencode-session", questions: [] },
-			]),
+	it("preserves question identity in the lightweight broadcast", async () => {
+		const { deps, effectDeps } = makeEffectDeps();
+		const question: RelayMessage = {
+			type: "ask_user",
+			sessionId: "session-1",
+			toolId: "q1",
+			questions: [],
 		};
-		const setPendingQuestionCounts = vi.fn(() => Effect.void);
-		const listeners = new Map<string, () => void>();
-		const consumer = {
-			on: vi.fn((name: string, listener: () => void) => {
-				listeners.set(name, listener);
-			}),
-		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
-		const layer = Layer.mergeAll(
-			PendingInteractionServiceLive,
-			makeOverridesStateLive(),
-			Layer.succeed(SessionManagerServiceTag, {
-				getSessionParentMap: () => Effect.succeed(new Map()),
-				setPendingQuestionCounts,
-			} as never),
-		);
+		vi.mocked(effectDeps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [question],
+		});
 		await Effect.runPromise(
-			Effect.gen(function* () {
-				const pending = yield* PendingInteractionServiceTag;
-				yield* pending.recoverPendingQuestions([
-					{
-						requestId: "toolu-claude",
-						sessionId: "claude-session",
-						questions: [{ question: "Continue?" }],
-					},
-				]);
-				yield* wireSSEConsumerEffect(deps, consumer);
-				listeners.get("connected")?.();
-				yield* Effect.promise(() =>
-					vi.waitFor(() => {
-						expect(setPendingQuestionCounts).toHaveBeenCalledWith(
-							new Map([
-								["opencode-session", 1],
-								["claude-session", 1],
-							]),
-						);
-					}),
-				);
-			}).pipe(Effect.provide(layer)),
+			handleSSEEventEffect(effectDeps, {
+				type: "question.asked",
+				properties: { id: "q1", sessionID: "session-1", questions: [] },
+			}).pipe(Effect.provide(makeEffectLayer())),
 		);
+		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+			"session-1",
+			question,
+		);
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "ask_user",
+			sessionId: "session-1",
+			alertId: "session-1:question:q1",
+		});
 	});
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
@@ -115,6 +96,7 @@ describe("handleSSEEventEffect", () => {
 			type: "done",
 			sessionId: "session-1",
 			code: 0,
+			alertId: "done-1",
 		};
 		vi.mocked(effectDeps.translator.translate).mockReturnValue({
 			ok: true,

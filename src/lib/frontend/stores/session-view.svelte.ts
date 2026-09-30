@@ -68,8 +68,8 @@ function rememberFilesPane(): void {
 }
 
 export const sessionViewState = $state({
-	/** Published by MessageList from its scroll controller. Loading and settling
-	 *  count as at-bottom while the transcript is hydrating. */
+	/** Published by MessageList from its scroll controller. Loading
+	 *  counts as at-bottom while the transcript is hydrating. */
 	atBottom: true,
 
 	/** The chevron's override: the bar stays expanded even at the bottom. Starts

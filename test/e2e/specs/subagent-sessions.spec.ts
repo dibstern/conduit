@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
+import { projectLegacyRelayMessage } from "../helpers/detail-projection-mock.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import {
 	createMockRelayProtocolContext,
@@ -28,12 +29,14 @@ const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8")) as {
 	parentSession: {
 		id: string;
 		title: string;
+		status: "idle";
 		updatedAt: number;
 		messageCount: number;
 	};
 	childSession: {
 		id: string;
 		title: string;
+		status: "idle";
 		updatedAt: number;
 		messageCount: number;
 		parentID: string;
@@ -59,6 +62,7 @@ const allSessions = [
 	{
 		id: "ses_other001",
 		title: "Unrelated session",
+		status: "idle",
 		updatedAt: snapshot.parentSession.updatedAt - 3600_000,
 		messageCount: 5,
 	},
@@ -66,7 +70,7 @@ const allSessions = [
 
 /** Root-only session list (excludes child/subagent sessions). */
 const rootSessionListMsg: MockMessage = {
-	type: "session_list",
+	type: "shell_snapshot",
 	roots: true,
 	sessions: allSessions.filter((s) => !("parentID" in s && s["parentID"])),
 };
@@ -108,7 +112,7 @@ const agentListMsg: MockMessage = {
 const initMessages: MockMessage[] = [
 	familyMsg,
 	{
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: snapshot.parentSession.id,
 		history: snapshot.parentHistory,
 	},
@@ -125,7 +129,7 @@ const initMessages: MockMessage[] = [
 const childSwitchMessages: MockMessage[] = [
 	familyMsg,
 	{
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: snapshot.childSession.id,
 		history: snapshot.childHistory,
 	},
@@ -138,7 +142,7 @@ const childSwitchMessages: MockMessage[] = [
 /** Messages to send when switching back to parent session */
 const parentSwitchMessages: MockMessage[] = [
 	{
-		type: "session_switched",
+		type: "mock_transcript_snapshot",
 		id: snapshot.parentSession.id,
 		history: snapshot.parentHistory,
 	},
@@ -161,6 +165,7 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 
 test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {
+		await mockWsRpc(page, { handlers: {} });
 		await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),
@@ -193,7 +198,7 @@ test.describe("Subagent navigation", () => {
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
-				type: "session_switched",
+				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
 				history: snapshot.childHistory,
 			},
@@ -223,10 +228,25 @@ test.describe("Subagent navigation", () => {
 				},
 			},
 		});
+		// This navigation scenario targets a tool step near the start of the
+		// recorded conversation, so expose its full fixture through the detail feed.
+		rpc.setDetailRows(
+			snapshot.parentSession.id,
+			snapshot.parentHistory.messages.map((message) => ({
+				_tag: "transcriptMessage",
+				message,
+			})),
+		);
 
 		await page.routeWebSocket(/\/ws/, (ws) => {
-			const protocolContext = createMockRelayProtocolContext();
+			const protocolContext = createMockRelayProtocolContext(
+				new URL(page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null,
+			);
 			sendMockRelayMessage = (msg: MockMessage) => {
+				if (msg.type === "mock_transcript_snapshot") {
+					projectLegacyRelayMessage(page, msg);
+					return;
+				}
 				ws.send(
 					JSON.stringify(normalizeMockRelayMessage(msg, protocolContext)),
 				);
@@ -264,7 +284,14 @@ test.describe("Subagent navigation", () => {
 
 		const chat = new ChatPage(page);
 
-		// Click the subagent link in the task tool card
+		// A settled turn collapses its steps into a strip (22875676); the link to
+		// the child session is on the subagent's row in the expanded log
+		// (5517789f). Clicking the strip segment opens the log at that step.
+		await page
+			.getByRole("button", {
+				name: /^Delegated Explore synthesis pipeline code/,
+			})
+			.click();
 		const subagentLink = chat.subagentLinks.first();
 		await expect(subagentLink).toBeVisible({ timeout: 5_000 });
 		await subagentLink.click();
@@ -288,7 +315,7 @@ test.describe("Subagent navigation", () => {
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
-				type: "session_switched",
+				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
 				history: snapshot.childHistory,
 			},
@@ -328,7 +355,7 @@ test.describe("Subagent navigation", () => {
 		const childInitMessages: MockMessage[] = [
 			familyMsg,
 			{
-				type: "session_switched",
+				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
 				history: snapshot.childHistory,
 			},

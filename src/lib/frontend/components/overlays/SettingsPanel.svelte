@@ -39,6 +39,8 @@
 	import {
 		applyGetAgentsResponse,
 		applyGetModelsResponse,
+		applyHiddenEntriesSet,
+		chooseHiddenEntries,
 		discoveryState,
 	} from "../../stores/discovery.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
@@ -53,9 +55,9 @@
 		getNotifSettings,
 		saveNotifSettings,
 	} from "../../utils/notif-settings.js";
-	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { getIsConnected, setPushActive } from "../../stores/ws.svelte.js";
 	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import TextButton from "../ui/TextButton.svelte";
 	import {
 		addInstanceRpc,
@@ -155,13 +157,6 @@
 
 	$effect(() => {
 		if (visible) {
-			void getAutoSettleSettingRpc()
-				.then((days) => {
-					autoSettleDays = days;
-				})
-				.catch(() => {
-					showToast("Couldn't load auto-settle setting", { variant: "error" });
-				});
 			clearClaudeSettingEdits();
 			activeTab = initialTab;
 			expandedInstanceId = null;
@@ -191,6 +186,24 @@
 		} else {
 			clearClaudeSettingEdits();
 		}
+	});
+
+	$effect(() => {
+		if (!visible || !getIsConnected()) return;
+		// A session URL can open before its project attachment arrives. The RPC
+		// socket pair is keyed by that attachment, so wait for it on reload.
+		const route = getCurrentRoute();
+		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
+		let current = true;
+		void getAutoSettleSettingRpc()
+			.then((days) => {
+				if (current && !autoSettleSaving) autoSettleDays = days;
+			})
+			.catch(() => {
+				if (current)
+					showToast("Couldn't load auto-settle setting", { variant: "error" });
+			});
+		return () => { current = false; };
 	});
 
 	// ─── Instance handlers ──────────────────────────────────────────────────
@@ -502,16 +515,14 @@
 	}): Promise<void> {
 		const projectSlug = getRpcProjectSlug();
 		if (!projectSlug) return;
-		const prevModels = discoveryState.hiddenModels;
-		const prevAgents = discoveryState.hiddenAgents;
-		// Optimistic update; the visibility_info broadcast confirms it.
-		if (update.hiddenModels) discoveryState.hiddenModels = update.hiddenModels;
-		if (update.hiddenAgents) discoveryState.hiddenAgents = update.hiddenAgents;
+		// Optimistic; the response (and the visibility_info broadcast) confirms it.
+		const undoHidden = chooseHiddenEntries(update);
 		try {
-			await setHiddenEntriesRpc({ projectSlug, ...update });
+			applyHiddenEntriesSet(
+				await setHiddenEntriesRpc({ projectSlug, ...update }),
+			);
 		} catch {
-			discoveryState.hiddenModels = prevModels;
-			discoveryState.hiddenAgents = prevAgents;
+			undoHidden();
 			showToast("Failed to save visibility settings", { variant: "warn" });
 		}
 	}

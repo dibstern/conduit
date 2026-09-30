@@ -115,9 +115,13 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 			const dataJson = JSON.stringify(event.data);
 			const metadataJson = JSON.stringify(event.metadata);
+			const isOpenCodeSessionSeed =
+				event.type === "session.created" &&
+				event.provider === "opencode" &&
+				event.eventId === `evt_opencode_session_created_${event.sessionId}`;
 
 			const rows = yield* sql<StoredEventRow>`
-				INSERT INTO events (
+				${sql.literal(isOpenCodeSessionSeed ? "INSERT OR IGNORE" : "INSERT")} INTO events (
 					event_id, session_id, stream_version, type, data, metadata, provider, created_at
 				)
 				SELECT
@@ -135,7 +139,16 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 					sequence, event_id, session_id, stream_version,
 					type, data, metadata, provider, created_at`;
 
-			const row = rows[0];
+			let row = rows[0];
+			if (!row && isOpenCodeSessionSeed) {
+				// Retry projection with the durable seed after a failed projection.
+				const existingRows = yield* sql<StoredEventRow>`
+					SELECT sequence, event_id, session_id, stream_version,
+						type, data, metadata, provider, created_at
+					FROM events
+					WHERE event_id = ${event.eventId}`;
+				row = existingRows[0];
+			}
 			if (!row) {
 				return yield* new EventStoreError({
 					operation: "append",
@@ -167,6 +180,11 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const results: StoredEvent[] = [];
 				for (const event of events) {
+					if (event.type === "message.snapshot") {
+						const existing = yield* sql<{ sequence: number }>`
+							SELECT sequence FROM events WHERE event_id = ${event.eventId}`;
+						if (existing.length > 0) continue;
+					}
 					results.push(yield* appendInCurrentTransaction(event));
 				}
 				return results;

@@ -2,12 +2,16 @@
 // Pure functions with no DOM or framework dependencies.
 // Extracted for unit testing without a browser environment.
 
-import { mapToolName } from "../../relay/event-translator.js";
+import {
+	endsOpenCodeTurn,
+	mapToolName,
+	openCodeTurnTotals,
+} from "../../relay/event-translator.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
 	HistoryMessage,
-	RelayMessage,
+	HistoryMessagePart,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
@@ -21,12 +25,6 @@ import { createToolMessage } from "./tool-message-factory.js";
 
 // Re-export types for convenience
 export type { HistoryMessage, Turn };
-
-/** A history message as decoded off the wire by RelayMessageSchema. */
-type WireHistoryMessage = Extract<
-	RelayMessage,
-	{ type: "history_page" }
->["messages"][number];
 
 /**
  * Group a flat list of messages into user+assistant turn pairs.
@@ -161,16 +159,21 @@ function mapToolStatus(
  *   If not provided, html is set to rawText (no markdown rendering).
  */
 function convertAssistantParts(
-	parts: NonNullable<WireHistoryMessage["parts"]>,
+	parts: HistoryMessagePart[],
 	renderHtml?: (text: string) => string,
 	messageId?: string,
 	createdAt?: number,
+	uuidFor?: (messageId: string, partId: string) => string,
+	completed = true,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];
 	// One fork point per message, on the text the transcript shows as the reply.
 	const replyPart = parts.filter((p) => p.type === "text" && p.text).at(-1);
 
-	for (const part of parts) {
+	for (const [index, part] of parts.entries()) {
+		const uuid =
+			messageId && uuidFor ? uuidFor(messageId, part.id) : generateUuid();
+		const settled = completed || index < parts.length - 1;
 		// A turn's parts all live under one message, so the message stamp would
 		// make every step 0ms. Use the part's own stamp when the store has one.
 		const partCreatedAt = part.time?.start ?? createdAt;
@@ -184,10 +187,10 @@ function convertAssistantParts(
 					part.renderedHtml ?? (renderHtml ? renderHtml(rawText) : rawText);
 				result.push({
 					type: "assistant",
-					uuid: generateUuid(),
+					uuid,
 					rawText,
 					html,
-					finalized: true,
+					finalized: settled,
 					partId: part.id,
 					...(messageId != null && part === replyPart && { messageId }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
@@ -205,9 +208,9 @@ function convertAssistantParts(
 						: undefined;
 				result.push({
 					type: "thinking",
-					uuid: generateUuid(),
+					uuid,
 					text,
-					done: true,
+					done: settled,
 					...(duration != null && { duration }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 					...(partEndedAt != null && { endedAt: partEndedAt }),
@@ -237,7 +240,7 @@ function convertAssistantParts(
 						: undefined;
 				result.push(
 					createToolMessage({
-						uuid: generateUuid(),
+						uuid,
 						id: part.callID ?? part.id,
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
@@ -257,7 +260,7 @@ function convertAssistantParts(
 				// lets restoreContextFromMessages recover the reduced context bar.
 				result.push({
 					type: "system",
-					uuid: generateUuid(),
+					uuid,
 					text: part.text ?? "",
 					variant: "info",
 					compaction: "completed",
@@ -295,12 +298,13 @@ function convertAssistantParts(
  *   assistant message html is set to the raw text (no markdown rendering).
  */
 export function historyToChatMessages(
-	messages: readonly WireHistoryMessage[],
+	messages: HistoryMessage[],
 	renderHtml?: (text: string) => string,
+	turnContext: readonly HistoryMessage[] = messages,
+	uuidFor?: (messageId: string, partId: string) => string,
 ): ChatMessage[] {
-	const result: ChatMessage[] = [];
-
-	for (const msg of messages) {
+	return messages.flatMap((msg) => {
+		const result: ChatMessage[] = [];
 		if (msg.role === "user") {
 			// User messages: extract text from parts
 			const text =
@@ -310,7 +314,8 @@ export function historyToChatMessages(
 					.join("\n") ?? "";
 			result.push({
 				type: "user",
-				uuid: generateUuid(),
+				uuid: uuidFor ? uuidFor(msg.id, "user") : generateUuid(),
+				messageId: msg.id,
 				text: extractDisplayText(text),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),
 				...(msg.modelExecution != null
@@ -326,29 +331,38 @@ export function historyToChatMessages(
 						renderHtml,
 						msg.id,
 						msg.time?.created,
+						uuidFor,
+						!uuidFor || msg.time?.completed !== undefined,
 					),
 				);
 			}
 
-			// Append a ResultMessage if cost/token metadata is present
+			// Append a ResultMessage once a step with cost/token metadata has
+			// completed. An OpenCode turn is one assistant message per step; only
+			// the step that ends the turn gets a result, billed for every step.
 			const hasCost = msg.cost !== undefined && msg.cost > 0;
 			const hasTokens =
 				msg.tokens?.input !== undefined ||
 				msg.tokens?.output !== undefined ||
 				msg.tokens?.context_window !== undefined;
-			const hasDuration =
-				msg.time?.created !== undefined && msg.time?.completed !== undefined;
 
-			if (hasCost || hasTokens) {
-				const duration = hasDuration
-					? // biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-						msg.time!.completed! - msg.time!.created!
-					: undefined;
+			if (
+				(hasCost || hasTokens) &&
+				msg.time?.completed !== undefined &&
+				endsOpenCodeTurn(msg)
+			) {
+				const turnSteps =
+					msg.parentID === undefined
+						? [msg]
+						: turnContext.filter(
+								(m) => m.role === "assistant" && m.parentID === msg.parentID,
+							);
+				const { cost, duration } = openCodeTurnTotals(msg, turnSteps);
 				result.push({
 					type: "result",
-					uuid: generateUuid(),
-					...(msg.cost != null && { cost: msg.cost }),
-					...(duration != null && { duration }),
+					uuid: uuidFor ? uuidFor(msg.id, "result") : generateUuid(),
+					...(msg.cost != null && { cost }),
+					duration,
 					...(msg.tokens?.input != null && { inputTokens: msg.tokens.input }),
 					...(msg.tokens?.output != null && {
 						outputTokens: msg.tokens.output,
@@ -370,9 +384,14 @@ export function historyToChatMessages(
 				} satisfies ResultMessage);
 			}
 		}
-	}
-
-	return result;
+		const createdAt = msg.time?.created;
+		return createdAt === undefined
+			? result
+			: result.map((part) => ({
+					...part,
+					messageOrder: { createdAt, id: msg.id },
+				}));
+	});
 }
 
 // ─── History Queued Flag (REMOVED) ──────────────────────────────────────────

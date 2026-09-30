@@ -8,7 +8,6 @@
 
 import { type Cause, Context, Effect, Layer } from "effect";
 
-import type { ForkEntry } from "../../../daemon/fork-metadata.js";
 import type {
 	HandlerDeps,
 	InstanceManagementDeps,
@@ -74,7 +73,7 @@ export type ConnectPtyUpstreamShape = (
 
 /**
  * Shape for the sessionMgr field — all SessionManager capabilities used
- * by handlers, session-switch, and wiring modules.
+ * by handlers and wiring modules.
  *
  * Replaces the concrete SessionManager class import so consumers depend
  * on a structural interface, not the implementation.
@@ -89,10 +88,7 @@ export interface SessionManagerShape {
 		query: string,
 		options?: { roots?: boolean },
 	): Promise<SessionInfo[]>;
-	loadPreRenderedHistory(
-		sessionId: string,
-		offset?: number,
-	): Promise<{
+	loadPreRenderedHistory(sessionId: string): Promise<{
 		messages: HistoryMessage[];
 		hasMore: boolean;
 		total?: number;
@@ -101,7 +97,6 @@ export interface SessionManagerShape {
 	getLastKnownSessionCount(): number;
 	getSessionParentMap(): Map<string, string>;
 	getLastMessageAtMap(): ReadonlyMap<string, number>;
-	getForkEntry(sessionId: string): ForkEntry | undefined;
 
 	// ── Mutations ──────────────────────────────────────────────────────
 	createSession(
@@ -113,16 +108,8 @@ export interface SessionManagerShape {
 	initialize(title?: string): Promise<string>;
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	addToParentMap(childId: string, parentId: string): void;
-	setForkEntry(sessionId: string, entry: ForkEntry): void;
-
-	// ── Pagination ─────────────────────────────────────────────────────
-	clearPaginationCursor(sessionId: string): void;
-	seedPaginationCursor(sessionId: string, messageId: string): void;
 
 	// ── Pending questions ──────────────────────────────────────────────
-	incrementPendingQuestionCount(sessionId: string): void;
-	decrementPendingQuestionCount(sessionId: string): void;
-	setPendingQuestionCounts(counts: Map<string, number>): void;
 
 	// ── Broadcasts ─────────────────────────────────────────────────────
 	sendSessionLists(

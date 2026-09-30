@@ -5,15 +5,7 @@
 //
 // Lazy-loaded — not in the critical rendering path.
 
-import {
-	Chunk,
-	Effect,
-	Fiber,
-	Layer,
-	ManagedRuntime,
-	Option,
-	Stream,
-} from "effect";
+import { Chunk, Effect, Fiber, ManagedRuntime, Option, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RelayMessage } from "../../shared-types.js";
 import {
@@ -21,13 +13,13 @@ import {
 	ProtocolDecodeError,
 	preloadDecoder,
 } from "../effect-boundary.js";
+import { type WsRpcClients, WsRpcClientsLayer } from "./shared-client.js";
 
-// Frontend transport has no async service dependencies.
-// ManagedRuntime is needed for fiber lifecycle (interrupt stream on reconnect).
-// Extend if async services (logging, metrics) are added later.
-const TransportLayer = Layer.empty;
+// The shared two-socket RPC client is the only transport-owned service. Its
+// scope is the runtime's scope, so disposing the runtime closes both sockets.
+const TransportLayer = WsRpcClientsLayer;
 
-let runtime: ManagedRuntime.ManagedRuntime<never, never> | null = null;
+let runtime: ManagedRuntime.ManagedRuntime<WsRpcClients, never> | null = null;
 let activeStreamFiber: RuntimeFiber<void, unknown> | null = null;
 
 void preloadDecoder();
@@ -51,7 +43,7 @@ export async function getRuntime() {
 
 /** Run transport-owned effects through the app-lifetime frontend runtime. */
 export async function runTransportEffect<A, E>(
-	effect: Effect.Effect<A, E, never>,
+	effect: Effect.Effect<A, E, WsRpcClients>,
 ): Promise<A> {
 	const rt = await getRuntime();
 	return await rt.runPromise(effect);

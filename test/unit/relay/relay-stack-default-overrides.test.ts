@@ -22,6 +22,7 @@ import {
 	type ProjectRelay,
 	RelayCreationAbortedError,
 } from "../../../src/lib/relay/relay-stack.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 
 interface MockOpenCode {
 	server: Server;
@@ -129,6 +130,7 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		relay = await createProjectRelay({
+			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),
@@ -185,6 +187,7 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		relay = await createProjectRelay({
+			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),
@@ -210,6 +213,7 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		relay = await createProjectRelay({
+			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
@@ -229,6 +233,7 @@ describe("createProjectRelay override-state defaults", () => {
 		controller.abort();
 
 		const rejected = createProjectRelay({
+			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),

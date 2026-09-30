@@ -1,0 +1,42 @@
+[
+  {
+    "provider": "opencode",
+    "scenario": "held report lands late",
+    "window": "A",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 1",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "held report lands late",
+    "window": "B",
+    "dot": true,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 1",
+    "unread": 1,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "next touch",
+    "window": "A",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  },
+  {
+    "provider": "opencode",
+    "scenario": "next touch",
+    "window": "B",
+    "dot": false,
+    "lastTurnEndVersion": "turn end 2",
+    "seenVersion": "turn end 2",
+    "unread": 0,
+    "session": "root"
+  }
+]

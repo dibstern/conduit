@@ -22,7 +22,11 @@ import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";
 import type { SSEStreamEvents } from "./sse-stream.js";
-import { extractSessionId, sendPushForEvent } from "./sse-wiring.js";
+import {
+	extractSessionId,
+	sendPushForEvent,
+	sendPushForEventEffect,
+} from "./sse-wiring.js";
 
 /** Structural interface for the message poller manager's capabilities needed by poller wiring. */
 interface PollerManagerLike {
@@ -117,12 +121,10 @@ const handlePollerEventsEffect = (
 			);
 			const pushManager = config.pushManager;
 			if (pollerNotification.sendPush && pushManager) {
-				yield* Effect.sync(() =>
-					sendPushForEvent(pushManager, msg, pollerLog, {
-						slug: config.slug,
-						sessionId: polledSessionId ?? undefined,
-					}),
-				);
+				yield* sendPushForEventEffect(pushManager, msg, pollerLog, {
+					slug: config.slug,
+					sessionId: polledSessionId ?? undefined,
+				});
 			}
 			if (
 				pollerNotification.broadcastCrossSession &&

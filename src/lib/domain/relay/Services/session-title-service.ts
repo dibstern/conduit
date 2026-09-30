@@ -11,6 +11,7 @@ import {
 	Layer,
 	Ref,
 } from "effect";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -204,13 +205,6 @@ function isClaudeSessionProvider(provider: string): boolean {
 	return provider === "claude" || provider === "claude-sdk";
 }
 
-function withSql<A, E>(
-	effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-	sql: SqlClient.SqlClient,
-): Effect.Effect<A, E> {
-	return effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-}
-
 export const makeSessionTitleServiceLive = (
 	options: SessionTitleServiceLiveOptions = {},
 ): Layer.Layer<
@@ -361,29 +355,26 @@ export const makeSessionTitleServiceLive = (
 					const projectionRunner = projectionRunnerOption.value;
 					const sql = sqlOption.value;
 
-					const recovered = yield* projectionRunner.isRecovered();
-					if (!recovered) {
-						yield* withSql(projectionRunner.recover(), sql).pipe(Effect.asVoid);
-					}
-
 					const createdAt = Date.now();
-					const stored = yield* eventStore.append(
+					// The auto-title rename is a read-model change like any other, so it
+					// goes through the one seam that projects and announces together.
+					const commitAndSignal = yield* makeCommitAndSignal.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.provideService(EventStoreEffectTag, eventStore),
+						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+					);
+					yield* commitAndSignal([
 						canonicalEvent(
 							"session.renamed",
 							sessionId,
-							{
-								sessionId,
-								title,
-							},
+							{ sessionId, title },
 							{
 								provider: current.provider,
 								createdAt,
 								metadata: { source: AUTO_TITLE_SOURCE },
 							},
 						),
-					);
-
-					yield* withSql(projectionRunner.projectEvent(stored), sql);
+					]);
 
 					const rows = yield* sql<{ title: string; provider: string }>`
 						SELECT title, provider FROM sessions WHERE id = ${sessionId}`;
@@ -394,9 +385,7 @@ export const makeSessionTitleServiceLive = (
 					if (!applied) return false;
 
 					if (wsHandlerOption._tag === "Some") {
-						yield* sessionManagerService.sendSessionLists((message) =>
-							wsHandlerOption.value.broadcast(message),
-						);
+						yield* sessionManagerService.pushViewerFamilies();
 					}
 					return true;
 				});
@@ -462,5 +451,3 @@ export const makeSessionTitleServiceLive = (
 			} satisfies SessionTitleService;
 		}),
 	);
-
-export const SessionTitleServiceLive = makeSessionTitleServiceLive();

@@ -20,6 +20,16 @@ mkdir -p \
   acceptance/generated \
   acceptance/visual/artifacts
 
+# Anything already listening on the preview port would answer the readiness
+# probe below, and the suite would test another worktree's build (or hang on a
+# non-HTTP listener). curl exits 7 only when nothing accepted the connection.
+probe=0
+curl --silent --output /dev/null --max-time 2 "$CONDUIT_BASE_URL" || probe=$?
+if [ "$probe" -ne 7 ]; then
+  echo "Something is already listening at $CONDUIT_BASE_URL; stop it and re-run." >&2
+  exit 1
+fi
+
 preview_log="$ROOT_DIR/acceptance/visual/artifacts/vite-preview.log"
 pnpm exec vite preview --port 4173 --strictPort >"$preview_log" 2>&1 &
 preview_pid=$!
@@ -31,7 +41,7 @@ stop_preview() {
 trap stop_preview EXIT HUP INT TERM
 
 attempt=0
-until curl --fail --silent --output /dev/null "$CONDUIT_BASE_URL"; do
+until curl --fail --silent --output /dev/null --max-time 2 "$CONDUIT_BASE_URL"; do
   if ! kill -0 "$preview_pid" >/dev/null 2>&1; then
     tail -c 4000 "$preview_log" >&2
     exit 1
@@ -45,7 +55,7 @@ until curl --fail --silent --output /dev/null "$CONDUIT_BASE_URL"; do
   sleep 0.1
 done
 
-for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling phone-session-bar desktop-session-bar; do
+for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling phone-session-bar desktop-session-bar transcript-feed-states; do
   gherkin-parser \
     "features/$feature.feature" \
     "build/acceptance/ir/$feature.json"

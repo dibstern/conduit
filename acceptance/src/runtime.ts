@@ -45,9 +45,13 @@ export async function runFeature(
 	lifecycle: AcceptanceLifecycle,
 ): Promise<void> {
 	let featureError: unknown;
+	const executions = expandFeature(feature);
+	if (executions.length === 0) {
+		throw new Error(`Feature has no scenarios to run: ${feature.name}`);
+	}
 
 	try {
-		for (const execution of expandFeature(feature)) {
+		for (const execution of executions) {
 			const lifecycleInput = {
 				scenarioName: execution.scenarioName,
 				exampleIndex: execution.exampleIndex,

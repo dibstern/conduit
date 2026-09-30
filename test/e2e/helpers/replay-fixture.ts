@@ -19,14 +19,16 @@
 
 import { test as base, type Page } from "@playwright/test";
 import type { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
+import type { ClaudeReplayPlan } from "./claude-trace-replayer.js";
 import { createReplayHarness, type ReplayHarness } from "./e2e-harness.js";
 
 /** Options that tests can set via test.use() */
 interface ReplayOptions {
 	/** Name of the .opencode.json.gz recording to use (default: "chat-simple") */
 	recording: string;
-	/** Give the relay a temp SQLite event store (default: false) */
-	persistence: boolean;
+	/** Claude lane: open a Claude session replaying these SDK traces, one per
+	 *  sent turn. The test fails unless exactly the planned turns are sent. */
+	claudeReplay: ClaudeReplayPlan | undefined;
 }
 
 /** Fixtures provided to tests */
@@ -42,13 +44,19 @@ interface ReplayFixtures {
 export const test = base.extend<ReplayFixtures & ReplayOptions>({
 	// Default recording — override per-describe with test.use({ recording: "..." })
 	recording: ["chat-simple", { option: true }],
-	persistence: [false, { option: true }],
+	claudeReplay: [undefined, { option: true }],
 
 	// Per-test harness lifecycle
-	harness: async ({ recording, persistence }, use) => {
-		const harness = await createReplayHarness(recording, { persistence });
-		await use(harness);
-		await harness.stop();
+	harness: async ({ recording, claudeReplay }, use) => {
+		const harness = await createReplayHarness(recording, {
+			...(claudeReplay ? { claudeReplay } : {}),
+		});
+		try {
+			await use(harness);
+			harness.claudeReplayer?.assertComplete();
+		} finally {
+			await harness.stop();
+		}
 	},
 
 	relayUrl: async ({ harness }, use) => {

@@ -9,6 +9,8 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import {
+		applyContextWindowSwitched,
+		chooseContextWindow,
 		discoveryState,
 		getActiveContextWindowOptions,
 	} from "../../stores/discovery.svelte.js";
@@ -17,11 +19,6 @@
 	import { switchContextWindowRpc } from "../../transport/ws-rpc-client.js";
 
 	let { onOpen }: { onOpen?: (() => void) | undefined } = $props();
-	const contextWindowState: {
-		availableContextWindowOptions: Awaited<
-			ReturnType<typeof switchContextWindowRpc>
-		>["options"];
-	} = discoveryState;
 
 	let open = $state(false);
 
@@ -48,8 +45,7 @@
 	}
 
 	function selectContextWindow(value: string) {
-		const previousContextWindow = discoveryState.currentContextWindow;
-		discoveryState.currentContextWindow = value;
+		const undoContextWindow = chooseContextWindow(value);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
@@ -58,13 +54,8 @@
 				sessionId,
 				contextWindow: value,
 			})
-				.then((response) => {
-					discoveryState.currentContextWindow = response.contextWindow;
-					contextWindowState.availableContextWindowOptions = response.options;
-				})
-				.catch(() => {
-					discoveryState.currentContextWindow = previousContextWindow;
-				});
+				.then(applyContextWindowSwitched)
+				.catch(undoContextWindow);
 		}
 	}
 

@@ -4,32 +4,37 @@
 
 let audioCtx: AudioContext | null = null;
 
-/**
- * Play a short notification tone (880 Hz sine wave, 300ms, 10% volume).
- * AudioContext is created lazily on first call. The `resume()` call succeeds
- * because the user has previously interacted with the page (toggling settings,
- * typing messages), which satisfies Chrome's autoplay policy.
- */
-export function playDoneSound(): void {
-	try {
-		if (!audioCtx) {
-			audioCtx = new AudioContext();
-		}
-		if (audioCtx.state === "suspended") {
-			audioCtx.resume();
-		}
+/** Prepare audio before asking the worker to hand over delivery ownership. */
+export async function readyDoneSound(): Promise<void> {
+	audioCtx ??= new AudioContext();
+	if (audioCtx.state === "suspended") await audioCtx.resume();
+	if (audioCtx.state !== "running")
+		throw new DOMException(
+			`AudioContext is ${audioCtx.state}: the ding cannot play`,
+			"InvalidStateError",
+		);
+}
 
-		const osc = audioCtx.createOscillator();
-		const gain = audioCtx.createGain();
-		osc.type = "sine";
-		osc.frequency.value = 880;
-		gain.gain.value = 0.1;
-		osc.connect(gain);
-		gain.connect(audioCtx.destination);
-		osc.start();
-		gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-		osc.stop(audioCtx.currentTime + 0.3);
-	} catch {
-		// Silently ignore — AudioContext may not be available
-	}
+/**
+ * Play the notification tone (880 Hz sine wave, 300ms, 10% volume).
+ * Only call this once `readyDoneSound()` has resolved.
+ */
+export function emitDoneSound(): void {
+	const ctx = audioCtx;
+	if (!ctx || ctx.state !== "running")
+		throw new DOMException(
+			"readyDoneSound() must resolve before emitDoneSound()",
+			"InvalidStateError",
+		);
+
+	const osc = ctx.createOscillator();
+	const gain = ctx.createGain();
+	osc.type = "sine";
+	osc.frequency.value = 880;
+	gain.gain.value = 0.1;
+	osc.connect(gain);
+	gain.connect(ctx.destination);
+	gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+	osc.start();
+	osc.stop(ctx.currentTime + 0.3);
 }

@@ -19,11 +19,10 @@ describe("Integration: Initial State on Connect", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("sends session_switched on connect", async () => {
+	it("sends the initial session family on connect", async () => {
 		const client = await harness.connectWsClient();
-		const msg = await client.waitFor("session_switched");
-		expect(msg["id"]).toBeTruthy();
-		expect(typeof msg["id"]).toBe("string");
+		await client.waitFor("session_family");
+		expect(client.getActiveSessionId()).toBeTruthy();
 		await client.close();
 	});
 
@@ -34,17 +33,20 @@ describe("Integration: Initial State on Connect", () => {
 		await client.close();
 	});
 
-	it("sends session_list on connect", async () => {
+	it("sends the viewed session family on connect", async () => {
 		const client = await harness.connectWsClient();
-		const msg = await client.waitFor("session_list");
+		const msg = await client.waitFor("session_family");
 		expect(Array.isArray(msg["sessions"])).toBe(true);
-		expect((msg["sessions"] as unknown[]).length).toBeGreaterThan(0);
+		expect((msg["sessions"] as Array<{ id: string }>).length).toBeGreaterThan(
+			0,
+		);
 		await client.close();
 	});
 
 	it("sends agent_list on connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.waitFor("agent_list");
 		const msg = client.getReceivedOfType("agent_list");
 		expect(msg.length).toBeGreaterThan(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -63,6 +65,7 @@ describe("Integration: Initial State on Connect", () => {
 	it("sends model_list on connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.waitFor("model_list");
 		const msg = client.getReceivedOfType("model_list");
 		expect(msg.length).toBeGreaterThan(0);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -84,9 +87,8 @@ describe("Integration: Initial State on Connect", () => {
 		await client2.waitForInitialState();
 
 		const types2 = client2.getReceived().map((m) => m.type);
-		expect(types2).toContain("session_switched");
 		expect(types2).toContain("status");
-		expect(types2).toContain("session_list");
+		expect(types2).toContain("session_family");
 
 		await client1.close();
 		await client2.close();

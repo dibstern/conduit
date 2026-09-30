@@ -1,11 +1,12 @@
 // ─── Session Store ───────────────────────────────────────────────────────────
-// Manages session list, active session, search, and date grouping.
+// Server-owned session rows on one side, this tab's selection and search on
+// the other. The two halves never write each other.
 
-import { SvelteMap } from "svelte/reactivity";
-import type {
-	ListDaemonSessionsResponse,
-	ListSessionsResponse,
-} from "../transport/ws-rpc.js";
+import {
+	resetSessionSubscription,
+	sessionSubscription,
+} from "../transport/session-subscription.svelte.js";
+import type { ListDaemonSessionsResponse } from "../transport/ws-rpc.js";
 import {
 	type CreateSessionRpcInput,
 	createSessionRpc,
@@ -19,16 +20,17 @@ import {
 } from "../transport/ws-rpc-client.js";
 import type {
 	AttentionGroups,
-	DaemonSessionCursor,
+	DateGroups,
+	Immutable,
 	RelayMessage,
 	RequestId,
 	SessionAttention,
 	SessionInfo,
 } from "../types.js";
 import {
-	abortSessionReplay,
 	activateSessionChatState,
 	clearSessionChatState,
+	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
 } from "./chat.svelte.js";
@@ -40,47 +42,186 @@ import {
 	flushPendingPermissionMode,
 	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
-import { getCurrentSlug, navigate } from "./router.svelte.js";
+import {
+	getCurrentSessionId,
+	getCurrentSlug,
+	navigate,
+	replaceRoute,
+} from "./router.svelte.js";
+import { sessionActivityBridge } from "./session-activity.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
-import {
-	noteSessionOpened,
-	noteSessionSnapshot,
-} from "./session-unread-hold.svelte.js";
+import { clearTodoState } from "./todo.svelte.js";
+import { updateContextPercent } from "./ui.svelte.js";
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// Every session the server has told us about, keyed by id — one representation,
+// not a map plus two arrays kept in step by hand. The map itself belongs to the
+// subscription that fills it (ni8.5 T-9); this store is a view over it and
+// holds no copy. Every row is a whole `SessionInfo` straight off the wire.
+// Nothing outside can write it: `sessionState` hands it out as a `ReadonlyMap`.
 
-export const sessionState = $state({
-	rootSessions: [] as SessionInfo[],
-	familySessions: [] as SessionInfo[],
+const serverSessions = $derived(sessionSubscription.rows);
+const rootSessions = $derived(
+	[...serverSessions.values()].filter((row) => !row.parentID),
+);
+let familySessions = $state.raw<readonly SessionInfo[]>([]);
+
+/** A session can receive events while its row is still arriving. */
+export function isRoutable(id: string): boolean {
+	return (
+		id === clientSession.currentId ||
+		serverSessions.has(id) ||
+		familySessions.some((row) => row.id === id)
+	);
+}
+
+/** Prefer the versioned row when a family message carries older metadata. */
+export function parentOf(id: string): string | null {
+	return (
+		serverSessions.get(id)?.parentID ??
+		familySessions.find((row) => row.id === id)?.parentID ??
+		(clientSession.announcedParent?.sessionId === id
+			? clientSession.announcedParent.parentId
+			: null)
+	);
+}
+
+const busySessionIds = $derived.by(() => {
+	const busy = new Set(sessionActivityBridge.pending.keys());
+	for (const row of serverSessions.values()) {
+		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
+	}
+	for (const family of familySessions) {
+		const row = serverSessions.get(family.id) ?? family;
+		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
+	}
+	for (const id of busy) {
+		const parent = parentOf(id);
+		if (parent && isRoutable(parent)) busy.add(parent);
+	}
+	return busy;
+});
+
+/** The session view's single busy decision, shared by every sidebar row. */
+export function isSessionBusy(id: string): boolean {
+	return busySessionIds.has(id);
+}
+
+/** Live content only. Replay must never create a new activity bridge. */
+export function observeSessionActivity(event: RelayMessage): void {
+	if (!("sessionId" in event) || !event.sessionId) return;
+	const id = event.sessionId;
+	if (!isRoutable(id)) return;
+	// Legacy `status` hints may come from the poller. Only the shell's
+	// accepted row can retire activity or supply a status for this view.
+	switch (event.type) {
+		case "delta":
+		case "thinking_start":
+		case "thinking_delta":
+		case "tool_start":
+		case "tool_executing":
+		case "tool_result":
+			sessionActivityBridge.mark(id);
+	}
+}
+
+// ─── Client-owned state ─────────────────────────────────────────────────────
+// What this tab is looking at. Applying server rows never touches it.
+
+const clientSession = $state({
+	currentId: null as string | null,
+	announcedParent: null as {
+		sessionId: string;
+		parentId: string;
+		forkMessageId?: string;
+		forkPointTimestamp?: number;
+	} | null,
+	searchQuery: "",
 	daemonSessions: [] as SessionInfo[],
-	// Projects the daemon could not read a session list from -- a directory that
-	// has moved or been deleted, or a store it could not open. Held so the list
-	// can say its own coverage is incomplete: the failure is otherwise
-	// indistinguishable from a project that genuinely has no sessions.
 	daemonUnavailableProjects: [] as string[],
-	// Keyset cursor for the cross-project browse page. Null means "start at the
-	// top"; daemonHasMore false means the merge is exhausted and the scroll
-	// sentinel must stop asking, which is what keeps the list from showing a
-	// loading row that never resolves.
-	daemonCursor: null as DaemonSessionCursor | null,
+	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	daemonHasMore: false,
 	daemonLoading: false,
-	now: Date.now(),
-	currentId: null as string | null,
-	searchQuery: "",
 	searchResults: null as SessionInfo[] | null,
-	// Search pages on its own cursor, deliberately separate from the browse
-	// cursor above. Sharing one would mean clearing a query dropped the browse
-	// list back to its first page instead of restoring where the user was.
-	searchCursor: null as DaemonSessionCursor | null,
+	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	searchHasMore: false,
 	searchLoading: false,
-	/** Id-keyed map maintained alongside rootSessions/familySessions arrays.
-	 *  Used by the dispatcher's unknown-session guard (O(1) membership check)
-	 *  for the roots, family, and selected session. */
-	sessions: new SvelteMap<string, SessionInfo>(),
+	now: Date.now(),
 });
+
+/** Read view over both halves. The server half is read-only by type; the
+ *  client half is a plain setting. */
+export const sessionState = {
+	/** Server-owned. The shell feed is its only writer. */
+	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
+		return serverSessions;
+	},
+	get rootSessions(): readonly Immutable<SessionInfo>[] {
+		return rootSessions;
+	},
+	get familySessions(): readonly Immutable<SessionInfo>[] {
+		return familySessions;
+	},
+	get daemonSessions(): readonly SessionInfo[] {
+		return clientSession.daemonSessions;
+	},
+	get daemonUnavailableProjects(): readonly string[] {
+		return clientSession.daemonUnavailableProjects;
+	},
+	get daemonCursor() {
+		return clientSession.daemonCursor;
+	},
+	get daemonHasMore() {
+		return clientSession.daemonHasMore;
+	},
+	get daemonLoading() {
+		return clientSession.daemonLoading;
+	},
+	get searchResults(): readonly SessionInfo[] | null {
+		return clientSession.searchResults;
+	},
+	get searchCursor() {
+		return clientSession.searchCursor;
+	},
+	get searchHasMore() {
+		return clientSession.searchHasMore;
+	},
+	get searchLoading() {
+		return clientSession.searchLoading;
+	},
+	get now() {
+		return clientSession.now;
+	},
+	set now(value: number) {
+		clientSession.now = value;
+	},
+	/** Whether the subscription has finished delivering its initial rows. */
+	get settled(): boolean {
+		return sessionSubscription.settled;
+	},
+	get currentId(): string | null {
+		return clientSession.currentId;
+	},
+	get currentParentId(): string | null {
+		const id = clientSession.currentId;
+		return id ? parentOf(id) : null;
+	},
+	get currentFork() {
+		return clientSession.announcedParent?.sessionId === clientSession.currentId
+			? clientSession.announcedParent
+			: null;
+	},
+	set currentId(id: string | null) {
+		clientSession.currentId = id;
+	},
+	get searchQuery(): string {
+		return clientSession.searchQuery;
+	},
+	set searchQuery(query: string) {
+		setSearchQuery(query);
+	},
+};
 
 // ─── Session Creation State Machine ──────────────────────────────────────────
 // Guards the new-session flow with typed phases. Prevents double-clicks,
@@ -122,11 +263,13 @@ function clearTimers(): void {
 
 /**
  * Create a branded RequestId from crypto.randomUUID().
- * Frontend-only — the server receives and echoes RequestIds, never creates them.
+ * Frontend-only correlation for the creation state machine.
  */
 function createRequestId(): RequestId {
 	return crypto.randomUUID() as RequestId;
 }
+
+let selectionGeneration = 0;
 
 /**
  * Transition idle -> creating. Returns the requestId, or null if not idle.
@@ -135,6 +278,7 @@ function createRequestId(): RequestId {
 export function requestNewSession(): RequestId | null {
 	if (sessionCreation.value.phase !== "idle") return null;
 	const requestId = createRequestId();
+	selectionGeneration++;
 	sessionCreation.value = {
 		phase: "creating",
 		requestId,
@@ -204,10 +348,11 @@ export function resetSessionCreation(): void {
  * shape so they can't diverge.
  */
 export function sendNewSession(
-	start?: (input: CreateSessionRpcInput) => void,
+	start?: (input: CreateSessionRpcInput) => ReturnType<typeof createSessionRpc>,
 ): RequestId | null {
 	const requestId = requestNewSession();
 	if (!requestId) return null;
+	const generation = selectionGeneration;
 	const projectSlug = getCurrentSlug();
 	if (!projectSlug) {
 		failNewSession(requestId, "No active project");
@@ -215,106 +360,46 @@ export function sendNewSession(
 	}
 	const input: CreateSessionRpcInput = {
 		projectSlug,
-		requestId,
 		originId: getBrowserClientId(),
 		// Bind the session to the selected harness instance (replaces the
 		// legacy implicit default-model-provider derivation).
 		instanceId: getEffectiveInstanceId(),
 	};
-	if (start) {
-		start(input);
-	} else {
-		void createSessionRpc(input).catch((error: unknown) =>
+	void (start ?? createSessionRpc)(input)
+		.then((response) => {
+			completeNewSession(requestId);
+			if (generation !== selectionGeneration) return;
+			switchToSession(response.sessionId, response.projectSlug);
+		})
+		.catch((error: unknown) =>
 			failNewSession(
 				requestId,
 				error instanceof Error ? error.message : String(error),
 			),
 		);
-	}
 	return requestId;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/** Find metadata in the current roots, family, or selected-session stub. */
-export function findSession(id: string): SessionInfo | undefined {
-	return (
-		sessionState.familySessions.find((s) => s.id === id) ??
-		sessionState.rootSessions.find((s) => s.id === id) ??
-		(id === sessionState.currentId ? sessionState.sessions.get(id) : undefined)
+/** Prune separate cross-project and search reads after a deletion notice. */
+export function pruneSessionLists(id: string): void {
+	clientSession.daemonSessions = clientSession.daemonSessions.filter(
+		(row) => row.id !== id,
 	);
-}
-
-/** Membership changes must not evict cached transcripts during navigation. */
-function syncSessionMembership(): void {
-	const selected = sessionState.currentId
-		? sessionState.sessions.get(sessionState.currentId)
-		: undefined;
-	sessionState.sessions.clear();
-	if (selected) sessionState.sessions.set(selected.id, selected);
-	for (const session of [
-		...sessionState.rootSessions,
-		...sessionState.familySessions,
-	]) {
-		sessionState.sessions.set(session.id, session);
-	}
-}
-
-// ─── Derived getters ────────────────────────────────────────────────────────
-// Components should wrap in $derived() for reactive caching.
-
-/** The sidebar and its search show root sessions only. */
-export function getFilteredSessions(): SessionInfo[] {
-	const scope = getSessionScope();
-	const currentSlug = getCurrentSlug();
-	// Local rows carry no projectSlug: they belong to the project this socket
-	// is attached to.
-	const inScope = (session: SessionInfo) =>
-		scope === null || (session.projectSlug ?? currentSlug) === scope;
-	if (sessionState.searchResults !== null) {
-		const searchSlug = currentSlug;
-		// Root rows carry the subtree rollup, so search hits resolve against
-		// them rather than the membership map, where family rows (individual
-		// state) win.
-		const liveRoots = new Map(
-			sessionState.rootSessions.map((session) => [session.id, session]),
+	if (clientSession.searchResults)
+		clientSession.searchResults = clientSession.searchResults.filter(
+			(row) => row.id !== id,
 		);
-		return sessionState.searchResults.flatMap((session) => {
-			if (session.parentID || !inScope(session)) return [];
-			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
-				return [session];
-			}
-			const liveSession = liveRoots.get(session.id);
-			return liveSession ? [liveSession] : [];
-		});
-	}
-	const localSessions = sessionState.rootSessions;
-	const query = sessionState.searchQuery.toLowerCase().trim();
-	// Foreign rows stay in while a query is active and get title-filtered with
-	// the rest. The server search they will be replaced by now covers every
-	// project too, so the local filter and the landing results agree -- which is
-	// why these no longer have to stand down to avoid flashing in and out.
-	const foreignSessions = sessionState.daemonSessions.filter(
-		(session) =>
-			session.projectSlug != null &&
-			session.projectSlug !== currentSlug &&
-			!session.parentID,
-	);
-	const sessions = [...localSessions, ...foreignSessions]
-		.filter(inScope)
-		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
-	if (!query) return sessions;
-	return sessions.filter((s) => s.title.toLowerCase().includes(query));
 }
 
-/** Get sessions grouped into the sidebar's sections. */
-export function getAttentionGroups(): AttentionGroups {
-	return groupSessionsByAttention(getFilteredSessions(), sessionState.now);
-}
-
-/** Get the currently active session object (or undefined). */
-export function getActiveSession(): SessionInfo | undefined {
-	return findSession(sessionState.currentId ?? "");
+/** Drop the state this tab keeps for a session the map no longer holds. */
+export function forgetSession(id: string): void {
+	clearSessionChatState(id);
+	// A session that is gone cannot still be the one we are looking at. The
+	// selection is what makes a session routable before its row arrives, so
+	// leaving it behind lets a late event rebuild the chat state we just threw
+	// away — and deleting the last session leaves no other for the server to
+	// switch us to, so nothing else would clear it.
+	if (clientSession.currentId === id) clientSession.currentId = null;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -371,7 +456,7 @@ $effect.root(() => {
 		if (nextWake == null) return;
 		const timer = setTimeout(
 			() => {
-				sessionState.now = Date.now();
+				clientSession.now = Date.now();
 			},
 			Math.max(1, Math.min(nextWake - Date.now(), 2_147_483_647)),
 		);
@@ -538,29 +623,6 @@ export function sessionMatchesStatus(
 	}
 }
 
-/** Group sessions into local-calendar today, yesterday and older buckets. */
-export function groupSessionsByDate(
-	sessions: SessionInfo[],
-	now: Date = new Date(),
-): { today: SessionInfo[]; yesterday: SessionInfo[]; older: SessionInfo[] } {
-	const todayStart = new Date(now);
-	todayStart.setHours(0, 0, 0, 0);
-	const yesterdayStart = new Date(todayStart);
-	yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-	const groups = {
-		today: [] as SessionInfo[],
-		yesterday: [] as SessionInfo[],
-		older: [] as SessionInfo[],
-	};
-	for (const session of sessions) {
-		const updated = getSessionDate(session);
-		if (updated >= todayStart) groups.today.push(session);
-		else if (updated >= yesterdayStart) groups.yesterday.push(session);
-		else groups.older.push(session);
-	}
-	return groups;
-}
-
 function getSessionDate(session: SessionInfo): Date {
 	return session.updatedAt
 		? new Date(session.updatedAt)
@@ -571,98 +633,10 @@ function getSessionDate(session: SessionInfo): Date {
 
 // ─── Message handlers ───────────────────────────────────────────────────────
 
-export function handleSessionList(
-	msg: Extract<RelayMessage, { type: "session_list" }>,
-): void {
-	const { sessions, roots, search } = msg;
-	if (!Array.isArray(sessions) || roots === false) return;
-	if (search) {
-		sessionState.searchResults = sessions.filter(
-			(session) => !session.parentID,
-		);
-		return;
-	}
-	if (!sessionState.searchQuery.trim()) sessionState.searchResults = null;
-	const nextRoots = sessions.filter((session) => !session.parentID);
-	const nextIds = new Set(nextRoots.map((session) => session.id));
-	const removedIds = new Set(
-		sessionState.rootSessions
-			.filter((session) => !nextIds.has(session.id))
-			.map((session) => session.id),
-	);
-	if (sessionState.searchResults)
-		sessionState.searchResults = sessionState.searchResults.filter(
-			(session) => !removedIds.has(session.id),
-		);
-	sessionState.rootSessions = nextRoots;
-	for (const session of nextRoots)
-		noteSessionSnapshot(session.id, session.unread);
-	syncSessionMembership();
-}
-
 export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
-	sessionState.familySessions = [...msg.sessions];
-	for (const session of msg.sessions)
-		noteSessionSnapshot(session.id, session.unread);
-	syncSessionMembership();
-}
-
-const sessionInfoFromRpc = (
-	session: ListSessionsResponse["sessions"][number],
-): SessionInfo => ({
-	id: session.id,
-	title: session.title,
-	...(session.createdAt != null ? { createdAt: session.createdAt } : {}),
-	...(session.updatedAt != null ? { updatedAt: session.updatedAt } : {}),
-	...(session.messageCount != null
-		? { messageCount: session.messageCount }
-		: {}),
-	...(session.processing != null ? { processing: session.processing } : {}),
-	...(session.parentID != null ? { parentID: session.parentID } : {}),
-	...(session.forkedFrom != null ? { forkedFrom: session.forkedFrom } : {}),
-	...(session.forkMessageId != null
-		? { forkMessageId: session.forkMessageId }
-		: {}),
-	...(session.forkPointTimestamp != null
-		? { forkPointTimestamp: session.forkPointTimestamp }
-		: {}),
-	...(session.pendingQuestionCount != null
-		? { pendingQuestionCount: session.pendingQuestionCount }
-		: {}),
-	...(session.pendingPermissionCount != null
-		? { pendingPermissionCount: session.pendingPermissionCount }
-		: {}),
-	...(session.attention != null ? { attention: session.attention } : {}),
-	...(session.unread != null ? { unread: session.unread } : {}),
-	...(session.settledAt != null ? { settledAt: session.settledAt } : {}),
-	...(session.settledAutomatically != null
-		? { settledAutomatically: session.settledAutomatically }
-		: {}),
-	...(session.autoSettleDisabled != null
-		? { autoSettleDisabled: session.autoSettleDisabled }
-		: {}),
-	...(session.pinnedAt != null ? { pinnedAt: session.pinnedAt } : {}),
-	...(session.snoozedAt != null ? { snoozedAt: session.snoozedAt } : {}),
-	...(session.git != null ? { git: session.git } : {}),
-	...(session.snoozedUntil != null
-		? { snoozedUntil: session.snoozedUntil }
-		: {}),
-	...(session.wokenAt != null ? { wokenAt: session.wokenAt } : {}),
-	...(session.wokeBecause != null ? { wokeBecause: session.wokeBecause } : {}),
-	...(session.projectSlug != null ? { projectSlug: session.projectSlug } : {}),
-});
-
-export function applyListSessionsResponse(
-	response: ListSessionsResponse,
-): void {
-	handleSessionList({
-		type: "session_list",
-		sessions: response.sessions.map(sessionInfoFromRpc),
-		roots: response.roots,
-		...(response.search ? { search: true } : {}),
-	});
+	familySessions = msg.sessions;
 }
 
 /** How many cross-project rows one page asks for. Exported so the caller that
@@ -701,11 +675,11 @@ export function applyListDaemonSessionsResponse(
 	response: ListDaemonSessionsResponse,
 ): void {
 	daemonBrowseToken += 1;
-	sessionState.daemonSessions = response.sessions.map(sessionInfoFromRpc);
-	sessionState.daemonCursor = response.nextCursor;
-	sessionState.daemonHasMore = response.hasMore;
-	sessionState.daemonLoading = false;
-	sessionState.daemonUnavailableProjects = response.availability
+	clientSession.daemonSessions = [...response.sessions];
+	clientSession.daemonCursor = response.nextCursor;
+	clientSession.daemonHasMore = response.hasMore;
+	clientSession.daemonLoading = false;
+	clientSession.daemonUnavailableProjects = response.availability
 		.filter((entry) => !entry.available)
 		.map((entry) => entry.projectSlug);
 }
@@ -725,7 +699,7 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 		return;
 	}
 	const token = daemonBrowseToken;
-	sessionState.daemonLoading = true;
+	clientSession.daemonLoading = true;
 	try {
 		const scope = getSessionScope();
 		const response = await listDaemonSessionsRpc({
@@ -739,20 +713,23 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 		// whose updated_at moves between two requests can land on both pages, and
 		// a repeated key throws out of Svelte's keyed {#each}.
 		const seen = new Set(sessionState.daemonSessions.map((row) => row.id));
-		const incoming = response.sessions
-			.map(sessionInfoFromRpc)
-			.filter((session) => !seen.has(session.id));
-		sessionState.daemonSessions = [...sessionState.daemonSessions, ...incoming];
-		sessionState.daemonCursor = response.nextCursor;
-		sessionState.daemonHasMore = response.hasMore;
-		sessionState.daemonUnavailableProjects = response.availability
+		const incoming = response.sessions.filter(
+			(session) => !seen.has(session.id),
+		);
+		clientSession.daemonSessions = [
+			...sessionState.daemonSessions,
+			...incoming,
+		];
+		clientSession.daemonCursor = response.nextCursor;
+		clientSession.daemonHasMore = response.hasMore;
+		clientSession.daemonUnavailableProjects = response.availability
 			.filter((entry) => !entry.available)
 			.map((entry) => entry.projectSlug);
 	} catch {
 		// Keep the rows already on screen and leave hasMore alone, so scrolling
 		// again retries rather than declaring the list finished.
 	} finally {
-		if (token === daemonBrowseToken) sessionState.daemonLoading = false;
+		if (token === daemonBrowseToken) clientSession.daemonLoading = false;
 	}
 }
 
@@ -778,8 +755,8 @@ export async function searchSessions(
 	}
 	daemonSearchToken += 1;
 	activeSearch = { query: trimmed, roots, scope: getSessionScope() };
-	sessionState.searchCursor = null;
-	sessionState.searchHasMore = false;
+	clientSession.searchCursor = null;
+	clientSession.searchHasMore = false;
 	// Results are left on screen until the new page lands. Blanking them first
 	// makes every keystroke flash the list through its "no match" state.
 	await runSearchPage(daemonSearchToken, true);
@@ -789,7 +766,7 @@ export async function searchSessions(
 export async function loadMoreSearchResults(): Promise<void> {
 	if (
 		activeSearch === null ||
-		sessionState.searchCursor === null ||
+		clientSession.searchCursor === null ||
 		!sessionState.searchHasMore ||
 		sessionState.searchLoading
 	) {
@@ -801,10 +778,10 @@ export async function loadMoreSearchResults(): Promise<void> {
 export function clearSessionSearch(): void {
 	daemonSearchToken += 1;
 	activeSearch = null;
-	sessionState.searchResults = null;
-	sessionState.searchCursor = null;
-	sessionState.searchHasMore = false;
-	sessionState.searchLoading = false;
+	clientSession.searchResults = null;
+	clientSession.searchCursor = null;
+	clientSession.searchHasMore = false;
+	clientSession.searchLoading = false;
 }
 
 async function runSearchPage(token: number, replace: boolean): Promise<void> {
@@ -812,7 +789,7 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 	const projectSlug = getCurrentSlug();
 	if (search === null || !projectSlug) return;
 	const cursor = replace ? null : sessionState.searchCursor;
-	sessionState.searchLoading = true;
+	clientSession.searchLoading = true;
 	try {
 		const response = await listDaemonSessionsRpc({
 			projectSlug,
@@ -823,102 +800,220 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 			...(cursor === null ? {} : { cursor }),
 		});
 		if (token !== daemonSearchToken) return;
-		const incoming = response.sessions.map(sessionInfoFromRpc);
-		if (replace) {
-			sessionState.searchResults = incoming;
-		} else {
-			const previous = sessionState.searchResults ?? [];
-			const seen = new Set(previous.map((row) => row.id));
-			sessionState.searchResults = [
-				...previous,
-				...incoming.filter((session) => !seen.has(session.id)),
-			];
-		}
-		sessionState.searchCursor = response.nextCursor;
-		sessionState.searchHasMore = response.hasMore;
+		applySearchResultsResponse(response, replace);
 	} catch {
 		// Same as browse paging: keep what is shown, allow a retry.
 	} finally {
-		if (token === daemonSearchToken) sessionState.searchLoading = false;
+		if (token === daemonSearchToken) clientSession.searchLoading = false;
 	}
 }
 
-export function handleSessionSwitched(
-	msg: Extract<RelayMessage, { type: "session_switched" }>,
+export function applySearchResultsResponse(
+	response: ListDaemonSessionsResponse,
+	replace = true,
 ): void {
-	const { id, requestId } = msg;
-	if (id) {
-		noteSessionOpened(id);
-		sessionState.currentId = id;
-		if (!findSession(id)) {
-			sessionState.sessions.set(id, {
-				id,
-				title: "",
-				...(msg.parentID ? { parentID: msg.parentID } : {}),
-				...(msg.forkedFrom ? { forkedFrom: msg.forkedFrom } : {}),
-			});
-		}
-		syncSessionMembership();
-		// A permission mode selected before any session was bound can only be
-		// delivered now that we know the session id.
-		const slug = getCurrentSlug();
-		if (slug) {
-			flushPendingPermissionMode(slug, id, switchPermissionModeRpc);
-		}
+	const incoming = response.sessions;
+	if (replace) {
+		clientSession.searchResults = [...incoming];
+	} else {
+		const previous = sessionState.searchResults ?? [];
+		const seen = new Set(previous.map((row) => row.id));
+		clientSession.searchResults = [
+			...previous,
+			...incoming.filter((session) => !seen.has(session.id)),
+		];
 	}
-	// Co-located: complete the creation state machine if this session_switched
-	// is the response to our CreateSession RPC request. This is inside
-	// handleSessionSwitched (not in the dispatch switch) so it can't be
-	// accidentally separated from the state update.
-	if (requestId) {
-		completeNewSession(requestId);
-	}
+	clientSession.searchCursor = response.nextCursor;
+	clientSession.searchHasMore = response.hasMore;
 }
 
-/** Handle a session_forked message — add the new session to the list. */
+/** Keep fork lineage with this tab's selection until the family row arrives. */
 export function handleSessionForked(
 	msg: Extract<RelayMessage, { type: "session_forked" }>,
 ): void {
-	const { session } = msg;
-	// The family snapshot sent before the switch owns membership. Keep supplied
-	// metadata only when this fork is already part of the viewer's family.
 	if (
-		sessionState.familySessions.some((candidate) => candidate.id === session.id)
-	) {
-		sessionState.familySessions = sessionState.familySessions.map(
-			(candidate) => (candidate.id === session.id ? session : candidate),
-		);
+		clientSession.announcedParent?.sessionId === clientSession.currentId &&
+		clientSession.currentId !== msg.parentId
+	)
+		return;
+	clientSession.announcedParent = {
+		sessionId: msg.sessionId,
+		parentId: msg.parentId,
+		...(msg.forkMessageId && {
+			forkMessageId: msg.forkMessageId,
+		}),
+		...(msg.forkPointTimestamp != null && {
+			forkPointTimestamp: msg.forkPointTimestamp,
+		}),
+	};
+}
+
+// ─── Reading the session list ───────────────────────────────────────────────
+// Components should wrap these in $derived() for reactive caching.
+
+/** Find a session by id. */
+export function findSession(id: string): Immutable<SessionInfo> | undefined {
+	return (
+		serverSessions.get(id) ??
+		familySessions.find((row) => row.id === id) ??
+		rootSessions.find((row) => row.id === id)
+	);
+}
+
+// ─── Notification views (ni8.23) ────────────────────────────────────────────
+// Three facts the server derives onto the row: how many questions and
+// permissions are unanswered, and whether a message landed since the session was
+// last looked at. These are reads over the server-owned half — there is no
+// client-side notification state left to drift out of step with them, and a
+// client that reconnects gets the truth in its snapshot rather than rebuilding a
+// guess from events it may have missed.
+
+/** What the sidebar dot should show for a session, if anything. */
+export function getSessionIndicator(
+	sessionId: string,
+	currentSessionId: string | null,
+): "attention" | "done-unviewed" | null {
+	// Tab-local by design: a session cannot be waiting on you while it is the one
+	// on your screen, and which one that is differs per browser tab, so the
+	// server cannot answer it (ni8.23 C3).
+	if (sessionId === currentSessionId) return null;
+	const session =
+		rootSessions.find((row) => row.id === sessionId) ??
+		serverSessions.get(sessionId) ??
+		familySessions.find((row) => row.id === sessionId);
+	if (session === undefined) return null;
+	if (
+		(session.pendingQuestionCount ?? 0) > 0 ||
+		(session.pendingPermissionCount ?? 0) > 0
+	)
+		return "attention";
+	return session.unread === true ? "done-unviewed" : null;
+}
+
+/** Every session waiting on an answer, for the attention banner. Excludes the
+ *  session on screen and its descendants — their prompts are already visible. */
+export function getAttentionSessions(
+	currentSessionId: string | null,
+	getDescendantIds: (sessionId: string) => Set<string>,
+): Map<string, { questions: number; permissions: number }> {
+	const descendants = currentSessionId
+		? getDescendantIds(currentSessionId)
+		: new Set<string>();
+	const waiting = new Map<string, { questions: number; permissions: number }>();
+	for (const session of sessionState.rootSessions) {
+		const sessionId = session.id;
+		if (sessionId === currentSessionId || descendants.has(sessionId)) continue;
+		const questions = session.pendingQuestionCount ?? 0;
+		const permissions = session.pendingPermissionCount ?? 0;
+		if (questions > 0 || permissions > 0)
+			waiting.set(sessionId, { questions, permissions });
 	}
-	if (sessionState.currentId === session.id)
-		sessionState.sessions.set(session.id, session);
-	syncSessionMembership();
+	return waiting;
+}
+
+/** When a session last changed, as the sidebar means it. */
+function lastChangedAt(session: Immutable<SessionInfo>): number {
+	// `||`, not `??`: a provider that has never touched a session sends `0` or
+	// `""` as readily as it omits the field, and all three mean the same thing
+	// — exactly as the line below reads a missing timestamp as 0.
+	const at = session.updatedAt || session.createdAt;
+	return at ? new Date(at).getTime() : 0;
+}
+
+/** The sidebar and its search show root sessions only. */
+export function getFilteredSessions(): SessionInfo[] {
+	const scope = getSessionScope();
+	const currentSlug = getCurrentSlug();
+	// Local rows carry no projectSlug: they belong to the project this socket
+	// is attached to.
+	const inScope = (session: SessionInfo) =>
+		scope === null || (session.projectSlug ?? currentSlug) === scope;
+	if (sessionState.searchResults !== null) {
+		const searchSlug = currentSlug;
+		// Root rows carry the subtree rollup, so local search hits use the
+		// current shell row rather than a possibly older search result.
+		const liveRoots = new Map(
+			sessionState.rootSessions.map((session) => [session.id, session]),
+		);
+		return sessionState.searchResults.flatMap((session) => {
+			if (session.parentID || !inScope(session)) return [];
+			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
+				return [session];
+			}
+			const liveSession = liveRoots.get(session.id);
+			return liveSession ? [liveSession] : [];
+		});
+	}
+	const localSessions = sessionState.rootSessions;
+	const query = sessionState.searchQuery.toLowerCase().trim();
+	// Foreign rows stay in while a query is active and get title-filtered with
+	// the rest. The server search they will be replaced by now covers every
+	// project too, so the local filter and the landing results agree -- which is
+	// why these no longer have to stand down to avoid flashing in and out.
+	const foreignSessions = sessionState.daemonSessions.filter(
+		(session) =>
+			session.projectSlug != null &&
+			session.projectSlug !== currentSlug &&
+			!session.parentID,
+	);
+	const sessions = [...localSessions, ...foreignSessions]
+		.filter(inScope)
+		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
+	if (!query) return sessions;
+	return sessions.filter((s) => s.title.toLowerCase().includes(query));
+}
+
+/** Get sessions grouped into the sidebar's sections. */
+export function getAttentionGroups(): AttentionGroups {
+	return groupSessionsByAttention(getFilteredSessions(), sessionState.now);
+}
+
+/** Get sessions grouped by date: today, yesterday, older. */
+export function getDateGroups(): DateGroups {
+	return groupSessionsByDate(getFilteredSessions());
+}
+
+/** Get the currently active session object (or undefined). */
+export function getActiveSession(): Immutable<SessionInfo> | undefined {
+	return findSession(clientSession.currentId ?? "");
+}
+
+/** Group sessions into today/yesterday/older buckets. */
+export function groupSessionsByDate(
+	sessions: readonly Immutable<SessionInfo>[],
+	now?: Date,
+): DateGroups {
+	const ref = now ?? new Date();
+	const todayStart = new Date(ref);
+	todayStart.setHours(0, 0, 0, 0);
+	const yesterdayStart = new Date(todayStart);
+	yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+	const groups: DateGroups = { today: [], yesterday: [], older: [] };
+
+	for (const s of sessions) {
+		const updated = lastChangedAt(s);
+		if (updated >= todayStart.getTime()) {
+			groups.today.push(s);
+		} else if (updated >= yesterdayStart.getTime()) {
+			groups.yesterday.push(s);
+		} else {
+			groups.older.push(s);
+		}
+	}
+
+	return groups;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
+/** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {
-	sessionState.searchQuery = query;
+	clientSession.searchQuery = query;
 }
 
 export function setCurrentSession(id: string | null): void {
-	if (id) noteSessionOpened(id);
-	sessionState.currentId = id;
-}
-
-/**
- * The session ID we are switching *away from*.  Captured here before
- * `currentId` is overwritten so that `ws-dispatch` can pass the correct
- * value to `clearSessionLocal` when the server confirms the switch.
- */
-let _switchingFromId: string | null = null;
-
-/** Read and clear the switching-from ID. Used by ws-dispatch to pass the
- *  correct previous session to `clearSessionLocal`. Consuming (clearing)
- *  prevents stale IDs from leaking into future server-initiated switches. */
-export function consumeSwitchingFromId(): string | null {
-	const id = _switchingFromId;
-	_switchingFromId = null;
-	return id;
+	clientSession.currentId = id;
 }
 
 /**
@@ -931,44 +1026,67 @@ export function consumeSwitchingFromId(): string | null {
 export function switchToSession(
 	sessionId: string,
 	projectSlug?: string,
-	view?: (input: ViewSessionRpcInput) => void,
+	view?: typeof viewSessionRpc,
+	options?: { replace?: boolean },
 ): void {
-	// Capture the outgoing session for permission cleanup in ws-dispatch.
-	_switchingFromId = sessionState.currentId;
-	const readOptions = noteSessionOpened(sessionId);
-	if (_switchingFromId && _switchingFromId !== sessionId) {
-		abortSessionReplay(_switchingFromId);
+	const generation = ++selectionGeneration;
+	const previousId = clientSession.currentId;
+	if (previousId && previousId !== sessionId) {
+		const activity = sessionActivity.get(previousId);
+		if (activity) activity.replayGeneration++;
+	}
+
+	clientSession.currentId = sessionId;
+	if (clientSession.announcedParent?.sessionId !== sessionId)
+		clientSession.announcedParent = null;
+	activateSessionChatState(sessionId);
+	if (previousId !== sessionId) {
+		updateContextPercent(0);
+		clearTodoState();
 	}
 
 	const slug = projectSlug ?? getCurrentSlug();
-	if (slug) {
-		sessionState.currentId = sessionId;
-		activateSessionChatState(sessionId);
+	if (getCurrentSessionId() !== sessionId) {
+		if (options?.replace) replaceRoute(`/s/${sessionId}`);
+		else navigate(`/s/${sessionId}`);
 	}
-	navigate(`/s/${sessionId}`);
 	if (slug) {
+		flushPendingPermissionMode(slug, sessionId, switchPermissionModeRpc);
 		const input: ViewSessionRpcInput = {
 			projectSlug: slug,
 			sessionId,
 			originId: getBrowserClientId(),
-			...readOptions,
 		};
-		if (view) {
-			view(input);
-		} else {
-			void viewSessionRpc(input).catch(() => undefined);
-		}
+		void (view ?? viewSessionRpc)(input)
+			.then(({ draft }) => {
+				if (
+					draft !== undefined &&
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
+					handleInputSyncReceived({ text: draft });
+			})
+			.catch(() => undefined);
 	}
 	if (slug) {
 		void getAgentsRpc({ projectSlug: slug, sessionId })
 			.then((response) => {
-				if (getCurrentSlug() === slug && sessionState.currentId === sessionId)
+				if (
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
 					applyGetAgentsResponse(response);
 			})
 			.catch(() => undefined);
 		void getCommandsRpc({ projectSlug: slug, sessionId })
 			.then((response) => {
-				if (getCurrentSlug() === slug && sessionState.currentId === sessionId)
+				if (
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
 					applyGetCommandsResponse(response);
 			})
 			.catch(() => undefined);
@@ -976,7 +1094,11 @@ export function switchToSession(
 		// mode) that connect-time hydration cannot see for later switches.
 		void getModelsRpc({ projectSlug: slug, sessionId })
 			.then((response) => {
-				if (getCurrentSlug() === slug && sessionState.currentId === sessionId)
+				if (
+					generation === selectionGeneration &&
+					clientSession.currentId === sessionId &&
+					getCurrentSlug() === slug
+				)
 					applyGetModelsResponse(response);
 			})
 			.catch(() => undefined);
@@ -985,23 +1107,26 @@ export function switchToSession(
 
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
-	_switchingFromId = null;
+	selectionGeneration++;
 	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
+	const held = [...serverSessions.keys()];
+	resetSessionSubscription();
+	for (const id of held) forgetSession(id);
 	for (const id of new Set([
 		...sessionActivity.keys(),
 		...sessionMessages.keys(),
 	])) {
 		clearSessionChatState(id);
 	}
-	sessionState.sessions.clear();
-	sessionState.rootSessions = [];
-	sessionState.familySessions = [];
-	sessionState.currentId = null;
-	sessionState.searchQuery = "";
+	clientSession.currentId = null;
+	clientSession.announcedParent = null;
+	setSearchQuery("");
+	familySessions = [];
+	clientSession.daemonSessions = [];
+	clientSession.daemonUnavailableProjects = [];
+	clientSession.daemonCursor = null;
+	clientSession.daemonHasMore = false;
+	clientSession.daemonLoading = false;
+	daemonBrowseToken++;
 	clearSessionSearch();
-	daemonBrowseToken += 1;
-	sessionState.daemonSessions = [];
-	sessionState.daemonCursor = null;
-	sessionState.daemonHasMore = false;
-	sessionState.daemonLoading = false;
 }

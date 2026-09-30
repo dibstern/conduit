@@ -15,10 +15,14 @@ import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import {
+	markSessionSeenRpc,
 	setSessionPinnedRpc,
 	setSessionSettledRpc,
 	snoozeSessionRpc,
@@ -28,6 +32,13 @@ import {
 	formatSnoozeTime,
 	formatTimeAgo,
 } from "../../../src/lib/frontend/utils/format.js";
+import {
+	clearSessionSearch,
+	seedDaemonSessions,
+	seedFamilySessions,
+	seedRootSessions,
+	seedSearchResults,
+} from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -35,6 +46,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
+		markSessionSeenRpc: vi.fn().mockResolvedValue(undefined),
 		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
 		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
 		snoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
@@ -43,6 +55,7 @@ vi.mock(
 );
 
 beforeEach(() => {
+	clearSessionState();
 	vi.clearAllMocks();
 	const storage = new Map<string, string>();
 	vi.stubGlobal("localStorage", {
@@ -59,7 +72,7 @@ beforeEach(() => {
 	projectState.projects = [
 		{ slug: "current-project", title: "Current", directory: "/current" },
 	];
-	sessionState.rootSessions = [
+	seedRootSessions([
 		{ id: "idle", title: "Idle work", attention: "idle" },
 		{ id: "approval", title: "Approval", attention: "needs-approval" },
 		{
@@ -75,17 +88,13 @@ beforeEach(() => {
 			settledAt: Date.now() - 120_000,
 			updatedAt: Date.now(),
 		},
-	];
-	sessionState.familySessions = [...sessionState.rootSessions];
-	sessionState.daemonSessions = [];
-	sessionState.daemonUnavailableProjects = [];
+	]);
+	seedFamilySessions("root-a", [...sessionState.rootSessions]);
+	seedDaemonSessions([]);
 	sessionState.searchQuery = "";
-	sessionState.searchResults = null;
-	sessionState.searchHasMore = false;
-	sessionState.daemonHasMore = false;
+	clearSessionSearch();
 	sessionState.currentId = null;
 	sessionState.now = Date.now();
-	sessionState.sessions.clear();
 });
 afterEach(() => {
 	cleanup();
@@ -101,7 +110,7 @@ function addSnoozedRow(until: number | null = Date.now() + 3_600_000) {
 		snoozedAt: Date.now() - 1_000,
 		...(until === null ? {} : { snoozedUntil: until }),
 	};
-	sessionState.rootSessions = [...sessionState.rootSessions, row];
+	seedRootSessions([...sessionState.rootSessions, row]);
 	return row;
 }
 
@@ -200,7 +209,7 @@ describe("session triage list", () => {
 			vi.setSystemTime(new Date(2026, 9, 5, 9));
 			const now = Date.now();
 			sessionState.now = now;
-			sessionState.rootSessions = [
+			seedRootSessions([
 				{
 					id: "wake",
 					title: "Wake soon",
@@ -208,7 +217,7 @@ describe("session triage list", () => {
 					snoozedAt: now,
 					snoozedUntil: now + 5_000,
 				},
-			];
+			]);
 			uiState.snoozedShelfOpen = true;
 			render(SessionList);
 			await tick();
@@ -216,7 +225,7 @@ describe("session triage list", () => {
 				screen.getByText("Wake soon").closest("#snoozed-shelf-rows"),
 			).not.toBeNull();
 			expect(vi.getTimerCount()).toBe(1);
-			sessionState.rootSessions = [
+			seedRootSessions([
 				{
 					id: "wake",
 					title: "Wake soon",
@@ -224,7 +233,7 @@ describe("session triage list", () => {
 					snoozedAt: now,
 					snoozedUntil: now + 1_000,
 				},
-			];
+			]);
 			await tick();
 			expect(vi.getTimerCount()).toBe(1);
 			await vi.advanceTimersByTimeAsync(1_000);
@@ -289,7 +298,7 @@ describe("session triage list", () => {
 	});
 
 	it("omits empty shelves", () => {
-		sessionState.rootSessions = [{ id: "idle", title: "Idle work" }];
+		seedRootSessions([{ id: "idle", title: "Idle work" }]);
 		render(SessionList);
 		expect(screen.queryByText("Pinned")).toBeNull();
 		expect(screen.queryByTestId("settled-shelf-toggle")).toBeNull();
@@ -355,7 +364,7 @@ describe("session triage list", () => {
 
 	it("does not reannounce the search summary when a result settles", async () => {
 		sessionState.searchQuery = "Idle";
-		sessionState.searchResults = [{ id: "idle", title: "Idle work" }];
+		seedSearchResults([{ id: "idle", title: "Idle work" }]);
 		render(SessionList);
 		const live = screen
 			.getByTestId("session-search-summary")
@@ -368,9 +377,9 @@ describe("session triage list", () => {
 			characterData: true,
 			subtree: true,
 		});
-		sessionState.rootSessions = [
+		seedRootSessions([
 			{ id: "idle", title: "Idle work", settledAt: Date.now() },
-		];
+		]);
 		await tick();
 		expect(live.textContent).toBe("1 match");
 		expect(mutations).not.toHaveBeenCalled();
@@ -404,9 +413,9 @@ describe("session triage list", () => {
 	});
 
 	it("keeps Undo addressed to the original project after navigation", async () => {
-		sessionState.rootSessions = [
+		seedRootSessions([
 			{ id: "empty-title", title: "", projectSlug: "current-project" },
-		];
+		]);
 		render(SessionList);
 		render(Toast);
 		const row = screen.getByText("New Session").closest("a");
@@ -435,14 +444,14 @@ describe("session triage list", () => {
 	});
 
 	it("limits another project's row menu to Mark read/unread", async () => {
-		sessionState.daemonSessions = [
+		seedDaemonSessions([
 			{
 				id: "foreign",
 				title: "Foreign work",
 				projectSlug: "other-project",
 				pinnedAt: 1,
 			},
-		];
+		]);
 		render(SessionList);
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
@@ -583,5 +592,43 @@ describe("session triage list", () => {
 			),
 		);
 		expect(uiState.toasts).toEqual([]);
+	});
+});
+
+// A user's sidebar pick is the only thing that clears the turn-end dot, and
+// the browser reports it; the server no longer marks a switch read, because a
+// switch also fires on restore, reload and reconnect (ADR-0004, Scope;
+// conduit-test-hk9m.3).
+describe("sidebar pick", () => {
+	const pick = (id: string) => {
+		const row = document.querySelector(`a[data-session-id="${id}"]`);
+		if (!row) throw new Error(`no row for ${id}`);
+		return fireEvent.click(row);
+	};
+
+	beforeEach(() => {
+		seedRootSessions([
+			{ id: "unread", title: "unread", unread: true, lastTurnEndVersion: 7 },
+			{ id: "read", title: "read", lastTurnEndVersion: 3 },
+		]);
+	});
+
+	it("reports an unread row seen up to its latest turn end, even when it is already open", async () => {
+		sessionState.currentId = "unread";
+		render(SessionList);
+		await pick("unread");
+		expect(markSessionSeenRpc).toHaveBeenCalledExactlyOnceWith({
+			projectSlug: "current-project",
+			sessionId: "unread",
+			upTo: 7,
+			originId: expect.any(String),
+		});
+	});
+
+	it("reports nothing for a row with no dot", async () => {
+		render(SessionList);
+		await pick("read");
+		await tick();
+		expect(markSessionSeenRpc).not.toHaveBeenCalled();
 	});
 });

@@ -1,3 +1,4 @@
+import { seedSessions } from "../stores/session-fixtures.js";
 // ─── WS Message Dispatch Tests ───────────────────────────────────────────────
 // Gap 1: handleToolContentResponse — tool_content message updates chat state
 // Gap 2: handleConnectionStatus — connection_status → banner lifecycle
@@ -71,7 +72,6 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 import {
 	chatState,
 	clearMessages,
-	handleToolStart,
 	inputSyncState,
 	type SessionActivity,
 	type SessionMessages,
@@ -90,16 +90,19 @@ import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 // ─── Setup / Teardown ───────────────────────────────────────────────────────
 
 // ─── Per-session tiers for handler calls ────────────────────────────────────
-let ta: SessionActivity;
+let _ta: SessionActivity;
 let tm: SessionMessages;
 
 beforeEach(() => {
 	clearMessages();
 	// Set currentId and register session BEFORE creating test slots,
 	// so testActivity()/testMessages() register under the correct key ("s1").
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	seedSessions([
+		...sessionState.sessions.values(),
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	sessionState.currentId = "s1";
-	ta = testActivity();
+	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
 	inputSyncState.text = "";
@@ -112,7 +115,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	clearMessages();
-	ta = testActivity();
+	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
 	inputSyncState.text = "";
@@ -129,30 +132,20 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		toolName: string,
 		opts?: { messageId?: string },
 	): void {
-		handleToolStart(ta, tm, {
-			type: "tool_start",
-			sessionId: "s1",
-			id: toolId,
-			name: toolName,
-		});
-
-		// Manually update to "completed" with truncated result
-		const messages = [...chatState.messages];
-		const idx = messages.findIndex(
-			(m) => m.type === "tool" && (m as ToolMessage).id === toolId,
-		);
-		if (idx >= 0) {
-			messages[idx] = {
-				...(messages[idx] as ToolMessage),
+		tm.messages = [
+			...tm.messages,
+			{
+				type: "tool",
+				uuid: `s1/${toolId}`,
+				id: toolId,
+				name: toolName,
 				status: "completed",
 				result: "truncated output…",
 				isTruncated: true,
 				fullContentLength: 50_000,
 				...(opts?.messageId != null && { messageId: opts.messageId }),
-			};
-			chatState.messages = messages;
-			tm.messages = messages;
-		}
+			},
+		];
 	}
 
 	it("replaces truncated tool result with full content", () => {

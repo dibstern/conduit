@@ -1,8 +1,10 @@
 import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Effect, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
-import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
-import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
@@ -18,7 +20,17 @@ export interface ProviderRuntimeIngestion {
 	) => Effect.Effect<number, unknown>;
 	readonly ingestBatch: (
 		events: readonly ProviderRuntimeEvent[],
-		options?: { readonly publish?: boolean },
+		options?: {
+			readonly publishToBus?: boolean;
+			readonly publishToRelay?: boolean;
+			readonly beforeCommit?: Effect.Effect<void, SqlError>;
+			/** Run at the durable boundary: inside the same uninterruptible region
+			 *  as append+project, after COMMIT returns and before anything is
+			 *  published. This is where a caller records state that only makes
+			 *  sense because the batch is durable — a publication defect after it
+			 *  must not be able to undo it. */
+			readonly afterCommit?: Effect.Effect<void>;
+		},
 	) => Effect.Effect<number, unknown>;
 	readonly drain: () => Effect.Effect<void, unknown>;
 }
@@ -45,8 +57,7 @@ export const makeProviderRuntimeIngestionLive = (
 	Layer.effect(
 		ProviderRuntimeIngestionTag,
 		Effect.gen(function* () {
-			const eventStore = yield* EventStoreEffectTag;
-			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			const commitAndSignal = yield* makeCommitAndSignal;
 			const sql = yield* SqlClient.SqlClient;
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
@@ -55,7 +66,12 @@ export const makeProviderRuntimeIngestionLive = (
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
-				ingestOptions: { readonly publish?: boolean } = {},
+				ingestOptions: {
+					readonly publishToBus?: boolean;
+					readonly publishToRelay?: boolean;
+					readonly beforeCommit?: Effect.Effect<void, SqlError>;
+					readonly afterCommit?: Effect.Effect<void>;
+				} = {},
 			): Effect.Effect<number, unknown> =>
 				ingestSemaphore.withPermits(1)(
 					Effect.gen(function* () {
@@ -101,10 +117,6 @@ export const makeProviderRuntimeIngestionLive = (
 								event.type !== "session.compaction" ||
 								event.data.state === "completed",
 						);
-						const storedEvents =
-							yield* eventStore.appendBatch(persistentEvents);
-
-						yield* Ref.set(mapperStateRef, nextState);
 
 						// Projectors write rows that reference sessions(id), and a
 						// provider can stream events for a session Conduit never created
@@ -116,12 +128,12 @@ export const makeProviderRuntimeIngestionLive = (
 						// session.created is left to the session projector, which owns
 						// the row and upserts it.
 						const createdHere = new Set(
-							storedEvents
+							persistentEvents
 								.filter((event) => event.type === "session.created")
 								.map((event) => event.sessionId),
 						);
 						const needsSessionRow = new Map<string, string>();
-						for (const event of storedEvents) {
+						for (const event of persistentEvents) {
 							if (createdHere.has(event.sessionId)) continue;
 							if (!needsSessionRow.has(event.sessionId)) {
 								needsSessionRow.set(event.sessionId, event.provider);
@@ -130,22 +142,26 @@ export const makeProviderRuntimeIngestionLive = (
 						for (const [sessionId, provider] of needsSessionRow) {
 							const seededAt = Date.now();
 							yield* sql`
-								INSERT OR IGNORE INTO sessions
-								(id, provider, title, status, created_at, updated_at)
-								VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
+									INSERT OR IGNORE INTO sessions
+									(id, provider, title, status, created_at, updated_at)
+									VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
 						}
 
-						if (storedEvents.length === 1 && storedEvents[0]) {
-							yield* projectionRunner
-								.projectEvent(storedEvents[0])
-								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-						} else if (storedEvents.length > 1) {
-							yield* projectionRunner
-								.projectBatch(storedEvents)
-								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-						}
+						yield* commitAndSignal(persistentEvents, {
+							publish: ingestOptions.publishToBus ?? true,
+							...(ingestOptions.beforeCommit
+								? { beforeCommit: ingestOptions.beforeCommit }
+								: {}),
+							afterCommit: Effect.zipRight(
+								Ref.set(mapperStateRef, nextState),
+								ingestOptions.afterCommit ?? Effect.void,
+							),
+						});
 
-						if (options.relayPublisher && ingestOptions.publish !== false) {
+						if (
+							options.relayPublisher &&
+							ingestOptions.publishToRelay !== false
+						) {
 							yield* publishRelayMessages(domainEvents, options.relayPublisher);
 						}
 

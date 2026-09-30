@@ -13,7 +13,10 @@ import type {
 } from "../events.js";
 import {
 	getSessionStatements,
+	isSessionRemoval,
+	REMOVE_SESSION_SQL,
 	SESSION_HANDLED_TYPES,
+	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
 
 // ─── Error type ─────────────────────────────────────────────────────────────
@@ -27,16 +30,73 @@ export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 // ─── Effect Projector interface ─────────────────────────────────────────────
 
 export interface ProjectionContext {
+	/**
+	 * The read-model version every row this projection touches is stamped with.
+	 * It comes from the monotone read-model counter, never from the event: an
+	 * event sequence goes backwards on replay, and a row that moves backwards is
+	 * a row a subscriber never hears about again.
+	 */
+	readonly version: number;
 	readonly replaying?: boolean;
 }
+
+/**
+ * What one projection did, in the only two terms a subscriber can act on:
+ * sessions to re-query, and sessions to drop.
+ *
+ * The split is decided by the database, not declared by the projector. Every
+ * statement names the rows it wrote through `RETURNING`; the stamp pass then
+ * separates them — a row still there takes the version and is `stamped`, and a
+ * row the statement wrote but that is no longer there was removed underneath
+ * it, by its own removal or by the cascade that followed one. So a projector
+ * can neither stamp a row it did not write, nor stay quiet about one it
+ * removed.
+ */
+export interface ProjectionTouch {
+	readonly stamped: readonly string[];
+	readonly removed: readonly string[];
+}
+
+/**
+ * Collapse touches into the outcome each session actually ended the commit
+ * with, later touches winning over earlier ones.
+ *
+ * Order is the whole point: a commit that deletes a session and recreates it
+ * leaves a live row, and one that creates then deletes leaves nothing. Taking
+ * the union and letting removal win would announce the surviving row as gone,
+ * and a subscriber would drop a session that is still there. Folding in order
+ * is also what keeps the two lists disjoint, so nobody downstream has to
+ * reconcile them.
+ */
+export const mergeTouches = (
+	touches: Iterable<ProjectionTouch>,
+): ProjectionTouch => {
+	const live = new Map<string, boolean>();
+	for (const touch of touches) {
+		for (const sessionId of touch.stamped) live.set(sessionId, true);
+		for (const sessionId of touch.removed) live.set(sessionId, false);
+	}
+	return {
+		stamped: [...live].filter(([, alive]) => alive).map(([id]) => id),
+		removed: [...live].filter(([, alive]) => !alive).map(([id]) => id),
+	};
+};
 
 export interface EffectProjector {
 	readonly name: string;
 	readonly handles: readonly CanonicalEventType[];
+	/**
+	 * Apply the event, then report what moved and what is gone. The projection
+	 * runner needs nothing from the caller to know either.
+	 */
 	readonly project: (
 		event: StoredEvent,
-		ctx?: ProjectionContext,
-	) => Effect.Effect<void, ProjectionError | SqlError, SqlClient.SqlClient>;
+		ctx: ProjectionContext,
+	) => Effect.Effect<
+		ProjectionTouch,
+		ProjectionError | SqlError,
+		SqlClient.SqlClient
+	>;
 }
 
 // ─── Type guard ─────────────────────────────────────────────────────────────
@@ -47,6 +107,84 @@ function isEventType<K extends CanonicalEventType>(
 ): event is StoredEvent & { type: K; data: EventPayloadMap[K] } {
 	return event.type === type;
 }
+
+// ─── Read-model stamping ────────────────────────────────────────────────────
+
+// A child-table row naming the session row it belongs to. `turns`, `activities`,
+// `pending_approvals` and `session_providers` carry no version of their own, so
+// the session row that owns them is what moves — and the owner is whatever the
+// write itself put in `session_id`, not what the event header says.
+interface OwnedRow {
+	readonly session_id: string;
+}
+
+const owners = (rows: readonly OwnedRow[]): readonly string[] =>
+	rows.map((row) => row.session_id);
+
+// A row a statement reports having written, via `RETURNING id`. An empty result
+// is the whole point: a declined guard, an ignored conflict and an update that
+// matched nothing all come back with no rows, and so announce nothing.
+const ids = (rows: readonly { readonly id: string }[]): readonly string[] =>
+	rows.map((row) => row.id);
+
+// Stamping is unconditional. `version` is the read-model counter, not the event
+// sequence, so a replayed write is still a write: it takes the next counter
+// value and the row moves forward whatever it carried before. Under the old
+// sequence stamp a replay could rewrite a row's payload and leave its version
+// behind, and a subscriber holding that version never heard about the change.
+//
+// `RETURNING` reports only rows that were really there, so an UPDATE against a
+// missing or already-deleted row announces nothing.
+const stampSessions = (
+	sessionIds: readonly string[],
+	version: number,
+): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const stamped: string[] = [];
+		const removed: string[] = [];
+		for (const sessionId of new Set(sessionIds)) {
+			const rows = yield* sql<{ id: string }>`
+				UPDATE sessions SET version = ${version}
+				WHERE id = ${sessionId}
+				RETURNING id`;
+			// The row was written a moment ago and is not here now: it went under
+			// this same event, by a removal statement or by the cascade one set off.
+			// Nothing declares that — the UPDATE that matched nothing is the report.
+			if (rows.length === 0) removed.push(sessionId);
+			else stamped.push(...rows.map((row) => row.id));
+		}
+		return { stamped, removed };
+	});
+
+// Takes the messages the handler reported writing, not the id in the event
+// header: a guard that declined and a conflict that was ignored both report
+// nothing, and a row nobody wrote must not be announced as changed.
+//
+// Returns the owning session rather than the event's own, because a subagent
+// message is stored against the subagent session and that is the row a
+// subscriber must re-query. Message parts carry no version of their own, so a
+// part write advances the message that owns it.
+const stampMessage = (
+	messageIds: readonly string[],
+	version: number,
+): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const stamped: string[] = [];
+		for (const messageId of new Set(messageIds)) {
+			const rows = yield* sql<OwnedRow>`
+				UPDATE messages SET version = ${version}
+				WHERE id = ${messageId}
+				RETURNING session_id`;
+			stamped.push(...owners(rows));
+		}
+		// A message row that vanished under its own event went with the session
+		// that owned it, and the session projector reports that removal by name.
+		// Nothing to add here: the missing id is a message id, and the advance
+		// speaks in sessions.
+		return { stamped, removed: [] };
+	});
 
 function encodeJson(value: unknown): string {
 	if (value === undefined) return "null";
@@ -81,13 +219,38 @@ function mergeMetadata(
 export const makeSessionProjector = (): EffectProjector => ({
 	name: "session",
 	handles: SESSION_HANDLED_TYPES,
-	project: (event: StoredEvent) =>
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			const written: string[] = [];
 
+			// Every session statement is a single-table write against `sessions`
+			// keyed by id, so `RETURNING id` names exactly the rows it wrote: the
+			// subagent row for a message filed under its parent, and nothing at
+			// all when the auto-title guard declines the rename.
+			//
+			// A removal is named instead of written, because `RETURNING` cannot
+			// report what the cascade takes: the subtree is read first, then the
+			// session row goes and the cascade takes the rest. Both arms feed the
+			// same list — the stamp pass is what tells a row that moved from one
+			// that is gone.
 			for (const stmt of getSessionStatements(event)) {
-				yield* sql.unsafe(stmt.sql, [...stmt.params]);
+				if (isSessionRemoval(stmt)) {
+					const subtree = yield* sql.unsafe<{ id: string }>(
+						SESSION_SUBTREE_SQL,
+						[stmt.removeSession],
+					);
+					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
+					written.push(...subtree.map((row) => row.id));
+					continue;
+				}
+				const rows = yield* sql.unsafe<{ id: string }>(
+					`${stmt.sql} RETURNING id`,
+					[...stmt.params],
+				);
+				written.push(...rows.map((row) => row.id));
 			}
+			return written;
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -98,6 +261,7 @@ export const makeSessionProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -107,6 +271,9 @@ export const makeMessageProjector = (): EffectProjector => ({
 	name: "message",
 	handles: [
 		"message.created",
+		"message.removed",
+		"message.part.removed",
+		"message.snapshot",
 		"text.delta",
 		"thinking.start",
 		"thinking.delta",
@@ -119,18 +286,152 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"turn.error",
 		"session.compaction",
 	],
-	project: (event: StoredEvent, ctx?: ProjectionContext) =>
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "message.removed")) {
+				const { messageId } = event.data;
+				yield* sql`UPDATE turns SET user_message_id = NULL
+					WHERE session_id = ${event.sessionId} AND user_message_id = ${messageId}`;
+				yield* sql`UPDATE turns SET assistant_message_id = NULL
+					WHERE session_id = ${event.sessionId} AND assistant_message_id = ${messageId}`;
+				yield* sql`DELETE FROM messages
+					WHERE id = ${messageId} AND session_id = ${event.sessionId}`;
+				yield* sql`INSERT INTO message_tombstones (session_id, message_id, version)
+					VALUES (${event.sessionId}, ${messageId}, ${ctx.version})
+					ON CONFLICT (message_id) DO UPDATE SET
+					session_id = excluded.session_id, version = excluded.version`;
+				return [];
+			}
+			if (
+				"messageId" in event.data &&
+				event.type !== "message.part.removed" &&
+				event.metadata.rawSource !== "opencode.rest"
+			) {
+				const rows = yield* sql<{
+					rest_digest: string | null;
+					session_id: string;
+				}>`
+						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
+				if (rows[0]?.rest_digest != null) {
+					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
+					return [];
+				}
+			}
+
+			if (isEventType(event, "message.snapshot")) {
+				const { message, digest } = event.data;
+				const created = message.time?.created ?? event.createdAt;
+				const completed = message.time?.completed ?? created;
+				const text = message.parts
+					.filter(
+						(part) => part.type === "text" && typeof part["text"] === "string",
+					)
+					.map((part) => part["text"])
+					.join("");
+				const existing = yield* sql<{ is_backfilled: number }>`
+					SELECT is_backfilled FROM messages WHERE id = ${message.id}`;
+				const written = yield* sql<{ id: string }>`
+					INSERT INTO messages
+					(id, session_id, role, text, cost, tokens_in, tokens_out,
+					 tokens_cache_read, tokens_cache_write, context_window,
+					 is_streaming, is_backfilled, created_at, updated_at,
+					 rest_digest, rest_event_id, rest_payload, finish, error)
+					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
+					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
+					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
+					 ${message.tokens?.cache?.write ?? null}, ${message.tokens?.contextWindow ?? null},
+					 0, ${existing.length === 0 ? 1 : (existing[0]?.is_backfilled ?? 0)},
+					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(message)},
+					 ${message.finish ?? null},
+					 ${message.error === undefined ? null : encodeJson(message.error)})
+					ON CONFLICT (id) DO UPDATE SET
+					 role = excluded.role, text = excluded.text, cost = excluded.cost,
+					 tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out,
+					 tokens_cache_read = excluded.tokens_cache_read,
+					 tokens_cache_write = excluded.tokens_cache_write,
+					 context_window = excluded.context_window, is_streaming = 0,
+					 created_at = excluded.created_at, updated_at = excluded.updated_at,
+					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
+					 rest_payload = excluded.rest_payload,
+					 finish = excluded.finish, error = excluded.error
+				RETURNING id`;
+				yield* sql`DELETE FROM message_parts WHERE message_id = ${message.id}`;
+				for (const [index, part] of message.parts.entries()) {
+					const partTime = part["time"];
+					const time =
+						typeof partTime === "object" &&
+						partTime !== null &&
+						!Array.isArray(partTime)
+							? partTime
+							: undefined;
+					const start =
+						time && "start" in time && typeof time.start === "number"
+							? time.start
+							: created;
+					const end =
+						time && "end" in time && typeof time.end === "number"
+							? time.end
+							: start;
+					const state = part["state"];
+					const toolState =
+						typeof state === "object" && state !== null && !Array.isArray(state)
+							? state
+							: undefined;
+					yield* sql`
+						INSERT INTO message_parts
+						(id, message_id, type, text, tool_name, call_id, input, result,
+						 status, sort_order, created_at, updated_at, metadata, rest_payload)
+						VALUES (${part.id}, ${message.id}, ${part.type},
+						 ${typeof part["text"] === "string" ? part["text"] : ""},
+						 ${typeof part["tool"] === "string" ? part["tool"] : null},
+						 ${typeof part["callID"] === "string" ? part["callID"] : null},
+						 ${toolState && "input" in toolState ? encodeJson(toolState.input) : null},
+						 ${toolState && "output" in toolState ? encodeJson(toolState.output) : null},
+						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
+						 ${index}, ${start}, ${end},
+						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
+						 ${encodeJson(part)})`;
+				}
+				return written.map((row) => row.id);
+			}
+
+			if (isEventType(event, "message.part.removed")) {
+				const removed = yield* sql<{ id: string }>`DELETE FROM message_parts
+					WHERE id = ${event.data.partId} AND message_id = ${event.data.messageId}
+					RETURNING id`;
+				if (removed.length === 0) return [];
+				return ids(
+					yield* sql<{ id: string }>`UPDATE messages
+					SET text = COALESCE((SELECT group_concat(text, '') FROM (
+						SELECT text FROM message_parts WHERE message_id = ${event.data.messageId}
+						AND type = 'text' ORDER BY sort_order
+					)), ''), rest_payload = NULL, rest_digest = NULL,
+					updated_at = ${event.createdAt}
+					WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}
+					RETURNING id`,
+				);
+			}
 
 			if (isEventType(event, "message.created")) {
-				const isStreaming = event.data.role === "assistant" ? 1 : 0;
-				yield* sql`
-					INSERT INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${event.createdAt}, ${event.createdAt})
-					ON CONFLICT (id) DO NOTHING`;
-				return;
+				if (event.metadata.rawSource !== "opencode.rest") {
+					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${event.sessionId}`;
+				}
+				// A backfilled message is settled history: it never streams here.
+				const isBackfilled = event.data.backfilled ? 1 : 0;
+				const isStreaming =
+					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
+				return ids(
+					yield* sql<{ id: string }>`
+						INSERT INTO messages
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null})
+						ON CONFLICT (id) DO UPDATE SET
+							role = excluded.role,
+							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END
+						WHERE messages.role <> excluded.role
+						RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "text.delta")) {
@@ -143,7 +444,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 						row?.last_applied_seq != null &&
 						event.sequence <= row.last_applied_seq
 					)
-						return;
+						return [];
 				}
 
 				// Defensive: ensure the messages row exists
@@ -161,9 +462,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 						text = message_parts.text || excluded.text,
 						updated_at = excluded.updated_at`;
 
-				yield* sql`
-					UPDATE messages SET text = text || ${event.data.text}, last_applied_seq = ${event.sequence}, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{ id: string }>`
+						UPDATE messages SET text = text || ${event.data.text}, last_applied_seq = ${event.sequence}, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}
+						RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "thinking.start")) {
@@ -179,8 +482,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 						${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
 
-				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "thinking.delta")) {
@@ -193,7 +499,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 						row?.last_applied_seq != null &&
 						event.sequence <= row.last_applied_seq
 					)
-						return;
+						return [];
 				}
 
 				yield* sql`
@@ -210,13 +516,19 @@ export const makeMessageProjector = (): EffectProjector => ({
 						text = message_parts.text || excluded.text,
 						updated_at = excluded.updated_at`;
 
-				yield* sql`UPDATE messages SET last_applied_seq = ${event.sequence}, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET last_applied_seq = ${event.sequence}, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "thinking.end")) {
-				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "tool.started")) {
@@ -234,8 +546,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 						${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
 
-				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "tool.running")) {
@@ -256,8 +571,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 						metadata = ${metadata},
 						updated_at = ${event.createdAt}
 					WHERE id = ${event.data.partId}`;
-				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "tool.completed")) {
@@ -274,8 +592,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 					UPDATE message_parts
 					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}
 					WHERE id = ${event.data.partId}`;
-				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "file.attached")) {
@@ -299,8 +620,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 						${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
 
-				yield* sql`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "turn.completed")) {
@@ -310,7 +634,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// so the latest value wins. Tokens are per-execution, so a turn
 				// that ran twice sums them.
 				const tokens = event.data.tokens;
-				yield* sql`
+				return ids(
+					yield* sql<{ id: string }>`
 					UPDATE messages SET
 					cost = ${event.data.cost ?? null},
 					tokens_in = ${tokens?.input ?? null},
@@ -320,13 +645,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 					context_window = ${tokens?.contextWindow ?? null},
 					is_streaming = 0,
 					updated_at = ${event.createdAt}
-					WHERE id = ${event.data.messageId}`;
-				return;
+					WHERE id = ${event.data.messageId}
+					RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "turn.error")) {
-				yield* sql`UPDATE messages SET is_streaming = 0, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId}`;
-				return;
+				return ids(
+					yield* sql<{
+						id: string;
+					}>`UPDATE messages SET is_streaming = 0, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+				);
 			}
 
 			if (isEventType(event, "session.compaction")) {
@@ -337,7 +666,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// assistant message holding one `compaction` part; that is what keeps
 				// the divider and the reduced context gauge across a reload. Ids keyed
 				// on the event sequence plus DO NOTHING make replay a no-op.
-				if (event.data.state !== "completed") return;
+				if (event.data.state !== "completed") return [];
 				const messageId = `compaction-${event.sequence}`;
 				const metadata = encodeJson({
 					...(typeof event.data.preTokens === "number"
@@ -349,16 +678,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 				});
 				yield* sql`
 					INSERT INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${messageId}, ${event.data.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt})
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
+					VALUES (${messageId}, ${event.data.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`
 					INSERT INTO message_parts
 					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
 					VALUES (${`compaction-part-${event.sequence}`}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, 0, ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
-				return;
+				return [messageId];
 			}
+			return [];
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -367,6 +697,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 							projector: "message",
 							operation: "project",
 							cause: e,
+						}),
+			),
+			Effect.flatMap((written) =>
+				isEventType(event, "message.removed")
+					? stampSessions([event.sessionId], ctx.version)
+					: Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							for (const messageId of new Set(written)) {
+								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
+							}
+							return yield* stampMessage(written, ctx.version);
 						}),
 			),
 		),
@@ -378,6 +719,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
 	handles: [
 		"message.created",
+		"message.snapshot",
 		"tool.started",
 		"session.status",
 		"turn.completed",
@@ -385,50 +727,179 @@ export const makeTurnProjector = (): EffectProjector => ({
 		"turn.interrupted",
 		"turn.model_resolved",
 	],
-	project: (event: StoredEvent) =>
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-
-			if (isEventType(event, "message.created") && event.data.role === "user") {
-				yield* sql`
-						INSERT OR REPLACE INTO turns
-						(id, session_id, state, user_message_id, requested_at)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})`;
-				return;
+			if (
+				event.metadata.rawSource !== "opencode.rest" &&
+				"messageId" in event.data
+			) {
+				const rows = yield* sql<{
+					rest_digest: string | null;
+					session_id: string;
+				}>`
+						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
+				if (rows[0]?.rest_digest != null) {
+					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
+					return [];
+				}
 			}
 
-			// Unambiguous new work: a provider can report a result and keep going,
-			// so any of these after a settle means the turn is running again.
-			// Deltas and tool progress/metadata updates are deliberately absent —
-			// they add nothing the signals below miss, they fire on every token,
-			// and a late update to an already-closed tool must not reopen a turn.
+			if (isEventType(event, "message.snapshot")) {
+				const { message } = event.data;
+				const parentId = message.parentID;
+				// The message projector leaves the previous ownership in this row
+				// until it can be captured here, before applying the new parent.
+				const [previous] = yield* sql<{
+					turn_id: string | null;
+					parent_id: string | null;
+				}>`SELECT turn_id, parent_id FROM messages WHERE id = ${message.id}`;
+				const affected = new Set(
+					[previous?.turn_id, previous?.parent_id].filter(
+						(owner): owner is string => owner != null,
+					),
+				);
+				const displayOwners = yield* sql<{ id: string }>`
+					SELECT id FROM turns WHERE assistant_message_id = ${message.id}
+					AND session_id = ${event.sessionId}`;
+				for (const owner of displayOwners) affected.add(owner.id);
+				if (message.role === "user") {
+					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					VALUES (${message.id}, ${event.sessionId}, 'pending', ${message.id}, ${message.time?.created ?? event.createdAt})
+					ON CONFLICT (id) DO UPDATE SET requested_at = excluded.requested_at`;
+					const children = yield* sql<{ turn_id: string | null }>`
+						SELECT DISTINCT turn_id FROM messages WHERE session_id = ${event.sessionId}
+						AND parent_id = ${message.id}
+						AND role = 'assistant'`;
+					for (const child of children) {
+						if (child.turn_id) affected.add(child.turn_id);
+					}
+					yield* sql`UPDATE messages SET turn_id = ${message.id}
+						WHERE session_id = ${event.sessionId} AND parent_id = ${message.id}
+						AND role = 'assistant'`;
+				} else if (parentId) {
+					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					SELECT id, session_id, 'pending', id, created_at FROM messages
+					WHERE id = ${parentId} AND session_id = ${event.sessionId} AND role = 'user'
+					ON CONFLICT (id) DO NOTHING`;
+				}
+				const turn = parentId
+					? yield* sql<{
+							id: string;
+						}>`SELECT id FROM turns WHERE id = ${parentId} AND session_id = ${event.sessionId}`
+					: [];
+				if (message.role === "assistant") {
+					yield* sql`UPDATE messages SET parent_id = ${parentId ?? null},
+						turn_id = ${turn.length ? parentId : null} WHERE id = ${message.id}`;
+				}
+				if (message.role === "user") affected.add(message.id);
+				if (turn.length && parentId) affected.add(parentId);
+				for (const turnId of affected) {
+					const [totals] = yield* sql<{
+						cost: number | null;
+						tokens_in: number | null;
+						tokens_out: number | null;
+						started_at: number | null;
+						completed_at: number | null;
+					}>`SELECT SUM(cost) AS cost, SUM(tokens_in) AS tokens_in,
+						SUM(tokens_out) AS tokens_out, MIN(created_at) AS started_at,
+						MAX(updated_at) AS completed_at FROM messages
+						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
+						AND role = 'assistant'`;
+					const [latest] = yield* sql<{ id: string; is_streaming: number }>`
+						SELECT id, is_streaming FROM messages
+						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
+						AND role = 'assistant'
+						ORDER BY created_at DESC, id DESC LIMIT 1`;
+					if (latest) {
+						yield* sql`UPDATE turns SET assistant_message_id = ${latest.id},
+							state = ${latest.is_streaming ? "running" : "completed"},
+							started_at = ${totals?.started_at ?? null},
+							completed_at = ${latest.is_streaming ? null : (totals?.completed_at ?? null)},
+							cost = ${totals?.cost ?? null}, tokens_in = ${totals?.tokens_in ?? null},
+							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId}`;
+					} else {
+						yield* sql`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
+							started_at = NULL, completed_at = NULL, cost = NULL,
+							tokens_in = NULL, tokens_out = NULL WHERE id = ${turnId}
+						AND assistant_message_id IS NOT NULL`;
+					}
+				}
+				return affected.size > 0 ? [event.sessionId] : [];
+			}
+
+			if (isEventType(event, "message.created")) {
+				if (event.data.role === "user") {
+					return owners(
+						yield* sql<OwnedRow>`
+							INSERT OR REPLACE INTO turns
+							(id, session_id, state, user_message_id, requested_at)
+							VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
+							RETURNING session_id`,
+					);
+				}
+			}
+
+			// A result may arrive before the provider continues the same turn.
 			if (
 				(isEventType(event, "session.status") &&
 					event.data.status === "busy") ||
-				isEventType(event, "message.created") ||
+				(isEventType(event, "message.created") &&
+					event.data.role === "assistant") ||
 				isEventType(event, "tool.started")
 			) {
-				const [turn] = yield* sql<{
-					id: string;
-					state: string;
-					assistant_message_id: string | null;
-				}>`
+				const parentTurn =
+					isEventType(event, "message.created") && event.data.parentID
+						? yield* sql<{
+								id: string;
+								state: string;
+								assistant_message_id: string | null;
+							}>`SELECT id, state, assistant_message_id FROM turns
+							WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId}`
+						: isEventType(event, "tool.started")
+							? yield* sql<{
+									id: string;
+									state: string;
+									assistant_message_id: string | null;
+								}>`SELECT turns.id, turns.state, turns.assistant_message_id
+								FROM turns JOIN messages ON messages.turn_id = turns.id
+								WHERE messages.id = ${event.data.messageId}
+								AND turns.session_id = ${event.sessionId}`
+							: [];
+				const [turn] = parentTurn.length
+					? parentTurn
+					: yield* sql<{
+							id: string;
+							state: string;
+							assistant_message_id: string | null;
+						}>`
 					SELECT id, state, assistant_message_id FROM turns
 					WHERE session_id = ${event.sessionId}
+					AND requested_at <= ${event.createdAt}
 					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
-				if (!turn) return;
+				if (!turn) return [];
+				if (isEventType(event, "message.created")) {
+					yield* sql`UPDATE messages SET turn_id = ${turn.id},
+						parent_id = COALESCE(parent_id, ${turn.id})
+						WHERE id = ${event.data.messageId}`;
+				}
 				const reopening = turn.state !== "pending" && turn.state !== "running";
 				const assistantMessageId = reopening ? null : turn.assistant_message_id;
-				yield* sql`
-					UPDATE turns
-					SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
-						started_at = COALESCE(started_at, ${event.createdAt}),
-						completed_at = NULL,
-						assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
-					WHERE id = ${turn.id}`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE turns
+						SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
+							started_at = COALESCE(started_at, ${event.createdAt}),
+							completed_at = NULL,
+							assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
+						WHERE id = ${turn.id}
+						RETURNING session_id`,
+				);
 			}
 
+			// These three find their turn by assistant message id, so the owning
+			// session is nowhere in the statement — `RETURNING session_id` is the
+			// only thing that knows which session row actually moved.
 			if (isEventType(event, "turn.completed")) {
 				// Cost and tokens are counted differently by the provider, which
 				// reads like a bug and is not: cost is cumulative for the whole
@@ -436,31 +907,37 @@ export const makeTurnProjector = (): EffectProjector => ({
 				// so the latest value wins. Tokens are per-execution, so a turn
 				// that ran twice sums them.
 				const tokens = event.data.tokens;
-				yield* sql`
-					UPDATE turns
-					SET state = ${persistedTurnState("result")},
-						cost = COALESCE(${event.data.cost ?? null}, cost),
-						tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
-						tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
-						completed_at = ${event.createdAt}
-					WHERE assistant_message_id = ${event.data.messageId}`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE turns
+						SET state = 'completed',
+							cost = COALESCE(${event.data.cost ?? null}, cost),
+							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
+							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
+							completed_at = ${event.createdAt}
+						WHERE assistant_message_id = ${event.data.messageId}
+						RETURNING session_id`,
+				);
 			}
 
 			if (isEventType(event, "turn.error")) {
-				yield* sql`
-					UPDATE turns
-					SET state = ${persistedTurnState("error")}, completed_at = ${event.createdAt}
-					WHERE assistant_message_id = ${event.data.messageId}`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE turns
+						SET state = 'error', completed_at = ${event.createdAt}
+						WHERE assistant_message_id = ${event.data.messageId}
+						RETURNING session_id`,
+				);
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				yield* sql`
-					UPDATE turns
-					SET state = ${persistedTurnState("interrupt")}, completed_at = ${event.createdAt}
-					WHERE assistant_message_id = ${event.data.messageId}`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE turns
+						SET state = 'interrupted', completed_at = ${event.createdAt}
+						WHERE assistant_message_id = ${event.data.messageId}
+						RETURNING session_id`,
+				);
 			}
 
 			// Attributed to the newest open turn rather than by id, because the
@@ -472,20 +949,23 @@ export const makeTurnProjector = (): EffectProjector => ({
 			// next turn's row exists. A second emitter, or concurrent turns,
 			// needs a real key first — see conduit-test-7i3.
 			if (isEventType(event, "turn.model_resolved")) {
-				yield* sql`
-					UPDATE turns
-					SET requested_model = ${event.data.requestedModel ?? null},
-						expected_model = ${event.data.expectedModel ?? null},
-						actual_model = ${event.data.actualModel}
-					WHERE id = (
-						SELECT id FROM turns
-						WHERE session_id = ${event.sessionId}
-							AND state IN ('pending', 'running')
-						ORDER BY requested_at DESC
-						LIMIT 1
-					)`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE turns
+						SET requested_model = ${event.data.requestedModel ?? null},
+							expected_model = ${event.data.expectedModel ?? null},
+							actual_model = ${event.data.actualModel}
+						WHERE id = (
+							SELECT id FROM turns
+							WHERE session_id = ${event.sessionId}
+								AND state IN ('pending', 'running')
+							ORDER BY requested_at DESC
+							LIMIT 1
+						)
+						RETURNING session_id`,
+				);
 			}
+			return [];
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -496,6 +976,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -513,10 +994,12 @@ export const makeActivityProjector = (): EffectProjector => ({
 		"question.resolved",
 		"turn.error",
 	],
-	project: (event: StoredEvent) =>
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
+			// OR IGNORE returns no row when the activity is already there, so a
+			// re-applied event announces nothing it did not actually write.
 			const insert = (
 				tone: string,
 				kind: string,
@@ -525,60 +1008,75 @@ export const makeActivityProjector = (): EffectProjector => ({
 			) => {
 				const id = `${event.sessionId}:${event.sequence}:${kind}`;
 				const payloadJson = encodeJson(payload);
-				return sql`
+				return sql<OwnedRow>`
 					INSERT OR IGNORE INTO activities
 					(id, session_id, tone, kind, summary, payload, sequence, created_at)
-					VALUES (${id}, ${event.sessionId}, ${tone}, ${kind}, ${summary}, ${payloadJson}, ${event.sequence}, ${event.createdAt})`;
+					VALUES (${id}, ${event.sessionId}, ${tone}, ${kind}, ${summary}, ${payloadJson}, ${event.sequence}, ${event.createdAt})
+					RETURNING session_id`;
 			};
 
 			if (isEventType(event, "tool.started")) {
-				yield* insert("tool", "tool.started", event.data.toolName, event.data);
-				return;
+				return owners(
+					yield* insert(
+						"tool",
+						"tool.started",
+						event.data.toolName,
+						event.data,
+					),
+				);
 			}
 			if (isEventType(event, "tool.running")) {
-				yield* insert("tool", "tool.running", event.data.partId, event.data);
-				return;
+				return owners(
+					yield* insert("tool", "tool.running", event.data.partId, event.data),
+				);
 			}
 			if (isEventType(event, "tool.completed")) {
 				const summary = `${event.data.partId} (${event.data.duration}ms)`;
-				yield* insert("tool", "tool.completed", summary, event.data);
-				return;
+				return owners(
+					yield* insert("tool", "tool.completed", summary, event.data),
+				);
 			}
 			if (isEventType(event, "permission.asked")) {
-				yield* insert(
-					"approval",
-					"permission.asked",
-					event.data.toolName,
-					event.data,
+				return owners(
+					yield* insert(
+						"approval",
+						"permission.asked",
+						event.data.toolName,
+						event.data,
+					),
 				);
-				return;
 			}
 			if (isEventType(event, "permission.resolved")) {
-				yield* insert(
-					"approval",
-					"permission.resolved",
-					event.data.decision,
-					event.data,
+				return owners(
+					yield* insert(
+						"approval",
+						"permission.resolved",
+						event.data.decision,
+						event.data,
+					),
 				);
-				return;
 			}
 			if (isEventType(event, "question.asked")) {
-				yield* insert("info", "question.asked", "Question asked", event.data);
-				return;
+				return owners(
+					yield* insert("info", "question.asked", "Question asked", event.data),
+				);
 			}
 			if (isEventType(event, "question.resolved")) {
-				yield* insert(
-					"info",
-					"question.resolved",
-					"Question answered",
-					event.data,
+				return owners(
+					yield* insert(
+						"info",
+						"question.resolved",
+						"Question answered",
+						event.data,
+					),
 				);
-				return;
 			}
 			if (isEventType(event, "turn.error")) {
-				yield* insert("error", "turn.error", event.data.error, event.data);
-				return;
+				return owners(
+					yield* insert("error", "turn.error", event.data.error, event.data),
+				);
 			}
+			return [];
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -589,6 +1087,7 @@ export const makeActivityProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -602,46 +1101,57 @@ export const makeApprovalProjector = (): EffectProjector => ({
 		"question.asked",
 		"question.resolved",
 	],
-	project: (event: StoredEvent) =>
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
+			// The resolve statements find their approval by id and never name a
+			// session, so only the row can say whose it was.
 			if (isEventType(event, "permission.asked")) {
 				const inputJson = encodeJson(event.data.input);
-				yield* sql`
-					INSERT INTO pending_approvals
-					(id, session_id, type, status, tool_name, input, created_at)
-					VALUES (${event.data.id}, ${event.data.sessionId}, 'permission', 'pending', ${event.data.toolName}, ${inputJson}, ${event.createdAt})
-					ON CONFLICT (id) DO NOTHING`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						INSERT INTO pending_approvals
+						(id, session_id, type, status, tool_name, input, created_at)
+						VALUES (${event.data.id}, ${event.data.sessionId}, 'permission', 'pending', ${event.data.toolName}, ${inputJson}, ${event.createdAt})
+						ON CONFLICT (id) DO NOTHING
+						RETURNING session_id`,
+				);
 			}
 
 			if (isEventType(event, "permission.resolved")) {
-				yield* sql`
-					UPDATE pending_approvals
-					SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}
-					WHERE id = ${event.data.id}`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_approvals
+						SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}
+						WHERE id = ${event.data.id}
+						RETURNING session_id`,
+				);
 			}
 
 			if (isEventType(event, "question.asked")) {
 				const questionsJson = encodeJson(event.data.questions);
-				yield* sql`
-					INSERT INTO pending_approvals
-					(id, session_id, type, status, input, created_at)
-					VALUES (${event.data.id}, ${event.data.sessionId}, 'question', 'pending', ${questionsJson}, ${event.createdAt})
-					ON CONFLICT (id) DO NOTHING`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						INSERT INTO pending_approvals
+						(id, session_id, type, status, input, created_at)
+						VALUES (${event.data.id}, ${event.data.sessionId}, 'question', 'pending', ${questionsJson}, ${event.createdAt})
+						ON CONFLICT (id) DO NOTHING
+						RETURNING session_id`,
+				);
 			}
 
 			if (isEventType(event, "question.resolved")) {
 				const answersJson = encodeJson(event.data.answers);
-				yield* sql`
-					UPDATE pending_approvals
-					SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}
-					WHERE id = ${event.data.id}`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_approvals
+						SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}
+						WHERE id = ${event.data.id}
+						RETURNING session_id`,
+				);
 			}
+			return [];
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -652,6 +1162,7 @@ export const makeApprovalProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -660,28 +1171,33 @@ export const makeApprovalProjector = (): EffectProjector => ({
 export const makeProviderProjector = (): EffectProjector => ({
 	name: "provider",
 	handles: ["session.created", "session.provider_changed"],
-	project: (event: StoredEvent) =>
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
 			if (isEventType(event, "session.created")) {
-				yield* sql`
-					INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
-					VALUES (${`${event.data.sessionId}:initial`}, ${event.data.sessionId}, ${event.data.provider}, 'active', ${event.createdAt})`;
-				return;
+				return owners(
+					yield* sql<OwnedRow>`
+						INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
+						VALUES (${`${event.data.sessionId}:initial`}, ${event.data.sessionId}, ${event.data.provider}, 'active', ${event.createdAt})
+						RETURNING session_id`,
+				);
 			}
 
 			if (isEventType(event, "session.provider_changed")) {
-				yield* sql`
+				const stopped = yield* sql<OwnedRow>`
 					UPDATE session_providers
 					SET status = 'stopped', deactivated_at = ${event.createdAt}
-					WHERE session_id = ${event.data.sessionId} AND status = 'active'`;
+					WHERE session_id = ${event.data.sessionId} AND status = 'active'
+					RETURNING session_id`;
 
-				yield* sql`
+				const started = yield* sql<OwnedRow>`
 					INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
-					VALUES (${`${event.data.sessionId}:${event.sequence}`}, ${event.data.sessionId}, ${event.data.newProvider}, 'active', ${event.createdAt})`;
-				return;
+					VALUES (${`${event.data.sessionId}:${event.sequence}`}, ${event.data.sessionId}, ${event.data.newProvider}, 'active', ${event.createdAt})
+					RETURNING session_id`;
+				return [...owners(stopped), ...owners(started)];
 			}
+			return [];
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -692,6 +1208,7 @@ export const makeProviderProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -710,6 +1227,11 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	// Superseded by tool.started carrying the complete input; kept in the
 	// canonical vocabulary only so historical stores still decode.
 	"tool.input_updated",
+	"session.provider_cleanup_failed",
+	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
+	// Kept so historical stores still decode.
+	"session.read",
+	"session.unread",
 ];
 
 /**

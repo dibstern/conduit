@@ -1,6 +1,6 @@
 // ─── Integration: Session Lifecycle ──────────────────────────────────────────
 // Tests session management operations: create, switch, rename, delete, and
-// search sessions through the relay WebSocket interface.
+// manage sessions through the relay WebSocket interface.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -21,7 +21,7 @@ describe("Integration: Session Lifecycle", () => {
 
 	// ── Create ──────────────────────────────────────────────────────────────
 
-	it("create session and receive session_switched", async () => {
+	it("create session and receive its id from RPC", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
@@ -33,17 +33,22 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("created session appears in session_list", async () => {
+	it("created session appears in the viewed family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
 		// Create a session with a deterministic title
-		const title = "Lifecycle-List-Test";
+		const title = "Lifecycle-Family-Test";
 		const switched = await client.createSession(title);
 		const newId = switched["id"] as string;
-		// Verify the broadcast session list includes the new session.
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		const list = await client.waitFor("session_family", {
+			timeout: 5000,
+			predicate: (message) =>
+				(message["sessions"] as Array<{ id: string }>).some(
+					(row) => row.id === newId,
+				),
+		});
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		expect(Array.isArray(sessions)).toBe(true);
 
@@ -60,10 +65,9 @@ describe("Integration: Session Lifecycle", () => {
 		await client.waitForInitialState();
 
 		// Record the initial session ID
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		expect(initialSwitched.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const firstId = initialSwitched[0]!["id"] as string;
+		const firstId = client.getActiveSessionId();
+		expect(firstId).toBeTruthy();
+		if (!firstId) throw new Error("No initial session");
 
 		// Create a second session (this switches to it automatically)
 		client.clearReceived();
@@ -94,8 +98,7 @@ describe("Integration: Session Lifecycle", () => {
 		const newTitle = "Renamed-Session-Test";
 		await client.renameSession(sessionId, newTitle);
 
-		// Verify the broadcast session list includes the new title.
-		const list = await client.waitFor("session_list", {
+		const list = await client.waitFor("session_family", {
 			timeout: 5000,
 			predicate: (msg) => {
 				const sessions = msg["sessions"] as
@@ -131,86 +134,42 @@ describe("Integration: Session Lifecycle", () => {
 		// Delete it
 		await client.deleteSession(sessionId);
 
-		// Verify the broadcast session list no longer includes it.
-		const list = await client.waitFor("session_list", {
+		const deleted = await client.waitFor("session_deleted", {
 			timeout: 5000,
-			predicate: (msg) => {
-				const sessions = msg["sessions"] as Array<{ id: string }> | undefined;
-				return (
-					Array.isArray(sessions) && !sessions.some((s) => s.id === sessionId)
-				);
-			},
+			predicate: (message) => message["sessionId"] === sessionId,
 		});
-		const sessions = list["sessions"] as Array<{ id: string }>;
-		const found = sessions.find((s) => s.id === sessionId);
-		expect(found).toBeUndefined();
-
-		await client.close();
-	});
-
-	// ── Search ──────────────────────────────────────────────────────────────
-
-	it("search sessions by query", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		// Create a session with a unique, searchable title
-		const uniqueTag = "Searchable-Integration-Test";
-		const switched = await client.createSession(uniqueTag);
-		expect(switched["id"]).toBeTruthy();
-		client.clearReceived();
-
-		// Search for it
-		const msg = await client.searchSessions(uniqueTag);
-		const sessions = msg.sessions;
-		expect(Array.isArray(sessions)).toBe(true);
-
-		const found = sessions.find((s) => s.title?.includes(uniqueTag));
-		expect(found).toBeTruthy();
-
-		await client.close();
-	});
-
-	it("search sessions returns empty for no match", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		// Search for something that should not match anything
-		const msg = await client.searchSessions(
-			"NoMatchWillEverExist-zzz-integration",
-		);
-		const sessions = msg.sessions;
-		expect(Array.isArray(sessions)).toBe(true);
-		expect(sessions).toHaveLength(0);
+		expect(deleted["sessionId"]).toBe(sessionId);
 
 		await client.close();
 	});
 
 	// ── State reset on switch ───────────────────────────────────────────────
 
-	it("switching session broadcasts session_switched and session_list", async () => {
+	it("switching session returns its draft and family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
 		// Record the initial session
-		const initialSwitched = client.getReceivedOfType("session_switched");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const firstId = initialSwitched[0]!["id"] as string;
+		const firstId = client.getActiveSessionId();
+		expect(firstId).toBeTruthy();
+		if (!firstId) throw new Error("No initial session");
+		await client.syncInputDraft("Unsent draft", { sessionId: firstId });
 
 		// Create a new session (auto-switches)
 		client.clearReceived();
 		const switchMsg = await client.createSession("Reset State Test");
 		expect(switchMsg["id"]).toBeTruthy();
 
-		// Now switch back — should get session_switched + session_list
+		// Now switch back to the first session.
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
+		expect(switched["draft"]).toBe("Unsent draft");
 
-		// After switching, verify we also get an updated session list
-		const list = await client.waitFor("session_list", { timeout: 5000 });
+		const list = await client.waitFor("session_family", {
+			timeout: 5000,
+			predicate: (message) => message["rootId"] === firstId,
+		});
 		expect(Array.isArray(list["sessions"])).toBe(true);
 
 		await client.close();

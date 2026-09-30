@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import WebSocket from "ws";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -17,7 +17,7 @@ import {
 	type GetFileTreeResponse,
 	type GetProjectsResponse,
 	type GetTodoResponse,
-	type ListSessionsResponse,
+	type LoadMoreHistoryResponse,
 	type PermissionDecision,
 	type PtyListResponse,
 	WsRpcGroup,
@@ -42,8 +42,10 @@ export class TestWsClient {
 	}> = [];
 	private openPromise: Promise<void>;
 
-	constructor(url: string) {
+	constructor(url: string, initialSessionId?: string) {
 		const wsUrl = new URL(url);
+		this.activeSessionId =
+			wsUrl.searchParams.get("session") ?? initialSessionId;
 		wsUrl.searchParams.set("client", this.clientId);
 		this.rpcUrl = `${wsUrl.protocol}//${wsUrl.host}/rpc`;
 		this.ws = new WebSocket(wsUrl);
@@ -57,12 +59,6 @@ export class TestWsClient {
 			try {
 				const msg = JSON.parse(data.toString()) as ReceivedMessage;
 				this.received.push(msg);
-				if (msg.type === "session_switched") {
-					const sessionId = msg["sessionId"] ?? msg["id"];
-					if (typeof sessionId === "string") {
-						this.activeSessionId = sessionId;
-					}
-				}
 
 				// Check waiters
 				for (let i = this.waiters.length - 1; i >= 0; i--) {
@@ -96,14 +92,11 @@ export class TestWsClient {
 
 	getActiveSessionId(): string | undefined {
 		if (this.activeSessionId) return this.activeSessionId;
-		for (let index = this.received.length - 1; index >= 0; index--) {
-			const msg = this.received[index];
-			if (msg?.type === "session_switched") {
-				const sessionId = msg["sessionId"] ?? msg["id"];
-				return typeof sessionId === "string" ? sessionId : undefined;
-			}
-		}
-		return undefined;
+		const family = this.received.find((msg) => msg.type === "session_family");
+		const sessions = family?.["sessions"];
+		if (!Array.isArray(sessions)) return undefined;
+		const first = sessions[0];
+		return first && typeof first.id === "string" ? first.id : undefined;
 	}
 
 	async sendMessage(
@@ -114,19 +107,19 @@ export class TestWsClient {
 			readonly originId?: string;
 			readonly commandId?: string;
 		} = {},
-	): Promise<void> {
+	): Promise<string> {
 		const sessionId = opts.sessionId ?? this.getActiveSessionId();
 		if (!sessionId) {
-			throw new Error("Cannot send RPC message before session_switched");
+			throw new Error("Cannot send RPC message before selecting a session");
 		}
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
 		try {
-			await Effect.runPromise(
+			const dispatchedSessionId = await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
-						yield* client.SendMessage({
+						const result = yield* client.SendMessage({
 							projectSlug: "integration-test",
 							sessionId,
 							text,
@@ -134,6 +127,7 @@ export class TestWsClient {
 							...(opts.images ? { images: [...opts.images] } : {}),
 							...(opts.originId ? { originId: opts.originId } : {}),
 						});
+						return result.sessionId;
 					}),
 				).pipe(
 					Effect.provide(RpcClient.layerProtocolSocket()),
@@ -142,6 +136,9 @@ export class TestWsClient {
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
+			if (this.activeSessionId === sessionId)
+				this.activeSessionId = dispatchedSessionId;
+			return dispatchedSessionId;
 		} finally {
 			globalThis.WebSocket = previousWebSocket;
 		}
@@ -208,25 +205,27 @@ export class TestWsClient {
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
-			return await this.waitFor("session_switched", {
-				predicate: (msg) => msg["id"] === result.sessionId,
-			});
+			this.activeSessionId = result.sessionId;
+			return { type: "create_session_response", id: result.sessionId };
 		} finally {
 			globalThis.WebSocket = previousWebSocket;
 		}
 	}
 
-	async viewSession(sessionId: string): Promise<ReceivedMessage> {
+	async viewSession(
+		sessionId: string,
+		projectSlug = "integration-test",
+	): Promise<ReceivedMessage> {
 		const previousWebSocket = globalThis.WebSocket;
 		const clientId = this.clientId;
-		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		Reflect.set(globalThis, "WebSocket", WebSocket);
 		try {
-			await Effect.runPromise(
+			const result = await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
-						yield* client.ViewSession({
-							projectSlug: "integration-test",
+						return yield* client.ViewSession({
+							projectSlug,
 							sessionId,
 							originId: clientId,
 						});
@@ -238,9 +237,8 @@ export class TestWsClient {
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
-			return await this.waitFor("session_switched", {
-				predicate: (msg) => msg["id"] === sessionId,
-			});
+			this.activeSessionId = sessionId;
+			return { type: "view_session_response", id: sessionId, ...result };
 		} finally {
 			globalThis.WebSocket = previousWebSocket;
 		}
@@ -248,6 +246,63 @@ export class TestWsClient {
 
 	async switchSession(sessionId: string): Promise<ReceivedMessage> {
 		return await this.viewSession(sessionId);
+	}
+
+	async loadTranscriptSnapshot(
+		sessionId: string,
+		projectSlug = "integration-test",
+	): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		Reflect.set(globalThis, "WebSocket", WebSocket);
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* Stream.runHead(
+							client.SubscribeSessionDetail({ projectSlug, sessionId }),
+						);
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async loadMoreHistory(
+		sessionId: string,
+		before?: string,
+		projectSlug = "integration-test",
+	): Promise<LoadMoreHistoryResponse> {
+		const previousWebSocket = globalThis.WebSocket;
+		Reflect.set(globalThis, "WebSocket", WebSocket);
+		try {
+			return await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						return yield* client.LoadMoreHistory({
+							projectSlug,
+							sessionId,
+							...(before ? { before } : {}),
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			Reflect.set(globalThis, "WebSocket", previousWebSocket);
+		}
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {
@@ -302,9 +357,8 @@ export class TestWsClient {
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
-			return await this.waitFor("session_switched", {
-				predicate: (msg) => msg["id"] === result.sessionId,
-			});
+			this.activeSessionId = result.sessionId;
+			return { type: "fork_session_response", id: result.sessionId };
 		} finally {
 			globalThis.WebSocket = previousWebSocket;
 		}
@@ -319,7 +373,7 @@ export class TestWsClient {
 	): Promise<void> {
 		const sessionId = opts.sessionId ?? this.getActiveSessionId();
 		if (!sessionId) {
-			throw new Error("Cannot sync input draft before session_switched");
+			throw new Error("Cannot sync input draft before selecting a session");
 		}
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -349,7 +403,7 @@ export class TestWsClient {
 
 	async cancelSession(sessionId = this.getActiveSessionId()): Promise<void> {
 		if (!sessionId) {
-			throw new Error("Cannot cancel before session_switched");
+			throw new Error("Cannot cancel before selecting a session");
 		}
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -381,7 +435,7 @@ export class TestWsClient {
 		sessionId = this.getActiveSessionId(),
 	): Promise<void> {
 		if (!sessionId) {
-			throw new Error("Cannot switch agent before session_switched");
+			throw new Error("Cannot switch agent before selecting a session");
 		}
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -414,7 +468,7 @@ export class TestWsClient {
 		sessionId = this.getActiveSessionId(),
 	): Promise<void> {
 		if (!sessionId) {
-			throw new Error("Cannot switch model before session_switched");
+			throw new Error("Cannot switch model before selecting a session");
 		}
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -679,35 +733,6 @@ export class TestWsClient {
 		}
 	}
 
-	async searchSessions(
-		query: string,
-		roots?: boolean,
-	): Promise<ListSessionsResponse> {
-		const previousWebSocket = globalThis.WebSocket;
-		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-		try {
-			return await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const client = yield* RpcClient.make(WsRpcGroup);
-						return yield* client.ListSessions({
-							projectSlug: "integration-test",
-							query,
-							...(roots !== undefined ? { roots } : {}),
-						});
-					}),
-				).pipe(
-					Effect.provide(RpcClient.layerProtocolSocket()),
-					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
-					Effect.provide(Socket.layerWebSocketConstructorGlobal),
-					Effect.provide(RpcSerialization.layerJson),
-				),
-			);
-		} finally {
-			globalThis.WebSocket = previousWebSocket;
-		}
-	}
-
 	async getFileTree(): Promise<GetFileTreeResponse> {
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -815,13 +840,14 @@ export class TestWsClient {
 		});
 	}
 
-	/** Wait for the initial connect handshake to settle (session_switched + status + lists) */
+	/** Wait for the initial connect handshake to settle. */
 	async waitForInitialState(timeout = 5000): Promise<void> {
 		await Promise.all([
-			this.waitFor("session_switched", { timeout }),
 			this.waitFor("status", { timeout }),
-			this.waitFor("session_list", { timeout }),
+			this.waitFor("session_family", { timeout }),
 		]);
+		const sessionId = this.getActiveSessionId();
+		if (sessionId) await this.viewSession(sessionId);
 		// Give agents/models a moment to arrive (they're async)
 		await new Promise((r) => setTimeout(r, 100));
 	}

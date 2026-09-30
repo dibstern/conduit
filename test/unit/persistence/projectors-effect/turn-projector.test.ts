@@ -62,14 +62,25 @@ interface TurnRow {
 describe("TurnProjector", () => {
 	let harness: EffectProjectionHarness;
 	let projector: EffectProjector;
+	let replayNextProjection: boolean;
 	const now = Date.now();
 
 	beforeEach(async () => {
+		replayNextProjection = false;
 		const effectProjector = createAllEffectProjectors().find(
 			(candidate) => candidate.name === "turn",
 		);
 		if (!effectProjector) throw new Error("Turn projector not found");
-		projector = effectProjector;
+		projector = {
+			...effectProjector,
+			project: (event, context) => {
+				const effectiveContext = replayNextProjection
+					? { ...context, replaying: true }
+					: context;
+				replayNextProjection = false;
+				return effectProjector.project(event, effectiveContext);
+			},
+		};
 		harness = makeEffectProjectionHarness([projector]);
 
 		// Pre-insert a session so FK constraints don't block inserts
@@ -83,7 +94,8 @@ describe("TurnProjector", () => {
 		await harness?.dispose();
 	});
 
-	async function project(event: StoredEvent): Promise<void> {
+	async function project(event: StoredEvent, replaying = false): Promise<void> {
+		replayNextProjection = replaying;
 		await harness.reproject([event]);
 	}
 
@@ -161,6 +173,7 @@ describe("TurnProjector", () => {
 		expect(projector.name).toBe("turn");
 		expect(projector.handles).toEqual([
 			"message.created",
+			"message.snapshot",
 			"tool.started",
 			"session.status",
 			"turn.completed",
@@ -351,6 +364,33 @@ describe("TurnProjector", () => {
 	});
 
 	describe("turn.completed", () => {
+		it.each([
+			false,
+			true,
+		])("does not count a late completion for a backfilled assistant again (replay=%s)", async (replaying) => {
+			await harness.query(
+				"INSERT INTO messages (id, session_id, role, is_streaming, rest_digest, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 0, 'digest', ?, ?)",
+				[now, now],
+			);
+			await harness.query(
+				"INSERT INTO turns (id, session_id, state, user_message_id, assistant_message_id, requested_at, tokens_in, tokens_out) VALUES ('u1', 's1', 'completed', 'u1', 'a1', ?, 10, 5)",
+				[now],
+			);
+			await project(
+				makeStored("turn.completed", "s1", {
+					messageId: "a1",
+					tokens: { input: 10, output: 5 },
+				}),
+				replaying,
+			);
+			expect(
+				await queryOne<TurnRow>("SELECT * FROM turns WHERE id = 'u1'"),
+			).toMatchObject({
+				tokens_in: 10,
+				tokens_out: 5,
+			});
+		});
+
 		it("settles the turn with the latest cost, summed tokens, and completed_at", async () => {
 			// Full lifecycle
 			await project(
@@ -504,7 +544,7 @@ describe("TurnProjector", () => {
 								partId: "p1",
 								toolName: "bash",
 								callId: "c1",
-								input: {},
+								input: { tool: "Bash", command: "true" },
 							});
 			await project(activity);
 			expect(

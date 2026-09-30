@@ -1,3 +1,4 @@
+import { seedSessions } from "../stores/session-fixtures.js";
 // ─── handleMessage → triggerNotifications wiring ─────────────────────────────
 // Verifies that handleMessage() calls triggerNotifications() for exactly the
 // four notification-worthy message types: done, error, permission_request,
@@ -73,6 +74,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 
 import {
 	clearMessages,
+	getOrCreateSessionActivity,
 	isProcessing,
 	isStreaming,
 	phaseToStreaming,
@@ -86,8 +88,10 @@ beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions used in test events so routePerSession's
 	// unknown-session guard doesn't drop them.
-	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	seedSessions([
+		{ id: "test-session", title: "", status: "idle" },
+		{ id: "s1", title: "", status: "idle" },
+	]);
 	clearMessages();
 	triggerNotificationsMock.mockClear();
 });
@@ -179,14 +183,19 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 			type: "notification_event",
 			eventType: "done",
 			sessionId: "sess-xyz",
+			alertId: "turn-1:done",
 		});
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "done", sessionId: "sess-xyz" }),
+			expect.objectContaining({
+				type: "done",
+				sessionId: "sess-xyz",
+				alertId: "turn-1:done",
+			}),
 		);
 	});
 
 	it("does NOT update chat state for notification_event (only triggers notification)", () => {
-		phaseToStreaming();
+		phaseToStreaming(getOrCreateSessionActivity("test-session"));
 
 		handleMessage({
 			type: "notification_event",

@@ -1,4 +1,3 @@
-import type { ForkEntry } from "../daemon/fork-metadata.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import type { SessionInfo } from "../types.js";
 
@@ -13,40 +12,24 @@ export function toSessionInfoList(
 	sessions: SessionDetail[],
 	statuses?: Record<string, SessionStatus>,
 	lastMessageAt?: ReadonlyMap<string, number>,
-	forkMeta?: ReadonlyMap<string, ForkEntry>,
-	pendingQuestionCounts?: ReadonlyMap<string, number>,
 ): SessionInfo[] {
 	return sessions
 		.map((s) => {
 			const lastMsgTime = lastMessageAt?.get(s.id);
 			const displayTime = lastMsgTime ?? s.time?.created ?? 0;
-			const forkEntry = forkMeta?.get(s.id);
 			const parentID = s.parentID;
+			// OpenCode has no `sessions` row to read a status off, so the poller's
+			// live view stands in for one. Its vocabulary is wider than the row's:
+			// anything the projection could not have stored reads as idle.
+			const status = statuses?.[s.id]?.type;
 
-			const info: SessionInfo = {
+			return {
 				id: s.id,
 				title: s.title ?? "Untitled",
+				status: status === "busy" || status === "retry" ? status : "idle",
 				updatedAt: displayTime,
-				messageCount: 0,
 				...(parentID != null && { parentID }),
-				...(forkEntry?.parentID && { forkedFrom: forkEntry.parentID }),
-				...(forkEntry != null && { forkMessageId: forkEntry.forkMessageId }),
-				...(forkEntry?.forkPointTimestamp != null && {
-					forkPointTimestamp: forkEntry.forkPointTimestamp,
-				}),
-			};
-
-			const status = statuses?.[s.id];
-			if (status && (status.type === "busy" || status.type === "retry")) {
-				info.processing = true;
-			}
-
-			const qCount = pendingQuestionCounts?.get(s.id);
-			if (qCount != null && qCount > 0) {
-				info.pendingQuestionCount = qCount;
-			}
-
-			return info;
+			} satisfies SessionInfo;
 		})
-		.sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number));
+		.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }

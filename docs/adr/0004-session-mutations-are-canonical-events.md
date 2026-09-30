@@ -4,6 +4,8 @@
 - Date: 2026-09-10
 - Context: conduit-test-42k7 (deleted sessions reappeared in the sidebar);
   hardening epic conduit-test-48mo
+- Amended: 2026-09-26, scope clarified for per-viewer read state
+  (conduit-test-mh7b)
 
 ## Context
 
@@ -66,6 +68,40 @@ anywhere in `src/` outside `session-command.ts` fails the build. There is no
 allowlist to curate — the rule is the architecture, stated once. A companion
 assertion pins the calls that are supposed to be inside the seam, so deleting
 the adapter cannot make the rule pass vacuously.
+
+## Scope (amended 2026-09-26)
+
+This decision covers changes to the session itself: facts about the
+conversation that a provider may also hold, such as its existence, title,
+lineage and deletion. It does not cover per-viewer annotations, and read state
+is the one that exists today.
+
+"Read up to here" records where a user's attention got to, not something that
+happened in the conversation. No provider has the concept, so the upstream step
+of the pipeline would be a no-op for both adapters. That is the sign it sits
+outside this seam rather than an exception to it. The event log is permanent,
+and a note about one viewer does not belong in the conversation's history
+forever. Matrix draws the same line: read markers live outside a room's event
+graph.
+
+Read state is therefore written directly to the read model, through one module,
+`SessionAttention`, using the commit-and-signal `stamp`. The stamp bumps the row
+version and publishes the row after commit, so every client sees the change. The
+guarantee this ADR exists for still holds, by a different mechanism. The write
+goes straight into the table `listSessions` reads, so it cannot miss the read
+model. A boundary test, in the style of `session-mutation-boundary-grep.test.ts`,
+fails the build if anything outside `SessionAttention` writes `seen_version`.
+
+Main's `session.read` and `session.unread` events predate this amendment. They
+stay decodable, so the stored log still reads, but they no longer project.
+Migration `0024_read_state_to_turn_ends` carries their effect over once: a
+session main showed as read is seen up to its last turn end, and any other
+session starts one short of it. Then it drops `read_at` and `marked_unread_at`.
+A session copied in from a provider (a Claude fork) starts seen up to its last
+imported turn end. `SessionAttention` writes that after the import commits.
+
+What this gives up is a history of when things were read. Nothing consumes one.
+If something ever needs it, `SessionAttention` is the single place to add it.
 
 ## Consequences
 

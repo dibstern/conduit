@@ -23,8 +23,12 @@ test.describe("Tool Call", () => {
 		// Send prompt — the mock will serve the first prompt_async response
 		await app.sendMessage("Show me a tool call");
 
-		// Tool steps live inside the turn's activity ledger, which collapses once
-		// the turn settles. Open it first so the wait doesn't race the reply.
+		// Wait for the assistant to finish responding after the tool result
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
+
+		// Tool steps live inside the turn's activity ledger, which collapses
+		// once settled, so open it once the reply is in.
 		await chat.expandTurnActivity();
 
 		// A tool block should appear (the recording includes tool events)
@@ -36,13 +40,40 @@ test.describe("Tool Call", () => {
 		// Wait for the tool to complete
 		await chat.waitForToolCompleted();
 
-		// Wait for the assistant to finish responding after the tool result
-		await chat.waitForAssistantMessage();
-		await chat.waitForStreamingComplete();
-
 		// The assistant should have responded with something
 		const text = await chat.getLastAssistantText();
 		expect(text.length).toBeGreaterThan(0);
+	});
+
+	// OpenCode runs this turn as two assistant messages: a step that calls
+	// `read`, then a step that replies. Both are one turn, so they share one
+	// ledger — the same shape a Claude turn renders.
+	test("a multi-step turn renders one ledger, live and after reload", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+		const ledgers = page.locator(".turn-activity");
+		await app.goto(relayUrl);
+
+		await app.sendMessage("Show me a tool call");
+		await chat.waitForAssistantMessage();
+		await chat.waitForStreamingComplete();
+
+		await expect(ledgers).toHaveCount(1);
+		await expect(ledgers.locator(".turn-activity-toggle")).toContainText(
+			/Worked\sfor/,
+		);
+
+		await page.reload();
+		await app.layout.waitFor({ state: "attached", timeout: 30_000 });
+		await chat.waitForAssistantMessage();
+
+		await expect(ledgers).toHaveCount(1);
+		await expect(ledgers.locator(".turn-activity-toggle")).toContainText(
+			/Worked\sfor/,
+		);
 	});
 });
 

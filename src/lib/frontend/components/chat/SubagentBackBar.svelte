@@ -10,7 +10,7 @@
 	// Find the active session and check if it has a parent
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
 
-	const parentId = $derived(activeSession?.parentID ?? null);
+	const parentId = $derived(sessionState.currentParentId);
 
 	const parentSession = $derived(parentId ? findSession(parentId) : null);
 
@@ -18,8 +18,9 @@
 		parentSession?.title ?? "parent session"
 	);
 
-	// Only subagents have parentID; forks have separate forkedFrom lineage.
-	const visible = $derived(!!parentId);
+	// Show for subagent sessions (parentID but no forkMessageId).
+	// Hide for user forks (parentID + forkMessageId) — they get the fork divider instead.
+	const visible = $derived(!!parentId && !activeSession?.forkMessageId && !activeSession?.forkPointTimestamp && !sessionState.currentFork?.forkMessageId && !sessionState.currentFork?.forkPointTimestamp);
 
 	function navigateBack() {
 		if (parentId) {

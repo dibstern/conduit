@@ -112,6 +112,30 @@ function makePersistenceLayer(filename: string) {
 	);
 }
 
+function establishCanonicalSession(sessionId: string, provider: string) {
+	return Effect.gen(function* () {
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		if (!(yield* projectionRunner.isRecovered())) {
+			yield* projectionRunner.recover();
+		}
+		const stored = yield* eventStore.append(
+			canonicalEvent(
+				"session.created",
+				sessionId,
+				{
+					sessionId,
+					title: "Parent Session",
+					provider,
+					providerSessionId: sessionId,
+				},
+				{ provider },
+			),
+		);
+		yield* projectionRunner.projectEvent(stored);
+	});
+}
+
 describe("Claude subagent materializer", () => {
 	it("does nothing when the SDK reports no subagents", async () => {
 		const sdk: ClaudeSubagentSdk = {
@@ -548,15 +572,16 @@ describe("Claude subagent materializer", () => {
 	it("persists child transcript events idempotently", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-subagent-"));
 		const filename = join(dir, "events.db");
+		const childSessionId = claudeSubagentSessionId({
+			parentConduitSessionId: "parent-session",
+			parentClaudeSessionId: "sdk-parent",
+			sdkSubagentId: "agent-abc",
+		});
 		try {
 			const result = await Effect.runPromise(
 				Effect.gen(function* () {
+					yield* establishCanonicalSession("parent-session", "opencode");
 					const persist = yield* ClaudeEventPersistEffectTag;
-					const childSessionId = claudeSubagentSessionId({
-						parentConduitSessionId: "parent-session",
-						parentClaudeSessionId: "sdk-parent",
-						sdkSubagentId: "agent-abc",
-					});
 					const materialize = makeClaudeSubagentMaterializer({
 						sdk: {
 							listSubagents: async () => ["agent-abc"],
@@ -581,13 +606,24 @@ describe("Claude subagent materializer", () => {
 					const sessionCreatedEvents = yield* sql<{ count: number }>`
 						SELECT COUNT(*) AS count FROM events WHERE session_id = ${childSessionId} AND type = 'session.created'`;
 					const childRows = yield* sql<{
+						provider: string;
 						parent_id: string | null;
 						provider_sid: string | null;
-					}>`SELECT parent_id, provider_sid FROM sessions WHERE id = ${childSessionId}`;
+					}>`SELECT provider, parent_id, provider_sid FROM sessions WHERE id = ${childSessionId}`;
+					const childBindings = yield* sql<{
+						id: string;
+						provider: string;
+					}>`
+						SELECT id, provider FROM session_providers
+						WHERE session_id = ${childSessionId} AND status = 'active'`;
+					const parentRows = yield* sql<{ provider: string }>`
+						SELECT provider FROM sessions WHERE id = 'parent-session'`;
 					return {
 						messages,
 						sessionCreatedCount: sessionCreatedEvents[0]?.count,
 						child: childRows[0],
+						childBindings,
+						parent: parentRows[0],
 					};
 				}).pipe(Effect.provide(makePersistenceLayer(filename))),
 			);
@@ -595,9 +631,14 @@ describe("Claude subagent materializer", () => {
 			expect(result.messages).toEqual([{ id: "sub-user-1" }]);
 			expect(result.sessionCreatedCount).toBe(1);
 			expect(result.child).toEqual({
+				provider: "claude",
 				parent_id: "parent-session",
 				provider_sid: "agent-abc",
 			});
+			expect(result.childBindings).toEqual([
+				{ id: `${childSessionId}:initial`, provider: "claude" },
+			]);
+			expect(result.parent).toEqual({ provider: "opencode" });
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -609,6 +650,7 @@ describe("Claude subagent materializer", () => {
 		try {
 			const result = await Effect.runPromise(
 				Effect.gen(function* () {
+					yield* establishCanonicalSession("parent-session", "opencode");
 					const persist = yield* ClaudeEventPersistEffectTag;
 					const childSessionId = claudeSubagentSessionId({
 						parentConduitSessionId: "parent-session",
@@ -689,6 +731,7 @@ describe("Claude subagent materializer", () => {
 		try {
 			const result = await Effect.runPromise(
 				Effect.gen(function* () {
+					yield* establishCanonicalSession("parent-session", "opencode");
 					const persist = yield* ClaudeEventPersistEffectTag;
 					const input = {
 						childSessionId: "child-session",
@@ -755,18 +798,125 @@ describe("Claude subagent materializer", () => {
 			);
 
 			expect(result.sessionCreatedCount).toBe(1);
-			expect(result.preexistingSessionCreatedCount).toBe(0);
+			expect(result.preexistingSessionCreatedCount).toBe(1);
 			expect(result.concurrentSessionCreatedCount).toBe(1);
 			expect(result.child).toEqual({
 				title: "Explore Agent",
 				parent_id: "parent-session",
 				provider_sid: "agent-abc",
 			});
-			expect(result.preexisting).toEqual({ title: "Untitled" });
+			expect(result.preexisting).toEqual({ title: "Preexisting Agent" });
 			expect(result.parent).toEqual({
 				id: "parent-session",
-				provider: "claude",
+				provider: "opencode",
 			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects subagent establishment when the parent session is missing", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-subagent-parent-"));
+		const filename = join(dir, "events.db");
+		try {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const outcome = yield* Effect.either(
+						persist.ensureClaudeSubagentSession({
+							childSessionId: "missing-parent-child",
+							parentSessionId: "missing-parent",
+							providerSessionId: "agent-missing-parent",
+							title: "Explore Agent",
+						}),
+					);
+					const sql = yield* SqlClient.SqlClient;
+					const sessions = yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM sessions
+						WHERE id IN ('missing-parent', 'missing-parent-child')`;
+					const events = yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM events
+						WHERE session_id IN ('missing-parent', 'missing-parent-child')`;
+					return {
+						outcome,
+						sessions: sessions[0]?.count,
+						events: events[0]?.count,
+					};
+				}).pipe(Effect.provide(makePersistenceLayer(filename))),
+			);
+
+			expect(result.outcome).toMatchObject({
+				_tag: "Left",
+				left: expect.objectContaining({
+					_tag: "ClaudeSessionLifecycleError",
+					operation: "ensureClaudeSubagentSession",
+					sessionId: "missing-parent",
+					role: "subagent-parent",
+					reason: "missing-session",
+				}),
+			});
+			expect(result.sessions).toBe(0);
+			expect(result.events).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects a conflicting existing child without rebinding it", async () => {
+		const dir = mkdtempSync(
+			join(tmpdir(), "conduit-claude-subagent-conflict-"),
+		);
+		const filename = join(dir, "events.db");
+		try {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					yield* establishCanonicalSession("parent-session", "opencode");
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`
+						INSERT INTO sessions (
+							id, provider, provider_sid, title, status, parent_id, created_at, updated_at
+						) VALUES (
+							'conflicting-child', 'opencode', 'upstream-child', 'Existing', 'idle', 'parent-session', 1, 1
+						)`;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const outcome = yield* Effect.either(
+						persist.ensureClaudeSubagentSession({
+							childSessionId: "conflicting-child",
+							parentSessionId: "parent-session",
+							providerSessionId: "agent-conflict",
+							title: "Explore Agent",
+						}),
+					);
+					const child = yield* sql<{
+						provider: string;
+						provider_sid: string | null;
+						parent_id: string | null;
+					}>`
+						SELECT provider, provider_sid, parent_id FROM sessions
+						WHERE id = 'conflicting-child'`;
+					const creations = yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM events
+						WHERE session_id = 'conflicting-child' AND type = 'session.created'`;
+					return { outcome, child: child[0], creations: creations[0]?.count };
+				}).pipe(Effect.provide(makePersistenceLayer(filename))),
+			);
+
+			expect(result.outcome).toMatchObject({
+				_tag: "Left",
+				left: expect.objectContaining({
+					_tag: "ClaudeSessionLifecycleError",
+					operation: "ensureClaudeSubagentSession",
+					sessionId: "conflicting-child",
+					role: "subagent-child",
+					reason: "conflicting-subagent-session",
+				}),
+			});
+			expect(result.child).toEqual({
+				provider: "opencode",
+				provider_sid: "upstream-child",
+				parent_id: "parent-session",
+			});
+			expect(result.creations).toBe(0);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

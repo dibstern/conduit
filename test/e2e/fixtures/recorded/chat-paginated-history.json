@@ -36,6 +36,7 @@
         {
           "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
           "title": "New session - 2026-03-27T04:07:47.404Z",
+          "status": "idle",
           "updatedAt": 1774584467404,
           "messageCount": 0
         }
@@ -48,6 +49,7 @@
         {
           "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
           "title": "New session - 2026-03-27T04:07:47.404Z",
+          "status": "idle",
           "updatedAt": 1774584467404,
           "messageCount": 0
         }
@@ -496,6 +498,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
+              "status": "idle",
               "updatedAt": 1774584469743,
               "messageCount": 0
             }
@@ -508,6 +511,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
+              "status": "idle",
               "updatedAt": 1774584469743,
               "messageCount": 0
             }
@@ -520,6 +524,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
+              "status": "idle",
               "updatedAt": 1774584469743,
               "messageCount": 0
             }
@@ -532,6 +537,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
+              "status": "idle",
               "updatedAt": 1774584469743,
               "messageCount": 0
             }
@@ -544,6 +550,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
+              "status": "busy",
               "updatedAt": 1774584469743,
               "messageCount": 0,
               "processing": true
@@ -562,6 +569,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
+              "status": "busy",
               "updatedAt": 1774584469743,
               "messageCount": 0,
               "processing": true
@@ -575,6 +583,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584469743,
               "messageCount": 0,
               "processing": true
@@ -588,6 +597,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584469743,
               "messageCount": 0,
               "processing": true
@@ -636,6 +646,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584474829,
               "messageCount": 0
             }
@@ -653,6 +664,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584474844,
               "messageCount": 0
             }
@@ -665,6 +677,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584474844,
               "messageCount": 0
             }
@@ -677,6 +690,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584474844,
               "messageCount": 0
             }
@@ -711,6 +725,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584475343,
               "messageCount": 0
             }
@@ -723,6 +738,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584475343,
               "messageCount": 0
             }
@@ -735,6 +751,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584475343,
               "messageCount": 0
             }
@@ -747,6 +764,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584475343,
               "messageCount": 0
             }
@@ -759,6 +777,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584475343,
               "messageCount": 0,
               "processing": true
@@ -777,6 +796,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584475343,
               "messageCount": 0,
               "processing": true
@@ -825,6 +845,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584479830,
               "messageCount": 0
             }
@@ -842,6 +863,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584479830,
               "messageCount": 0
             }
@@ -854,6 +876,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584479841,
               "messageCount": 0
             }
@@ -866,6 +889,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584479841,
               "messageCount": 0
             }
@@ -900,6 +924,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584480343,
               "messageCount": 0
             }
@@ -912,6 +937,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584480343,
               "messageCount": 0
             }
@@ -924,6 +950,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584480343,
               "messageCount": 0
             }
@@ -936,6 +963,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584480343,
               "messageCount": 0
             }
@@ -948,6 +976,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584480343,
               "messageCount": 0,
               "processing": true
@@ -966,6 +995,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584480343,
               "messageCount": 0,
               "processing": true
@@ -1014,6 +1044,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482488,
               "messageCount": 0
             }
@@ -1031,6 +1062,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482488,
               "messageCount": 0
             }
@@ -1043,6 +1075,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482499,
               "messageCount": 0
             }
@@ -1055,6 +1088,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482499,
               "messageCount": 0
             }
@@ -1089,6 +1123,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482998,
               "messageCount": 0
             }
@@ -1101,6 +1136,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482998,
               "messageCount": 0
             }
@@ -1113,6 +1149,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482998,
               "messageCount": 0
             }
@@ -1125,6 +1162,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584482998,
               "messageCount": 0
             }
@@ -1137,6 +1175,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584482998,
               "messageCount": 0,
               "processing": true
@@ -1155,6 +1194,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584482998,
               "messageCount": 0,
               "processing": true
@@ -1203,6 +1243,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584485968,
               "messageCount": 0
             }
@@ -1220,6 +1261,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584485968,
               "messageCount": 0
             }
@@ -1232,6 +1274,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584485980,
               "messageCount": 0
             }
@@ -1244,6 +1287,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584485980,
               "messageCount": 0
             }
@@ -1278,6 +1322,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584486492,
               "messageCount": 0
             }
@@ -1290,6 +1335,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584486492,
               "messageCount": 0
             }
@@ -1302,6 +1348,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584486492,
               "messageCount": 0
             }
@@ -1314,6 +1361,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584486492,
               "messageCount": 0
             }
@@ -1326,6 +1374,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584486492,
               "messageCount": 0,
               "processing": true
@@ -1344,6 +1393,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584486492,
               "messageCount": 0,
               "processing": true
@@ -1392,6 +1442,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489446,
               "messageCount": 0
             }
@@ -1409,6 +1460,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489446,
               "messageCount": 0
             }
@@ -1421,6 +1473,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489458,
               "messageCount": 0
             }
@@ -1433,6 +1486,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489458,
               "messageCount": 0
             }
@@ -1467,6 +1521,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489959,
               "messageCount": 0
             }
@@ -1479,6 +1534,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489959,
               "messageCount": 0
             }
@@ -1491,6 +1547,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489959,
               "messageCount": 0
             }
@@ -1503,6 +1560,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584489959,
               "messageCount": 0
             }
@@ -1515,6 +1573,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584489959,
               "messageCount": 0,
               "processing": true
@@ -1533,6 +1592,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584489959,
               "messageCount": 0,
               "processing": true
@@ -1581,6 +1641,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492399,
               "messageCount": 0
             }
@@ -1598,6 +1659,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492399,
               "messageCount": 0
             }
@@ -1610,6 +1672,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492410,
               "messageCount": 0
             }
@@ -1622,6 +1685,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492410,
               "messageCount": 0
             }
@@ -1656,6 +1720,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492911,
               "messageCount": 0
             }
@@ -1668,6 +1733,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492911,
               "messageCount": 0
             }
@@ -1680,6 +1746,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492911,
               "messageCount": 0
             }
@@ -1692,6 +1759,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584492911,
               "messageCount": 0
             }
@@ -1704,6 +1772,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584492911,
               "messageCount": 0,
               "processing": true
@@ -1722,6 +1791,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584492911,
               "messageCount": 0,
               "processing": true
@@ -1770,6 +1840,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584495700,
               "messageCount": 0
             }
@@ -1787,6 +1858,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584495700,
               "messageCount": 0
             }
@@ -1799,6 +1871,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584495714,
               "messageCount": 0
             }
@@ -1811,6 +1884,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584495714,
               "messageCount": 0
             }
@@ -1845,6 +1919,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584496221,
               "messageCount": 0
             }
@@ -1857,6 +1932,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584496221,
               "messageCount": 0
             }
@@ -1869,6 +1945,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584496221,
               "messageCount": 0
             }
@@ -1881,6 +1958,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584496221,
               "messageCount": 0
             }
@@ -1893,6 +1971,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584496221,
               "messageCount": 0,
               "processing": true
@@ -1911,6 +1990,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584496221,
               "messageCount": 0,
               "processing": true
@@ -1959,6 +2039,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499277,
               "messageCount": 0
             }
@@ -1976,6 +2057,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499277,
               "messageCount": 0
             }
@@ -1988,6 +2070,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499290,
               "messageCount": 0
             }
@@ -2000,6 +2083,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499290,
               "messageCount": 0
             }
@@ -2034,6 +2118,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499789,
               "messageCount": 0
             }
@@ -2046,6 +2131,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499789,
               "messageCount": 0
             }
@@ -2058,6 +2144,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499789,
               "messageCount": 0
             }
@@ -2070,6 +2157,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584499789,
               "messageCount": 0
             }
@@ -2082,6 +2170,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584499789,
               "messageCount": 0,
               "processing": true
@@ -2100,6 +2189,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584499789,
               "messageCount": 0,
               "processing": true
@@ -2148,6 +2238,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504130,
               "messageCount": 0
             }
@@ -2165,6 +2256,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504130,
               "messageCount": 0
             }
@@ -2177,6 +2269,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504142,
               "messageCount": 0
             }
@@ -2189,6 +2282,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504142,
               "messageCount": 0
             }
@@ -2223,6 +2317,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504651,
               "messageCount": 0
             }
@@ -2235,6 +2330,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504651,
               "messageCount": 0
             }
@@ -2247,6 +2343,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504651,
               "messageCount": 0
             }
@@ -2259,6 +2356,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584504651,
               "messageCount": 0
             }
@@ -2271,6 +2369,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584504651,
               "messageCount": 0,
               "processing": true
@@ -2289,6 +2388,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584504651,
               "messageCount": 0,
               "processing": true
@@ -2337,6 +2437,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584508678,
               "messageCount": 0
             }
@@ -2354,6 +2455,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584508678,
               "messageCount": 0
             }
@@ -2366,6 +2468,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584508688,
               "messageCount": 0
             }
@@ -2378,6 +2481,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584508688,
               "messageCount": 0
             }
@@ -2412,6 +2516,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584509189,
               "messageCount": 0
             }
@@ -2424,6 +2529,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584509189,
               "messageCount": 0
             }
@@ -2436,6 +2542,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584509189,
               "messageCount": 0
             }
@@ -2448,6 +2555,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584509189,
               "messageCount": 0
             }
@@ -2460,6 +2568,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584509189,
               "messageCount": 0,
               "processing": true
@@ -2478,6 +2587,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584509189,
               "messageCount": 0,
               "processing": true
@@ -2526,6 +2636,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513034,
               "messageCount": 0
             }
@@ -2543,6 +2654,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513034,
               "messageCount": 0
             }
@@ -2555,6 +2667,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513047,
               "messageCount": 0
             }
@@ -2567,6 +2680,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513047,
               "messageCount": 0
             }
@@ -2601,6 +2715,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513564,
               "messageCount": 0
             }
@@ -2613,6 +2728,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513564,
               "messageCount": 0
             }
@@ -2625,6 +2741,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513564,
               "messageCount": 0
             }
@@ -2637,6 +2754,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584513564,
               "messageCount": 0
             }
@@ -2649,6 +2767,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584513564,
               "messageCount": 0,
               "processing": true
@@ -2667,6 +2786,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584513564,
               "messageCount": 0,
               "processing": true
@@ -2715,6 +2835,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525117,
               "messageCount": 0
             }
@@ -2732,6 +2853,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525129,
               "messageCount": 0
             }
@@ -2744,6 +2866,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525129,
               "messageCount": 0
             }
@@ -2756,6 +2879,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525129,
               "messageCount": 0
             }
@@ -2790,6 +2914,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525653,
               "messageCount": 0
             }
@@ -2802,6 +2927,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525653,
               "messageCount": 0
             }
@@ -2814,6 +2940,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525653,
               "messageCount": 0
             }
@@ -2826,6 +2953,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584525653,
               "messageCount": 0
             }
@@ -2838,6 +2966,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584525653,
               "messageCount": 0,
               "processing": true
@@ -2856,6 +2985,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584525653,
               "messageCount": 0,
               "processing": true
@@ -2904,6 +3034,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531108,
               "messageCount": 0
             }
@@ -2921,6 +3052,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531123,
               "messageCount": 0
             }
@@ -2933,6 +3065,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531123,
               "messageCount": 0
             }
@@ -2945,6 +3078,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531123,
               "messageCount": 0
             }
@@ -2979,6 +3113,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531654,
               "messageCount": 0
             }
@@ -2991,6 +3126,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531654,
               "messageCount": 0
             }
@@ -3003,6 +3139,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531654,
               "messageCount": 0
             }
@@ -3015,6 +3152,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584531654,
               "messageCount": 0
             }
@@ -3027,6 +3165,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584531654,
               "messageCount": 0,
               "processing": true
@@ -3045,6 +3184,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584531654,
               "messageCount": 0,
               "processing": true
@@ -3093,6 +3233,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535136,
               "messageCount": 0
             }
@@ -3110,6 +3251,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535136,
               "messageCount": 0
             }
@@ -3122,6 +3264,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535146,
               "messageCount": 0
             }
@@ -3134,6 +3277,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535146,
               "messageCount": 0
             }
@@ -3168,6 +3312,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535647,
               "messageCount": 0
             }
@@ -3180,6 +3325,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535647,
               "messageCount": 0
             }
@@ -3192,6 +3338,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535647,
               "messageCount": 0
             }
@@ -3204,6 +3351,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584535647,
               "messageCount": 0
             }
@@ -3216,6 +3364,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584535647,
               "messageCount": 0,
               "processing": true
@@ -3234,6 +3383,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584535647,
               "messageCount": 0,
               "processing": true
@@ -3282,6 +3432,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539308,
               "messageCount": 0
             }
@@ -3299,6 +3450,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539308,
               "messageCount": 0
             }
@@ -3311,6 +3463,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539319,
               "messageCount": 0
             }
@@ -3323,6 +3476,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539319,
               "messageCount": 0
             }
@@ -3357,6 +3511,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539845,
               "messageCount": 0
             }
@@ -3369,6 +3524,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539845,
               "messageCount": 0
             }
@@ -3381,6 +3537,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539845,
               "messageCount": 0
             }
@@ -3393,6 +3550,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584539845,
               "messageCount": 0
             }
@@ -3405,6 +3563,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584539845,
               "messageCount": 0,
               "processing": true
@@ -3423,6 +3582,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584539845,
               "messageCount": 0,
               "processing": true
@@ -3471,6 +3631,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543318,
               "messageCount": 0
             }
@@ -3488,6 +3649,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543318,
               "messageCount": 0
             }
@@ -3500,6 +3662,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543328,
               "messageCount": 0
             }
@@ -3512,6 +3675,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543328,
               "messageCount": 0
             }
@@ -3546,6 +3710,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543830,
               "messageCount": 0
             }
@@ -3558,6 +3723,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543830,
               "messageCount": 0
             }
@@ -3570,6 +3736,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543830,
               "messageCount": 0
             }
@@ -3582,6 +3749,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584543830,
               "messageCount": 0
             }
@@ -3594,6 +3762,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584543830,
               "messageCount": 0,
               "processing": true
@@ -3612,6 +3781,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584543830,
               "messageCount": 0,
               "processing": true
@@ -3660,6 +3830,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546206,
               "messageCount": 0
             }
@@ -3677,6 +3848,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546206,
               "messageCount": 0
             }
@@ -3689,6 +3861,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546216,
               "messageCount": 0
             }
@@ -3701,6 +3874,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546216,
               "messageCount": 0
             }
@@ -3735,6 +3909,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546723,
               "messageCount": 0
             }
@@ -3747,6 +3922,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546723,
               "messageCount": 0
             }
@@ -3759,6 +3935,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546723,
               "messageCount": 0
             }
@@ -3771,6 +3948,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584546723,
               "messageCount": 0
             }
@@ -3783,6 +3961,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584546723,
               "messageCount": 0,
               "processing": true
@@ -3801,6 +3980,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584546723,
               "messageCount": 0,
               "processing": true
@@ -3849,6 +4029,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549326,
               "messageCount": 0
             }
@@ -3866,6 +4047,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549326,
               "messageCount": 0
             }
@@ -3878,6 +4060,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549337,
               "messageCount": 0
             }
@@ -3890,6 +4073,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549337,
               "messageCount": 0
             }
@@ -3924,6 +4108,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549837,
               "messageCount": 0
             }
@@ -3936,6 +4121,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549837,
               "messageCount": 0
             }
@@ -3948,6 +4134,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549837,
               "messageCount": 0
             }
@@ -3960,6 +4147,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584549837,
               "messageCount": 0
             }
@@ -3972,6 +4160,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584549837,
               "messageCount": 0,
               "processing": true
@@ -3990,6 +4179,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584549837,
               "messageCount": 0,
               "processing": true
@@ -4038,6 +4228,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584552615,
               "messageCount": 0
             }
@@ -4055,6 +4246,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584552615,
               "messageCount": 0
             }
@@ -4067,6 +4259,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584552625,
               "messageCount": 0
             }
@@ -4079,6 +4272,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584552625,
               "messageCount": 0
             }
@@ -4113,6 +4307,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584553128,
               "messageCount": 0
             }
@@ -4125,6 +4320,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584553128,
               "messageCount": 0
             }
@@ -4137,6 +4333,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584553128,
               "messageCount": 0
             }
@@ -4149,6 +4346,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584553128,
               "messageCount": 0
             }
@@ -4161,6 +4359,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584553128,
               "messageCount": 0,
               "processing": true
@@ -4179,6 +4378,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584553128,
               "messageCount": 0,
               "processing": true
@@ -4227,6 +4427,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558372,
               "messageCount": 0
             }
@@ -4244,6 +4445,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558383,
               "messageCount": 0
             }
@@ -4256,6 +4458,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558383,
               "messageCount": 0
             }
@@ -4268,6 +4471,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558383,
               "messageCount": 0
             }
@@ -4302,6 +4506,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558886,
               "messageCount": 0
             }
@@ -4314,6 +4519,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558886,
               "messageCount": 0
             }
@@ -4326,6 +4532,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558886,
               "messageCount": 0
             }
@@ -4338,6 +4545,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584558886,
               "messageCount": 0
             }
@@ -4350,6 +4558,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584558886,
               "messageCount": 0,
               "processing": true
@@ -4368,6 +4577,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584558886,
               "messageCount": 0,
               "processing": true
@@ -4416,6 +4626,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584562656,
               "messageCount": 0
             }
@@ -4433,6 +4644,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584562656,
               "messageCount": 0
             }
@@ -4445,6 +4657,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584562670,
               "messageCount": 0
             }
@@ -4457,6 +4670,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584562670,
               "messageCount": 0
             }
@@ -4491,6 +4705,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584563172,
               "messageCount": 0
             }
@@ -4503,6 +4718,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584563172,
               "messageCount": 0
             }
@@ -4515,6 +4731,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584563172,
               "messageCount": 0
             }
@@ -4527,6 +4744,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584563172,
               "messageCount": 0
             }
@@ -4539,6 +4757,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584563172,
               "messageCount": 0,
               "processing": true
@@ -4557,6 +4776,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584563172,
               "messageCount": 0,
               "processing": true
@@ -4605,6 +4825,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584566536,
               "messageCount": 0
             }
@@ -4622,6 +4843,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584566536,
               "messageCount": 0
             }
@@ -4634,6 +4856,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584566547,
               "messageCount": 0
             }
@@ -4646,6 +4869,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584566547,
               "messageCount": 0
             }
@@ -4680,6 +4904,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584567048,
               "messageCount": 0
             }
@@ -4692,6 +4917,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584567048,
               "messageCount": 0
             }
@@ -4704,6 +4930,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584567048,
               "messageCount": 0
             }
@@ -4716,6 +4943,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584567048,
               "messageCount": 0
             }
@@ -4728,6 +4956,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584567048,
               "messageCount": 0,
               "processing": true
@@ -4746,6 +4975,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584567048,
               "messageCount": 0,
               "processing": true
@@ -4794,6 +5024,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584569610,
               "messageCount": 0
             }
@@ -4811,6 +5042,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584569610,
               "messageCount": 0
             }
@@ -4823,6 +5055,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584569620,
               "messageCount": 0
             }
@@ -4835,6 +5068,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584569620,
               "messageCount": 0
             }
@@ -4869,6 +5103,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584570121,
               "messageCount": 0
             }
@@ -4881,6 +5116,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584570121,
               "messageCount": 0
             }
@@ -4893,6 +5129,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584570121,
               "messageCount": 0
             }
@@ -4905,6 +5142,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584570121,
               "messageCount": 0
             }
@@ -4917,6 +5155,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584570121,
               "messageCount": 0,
               "processing": true
@@ -4935,6 +5174,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584570121,
               "messageCount": 0,
               "processing": true
@@ -4983,6 +5223,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584572802,
               "messageCount": 0
             }
@@ -5000,6 +5241,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584572802,
               "messageCount": 0
             }
@@ -5012,6 +5254,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584572811,
               "messageCount": 0
             }
@@ -5024,6 +5267,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584572811,
               "messageCount": 0
             }
@@ -5058,6 +5302,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584573313,
               "messageCount": 0
             }
@@ -5070,6 +5315,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584573313,
               "messageCount": 0
             }
@@ -5082,6 +5328,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584573313,
               "messageCount": 0
             }
@@ -5094,6 +5341,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584573313,
               "messageCount": 0
             }
@@ -5106,6 +5354,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584573313,
               "messageCount": 0,
               "processing": true
@@ -5124,6 +5373,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584573313,
               "messageCount": 0,
               "processing": true
@@ -5172,6 +5422,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578423,
               "messageCount": 0
             }
@@ -5189,6 +5440,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578423,
               "messageCount": 0
             }
@@ -5201,6 +5453,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578435,
               "messageCount": 0
             }
@@ -5213,6 +5466,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578435,
               "messageCount": 0
             }
@@ -5247,6 +5501,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578950,
               "messageCount": 0
             }
@@ -5259,6 +5514,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578950,
               "messageCount": 0
             }
@@ -5271,6 +5527,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578950,
               "messageCount": 0
             }
@@ -5283,6 +5540,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584578950,
               "messageCount": 0
             }
@@ -5295,6 +5553,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584578950,
               "messageCount": 0,
               "processing": true
@@ -5313,6 +5572,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "busy",
               "updatedAt": 1774584578950,
               "messageCount": 0,
               "processing": true
@@ -5361,6 +5621,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584582156,
               "messageCount": 0
             }
@@ -5378,6 +5639,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584582156,
               "messageCount": 0
             }
@@ -5390,6 +5652,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584582169,
               "messageCount": 0
             }
@@ -5402,6 +5665,7 @@
             {
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
+              "status": "idle",
               "updatedAt": 1774584582169,
               "messageCount": 0
             }

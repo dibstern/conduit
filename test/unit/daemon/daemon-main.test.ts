@@ -4,6 +4,7 @@ import {
 	ProjectMgmtTag,
 } from "../../../src/lib/domain/daemon/Services/management-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 // ─── Daemon Main Tests ──────────────────────────────────────────────────────
 // TDD tests for daemon-main.ts: the top-level Effect entry point that replaces
 // the Daemon class's start() method. Tests exercise runStartupSequence
@@ -96,6 +97,7 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 			opencodeUrl: "http://localhost:4096",
 			projectDir: "/tmp/test",
 			slug: "test-project",
+			persistenceDbPath: tempEventsDbPath(),
 		}),
 		Layer.succeed(LoggerTag, {
 			info: vi.fn(),

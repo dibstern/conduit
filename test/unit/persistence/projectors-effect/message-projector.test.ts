@@ -94,7 +94,7 @@ describe("MessageProjector", () => {
 			...effectProjector,
 			project: (event, context) => {
 				const effectiveContext = replayNextProjection
-					? { replaying: true }
+					? { ...context, replaying: true }
 					: context;
 				replayNextProjection = false;
 				return effectProjector.project(event, effectiveContext);
@@ -132,6 +132,9 @@ describe("MessageProjector", () => {
 		expect(projector.name).toBe("message");
 		expect(projector.handles).toEqual([
 			"message.created",
+			"message.removed",
+			"message.part.removed",
+			"message.snapshot",
 			"text.delta",
 			"thinking.start",
 			"thinking.delta",
@@ -144,6 +147,162 @@ describe("MessageProjector", () => {
 			"turn.error",
 			"session.compaction",
 		]);
+	});
+
+	it("removes an imported message, its parts and turn references, and records a tombstone", async () => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, rest_digest, created_at, updated_at) VALUES ('m1', 's1', 'user', 'digest', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, sort_order, created_at, updated_at) VALUES ('p1', 'm1', 'text', 0, 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO turns (id, session_id, user_message_id, requested_at) VALUES ('t1', 's1', 'm1', 1)",
+		);
+		await project(makeStored("message.removed", "s1", { messageId: "m1" }));
+		expect(
+			await harness.query("SELECT id FROM messages WHERE id = 'm1'"),
+		).toEqual([]);
+		expect(
+			await harness.query("SELECT id FROM message_parts WHERE id = 'p1'"),
+		).toEqual([]);
+		expect(
+			await queryOne<{ user_message_id: string | null }>(
+				"SELECT user_message_id FROM turns WHERE id = 't1'",
+			),
+		).toEqual({ user_message_id: null });
+		expect(
+			await queryOne<{
+				session_id: string;
+				message_id: string;
+				version: number;
+			}>(
+				"SELECT session_id, message_id, version FROM message_tombstones WHERE message_id = 'm1'",
+			),
+		).toEqual({ session_id: "s1", message_id: "m1", version: 1 });
+	});
+
+	it("removes a part and advances the surviving message", async () => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, text, rest_digest, rest_payload, created_at, updated_at) VALUES ('m1', 's1', 'assistant', 'gonekeep', 'digest', '{}', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p1', 'm1', 'text', 'gone', 0, 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p2', 'm1', 'text', 'keep', 1, 1, 1)",
+		);
+		await project(
+			makeStored("message.part.removed", "s1", {
+				messageId: "m1",
+				partId: "p1",
+			}),
+		);
+		expect(
+			await harness.query(
+				"SELECT id FROM message_parts WHERE message_id = 'm1'",
+			),
+		).toEqual([{ id: "p2" }]);
+		expect(
+			await queryOne<{
+				text: string;
+				version: number;
+				rest_payload: string | null;
+			}>("SELECT text, version, rest_payload FROM messages WHERE id = 'm1'"),
+		).toEqual({ text: "keep", version: 1, rest_payload: null });
+	});
+
+	it("a recreated message supersedes its tombstone", async () => {
+		await project(makeStored("message.removed", "s1", { messageId: "m1" }));
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{ messageId: "m1", partId: "p1", text: "back" },
+				2,
+			),
+		);
+		expect(
+			await harness.query("SELECT id FROM messages WHERE id = 'm1'"),
+		).toEqual([{ id: "m1" }]);
+		expect(
+			await harness.query(
+				"SELECT message_id FROM message_tombstones WHERE message_id = 'm1'",
+			),
+		).toEqual([]);
+	});
+
+	it.each([
+		false,
+		true,
+	])("ignores a late reasoning delta for settled backfill (replay=%s)", async (replaying) => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, is_streaming, rest_digest, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 0, 'digest', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p1', 'a1', 'thinking', 'reason', 0, 1, 1)",
+		);
+		await project(
+			makeStored(
+				"thinking.delta",
+				"s1",
+				{
+					messageId: "a1",
+					partId: "p1",
+					text: "reason",
+				} satisfies ThinkingDeltaPayload,
+				2,
+			),
+			{ replaying, version: 1 },
+		);
+		expect(
+			await queryOne<{ text: string }>(
+				"SELECT text FROM message_parts WHERE id = 'p1'",
+			),
+		).toEqual({ text: "reason" });
+	});
+
+	it.each([
+		false,
+		true,
+	])("invalidates complete history when a late text update targets an imported message (replay=%s)", async (replaying) => {
+		await harness.query(
+			"UPDATE sessions SET history_complete = 1 WHERE id = 's1'",
+		);
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, text, is_streaming, rest_digest, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 'hello', 0, 'digest', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p1', 'a1', 'text', 'hello', 0, 1, 1)",
+		);
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{
+					messageId: "a1",
+					partId: "p1",
+					text: "hello world",
+				} satisfies TextDeltaPayload,
+				2,
+			),
+			{ replaying, version: 1 },
+		);
+		expect(
+			await queryOne<{ text: string }>(
+				"SELECT text FROM messages WHERE id = 'a1'",
+			),
+		).toEqual({ text: "hello" });
+		expect(
+			await queryOne<{ text: string }>(
+				"SELECT text FROM message_parts WHERE id = 'p1'",
+			),
+		).toEqual({ text: "hello" });
+		expect(
+			await queryOne<{ history_complete: number }>(
+				"SELECT history_complete FROM sessions WHERE id = 's1'",
+			),
+		).toEqual({ history_complete: 0 });
 	});
 
 	describe("message.created", () => {
@@ -201,6 +360,41 @@ describe("MessageProjector", () => {
 				["m1"],
 			);
 			expect(row?.is_streaming).toBe(0);
+		});
+
+		it("corrects a defensive row when the authoritative user role arrives after text", async () => {
+			await project(
+				makeStored(
+					"text.delta",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "p1",
+						text: "prompt",
+					} satisfies TextDeltaPayload,
+					1,
+				),
+			);
+			await project(
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "m1",
+						role: "user",
+						sessionId: "s1",
+					} satisfies MessageCreatedPayload,
+					2,
+				),
+			);
+
+			const row = await queryOne<MessageRow>(
+				"SELECT * FROM messages WHERE id = ?",
+				["m1"],
+			);
+			expect(row?.role).toBe("user");
+			expect(row?.is_streaming).toBe(0);
+			expect(row?.text).toBe("prompt");
 		});
 	});
 
@@ -463,7 +657,7 @@ describe("MessageProjector", () => {
 					partId: "tool1",
 					toolName: "read_file",
 					callId: "call_123",
-					input: { path: "/foo/bar.ts" },
+					input: { tool: "Read", filePath: "/foo/bar.ts" },
 				} satisfies ToolStartedPayload,
 				2,
 			);
@@ -479,7 +673,8 @@ describe("MessageProjector", () => {
 			expect(parts[0]?.tool_name).toBe("read_file");
 			expect(parts[0]?.call_id).toBe("call_123");
 			expect(JSON.parse(parts[0]?.input ?? "null")).toEqual({
-				path: "/foo/bar.ts",
+				tool: "Read",
+				filePath: "/foo/bar.ts",
 			});
 			expect(parts[0]?.status).toBe("started");
 		});
@@ -508,7 +703,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "read_file",
 						callId: "call_123",
-						input: { path: "/foo" },
+						input: { tool: "Read", filePath: "/foo" },
 					} satisfies ToolStartedPayload,
 					2,
 				),
@@ -755,7 +950,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "read_file",
 						callId: "call_123",
-						input: { path: "/foo" },
+						input: { tool: "Read", filePath: "/foo" },
 					} satisfies ToolStartedPayload,
 					2,
 				),
@@ -1140,7 +1335,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "read_file",
 						callId: "call_abc",
-						input: { path: "/src/main.ts" },
+						input: { tool: "Read", filePath: "/src/main.ts" },
 					} satisfies ToolStartedPayload,
 					5,
 				),
@@ -1321,7 +1516,7 @@ describe("MessageProjector", () => {
 					partId: "tp1",
 					toolName: "Read",
 					callId: "call-1",
-					input: { file: "test.ts" },
+					input: { tool: "Read", filePath: "test.ts" },
 				} satisfies ToolStartedPayload,
 				1,
 			);
@@ -1413,7 +1608,7 @@ describe("MessageProjector", () => {
 					partId: "tp2",
 					toolName: "Bash",
 					callId: "call-2",
-					input: { command: "ls" },
+					input: { tool: "Bash", command: "ls" },
 				} satisfies ToolStartedPayload,
 				2,
 			);
@@ -1557,7 +1752,7 @@ describe("MessageProjector", () => {
 						partId: "tool1",
 						toolName: "bash",
 						callId: "c1",
-						input: {},
+						input: { tool: "Bash", command: "" },
 					} satisfies ToolStartedPayload,
 					4,
 				),
@@ -1655,7 +1850,10 @@ describe("MessageProjector", () => {
 			await project(thinkDelta);
 
 			// Replay the same event with replaying=true -- should be skipped by alreadyApplied
-			await project(thinkDelta, { replaying: true });
+			await project(thinkDelta, {
+				version: thinkDelta.streamVersion,
+				replaying: true,
+			});
 
 			const parts = await harness.query<{
 				id: string;
@@ -1723,7 +1921,7 @@ describe("MessageProjector", () => {
 			);
 
 			await project(event);
-			await project(event, { replaying: true });
+			await project(event, { version: event.streamVersion, replaying: true });
 
 			const msgs = await harness.query<MessageRow>(
 				"SELECT * FROM messages WHERE id = ?",

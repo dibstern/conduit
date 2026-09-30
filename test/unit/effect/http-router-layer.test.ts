@@ -31,7 +31,17 @@ import {
 	makeDaemonHttpRouterLive,
 } from "../../../src/lib/domain/server/Layers/http-router-layer.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
-import type { PushSubscriptionData } from "../../../src/lib/server/push.js";
+import type {
+	PushDeliveryReport,
+	PushSubscriptionData,
+} from "../../../src/lib/server/push.js";
+
+/** The stub push layer has no subscribed devices, so nothing is delivered. */
+const noDevices: PushDeliveryReport = {
+	delivered: [],
+	expired: [],
+	failed: [],
+};
 
 const baseConfig = {
 	port: 2633,
@@ -148,7 +158,7 @@ const makeDaemonRouterLayer = (
 				subscription: PushSubscriptionData,
 			) => void;
 			readonly removeSubscription: (endpoint: string) => void;
-			readonly sendToAll: (payload: unknown) => Promise<void>;
+			readonly sendToAll: (payload: unknown) => Promise<PushDeliveryReport>;
 		};
 	},
 ) =>
@@ -440,7 +450,7 @@ describe("makeDaemonHttpRouterLive", () => {
 					removeSubscription: (endpoint) => {
 						removed.push(endpoint);
 					},
-					sendToAll: async () => {},
+					sendToAll: async () => noDevices,
 				},
 			});
 

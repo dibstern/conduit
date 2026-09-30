@@ -19,7 +19,9 @@ import type {
 	RelayMessage,
 } from "../types.js";
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── Server-owned state ─────────────────────────────────────────────────────
+// This store has no client half: every field is an instance row, a cached copy
+// of one, or the result of a probe the server answered.
 
 export const instanceState = $state({
 	instances: [] as OpenCodeInstance[],

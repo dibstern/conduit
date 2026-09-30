@@ -1,6 +1,6 @@
 // src/lib/persistence/session-history-adapter.ts
 // ─── Session History Adapter ────────────────────────────────────────────────
-// Converts SQLite MessageWithParts[] → HistoryMessage[] for session_switched messages.
+// Converts SQLite MessageWithParts[] → HistoryMessage[] for transcript consumers.
 // Pure conversion with no I/O.
 
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
@@ -10,6 +10,48 @@ import type {
 	ToolStatus,
 } from "../shared-types.js";
 import type { MessagePartRow, MessageWithParts } from "./read-model-types.js";
+
+function snapshotRowToHistory(
+	row: MessageWithParts,
+): HistoryMessage | undefined {
+	if (!row.rest_payload) return undefined;
+	const parsed: unknown = JSON.parse(row.rest_payload);
+	if (
+		typeof parsed !== "object" ||
+		parsed === null ||
+		!("id" in parsed) ||
+		typeof parsed.id !== "string" ||
+		!("role" in parsed) ||
+		(parsed.role !== "user" && parsed.role !== "assistant") ||
+		!("parts" in parsed) ||
+		!Array.isArray(parsed.parts)
+	)
+		return undefined;
+	const parts: HistoryMessagePart[] = parsed.parts.map((part: unknown) => {
+		if (
+			typeof part !== "object" ||
+			part === null ||
+			!("id" in part) ||
+			typeof part.id !== "string" ||
+			!("type" in part) ||
+			typeof part.type !== "string"
+		) {
+			throw new TypeError(`Invalid snapshot part for ${row.id}`);
+		}
+		return {
+			...part,
+			id: part.id,
+			type: part.type as HistoryMessagePart["type"],
+		};
+	});
+	return {
+		...parsed,
+		id: parsed.id,
+		role: parsed.role,
+		parts,
+		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+	};
+}
 
 export interface HistoryResult {
 	messages: HistoryMessage[];
@@ -96,7 +138,12 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 			}
 		}
 		if (row.result != null) {
-			stateObj["output"] = row.result;
+			try {
+				const output: unknown = JSON.parse(row.result);
+				stateObj["output"] = typeof output === "string" ? output : row.result;
+			} catch {
+				stateObj["output"] = row.result;
+			}
 		}
 		if (row.metadata != null) {
 			const metadata = parseObjectJson(row.metadata);
@@ -122,8 +169,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 
 /**
  * Convert message rows (with pre-loaded parts) from the SQLite projection
- * into the HistoryMessage format expected by the frontend's session_switched
- * handler.
+ * into the HistoryMessage format used by transcript consumers.
  *
  * Uses all ascending rows from the read model to detect exact `hasMore`, then
  * keeps the newest `pageSize` rows while preserving ascending display order.
@@ -137,11 +183,14 @@ export function messageRowsToHistory(
 	const pageRows = hasMore ? rows.slice(rows.length - opts.pageSize) : rows;
 
 	const messages: HistoryMessage[] = pageRows.map((row) => {
+		const snapshot = snapshotRowToHistory(row);
+		if (snapshot) return snapshot;
 		const parts = row.parts.map(partRowToHistoryPart);
 
 		return {
 			id: row.id,
 			role: row.role as "user" | "assistant",
+			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 			time: {
 				created: row.created_at,
 				completed: row.updated_at,

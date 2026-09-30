@@ -37,7 +37,7 @@ describe("MessageProjector resilience", () => {
 
 			return {
 				...projector,
-				project: (event: StoredEvent, context?: ProjectionContext) => {
+				project: (event: StoredEvent, context: ProjectionContext) => {
 					if (failNextProjection && event.type === "thinking.delta") {
 						failNextProjection = false;
 						return Effect.fail(
@@ -50,7 +50,7 @@ describe("MessageProjector resilience", () => {
 					}
 
 					const effectiveContext = replayNextProjection
-						? { replaying: true }
+						? { ...context, replaying: true }
 						: context;
 					replayNextProjection = false;
 					return projector.project(event, effectiveContext);
@@ -467,7 +467,10 @@ describe("MessageProjector resilience", () => {
 			await project(deltaEvent);
 
 			// Second projection (replay mode) — skipped via alreadyApplied()
-			await project(deltaEvent, { replaying: true });
+			await project(deltaEvent, {
+				version: deltaEvent.streamVersion,
+				replaying: true,
+			});
 
 			await project(
 				makeStored(
@@ -566,7 +569,7 @@ describe("MessageProjector resilience", () => {
 			);
 
 			// Phase 2: SSE reconnects — replays events 2-5 (overlap: 2,3; new: 4,5)
-			const replayCtx = { replaying: true };
+			const replayCtx = { version: 0, replaying: true };
 
 			// Event seq 2 replay — should be skipped
 			await project(
@@ -1192,7 +1195,7 @@ describe("MessageProjector resilience", () => {
 						partId: "tool-1",
 						toolName: "bash",
 						callId: "call-1",
-						input: { command: "ls" },
+						input: { tool: "Bash", command: "ls" },
 					},
 					{ sequence: nextSeq(), createdAt: NOW + 300 },
 				),

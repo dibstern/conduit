@@ -30,9 +30,21 @@ export const SESSIONS_SETTLED_PINNED_MIGRATION =
 	"0014_sessions_settled_pinned.sql";
 export const SESSIONS_SNOOZED_MIGRATION = "0015_sessions_snoozed.sql";
 export const SESSIONS_AUTO_SETTLE_MIGRATION = "0016_sessions_auto_settle.sql";
+export const PROJECTION_FAILURES_MIGRATION = "0017_projection_failures.sql";
+export const READ_MODEL_VERSION_MIGRATION = "0018_read_model_version.sql";
+export const READ_MODEL_COUNTER_MIGRATION = "0019_read_model_counter.sql";
+export const SENT_ALERTS_MIGRATION = "0020_sent_alerts.sql";
+export const FORK_POINT_TIMESTAMP_MIGRATION = "0021_fork_point_timestamp.sql";
 export const SESSIONS_MARKED_UNREAD_MIGRATION =
-	"0017_sessions_marked_unread.sql";
-export const SESSIONS_FORKED_FROM_MIGRATION = "0018_sessions_forked_from.sql";
+	"0022_sessions_marked_unread.sql";
+export const SESSION_ATTENTION_MIGRATION = "0023_session_attention.sql";
+export const READ_STATE_TO_TURN_ENDS_MIGRATION =
+	"0024_read_state_to_turn_ends.sql";
+export const SESSIONS_FORKED_FROM_MIGRATION = "0025_sessions_forked_from.sql";
+export const MESSAGES_BACKFILLED_MIGRATION = "0026_messages_backfilled.sql";
+export const SESSIONS_HISTORY_COMPLETE_MIGRATION =
+	"0027_sessions_history_complete.sql";
+export const MESSAGE_TOMBSTONES_MIGRATION = "0028_message_tombstones.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

@@ -43,15 +43,11 @@ export const makeSessionStateProjectionNotifierLive = (
 				// duplicate list is invisible, a missing one is the bug.
 				Effect.zipRight(Ref.set(broadcastPending, false)),
 				// Suspended so each broadcast builds its own effect. The same effect
-				// value is forked repeatedly, and sendSessionLists happens to be
+				// value is forked repeatedly, and pushViewerFamilies happens to be
 				// lazy today; relying on that would make a future eager read here
 				// publish one frozen snapshot forever.
 				Effect.zipRight(
-					Effect.suspend(() =>
-						sessionManagerService.sendSessionLists((message) =>
-							wsHandler.broadcast(message),
-						),
-					),
+					Effect.suspend(() => sessionManagerService.pushViewerFamilies()),
 				),
 				Effect.catchAllCause((cause) =>
 					logFailure("Failed to broadcast projected session state", cause),
@@ -65,52 +61,30 @@ export const makeSessionStateProjectionNotifierLive = (
 			const armBroadcast = Effect.gen(function* () {
 				const alreadyPending = yield* Ref.getAndSet(broadcastPending, true);
 				if (!alreadyPending) {
-					yield* Effect.forkIn(broadcastSessionLists, scope);
+					// Arming happens inside the uninterruptible commit, and a fork inherits
+					// that. Without this the scope-close interrupt waits out the sleep.
+					yield* Effect.forkIn(
+						Effect.interruptible(broadcastSessionLists),
+						scope,
+					);
 				}
 			});
-
-			const markViewedTurnRead: SessionStateProjectionNotifier["sessionStateProjected"] =
-				(sessionId, eventType) => {
-					if (eventType !== "turn.completed" && eventType !== "turn.error") {
-						return Effect.void;
-					}
-					if (wsHandler.getClientsForSession(sessionId).length === 0) {
-						return Effect.void;
-					}
-					return sessionManagerService
-						.markSessionRead(sessionId)
-						.pipe(
-							Effect.catchAllCause((cause) =>
-								logFailure(
-									`Failed to mark viewed session ${sessionId} read`,
-									cause,
-								),
-							),
-						);
-				};
 
 			return {
 				sessionStateProjected: (sessionId, eventType) =>
 					Effect.gen(function* () {
-						// Read first, then arm: the timer that follows is what publishes
-						// the result, so recording the read after arming would race its
-						// own broadcast and rely on a second cycle to correct the list.
-						//
-						// Awaited, not forked, and it re-enters the projection runner --
-						// marking read appends session.read, which projects, which calls
-						// back in here. That terminates, because session.read is not a
-						// turn type, and it runs outside the caller's transaction. The
-						// cost is one extra write per turn boundary, which buys the
-						// guarantee above.
-						yield* markViewedTurnRead(sessionId, eventType);
 						if (eventType === "turn.completed" || eventType === "turn.error") {
-							yield* Effect.tryPromise(() => refreshSessionGit()).pipe(
-								Effect.catchAllCause((cause) =>
-									logFailure("Failed to refresh session git state", cause),
+							yield* Effect.forkDaemon(
+								Effect.tryPromise(() => refreshSessionGit()).pipe(
+									Effect.catchAllCause((cause) =>
+										logFailure("Failed to refresh session git state", cause),
+									),
+									Effect.zipRight(armBroadcast),
 								),
 							);
+						} else {
+							yield* armBroadcast;
 						}
-						yield* armBroadcast;
 					}).pipe(
 						Effect.catchAllCause((cause) =>
 							logFailure(

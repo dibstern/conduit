@@ -42,7 +42,10 @@ export interface OpenCodeInstanceClients {
 	 * flow through the exact same consumer pipeline as the default stream.
 	 */
 	registerStreamWirer<R>(
-		wirer: (stream: SSEStreamPort) => Effect.Effect<void, never, R>,
+		wirer: (
+			stream: SSEStreamPort,
+			instanceId: string,
+		) => Effect.Effect<void, never, R>,
 	): Effect.Effect<void, never, R>;
 }
 
@@ -62,7 +65,7 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 		const bundles = new Map<string, { api: OpenCodeAPI; stream: SSEStream }>();
 		const buildLock = yield* Effect.makeSemaphore(1);
 		let streamWirer:
-			| ((stream: SSEStreamPort) => Effect.Effect<void>)
+			| ((stream: SSEStreamPort, instanceId: string) => Effect.Effect<void>)
 			| undefined;
 
 		yield* Effect.addFinalizer(() =>
@@ -149,7 +152,7 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 					// explains why the connection never came up.
 					lastStreamError = error;
 				});
-				yield* wirer(stream);
+				yield* wirer(stream, instanceId);
 				yield* stream.connectEffect();
 				const connectionResult = yield* Effect.either(
 					Deferred.await(connected).pipe(
@@ -183,12 +186,15 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 					? Effect.succeed(undefined)
 					: buildLock.withPermits(1)(buildBundle(instanceId)),
 			registerStreamWirer: <R>(
-				wirer: (stream: SSEStreamPort) => Effect.Effect<void, never, R>,
+				wirer: (
+					stream: SSEStreamPort,
+					instanceId: string,
+				) => Effect.Effect<void, never, R>,
 			): Effect.Effect<void, never, R> =>
 				Effect.context<R>().pipe(
 					Effect.map((context) => {
-						streamWirer = (stream) =>
-							wirer(stream).pipe(Effect.provide(context));
+						streamWirer = (stream, instanceId) =>
+							wirer(stream, instanceId).pipe(Effect.provide(context));
 						return undefined;
 					}),
 				),

@@ -47,6 +47,28 @@ test.describe("Session Management", () => {
 		expect(countAfter).toBeGreaterThan(countBefore);
 	});
 
+	test("new session opens it while another session is open", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		const sidebar = new SidebarPage(page);
+		await app.goto(relayUrl);
+		await sidebar.waitForSessions();
+
+		const current = await sidebar.sessionList
+			.locator("[data-session-id]")
+			.first()
+			.getAttribute("data-session-id");
+		if (!current) throw new Error("expected a session in the list");
+		await sidebar.clickSession(current);
+		await expect(page).toHaveURL(new RegExp(`/s/${current}$`));
+
+		await sidebar.createNewSession();
+		await expect(page).not.toHaveURL(new RegExp(`/s/${current}$`));
+		await expect(page).toHaveURL(/\/s\/[^/]+$/);
+	});
+
 	test("search sessions filters the list", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);

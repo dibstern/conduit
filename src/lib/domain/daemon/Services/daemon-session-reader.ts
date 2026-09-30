@@ -11,10 +11,6 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
-import {
-	pendingApprovalCountsByType,
-	sessionRowsToSessionInfoList,
-} from "../../../persistence/session-list-adapter.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
@@ -99,60 +95,26 @@ const readProjectSessions = (
 			makeReadQueryEffect,
 		).pipe(Layer.provide(sqliteLayer));
 
-		const { rows, pendingApprovals, lineage, statuses } = yield* Effect.gen(
-			function* () {
-				const readQuery = yield* ReadQueryEffectTag;
-				const rows = yield* readQuery.listSessions({
-					...(options.roots !== undefined ? { roots: options.roots } : {}),
-					...(options.limit !== undefined ? { limit: options.limit } : {}),
-					...(options.search !== undefined
-						? { titleQuery: options.search }
-						: {}),
-					...(options.cursor !== undefined ? { before: options.cursor } : {}),
-				});
-				const pendingApprovals =
-					yield* readQuery.countPendingApprovalsBySession();
-				const lineage = yield* readQuery.getSessionLineage();
-				const statuses = yield* readQuery.getAllSessionStatuses();
-				return { rows, pendingApprovals, lineage, statuses };
-			},
-		).pipe(Effect.provide(readQueryLayer));
-		const pending = pendingApprovalCountsByType(pendingApprovals);
-
-		const sessions = sessionRowsToSessionInfoList(Array.from(rows), {
-			parentMap: new Map(
-				lineage.rows.flatMap((row) =>
-					row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
-				),
-			),
-			statuses: Object.fromEntries(
-				Object.entries(statuses).map(([id, type]) => [id, { type }]),
-			),
-			pendingQuestionCounts: pending.questions,
-			pendingPermissionCounts: pending.permissions,
-		});
-		const sortKeys = new Map(
-			rows.map((row) => [
-				row.id,
-				{ updatedAt: row.updated_at, id: row.id } satisfies DaemonSessionCursor,
-			]),
-		);
+		const sessions = yield* Effect.gen(function* () {
+			const readQuery = yield* ReadQueryEffectTag;
+			return yield* readQuery.listSessionInfos({
+				...(options.roots !== undefined ? { roots: options.roots } : {}),
+				...(options.limit !== undefined ? { limit: options.limit } : {}),
+				...(options.search !== undefined ? { titleQuery: options.search } : {}),
+				...(options.cursor !== undefined ? { before: options.cursor } : {}),
+			});
+		}).pipe(Effect.provide(readQueryLayer));
 		const gitContext = gitCache.peek(projectDirectory);
-		return sessions.flatMap((session): ProjectSessionCandidate[] => {
-			const sortKey = sortKeys.get(session.id);
-			return sortKey === undefined
-				? []
-				: [
-						{
-							sortKey,
-							session: {
-								...session,
-								projectSlug,
-								...(gitContext ? { git: gitContext } : {}),
-							},
-						},
-					];
-		});
+		return sessions.map(
+			(session): ProjectSessionCandidate => ({
+				sortKey: { updatedAt: session.updatedAt, id: session.id },
+				session: {
+					...session,
+					projectSlug,
+					...(gitContext ? { git: gitContext } : {}),
+				},
+			}),
+		);
 	});
 
 /** Use the same read-only SQLite path as the daemon-wide session list. */

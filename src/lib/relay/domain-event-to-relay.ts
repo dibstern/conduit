@@ -14,6 +14,8 @@ export function translateDomainEventToRelay(
 	event: CanonicalEvent,
 ): DomainEventRelayTranslation {
 	switch (event.type) {
+		case "message.snapshot":
+			return silent("REST snapshot is read-model-only");
 		case "text.delta":
 			return emit({
 				type: "delta",
@@ -111,20 +113,54 @@ export function translateDomainEventToRelay(
 					duration: duration ?? 0,
 					sessionId: event.sessionId,
 				} satisfies RelayMessage,
-				{ type: "done", code: 0 },
+				{
+					type: "done",
+					code: 0,
+					alertId: JSON.stringify([
+						event.sessionId,
+						event.data.messageId || event.eventId,
+						"done",
+					]),
+				},
 			);
 		}
 
 		case "turn.error": {
 			const { error, code } = event.data;
 			return emit(
-				{ type: "error", code: code ?? "TURN_ERROR", message: error },
-				{ type: "done", code: 1 },
+				{
+					type: "error",
+					code: code ?? "TURN_ERROR",
+					message: error,
+					alertId: JSON.stringify([
+						event.sessionId,
+						event.data.messageId || event.eventId,
+						"error",
+						error,
+					]),
+				},
+				{
+					type: "done",
+					code: 1,
+					alertId: JSON.stringify([
+						event.sessionId,
+						event.data.messageId || event.eventId,
+						"done",
+					]),
+				},
 			);
 		}
 
 		case "turn.interrupted":
-			return emit({ type: "done", code: 1 });
+			return emit({
+				type: "done",
+				code: 1,
+				alertId: JSON.stringify([
+					event.sessionId,
+					event.data.messageId || event.eventId,
+					"done",
+				]),
+			});
 
 		case "turn.model_resolved":
 			return silent("persistence/ws-rpc-only event");
@@ -135,7 +171,12 @@ export function translateDomainEventToRelay(
 					typeof event.metadata.correlationId === "string"
 						? event.metadata.correlationId
 						: "Retrying";
-				return emit({ type: "error", code: "RETRY", message: reason });
+				return emit({
+					type: "error",
+					code: "RETRY",
+					message: reason,
+					alertId: JSON.stringify([event.sessionId, event.eventId, "error"]),
+				});
 			}
 			return silent(
 				"prompt handler owns lifecycle; terminal done/error covers completion",
@@ -154,12 +195,15 @@ export function translateDomainEventToRelay(
 		}
 
 		case "message.created":
+		case "message.removed":
+		case "message.part.removed":
 		case "file.attached":
 		case "session.created":
 		case "session.renamed":
 		case "session.deleted":
 		case "session.forked":
 		case "session.provider_changed":
+		case "session.provider_cleanup_failed":
 		// Read state reaches the UI as the `unread` field on a broadcast session
 		// list, never as a relay event, so there is nothing to translate here.
 		case "session.read":

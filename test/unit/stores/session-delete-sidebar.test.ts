@@ -1,8 +1,12 @@
+import {
+	applySessionChange,
+	seedSearchResults,
+	seedSessions,
+} from "./session-fixtures.js";
 // ─── Sidebar removal on delete ────────────────────────────────────────────────
-// The sidebar (SessionList.svelte) renders getAttentionGroups() -> getFilteredSessions().
-// A deleted session must leave that list in every UI state, including during an
-// active search — searchResults is a snapshot no removal path writes to, so it
-// has to be reconciled against the live session map at read time.
+// A deleted session must leave the sidebar in every UI state, including during
+// an active search. The search query keeps its results separate from live rows;
+// deletion prunes both the query and the current project's roots.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,83 +43,147 @@ import {
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
+import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
-const VICTIM = { id: "victim", title: "Doomed Session", updatedAt: Date.now() };
-const KEEPER = { id: "keeper", title: "Survivor", updatedAt: Date.now() };
+const VICTIM = {
+	id: "victim",
+	title: "Doomed Session",
+	status: "idle",
+	updatedAt: Date.now(),
+} satisfies SessionInfo;
+const KEEPER = {
+	id: "keeper",
+	title: "Survivor",
+	status: "idle",
+	updatedAt: Date.now(),
+} satisfies SessionInfo;
 
 beforeEach(() => {
+	clearSessionState();
 	sessionState.currentId = "keeper";
-	sessionState.rootSessions = [VICTIM, KEEPER];
-	sessionState.familySessions = [VICTIM, KEEPER];
-	sessionState.searchResults = null;
-	sessionState.searchQuery = "";
-	sessionState.sessions.clear();
-	sessionState.sessions.set(VICTIM.id, VICTIM);
-	sessionState.sessions.set(KEEPER.id, KEEPER);
+	seedSessions([VICTIM, KEEPER]);
 });
 
-const deleteVictim = () =>
+/** Seed the server query result independently of the live session rows. */
+const searchFor = (query: string, hits: (typeof VICTIM)[]) => {
+	sessionState.searchQuery = query;
+	seedSearchResults(hits);
+};
+
+const announceDeletion = () =>
 	handleMessage({
 		type: "session_deleted",
 		sessionId: "victim",
 	} as RelayMessage);
+const deleteVictim = () => {
+	announceDeletion();
+	applySessionChange({ _tag: "remove", id: "victim" });
+};
 
 const sidebarIds = () => getFilteredSessions().map((s) => s.id);
 
 describe("deleted sessions leave the sidebar", () => {
+	it("keeps the row until the feed removes it", () => {
+		announceDeletion();
+		expect(sidebarIds()).toEqual(["victim", "keeper"]);
+		applySessionChange({ _tag: "remove", id: "victim" });
+		expect(sidebarIds()).toEqual(["keeper"]);
+	});
 	it("drops the session with no search active", () => {
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops the session from the family cache too", () => {
-		deleteVictim();
-		expect(sidebarIds()).toEqual(["keeper"]);
-	});
-
-	// Regression: searchResults took priority in getFilteredSessions but was
-	// never pruned by the delete path, so the row survived until the query
-	// was cleared. The server's follow-up session_list can't rescue it either,
-	// because handleSessionList only clears searchResults when the query is empty.
-	it("drops the session during an active search", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
-		deleteVictim();
-		expect(sidebarIds()).toEqual(["keeper"]);
-	});
-
-	it("stays dropped after the server's follow-up session_list broadcast", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
-		deleteVictim();
+	it("drops the root even when a family snapshot is loaded", () => {
 		handleMessage({
-			type: "session_list",
-			sessions: [KEEPER],
-			roots: true,
-		} as RelayMessage);
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM],
+		});
+		deleteVictim();
+		expect(sidebarIds()).toEqual(["keeper"]);
+	});
+
+	it("keeps family rows until the next family message", () => {
+		const child = {
+			id: "child",
+			title: "Child",
+			status: "idle",
+			parentID: "victim",
+		} satisfies SessionInfo;
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM, child],
+		});
+		deleteVictim();
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"victim",
+			"child",
+		]);
+		expect(sidebarIds()).toEqual(["keeper"]);
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [],
+		});
+		expect(sessionState.familySessions).toEqual([]);
+	});
+
+	it("removes a deleted subagent when the family message arrives", () => {
+		const child = {
+			id: "child",
+			title: "Child",
+			status: "idle",
+			parentID: "victim",
+		} satisfies SessionInfo;
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM, child],
+		});
+		handleMessage({ type: "session_deleted", sessionId: "child" });
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"victim",
+			"child",
+		]);
+		expect(sidebarIds()).toEqual(["victim", "keeper"]);
+		handleMessage({
+			type: "session_family",
+			rootId: "victim",
+			sessions: [VICTIM],
+		});
+		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
+			"victim",
+		]);
+	});
+
+	// Regression: search hits used to be a snapshot of rows that took priority in
+	// getFilteredSessions and that no removal path pruned, so the row survived
+	// until the query was cleared.
+	it("drops the session during an active search", () => {
+		searchFor("s", [VICTIM, KEEPER]);
+		deleteVictim();
+		expect(sidebarIds()).toEqual(["keeper"]);
+	});
+
+	it("stays dropped after the feed synchronizes", () => {
+		searchFor("s", [VICTIM, KEEPER]);
+		deleteVictim();
+		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
 	it("drops a stale searched session after an authoritative tagged refresh", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
-		handleMessage({
-			type: "session_list",
-			sessions: [KEEPER],
-			roots: true,
-		} as RelayMessage);
+		searchFor("s", [VICTIM, KEEPER]);
+		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
 	it("returns the live renamed session object during an active search", () => {
 		const renamed = { ...VICTIM, title: "Renamed Session" };
-		sessionState.searchQuery = "session";
-		sessionState.searchResults = [VICTIM];
-		handleMessage({
-			type: "session_list",
-			sessions: [renamed, KEEPER],
-			roots: true,
-		} as RelayMessage);
+		searchFor("session", [VICTIM]);
+		applySessionChange({ _tag: "upsert", item: renamed });
 		expect(getFilteredSessions()).toEqual([renamed]);
 	});
 
@@ -125,8 +193,7 @@ describe("deleted sessions leave the sidebar", () => {
 	});
 
 	it("leaves a normal search untouched when nothing was deleted", () => {
-		sessionState.searchQuery = "s";
-		sessionState.searchResults = [VICTIM, KEEPER];
+		searchFor("s", [VICTIM, KEEPER]);
 		expect(sidebarIds()).toEqual(["victim", "keeper"]);
 	});
 });
@@ -134,22 +201,24 @@ describe("deleted sessions leave the sidebar", () => {
 describe("root rows keep their subtree rollup", () => {
 	it("ignores the root's individual state from a later family snapshot", () => {
 		const rolled = { ...VICTIM, attention: "needs-approval" as const };
-		handleMessage({
-			type: "session_list",
-			sessions: [rolled, KEEPER],
-			roots: true,
-		} as RelayMessage);
+		applySessionChange({ _tag: "upsert", item: rolled });
 		handleMessage({
 			type: "session_family",
 			rootId: VICTIM.id,
 			sessions: [
 				{ ...VICTIM, attention: "idle" },
-				{ id: "child", title: "Child", updatedAt: 0, parentID: VICTIM.id },
+				{
+					id: "child",
+					title: "Child",
+					status: "idle",
+					updatedAt: 0,
+					parentID: VICTIM.id,
+				},
 			],
 		} as RelayMessage);
 		expect(getFilteredSessions()[0]?.attention).toBe("needs-approval");
 		sessionState.searchQuery = "doomed";
-		sessionState.searchResults = [VICTIM];
+		seedSearchResults([VICTIM]);
 		expect(getFilteredSessions()).toEqual([rolled]);
 	});
 });

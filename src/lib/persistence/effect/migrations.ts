@@ -7,14 +7,24 @@ import {
 	CURRENT_EVENT_STORE_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
+	FORK_POINT_TIMESTAMP_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+	MESSAGE_TOMBSTONES_MIGRATION,
+	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	PROJECTION_FAILURES_MIGRATION,
+	READ_MODEL_COUNTER_MIGRATION,
+	READ_MODEL_VERSION_MIGRATION,
+	READ_STATE_TO_TURN_ENDS_MIGRATION,
 	readMigrationSql,
+	SENT_ALERTS_MIGRATION,
+	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
+	SESSIONS_HISTORY_COMPLETE_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
@@ -51,6 +61,9 @@ const turnModelExecutionMigrationSql = readMigrationSql(
 const sessionsPermissionModeMigrationSql = readMigrationSql(
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 );
+const projectionFailuresMigrationSql = readMigrationSql(
+	PROJECTION_FAILURES_MIGRATION,
+);
 const sessionCascadeDeletesMigrationSql = readMigrationSql(
 	SESSION_CASCADE_DELETES_MIGRATION,
 );
@@ -74,8 +87,11 @@ const sessionsAutoSettleMigrationSql = readMigrationSql(
 const sessionsMarkedUnreadMigrationSql = readMigrationSql(
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 );
-const sessionsForkedFromMigrationSql = readMigrationSql(
-	SESSIONS_FORKED_FROM_MIGRATION,
+const sessionAttentionMigrationSql = readMigrationSql(
+	SESSION_ATTENTION_MIGRATION,
+);
+const readStateToTurnEndsMigrationSql = readMigrationSql(
+	READ_STATE_TO_TURN_ENDS_MIGRATION,
 );
 
 const expectedTableColumns = {
@@ -163,6 +179,15 @@ const expectedTableColumns = {
 		"always",
 		"created_at",
 		"resolved_at",
+	],
+	projection_failures: [
+		"id",
+		"projector_name",
+		"event_sequence",
+		"event_type",
+		"session_id",
+		"error",
+		"failed_at",
 	],
 	projector_cursors: ["projector_name", "last_applied_seq", "updated_at"],
 	provider_command_interactions: [
@@ -280,7 +305,12 @@ const expectedTableColumns = {
 		"unsettled_at",
 		"auto_settle_disabled_at",
 		"settled_automatically",
+		"version",
+		"fork_point_timestamp",
+		"fork_point_message_id",
 		"marked_unread_at",
+		"last_turn_end_version",
+		"seen_version",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -313,9 +343,22 @@ const durableProviderCommandTableNames = [
 const durableProviderCommandTableNameSet = new Set<string>(
 	durableProviderCommandTableNames,
 );
-const preDurableProviderCommandTableNames = expectedTableNames.filter(
-	(name) => !durableProviderCommandTableNameSet.has(name),
+const preProjectionFailuresTableNames = expectedTableNames.filter(
+	(name) => name !== "projection_failures",
 );
+const preDurableProviderCommandTableNames =
+	preProjectionFailuresTableNames.filter(
+		(name) => !durableProviderCommandTableNameSet.has(name),
+	);
+// Tables added after the baseline, which the synchronous registry may have
+// created before the migrator looks. Treated as allowed extras rather than part
+// of any baseline shape, exactly as 0012's `version` columns and their indexes
+// are — otherwise every new table would need its own whole-schema variant.
+const postBaselineTableNames = new Set<string>([
+	"read_model_counter", // 0013
+	"sent_alerts", // 0015
+	"message_tombstones", // 0029
+]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
 
@@ -393,8 +436,12 @@ const appendedSessionColumns = [
 	"unsettled_at",
 	"auto_settle_disabled_at",
 	"settled_automatically",
+	"version",
+	"fork_point_timestamp",
+	"fork_point_message_id",
 	"marked_unread_at",
-	"forked_from",
+	"last_turn_end_version",
+	"seen_version",
 ] as const;
 
 function sameStrings(
@@ -448,9 +495,13 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			AND name NOT IN ('_migrations', ${EFFECT_SQL_MIGRATIONS_TABLE})
 		ORDER BY name`;
 	const actualTableNames = tables.map((row) => row.name);
+	const baselineTableNames = actualTableNames.filter(
+		(name) => !postBaselineTableNames.has(name),
+	);
 	const knownTableShape =
-		sameStrings(actualTableNames, expectedTableNames) ||
-		sameStrings(actualTableNames, preDurableProviderCommandTableNames);
+		sameStrings(baselineTableNames, expectedTableNames) ||
+		sameStrings(baselineTableNames, preProjectionFailuresTableNames) ||
+		sameStrings(baselineTableNames, preDurableProviderCommandTableNames);
 	if (!knownTableShape) {
 		return yield* failSchemaMismatch(
 			`Existing event-store tables differ from baseline migration. Expected ${expectedTableNames.join(", ")}, got ${actualTableNames.join(", ")}`,
@@ -464,6 +515,14 @@ const verifyExistingBaselineSchema: Effect.Effect<
 	const actualIndexNames = indexes.map((row) => row.name);
 	const knownIndexShape =
 		sameStrings(actualIndexNames, expectedIndexNames) ||
+		sameStrings(
+			actualIndexNames,
+			[
+				...expectedIndexNames,
+				"idx_sessions_version",
+				"idx_messages_version",
+			].sort(),
+		) ||
 		sameStrings(actualIndexNames, preDurableProviderCommandIndexNames);
 	if (!knownIndexShape) {
 		return yield* failSchemaMismatch(
@@ -475,7 +534,8 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		expectedTableColumns,
 	)) {
 		if (
-			durableProviderCommandTableNameSet.has(tableName) &&
+			(durableProviderCommandTableNameSet.has(tableName) ||
+				tableName === "projection_failures") &&
 			!actualTableNames.includes(tableName)
 		) {
 			continue;
@@ -486,6 +546,8 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		const actualColumns = columns.map((column) => column.name);
 		const matchesKnownSchema =
 			sameStrings(actualColumns, expectedColumns) ||
+			((tableName === "sessions" || tableName === "messages") &&
+				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
 			(tableName === "command_receipts" &&
 				sameStrings(actualColumns, preDurableCommandReceiptColumns)) ||
 			(tableName === "message_parts" &&
@@ -620,6 +682,57 @@ const runSessionsLastTurnErrorMigration = runAddColumnMigrationIfMissing(
 	"last_turn_error_at",
 	sessionsLastTurnErrorMigrationSql,
 );
+
+const runProjectionFailuresMigration: Effect.Effect<
+	void,
+	unknown,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const columns = yield* sql.unsafe<{ name: string }>(
+		"PRAGMA table_info(projection_failures)",
+	);
+	if (columns.length > 0) return;
+
+	yield* executeSqlStatements(projectionFailuresMigrationSql);
+});
+
+const runReadModelVersionMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const sessionColumns = yield* sql<{
+		name: string;
+	}>`PRAGMA table_info(sessions)`;
+	const messageColumns = yield* sql<{
+		name: string;
+	}>`PRAGMA table_info(messages)`;
+	// A database may have applied this SQL through the synchronous registry.
+	if (
+		sessionColumns.some((column) => column.name === "version") &&
+		messageColumns.some((column) => column.name === "version")
+	)
+		return;
+	yield* executeSqlStatements(readMigrationSql(READ_MODEL_VERSION_MIGRATION));
+});
+
+const runSentAlertsMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// A database may have applied this SQL through the synchronous registry.
+	const existing = yield* sql<{
+		name: string;
+	}>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sent_alerts'`;
+	if (existing.length > 0) return;
+	yield* executeSqlStatements(readMigrationSql(SENT_ALERTS_MIGRATION));
+});
+
+const runReadModelCounterMigration = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// A database may have applied this SQL through the synchronous registry.
+	const existing = yield* sql<{
+		name: string;
+	}>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'read_model_counter'`;
+	if (existing.length > 0) return;
+	yield* executeSqlStatements(readMigrationSql(READ_MODEL_COUNTER_MIGRATION));
+});
 
 const runSessionsSettledPinnedMigration = runAddColumnMigrationIfMissing(
 	"sessions",
@@ -817,11 +930,73 @@ export const effectMigrationEntries = {
 	"0015_sessions_settled_pinned": runSessionsSettledPinnedMigration,
 	"0016_sessions_snoozed": runSessionsSnoozedMigration,
 	"0017_sessions_auto_settle": runSessionsAutoSettleMigration,
-	"0018_sessions_marked_unread": runSessionsMarkedUnreadMigration,
-	"0019_sessions_forked_from": executeSqlStatements(
-		sessionsForkedFromMigrationSql,
+	"0018_create_projection_failures": runProjectionFailuresMigration,
+	"0019_read_model_version": runReadModelVersionMigration,
+	"0020_read_model_counter": runReadModelCounterMigration,
+	"0021_sent_alerts": runSentAlertsMigration,
+	"0022_fork_point_timestamp": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "fork_point_timestamp"))
+			return;
+		yield* executeSqlStatements(
+			readMigrationSql(FORK_POINT_TIMESTAMP_MIGRATION),
+		);
+	}),
+	"0023_sessions_marked_unread": runSessionsMarkedUnreadMigration,
+	"0024_session_attention": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "last_turn_end_version"))
+			return;
+		yield* executeSqlStatements(sessionAttentionMigrationSql);
+	}),
+	"0025_read_state_to_turn_ends": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (!columns.some((column) => column.name === "read_at")) return;
+		yield* executeSqlStatements(readStateToTurnEndsMigrationSql);
+	}),
+	// Only a store that ran a local build recording forks in forked_from has the
+	// column (conduit-test-l4ek). Everywhere else this is a no-op.
+	"0026_sessions_forked_from": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (!columns.some((column) => column.name === "forked_from")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION),
+		);
+	}),
+	"0027_messages_backfilled": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
+		if (columns.some((column) => column.name === "is_backfilled")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(MESSAGES_BACKFILLED_MIGRATION),
+		);
+	}),
+	"0028_sessions_history_complete": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "history_complete")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSIONS_HISTORY_COMPLETE_MIGRATION),
+		);
+	}),
+	"0029_message_tombstones": executeSqlStatements(
+		readMigrationSql(MESSAGE_TOMBSTONES_MIGRATION),
 	),
 } satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
+
+/**
+ * Session columns that hold state no event can rebuild, keyed by the migration
+ * that adds them. A later migration that rebuilds `sessions` must carry them
+ * across; test/unit/persistence/durable-session-columns.test.ts checks it.
+ */
+export const DURABLE_SESSION_COLUMNS = {
+	seen_version: "0024_session_attention",
+	history_complete: "0028_sessions_history_complete",
+} as const satisfies Record<string, keyof typeof effectMigrationEntries>;
 
 export function makeEffectMigrationLoader(
 	entries: Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>,
@@ -895,8 +1070,43 @@ export function makeEffectSqlMigrator(
 	Migrator.MigrationError | SqlError,
 	SqlClient.SqlClient
 > {
-	return Migrator.make({})({
-		loader: makeEffectMigrationLoader(entries),
-		table: EFFECT_SQL_MIGRATIONS_TABLE,
+	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const registry = yield* makeEffectMigrationLoader(entries);
+		const expectedNames = new Map(registry.map(([id, name]) => [id, name]));
+		const knownNames = new Set(registry.map(([, name]) => name));
+		const ledger = yield* sql<{ name: string }>`
+			SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ${EFFECT_SQL_MIGRATIONS_TABLE}`;
+		if (ledger.length > 0) {
+			const recorded = yield* sql<{
+				migration_id: number;
+				name: string;
+			}>`
+				SELECT migration_id, name FROM effect_sql_migrations
+				ORDER BY migration_id`;
+			const firstMismatch = recorded.findIndex(
+				(row) => expectedNames.get(row.migration_id) !== row.name,
+			);
+			const mismatch = recorded[firstMismatch];
+			if (mismatch !== undefined) {
+				const suffix = recorded.slice(firstMismatch);
+				const unknown = suffix.find((row) => !knownNames.has(row.name));
+				if (unknown) {
+					return yield* Effect.fail(
+						migrationRegistryError(
+							`Unknown recorded migration ${unknown.name} at Effect id ${unknown.migration_id}; refusing to migrate`,
+						),
+					);
+				}
+				// Known names recorded at divergent ids are replayed in registry order.
+				yield* sql`DELETE FROM effect_sql_migrations
+					WHERE migration_id >= ${mismatch.migration_id}`;
+			}
+		}
+		return yield* Migrator.make({})({
+			loader: Effect.succeed(registry),
+			table: EFFECT_SQL_MIGRATIONS_TABLE,
+		});
 	});
 }

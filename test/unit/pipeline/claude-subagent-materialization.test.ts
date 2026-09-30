@@ -27,7 +27,10 @@ import {
 	ProjectorCursorEffectTag,
 } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
-import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+} from "../../../src/lib/persistence/events.js";
 import type {
 	MessagePartRow,
 	MessageRow,
@@ -175,9 +178,19 @@ describe("Claude subagent materialization pipeline", () => {
 						parentClaudeSessionId,
 						sdkSubagentId,
 					});
-					yield* sql`
-						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-						VALUES (${parentSessionId}, 'claude', 'Parent', 'idle', 1, 1)`;
+					yield* projectionRunner.recover();
+					yield* appendProject(
+						canonicalEvent(
+							"session.created",
+							parentSessionId,
+							{
+								sessionId: parentSessionId,
+								title: "Parent",
+								provider: "claude",
+							},
+							{ provider: "claude", createdAt: 1 },
+						),
+					);
 
 					const sdk: ClaudeSubagentSdk = {
 						listSubagents: vi.fn(async () => [sdkSubagentId]),
@@ -474,9 +487,19 @@ describe("Claude subagent materialization pipeline", () => {
 						parentClaudeSessionId,
 						sdkSubagentId,
 					});
-					yield* sql`
-						INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-						VALUES (${parentSessionId}, 'claude', 'Parent', 'idle', 1, 1)`;
+					yield* projectionRunner.recover();
+					yield* appendProject(
+						canonicalEvent(
+							"session.created",
+							parentSessionId,
+							{
+								sessionId: parentSessionId,
+								title: "Parent",
+								provider: "claude",
+							},
+							{ provider: "claude", createdAt: 1 },
+						),
+					);
 
 					let getSubagentMessagesCalls = 0;
 					const transcript = [

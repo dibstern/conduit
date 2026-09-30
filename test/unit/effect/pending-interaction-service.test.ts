@@ -419,9 +419,11 @@ describe("PendingInteractionService", () => {
 				yield* service.cancelSessionInteractions("session-1", "disposed", {
 					recoverQuestions: true,
 				});
-				expect(Exit.isFailure(yield* Effect.exit(Fiber.join(waiter)))).toBe(
-					true,
-				);
+				// The waiter learns the question outlives it, so the sink does not
+				// record it resolved.
+				expect(yield* Effect.flip(Fiber.join(waiter))).toMatchObject({
+					recovered: true,
+				});
 				expect(yield* service.listPendingQuestions("session-1")).toMatchObject([
 					{ requestId: "toolu-1", recovered: true },
 				]);

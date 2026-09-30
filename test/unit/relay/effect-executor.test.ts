@@ -76,10 +76,15 @@ describe("executeEffects", () => {
 	it("notify-idle processes done + clears processing timeout + clears message activity", () => {
 		const deps = createMockDeps();
 		const effects: MonitoringEffect[] = [
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: false },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: false,
+				busySince: 42,
+			},
 		];
 		executeEffects(effects, deps);
-		expect(deps.calls["processAndApplyDone"]).toEqual([["s1", false]]);
+		expect(deps.calls["processAndApplyDone"]).toEqual([["s1", false, 42]]);
 		expect(deps.calls["clearProcessingTimeout"]).toEqual([["s1"]]);
 		expect(deps.calls["clearMessageActivity"]).toEqual([["s1"]]);
 	});
@@ -87,10 +92,15 @@ describe("executeEffects", () => {
 	it("notify-idle with isSubagent=true passes isSubagent through", () => {
 		const deps = createMockDeps();
 		const effects: MonitoringEffect[] = [
-			{ effect: "notify-idle", sessionId: "s1", isSubagent: true },
+			{
+				effect: "notify-idle",
+				sessionId: "s1",
+				isSubagent: true,
+				busySince: 42,
+			},
 		];
 		executeEffects(effects, deps);
-		expect(deps.calls["processAndApplyDone"]).toEqual([["s1", true]]);
+		expect(deps.calls["processAndApplyDone"]).toEqual([["s1", true, 42]]);
 	});
 
 	it("processes multiple effects in order", () => {

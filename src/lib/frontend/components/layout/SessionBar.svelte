@@ -17,7 +17,6 @@
 -->
 
 <script lang="ts">
-	import { getAttentionSessions } from "../../stores/notification-reducer.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import {
@@ -28,8 +27,7 @@
 		isBarCollapsed,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { isSessionUnreadHeld } from "../../stores/session-unread-hold.svelte.js";
+	import { findSession, getAttentionSessions, sessionState } from "../../stores/session.svelte.js";
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
@@ -286,7 +284,7 @@
 				}}
 			/>
 		{/if}
-		{#if session?.unread === true && isSessionUnreadHeld(session.id) && !collapsed}
+		{#if session?.unread === true && !collapsed}
 			<Menu ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
 				{#snippet trigger({ props })}
 					<Button {...props} variant="ghost" size="content" hoverFill="none" class="group -my-[13px] min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
@@ -438,8 +436,13 @@
 			const opener = overflowOpener;
 			if (opener?.isConnected) {
 				event.preventDefault();
+				// Yield to an item that moved focus on purpose: the Terminal view
+				// focuses xterm once its lazily loaded tab mounts, which can land
+				// either side of this restore.
 				setTimeout(() => {
-					requestAnimationFrame(() => { if (opener.isConnected) opener.focus(); });
+					requestAnimationFrame(() => {
+						if (opener.isConnected && document.activeElement === document.body) opener.focus();
+					});
 				}, 0);
 			}
 		}}

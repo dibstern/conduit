@@ -1,3 +1,4 @@
+import { seedSessions } from "../stores/session-fixtures.js";
 // ─── Scan In-Flight State ───────────────────────────────────────────────────
 // Verifies that the scanInFlight flag is properly managed across all outcomes:
 // success (scan_result), error (INSTANCE_ERROR), and state reset.
@@ -23,8 +24,10 @@ import type { RelayMessage } from "../../../src/lib/shared-types.js";
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions so routePerSession's unknown-session guard passes.
-	sessionState.sessions.set("test-session", { id: "test-session", title: "" });
-	sessionState.sessions.set("s1", { id: "s1", title: "" });
+	seedSessions([
+		{ id: "test-session", title: "", status: "idle" },
+		{ id: "s1", title: "", status: "idle" },
+	]);
 });
 
 describe("scanInFlight state management", () => {

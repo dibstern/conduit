@@ -6,6 +6,8 @@ import {
 	routerState,
 } from "../../stores/router.svelte.js";
 import {
+	applyListDaemonSessionsResponse,
+	clearSessionState,
 	requestNewSession,
 	resetSessionCreation,
 	sessionState,
@@ -13,23 +15,44 @@ import {
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type { SessionInfo } from "../../types.js";
 import SessionList from "./SessionList.svelte";
+
+let sequence = 0;
+
+function seedSessions(
+	rows: readonly (Omit<SessionInfo, "status"> & {
+		status?: SessionInfo["status"];
+	})[],
+) {
+	const sessions = rows.map((row) => ({ status: "idle" as const, ...row }));
+	applySessionChange({
+		_tag: "snapshot",
+		rows: sessions,
+		sequence: ++sequence,
+	});
+	applySessionChange({ _tag: "synchronized" });
+}
+
+function seedDaemonSessions(
+	rows: readonly (Omit<SessionInfo, "status"> & {
+		status?: SessionInfo["status"];
+	})[],
+) {
+	applyListDaemonSessionsResponse({
+		sessions: rows.map((row) => ({ status: "idle", ...row })),
+		availability: [],
+		hasMore: false,
+		nextCursor: null,
+	});
+}
 
 function resetSessionState() {
 	uiState.selectMode = false;
 	uiState.settledShelfOpen = false;
 	uiState.snoozedShelfOpen = false;
-	sessionState.rootSessions = [];
-	sessionState.familySessions = [];
-	sessionState.daemonSessions = [];
-	sessionState.daemonUnavailableProjects = [];
-	sessionState.searchResults = null;
-	sessionState.currentId = null;
-	sessionState.searchQuery = "";
-	sessionState.daemonCursor = null;
-	sessionState.daemonHasMore = false;
-	sessionState.searchCursor = null;
-	sessionState.searchHasMore = false;
+	clearSessionState();
 	// Storybook shares module state across stories, and the scope lives in the
 	// router, so a scoped story would otherwise scope every story after it.
 	routerState.path = "/";
@@ -64,11 +87,21 @@ export const Empty: Story = {};
 export const SelectMode: Story = {
 	name: "Select mode, two selected",
 	beforeEach: () => {
-		sessionState.rootSessions = [
-			{ id: "select-one", title: "Review build logs", attention: "idle" },
-			{ id: "select-two", title: "Prepare release", attention: "idle" },
+		const sessions: SessionInfo[] = [
+			{
+				id: "select-one",
+				title: "Review build logs",
+				attention: "idle",
+				status: "idle",
+			},
+			{
+				id: "select-two",
+				title: "Prepare release",
+				attention: "idle",
+				status: "idle",
+			},
 		];
-		sessionState.familySessions = [...sessionState.rootSessions];
+		seedSessions(sessions);
 		uiState.selectMode = true;
 	},
 	play: async ({ canvasElement }) => {
@@ -92,7 +125,7 @@ export const SnoozedShelfCollapsed: Story = {
 	name: "Snoozed shelf collapsed",
 	beforeEach: () => {
 		sessionState.now = SNOOZE_STORY_NOW;
-		sessionState.rootSessions = [
+		seedSessions([
 			{
 				id: "sleeping",
 				title: "Review build logs",
@@ -101,7 +134,7 @@ export const SnoozedShelfCollapsed: Story = {
 				snoozedUntil: new Date(2030, 9, 8, 9).getTime(),
 			},
 			{ id: "working", title: "Prepare release", attention: "working" },
-		];
+		]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -120,7 +153,7 @@ export const SnoozedShelfOpen: Story = {
 	beforeEach: () => {
 		uiState.snoozedShelfOpen = true;
 		sessionState.now = SNOOZE_STORY_NOW;
-		sessionState.rootSessions = [
+		seedSessions([
 			{
 				id: "sleeping",
 				title: "Review build logs",
@@ -134,7 +167,7 @@ export const SnoozedShelfOpen: Story = {
 				attention: "idle",
 				snoozedAt: SNOOZE_STORY_NOW,
 			},
-		];
+		]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -150,7 +183,7 @@ export const SnoozedShelfOpen: Story = {
 export const PinnedAndSettledShelfCollapsed: Story = {
 	name: "Pinned and settled, shelf collapsed",
 	beforeEach: () => {
-		sessionState.rootSessions = [
+		seedSessions([
 			...mockSessionsAllGroups,
 			{
 				id: "pinned",
@@ -164,8 +197,7 @@ export const PinnedAndSettledShelfCollapsed: Story = {
 				attention: "done-unread",
 				settledAt: Date.now() - 120_000,
 			},
-		];
-		sessionState.familySessions = [...sessionState.rootSessions];
+		]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -181,7 +213,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 	name: "Pinned and settled, shelf open",
 	beforeEach: () => {
 		uiState.settledShelfOpen = true;
-		sessionState.rootSessions = [
+		seedSessions([
 			...mockSessionsAllGroups,
 			{
 				id: "pinned",
@@ -195,8 +227,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 				attention: "done-unread",
 				settledAt: Date.now() - 120_000,
 			},
-		];
-		sessionState.familySessions = [...sessionState.rootSessions];
+		]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -210,8 +241,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 
 export const WithItems: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.familySessions = [...mockSessionsAllGroups];
+		seedSessions([...mockSessionsAllGroups]);
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 		sessionState.currentId = mockSessionsAllGroups[0]!.id;
 		routerState.path = `/s/${sessionState.currentId}`;
@@ -221,14 +251,14 @@ export const WithItems: Story = {
 export const FilteredToNeedsYou: Story = {
 	name: "Filtered to needs you",
 	beforeEach: () => {
-		sessionState.rootSessions = [
+		seedSessions([
 			...mockSessionsAllGroups,
 			{
 				id: "approval",
 				title: "Approve deployment",
 				attention: "needs-approval",
 			},
-		];
+		]);
 		routerState.search = "?status=needs-you";
 	},
 	play: async ({ canvasElement }) => {
@@ -243,9 +273,7 @@ export const FilteredToNeedsYou: Story = {
 export const FilterMatchesNothing: Story = {
 	name: "Filter matches nothing",
 	beforeEach: () => {
-		sessionState.rootSessions = [
-			{ id: "idle", title: "Plan release", attention: "idle" },
-		];
+		seedSessions([{ id: "idle", title: "Plan release", attention: "idle" }]);
 		routerState.search = "?status=unread";
 	},
 	play: async ({ canvasElement }) => {
@@ -260,17 +288,17 @@ export const FilterMatchesNothing: Story = {
 export const GroupedByProject: Story = {
 	name: "Grouped by project",
 	beforeEach: () => {
-		sessionState.rootSessions = [
+		seedSessions([
 			{ id: "local", title: "Build sidebar", attention: "working" },
-		];
-		sessionState.daemonSessions = [
+		]);
+		seedDaemonSessions([
 			{
 				id: "foreign",
 				title: "Review release",
 				attention: "idle",
 				projectSlug: "acme",
 			},
-		];
+		]);
 		routerState.search = "?group=project";
 	},
 	play: async ({ canvasElement }) => {
@@ -286,8 +314,7 @@ export const GroupedByProject: Story = {
 
 export const Searching: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.familySessions = [...mockSessionsAllGroups];
+		seedSessions([...mockSessionsAllGroups]);
 		setSearchQuery("dark");
 	},
 };
@@ -310,8 +337,7 @@ export const Loading: Story = {
 // box. This is the assertion: the field has no other focus path to regress.
 export const SearchFocused: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.familySessions = [...mockSessionsAllGroups];
+		seedSessions([...mockSessionsAllGroups]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -326,8 +352,7 @@ export const SearchFocused: Story = {
 // shows the scoped empty state and the chip with its clear button.
 export const Scoped: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.familySessions = [...mockSessionsAllGroups];
+		seedSessions([...mockSessionsAllGroups]);
 		routerState.search = "?p=acme";
 	},
 	play: async ({ canvasElement }) => {
@@ -341,8 +366,7 @@ export const Scoped: Story = {
 
 export const ScopePickerOpen: Story = {
 	beforeEach: () => {
-		sessionState.rootSessions = [...mockSessionsAllGroups];
-		sessionState.familySessions = [...mockSessionsAllGroups];
+		seedSessions([...mockSessionsAllGroups]);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

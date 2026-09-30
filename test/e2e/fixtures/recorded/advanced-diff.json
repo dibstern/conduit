@@ -32,6 +32,7 @@
         {
           "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
           "title": "New session - 2026-03-27T04:04:12.813Z",
+          "status": "idle",
           "updatedAt": 1774584252813,
           "messageCount": 0
         }
@@ -44,6 +45,7 @@
         {
           "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
           "title": "New session - 2026-03-27T04:04:12.813Z",
+          "status": "idle",
           "updatedAt": 1774584252813,
           "messageCount": 0
         }
@@ -490,6 +492,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
+              "status": "idle",
               "updatedAt": 1774584255127,
               "messageCount": 0
             }
@@ -502,6 +505,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
+              "status": "idle",
               "updatedAt": 1774584255127,
               "messageCount": 0
             }
@@ -514,6 +518,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
+              "status": "idle",
               "updatedAt": 1774584255127,
               "messageCount": 0
             }
@@ -526,6 +531,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
+              "status": "idle",
               "updatedAt": 1774584255127,
               "messageCount": 0
             }
@@ -538,6 +544,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
+              "status": "busy",
               "updatedAt": 1774584255127,
               "messageCount": 0,
               "processing": true
@@ -556,6 +563,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
+              "status": "busy",
               "updatedAt": 1774584255127,
               "messageCount": 0,
               "processing": true
@@ -569,6 +577,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584255127,
               "messageCount": 0,
               "processing": true
@@ -582,6 +591,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584255127,
               "messageCount": 0,
               "processing": true
@@ -674,6 +684,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584256843,
               "messageCount": 0,
               "processing": true
@@ -687,6 +698,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584256843,
               "messageCount": 0,
               "processing": true
@@ -799,6 +811,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584260999,
               "messageCount": 0,
               "processing": true
@@ -812,6 +825,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584260999,
               "messageCount": 0,
               "processing": true
@@ -928,6 +942,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584265248,
               "messageCount": 0,
               "processing": true
@@ -941,6 +956,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584265248,
               "messageCount": 0,
               "processing": true
@@ -1009,6 +1025,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266450,
               "messageCount": 0
             }
@@ -1026,6 +1043,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266450,
               "messageCount": 0
             }
@@ -1038,6 +1056,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266462,
               "messageCount": 0
             }
@@ -1050,6 +1069,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266462,
               "messageCount": 0
             }
@@ -1084,6 +1104,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266963,
               "messageCount": 0
             }
@@ -1096,6 +1117,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266963,
               "messageCount": 0
             }
@@ -1108,6 +1130,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266963,
               "messageCount": 0
             }
@@ -1120,6 +1143,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584266963,
               "messageCount": 0
             }
@@ -1132,6 +1156,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584266963,
               "messageCount": 0,
               "processing": true
@@ -1150,6 +1175,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584266963,
               "messageCount": 0,
               "processing": true
@@ -1289,6 +1315,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584271293,
               "messageCount": 0,
               "processing": true
@@ -1302,6 +1329,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584271293,
               "messageCount": 0,
               "processing": true
@@ -1370,6 +1398,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272346,
               "messageCount": 0
             }
@@ -1387,6 +1416,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272346,
               "messageCount": 0
             }
@@ -1399,6 +1429,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272356,
               "messageCount": 0
             }
@@ -1411,6 +1442,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272356,
               "messageCount": 0
             }
@@ -1445,6 +1477,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272859,
               "messageCount": 0
             }
@@ -1457,6 +1490,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272859,
               "messageCount": 0
             }
@@ -1469,6 +1503,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272859,
               "messageCount": 0
             }
@@ -1481,6 +1516,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584272859,
               "messageCount": 0
             }
@@ -1493,6 +1529,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584272859,
               "messageCount": 0,
               "processing": true
@@ -1511,6 +1548,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584272859,
               "messageCount": 0,
               "processing": true
@@ -1623,6 +1661,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584276944,
               "messageCount": 0,
               "processing": true
@@ -1636,6 +1675,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "busy",
               "updatedAt": 1774584276944,
               "messageCount": 0,
               "processing": true
@@ -1704,6 +1744,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584278233,
               "messageCount": 0
             }
@@ -1721,6 +1762,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584278233,
               "messageCount": 0
             }
@@ -1733,6 +1775,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584278244,
               "messageCount": 0
             }
@@ -1745,6 +1788,7 @@
             {
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
+              "status": "idle",
               "updatedAt": 1774584278244,
               "messageCount": 0
             }

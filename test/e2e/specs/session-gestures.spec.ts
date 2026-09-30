@@ -1,10 +1,10 @@
 import type { Locator, Page } from "@playwright/test";
+import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
 	recording: "chat-simple",
-	persistence: true,
 	viewport: { width: 1440, height: 900 },
 	screenshot: "off",
 });
@@ -93,10 +93,22 @@ async function tapExposed(action: Locator, edge: "left" | "right") {
 	});
 }
 
-async function setUp(page: Page, relayUrl: string) {
+async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 	await gotoRelay(page, relayUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
+	// Unread is relative to a turn end (ADR-0004, Scope; conduit-test-hk9m.3),
+	// and the recorded session has none until its prompt replays. Its dot is
+	// then cleared the way a user clears it, by picking the row.
+	const recorded = rows.first();
+	const recordedId = await recorded.getAttribute("data-session-id");
+	if (!recordedId) throw new Error("the recorded session has no row id");
+	harness.mock.triggerPromptSse(recordedId);
+	await expect(recorded.getByTestId("session-unread-dot")).toBeVisible({
+		timeout: 20_000,
+	});
+	await recorded.click();
+	await expect(recorded.getByTestId("session-unread-dot")).toHaveCount(0);
 	// The recording holds one session; the verbs need a second to move around.
 	await new SidebarPage(page).createNewSession();
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
@@ -109,8 +121,9 @@ async function setUp(page: Page, relayUrl: string) {
 test("desktop: hover and Tab reach the row's verbs, and the menu returns focus", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const { row, title } = await setUp(page, relayUrl);
+	const { row, title } = await setUp(page, relayUrl, harness);
 	const settled = page
 		.getByRole("status")
 		.filter({ hasText: `Moved “${title}” to Settled` });
@@ -175,8 +188,9 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 test("desktop: a settled row un-settles from the shelf by menu and by hover", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const { row } = await setUp(page, relayUrl);
+	const { row } = await setUp(page, relayUrl, harness);
 	const id = await row.getAttribute("data-session-id");
 	const shelfRow = page.locator(
 		`#settled-shelf-rows [data-session-id="${id}"]`,
@@ -213,8 +227,9 @@ test.describe("phone", () => {
 	test("phone: a full swipe right on a settled row un-settles it", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
-		const { row } = await setUp(page, relayUrl);
+		const { row } = await setUp(page, relayUrl, harness);
 		const id = await row.getAttribute("data-session-id");
 		await page.setViewportSize({ width: 375, height: 740 });
 		await page.goto(new URL("/", page.url()).toString());
@@ -244,8 +259,9 @@ test.describe("phone", () => {
 	test("phone: swipe settles and snoozes, holds on a short swipe, and long press opens the sheet", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
-		const { row, title } = await setUp(page, relayUrl);
+		const { row, title } = await setUp(page, relayUrl, harness);
 		await page.setViewportSize({ width: 375, height: 740 });
 		await page.goto(new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
@@ -333,8 +349,9 @@ test.describe("phone", () => {
 	test("phone: long press docks the action sheet, pins, and dismisses on scrim", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
-		const { row, title } = await setUp(page, relayUrl);
+		const { row, title } = await setUp(page, relayUrl, harness);
 		await page.setViewportSize({ width: 393, height: 852 });
 		await page.goto(new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
@@ -388,8 +405,9 @@ test.describe("phone", () => {
 	test("phone: the right tray marks unread and then offers Read", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
-		const { row, title } = await setUp(page, relayUrl);
+		const { row, title } = await setUp(page, relayUrl, harness);
 		await page.setViewportSize({ width: 375, height: 740 });
 		await page.goto(new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
@@ -414,8 +432,9 @@ test.describe("phone", () => {
 	test("phone: a row that cannot settle holds only Unread after a full swipe", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
-		const { row } = await setUp(page, relayUrl);
+		const { row } = await setUp(page, relayUrl, harness);
 		await row.click({ button: "right" });
 		await page.getByTestId("session-ctx-pin").click();
 		await expect(

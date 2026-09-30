@@ -7,6 +7,7 @@ import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -66,6 +67,7 @@ describe("SessionManager Effect", () => {
 	const makeTestLayer = (mockApi: ReturnType<typeof makeMockApi>) =>
 		Layer.mergeAll(
 			makeSessionManagerStateLive(),
+			PendingSendOwnershipLive,
 			Layer.succeed(OpenCodeAPITag, mockApi as unknown as OpenCodeAPI),
 		);
 
@@ -142,7 +144,7 @@ describe("SessionManager Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 
-	it.effect("deleteSession clears all state maps", () => {
+	it.effect("deleteSession clears session activity and parent mappings", () => {
 		const mockApi = makeMockApi();
 
 		return Effect.gen(function* () {
@@ -152,16 +154,6 @@ describe("SessionManager Effect", () => {
 			yield* Ref.update(ref, (s) => ({
 				...s,
 				cachedParentMap: HashMap.make(["child1", "s1"]),
-				paginationCursors: HashMap.make(["s1", "cursor-1"]),
-				forkMeta: HashMap.make([
-					"s1",
-					{
-						forkMessageId: "m1",
-						parentID: "p1",
-						forkPointTimestamp: 100,
-					},
-				]),
-				pendingQuestionCounts: HashMap.make(["s1", 3]),
 			}));
 
 			// Delete
@@ -170,16 +162,12 @@ describe("SessionManager Effect", () => {
 			const state = yield* Ref.get(ref);
 			const result = {
 				hasActivity: HashMap.has(state.lastMessageAt, "s1"),
-				hasCursor: HashMap.has(state.paginationCursors, "s1"),
 				// child1's parent was s1, so it should be removed from parent map
 				hasChildInParentMap: HashMap.has(state.cachedParentMap, "child1"),
 			};
 
 			expect(result.hasActivity).toBe(false);
-			expect(result.hasCursor).toBe(false);
 			expect(result.hasChildInParentMap).toBe(false);
-			expect(HashMap.has(state.forkMeta, "s1")).toBe(false);
-			expect(HashMap.has(state.pendingQuestionCounts, "s1")).toBe(false);
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
 
@@ -313,7 +301,7 @@ describe("SessionManager Effect", () => {
 				expect(result.left.operation).toBe("renameSession");
 				expect(result.left.cause).toBeInstanceOf(SessionCommandError);
 				if (result.left.cause instanceof SessionCommandError) {
-					expect(result.left.cause.operation).toBe("session.renamed.project");
+					expect(result.left.cause.operation).toBe("session.renamed.commit");
 					expect(result.left.cause.cause).toBeInstanceOf(ProjectionRunnerError);
 					if (result.left.cause.cause instanceof ProjectionRunnerError) {
 						expect(result.left.cause.cause.cause).toBeInstanceOf(
@@ -524,11 +512,19 @@ describe("SessionManager Effect", () => {
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
 			};
 			const layer = makeLiveServiceLayer(mockApi, filename, readQuery);
 

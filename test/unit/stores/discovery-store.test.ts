@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
+	chooseModel,
+	choosePermissionMode,
 	clearDiscoveryState,
 	discoveryState,
 	extractSlashQuery,
@@ -20,8 +22,6 @@ import {
 	handleModelInfo,
 	handleModelList,
 	handlePermissionModeInfo,
-	setActiveAgent,
-	setActiveModel,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type {
@@ -45,22 +45,7 @@ function msg<T extends RelayMessage["type"]>(data: {
 // ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
-	discoveryState.agents = [];
-	discoveryState.agentProviderScope = null;
-	discoveryState.activeAgentId = null;
-	discoveryState.providers = [];
-	discoveryState.currentModelId = "";
-	discoveryState.currentProviderId = "";
-	discoveryState.commands = [];
-	discoveryState.commandsFetched = false;
-	discoveryState.defaultModelId = "";
-	discoveryState.defaultProviderId = "";
-	discoveryState.currentVariant = "";
-	discoveryState.availableVariants = [];
-	discoveryState.currentContextWindow = "";
-	discoveryState.availableContextWindowOptions = [];
-	discoveryState.permissionMode = "ask";
-	discoveryState.modelExecution = null;
+	clearDiscoveryState();
 });
 
 // ─── Pure helper: formatAgentLabel ──────────────────────────────────────────
@@ -102,14 +87,17 @@ describe("formatModelName", () => {
 
 describe("getModelDisplayName", () => {
 	it("resolves catalog names and falls back to the raw id", () => {
-		discoveryState.providers = [
-			{
-				id: "claude",
-				name: "Claude",
-				configured: true,
-				models: [{ id: "sonnet", name: "Sonnet 5", provider: "claude" }],
-			},
-		];
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [{ id: "sonnet", name: "Sonnet 5", provider: "claude" }],
+				},
+			],
+		});
 
 		expect(getModelDisplayName("sonnet")).toBe("Sonnet 5");
 		expect(getModelDisplayName("claude-sonnet-5")).toBe("claude-sonnet-5");
@@ -217,7 +205,12 @@ describe("handleAgentList", () => {
 	});
 
 	it("clears stale active agent when a scoped list has no active override", () => {
-		discoveryState.activeAgentId = "missing";
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [],
+			activeAgentId: "missing",
+		});
 
 		handleAgentList({
 			type: "agent_list",
@@ -343,7 +336,7 @@ describe("flushPendingPermissionMode", () => {
 	// pill read "Ask". Restricting a session must never be the silent case.
 	it("sends a pre-bind selection of ask rather than assuming the server default", () => {
 		const sent: SessionPermissionMode[] = [];
-		discoveryState.permissionMode = "full";
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
 		discoveryState.pendingPermissionMode = "ask";
 
 		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
@@ -351,6 +344,83 @@ describe("flushPendingPermissionMode", () => {
 		});
 
 		expect(sent).toEqual(["ask"]);
+	});
+});
+
+// ─── Undoing a click that the server refused ────────────────────────────────
+
+describe("an undo only undoes its own choice", () => {
+	it("leaves a newer choice alone when an older request fails", () => {
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+
+		const undoA = choosePermissionMode("acceptEdits");
+		choosePermissionMode("ask"); // the user clicks again while A is in flight
+		undoA(); // ...and only then does A come back rejected
+
+		expect(discoveryState.permissionMode).toBe("ask");
+	});
+
+	it("drops its own choice, falling back to the server's value", () => {
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+
+		const undo = choosePermissionMode("acceptEdits");
+		expect(discoveryState.permissionMode).toBe("acceptEdits");
+		undo();
+
+		expect(discoveryState.permissionMode).toBe("full");
+	});
+
+	it("leaves a server update that landed meanwhile alone", () => {
+		const undo = choosePermissionMode("acceptEdits");
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "plan" });
+		undo();
+
+		expect(discoveryState.permissionMode).toBe("plan");
+	});
+
+	it("keeps a newer model choice when an older model request fails", () => {
+		handleModelInfo({
+			type: "model_info",
+			model: "server-model",
+			provider: "server-provider",
+		});
+
+		const undoA = chooseModel({ modelId: "a", providerId: "p" });
+		chooseModel({ modelId: "b", providerId: "p" });
+		undoA();
+
+		expect(discoveryState.currentModelId).toBe("b");
+		expect(discoveryState.currentProviderId).toBe("p");
+	});
+
+	// The click is the thing being undone, not the value it wrote. Landing back
+	// on a value an earlier failing request also asked for is a normal way to
+	// use a dropdown, and it must not hand that earlier request the field.
+	it("keeps a re-chosen mode when the first request for it fails", () => {
+		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+
+		const undoA = choosePermissionMode("acceptEdits");
+		choosePermissionMode("ask");
+		choosePermissionMode("acceptEdits"); // the user lands back where A was
+		undoA();
+
+		expect(discoveryState.permissionMode).toBe("acceptEdits");
+	});
+
+	it("keeps a re-chosen model when the first request for it fails", () => {
+		handleModelInfo({
+			type: "model_info",
+			model: "server-model",
+			provider: "server-provider",
+		});
+
+		const undoA = chooseModel({ modelId: "a", providerId: "p" });
+		chooseModel({ modelId: "b", providerId: "p" });
+		chooseModel({ modelId: "a", providerId: "p" });
+		undoA();
+
+		expect(discoveryState.currentModelId).toBe("a");
+		expect(discoveryState.currentProviderId).toBe("p");
 	});
 });
 
@@ -368,7 +438,11 @@ describe("handleModelInfo", () => {
 	});
 
 	it("does not overwrite if fields are empty", () => {
-		discoveryState.currentModelId = "existing";
+		handleModelInfo({
+			type: "model_info",
+			model: "existing",
+			provider: "existing",
+		});
 		handleModelInfo({ type: "model_info", model: "", provider: "" });
 		expect(discoveryState.currentModelId).toBe("existing");
 	});
@@ -393,52 +467,40 @@ describe("handleCommandList", () => {
 	});
 });
 
-// ─── setActiveAgent ─────────────────────────────────────────────────────────
-
-describe("setActiveAgent", () => {
-	it("sets the active agent ID", () => {
-		setActiveAgent("agent-x");
-		expect(discoveryState.activeAgentId).toBe("agent-x");
-	});
-});
-
-// ─── setActiveModel ─────────────────────────────────────────────────────────
-
-describe("setActiveModel", () => {
-	it("sets model and provider IDs", () => {
-		setActiveModel("model-y", "provider-z");
-		expect(discoveryState.currentModelId).toBe("model-y");
-		expect(discoveryState.currentProviderId).toBe("provider-z");
-	});
-});
-
 // ─── getActiveModel with grouped routing options ────────────────────────────
 
 describe("getActiveModel", () => {
 	it("resolves a grouped model when the active id is a routing option", () => {
-		discoveryState.providers = [
-			{
-				id: "amazon-bedrock",
-				name: "Amazon Bedrock",
-				configured: true,
-				models: [
-					{
-						id: "global.anthropic.claude-fable-5",
-						name: "Claude Fable 5",
-						provider: "amazon-bedrock",
-						routingOptions: [
-							{
-								value: "global.anthropic.claude-fable-5",
-								label: "Global",
-								isDefault: true,
-							},
-							{ value: "us.anthropic.claude-fable-5", label: "US" },
-						],
-					},
-				],
-			},
-		];
-		discoveryState.currentModelId = "us.anthropic.claude-fable-5";
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					id: "amazon-bedrock",
+					name: "Amazon Bedrock",
+					configured: true,
+					models: [
+						{
+							id: "global.anthropic.claude-fable-5",
+							name: "Claude Fable 5",
+							provider: "amazon-bedrock",
+							routingOptions: [
+								{
+									value: "global.anthropic.claude-fable-5",
+									label: "Global",
+									isDefault: true,
+								},
+								{ value: "us.anthropic.claude-fable-5", label: "US" },
+							],
+						},
+					],
+				},
+			],
+		});
+		handleModelInfo({
+			type: "model_info",
+			model: "us.anthropic.claude-fable-5",
+			provider: "amazon-bedrock",
+		});
 		expect(getActiveModel()?.name).toBe("Claude Fable 5");
 	});
 });
@@ -459,9 +521,12 @@ describe("handleDefaultModelInfo", () => {
 	});
 
 	it("clears to empty string when fields are missing", () => {
-		discoveryState.defaultModelId = "existing";
-		discoveryState.defaultProviderId = "existing-provider";
-		discoveryState.defaultVariant = "existing-variant";
+		handleDefaultModelInfo({
+			type: "default_model_info",
+			model: "existing",
+			provider: "existing-provider",
+			variant: "existing-variant",
+		});
 		handleDefaultModelInfo(
 			msg({
 				type: "default_model_info",
@@ -515,10 +580,11 @@ describe("handleContextWindowInfo", () => {
 	});
 
 	it("falls back to empty state when the server sends no options", () => {
-		discoveryState.currentContextWindow = "1m";
-		discoveryState.availableContextWindowOptions = [
-			{ value: "200k", label: "200K" },
-		];
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "1m",
+			options: [{ value: "200k", label: "200K" }],
+		});
 
 		handleContextWindowInfo(
 			msg({
@@ -535,10 +601,14 @@ describe("handleContextWindowInfo", () => {
 
 describe("getActiveContextWindowOptions", () => {
 	it("returns the server-provided context window options", () => {
-		discoveryState.availableContextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		];
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: [
+				{ value: "200k", label: "200K", isDefault: true },
+				{ value: "1m", label: "1M (beta)" },
+			],
+		});
 
 		expect(getActiveContextWindowOptions()).toEqual([
 			{ value: "200k", label: "200K", isDefault: true },
@@ -571,11 +641,17 @@ describe("getActiveContextWindowOptions", () => {
 				],
 			}),
 		);
-		discoveryState.currentModelId = "claude-opus-5";
+		handleModelInfo({
+			type: "model_info",
+			model: "claude-opus-5",
+			provider: "claude",
+		});
 		// Stale server list from a previously-selected model must not win.
-		discoveryState.availableContextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-		];
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: [{ value: "200k", label: "200K", isDefault: true }],
+		});
 
 		expect(getActiveContextWindowOptions()).toEqual(modelOptions);
 	});
@@ -596,10 +672,16 @@ describe("getActiveContextWindowOptions", () => {
 				],
 			}),
 		);
-		discoveryState.currentModelId = "claude-haiku-4-5";
-		discoveryState.availableContextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-		];
+		handleModelInfo({
+			type: "model_info",
+			model: "claude-haiku-4-5",
+			provider: "claude",
+		});
+		handleContextWindowInfo({
+			type: "context_window_info",
+			contextWindow: "",
+			options: [{ value: "200k", label: "200K", isDefault: true }],
+		});
 
 		expect(getActiveContextWindowOptions()).toEqual([
 			{ value: "200k", label: "200K", isDefault: true },
@@ -609,14 +691,21 @@ describe("getActiveContextWindowOptions", () => {
 
 describe("clearDiscoveryState", () => {
 	it("resets provider-scoped agent state on project switch", () => {
-		discoveryState.agentProviderScope = { id: "claude", name: "Claude" };
-		discoveryState.agents = [{ id: "Explore", name: "Explore" }];
-		discoveryState.activeAgentId = "Explore";
-		discoveryState.modelExecution = {
-			expectedModel: "claude-sonnet-5",
-			actualModel: "claude-fable-4-0",
-			drifted: true,
-		};
+		handleAgentList({
+			type: "agent_list",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [{ id: "Explore", name: "Explore" }],
+			activeAgentId: "Explore",
+		});
+		applyGetModelsResponse({
+			projectSlug: "proj",
+			providers: [],
+			modelExecution: {
+				expectedModel: "claude-sonnet-5",
+				actualModel: "claude-fable-4-0",
+				drifted: true,
+			},
+		});
 
 		clearDiscoveryState();
 

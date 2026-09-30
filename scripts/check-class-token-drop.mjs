@@ -80,7 +80,7 @@ function git(args) {
 // prevent, arriving by the other door.
 const RECIPE_PATH = /-(?:styles|recipes)\.ts$/;
 const RECIPE_DECLARATION =
-	/\bconst\s+[A-Z][A-Z0-9_]*_(?:CLASSES|VARIANTS|RECIPES)\b|Record<[^>]*,\s*string>/;
+	/\bconst\s+[A-Z][A-Z0-9_]*_(?:CLASSES|VARIANTS|RECIPES)\b/;
 const recipeFileCache = new Map();
 function declaresRecipes(file) {
 	if (RECIPE_PATH.test(file)) return true;
@@ -104,7 +104,7 @@ function classStrings(line, keyedValues = false) {
 		out.push(m[1] ?? m[2] ?? m[3] ?? m[4]);
 	}
 	// Recipe constants and the `"a " + "b"` continuation lines they wrap onto.
-	if (/^[+-]\s*(?:"[^"]*"|`[^`]*`)\s*[+,]?\s*$/.test(line)) {
+	if (keyedValues && /^[+-]\s*(?:"[^"]*"|`[^`]*`)\s*[+,]?\s*$/.test(line)) {
 		const quoted = line.match(/"([^"]*)"|`([^`]*)`/);
 		if (quoted) out.push(quoted[1] ?? quoted[2]);
 	}
@@ -116,10 +116,7 @@ function classStrings(line, keyedValues = false) {
 		);
 	if (property) {
 		const value = property[1] ?? property[2] ?? property[3];
-		// A colour literal is never a utility. The xterm palette satisfies
-		// `Record<string, string>` and so reads as a recipe file, which made every
-		// hex it changed look like a dropped class -- the renamed-label false
-		// positive this check's own comment warns about, arriving as a colour.
+		// A colour literal is never a utility.
 		if (value !== undefined && !COLOUR_LITERAL.test(value)) out.push(value);
 	}
 	return out;
@@ -157,38 +154,59 @@ function tokensOf(lines, keyedValues = false) {
 
 const sinceIndex = process.argv.indexOf("--since");
 const since = sinceIndex === -1 ? null : process.argv[sinceIndex + 1];
-const diffArgs = since
-	? ["diff", "--unified=0", `${since}...HEAD`, "--", "*.svelte", "*.ts"]
-	: ["diff", "--unified=0", "HEAD", "--", "*.svelte", "*.ts"];
 
-const diff = git(diffArgs);
-if (diff.trim() === "") {
-	console.log("class-token-drop: no changed markup to check.");
-	process.exit(0);
+// Mid-merge, `git diff HEAD` charges the resolution with every class the other
+// parent dropped on purpose (and waived in its own history). A merge only drops
+// a class when it is gone relative to BOTH parents, so check each and keep the
+// intersection.
+function mergeHeadExists() {
+	try {
+		git(["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+		return true;
+	} catch {
+		return false;
+	}
 }
+const bases = since
+	? [`${since}...HEAD`]
+	: mergeHeadExists()
+		? ["HEAD", "MERGE_HEAD"]
+		: ["HEAD"];
 
-const perFile = new Map();
-let current = null;
 // A deleted file's `+++` header is `/dev/null`, so its path only appears on the
 // `---` side. Without this the deletion's removed lines get charged to whichever
 // file the diff happened to list before it.
-let previousPath = null;
-for (const line of diff.split("\n")) {
-	const from = line.match(/^--- a\/(.+)$/);
-	if (from) {
-		previousPath = from[1];
-		continue;
+function changesAgainst(base) {
+	const diff = git(["diff", "--unified=0", base, "--", "*.svelte", "*.ts"]);
+	const perFile = new Map();
+	let current = null;
+	let previousPath = null;
+	for (const line of diff.split("\n")) {
+		const from = line.match(/^--- a\/(.+)$/);
+		if (from) {
+			previousPath = from[1];
+			continue;
+		}
+		const header = line.match(/^\+\+\+ (?:b\/(.+)|\/dev\/null)$/);
+		if (header) {
+			current = header[1] ?? previousPath;
+			if (!current) continue;
+			if (!perFile.has(current))
+				perFile.set(current, { removed: [], added: [] });
+			continue;
+		}
+		if (!current || line.startsWith("+++") || line.startsWith("---")) continue;
+		if (line.startsWith("-")) perFile.get(current).removed.push(line);
+		else if (line.startsWith("+")) perFile.get(current).added.push(line);
 	}
-	const header = line.match(/^\+\+\+ (?:b\/(.+)|\/dev\/null)$/);
-	if (header) {
-		current = header[1] ?? previousPath;
-		if (!current) continue;
-		if (!perFile.has(current)) perFile.set(current, { removed: [], added: [] });
-		continue;
-	}
-	if (!current || line.startsWith("+++") || line.startsWith("---")) continue;
-	if (line.startsWith("-")) perFile.get(current).removed.push(line);
-	else if (line.startsWith("+")) perFile.get(current).added.push(line);
+	return perFile;
+}
+
+const changes = bases.map(changesAgainst);
+const perFile = changes[0];
+if (changes.every((c) => c.size === 0)) {
+	console.log("class-token-drop: no changed markup to check.");
+	process.exit(0);
 }
 
 const waivers = existsSync(MANIFEST)
@@ -236,25 +254,31 @@ function isWaived(file, token, afterText, after) {
 	return waiver.requires === undefined || afterText.includes(waiver.requires);
 }
 
-const findings = [];
-for (const [file, { removed, added }] of perFile) {
-	if (!file.endsWith(".svelte") && !file.endsWith(".ts")) continue;
-	const keyedValues = declaresRecipes(file);
-	const gone = tokensOf(removed, keyedValues);
-	const kept = tokensOf(added, keyedValues);
-	const afterText = existsSync(file) ? readFileSync(file, "utf8") : "";
-	// Only what the file still puts on an element, extracted exactly the way the
-	// diff side is. A raw text search would match prose and be whole-token by
-	// accident rather than by construction.
-	const after = tokensOf(stripComments(afterText).split("\n"), keyedValues);
-	for (const token of recipeTokens(file)) after.add(token);
-	for (const token of gone) {
-		if (kept.has(token) || PLUMBING.has(token)) continue;
-		if (after.has(token)) continue;
-		if (isWaived(file, token, afterText, after)) continue;
-		findings.push(`${file} :: ${token}`);
+function dropsIn(changed) {
+	const drops = new Set();
+	for (const [file, { removed, added }] of changed) {
+		if (!file.endsWith(".svelte") && !file.endsWith(".ts")) continue;
+		const keyedValues = declaresRecipes(file);
+		const gone = tokensOf(removed, keyedValues);
+		const kept = tokensOf(added, keyedValues);
+		const afterText = existsSync(file) ? readFileSync(file, "utf8") : "";
+		// Only what the file still puts on an element, extracted exactly the way
+		// the diff side is. A raw text search would match prose and be
+		// whole-token by accident rather than by construction.
+		const after = tokensOf(stripComments(afterText).split("\n"), keyedValues);
+		for (const token of recipeTokens(file)) after.add(token);
+		for (const token of gone) {
+			if (kept.has(token) || PLUMBING.has(token)) continue;
+			if (after.has(token)) continue;
+			if (isWaived(file, token, afterText, after)) continue;
+			drops.add(`${file} :: ${token}`);
+		}
 	}
+	return drops;
 }
+
+const [first, ...others] = changes.map(dropsIn);
+const findings = [...first].filter((f) => others.every((o) => o.has(f)));
 
 if (findings.length === 0) {
 	console.log(

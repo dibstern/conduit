@@ -11,26 +11,11 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("WsRpcServerLayer RenameSession", () => {
-	it.effect("renames a session and broadcasts refreshed session lists", () => {
+	it.effect("renames a session and refreshes viewed families", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession: vi.fn(() => Effect.void),
-			sendSessionLists: vi.fn((send) =>
-				Effect.sync(() => {
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Renamed Root",
-								updatedAt: 100,
-								messageCount: 2,
-							},
-						],
-						roots: true,
-					});
-				}),
-			),
+			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		return Effect.gen(function* () {
@@ -48,20 +33,8 @@ describe("WsRpcServerLayer RenameSession", () => {
 				"root-1",
 				"Renamed Root",
 			);
-			expect(calls.map((call) => call.message)).toEqual([
-				{
-					type: "session_list",
-					sessions: [
-						{
-							id: "root-1",
-							title: "Renamed Root",
-							updatedAt: 100,
-							messageCount: 2,
-						},
-					],
-					roots: true,
-				},
-			]);
+			expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalledOnce();
+			expect(calls).toEqual([]);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -74,27 +47,11 @@ describe("WsRpcServerLayer RenameSession", () => {
 		);
 	});
 
-	it.effect("marks a session unread and broadcasts refreshed lists", () => {
+	it.effect("marks a session unread and refreshes viewed families", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			markSessionUnread: vi.fn(() => Effect.void),
-			sendSessionLists: vi.fn((send) =>
-				Effect.sync(() =>
-					send({
-						type: "session_list",
-						sessions: [
-							{
-								id: "root-1",
-								title: "Unread Root",
-								updatedAt: 100,
-								messageCount: 2,
-								unread: true,
-							},
-						],
-						roots: true,
-					}),
-				),
-			),
+			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		return Effect.gen(function* () {
@@ -109,23 +66,12 @@ describe("WsRpcServerLayer RenameSession", () => {
 			expect(sessionManagerService.markSessionUnread).toHaveBeenCalledWith(
 				"root-1",
 			);
-			expect(
-				calls
-					.map((call) => call.message)
-					.filter((message) => message.type === "session_list"),
-			).toEqual([
+			expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalledOnce();
+			expect(calls).toEqual([
 				{
-					type: "session_list",
-					sessions: [
-						{
-							id: "root-1",
-							title: "Unread Root",
-							updatedAt: 100,
-							messageCount: 2,
-							unread: true,
-						},
-					],
-					roots: true,
+					channel: "sendToSession",
+					sessionId: "root-1",
+					message: { type: "session_family", rootId: "root-1", sessions: [] },
 				},
 			]);
 		}).pipe(

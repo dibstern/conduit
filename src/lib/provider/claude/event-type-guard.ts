@@ -39,6 +39,9 @@ const CLAUDE_PRODUCED_TYPES = [
  * comment explaining why it's excluded.
  */
 const CLAUDE_NOT_APPLICABLE_TYPES = [
+	"message.snapshot", // OpenCode REST reconciliation only
+	"message.removed", // OpenCode SSE rewind/removal only
+	"message.part.removed", // OpenCode SSE part removal only
 	"file.attached", // OpenCode REST/SSE file part transport; Claude attachments use a different provider path
 	"tool.input_updated", // Historical event — no longer emitted after Phase 2 (buffered tool.started replaces it)
 	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator
@@ -46,6 +49,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.deleted", // Relay-owned lifecycle event appended directly by SessionManager
 	"session.forked", // Fork lineage is recorded by the relay, not the Claude event translator
 	"session.provider_changed", // Provider switching is a relay-level concept
+	"session.provider_cleanup_failed", // Relay-owned cleanup diagnostic
 	"session.settled", // Relay-owned triage state
 	"session.unsettled", // Relay-owned triage state
 	"session.pinned", // Relay-owned triage state
@@ -53,12 +57,12 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.snoozed", // Relay-owned triage state
 	"session.auto_settle_set", // Relay-owned triage state
 	"session.unsnoozed", // Relay-owned triage state
-	"session.read", // Whether a human has looked at a session; no provider can know it
-	"session.unread", // Same — appended by the relay when someone marks a session unread
-	"permission.asked", // Interactive asks use requestPermission(); auto-approved asks persist via synthetic sink push (audit)
-	"permission.resolved", // Interactive resolutions use resolvePermission(); auto-approvals persist via synthetic sink push (audit)
-	"question.asked", // Routed through requestQuestion(), not push()
-	"question.resolved", // Routed through resolveQuestion(), not push()
+	"session.read", // Retired read state (hk9m.7); kept so historical stores decode
+	"session.unread", // Same
+	"permission.asked", // Recorded by the sink's requestPermission(), not push()
+	"permission.resolved", // Same
+	"question.asked", // Recorded by the sink's requestQuestion(), not push()
+	"question.resolved", // Same, or by the turn that answers a recovered question
 ] as const satisfies readonly CanonicalEventType[];
 
 // ─── Compile-time exhaustiveness check ──────────────────────────────────

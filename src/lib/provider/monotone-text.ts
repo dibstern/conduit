@@ -44,6 +44,16 @@ export class MonotoneText {
 		return chunk;
 	}
 
+	/** A copy that advances independently, so text accepted for a batch that
+	 *  never commits can be thrown away with the batch. */
+	clone(): MonotoneText {
+		const copy = new MonotoneText();
+		for (const [partId, text] of this.accepted) {
+			copy.accepted.set(partId, text);
+		}
+		return copy;
+	}
+
 	forget(partId: string): void {
 		this.accepted.delete(partId);
 	}

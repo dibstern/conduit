@@ -16,6 +16,7 @@ describe("SessionItem wake marker", () => {
 		const session: SessionInfo = {
 			id: reason,
 			title: "Work",
+			status: "idle",
 			attention: "idle",
 			wokenAt: 1,
 			wokeBecause: reason,

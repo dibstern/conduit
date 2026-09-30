@@ -1,3 +1,4 @@
+import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 // ─── E2E: Per-Tab Session Routing (Mock OpenCode) ────────────────────────────
 // Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
 // real WebSocket clients to verify SSE events route only to session viewers.
@@ -235,6 +236,7 @@ async function createTestHarness(): Promise<TestHarness> {
 	const relayPort = (relayServer.address() as { port: number }).port;
 
 	const relay = await createProjectRelay({
+		persistenceDbPath: tempEventsDbPath(),
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
@@ -325,8 +327,8 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
 
-		const switched = client.getReceivedOfType("session_switched");
-		expect(switched.length).toBeGreaterThan(0);
+		const families = client.getReceivedOfType("session_family");
+		expect(families.length).toBeGreaterThan(0);
 
 		const status = client.getReceivedOfType("status");
 		expect(status.length).toBeGreaterThan(0);
@@ -444,11 +446,6 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 	});
 
 	it("client that views a session then reconnects gets correct session on init", async () => {
-		// Bug: When client reconnects, client init sends session_switched
-		// with the GLOBAL activeSessionId, overriding the client's intended session.
-		// After reconnect, if the client sends ViewSession, it should end up on
-		// the correct session without an intermediate session_switched for the wrong one.
-
 		const client1 = await harness.connectClient();
 		await client1.waitForInitialState();
 
@@ -465,21 +462,15 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client2.waitForInitialState();
 
 		// On reconnect, the frontend sends ViewSession RPC.
-		const switched = await client2.viewSession("sess-B");
-
-		expect(switched["id"]).toBe("sess-B");
+		await client2.viewSession("sess-B");
+		expect(client2.getReceivedOfType("status")).toContainEqual(
+			expect.objectContaining({ sessionId: "sess-B" }),
+		);
 
 		await client2.close();
 	});
 
-	it("client connecting with ?session= gets that session as first session_switched (no flash)", async () => {
-		// Bug: When a new tab opens /p/slug/s/sess-B, the server sends
-		// session_switched for the GLOBAL active session first (e.g., sess-A),
-		// causing a flash of wrong content before the correct session arrives.
-		//
-		// Fix: Pass desired session via ?session= query param on WS URL.
-		// The server should use it instead of the global active session.
-
+	it("client connecting with ?session= gets that session metadata first", async () => {
 		// First, ensure the global active session is sess-A (the default)
 		const setupClient = await harness.connectClient();
 		await setupClient.waitForInitialState();
@@ -490,16 +481,13 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		const client = await harness.connectClient({ session: "sess-B" });
 		await client.waitForInitialState();
 
-		// The FIRST session_switched should be for sess-B, NOT sess-A
-		const allSwitched = client.getReceivedOfType("session_switched");
-		expect(allSwitched.length).toBeGreaterThan(0);
-
-		// Check that the FIRST session_switched is sess-B (no flash of sess-A)
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(allSwitched[0]!["id"]).toBe("sess-B");
-
-		// There should be exactly ONE session_switched — no duplicate
-		expect(allSwitched).toHaveLength(1);
+		const statuses = client.getReceivedOfType("status");
+		expect(statuses).toContainEqual(
+			expect.objectContaining({ sessionId: "sess-B" }),
+		);
+		expect(statuses).not.toContainEqual(
+			expect.objectContaining({ sessionId: "sess-A" }),
+		);
 
 		await client.close();
 	});

@@ -2,6 +2,7 @@
 // Generates GENERATE-APPROVAL.png — iPhone showing a permission request card
 // for a Bash command that needs user approval, after some chat context.
 
+import { mockWsRpc } from "../../../test/e2e/helpers/rpc-mock.js";
 import {
 	freezeAnimations,
 	waitForFonts,
@@ -30,6 +31,16 @@ export const approvalScene: SceneDefinition = {
 		let wsMock: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 
 		await phase("setup-ws-mock", async () => {
+			await mockWsRpc(page, {
+				handlers: {
+					ListDaemonSessions: () => ({
+						sessions: [],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
+				},
+			});
 			wsMock = await mockRelayWebSocket(page, {
 				initMessages: approvalInit,
 				responses: new Map([

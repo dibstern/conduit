@@ -1,5 +1,5 @@
 // ─── SW navigation listener + session navigation callback tests ─────────────
-// Tests initSWNavigationListener(), onNavigateToSession(), and
+// Tests initSWMessageListener(), onNavigateToSession(), and
 // clearNavigateToSession() from ws-notifications.ts.
 //
 // These functions wire push notification clicks (posted by the SW as
@@ -89,7 +89,7 @@ describe("SW navigation listener", () => {
 		const mod: WSNotificationsModule = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		expect(addEventListenerMock).toHaveBeenCalledWith(
 			"message",
@@ -101,9 +101,9 @@ describe("SW navigation listener", () => {
 		const mod: WSNotificationsModule = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		mod.initSWNavigationListener();
-		mod.initSWNavigationListener();
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
+		mod.initSWMessageListener();
+		mod.initSWMessageListener();
 
 		expect(addEventListenerMock).toHaveBeenCalledTimes(1);
 	});
@@ -114,7 +114,7 @@ describe("SW navigation listener", () => {
 		);
 		const callback = vi.fn();
 		mod.onNavigateToSession(callback);
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		postSWMessage({
 			type: "navigate_to_session",
@@ -131,7 +131,7 @@ describe("SW navigation listener", () => {
 		);
 		const callback = vi.fn();
 		mod.onNavigateToSession(callback);
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		postSWMessage({
 			type: "navigate_to_session",
@@ -146,7 +146,7 @@ describe("SW navigation listener", () => {
 		);
 		const callback = vi.fn();
 		mod.onNavigateToSession(callback);
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		// Current slug is "test-project", incoming is "other-project"
 		getCurrentSlugMock.mockReturnValue("test-project");
@@ -168,7 +168,7 @@ describe("SW navigation listener", () => {
 		);
 		const callback = vi.fn();
 		mod.onNavigateToSession(callback);
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		getCurrentSlugMock.mockReturnValue("my-project");
 
@@ -187,7 +187,7 @@ describe("SW navigation listener", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 		// Do NOT register a callback
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		// Should not throw
 		expect(() => {
@@ -207,7 +207,7 @@ describe("SW navigation listener", () => {
 		);
 		const callback = vi.fn();
 		mod.onNavigateToSession(callback);
-		mod.initSWNavigationListener();
+		mod.initSWMessageListener();
 
 		// Verify it works first
 		postSWMessage({

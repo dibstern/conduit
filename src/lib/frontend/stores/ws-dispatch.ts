@@ -5,72 +5,38 @@
 // Two-tier dispatcher routes per-session events by event.sessionId
 // via routePerSession. Global events handled by handleMessage directly.
 
-import { Schema } from "effect";
 import { notificationContent } from "../../notification-content.js";
 import {
 	type PerSessionEvent,
 	type PerSessionEventType,
-	RelayMessageSchema,
 	WS_PROTOCOL_VERSION,
 } from "../../shared-types.js";
 import type {
 	GetFileContentResponse,
 	GetFileListResponse,
 } from "../transport/ws-rpc.js";
-import type { ChatMessage, RelayMessage, ToolMessage } from "../types.js";
-import { historyToChatMessages } from "../utils/history-logic.js";
+import type { RelayMessage, ToolMessage } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { renderMarkdown } from "../utils/markdown.js";
-import { isSubagentToolName } from "../utils/subagent-tools.js";
 import {
-	abortSessionReplay,
-	activateSessionChatState,
-	addUserMessage,
-	advanceTurnIfNewMessage,
-	beginReplayBatch,
-	chatState,
-	clearMessages,
-	clearSessionChatState,
-	commitReplayFinal,
-	discardReplayBatch,
 	findMessage,
-	flushPendingRender,
 	getMessages,
 	getOrCreateSessionSlot,
 	handleCompaction,
-	handleDelta,
 	handleDone,
 	handleError,
 	handleInputSyncReceived,
-	handleMessageRemoved,
-	handlePartRemoved,
-	handleResult,
 	handleStatus,
-	handleThinkingDelta,
-	handleThinkingStart,
 	handleThinkingStop,
 	handleToolExecuting,
-	handleToolResult,
-	handleToolStart,
-	historyState,
-	isProcessing,
-	markPendingHistoryQueuedFallback,
-	phaseEndReplay,
-	phaseStartReplay,
-	prependMessages,
-	registerClearMessagesHook,
-	renderDeferredMarkdown,
-	restoreContextFromMessages,
 	type SessionActivity,
 	type SessionMessages,
-	seedRegistryFromMessages,
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
 import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
-	discoveryState,
+	applyDefaultPermissionMode,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -89,7 +55,6 @@ import {
 	handleProxyDetected,
 	handleScanResult,
 } from "./instance.svelte.js";
-import { dispatch } from "./notification-reducer.svelte.js";
 import {
 	handleAskUser,
 	handleAskUserError,
@@ -102,19 +67,19 @@ import {
 	attachedProjectState,
 	getCurrentRoute,
 	replaceRoute,
-	routerState,
 } from "./router.svelte.js";
 import {
-	consumeSwitchingFromId,
 	findSession,
+	getFilteredSessions,
 	handleSessionFamily,
 	handleSessionForked,
-	handleSessionList,
-	handleSessionSwitched,
-	loadDaemonSessions,
-	sessionCreation,
+	isRoutable,
+	observeSessionActivity,
+	pruneSessionLists,
 	sessionState,
+	switchToSession,
 } from "./session.svelte.js";
+import { refreshSessionList } from "./session-list.svelte.js";
 import {
 	handlePtyCreated,
 	handlePtyDeleted,
@@ -142,7 +107,6 @@ import {
 	planModeListeners,
 	projectAttachedListeners,
 	projectListeners,
-	rewindListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
 import { wsSend } from "./ws-send.svelte.js";
@@ -176,9 +140,7 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"ask_user_error",
 		"permission_request",
 		"permission_resolved",
-		"session_switched",
 		"session_forked",
-		"history_page",
 		"provider_session_reloaded",
 		"session_deleted",
 	]);
@@ -191,9 +153,7 @@ export function isPerSessionEvent(msg: RelayMessage): msg is PerSessionEvent {
 /** Per-session event types that still require global coordination in handleMessage.
  *  These are NOT routed through routePerSession. */
 const GLOBALLY_COORDINATED_TYPES: ReadonlySet<string> = new Set([
-	"session_switched",
 	"session_forked",
-	"history_page",
 	"session_deleted",
 ]);
 
@@ -201,16 +161,10 @@ function isDev(): boolean {
 	return (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
 }
 
-function shouldIgnoreOwnUserMessage(event: {
-	type: string;
-	originId?: string | undefined;
-}): boolean {
-	return event.type === "user_message" && isOwnBrowserClientId(event.originId);
-}
-
 /**
  * Route a per-session event to the correct session slot by event.sessionId.
- * Validates sessionId presence and membership in sessionState.sessions.
+ * Validates sessionId presence, and that the session is one we know about or
+ * the one being viewed.
  *
  * NOTE: notification_event is excluded from PerSessionEventType by
  * construction — it routes through handleMessage's global dispatch instead.
@@ -250,10 +204,9 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 
 	// ── Unknown-session guard ──────────────────────────────────────────
-	if (
-		!sessionState.sessions.has(event.sessionId) &&
-		event.sessionId !== sessionState.currentId
-	) {
+	// The shell feed can announce a row after a background event. Dropping the
+	// event is safe: opening that session loads fresh history after membership.
+	if (!isRoutable(event.sessionId)) {
 		log.debug(
 			"routePerSession: unknown sessionId %s for event %s",
 			event.sessionId,
@@ -265,37 +218,14 @@ function routePerSession(event: PerSessionEvent): void {
 
 	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
 
-	// ── Turn boundary detection ─────────────────────────────────────────
-	if ("messageId" in event && event.messageId != null) {
-		advanceTurnIfNewMessage(
-			activity,
-			messages,
-			event.messageId as string,
-			event.type === "delta" ? event.partId : undefined,
-		);
-	}
-
 	switch (event.type) {
-		case "delta":
-			handleDelta(activity, messages, event);
-			break;
-		case "thinking_start":
-			handleThinkingStart(activity, messages, event);
-			break;
-		case "thinking_delta":
-			handleThinkingDelta(activity, messages, event);
-			break;
 		case "thinking_stop":
 			handleThinkingStop(activity, messages, event);
-			break;
-		case "tool_start":
-			handleToolStart(activity, messages, event);
 			break;
 		case "tool_executing":
 			handleToolExecuting(activity, messages, event);
 			break;
 		case "tool_result": {
-			handleToolResult(activity, messages, event);
 			// If this was a TodoWrite result, also update the todo store.
 			const msgs = getMessages(messages);
 			const toolMsg = msgs.find(
@@ -306,9 +236,6 @@ function routePerSession(event: PerSessionEvent): void {
 			}
 			break;
 		}
-		case "result":
-			handleResult(activity, messages, event);
-			break;
 		case "done": {
 			handleDone(activity, messages, event);
 			// Only notify for root agent sessions — subagent completions are
@@ -329,29 +256,11 @@ function routePerSession(event: PerSessionEvent): void {
 			handleChatError(activity, messages, event);
 			triggerNotifications(event);
 			break;
-		case "user_message":
-			if (shouldIgnoreOwnUserMessage(event)) break;
-			addUserMessage(activity, messages, event.text, undefined, isProcessing());
-			break;
 		case "tool_content":
 			handleToolContentResponse(messages, event);
 			break;
-		case "part_removed":
-			handlePartRemoved(activity, messages, event);
-			break;
-		case "message_removed":
-			handleMessageRemoved(activity, messages, event);
-			break;
-		case "session_switched":
-			// Handled in handleMessage — session_switched requires global
-			// coordination (URL updates, message clearing, replay).
-			// This should not be reached via routePerSession.
-			break;
 		case "session_forked":
 			// Handled in handleMessage — requires global toast.
-			break;
-		case "history_page":
-			// Handled in handleMessage — requires async history conversion.
 			break;
 		case "provider_session_reloaded":
 			log.debug("Provider session reloaded:", event.sessionId);
@@ -362,345 +271,6 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 }
 
-/** Get the current session slot for non-handler functions that need
- *  activity/messages but don't take an event parameter. */
-function getCurrentSlot(): {
-	activity: SessionActivity;
-	messages: SessionMessages;
-} | null {
-	const id = sessionState.currentId;
-	if (!id) return null;
-	return getOrCreateSessionSlot(id);
-}
-
-// ─── LLM Content Start ──────────────────────────────────────────────────────
-// Single source of truth for event types that indicate the LLM started
-// producing content for a turn. Used by replayEvents() to track `llmActive`
-// and infer whether a user_message was sent while the LLM was busy (queued).
-// A user_message that appears while llmActive is true gets `sentDuringEpoch`
-// set, so the UI can derive the "Queued" shimmer reactively.
-
-// LLM content start types — canonical source is event-classify.ts (shared
-// between server and frontend). Import from there so the turn-boundary
-// definition stays in sync with patchMissingDone and isLastTurnActive.
-import { LLM_CONTENT_START_TYPES } from "../../event-classify.js";
-
-function isLlmContentStart(type: string): boolean {
-	return LLM_CONTENT_START_TYPES.has(type as RelayMessage["type"]);
-}
-
-// ─── Async replay infrastructure ────────────────────────────────────────────
-
-// replayGeneration: per-session only (activity.replayGeneration). Module-level counter removed in Task 6.
-const REPLAY_CHUNK_SIZE = 80; // ~16ms per chunk with batched mutations
-const isRelayMessage = Schema.is(RelayMessageSchema);
-
-function yieldToEventLoop(): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-// ─── Live event buffer during replay ────────────────────────────────────────
-// When an async replay is in progress, live WebSocket chat events are buffered
-// instead of being dispatched immediately. This prevents interleaving of live
-// events (e.g. thinking_stop) with cached events being replayed, which would
-// cause data loss (e.g. cached thinking_deltas silently dropped after a live
-// thinking_stop prematurely marks the thinking message as done).
-// liveEventBuffer: per-session only (activity.liveEventBuffer).
-
-/** Event types handled by dispatchChatEvent — used to decide what to buffer. */
-const CHAT_EVENT_TYPES: ReadonlySet<string> = new Set([
-	"user_message",
-	"delta",
-	"thinking_start",
-	"thinking_delta",
-	"thinking_stop",
-	"tool_start",
-	"tool_executing",
-	"tool_result",
-	"result",
-	"done",
-	"status",
-	"compaction",
-	"error",
-]);
-
-/** Start buffering live chat events for a specific session slot. */
-function startBufferingLiveEvents(activity?: SessionActivity): void {
-	if (activity) activity.liveEventBuffer = [];
-}
-
-/** Drain buffered live events through normal dispatch (called after replay commits). */
-function drainLiveEventBuffer(activity?: SessionActivity): void {
-	const buffer = activity?.liveEventBuffer ?? null;
-	if (activity) activity.liveEventBuffer = null;
-	if (!buffer || buffer.length === 0) return;
-	for (const event of buffer) {
-		handleMessage(event);
-	}
-}
-
-// Register abort hook: clearMessages bumps generation to cancel in-flight replays
-// and discards the live event buffer (session is changing, buffered events are stale).
-registerClearMessagesHook((sessionId: string | null) => {
-	if (sessionId) {
-		const activity = sessionActivity.get(sessionId);
-		if (activity) {
-			activity.liveEventBuffer = null;
-			activity.replayGeneration++;
-		}
-	}
-});
-
-// ─── Async history conversion ───────────────────────────────────────────────
-
-/**
- * Convert history messages in yielding chunks.
- * historyToChatMessages stays synchronous (pure, well-tested).
- * This wrapper yields between chunks to avoid blocking the main thread.
- *
- * Captures the target slot at start and uses its replayGeneration for
- * ghost-write guard. Session switches bump generation via clearMessages.
- */
-async function convertHistoryAsync(
-	messages: Extract<RelayMessage, { type: "history_page" }>["messages"],
-	render: (text: string) => string,
-	capturedActivity?: SessionActivity,
-): Promise<ChatMessage[] | null> {
-	const CHUNK = 50;
-	const activityGen = capturedActivity?.replayGeneration; // per-session snapshot
-	const result: ChatMessage[] = [];
-
-	for (let i = 0; i < messages.length; i += CHUNK) {
-		const slice = messages.slice(i, i + CHUNK);
-		const converted = historyToChatMessages(slice, render);
-		result.push(...converted);
-
-		if (i + CHUNK < messages.length) {
-			await yieldToEventLoop();
-			// Ghost-write guard: abort if generation changed
-			if (
-				capturedActivity &&
-				activityGen !== undefined &&
-				capturedActivity.replayGeneration !== activityGen
-			)
-				return null;
-		}
-	}
-
-	return result;
-}
-
-function isSubagentToolMessage(message: ChatMessage): message is ToolMessage {
-	return message.type === "tool" && isSubagentToolName(message.name);
-}
-
-function hasSubagentSessionLink(message: ToolMessage): boolean {
-	const metadata = message.metadata;
-	return (
-		typeof metadata?.["childSessionId"] === "string" ||
-		typeof metadata?.["sessionId"] === "string"
-	);
-}
-
-function isTerminalToolStatus(status: ToolMessage["status"]): boolean {
-	return status === "completed" || status === "error";
-}
-
-function preserveCachedSubagentToolState(
-	cachedMessages: readonly ChatMessage[],
-	freshMessages: readonly ChatMessage[],
-): ChatMessage[] {
-	const cachedByToolId = new Map<string, ToolMessage>();
-	for (const message of cachedMessages) {
-		if (isSubagentToolMessage(message)) cachedByToolId.set(message.id, message);
-	}
-	if (cachedByToolId.size === 0) return [...freshMessages];
-
-	return freshMessages.map((message) => {
-		if (!isSubagentToolMessage(message)) return message;
-		const cached = cachedByToolId.get(message.id);
-		if (!cached) return message;
-
-		let next = message;
-		if (!hasSubagentSessionLink(message) && hasSubagentSessionLink(cached)) {
-			next = {
-				...next,
-				metadata: { ...(cached.metadata ?? {}), ...(next.metadata ?? {}) },
-			};
-		}
-		if (
-			isTerminalToolStatus(cached.status) &&
-			!isTerminalToolStatus(next.status)
-		) {
-			next = { ...next, status: cached.status };
-		}
-		return next;
-	});
-}
-
-// ─── Shared chat-event dispatch ─────────────────────────────────────────────
-// Single dispatch function for ALL chat event types (PERSISTED_EVENT_TYPES
-// plus `status`). Used by both handleMessage (live) and replayEvents (replay)
-// to eliminate the parallel switch statements that previously diverged subtly.
-
-/** Context passed to dispatchChatEvent to abstract live/replay differences. */
-export interface DispatchContext {
-	/** True when replaying cached events (suppresses notifications). */
-	isReplay: boolean;
-	/** Whether the LLM is currently active (sentDuringEpoch source).
-	 *  Live: `isProcessing()`. Replay: local `llmActive` tracker. */
-	isQueued: boolean;
-}
-
-/**
- * Dispatch a single chat event to the appropriate store handler.
- * Returns `true` if the event was a chat event (handled), `false` otherwise.
- *
- * Live vs replay divergences:
- * - `user_message`: 3rd arg uses `ctx.isQueued` (live: processing, replay: llmActive)
- * - `tool_result`: TodoWrite side-effect uses `getMessages()` (works for both)
- * - `done`: notifications fire only when `!ctx.isReplay` and not a subagent
- * - `error`: live routes through `handleChatError` (PTY/HANDLER/INSTANCE) +
- *   notifications; replay uses `handleError` directly (those error codes
- *   never appear in the cache — they're sent via sendToSession, not recordEvent)
- */
-function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
-	// ── Resolve per-session slot ────────────────────────────────────────
-	const slot = getCurrentSlot();
-	// During startup or when no session is active, we still need to handle
-	// events (e.g. during session_switched replay). Use a lazy fallback.
-	const activity = slot?.activity;
-	const messages = slot?.messages;
-
-	// ── Turn boundary detection ─────────────────────────────────────────
-	// When an event carries a messageId that differs from the current one,
-	// a new turn has started.  This single check replaces per-handler
-	// new-turn detection and handles all response shapes (text-first,
-	// tool-first, thinking-first).
-	const hasMessageId = "messageId" in event;
-	const msgId = hasMessageId
-		? (event as Record<string, unknown>)["messageId"]
-		: undefined;
-	if (hasMessageId && msgId != null && activity && messages) {
-		advanceTurnIfNewMessage(
-			activity,
-			messages,
-			msgId as string,
-			event.type === "delta" ? event.partId : undefined,
-		);
-	} else if (hasMessageId && msgId != null) {
-		// Fallback: no slot yet — just log
-		log.debug(
-			"advanceTurn skipped — no slot for event %s messageId=%s",
-			event.type,
-			msgId,
-		);
-	} else {
-		const LLM_TYPES = new Set([
-			"delta",
-			"thinking_start",
-			"thinking_delta",
-			"thinking_stop",
-			"tool_start",
-			"tool_executing",
-			"tool_result",
-			"result",
-		]);
-		if (LLM_TYPES.has(event.type)) {
-			log.debug(
-				"LLM event %s has NO messageId (hasKey=%s val=%s) replay=%s",
-				event.type,
-				hasMessageId,
-				msgId,
-				ctx.isReplay,
-			);
-		}
-	}
-
-	// Guard: if we have no slot, we can't dispatch. This should only
-	// happen if currentId is null (extremely early in startup).
-	if (!activity || !messages) {
-		if (CHAT_EVENT_TYPES.has(event.type)) {
-			log.debug("dispatchChatEvent: no slot for event %s", event.type);
-		}
-		return false;
-	}
-
-	switch (event.type) {
-		case "user_message":
-			if (shouldIgnoreOwnUserMessage(event)) return true;
-			addUserMessage(activity, messages, event.text, undefined, ctx.isQueued);
-			return true;
-		case "delta":
-			handleDelta(activity, messages, event);
-			return true;
-		case "thinking_start":
-			handleThinkingStart(activity, messages, event);
-			return true;
-		case "thinking_delta":
-			handleThinkingDelta(activity, messages, event);
-			return true;
-		case "thinking_stop":
-			handleThinkingStop(activity, messages, event);
-			return true;
-		case "tool_start":
-			handleToolStart(activity, messages, event);
-			return true;
-		case "tool_executing":
-			handleToolExecuting(activity, messages, event);
-			return true;
-		case "tool_result":
-			handleToolResult(activity, messages, event);
-			// If this was a TodoWrite result, also update the todo store.
-			// The tool_result has no `name`, so look up the message in chat state.
-			{
-				const msgs = getMessages(messages);
-				const toolMsg = msgs.find(
-					(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
-				);
-				if (toolMsg?.name === "TodoWrite" && !event.is_error && event.content) {
-					updateTodosFromToolResult(event.content);
-				}
-			}
-			return true;
-		case "result":
-			handleResult(activity, messages, event);
-			return true;
-		case "done": {
-			handleDone(activity, messages, event);
-			if (!ctx.isReplay) {
-				// Only notify for root agent sessions — subagent completions are
-				// intermediate steps; the parent emits its own done when finished.
-				const doneSession = findSession(sessionState.currentId ?? "");
-				if (!doneSession?.parentID) {
-					triggerNotifications(event);
-				}
-			}
-			return true;
-		}
-		case "status":
-			handleStatus(activity, messages, event);
-			return true;
-		case "compaction":
-			handleCompaction(activity, messages, event);
-			return true;
-		case "error":
-			if (ctx.isReplay) {
-				// Replay: route directly to handleError. PTY/HANDLER/INSTANCE
-				// error codes never appear in the cache (they're sent via
-				// sendToSession, not recordEvent), so no routing is needed.
-				handleError(activity, messages, event);
-			} else {
-				// Live: full error routing (PTY, HANDLER, INSTANCE) + notifications.
-				handleChatError(activity, messages, event);
-				triggerNotifications(event);
-			}
-			return true;
-		default:
-			return false;
-	}
-}
-
 // ─── Centralized message dispatch ───────────────────────────────────────────
 
 /**
@@ -708,13 +278,11 @@ function dispatchChatEvent(event: RelayMessage, ctx: DispatchContext): boolean {
  * Replaces the vanilla handler registry pattern.
  */
 export function handleMessage(msg: RelayMessage): void {
+	observeSessionActivity(msg);
 	if (msg.type === "project_attached") {
-		if (attachedProjectState.slug !== msg.slug) {
-			for (const activity of sessionActivity.values()) {
+		if (attachedProjectState.slug !== msg.slug)
+			for (const activity of sessionActivity.values())
 				activity.replayGeneration++;
-				activity.liveEventBuffer = null;
-			}
-		}
 		attachedProjectState.slug = msg.slug;
 		for (const listener of projectAttachedListeners) listener(msg.slug);
 		return;
@@ -724,18 +292,6 @@ export function handleMessage(msg: RelayMessage): void {
 	// session slot. notification_event is excluded by construction
 	// (PerSessionEventType union does not include it).
 	if (isPerSessionEvent(msg)) {
-		// Buffer live chat events during replay to prevent interleaving
-		if (CHAT_EVENT_TYPES.has(msg.type)) {
-			const currentActivity = sessionActivity.get(msg.sessionId);
-			if (
-				currentActivity?.liveEventBuffer !== null &&
-				currentActivity?.liveEventBuffer !== undefined
-			) {
-				currentActivity.liveEventBuffer.push(msg);
-				return;
-			}
-		}
-
 		// Events requiring global coordination are handled in the switch
 		// below rather than routePerSession. All other per-session events
 		// route through routePerSession.
@@ -748,26 +304,6 @@ export function handleMessage(msg: RelayMessage): void {
 	// ── Global events + globally-coordinated per-session events ──────────
 	switch (msg.type) {
 		// ─── Sessions ────────────────────────────────────────────────────
-		case "session_list": {
-			const rootIds = new Set(
-				sessionState.rootSessions.map((session) => session.id),
-			);
-			handleSessionList(msg);
-			if (msg.roots === false || msg.search) break;
-			const counts = new Map<
-				string,
-				{ questions: number; permissions: number }
-			>();
-			for (const session of sessionState.rootSessions) {
-				rootIds.add(session.id);
-				counts.set(session.id, {
-					questions: session.pendingQuestionCount ?? 0,
-					permissions: session.pendingPermissionCount ?? 0,
-				});
-			}
-			dispatch({ type: "reconcile", counts, sessionIds: rootIds });
-			break;
-		}
 		case "session_family": {
 			handleSessionFamily(msg);
 			break;
@@ -779,134 +315,32 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 		case "session_deleted": {
-			// Clean up per-session chat state for the deleted session.
-			const deletedId =
-				"sessionId" in msg ? (msg.sessionId as string) : undefined;
-			if (deletedId) {
-				clearSessionChatState(deletedId);
-				// Remove from session map
-				sessionState.sessions.delete(deletedId);
-				if (sessionState.searchResults)
-					sessionState.searchResults = sessionState.searchResults.filter(
-						(session) => session.id !== deletedId,
-					);
-				sessionState.rootSessions = sessionState.rootSessions.filter(
-					(s) => s.id !== deletedId,
-				);
-				sessionState.familySessions = sessionState.familySessions.filter(
-					(s) => s.id !== deletedId,
-				);
-			}
-			break;
-		}
-		case "session_switched": {
+			const deletedId = msg.sessionId;
+			// The shell feed owns row removal and chat cleanup.
+			pruneSessionLists(deletedId);
 			const route = getCurrentRoute();
-			const requestedCreation =
-				sessionCreation.value.phase === "creating" &&
-				sessionCreation.value.requestId === msg.requestId;
-			// Only this tab's creation request may leave the session list.
-			if (route.page !== "chat" || (!route.sessionId && !requestedCreation))
-				break;
-			if (!msg.id) {
-				clearMessages();
-				break;
-			}
-			// Use the ID captured by switchToSession() before it changed currentId.
-			// Falls back to sessionState.currentId for server-initiated switches
-			// (e.g. CreateSession flow) where switchToSession() wasn't called.
-			// consumeSwitchingFromId() reads and clears the value in one call to
-			// prevent stale IDs from leaking into future server-initiated switches.
-			const previousSessionId =
-				consumeSwitchingFromId() ?? sessionState.currentId;
-			handleSessionSwitched(msg);
-
-			// Update URL to reflect the new session. Skip it when the URL already
-			// names it: a same-path replace is taken literally and would drop the
-			// list's query (scope, filter, grouping) on every reload.
-			if (routerState.path !== `/s/${msg.id}`) replaceRoute(`/s/${msg.id}`);
-
-			// Bump the outgoing session's replayGeneration to abort any in-flight
-			// convertHistoryAsync or replay for the previous session.
-			if (previousSessionId) {
-				abortSessionReplay(previousSessionId);
-			}
-
-			activateSessionChatState(msg.id);
-			updateContextPercent(0);
-			clearTodoState();
-			dispatch({ type: "session_viewed", sessionId: msg.id });
-
-			if (msg.events) {
-				// Cache hit: replay raw events through existing chat handlers
-				// (full fidelity — same code paths as live streaming).
-				// Fire-and-forget — handleMessage stays synchronous.
-				const eventsHasMore = msg.eventsHasMore ?? false;
-				replayEvents(msg.events, msg.id, eventsHasMore).catch((err) => {
-					log.warn("Replay error:", err);
-				});
-			} else if (msg.history) {
-				// REST API fallback: convert to ChatMessages and prepend.
-				// REST history has no event-level data, so sentDuringEpoch
-				// can't be set during conversion.  Signal that the next
-				// status:processing should apply the queued-state fallback.
-				markPendingHistoryQueuedFallback();
-				// Fire-and-forget — handleMessage stays synchronous.
-				// Capture slot at start so commits go to the correct session.
-				const historyMsgs = msg.history.messages;
-				const hasMore = msg.history.hasMore;
-				const msgCount = historyMsgs.length;
-				const capturedSlot = getOrCreateSessionSlot(msg.id);
-				const actGen = ++capturedSlot.activity.replayGeneration; // per-session snapshot
-				capturedSlot.messages.historyLoading = true;
-				capturedSlot.messages.loadLifecycle = "loading";
-				chatState.loadLifecycle = "loading";
-				convertHistoryAsync(historyMsgs, renderMarkdown, capturedSlot.activity)
-					.then((chatMsgs) => {
-						if (chatMsgs && capturedSlot.activity.replayGeneration === actGen) {
-							const mergedChatMsgs = preserveCachedSubagentToolState(
-								getMessages(capturedSlot.messages),
-								chatMsgs,
-							);
-							capturedSlot.messages.toolRegistry.clear();
-							setMessages(capturedSlot.messages, mergedChatMsgs);
-							seedRegistryFromMessages(
-								capturedSlot.activity,
-								capturedSlot.messages,
-								mergedChatMsgs,
-							);
-							restoreContextFromMessages(capturedSlot.messages);
-							capturedSlot.messages.historyHasMore = hasMore;
-							capturedSlot.messages.historyMessageCount = msgCount;
-							historyState.hasMore = hasMore;
-							historyState.messageCount = msgCount;
-							// Transition loadLifecycle so the scroll controller
-							// exits "loading" state and scrolls to bottom.
-							capturedSlot.messages.loadLifecycle = "ready";
-							chatState.loadLifecycle = "ready";
-						}
-						capturedSlot.messages.historyLoading = false;
-					})
-					.catch((err) => {
-						log.warn("History conversion error:", err);
-						capturedSlot.messages.historyLoading = false;
+			if (
+				(sessionState.currentId === deletedId ||
+					sessionState.currentId === null) &&
+				route.page === "chat" &&
+				route.sessionId === deletedId
+			) {
+				const survivor = getFilteredSessions().find(
+					(row) => row.id !== deletedId,
+				);
+				if (survivor)
+					switchToSession(survivor.id, survivor.projectSlug, undefined, {
+						replace: true,
 					});
-			} else {
-				// Empty session (neither events nor history) — hasMore stays false
-				// so "Beginning of session" marker shows immediately.
-				// Transition loadLifecycle to "ready" so the scroll controller
-				// exits "loading" state and can handle live events normally.
-				const emptySlot = getOrCreateSessionSlot(msg.id);
-				emptySlot.messages.loadLifecycle = "ready";
-				chatState.loadLifecycle = "ready";
+				else {
+					const activity = sessionActivity.get(deletedId);
+					if (activity) activity.replayGeneration++;
+					updateContextPercent(0);
+					clearTodoState();
+					replaceRoute("/");
+					sessionState.currentId = null;
+				}
 			}
-
-			// Apply server-provided input draft for this session.
-			// This uses the input_sync mechanism so InputArea picks it up
-			// via the existing $effect (server value overrides local draft).
-			if (msg.inputText != null) {
-				handleInputSyncReceived({ text: msg.inputText });
-			}
-
 			break;
 		}
 
@@ -941,13 +375,19 @@ export function handleMessage(msg: RelayMessage): void {
 			handleClaudeSettingsInfo(msg);
 			break;
 		case "model_info":
+			// Unkeyed legacy/default metadata cannot identify the active session.
+			if (
+				msg.sessionId === undefined ||
+				msg.sessionId !== sessionState.currentId
+			)
+				return;
 			handleModelInfo(msg);
 			break;
 		case "default_model_info":
 			handleDefaultModelInfo(msg);
 			break;
 		case "default_permission_mode_info":
-			discoveryState.defaultPermissionMode = msg.mode;
+			applyDefaultPermissionMode(msg.mode);
 			break;
 		case "permission_mode_info":
 			handlePermissionModeInfo(msg);
@@ -985,61 +425,6 @@ export function handleMessage(msg: RelayMessage): void {
 			handleInputSyncReceived(msg);
 			break;
 
-		// ─── History ─────────────────────────────────────────────────────
-		case "history_page": {
-			// Convert and prepend older messages into the session's message list.
-			// Fire-and-forget — handleMessage stays synchronous.
-			// Capture slot at start so commits go to the correct session.
-			const historyMsg = msg as Extract<RelayMessage, { type: "history_page" }>;
-			const rawMessages = historyMsg.messages ?? [];
-			const hasMore = historyMsg.hasMore ?? false;
-			const hpSessionId = historyMsg.sessionId ?? sessionState.currentId;
-			const hpCapturedSlot = hpSessionId
-				? getOrCreateSessionSlot(hpSessionId)
-				: null;
-			const hpActGen = hpCapturedSlot?.activity.replayGeneration; // per-session snapshot
-			convertHistoryAsync(rawMessages, renderMarkdown, hpCapturedSlot?.activity)
-				.then((chatMsgs) => {
-					if (
-						hpCapturedSlot &&
-						hpCapturedSlot.activity.replayGeneration !== hpActGen
-					)
-						return;
-					if (chatMsgs) {
-						// Commit to captured slot, not getCurrentSlot()
-						if (hpCapturedSlot) {
-							prependMessages(
-								hpCapturedSlot.activity,
-								hpCapturedSlot.messages,
-								chatMsgs,
-							);
-							seedRegistryFromMessages(
-								hpCapturedSlot.activity,
-								hpCapturedSlot.messages,
-								chatMsgs,
-							);
-							hpCapturedSlot.messages.historyHasMore = hasMore;
-							hpCapturedSlot.messages.historyMessageCount += rawMessages.length;
-						}
-						if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-						historyState.hasMore = hasMore;
-						historyState.messageCount += rawMessages.length;
-					}
-					historyState.loading = false;
-				})
-				.catch((err) => {
-					log.warn("History page conversion error:", err);
-					if (
-						hpCapturedSlot &&
-						hpCapturedSlot.activity.replayGeneration !== hpActGen
-					)
-						return;
-					if (hpCapturedSlot) hpCapturedSlot.messages.historyLoading = false;
-					historyState.loading = false;
-				});
-			break;
-		}
-
 		// ─── Plan Mode ───────────────────────────────────────────────────
 		case "plan_enter":
 		case "plan_exit":
@@ -1068,18 +453,13 @@ export function handleMessage(msg: RelayMessage): void {
 			for (const fn of fileHistoryListeners) fn(msg);
 			break;
 
-		// ─── Rewind ──────────────────────────────────────────────────────
-		case "rewind_result":
-			for (const fn of rewindListeners) fn(msg);
-			break;
-
 		// ─── Project ─────────────────────────────────────────────────────
 		case "project_list":
 			handleProjectList(msg);
 			for (const fn of projectListeners) fn(msg);
 			break;
 		case "daemon_sessions_changed":
-			void loadDaemonSessions();
+			void refreshSessionList();
 			break;
 
 		// ─── Todo ────────────────────────────────────────────────────────
@@ -1115,23 +495,14 @@ export function handleMessage(msg: RelayMessage): void {
 		case "notification_event": {
 			const syntheticMsg = {
 				type: msg.eventType,
+				...(msg.alertId != null ? { alertId: msg.alertId } : {}),
 				...(msg.message != null ? { message: msg.message } : {}),
 				...(msg.sessionId != null ? { sessionId: msg.sessionId } : {}),
 			} as RelayMessage;
 
-			// Dispatch to notification reducer based on event type
-			if (msg.sessionId) {
-				if (msg.eventType === "ask_user") {
-					dispatch({ type: "question_appeared", sessionId: msg.sessionId });
-				} else if (msg.eventType === "ask_user_resolved") {
-					dispatch({ type: "question_resolved", sessionId: msg.sessionId });
-				} else if (msg.eventType === "session_viewed") {
-					dispatch({ type: "session_viewed", sessionId: msg.sessionId });
-				}
-			}
-
-			// session_viewed is a silent indicator update — no notifications or toasts.
-			if (msg.eventType === "session_viewed") break;
+			// Nothing here touches badge state any more: this message exists only to
+			// fire the alert (ni8.23). What a session is waiting on, and whether it
+			// has been looked at, arrive on the session row.
 
 			// Suppress all frontend notifications for subagent done events.
 			// Server-side notification-policy.ts is the primary defense; this is belt-and-suspenders.
@@ -1170,107 +541,6 @@ export function handleMessage(msg: RelayMessage): void {
 			// Unknown message type — debug-only (tree-shaken in production)
 			log.debug("Unhandled message type:", msg.type, msg);
 			break;
-	}
-}
-
-// ─── Event Replay (session switch with cached events) ────────────────────────
-// Replays raw events through existing chat handlers — same code paths as live
-// streaming. Zero conversion, full fidelity, handles mid-stream.
-//
-// Queued-flag inference: The message cache NEVER contains status:processing
-// events (prompt.ts sends them via sendToSession, not recordEvent). So we
-// track LLM activity locally via LLM_CONTENT_START_TYPES: content events set
-// llmActive=true; done and non-retry errors set it false. A user_message
-// that appears while llmActive is true was queued behind an in-progress turn.
-
-export async function replayEvents(
-	events: readonly unknown[],
-	sessionId: string,
-	eventsHasMore = false,
-): Promise<void> {
-	// ── Slot-capture: capture at start, thread through all dispatches ──
-	const slot = getOrCreateSessionSlot(sessionId);
-	const gen = ++slot.activity.replayGeneration;
-
-	phaseStartReplay(slot.activity, slot.messages);
-	beginReplayBatch(slot.activity, slot.messages);
-	slot.messages.toolRegistry.clear();
-	startBufferingLiveEvents(slot.activity);
-
-	/** Ghost-write guard: abort if the slot's generation has changed
-	 *  (concurrent replay or clearMessages bumped it). */
-	function isAborted(): boolean {
-		return slot.activity.replayGeneration !== gen;
-	}
-
-	try {
-		// Local tracker: true when the LLM is producing content for the current
-		// turn. Inferred from event structure, NOT from status events (which
-		// aren't cached). Used to set the `queued` flag on user_message events.
-		let llmActive = false;
-
-		for (let i = 0; i < events.length; i++) {
-			// Abort: a newer replay or clearMessages happened
-			if (isAborted()) {
-				discardReplayBatch(slot.activity, slot.messages);
-				return; // don't call phaseEndReplay — clearMessages already reset loadLifecycle, or a new replay set it to loading
-			}
-
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const event = events[i]!;
-			// Cached events skip the WS boundary decoder, so validate here and
-			// drop invalid ones the same way the live path does.
-			if (!isRelayMessage(event)) {
-				log.warn("Replay skipped an invalid cached event:", event);
-				continue;
-			}
-
-			// ── LLM activity tracking (before handler, so user_message reads it) ──
-			if (isLlmContentStart(event.type)) llmActive = true;
-			else if (event.type === "done") llmActive = false;
-			else if (event.type === "error" && event.code !== "RETRY")
-				llmActive = false;
-
-			const ctx: DispatchContext = { isReplay: true, isQueued: llmActive };
-			dispatchChatEvent(event, ctx);
-
-			// Yield between chunks to keep the main thread responsive.
-			// NOTE: Do NOT call discardReplayBatch() on abort after yield.
-			// A newer replay may have already called beginReplayBatch() and
-			// started populating it — discarding here would destroy the new
-			// replay's batch. clearMessages() already sets replayBatch = null.
-			if ((i + 1) % REPLAY_CHUNK_SIZE === 0) {
-				await yieldToEventLoop();
-				if (isAborted()) return;
-			}
-		}
-
-		// Flush any pending debounced render (for mid-stream sessions
-		// where no "done" event has been received yet)
-		flushPendingRender(slot.activity, slot.messages);
-
-		// Single commit: page large replays so only the last 50 messages
-		// render immediately, with older messages buffered for lazy loading.
-		commitReplayFinal(slot.activity, slot.messages, sessionId, eventsHasMore);
-
-		// Reconcile processing state after replay completes.
-		// phaseEndReplay handles the edge case where llmActive is true
-		// but phase ended at "idle" (all turns completed during replay,
-		// but server says LLM is still active).
-		phaseEndReplay(slot.activity, llmActive);
-
-		// Drain live events that arrived while the replay was in progress.
-		// These are post-cache events dispatched as normal live events,
-		// continuing the timeline where the cache left off.
-		drainLiveEventBuffer(slot.activity);
-
-		renderDeferredMarkdown(slot.activity, slot.messages);
-	} finally {
-		// Safety: ensure buffer is cleared on any exit path not handled above.
-		// Normal path: drainLiveEventBuffer already set buffer to null.
-		// Abort path: clearMessages hook already set buffer to null.
-		// Error path: discard any un-drained buffer to prevent infinite buffering.
-		if (slot.activity) slot.activity.liveEventBuffer = null;
 	}
 }
 
@@ -1402,11 +672,11 @@ function handleConnectionStatus(
 	}
 }
 
-/** Stale-daemon detection: the daemon sends protocol_version on connect.
- *  A different version — or none at all, which marks a daemon predating the
- *  handshake — means the daemon and this frontend disagree on wire semantics
- *  (e.g. what a permission-mode literal grants), so warn until it restarts. */
+/** The daemon sends protocol_version on connect. An older daemon needs a
+ *  restart; an older page needs a reload. No message within the grace window
+ *  still marks a daemon predating the handshake. */
 const STALE_DAEMON_BANNER_ID = "stale-daemon";
+const STALE_PAGE_BANNER_ID = "stale-page";
 const PROTOCOL_VERSION_GRACE_MS = 10_000;
 let protocolVersionTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1441,8 +711,20 @@ function handleProtocolVersion(version: number): void {
 	disarmProtocolVersionCheck();
 	if (version === WS_PROTOCOL_VERSION) {
 		removeBanner(STALE_DAEMON_BANNER_ID);
-	} else {
+		removeBanner(STALE_PAGE_BANNER_ID);
+	} else if (version < WS_PROTOCOL_VERSION) {
+		removeBanner(STALE_PAGE_BANNER_ID);
 		showStaleDaemonBanner();
+	} else {
+		removeBanner(STALE_DAEMON_BANNER_ID);
+		showBanner({
+			id: STALE_PAGE_BANNER_ID,
+			variant: "update",
+			icon: "refresh-cw",
+			text: "Conduit was updated. Reload this tab to keep things working.",
+			dismissible: true,
+			action: { label: "Reload", run: () => location.reload() },
+		});
 	}
 }
 

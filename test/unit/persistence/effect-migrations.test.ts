@@ -5,24 +5,19 @@ import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
-import { Effect, Exit, Layer } from "effect";
+import { Effect, Either, Exit, Layer } from "effect";
 import { expect } from "vitest";
 import {
+	effectMigrationEntries,
 	makeEffectMigrationLoader,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
-import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
-import {
-	readMigrationSql,
-	SESSIONS_FORKED_FROM_MIGRATION,
-} from "../../../src/lib/persistence/schema.js";
-import { sessionRowsToSessionInfoList } from "../../../src/lib/persistence/session-list-adapter.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
-function makeFileSqlLayer(setup?: (filename: string) => void) {
+function makeFileSqlLayer(seed?: (filename: string) => void) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-effect-migrations-"));
 	const filename = join(dir, "events.db");
-	setup?.(filename);
+	seed?.(filename);
 	return EffectSqliteClient.layer({ filename }).pipe(
 		Layer.merge(
 			Layer.scopedDiscard(
@@ -34,130 +29,84 @@ function makeFileSqlLayer(setup?: (filename: string) => void) {
 	);
 }
 
-function seedDatabase(filename: string, seed: (db: Database.Database) => void) {
-	const db = new Database(filename);
-	try {
-		seed(db);
-	} finally {
-		db.close();
-	}
-}
+const migrationEntries = Object.entries(effectMigrationEntries);
+const prefix = (count: number) =>
+	Object.fromEntries(migrationEntries.slice(0, count));
 
-// After the legacy skeleton cutoff, so migration 10's purge keeps these sessions.
-const CREATED_AT = 2_000_000_000_000;
-const ACTIVE_AT = CREATED_AT + 456;
+const expectedNames = [
+	"create_event_store_tables",
+	"add_message_part_metadata",
+	"add_durable_provider_commands",
+	"drop_events_session_fk",
+	"message_parts_file_type",
+	"message_parts_compaction_type",
+	"messages_context_window",
+	"turn_model_execution",
+	"sessions_permission_mode",
+	"purge_legacy_skeleton_sessions",
+	"session_cascade_deletes",
+	"sessions_read_at",
+	"sessions_last_turn_error",
+	"backfill_compaction_messages",
+	"sessions_settled_pinned",
+	"sessions_snoozed",
+	"sessions_auto_settle",
+	"create_projection_failures",
+	"read_model_version",
+	"read_model_counter",
+	"sent_alerts",
+	"fork_point_timestamp",
+	"sessions_marked_unread",
+	"session_attention",
+	"read_state_to_turn_ends",
+	"sessions_forked_from",
+	"messages_backfilled",
+	"sessions_history_complete",
+	"message_tombstones",
+];
+const legacyNames = [
+	"create_event_store_tables",
+	"add_message_part_metadata",
+	"add_durable_provider_commands",
+	"drop_events_session_fk",
+	"message_parts_file_type",
+	"message_parts_compaction_type",
+	"messages_context_window",
+	"turn_model_execution",
+	"sessions_permission_mode",
+	"session_cascade_deletes",
+	"sessions_read_at",
+	"sessions_last_turn_error",
+	"backfill_compaction_messages",
+];
 
-function sessionColumns(db: Database.Database): string[] {
-	return db
-		.prepare<unknown[], { name: string }>("PRAGMA table_info(sessions)")
-		.all()
-		.map((column) => column.name);
-}
-
-describe("Effect SQL migrations", () => {
-	it("moves existing forks without changing subagents or cascading origin deletion", () => {
-		const db = new Database(":memory:");
-		try {
-			db.pragma("foreign_keys = ON");
-			db.exec(`CREATE TABLE sessions (
-				id TEXT PRIMARY KEY,
-				parent_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
-				fork_point_event TEXT
-			)`);
-			const insert = db.prepare(
-				"INSERT INTO sessions (id, parent_id, fork_point_event) VALUES (?, ?, ?)",
-			);
-			insert.run("origin", null, null);
-			insert.run("fork", "origin", "msg-1");
-			insert.run("child", "origin", null);
-			db.exec(readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION));
-			const rows = db
-				.prepare("SELECT id, parent_id, forked_from FROM sessions ORDER BY id")
-				.all();
-			expect(rows).toEqual([
-				{ id: "child", parent_id: "origin", forked_from: null },
-				{ id: "fork", parent_id: null, forked_from: "origin" },
-				{ id: "origin", parent_id: null, forked_from: null },
-			]);
-			db.prepare("DELETE FROM sessions WHERE id = 'origin'").run();
-			expect(db.prepare("SELECT id FROM sessions").all()).toEqual([
-				{ id: "fork" },
-			]);
-		} finally {
-			db.close();
-		}
-	});
-
-	it.effect("adds automatic settlement columns with nullable overrides", () =>
+describe("Effect migration lineage", () => {
+	it.effect("a failed migration run applies and records nothing", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			yield* makeEffectSqlMigrator();
-			const columns = yield* sql.unsafe<{ name: string }>(
-				"PRAGMA table_info(sessions)",
-			);
-			expect(columns.map((column) => column.name)).toEqual(
-				expect.arrayContaining([
-					"unsettled_at",
-					"auto_settle_disabled_at",
-					"settled_automatically",
-				]),
-			);
-			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES ('auto-s1', 'opencode', 'Auto', 'idle', 1, 1)`;
-			const rows = yield* sql<{
-				unsettled_at: number | null;
-				auto_settle_disabled_at: number | null;
-				settled_automatically: number;
-			}>`
-				SELECT unsettled_at, auto_settle_disabled_at, settled_automatically FROM sessions WHERE id = 'auto-s1'`;
-			expect(rows[0]).toEqual({
-				unsettled_at: null,
-				auto_settle_disabled_at: null,
-				settled_automatically: 0,
-			});
-			expect(yield* makeEffectSqlMigrator()).toEqual([]);
-		}).pipe(Effect.provide(makeFileSqlLayer())),
-	);
-	it.effect(
-		"runs static record migrations once through Effect SQL Migrator",
-		() =>
-			Effect.gen(function* () {
-				const migration = Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					yield* sql`CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`;
-				});
-				const migrate = makeEffectSqlMigrator({
-					"0001_create_items": migration,
-				});
-
-				const completed = yield* migrate;
-				expect(completed).toEqual([[1, "create_items"]]);
-
-				const secondRun = yield* migrate;
-				expect(secondRun).toEqual([]);
-
-				const sql = yield* SqlClient.SqlClient;
-				const rows = yield* sql<{ migration_id: number; name: string }>`
-				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
-				expect(rows).toEqual([{ migration_id: 1, name: "create_items" }]);
-			}).pipe(
-				Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" })),
-			),
-	);
-
-	it.effect("refuses non-contiguous static migration ids", () =>
-		Effect.gen(function* () {
-			const result = yield* Effect.either(
-				makeEffectMigrationLoader({
-					"0002_skip_baseline": Effect.void,
+			const createGood = sql`CREATE TABLE good_table (id INTEGER PRIMARY KEY)`;
+			const failed = yield* Effect.exit(
+				makeEffectSqlMigrator({
+					"0001_good": createGood,
+					"0002_bad": sql.unsafe(
+						"CREATE TABLE broken_table (id INTEGER PRIMARY KEY",
+					),
 				}),
 			);
-
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left.message).toContain("contiguous");
-			}
-		}),
+			expect(Exit.isFailure(failed)).toBe(true);
+			expect(
+				yield* sql`SELECT name FROM sqlite_master WHERE name = 'good_table'`,
+			).toEqual([]);
+			expect(
+				yield* makeEffectSqlMigrator({
+					"0001_good": createGood,
+					"0002_fixed": sql`CREATE TABLE fixed_table (id INTEGER PRIMARY KEY)`,
+				}),
+			).toEqual([
+				[1, "good"],
+				[2, "fixed"],
+			]);
+		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
 	);
 
 	it.effect("runs migrations in key order", () =>
@@ -175,256 +124,194 @@ describe("Effect SQL migrations", () => {
 		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
 	);
 
+	it.effect("refuses non-contiguous static migration ids", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.either(
+				makeEffectMigrationLoader({ "0002_skip_baseline": Effect.void }),
+			);
+			expect(Either.isLeft(result)).toBe(true);
+			if (Either.isLeft(result))
+				expect(result.left.message).toContain("contiguous");
+		}),
+	);
+
+	it.effect(
+		"runs static record migrations once through Effect SQL Migrator",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const entries = {
+					"0001_create_items": sql`CREATE TABLE items (id INTEGER PRIMARY KEY)`,
+				};
+				expect(yield* makeEffectSqlMigrator(entries)).toEqual([
+					[1, "create_items"],
+				]);
+				expect(yield* makeEffectSqlMigrator(entries)).toEqual([]);
+				const rows = yield* sql<{ migration_id: number; name: string }>`
+				SELECT migration_id, name FROM effect_sql_migrations`;
+				expect(rows).toEqual([{ migration_id: 1, name: "create_items" }]);
+			}).pipe(
+				Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" })),
+			),
+	);
+
 	it.effect("runs only the migrations added since the last run", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const createUsers = sql`CREATE TABLE users (id INTEGER PRIMARY KEY)`;
-			yield* makeEffectSqlMigrator({ "0001_create_users": createUsers });
-
-			const completed = yield* makeEffectSqlMigrator({
-				"0001_create_users": createUsers,
-				"0002_create_posts": sql`CREATE TABLE posts (id INTEGER PRIMARY KEY)`,
-			});
-			expect(completed).toEqual([[2, "create_posts"]]);
-		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
-	);
-
-	it.effect("a failed migration run applies and records nothing", () =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			const createGood = sql`CREATE TABLE good_table (id INTEGER PRIMARY KEY)`;
-			const failed = yield* Effect.exit(
-				makeEffectSqlMigrator({
-					"0001_good": createGood,
-					"0002_bad": sql.unsafe(
-						"CREATE TABLE broken_table (id INTEGER PRIMARY KEY",
-					),
-				}),
-			);
-			expect(Exit.isFailure(failed)).toBe(true);
-			expect(
-				yield* sql`SELECT name FROM sqlite_master WHERE name = 'good_table'`,
-			).toEqual([]);
-
-			// Nothing was recorded, so a fixed run starts again from the first migration.
+			const first = sql`CREATE TABLE users (id INTEGER PRIMARY KEY)`;
+			yield* makeEffectSqlMigrator({ "0001_create_users": first });
 			expect(
 				yield* makeEffectSqlMigrator({
-					"0001_good": createGood,
-					"0002_fixed": sql`CREATE TABLE fixed_table (id INTEGER PRIMARY KEY)`,
+					"0001_create_users": first,
+					"0002_create_posts": sql`CREATE TABLE posts (id INTEGER PRIMARY KEY)`,
 				}),
-			).toEqual([
-				[1, "good"],
-				[2, "fixed"],
-			]);
+			).toEqual([[2, "create_posts"]]);
 		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
 	);
 
 	it.effect(
-		"adopts an existing legacy baseline schema into Effect SQL history",
+		"adds read_at once and backfills existing sessions as already read",
 		() =>
 			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
-
+				yield* makeEffectSqlMigrator(prefix(11));
 				const sql = yield* SqlClient.SqlClient;
-				const rows = yield* sql<{ migration_id: number; name: string }>`
-				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				yield* sql`INSERT INTO sessions (id, provider, last_message_at, created_at, updated_at)
+				VALUES ('existing', 'opencode', 2000000000456, 2000000000000, 2000000000456)`;
+				yield* makeEffectSqlMigrator(prefix(12));
+				const rows = yield* sql<{ read_at: number; last_message_at: number }>`
+				SELECT read_at, last_message_at FROM sessions WHERE id = 'existing'`;
 				expect(rows).toEqual([
-					{ migration_id: 1, name: "create_event_store_tables" },
-					{ migration_id: 2, name: "add_message_part_metadata" },
-					{ migration_id: 3, name: "add_durable_provider_commands" },
-					{ migration_id: 4, name: "drop_events_session_fk" },
-					{ migration_id: 5, name: "message_parts_file_type" },
-					{ migration_id: 6, name: "message_parts_compaction_type" },
-					{ migration_id: 7, name: "messages_context_window" },
-					{ migration_id: 8, name: "turn_model_execution" },
-					{ migration_id: 9, name: "sessions_permission_mode" },
-					{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
-					{ migration_id: 11, name: "session_cascade_deletes" },
-					{ migration_id: 12, name: "sessions_read_at" },
-					{ migration_id: 13, name: "sessions_last_turn_error" },
-					{ migration_id: 14, name: "backfill_compaction_messages" },
-					{ migration_id: 15, name: "sessions_settled_pinned" },
-					{ migration_id: 16, name: "sessions_snoozed" },
-					{ migration_id: 17, name: "sessions_auto_settle" },
-					{ migration_id: 18, name: "sessions_marked_unread" },
-					{ migration_id: 19, name: "sessions_forked_from" },
+					{ read_at: 2_000_000_000_456, last_message_at: 2_000_000_000_456 },
 				]);
-
-				const legacyRows = yield* sql<{ id: number; name: string }>`
-				SELECT id, name FROM _migrations ORDER BY id`;
-				expect(legacyRows).toEqual([
-					{ id: 1, name: "create_event_store_tables" },
-					{ id: 2, name: "add_message_part_metadata" },
-					{ id: 3, name: "add_durable_provider_commands" },
-					{ id: 4, name: "drop_events_session_fk" },
-					{ id: 5, name: "message_parts_file_type" },
-					{ id: 6, name: "message_parts_compaction_type" },
-					{ id: 7, name: "messages_context_window" },
-					{ id: 8, name: "turn_model_execution" },
-					{ id: 9, name: "sessions_permission_mode" },
-					{ id: 10, name: "session_cascade_deletes" },
-					{ id: 11, name: "sessions_read_at" },
-					{ id: 12, name: "sessions_last_turn_error" },
-					{ id: 13, name: "backfill_compaction_messages" },
-				]);
-			}).pipe(
-				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => seedLegacyEventStore(db)),
-					),
-				),
-			),
-	);
-
-	it.effect(
-		"adopts and upgrades a migration-7 database with turn model execution",
-		() =>
-			Effect.gen(function* () {
-				const completed = yield* makeEffectSqlMigrator();
-				expect(completed).toEqual([
-					[1, "create_event_store_tables"],
-					[2, "add_message_part_metadata"],
-					[3, "add_durable_provider_commands"],
-					[4, "drop_events_session_fk"],
-					[5, "message_parts_file_type"],
-					[6, "message_parts_compaction_type"],
-					[7, "messages_context_window"],
-					[8, "turn_model_execution"],
-					[9, "sessions_permission_mode"],
-					[10, "purge_legacy_skeleton_sessions"],
-					[11, "session_cascade_deletes"],
-					[12, "sessions_read_at"],
-					[13, "sessions_last_turn_error"],
-					[14, "backfill_compaction_messages"],
-					[15, "sessions_settled_pinned"],
-					[16, "sessions_snoozed"],
-					[17, "sessions_auto_settle"],
-					[18, "sessions_marked_unread"],
-					[19, "sessions_forked_from"],
-				]);
-
-				const sql = yield* SqlClient.SqlClient;
-				const columns = yield* sql<{ name: string }>`PRAGMA table_info(turns)`;
-				expect(columns.map((column) => column.name)).toEqual(
-					expect.arrayContaining([
-						"requested_model",
-						"expected_model",
-						"actual_model",
-					]),
-				);
-				expect(yield* makeEffectSqlMigrator()).toEqual([]);
-
-				const effectHistory = yield* sql<{
-					migration_id: number;
+				expect(yield* makeEffectSqlMigrator(prefix(12))).toEqual([]);
+				const columns = yield* sql<{
 					name: string;
-				}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
-				expect(effectHistory.at(-1)).toEqual({
-					migration_id: 19,
-					name: "sessions_forked_from",
-				});
-				const legacyHistory = yield* sql<{ id: number; name: string }>`
-					SELECT id, name FROM _migrations ORDER BY id`;
-				expect(legacyHistory.at(-1)).toEqual({
-					id: 7,
-					name: "messages_context_window",
-				});
-			}).pipe(
-				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => seedLegacyEventStore(db, 7)),
-					),
-				),
-			),
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter((column) => column.name === "read_at"),
+				).toHaveLength(1);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect(
-		"adopts an old baseline schema and adds message part metadata",
-		() =>
-			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
+	for (const [name, count, fields] of [
+		["settled and pinned", 14, ["settled_at", "pinned_at"]],
+		["snooze", 15, ["snoozed_at", "snoozed_until", "woken_at", "woken_reason"]],
+		["automatic settlement", 16, ["unsettled_at", "auto_settle_disabled_at"]],
+		["last turn error", 12, ["last_turn_error_at"]],
+	] as const) {
+		it.effect(
+			`adds ${name} columns without backfilling historical sessions`,
+			() =>
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator(prefix(count));
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at)
+					VALUES ('existing', 'opencode', 2000000000000, 2000000000000)`;
+					yield* makeEffectSqlMigrator();
+					const rows = yield* sql.unsafe<Record<string, number | null>>(
+						`SELECT ${fields.join(", ")} FROM sessions WHERE id = 'existing'`,
+					);
+					for (const field of fields) expect(rows[0]?.[field]).toBeNull();
+					const columns = yield* sql<{
+						name: string;
+					}>`PRAGMA table_info(sessions)`;
+					for (const field of fields)
+						expect(
+							columns.filter((column) => column.name === field),
+						).toHaveLength(1);
+					expect(yield* makeEffectSqlMigrator()).toEqual([]);
+				}).pipe(Effect.provide(makeFileSqlLayer())),
+		);
+	}
 
-				const sql = yield* SqlClient.SqlClient;
-				const migrationRows = yield* sql<{
-					migration_id: number;
-					name: string;
-				}>`
-				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
-				expect(migrationRows).toEqual([
-					{ migration_id: 1, name: "create_event_store_tables" },
-					{ migration_id: 2, name: "add_message_part_metadata" },
-					{ migration_id: 3, name: "add_durable_provider_commands" },
-					{ migration_id: 4, name: "drop_events_session_fk" },
-					{ migration_id: 5, name: "message_parts_file_type" },
-					{ migration_id: 6, name: "message_parts_compaction_type" },
-					{ migration_id: 7, name: "messages_context_window" },
-					{ migration_id: 8, name: "turn_model_execution" },
-					{ migration_id: 9, name: "sessions_permission_mode" },
-					{ migration_id: 10, name: "purge_legacy_skeleton_sessions" },
-					{ migration_id: 11, name: "session_cascade_deletes" },
-					{ migration_id: 12, name: "sessions_read_at" },
-					{ migration_id: 13, name: "sessions_last_turn_error" },
-					{ migration_id: 14, name: "backfill_compaction_messages" },
-					{ migration_id: 15, name: "sessions_settled_pinned" },
-					{ migration_id: 16, name: "sessions_snoozed" },
-					{ migration_id: 17, name: "sessions_auto_settle" },
-					{ migration_id: 18, name: "sessions_marked_unread" },
-					{ migration_id: 19, name: "sessions_forked_from" },
-				]);
-
-				const columns = yield* sql<{ name: string }>`
-				PRAGMA table_info(message_parts)`;
-				expect(columns.map((column) => column.name)).toContain("metadata");
-				const receiptColumns = yield* sql<{ name: string }>`
-				PRAGMA table_info(command_receipts)`;
-				expect(receiptColumns.map((column) => column.name)).toContain(
-					"fingerprint_hash",
-				);
-				const messageColumns = yield* sql<{ name: string }>`
-				PRAGMA table_info(messages)`;
-				expect(messageColumns.map((column) => column.name)).toContain(
-					"context_window",
-				);
-				const turnColumns = yield* sql<{ name: string }>`
-				PRAGMA table_info(turns)`;
-				expect(turnColumns.map((column) => column.name)).toEqual(
-					expect.arrayContaining([
-						"requested_model",
-						"expected_model",
-						"actual_model",
-					]),
-				);
-				const sessionColumns = yield* sql<{ name: string }>`
-				PRAGMA table_info(sessions)`;
-				expect(sessionColumns.map((column) => column.name)).toContain(
-					"permission_mode",
-				);
-			}).pipe(
-				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => seedLegacyEventStore(db, 1)),
+	for (const legacyId of [1, 7, 8, 9, 13]) {
+		it.effect(
+			`adopts legacy migration-${legacyId} schema without changing its ledger`,
+			() =>
+				Effect.gen(function* () {
+					const applied = yield* makeEffectSqlMigrator();
+					expect(applied).toHaveLength(expectedNames.length);
+					const sql = yield* SqlClient.SqlClient;
+					const history = yield* sql<{ name: string }>`
+					SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+					expect(history.map((row) => row.name)).toEqual(expectedNames);
+					const legacy = yield* sql<{
+						id: number;
+						name: string;
+					}>`SELECT id, name FROM _migrations ORDER BY id`;
+					expect(legacy).toEqual(
+						legacyNames.slice(0, legacyId).map((name, index) => ({
+							id: index + 1,
+							name,
+						})),
+					);
+					const messagePartColumns = yield* sql<{
+						name: string;
+					}>`PRAGMA table_info(message_parts)`;
+					expect(messagePartColumns.map((row) => row.name)).toContain(
+						"metadata",
+					);
+					const turnColumns = yield* sql<{
+						name: string;
+					}>`PRAGMA table_info(turns)`;
+					expect(turnColumns.map((row) => row.name)).toEqual(
+						expect.arrayContaining([
+							"requested_model",
+							"expected_model",
+							"actual_model",
+						]),
+					);
+					const sessionColumns = yield* sql<{
+						name: string;
+					}>`PRAGMA table_info(sessions)`;
+					expect(sessionColumns.map((row) => row.name)).toContain(
+						"permission_mode",
+					);
+					const projectionFailureColumns = yield* sql<{
+						name: string;
+					}>`PRAGMA table_info(projection_failures)`;
+					expect(projectionFailureColumns.map((row) => row.name)).toContain(
+						"event_sequence",
+					);
+					expect(yield* makeEffectSqlMigrator()).toEqual([]);
+				}).pipe(
+					Effect.provide(
+						makeFileSqlLayer((filename) => {
+							const db = new Database(filename);
+							try {
+								seedLegacyEventStore(db, legacyId);
+							} finally {
+								db.close();
+							}
+						}),
 					),
 				),
-			),
-	);
+		);
+	}
 
 	it.effect(
 		"adds the sessions permission mode column to a migration-8 database",
 		() =>
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
-
 				const sql = yield* SqlClient.SqlClient;
-				const columns = yield* sql<{ name: string }>`
-					PRAGMA table_info(sessions)`;
-				expect(columns.map((column) => column.name)).toContain(
-					"permission_mode",
-				);
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter((column) => column.name === "permission_mode"),
+				).toHaveLength(1);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(
 				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => seedLegacyEventStore(db, 8)),
-					),
+					makeFileSqlLayer((filename) => {
+						const db = new Database(filename);
+						try {
+							seedLegacyEventStore(db, 8);
+						} finally {
+							db.close();
+						}
+					}),
 				),
 			),
 	);
@@ -434,224 +321,401 @@ describe("Effect SQL migrations", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
-
 				const sql = yield* SqlClient.SqlClient;
-				const columns = yield* sql<{ name: string }>`
-					PRAGMA table_info(sessions)`;
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
 				expect(
 					columns.filter((column) => column.name === "permission_mode"),
 				).toHaveLength(1);
-				const history = yield* sql<{ migration_id: number; name: string }>`
-					SELECT migration_id, name
-					FROM effect_sql_migrations
-					ORDER BY migration_id`;
-				expect(history.at(-1)).toEqual({
-					migration_id: 19,
-					name: "sessions_forked_from",
-				});
+				const history = yield* sql<{ name: string }>`
+				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history.map((row) => row.name)).toEqual(expectedNames);
 			}).pipe(
 				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => {
+					makeFileSqlLayer((filename) => {
+						const db = new Database(filename);
+						try {
 							seedLegacyEventStore(db, 8);
-							db.prepare(
-								"ALTER TABLE sessions ADD COLUMN permission_mode TEXT",
-							).run();
-						}),
-					),
+							db.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT");
+						} finally {
+							db.close();
+						}
+					}),
 				),
 			),
 	);
 
 	it.effect(
-		"adds read_at once and backfills existing sessions as already read",
+		"backfills existing fork ordering once and retains unresolved legacy lineage",
 		() =>
 			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
-
+				yield* makeEffectSqlMigrator(prefix(21));
 				const sql = yield* SqlClient.SqlClient;
-				// The criterion is that upgrading does not invent a backlog, so assert on
-				// the derived flag the product actually shows rather than on read_at alone.
-				const rows = yield* sql<SessionRow>`SELECT * FROM sessions`;
-				expect(rows[0]?.read_at).toBe(ACTIVE_AT);
-				expect(sessionRowsToSessionInfoList([...rows])[0]).not.toHaveProperty(
-					"unread",
-				);
-
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+				VALUES ('parent', 'claude', 'Parent', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+				VALUES ('boundary', 'parent', 'assistant', 'answer', 1000, 1000)`;
+				yield* sql`INSERT INTO sessions
+				(id, provider, title, parent_id, fork_point_event, created_at, updated_at)
+				VALUES ('child', 'claude', 'Child', 'parent', 'boundary', 2000, 2000),
+				('legacy', 'claude', 'Legacy', 'parent', 'missing', 2000, 2000)`;
+				yield* makeEffectSqlMigrator();
+				yield* sql`DELETE FROM messages WHERE id = 'boundary'`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
-				const columns = yield* sql<{
-					name: string;
-				}>`PRAGMA table_info(sessions)`;
-				expect(
-					columns.filter((column) => column.name === "read_at"),
-				).toHaveLength(1);
-			}).pipe(
-				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => {
-							seedLegacyEventStore(db, 10);
-							expect(sessionColumns(db)).not.toContain("read_at");
-							// last_message_at matters: without activity a session is never
-							// unread, so a row that has none cannot tell a working backfill
-							// from a missing one.
-							db.prepare(
-								`INSERT INTO sessions (id, provider, title, status, last_message_at, created_at, updated_at)
-								 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-							).run(
-								"existing",
-								"opencode",
-								"Existing",
-								"idle",
-								ACTIVE_AT,
-								CREATED_AT,
-								ACTIVE_AT,
-							);
-						}),
-					),
-				),
-			),
-	);
-
-	it.effect(
-		"adds settled_at and pinned_at once without backfilling existing sessions",
-		() =>
-			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
-
-				const sql = yield* SqlClient.SqlClient;
-				const columns = yield* sql<{
-					name: string;
-				}>`PRAGMA table_info(sessions)`;
-				expect(
-					columns.filter(
-						(column) =>
-							column.name === "settled_at" || column.name === "pinned_at",
-					),
-				).toHaveLength(2);
 				const rows = yield* sql<{
-					settled_at: number | null;
-					pinned_at: number | null;
-					updated_at: number;
-				}>`
-					SELECT settled_at, pinned_at, updated_at FROM sessions WHERE id = 'existing'`;
-				expect(rows[0]).toEqual({
-					settled_at: null,
-					pinned_at: null,
-					updated_at: 2_000_000_000_000,
-				});
-				expect(yield* makeEffectSqlMigrator()).toEqual([]);
-			}).pipe(
-				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => {
-							seedLegacyEventStore(db, 13);
-							expect(sessionColumns(db)).not.toContain("settled_at");
-							db.prepare(
-								`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-								 VALUES (?, ?, ?, ?, ?, ?)`,
-							).run(
-								"existing",
-								"opencode",
-								"Existing",
-								"idle",
-								2_000_000_000_000,
-								2_000_000_000_000,
-							);
-						}),
-					),
-				),
-			),
+					id: string;
+					fork_point_timestamp: number | null;
+					fork_point_message_id: string | null;
+				}>`SELECT id, fork_point_timestamp, fork_point_message_id FROM sessions
+				WHERE parent_id IS NOT NULL ORDER BY id`;
+				expect(rows).toEqual([
+					{
+						id: "child",
+						fork_point_timestamp: 1000,
+						fork_point_message_id: "boundary",
+					},
+					{
+						id: "legacy",
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					},
+				]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it.effect("adds nullable snooze columns once without backfilling", () =>
+	it.effect(
+		"creates a fresh database with main behavior and feature stamps",
+		() =>
+			Effect.gen(function* () {
+				const applied = yield* makeEffectSqlMigrator();
+				expect(applied).toHaveLength(expectedNames.length);
+				const sql = yield* SqlClient.SqlClient;
+				const history = yield* sql<{ migration_id: number; name: string }>`
+				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history.map((row) => row.name)).toEqual(expectedNames);
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(columns.map((row) => row.name)).toEqual(
+					expect.arrayContaining([
+						"last_turn_error_at",
+						"settled_at",
+						"pinned_at",
+						"snoozed_at",
+						"auto_settle_disabled_at",
+						"version",
+						"fork_point_timestamp",
+						"fork_point_message_id",
+						"last_turn_end_version",
+						"seen_version",
+					]),
+				);
+				for (const retired of ["read_at", "marked_unread_at", "last_viewed_at"])
+					expect(columns.map((row) => row.name)).not.toContain(retired);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	for (const mainId of [17, 13, 2]) {
+		it.effect(
+			`upgrades a main Effect ${mainId} database and repeats as a no-op`,
+			() =>
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator(prefix(mainId));
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+					VALUES ('kept', 'opencode', 'Preserved', 1900000000000, 1900000000000)`;
+					const applied = yield* makeEffectSqlMigrator();
+					expect(applied).toHaveLength(expectedNames.length - mainId);
+					const history = yield* sql<{ migration_id: number; name: string }>`
+					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+					expect(history.map((row) => row.name)).toEqual(expectedNames);
+					const rows = yield* sql<{ title: string; version: number }>`
+					SELECT title, version FROM sessions WHERE id = 'kept'`;
+					expect(rows).toEqual([
+						{ title: "Preserved", version: expect.any(Number) },
+					]);
+					expect(yield* makeEffectSqlMigrator()).toEqual([]);
+				}).pipe(Effect.provide(makeFileSqlLayer())),
+		);
+	}
+
+	it.effect(
+		"reconciles a known feature name occupying a main-owned migration id",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(17));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
+				WHERE migration_id = 12`;
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(18);
+				const history = yield* sql<{ name: string }>`
+				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history.map((row) => row.name)).toEqual(expectedNames);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect("reconciles local-main id 18 and reruns 18 through 26 once", () =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
+			yield* makeEffectSqlMigrator(prefix(17));
 			const sql = yield* SqlClient.SqlClient;
+			yield* sql`ALTER TABLE sessions ADD COLUMN marked_unread_at INTEGER`;
+			yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
+				VALUES (18, 'sessions_marked_unread')`;
+			const before = yield* sql<{ name: string }>`SELECT name FROM sqlite_master
+				WHERE type = 'table' AND name = 'projection_failures'`;
+			expect(before).toEqual([]);
+			expect(yield* makeEffectSqlMigrator()).toEqual(
+				expectedNames.slice(17).map((name, index) => [index + 18, name]),
+			);
+			const tables = yield* sql<{ name: string }>`SELECT name FROM sqlite_master
+				WHERE type = 'table' AND name IN ('projection_failures', 'read_model_counter', 'sent_alerts')`;
+			expect(tables.map((row) => row.name).sort()).toEqual([
+				"projection_failures",
+				"read_model_counter",
+				"sent_alerts",
+			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
-			expect(columns.map((column) => column.name)).toEqual(
+			expect(columns.map((row) => row.name)).toEqual(
 				expect.arrayContaining([
+					"version",
+					"fork_point_timestamp",
+					"fork_point_message_id",
+					"last_turn_end_version",
+					"seen_version",
+				]),
+			);
+			const history = yield* sql<{
+				name: string;
+			}>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+			expect(history.map((row) => row.name)).toEqual(expectedNames);
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"migrates the live local-main ledger (18 sessions_marked_unread, 19 sessions_forked_from)",
+		() =>
+			Effect.gen(function* () {
+				// The shape recorded in the live store on 2026-09-28 (conduit-test-l4ek).
+				yield* makeEffectSqlMigrator(prefix(17));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`ALTER TABLE sessions ADD COLUMN marked_unread_at INTEGER`;
+				yield* sql`ALTER TABLE sessions ADD COLUMN forked_from TEXT`;
+				yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
+					VALUES (18, 'sessions_marked_unread'), (19, 'sessions_forked_from')`;
+				const liveColumns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(liveColumns.map((row) => row.name)).toEqual([
+					"id",
+					"provider",
+					"provider_sid",
+					"title",
+					"status",
+					"parent_id",
+					"fork_point_event",
+					"last_message_at",
+					"created_at",
+					"updated_at",
+					"permission_mode",
+					"read_at",
+					"last_turn_error_at",
+					"settled_at",
+					"pinned_at",
 					"snoozed_at",
 					"snoozed_until",
 					"woken_at",
 					"woken_reason",
-				]),
-			);
-			const rows = yield* sql<{
-				snoozed_at: number | null;
-				snoozed_until: number | null;
-				woken_at: number | null;
-				woken_reason: string | null;
-				updated_at: number;
-			}>`SELECT snoozed_at, snoozed_until, woken_at, woken_reason, updated_at FROM sessions WHERE id = 'existing'`;
-			expect(rows[0]).toEqual({
-				snoozed_at: null,
-				snoozed_until: null,
-				woken_at: null,
-				woken_reason: null,
-				updated_at: CREATED_AT,
-			});
-			expect(yield* makeEffectSqlMigrator()).toEqual([]);
-		}).pipe(
-			Effect.provide(
-				makeFileSqlLayer((filename) =>
-					seedDatabase(filename, (db) => {
-						seedLegacyEventStore(db, 13);
-						db.prepare(
-							`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-						).run(
-							"existing",
-							"opencode",
-							"Existing",
-							"idle",
-							CREATED_AT,
-							CREATED_AT,
-						);
-					}),
-				),
-			),
-		),
-	);
+					"unsettled_at",
+					"auto_settle_disabled_at",
+					"settled_automatically",
+					"marked_unread_at",
+					"forked_from",
+				]);
+				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at)
+					VALUES ('origin', 'claude', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, provider, forked_from, fork_point_event,
+					created_at, updated_at) VALUES
+					('fork', 'claude', 'origin', 'boundary', 1, 1),
+					('orphan-fork', 'claude', 'deleted', 'gone', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+					VALUES ('boundary', 'origin', 'assistant', 200, 200)`;
 
-	it.effect(
-		"adds last_turn_error_at once without backfilling historical failures",
-		() =>
-			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
-
-				const sql = yield* SqlClient.SqlClient;
-				const rows = yield* sql<SessionRow>`SELECT * FROM sessions`;
-				expect(rows[0]?.last_turn_error_at).toBeNull();
-				expect(sessionRowsToSessionInfoList([...rows])[0]?.attention).toBe(
-					"idle",
+				expect(yield* makeEffectSqlMigrator()).toEqual(
+					expectedNames.slice(17).map((name, index) => [index + 18, name]),
 				);
-
-				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+				const history = yield* sql<{ name: string }>`
+					SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history.map((row) => row.name)).toEqual(expectedNames);
 				const columns = yield* sql<{
 					name: string;
 				}>`PRAGMA table_info(sessions)`;
+				expect(columns.map((row) => row.name)).not.toContain("forked_from");
 				expect(
-					columns.filter((column) => column.name === "last_turn_error_at"),
-				).toHaveLength(1);
-			}).pipe(
-				Effect.provide(
-					makeFileSqlLayer((filename) =>
-						seedDatabase(filename, (db) => {
-							seedLegacyEventStore(db, 11);
-							expect(sessionColumns(db)).not.toContain("last_turn_error_at");
-							db.prepare(
-								`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-								 VALUES (?, ?, ?, ?, ?, ?)`,
-							).run(
-								"existing",
-								"opencode",
-								"Existing",
-								"idle",
-								CREATED_AT,
-								ACTIVE_AT,
-							);
-						}),
-					),
-				),
-			),
+					yield* sql`SELECT id, parent_id, fork_point_event, fork_point_timestamp,
+						fork_point_message_id FROM sessions ORDER BY id`,
+				).toEqual([
+					{
+						id: "fork",
+						parent_id: "origin",
+						fork_point_event: "boundary",
+						fork_point_timestamp: 200,
+						fork_point_message_id: "boundary",
+					},
+					{
+						id: "origin",
+						parent_id: null,
+						fork_point_event: null,
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					},
+					{
+						id: "orphan-fork",
+						parent_id: null,
+						fork_point_event: "gone",
+						fork_point_timestamp: null,
+						fork_point_message_id: null,
+					},
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect("appends only migrations 23 to 26 to a HEAD id-22 database", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(22));
+			const sql = yield* SqlClient.SqlClient;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[23, "sessions_marked_unread"],
+				[24, "session_attention"],
+				[25, "read_state_to_turn_ends"],
+				[26, "sessions_forked_from"],
+				[27, "messages_backfilled"],
+				[28, "sessions_history_complete"],
+				[29, "message_tombstones"],
+			]);
+			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
+			expect(columns.map((row) => row.name)).toContain("last_turn_end_version");
+			expect(columns.map((row) => row.name)).toContain("seen_version");
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"carries main's read state into turn-end positions (failure list 1-17)",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(24));
+				const sql = yield* SqlClient.SqlClient;
+				// id, parent, fork point, last_message_at, read_at, marked_unread_at, preset last/seen
+				const sessions = [
+					["a-no-turns", null, null, null, null, null, null, null],
+					["b-error-last-tied", null, null, 100, 100, null, null, null],
+					["c-interrupted-only", null, null, 50, null, null, null, null],
+					["d-interrupted-after", null, null, 20, 10, null, null, null],
+					["e-marked-and-read", null, null, 50, 100, 60, null, null],
+					["f-child", "b-error-last-tied", null, 50, null, null, null, null],
+					["g-fork", "b-error-last-tied", "evt", 50, null, null, null, null],
+					["h-already-seen", null, null, 50, null, null, 9, 9],
+				] as const;
+				for (const [
+					id,
+					parent,
+					fork,
+					lastMessage,
+					read,
+					marked,
+					last,
+					seen,
+				] of sessions)
+					yield* sql`INSERT INTO sessions (id, provider, parent_id, fork_point_event,
+						last_message_at, read_at, marked_unread_at, last_turn_end_version,
+						seen_version, created_at, updated_at)
+						VALUES (${id}, 'claude', ${parent}, ${fork}, ${lastMessage}, ${read},
+						${marked}, ${last}, ${seen}, 1, 1)`;
+				const events = [
+					["a-no-turns", 1, "message.created"],
+					["b-error-last-tied", 3, "turn.completed"],
+					["b-error-last-tied", 7, "turn.error"],
+					["c-interrupted-only", 4, "turn.interrupted"],
+					["d-interrupted-after", 2, "turn.completed"],
+					["d-interrupted-after", 5, "turn.interrupted"],
+					["e-marked-and-read", 3, "turn.completed"],
+					["f-child", 3, "turn.completed"],
+					["g-fork", 3, "turn.completed"],
+					["h-already-seen", 3, "turn.completed"],
+					["orphan", 1, "turn.completed"],
+				] as const;
+				for (const [sessionId, version, type] of events)
+					yield* sql`INSERT INTO events (event_id, session_id, stream_version, type,
+						data, provider, created_at)
+						VALUES (${`${sessionId}-${version}`}, ${sessionId}, ${version}, ${type},
+						'{}', 'claude', 1)`;
+
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[25, "read_state_to_turn_ends"],
+					[26, "sessions_forked_from"],
+					[27, "messages_backfilled"],
+					[28, "sessions_history_complete"],
+					[29, "message_tombstones"],
+				]);
+				const rows = yield* sql<{
+					id: string;
+					last_turn_end_version: number | null;
+					seen_version: number | null;
+					unread: number;
+				}>`SELECT id, last_turn_end_version, seen_version, unread
+					FROM sessions ORDER BY id`;
+				expect(
+					rows.map((row) => [
+						row.id,
+						row.last_turn_end_version,
+						row.seen_version,
+						row.unread,
+					]),
+				).toEqual([
+					["a-no-turns", null, null, 0],
+					["b-error-last-tied", 7, 7, 0],
+					["c-interrupted-only", null, -2, 1],
+					["d-interrupted-after", 2, 1, 1],
+					["e-marked-and-read", 3, 2, 1],
+					["f-child", 3, 2, 0],
+					["g-fork", 3, 2, 1],
+					["h-already-seen", 9, 9, 0],
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"refuses an unknown recorded name without deleting ledger rows",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(17));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO effect_sql_migrations (migration_id, name)
+				VALUES (18, 'foreign_future_migration')`;
+				const result = yield* Effect.either(makeEffectSqlMigrator());
+				expect(Either.isLeft(result)).toBe(true);
+				if (Either.isLeft(result))
+					expect(result.left.message).toContain("foreign_future_migration");
+				const history = yield* sql<{ migration_id: number; name: string }>`
+				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(history).toEqual([
+					...expectedNames
+						.slice(0, 17)
+						.map((name, index) => ({ migration_id: index + 1, name })),
+					{ migration_id: 18, name: "foreign_future_migration" },
+				]);
+				const tables = yield* sql<{
+					name: string;
+				}>`SELECT name FROM sqlite_master
+				WHERE type = 'table' AND name = 'projection_failures'`;
+				expect(tables).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 });

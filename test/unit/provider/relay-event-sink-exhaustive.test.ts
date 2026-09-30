@@ -25,11 +25,15 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.status",
 		"session.compaction",
 		"message.created",
+		"message.removed",
+		"message.part.removed",
+		"message.snapshot",
 		"session.created",
 		"session.renamed",
 		"session.deleted",
 		"session.forked",
 		"session.provider_changed",
+		"session.provider_cleanup_failed",
 		"session.permission_mode_changed",
 		"session.read",
 		"session.unread",
@@ -63,6 +67,27 @@ describe("domain-event relay translation exhaustiveness", () => {
 		expect(result).toEqual({
 			kind: "silent",
 			reason: "persistence/ws-rpc-only event",
+		});
+	});
+
+	it("keeps provider cleanup failure receipts persistence-only", () => {
+		const result = translateDomainEventToRelay(
+			canonicalEvent(
+				"session.provider_cleanup_failed",
+				"session-1",
+				{
+					sessionId: "session-1",
+					provider: "opencode",
+					instanceId: "work-oc",
+					reason: "provider_delete: unavailable",
+				},
+				{ provider: "opencode" },
+			),
+		);
+
+		expect(result).toEqual({
+			kind: "silent",
+			reason: "persistence-only event; no UI surface in relay",
 		});
 	});
 

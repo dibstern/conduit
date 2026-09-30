@@ -8,7 +8,7 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { choosePermissionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -48,17 +48,14 @@
 	 *  no-op, with no way back to it short of picking another mode first. The
 	 *  RPC is idempotent, so asserting costs nothing and removes the trap. */
 	function selectMode(mode: SessionPermissionMode) {
-		const previousMode = discoveryState.permissionMode;
-		discoveryState.permissionMode = mode;
+		const undoMode = choosePermissionMode(mode);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
 			discoveryState.pendingPermissionMode = null;
 			void switchPermissionModeRpc({ projectSlug, sessionId, mode }).catch(
 				(error: unknown) => {
-					if (discoveryState.permissionMode === mode) {
-						discoveryState.permissionMode = previousMode;
-					}
+					undoMode();
 					// Without this the pill silently snaps back, which reads as a
 					// frontend bug. Show the server's reason rather than guessing:
 					// a stale daemon already gets its own banner (ws-dispatch).
@@ -72,8 +69,7 @@
 				},
 			);
 		} else {
-			// No session bound yet (e.g. cold start before session_switched):
-			// remember the choice; handleSessionSwitched flushes it on bind.
+			// No session bound yet: remember the choice until the tab selects one.
 			discoveryState.pendingPermissionMode = mode;
 		}
 	}

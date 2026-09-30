@@ -1,10 +1,18 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import {
-	SessionAttentionSchema,
 	SessionGitSchema,
+	type SessionInfo,
+	SessionInfoSchema,
 	SessionPermissionModeSchema,
+	SessionStatusSchema,
 } from "../shared-types.js";
+
+// The single session type (ni8.5 T-1) is declared once, in shared-types, and
+// re-exported here so contract consumers never reach past the contract module.
+export { SessionInfoSchema, SessionStatusSchema };
+export type { SessionInfo };
+
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,
@@ -12,8 +20,31 @@ import {
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
+import { StoredEventSchema } from "./stored-event.js";
 
 const NonEmptyString = Schema.NonEmptyString;
+
+export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
+	Schema.Union(
+		Schema.Struct({
+			_tag: Schema.Literal("snapshot"),
+			rows: Schema.Array(itemSchema),
+			sequence: Schema.Number,
+			hasMore: Schema.optional(Schema.Boolean),
+			cursor: Schema.optional(NonEmptyString),
+		}),
+		Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+		Schema.Struct({
+			_tag: Schema.Literal("upsert"),
+			item: itemSchema,
+			sequence: Schema.Number,
+		}),
+		Schema.Struct({
+			_tag: Schema.Literal("remove"),
+			id: Schema.String,
+			sequence: Schema.Number,
+		}),
+	);
 
 export const ContextWindowOptionSchema = Schema.Struct({
 	value: Schema.String,
@@ -181,9 +212,11 @@ const HistoryMessagePartSchema = Schema.Struct({
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );
 
-const HistoryMessageSchema = Schema.Struct({
+export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
+	isBackfilled: Schema.optional(Schema.Boolean),
+	text: Schema.optional(Schema.String),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
 	time: Schema.optional(
 		Schema.Struct({
@@ -199,6 +232,38 @@ const HistoryMessageSchema = Schema.Struct({
 }).pipe(
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );
+
+export const SessionDetailItemSchema = Schema.Union(
+	Schema.Struct({
+		_tag: Schema.Literal("transcriptMessage"),
+		message: HistoryMessageSchema,
+	}),
+	Schema.Struct({
+		_tag: Schema.Literal("event"),
+		event: StoredEventSchema,
+	}),
+);
+
+// Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
+const TextSuffixSchema = Schema.Struct({
+	partId: Schema.optional(Schema.String),
+	from: Schema.NonNegativeInt,
+	total: Schema.NonNegativeInt,
+});
+const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
+export const SessionDetailEnvelopeSchema = Schema.Union(
+	DetailEnvelope.members[0],
+	DetailEnvelope.members[1],
+	DetailEnvelope.members[2].pipe(
+		Schema.extend(
+			Schema.Struct({
+				textSuffixes: Schema.optional(Schema.Array(TextSuffixSchema)),
+			}),
+		),
+	),
+	DetailEnvelope.members[3],
+);
+export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -292,35 +357,6 @@ export const RpcLogLevelSchema = Schema.Literal(
 	"error",
 );
 
-export const SessionInfoSchema = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-	projectSlug: Schema.optional(Schema.String),
-	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
-	messageCount: Schema.optional(Schema.Number),
-	processing: Schema.optional(Schema.Boolean),
-	parentID: Schema.optional(Schema.String),
-	forkedFrom: Schema.optional(Schema.String),
-	forkMessageId: Schema.optional(Schema.String),
-	forkPointTimestamp: Schema.optional(Schema.Number),
-	pendingQuestionCount: Schema.optional(Schema.Number),
-	pendingPermissionCount: Schema.optional(Schema.Number),
-	attention: Schema.optional(SessionAttentionSchema),
-	unread: Schema.optional(Schema.Boolean),
-	settledAt: Schema.optional(Schema.Number),
-	settledAutomatically: Schema.optional(Schema.Boolean),
-	autoSettleDisabled: Schema.optional(Schema.Boolean),
-	pinnedAt: Schema.optional(Schema.Number),
-	snoozedAt: Schema.optional(Schema.Number),
-	git: Schema.optional(SessionGitSchema),
-	snoozedUntil: Schema.optional(Schema.Number),
-	wokenAt: Schema.optional(Schema.Number),
-	wokeBecause: Schema.optional(
-		Schema.Literal("time", "approval", "question", "error", "turn"),
-	),
-});
-
 export const ProjectSessionAvailabilitySchema = Schema.Union(
 	Schema.Struct({
 		projectSlug: Schema.String,
@@ -346,15 +382,18 @@ export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
 });
 
-export const ListSessionsResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
-	sessions: Schema.Array(SessionInfoSchema),
-	roots: Schema.Boolean,
-	search: Schema.optional(Schema.Boolean),
-});
-
 export const CreateSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	sessionId: Schema.String,
+});
+
+export const ViewSessionResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	draft: Schema.optional(Schema.String),
+});
+
+export const SendMessageResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
 	sessionId: Schema.String,
 });
 
@@ -363,7 +402,6 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	sessionId: Schema.String,
 	messages: Schema.Array(HistoryMessageSchema),
 	hasMore: Schema.Boolean,
-	total: Schema.optional(Schema.Number),
 });
 
 export const ForkSessionResponseSchema = Schema.Struct({
@@ -506,13 +544,13 @@ export type ReloadProviderSessionResponse =
 export type SwitchVariantResponse = typeof SwitchVariantResponseSchema.Type;
 export type SwitchPermissionModeResponse =
 	typeof SwitchPermissionModeResponseSchema.Type;
-export type SessionInfo = typeof SessionInfoSchema.Type;
 export type ProjectSessionAvailability =
 	typeof ProjectSessionAvailabilitySchema.Type;
 export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
-export type ListSessionsResponse = typeof ListSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
+export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
+export type SendMessageResponse = typeof SendMessageResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
@@ -955,6 +993,25 @@ export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()
 	},
 ) {}
 
+/**
+ * `session.mark_seen`: the user picked the session in the sidebar, having seen
+ * it up to stream version `upTo`. The server caps `upTo` at the latest turn
+ * end, so a report can never mark a turn that has not happened yet as seen.
+ */
+export class MarkSessionSeen extends Schema.TaggedRequest<MarkSessionSeen>()(
+	"MarkSessionSeen",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			upTo: Schema.NonNegativeInt,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class MarkSessionRead extends Schema.TaggedRequest<MarkSessionRead>()(
 	"MarkSessionRead",
 	{
@@ -1134,19 +1191,6 @@ export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	},
 }) {}
 
-export class ListSessions extends Schema.TaggedRequest<ListSessions>()(
-	"ListSessions",
-	{
-		failure: WsRpcError,
-		success: ListSessionsResponseSchema,
-		payload: {
-			projectSlug: NonEmptyString,
-			roots: Schema.optional(Schema.Boolean),
-			query: Schema.optional(Schema.String),
-		},
-	},
-) {}
-
 export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>()(
 	"ListDaemonSessions",
 	{
@@ -1172,7 +1216,6 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			projectSlug: NonEmptyString,
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
-			requestId: Schema.optional(NonEmptyString),
 			instanceId: Schema.optional(
 				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
 			),
@@ -1185,12 +1228,11 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 	"ViewSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: ViewSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
-			skipMarkRead: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}
@@ -1289,16 +1331,24 @@ export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
-			offset: Schema.Number,
+			before: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
+
+export const RewindSessionResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	sessionId: NonEmptyString,
+	messageId: NonEmptyString,
+});
+
+export type RewindSessionResponse = typeof RewindSessionResponseSchema.Type;
 
 export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 	"RewindSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: RewindSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
@@ -1311,7 +1361,7 @@ export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
 	"SendMessage",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: SendMessageResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
@@ -1395,6 +1445,7 @@ export const WsRpcRequest = Schema.Union(
 	RenameSession,
 	MarkSessionUnread,
 	MarkSessionRead,
+	MarkSessionSeen,
 	SetSessionSettled,
 	SetSessionPinned,
 	SetSessionAutoSettle,
@@ -1427,7 +1478,6 @@ export const WsRpcRequest = Schema.Union(
 	ResizePty,
 	ClosePty,
 	ListDaemonSessions,
-	ListSessions,
 	CreateSession,
 	ViewSession,
 	DeleteSession,
@@ -1445,7 +1495,32 @@ export const WsRpcRequest = Schema.Union(
 
 export type WsRpcRequest = typeof WsRpcRequest.Type;
 
+export const SubscribeShell = Rpc.make("SubscribeShell", {
+	payload: {
+		projectSlug: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(SessionInfoSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
+export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
+	payload: {
+		projectSlug: NonEmptyString,
+		sessionId: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+		// Only clients that decode textSuffixes may opt into compressed live rows.
+		textSuffixes: Schema.optional(Schema.Boolean),
+	},
+	success: SessionDetailEnvelopeSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+	SubscribeShell,
+	SubscribeSessionDetail,
 	Rpc.fromTaggedRequest(AttachProject),
 	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetAgents),
@@ -1466,6 +1541,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(MarkSessionRead),
+	Rpc.fromTaggedRequest(MarkSessionSeen),
 	Rpc.fromTaggedRequest(SetSessionSettled),
 	Rpc.fromTaggedRequest(SetSessionPinned),
 	Rpc.fromTaggedRequest(SetSessionAutoSettle),
@@ -1498,7 +1574,6 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResizePty),
 	Rpc.fromTaggedRequest(ClosePty),
 	Rpc.fromTaggedRequest(ListDaemonSessions),
-	Rpc.fromTaggedRequest(ListSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
 	Rpc.fromTaggedRequest(DeleteSession),

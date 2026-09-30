@@ -44,6 +44,19 @@ function tool(
 // ─── Timestamp-based splitting ──────────────────────────────────────────────
 
 describe("splitAtForkPoint — timestamp-based", () => {
+	it("uses message IDs to break timestamp ties even when the boundary is paginated out", () => {
+		const before = assistant("before", { messageId: "a", createdAt: 1000 });
+		const after = user("after", { messageId: "z", createdAt: 1000 });
+		expect(splitAtForkPoint([before, after], "m", 1000)).toEqual({
+			inherited: [before],
+			current: [after],
+		});
+		const boundary = assistant("boundary", { messageId: "m", createdAt: 1000 });
+		expect(splitAtForkPoint([boundary, after], "m", 1000)).toEqual({
+			inherited: [boundary],
+			current: [after],
+		});
+	});
 	it("splits by timestamp: inherited < forkPointTimestamp, current >= forkPointTimestamp", () => {
 		const messages: ChatMessage[] = [
 			user("u1", { createdAt: 1000 }),

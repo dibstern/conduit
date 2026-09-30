@@ -10,10 +10,8 @@ import {
 	type SessionCreatedPayload,
 	type SessionPermissionModeChangedPayload,
 	type SessionProviderChangedPayload,
-	type SessionReadPayload,
 	type SessionRenamedPayload,
 	type SessionStatusPayload,
-	type SessionUnreadPayload,
 	type StoredEvent,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
@@ -51,18 +49,17 @@ interface SessionRow {
 	title: string;
 	status: string;
 	parent_id: string | null;
-	forked_from: string | null;
 	fork_point_event: string | null;
 	last_message_at: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
-	read_at: number | null;
 	settled_at: number | null;
 	pinned_at: number | null;
 	snoozed_at: number | null;
 	snoozed_until: number | null;
 	woken_at: number | null;
 	woken_reason: string | null;
+	version: number;
 	created_at: number;
 	updated_at: number;
 }
@@ -99,6 +96,42 @@ describe("SessionProjector", () => {
 	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("session");
 		expect(projector.handles).toBe(SESSION_HANDLED_TYPES);
+	});
+
+	describe("session.deleted", () => {
+		it("deletes the session row", async () => {
+			await project(
+				makeStored("session.created", "s1", {
+					sessionId: "s1",
+					title: "Doomed",
+					provider: "opencode",
+				}),
+			);
+			expect(
+				await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", [
+					"s1",
+				]),
+			).toBeDefined();
+			await project(
+				makeStored("session.deleted", "s1", { sessionId: "s1" }, 2),
+			);
+			expect(
+				await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = ?", [
+					"s1",
+				]),
+			).toBeUndefined();
+		});
+
+		it("is a no-op for an already-absent row", async () => {
+			await expect(
+				project(
+					makeStored("session.deleted", "missing", { sessionId: "missing" }),
+				),
+			).resolves.toBeUndefined();
+			expect(await harness.query<SessionRow>("SELECT * FROM sessions")).toEqual(
+				[],
+			);
+		});
 	});
 
 	describe("snooze projection", () => {
@@ -231,19 +264,26 @@ describe("SessionProjector", () => {
 				makeStored(
 					"session.created",
 					"child",
-					{
-						sessionId: "child",
-						title: "Child",
-						provider: "opencode",
-						parentId: "s1",
-					},
+					{ sessionId: "child", title: "Child", provider: "opencode" },
 					3,
 					now + 11,
 				),
 			);
 			await project(
+				makeStored(
+					"session.forked",
+					"child",
+					{ sessionId: "child", parentId: "s1" },
+					4,
+					now + 12,
+				),
+			);
+			await project(
 				makeStored("turn.completed", "child", { messageId: "m1" }, 5, now + 15),
 			);
+			const beforeVersion = (
+				await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'")
+			)?.version;
 			expect(
 				(await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'"))
 					?.woken_at,
@@ -264,6 +304,7 @@ describe("SessionProjector", () => {
 				now + 20,
 				"approval",
 			]);
+			expect(row?.version).toBeGreaterThan(beforeVersion ?? 0);
 		});
 
 		it("wakes an indefinite snooze", async () => {
@@ -390,44 +431,6 @@ describe("SessionProjector", () => {
 			expect(row?.title).toBe("Explore Agent Updated");
 			expect(row?.parent_id).toBe("parent-session");
 			expect(row?.provider_sid).toBe("sdk-subagent-1");
-		});
-	});
-
-	describe("session.forked", () => {
-		it.each([
-			false,
-			true,
-		])("records a top-level fork when session.created carried parentId: %s", async (legacyParent) => {
-			await project(
-				makeStored("session.created", "origin", {
-					sessionId: "origin",
-					title: "Origin",
-					provider: "claude",
-				}),
-			);
-			await project(
-				makeStored("session.created", "fork", {
-					sessionId: "fork",
-					title: "Fork",
-					provider: "claude",
-					...(legacyParent ? { parentId: "origin" } : {}),
-				}),
-			);
-			await project(
-				makeStored("session.forked", "fork", {
-					sessionId: "fork",
-					parentId: "origin",
-					forkPointEvent: "msg-1",
-				}),
-			);
-			const fork = await queryOne<SessionRow>(
-				"SELECT * FROM sessions WHERE id = 'fork'",
-			);
-			expect(fork).toMatchObject({
-				parent_id: null,
-				forked_from: "origin",
-				fork_point_event: "msg-1",
-			});
 		});
 	});
 
@@ -685,58 +688,6 @@ describe("SessionProjector", () => {
 		);
 		expect(afterClear?.[column]).toBeNull();
 		expect(afterClear?.updated_at).toBe(now);
-	});
-
-	describe("session read state", () => {
-		it("sets read_at from the event timestamp and clears it when unread", async () => {
-			await project(
-				makeStored(
-					"session.created",
-					"s1",
-					{
-						sessionId: "s1",
-						title: "Test",
-						provider: "opencode",
-					} satisfies SessionCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"session.read",
-					"s1",
-					{ sessionId: "s1" } satisfies SessionReadPayload,
-					2,
-					now + 100,
-				),
-			);
-			const afterRead = await queryOne<SessionRow>(
-				"SELECT * FROM sessions WHERE id = ?",
-				["s1"],
-			);
-			expect(afterRead?.read_at).toBe(now + 100);
-			// updated_at is the session list's sort key, so merely reading a session
-			// must not jump it to the top of the list.
-			expect(afterRead?.updated_at).toBe(now);
-
-			await project(
-				makeStored(
-					"session.unread",
-					"s1",
-					{ sessionId: "s1" } satisfies SessionUnreadPayload,
-					3,
-					now + 200,
-				),
-			);
-			const afterUnread = await queryOne<SessionRow>(
-				"SELECT * FROM sessions WHERE id = ?",
-				["s1"],
-			);
-			expect(afterUnread?.read_at).toBeNull();
-			expect(afterUnread?.updated_at).toBe(now);
-		});
 	});
 
 	describe("turn.completed", () => {

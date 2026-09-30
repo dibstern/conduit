@@ -20,6 +20,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 				{
 					id: "session-1",
 					title: "Session one",
+					status: "idle" as const,
 					updatedAt: 42,
 					projectSlug: "project-b",
 				},
@@ -59,6 +60,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 					{
 						id: "session-1",
 						title: "Session one",
+						status: "idle" as const,
 						updatedAt: 42,
 						projectSlug: "project-b",
 					},

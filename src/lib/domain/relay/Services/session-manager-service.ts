@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import {
+	PendingSendOwnershipLive,
+	PendingSendOwnershipTag,
+} from "./pending-send-ownership.js";
 // ─── SessionManager Service (Effect) ────────────────────────────────────────
 // Pure Effect functions that replace the imperative SessionManager methods.
 // State lives in SessionManagerStateTag (Ref<SessionManagerState>);
@@ -10,9 +14,12 @@ import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js"
 // SessionManagerServiceTag bundles them for callers that prefer a service object.
 
 import {
+	Cause,
 	Context,
 	Data,
+	Deferred,
 	Effect,
+	Exit,
 	HashMap,
 	Layer,
 	Option,
@@ -28,27 +35,24 @@ import {
 import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
+	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
-import {
-	type ForkEntry,
-	loadForkMetadata,
-	saveForkMetadata,
-} from "../../../daemon/fork-metadata.js";
-import { OpenCodeApiError } from "../../../errors.js";
+import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
+import { daemonSessionGitCache } from "../../../git/session-git.js";
 import type {
 	SessionDetail,
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import {
+	pendingApprovalCountsByType,
+	ReadQueryEffectTag,
+	sessionRowsToSessionInfoList,
+} from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import {
-	type PendingApprovalCounts,
-	pendingApprovalCountsByType,
-	sessionRowsToSessionInfoList,
-} from "../../../persistence/session-list-adapter.js";
 import { toSessionInfoList } from "../../../session/session-info-list.js";
 import {
 	type HistoryMessage,
@@ -71,10 +75,14 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "./services.js";
+import { markSeen, markUnread } from "./session-attention.js";
 import {
 	applySessionCommand,
 	createOpenCodeSession,
 	normalizeSessionTitle,
+	openCodeUpstreamAdapter,
+	type SessionCommand,
+	type SessionUpstreamAdapter,
 } from "./session-command.js";
 import { SessionManagerStateTag } from "./session-manager-state.js";
 import {
@@ -92,6 +100,39 @@ const DEFAULT_HISTORY_PAGE_SIZE = 50;
 const CURSOR_SCAN_LIMIT = 10_000;
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
+// The delete handler's broadcasts wait for this Effect, so provider cleanup
+// must not delay the already-committed local deletion indefinitely.
+const PROVIDER_CLEANUP_TIMEOUT = "2 seconds";
+// Provider response bodies are untrusted; bound both durable receipts and the
+// matching warning so one cleanup failure cannot create oversized diagnostics.
+const PROVIDER_CLEANUP_DETAIL_MAX_LENGTH = 2_000;
+const PROVIDER_CLEANUP_REASON_MAX_LENGTH = 4_000;
+const PROVIDER_CLEANUP_TRUNCATION_MARKER = "... [truncated]";
+const PROVIDER_CLEANUP_DETAIL_FALLBACK = "cleanup error detail unavailable";
+
+function truncateProviderCleanupDiagnostic(
+	detail: string,
+	maximumLength: number,
+): string {
+	if (detail.length <= maximumLength) {
+		return detail;
+	}
+	return `${detail.slice(
+		0,
+		maximumLength - PROVIDER_CLEANUP_TRUNCATION_MARKER.length,
+	)}${PROVIDER_CLEANUP_TRUNCATION_MARKER}`;
+}
+
+function renderProviderCleanupDetail(error: unknown): string {
+	try {
+		return truncateProviderCleanupDiagnostic(
+			formatErrorDetail(error),
+			PROVIDER_CLEANUP_DETAIL_MAX_LENGTH,
+		);
+	} catch {
+		return PROVIDER_CLEANUP_DETAIL_FALLBACK;
+	}
+}
 
 // ─── Error types ───────────────────────────────────────────────────────────
 
@@ -109,11 +150,15 @@ export type ListSessionsOptions = {
 	hasLiveBackgroundWork?: (sessionId: string) => boolean;
 };
 
-type SessionListMessage = Extract<RelayMessage, { type: "session_list" }>;
-
 export interface CreateSessionOptions {
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+}
+
+interface ForkEntry {
+	readonly parentID: string;
+	readonly forkMessageId: string;
+	readonly forkPointTimestamp?: number;
 }
 
 export interface HistoryPage {
@@ -151,35 +196,13 @@ const sessionDetailsParentMap = (
 ): HashMap.HashMap<string, string> => {
 	let parentMap = HashMap.empty<string, string>();
 	for (const session of sessions) {
-		const rec = session as Record<string, unknown>;
-		const apiParentID = rec["parentID"];
-		const parentID = typeof apiParentID === "string" ? apiParentID : undefined;
+		const parentID = session.parentID;
 		if (parentID) {
 			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
 	}
 	return parentMap;
 };
-
-const sessionRowsToInfo = (
-	rows: readonly SessionRow[],
-	options: ListSessionsOptions | undefined,
-	state: {
-		forkMeta: HashMap.HashMap<string, ForkEntry>;
-	},
-	pending: PendingApprovalCounts,
-	parentMap?: ReadonlyMap<string, string>,
-): SessionInfo[] =>
-	sessionRowsToSessionInfoList(Array.from(rows), {
-		...(options?.statuses !== undefined ? { statuses: options.statuses } : {}),
-		forkMeta: toReadonlyMap(state.forkMeta),
-		...(parentMap ? { parentMap } : {}),
-		pendingQuestionCounts: pending.questions,
-		pendingPermissionCounts: pending.permissions,
-		...(options?.hasLiveBackgroundWork && {
-			hasLiveBackgroundWork: options.hasLiveBackgroundWork,
-		}),
-	});
 
 const updateRelaySessionCountSnapshot = (sessionCount: number) =>
 	Effect.serviceOption(RelayStatusSnapshotTag).pipe(
@@ -219,50 +242,34 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		const stateRef = yield* SessionManagerStateTag;
 		const readQueryEffectOption =
 			yield* Effect.serviceOption(ReadQueryEffectTag);
-		const sqOpts =
-			options?.roots !== undefined ? { roots: options.roots } : undefined;
 		const state = yield* Ref.get(stateRef);
 
 		if (readQueryEffectOption._tag === "Some") {
-			const [rows, pendingApprovals, lineage, projectedStatuses] =
-				yield* Effect.all([
-					readQueryEffectOption.value.listSessions(sqOpts),
-					readQueryEffectOption.value.countPendingApprovalsBySession(),
-					readQueryEffectOption.value.getSessionLineage(),
-					readQueryEffectOption.value.getAllSessionStatuses(),
-				]).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionManagerError({ operation: "listSessions", cause }),
-					),
-				);
-			const parentMap = sessionRowsParentMap(lineage.rows);
-			yield* Ref.update(stateRef, (s) => ({
-				...s,
-				cachedParentMap: parentMap,
+			const [sessions, lineage] = yield* Effect.all([
+				readQueryEffectOption.value.listSessionInfos({
+					...(options?.roots !== undefined ? { roots: options.roots } : {}),
+					...(options?.limit !== undefined ? { limit: options.limit } : {}),
+					...(options?.statuses !== undefined
+						? { statuses: options.statuses }
+						: {}),
+					...(options?.hasLiveBackgroundWork && {
+						hasLiveBackgroundWork: options.hasLiveBackgroundWork,
+					}),
+				}),
+				readQueryEffectOption.value.getSessionLineage(),
+			]).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "listSessions", cause }),
+				),
+			);
+			yield* Ref.update(stateRef, (current) => ({
+				...current,
+				cachedParentMap: sessionRowsParentMap(lineage.rows),
 				lastKnownSessionCount: lineage.count,
 			}));
 			yield* updateRelaySessionCountSnapshot(lineage.count);
-			// The durable table wins outright here, with no fallback to the relay's
-			// in-memory map. The map is only correct for a relay that saw the events
-			// live, and a permission decision decrements it even though only a
-			// question increments it, so falling back would reintroduce the skew the
-			// projection exists to avoid.
-			const statuses: Record<string, SessionStatus> = {};
-			for (const [id, status] of Object.entries(projectedStatuses)) {
-				statuses[id] =
-					status === "busy" || status === "retry"
-						? { type: "busy" }
-						: { type: "idle" };
-			}
-			Object.assign(statuses, options?.statuses);
-			return sessionRowsToInfo(
-				rows,
-				{ ...options, statuses },
-				state,
-				pendingApprovalCountsByType(pendingApprovals),
-				toReadonlyMap(parentMap),
-			);
+			return [...sessions];
 		}
 
 		const clientOptions = {
@@ -297,8 +304,6 @@ export const listSessions = (options?: ListSessionsOptions) =>
 			sessions,
 			options?.statuses,
 			toReadonlyMap(state.lastMessageAt),
-			toReadonlyMap(state.forkMeta),
-			toReadonlyMap(state.pendingQuestionCounts),
 		);
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
@@ -489,45 +494,313 @@ const createLocalSession = (
 /** Delete a session locally, then best-effort upstream, and clear associated state. */
 export const deleteSession = (sessionId: string) =>
 	Effect.gen(function* () {
+		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
+		const logOption = yield* Effect.serviceOption(LoggerTag);
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const instanceClientsOption = yield* Effect.serviceOption(
+			OpenCodeInstanceClientsTag,
+		);
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const configOption = yield* Effect.serviceOption(ConfigTag);
 
-		yield* applySessionCommand({
-			type: "session.deleted",
-			data: { sessionId },
-		}).pipe(
+		const sessions =
+			readQueryOption._tag === "Some"
+				? (yield* readQueryOption.value.readSessionList().pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "deleteSession.snapshot",
+									cause,
+								}),
+						),
+					)).rows.map(({ item }) => item)
+				: [];
+		// The provider that owns the session is row-only state, never on the wire.
+		const row =
+			readQueryOption._tag === "Some"
+				? yield* readQueryOption.value.getSession(sessionId).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionManagerError({
+									operation: "deleteSession.row",
+									cause,
+								}),
+						),
+					)
+				: undefined;
+		const childSessionIds: string[] = [];
+		const discovered = new Set([sessionId]);
+		const pendingParents = [sessionId];
+		for (const parentId of pendingParents) {
+			for (const candidate of sessions) {
+				if (candidate.parentID === parentId && !discovered.has(candidate.id)) {
+					discovered.add(candidate.id);
+					childSessionIds.push(candidate.id);
+					pendingParents.push(candidate.id);
+				}
+			}
+		}
+
+		const bindingExit =
+			engineOption._tag === "Some"
+				? yield* Effect.exit(
+						engineOption.value.getProviderForSessionEffect(sessionId),
+					)
+				: undefined;
+
+		const cleanupFailures: string[] = [];
+		const capturedBinding =
+			bindingExit !== undefined && Exit.isSuccess(bindingExit)
+				? bindingExit.value
+				: undefined;
+		if (bindingExit !== undefined && Exit.isFailure(bindingExit)) {
+			cleanupFailures.push(
+				`binding_resolution: ${renderProviderCleanupDetail(
+					Cause.squash(bindingExit.cause),
+				)}`,
+			);
+		}
+
+		const capturedIdentity = capturedBinding ?? row?.provider;
+		const capturedInstanceId =
+			capturedIdentity === CLAUDE_SDK_PROVIDER_ID
+				? CLAUDE_PROVIDER_ID
+				: capturedIdentity;
+		const providerResolutionExit =
+			capturedInstanceId === undefined
+				? undefined
+				: yield* Effect.exit(
+						Effect.sync(() => {
+							if (isKnownDriverKind(capturedInstanceId)) {
+								return capturedInstanceId;
+							}
+							return resolveProviderRoutingDriver(
+								configOption._tag === "Some"
+									? loadDaemonConfig(configOption.value.configDir)
+									: null,
+								capturedInstanceId,
+							);
+						}),
+					);
+		const provider =
+			providerResolutionExit !== undefined &&
+			Exit.isSuccess(providerResolutionExit)
+				? providerResolutionExit.value
+				: undefined;
+		if (
+			providerResolutionExit !== undefined &&
+			Exit.isFailure(providerResolutionExit)
+		) {
+			cleanupFailures.push(
+				`provider_resolution: ${renderProviderCleanupDetail(
+					Cause.squash(providerResolutionExit.cause),
+				)}`,
+			);
+		} else if (capturedInstanceId !== undefined && provider === undefined) {
+			cleanupFailures.push(
+				`provider_resolution: provider driver is unavailable for "${capturedInstanceId}"`,
+			);
+		}
+		if (capturedInstanceId === undefined || provider === undefined) {
+			cleanupFailures.push(
+				"provider_route: no provider route could be determined, so cleanup was skipped",
+			);
+		}
+
+		const providerCleanup = (command: SessionCommand) =>
+			Effect.gen(function* () {
+				if (capturedInstanceId === undefined || provider === undefined) {
+					return;
+				}
+
+				if (engineOption._tag === "None") {
+					cleanupFailures.push(
+						"end_session: orchestration engine is unavailable",
+					);
+				} else {
+					const engine = engineOption.value;
+					const endSessionExit = yield* Effect.exit(
+						Effect.suspend(() =>
+							engine.dispatchEffect({
+								type: "end_session",
+								commandId: randomUUID(),
+								sessionId,
+								targetProviderId: capturedInstanceId,
+								unbind: true,
+							}),
+						),
+					);
+					if (Exit.isFailure(endSessionExit)) {
+						if (Exit.isInterrupted(endSessionExit)) {
+							return yield* Effect.failCause(endSessionExit.cause);
+						}
+						cleanupFailures.push(
+							`end_session: ${renderProviderCleanupDetail(
+								Cause.squash(endSessionExit.cause),
+							)}`,
+						);
+					}
+				}
+
+				if (provider === "opencode") {
+					const providerDeleteExit = yield* Effect.exit(
+						Effect.gen(function* () {
+							let deleteApi = api;
+							if (capturedInstanceId !== "opencode") {
+								if (instanceClientsOption._tag === "None") {
+									return yield* Effect.fail(
+										new Error(
+											`OpenCode instance client registry is unavailable for "${capturedInstanceId}"`,
+										),
+									);
+								}
+								const resolved =
+									yield* instanceClientsOption.value.clientFor(
+										capturedInstanceId,
+									);
+								if (resolved === undefined) {
+									return yield* Effect.fail(
+										new Error(
+											`OpenCode instance client "${capturedInstanceId}" was not resolved`,
+										),
+									);
+								}
+								deleteApi = resolved;
+							}
+
+							yield* openCodeUpstreamAdapter(deleteApi).sync(command);
+						}),
+					);
+					if (Exit.isFailure(providerDeleteExit)) {
+						if (Exit.isInterrupted(providerDeleteExit)) {
+							return yield* Effect.failCause(providerDeleteExit.cause);
+						}
+						cleanupFailures.push(
+							`provider_delete: ${renderProviderCleanupDetail(
+								Cause.squash(providerDeleteExit.cause),
+							)}`,
+						);
+					}
+				}
+			});
+
+		const upstreamAdapter: SessionUpstreamAdapter = {
+			provider: provider === CLAUDE_PROVIDER_ID ? "claude" : "opencode",
+			sync: (command) =>
+				Effect.gen(function* () {
+					const cleanupExit = yield* Effect.exit(
+						providerCleanup(command).pipe(
+							Effect.timeout(PROVIDER_CLEANUP_TIMEOUT),
+						),
+					);
+					if (Exit.isFailure(cleanupExit)) {
+						const failure = Cause.failureOption(cleanupExit.cause);
+						cleanupFailures.push(
+							Option.isSome(failure) && Cause.isTimeoutException(failure.value)
+								? "cleanup: timed out after 2s"
+								: `cleanup: ${renderProviderCleanupDetail(
+										Cause.squash(cleanupExit.cause),
+									)}`,
+						);
+					}
+				}),
+		};
+
+		yield* applySessionCommand(
+			{
+				type: "session.deleted",
+				data:
+					childSessionIds.length === 0
+						? { sessionId }
+						: { sessionId, childSessionIds },
+			},
+			{ upstreamAdapter },
+		).pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({ operation: "deleteSession", cause }),
 			),
 		);
 
-		yield* Ref.update(stateRef, (s) => {
-			let cachedParentMap = HashMap.remove(s.cachedParentMap, sessionId);
-			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
-			const forkMeta = HashMap.remove(s.forkMeta, sessionId);
-			const pendingQuestionCounts = HashMap.remove(
-				s.pendingQuestionCounts,
-				sessionId,
-			);
-			const paginationCursors = HashMap.remove(s.paginationCursors, sessionId);
+		const ownership = yield* PendingSendOwnershipTag;
+		ownership.deleteSession(sessionId);
+		for (const childSessionId of childSessionIds)
+			ownership.deleteSession(childSessionId);
 
-			// Also remove any entries where this session was a parent
-			cachedParentMap = HashMap.filter(
-				cachedParentMap,
-				(parent) => parent !== sessionId,
+		// The delete took the whole lineage, so the cache must forget the whole
+		// lineage: an edge naming a session that no longer exists would put a
+		// deleted grandchild back under a live root on the next list.
+		const deleted = new Set([sessionId, ...childSessionIds]);
+		yield* Ref.update(stateRef, (s) => {
+			const lastMessageAt = HashMap.remove(s.lastMessageAt, sessionId);
+
+			const cachedParentMap = HashMap.filter(
+				s.cachedParentMap,
+				(parent, child) => !deleted.has(parent) && !deleted.has(child),
 			);
 
 			return {
 				cachedParentMap,
 				lastMessageAt,
-				forkMeta,
-				pendingQuestionCounts,
-				paginationCursors,
 				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
 		});
 		const state = yield* Ref.get(stateRef);
 		yield* updateRelaySessionCountSnapshot(state.lastKnownSessionCount);
+
+		if (cleanupFailures.length > 0) {
+			const reason = truncateProviderCleanupDiagnostic(
+				cleanupFailures.join("; "),
+				PROVIDER_CLEANUP_REASON_MAX_LENGTH,
+			);
+			const payload = {
+				sessionId,
+				provider: provider ?? capturedInstanceId ?? "unknown",
+				...(provider !== undefined &&
+				capturedInstanceId !== undefined &&
+				capturedInstanceId !== provider
+					? { instanceId: capturedInstanceId }
+					: {}),
+				reason,
+			};
+			const receiptExit =
+				eventStoreOption._tag === "Some"
+					? yield* Effect.exit(
+							eventStoreOption.value
+								.append(
+									canonicalEvent(
+										"session.provider_cleanup_failed",
+										sessionId,
+										payload,
+										{ provider: payload.provider },
+									),
+								)
+								.pipe(Effect.asVoid),
+						)
+					: undefined;
+			const receiptFailure =
+				receiptExit !== undefined && Exit.isFailure(receiptExit)
+					? ` receipt_append_failed=${renderProviderCleanupDetail(
+							Cause.squash(receiptExit.cause),
+						)}`
+					: eventStoreOption._tag === "None"
+						? " receipt_append_failed=event store unavailable"
+						: "";
+
+			if (logOption._tag === "Some") {
+				yield* Effect.exit(
+					Effect.sync(() =>
+						logOption.value.warn(
+							`Provider cleanup failed: session=${sessionId} provider=${payload.provider}` +
+								`${payload.instanceId ? ` instanceId=${payload.instanceId}` : ""}` +
+								` reason=${reason}${receiptFailure}`,
+						),
+					),
+				);
+			}
+		}
 	}).pipe(
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.deleteSession", { attributes: { sessionId } }),
@@ -552,57 +825,32 @@ export const persistSessionPermissionMode = (
 			return yield* Effect.void;
 		}
 
-		const eventStore = eventStoreOption.value;
-		const projectionRunner = projectionRunnerOption.value;
-		const sql = sqlOption.value;
-
-		const withSql = <A, E>(
-			effect: Effect.Effect<A, E, SqlClient.SqlClient>,
-		): Effect.Effect<A, E> =>
-			effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-
-		const recovered = yield* projectionRunner.isRecovered();
-		if (!recovered) {
-			yield* withSql(projectionRunner.recover()).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "persistPermissionMode.recover",
-							cause,
-						}),
-				),
-				Effect.asVoid,
-			);
-		}
+		// Append and projection are one transaction inside the seam, so the two
+		// used to be separately labelled failures are now one: the whole write
+		// either lands and is announced, or neither happened.
+		const commitAndSignal = yield* makeCommitAndSignal.pipe(
+			Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+			Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+			Effect.provideService(
+				ProjectionRunnerEffectTag,
+				projectionRunnerOption.value,
+			),
+		);
 
 		const now = Date.now();
-		const stored = yield* eventStore
-			.append(
-				canonicalEvent(
-					"session.permission_mode_changed",
-					sessionId,
-					{ sessionId, mode },
-					{
-						createdAt: now,
-						metadata: { source: "relay" },
-					},
-				),
-			)
-			.pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "persistPermissionMode.append",
-							cause,
-						}),
-				),
-			);
-
-		yield* withSql(projectionRunner.projectEvent(stored)).pipe(
+		yield* commitAndSignal([
+			canonicalEvent(
+				"session.permission_mode_changed",
+				sessionId,
+				{ sessionId, mode },
+				{ createdAt: now, metadata: { source: "relay" } },
+			),
+		]).pipe(
+			// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({
-						operation: "persistPermissionMode.project",
+						operation: "persistPermissionMode.commit",
 						cause,
 					}),
 			),
@@ -683,31 +931,63 @@ export const renameSession = (sessionId: string, title: string) =>
 		Effect.withSpan("session.renameSession", { attributes: { sessionId } }),
 	);
 
-export const markSessionRead = (sessionId: string) =>
-	applySessionCommand({
-		type: "session.read",
-		data: { sessionId },
+/**
+ * Runs a SessionAttention write when the relay has a durable store, and is a
+ * no-op (nothing changed) when it does not, like every other session command.
+ */
+const withSessionAttention = (
+	operation: string,
+	sessionId: string,
+	write: Effect.Effect<
+		boolean,
+		unknown,
+		SqlClient.SqlClient | EventStoreEffectTag | ProjectionRunnerEffectTag
+	>,
+) =>
+	Effect.gen(function* () {
+		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projectionRunnerOption = yield* Effect.serviceOption(
+			ProjectionRunnerEffectTag,
+		);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (
+			eventStoreOption._tag === "None" ||
+			projectionRunnerOption._tag === "None" ||
+			sqlOption._tag === "None"
+		)
+			return false;
+		return yield* write.pipe(
+			Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+			Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
+			Effect.provideService(
+				ProjectionRunnerEffectTag,
+				projectionRunnerOption.value,
+			),
+		);
 	}).pipe(
-		Effect.mapError(
-			(cause) =>
-				new SessionManagerError({ operation: "markSessionRead", cause }),
-		),
+		Effect.mapError((cause) => new SessionManagerError({ operation, cause })),
 		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.markSessionRead", { attributes: { sessionId } }),
+		Effect.withSpan(`session.${operation}`, { attributes: { sessionId } }),
 	);
 
+export const markSessionSeen = (sessionId: string, upTo: number) =>
+	withSessionAttention("markSessionSeen", sessionId, markSeen(sessionId, upTo));
+
+// The context-menu commands. SessionAttention is the only writer of read
+// state; main's session.read/unread events are no longer appended (hk9m.7).
+export const markSessionRead = (sessionId: string) =>
+	withSessionAttention(
+		"markSessionRead",
+		sessionId,
+		markSeen(sessionId, Number.MAX_SAFE_INTEGER),
+	).pipe(Effect.asVoid);
+
 export const markSessionUnread = (sessionId: string) =>
-	applySessionCommand({
-		type: "session.unread",
-		data: { sessionId },
-	}).pipe(
-		Effect.mapError(
-			(cause) =>
-				new SessionManagerError({ operation: "markSessionUnread", cause }),
-		),
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.markSessionUnread", { attributes: { sessionId } }),
-	);
+	withSessionAttention(
+		"markSessionUnread",
+		sessionId,
+		markUnread(sessionId),
+	).pipe(Effect.asVoid);
 
 const readSessionForTriage = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -871,165 +1151,21 @@ export const unsnoozeSession = (sessionId: string) =>
 		Effect.withSpan("session.unsnoozeSession", { attributes: { sessionId } }),
 	);
 
-/**
- * Clear the stored pagination cursor for a session.
- */
-export const clearPaginationCursor = (sessionId: string) =>
-	Effect.gen(function* () {
-		const stateRef = yield* SessionManagerStateTag;
-		yield* Ref.update(stateRef, (s) => ({
-			...s,
-			paginationCursors: HashMap.remove(s.paginationCursors, sessionId),
-		}));
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.clearPaginationCursor", {
-			attributes: { sessionId },
-		}),
-	);
-
-/**
- * Seed a pagination cursor without overwriting a cursor already advanced by load-more.
- */
-export const seedPaginationCursor = (sessionId: string, messageId: string) =>
-	Effect.gen(function* () {
-		const stateRef = yield* SessionManagerStateTag;
-		yield* Ref.update(stateRef, (s) => {
-			if (HashMap.has(s.paginationCursors, sessionId)) {
-				return s;
-			}
-			return {
-				...s,
-				paginationCursors: HashMap.set(
-					s.paginationCursors,
-					sessionId,
-					messageId,
-				),
-			};
-		});
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.seedPaginationCursor", {
-			attributes: { sessionId },
-		}),
-	);
-
-const loadHistoryByCursorScan = (sessionId: string, cursorId: string) =>
+/** Load the newest REST page for initial OpenCode history while backfill runs. */
+export const loadHistory = (sessionId: string, options?: LoadHistoryOptions) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
-		const all = yield* Effect.tryPromise({
+		const historyPageSize =
+			options?.historyPageSize ?? DEFAULT_HISTORY_PAGE_SIZE;
+		const page = yield* Effect.tryPromise({
 			try: () =>
-				api.session.messagesPage(sessionId, { limit: CURSOR_SCAN_LIMIT }),
+				api.session.messagesPage(sessionId, { limit: historyPageSize }),
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({
-						operation: "loadHistoryByCursorScan",
-						cause,
-					}),
+				(cause) => new SessionManagerError({ operation: "loadHistory", cause }),
 			),
 		);
-
-		const cursorIdx = all.findIndex((message) => message.id === cursorId);
-		if (cursorIdx <= 0) {
-			return { messages: [], hasMore: false } satisfies HistoryPage;
-		}
-
-		return {
-			messages: all.slice(0, cursorIdx) as unknown as HistoryMessage[],
-			hasMore: false,
-		} satisfies HistoryPage;
-	});
-
-/**
- * Load one page of session history and maintain the service-owned pagination cursor.
- */
-export const loadHistory = (
-	sessionId: string,
-	offset = 0,
-	options?: LoadHistoryOptions,
-) =>
-	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
-		const stateRef = yield* SessionManagerStateTag;
-		const log = yield* LoggerTag;
-		const historyPageSize =
-			options?.historyPageSize ?? DEFAULT_HISTORY_PAGE_SIZE;
-		const state = yield* Ref.get(stateRef);
-		const cursorOption =
-			offset > 0 ? HashMap.get(state.paginationCursors, sessionId) : undefined;
-		const before =
-			cursorOption?._tag === "Some" ? cursorOption.value : undefined;
-
-		if (offset > 0 && !before) {
-			return { messages: [], hasMore: false } satisfies HistoryPage;
-		}
-
-		const fetchPage = (requestOptions: { limit: number; before?: string }) =>
-			Effect.tryPromise({
-				try: () => api.session.messagesPage(sessionId, requestOptions),
-				catch: (cause) => cause,
-			});
-
-		const page = yield* fetchPage({
-			limit: historyPageSize,
-			...(before ? { before } : {}),
-		}).pipe(
-			Effect.catchAll((cause) => {
-				if (
-					before &&
-					cause instanceof OpenCodeApiError &&
-					cause.responseStatus === 400
-				) {
-					return Effect.gen(function* () {
-						log.warn(
-							`Pagination cursor failed for ${sessionId.slice(0, 12)} — falling back to full fetch`,
-						);
-						yield* clearPaginationCursor(sessionId);
-
-						if (offset > 0) {
-							return yield* loadHistoryByCursorScan(sessionId, before);
-						}
-
-						const retryPage = yield* fetchPage({ limit: historyPageSize }).pipe(
-							Effect.mapError(
-								(retryCause) =>
-									new SessionManagerError({
-										operation: "loadHistory",
-										cause: retryCause,
-									}),
-							),
-						);
-						return {
-							messages: retryPage as unknown as HistoryMessage[],
-							hasMore: retryPage.length >= historyPageSize,
-						} satisfies HistoryPage;
-					});
-				}
-
-				return Effect.fail(
-					new SessionManagerError({ operation: "loadHistory", cause }),
-				);
-			}),
-		);
-
-		if ("messages" in page) {
-			return page;
-		}
-
-		const oldest = page[0];
-		if (oldest) {
-			yield* Ref.update(stateRef, (s) => ({
-				...s,
-				paginationCursors: HashMap.set(
-					s.paginationCursors,
-					sessionId,
-					oldest.id,
-				),
-			}));
-		}
-
 		return {
 			messages: page as unknown as HistoryMessage[],
 			hasMore: page.length >= historyPageSize,
@@ -1044,11 +1180,10 @@ export const loadHistory = (
  */
 export const loadPreRenderedHistory = (
 	sessionId: string,
-	offset?: number,
 	options?: LoadHistoryOptions,
 ) =>
 	Effect.gen(function* () {
-		const page = yield* loadHistory(sessionId, offset, options);
+		const page = yield* loadHistory(sessionId, options);
 		const renderer = yield* Effect.tryPromise(
 			() => import("../../../relay/markdown-renderer.js"),
 		).pipe(
@@ -1118,73 +1253,10 @@ export const getLastKnownSessionCount = () =>
 		return state.lastKnownSessionCount;
 	}).pipe(Effect.withSpan("session.getLastKnownSessionCount"));
 
-/** Increment pending question count for a session. */
-export const incrementPendingQuestionCount = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => {
-			const current = Option.getOrElse(
-				HashMap.get(s.pendingQuestionCounts, sessionId),
-				() => 0,
-			);
-			return {
-				...s,
-				pendingQuestionCounts: HashMap.set(
-					s.pendingQuestionCounts,
-					sessionId,
-					current + 1,
-				),
-			};
-		});
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.incrementPendingQuestionCount"),
-	);
-
-/** Decrement pending question count for a session and clear zero counts. */
-export const decrementPendingQuestionCount = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => {
-			const current = Option.getOrElse(
-				HashMap.get(s.pendingQuestionCounts, sessionId),
-				() => 0,
-			);
-			return {
-				...s,
-				pendingQuestionCounts:
-					current <= 1
-						? HashMap.remove(s.pendingQuestionCounts, sessionId)
-						: HashMap.set(s.pendingQuestionCounts, sessionId, current - 1),
-			};
-		});
-	}).pipe(
-		Effect.annotateLogs("sessionId", sessionId),
-		Effect.withSpan("session.decrementPendingQuestionCount"),
-	);
-
-/** Replace pending question counts from a reconnect/list-pending snapshot. */
-export const setPendingQuestionCounts = (counts: ReadonlyMap<string, number>) =>
-	Effect.gen(function* () {
-		const ref = yield* SessionManagerStateTag;
-		yield* Ref.update(ref, (s) => ({
-			...s,
-			pendingQuestionCounts: HashMap.fromIterable(counts),
-		}));
-	}).pipe(Effect.withSpan("session.setPendingQuestionCounts"));
-
 /**
- * Record fork-point metadata for a forked session: lineage into the event
- * store, the whole entry into relay state and the on-disk sidecar.
- *
- * The canonical event records fork origin separately from subagent lineage.
- * The sidecar retains the fork-point timestamp, which has no column.
+ * Record fork lineage through the event store and announce the projected row.
  */
-export const setForkEntry = (
-	sessionId: string,
-	entry: ForkEntry,
-	configDir?: string,
-) =>
+export const setForkEntry = (sessionId: string, entry: ForkEntry) =>
 	Effect.gen(function* () {
 		if (entry.parentID) {
 			yield* applySessionCommand({
@@ -1208,41 +1280,16 @@ export const setForkEntry = (
 		}
 
 		const ref = yield* SessionManagerStateTag;
-		const forkMeta = yield* Ref.modify(ref, (s) => {
-			const nextForkMeta = HashMap.set(s.forkMeta, sessionId, entry);
-			return [
-				nextForkMeta,
-				{
-					...s,
-					forkMeta: nextForkMeta,
-					cachedParentMap: HashMap.remove(s.cachedParentMap, sessionId),
-				},
-			] as const;
-		});
-
-		yield* Effect.try({
-			try: () =>
-				saveForkMetadata(new Map(HashMap.toEntries(forkMeta)), configDir),
-			catch: (cause) =>
-				new SessionManagerError({ operation: "setForkEntry", cause }),
-		});
+		yield* Ref.update(ref, (s) => ({
+			...s,
+			cachedParentMap: entry.parentID
+				? HashMap.set(s.cachedParentMap, sessionId, entry.parentID)
+				: s.cachedParentMap,
+		}));
 	}).pipe(
 		Effect.annotateLogs("sessionId", sessionId),
 		Effect.withSpan("session.setForkEntry"),
 	);
-
-/** Send the roots-only sidebar snapshot. */
-export const sendSessionLists = (
-	send: (msg: SessionListMessage) => void,
-	options?: { statuses?: Record<string, SessionStatus> | undefined },
-) =>
-	Effect.gen(function* () {
-		const roots = yield* listSessions({
-			roots: true,
-			statuses: options?.statuses,
-		});
-		send({ type: "session_list", sessions: roots, roots: true });
-	});
 
 export interface SessionManagerService {
 	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
@@ -1264,7 +1311,11 @@ export interface SessionManagerService {
 		title?: string,
 		options?: CreateSessionOptions,
 	): Effect.Effect<SessionDetail, SessionManagerError>;
-	deleteSession(sessionId: string): Effect.Effect<void, SessionManagerError>;
+	establishOpenCodeSession(
+		session: SessionDetail,
+		providerInstanceId: ProviderInstanceId,
+	): Effect.Effect<void, SessionManagerError>;
+	deleteSession(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
 	renameSession(
 		sessionId: string,
 		title: string,
@@ -1292,14 +1343,13 @@ export interface SessionManagerService {
 	markSessionUnread(
 		sessionId: string,
 	): Effect.Effect<void, SessionManagerError>;
-	clearPaginationCursor(sessionId: string): Effect.Effect<void>;
-	seedPaginationCursor(
+	/** Report a user-initiated pick; resolves whether the row changed. */
+	markSessionSeen(
 		sessionId: string,
-		messageId: string,
-	): Effect.Effect<void>;
+		upTo: number,
+	): Effect.Effect<boolean, SessionManagerError>;
 	loadPreRenderedHistory(
 		sessionId: string,
-		offset?: number,
 	): Effect.Effect<HistoryPage, SessionManagerError>;
 	recordMessageActivity(
 		sessionId: string,
@@ -1307,19 +1357,11 @@ export interface SessionManagerService {
 	): Effect.Effect<void>;
 	addToParentMap(childId: string, parentId: string): Effect.Effect<void>;
 	getSessionParentMap(): Effect.Effect<Map<string, string>>;
-	incrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
-	decrementPendingQuestionCount(sessionId: string): Effect.Effect<void>;
-	setPendingQuestionCounts(
-		counts: ReadonlyMap<string, number>,
-	): Effect.Effect<void>;
 	setForkEntry(
 		sessionId: string,
 		entry: ForkEntry,
 	): Effect.Effect<void, SessionManagerError>;
-	sendSessionLists(
-		send: (msg: SessionListMessage) => void,
-		options?: { statuses?: Record<string, SessionStatus> | undefined },
-	): Effect.Effect<void, SessionManagerError>;
+	pushViewerFamilies(): Effect.Effect<void, SessionManagerError>;
 }
 
 // ─── Service Tag ────────────────────────────────────────────────────────────
@@ -1332,7 +1374,7 @@ export class SessionManagerServiceTag extends Context.Tag(
 // ─── Service Layer ──────────────────────────────────────────────────────────
 
 export const SessionManagerServiceLive: Layer.Layer<
-	SessionManagerServiceTag,
+	SessionManagerServiceTag | PendingSendOwnershipTag,
 	never,
 	OpenCodeAPITag | SessionManagerStateTag | LoggerTag | DaemonEventBusTag
 > = Layer.effect(
@@ -1342,6 +1384,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const stateRef = yield* SessionManagerStateTag;
 		const log = yield* LoggerTag;
 		const eventBus = yield* DaemonEventBusTag;
+		const ownership = yield* PendingSendOwnershipTag;
 		const configOption = yield* Effect.serviceOption(ConfigTag);
 		const configDir =
 			configOption._tag === "Some" ? configOption.value.configDir : undefined;
@@ -1367,18 +1410,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const instanceClientsOption = yield* Effect.serviceOption(
 			OpenCodeInstanceClientsTag,
 		);
-		if (configOption._tag === "Some") {
-			const forkMeta = loadForkMetadata(configDir);
-			if (forkMeta.size > 0) {
-				yield* Ref.update(stateRef, (s) => {
-					let nextForkMeta = s.forkMeta;
-					for (const [sessionId, entry] of forkMeta) {
-						nextForkMeta = HashMap.set(nextForkMeta, sessionId, entry);
-					}
-					return { ...s, forkMeta: nextForkMeta };
-				});
-			}
-		}
+		const inFlightDeletes = new Map<
+			string,
+			Deferred.Deferred<void, SessionManagerError>
+		>();
 		const currentStatuses = (
 			explicit?: Record<string, SessionStatus> | undefined,
 		): Effect.Effect<Record<string, SessionStatus> | undefined> => {
@@ -1387,6 +1422,147 @@ export const SessionManagerServiceLive: Layer.Layer<
 				? statusPollerOption.value.getCurrentStatuses()
 				: Effect.succeed(undefined);
 		};
+		const establishOpenCodeSession = (
+			session: SessionDetail,
+			providerInstanceId: ProviderInstanceId,
+		): Effect.Effect<void, SessionManagerError> =>
+			Effect.gen(function* () {
+				const persistenceConfigured =
+					configOption._tag === "Some" &&
+					configOption.value.persistenceDbPath != null;
+				const persistenceUnavailable =
+					eventStoreEffectOption._tag === "None" &&
+					projectionRunnerEffectOption._tag === "None" &&
+					sqlOption._tag === "None";
+				if (!persistenceConfigured && persistenceUnavailable) return;
+
+				if (
+					eventStoreEffectOption._tag === "None" ||
+					projectionRunnerEffectOption._tag === "None" ||
+					sqlOption._tag === "None"
+				) {
+					return yield* new SessionManagerError({
+						operation: "establishOpenCodeSession.services",
+						cause: "SQLite event-store services are unavailable",
+					});
+				}
+
+				const eventStore = eventStoreEffectOption.value;
+				const sql = sqlOption.value;
+				// `write` rather than the plain form: the seed and the verification
+				// query belong in the same transaction as the append, and projecting
+				// through the handle it hands us is what makes the announcement
+				// unskippable.
+				const commitAndSignal = yield* makeCommitAndSignal.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(EventStoreEffectTag, eventStore),
+					Effect.provideService(
+						ProjectionRunnerEffectTag,
+						projectionRunnerEffectOption.value,
+					),
+				);
+
+				const now = Date.now();
+				const normalizedTitle = normalizeSessionTitle(session.title);
+				yield* commitAndSignal
+					.write((project) =>
+						Effect.gen(function* () {
+							yield* sql`
+					INSERT OR IGNORE INTO sessions (
+						id, provider, provider_sid, title, status, created_at, updated_at
+					) VALUES (
+						${session.id}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
+					)
+					`.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "establishOpenCodeSession.seed",
+											cause,
+										}),
+								),
+							);
+							const stored = yield* eventStore
+								.append(
+									canonicalEvent(
+										"session.created",
+										session.id,
+										{
+											sessionId: session.id,
+											title: normalizedTitle,
+											provider: providerInstanceId,
+											providerSessionId: session.id,
+											...(session.parentID === undefined
+												? {}
+												: { parentId: session.parentID }),
+										},
+										{
+											provider: providerInstanceId,
+											createdAt: now,
+											metadata: { source: "relay", synthetic: true },
+										},
+									),
+								)
+								.pipe(
+									Effect.mapError(
+										(cause) =>
+											new SessionManagerError({
+												operation: "establishOpenCodeSession.append",
+												cause,
+											}),
+									),
+								);
+
+							yield* project([stored]).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "establishOpenCodeSession.project",
+											cause,
+										}),
+								),
+							);
+
+							const establishedRows = yield* sql<{ readonly id: string }>`
+						SELECT sessions.id
+						FROM sessions
+						JOIN session_providers
+							ON session_providers.session_id = sessions.id
+						WHERE sessions.id = ${session.id}
+							AND sessions.provider = ${providerInstanceId}
+							AND sessions.provider_sid = ${session.id}
+							AND session_providers.id = ${`${session.id}:initial`}
+							AND session_providers.provider = ${providerInstanceId}
+							AND session_providers.status = 'active'
+						LIMIT 1`.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "establishOpenCodeSession.project",
+											cause,
+										}),
+								),
+							);
+							if (establishedRows.length === 0) {
+								return yield* new SessionManagerError({
+									operation: "establishOpenCodeSession.project",
+									cause: `Projected session ${session.id} has no matching active provider binding`,
+								});
+							}
+						}),
+					)
+					.pipe(
+						// BEGIN failures are typed; Effect SQL leaves COMMIT failures as defects.
+						Effect.mapError((cause) =>
+							cause instanceof SessionManagerError
+								? cause
+								: new SessionManagerError({
+										operation: "establishOpenCodeSession.transaction",
+										cause,
+									}),
+						),
+					);
+			});
 		const serviceListSessions = (options?: ListSessionsOptions) =>
 			Effect.gen(function* () {
 				const statuses = yield* currentStatuses(options?.statuses);
@@ -1407,7 +1583,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								),
 							)
 						: base;
-				return yield* snapshotOption._tag === "Some"
+				const sessions = yield* snapshotOption._tag === "Some"
 					? withEffectRead.pipe(
 							Effect.provideService(
 								RelayStatusSnapshotTag,
@@ -1415,6 +1591,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 							),
 						)
 					: withEffectRead;
+				const git =
+					configOption._tag === "Some"
+						? daemonSessionGitCache.peek(configOption.value.projectDir)
+						: undefined;
+				return git
+					? sessions.map((session) => ({ ...session, git }))
+					: [...sessions];
 			});
 		const getSessionFamily: SessionManagerService["getSessionFamily"] = (
 			sessionId,
@@ -1427,10 +1610,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 						sessions: [],
 					};
 				}
-				const [rows, approvals, state] = yield* Effect.all([
+				const [rows, approvals] = yield* Effect.all([
 					readQueryEffectOption.value.getSessionFamily(sessionId),
 					readQueryEffectOption.value.countPendingApprovalsBySession(),
-					Ref.get(stateRef),
 				]).pipe(
 					Effect.mapError(
 						(cause) =>
@@ -1452,15 +1634,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 				return {
 					type: "session_family" as const,
 					rootId: root?.id ?? sessionId,
-					sessions: sessionRowsToInfo(
-						rows,
-						{
-							statuses: familyStatuses,
-							...(hasLiveBackgroundWork && { hasLiveBackgroundWork }),
-						},
-						state,
-						pendingApprovalCountsByType(approvals),
-					),
+					sessions: sessionRowsToSessionInfoList(rows, {
+						statuses: familyStatuses,
+						pendingQuestionCounts:
+							pendingApprovalCountsByType(approvals).questions,
+						pendingPermissionCounts:
+							pendingApprovalCountsByType(approvals).permissions,
+						...(hasLiveBackgroundWork && { hasLiveBackgroundWork }),
+					}),
 				};
 			});
 
@@ -1742,6 +1923,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 						)
 					: base;
 			},
+			establishOpenCodeSession,
 			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
@@ -1756,13 +1938,94 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 			deleteSession: (sessionId) =>
 				Effect.gen(function* () {
-					yield* deleteSession(sessionId).pipe(
+					const completion = yield* Deferred.make<void, SessionManagerError>();
+					const existing = inFlightDeletes.get(sessionId);
+					if (existing) {
+						yield* Deferred.await(existing);
+						return false;
+					}
+
+					inFlightDeletes.set(sessionId, completion);
+					const base = deleteSession(sessionId).pipe(
+						Effect.provideService(PendingSendOwnershipTag, ownership),
 						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(LoggerTag, log),
 					);
-					yield* publishSessionDeleted(sessionId).pipe(
-						Effect.provideService(DaemonEventBusTag, eventBus),
-					);
+					const withReadQuery =
+						readQueryEffectOption._tag === "Some"
+							? base.pipe(
+									Effect.provideService(
+										ReadQueryEffectTag,
+										readQueryEffectOption.value,
+									),
+								)
+							: base;
+					const withEventStore =
+						eventStoreEffectOption._tag === "Some"
+							? withReadQuery.pipe(
+									Effect.provideService(
+										EventStoreEffectTag,
+										eventStoreEffectOption.value,
+									),
+								)
+							: withReadQuery;
+					const withProjectionRunner =
+						projectionRunnerEffectOption._tag === "Some"
+							? withEventStore.pipe(
+									Effect.provideService(
+										ProjectionRunnerEffectTag,
+										projectionRunnerEffectOption.value,
+									),
+								)
+							: withEventStore;
+					const withSql =
+						sqlOption._tag === "Some"
+							? withProjectionRunner.pipe(
+									Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+								)
+							: withProjectionRunner;
+					const withConfig =
+						configOption._tag === "Some"
+							? withSql.pipe(
+									Effect.provideService(ConfigTag, configOption.value),
+								)
+							: withSql;
+					const withEngine =
+						engineOption._tag === "Some"
+							? withConfig.pipe(
+									Effect.provideService(
+										OrchestrationEngineTag,
+										engineOption.value,
+									),
+								)
+							: withConfig;
+					const deleteAndPublish = Effect.gen(function* () {
+						yield* instanceClientsOption._tag === "Some"
+							? withEngine.pipe(
+									Effect.provideService(
+										OpenCodeInstanceClientsTag,
+										instanceClientsOption.value,
+									),
+								)
+							: withEngine;
+						yield* publishSessionDeleted(sessionId).pipe(
+							Effect.provideService(DaemonEventBusTag, eventBus),
+						);
+					});
+					const exit = yield* Effect.exit(deleteAndPublish);
+
+					yield* Deferred.done(completion, exit);
+					yield* Effect.sync(() => {
+						if (inFlightDeletes.get(sessionId) === completion) {
+							inFlightDeletes.delete(sessionId);
+						}
+					});
+
+					return yield* Exit.matchEffect(exit, {
+						onFailure: Effect.failCause,
+						onSuccess: () => Effect.succeed(true),
+					});
 				}),
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),
@@ -1770,6 +2033,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				withSessionCommandServices(markSessionRead(sessionId)),
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
+			markSessionSeen: (sessionId, upTo) =>
+				withSessionCommandServices(markSessionSeen(sessionId, upTo)),
 			setSessionSettled: (sessionId, options) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(setSessionSettled(sessionId, options)),
@@ -1792,20 +2057,41 @@ export const SessionManagerServiceLive: Layer.Layer<
 				triageLock.withPermits(1)(
 					withSessionCommandServices(unsnoozeSession(sessionId)),
 				),
-			clearPaginationCursor: (sessionId) =>
-				clearPaginationCursor(sessionId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			seedPaginationCursor: (sessionId, messageId) =>
-				seedPaginationCursor(sessionId, messageId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			loadPreRenderedHistory: (sessionId, offset) =>
-				loadPreRenderedHistory(sessionId, offset).pipe(
-					Effect.provideService(OpenCodeAPITag, api),
-					Effect.provideService(SessionManagerStateTag, stateRef),
-					Effect.provideService(LoggerTag, log),
-				),
+			loadPreRenderedHistory: (sessionId) =>
+				Effect.gen(function* () {
+					const sessionResult =
+						readQueryEffectOption._tag === "Some"
+							? yield* Effect.either(
+									readQueryEffectOption.value.getSession(sessionId),
+								)
+							: undefined;
+					const instanceId =
+						sessionResult?._tag === "Right"
+							? sessionResult.right?.provider
+							: undefined;
+					const instanceApi =
+						instanceId &&
+						instanceClientsOption._tag === "Some" &&
+						resolveProviderRoutingDriver(
+							loadDaemonConfig(configDir),
+							instanceId,
+						) === "opencode"
+							? yield* instanceClientsOption.value.clientFor(instanceId).pipe(
+									Effect.mapError(
+										(cause) =>
+											new SessionManagerError({
+												operation: "loadPreRenderedHistory",
+												cause,
+											}),
+									),
+								)
+							: undefined;
+					return yield* loadPreRenderedHistory(sessionId).pipe(
+						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
+						Effect.provideService(SessionManagerStateTag, stateRef),
+						Effect.provideService(LoggerTag, log),
+					);
+				}),
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
@@ -1818,33 +2104,35 @@ export const SessionManagerServiceLive: Layer.Layer<
 				getSessionParentMap().pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
-			incrementPendingQuestionCount: (sessionId) =>
-				incrementPendingQuestionCount(sessionId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			decrementPendingQuestionCount: (sessionId) =>
-				decrementPendingQuestionCount(sessionId).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
-			setPendingQuestionCounts: (counts) =>
-				setPendingQuestionCounts(counts).pipe(
-					Effect.provideService(SessionManagerStateTag, stateRef),
-				),
 			setForkEntry: (sessionId, entry) =>
 				Effect.gen(function* () {
-					yield* setForkEntry(sessionId, entry, configDir).pipe(
+					yield* setForkEntry(sessionId, entry).pipe(
 						Effect.provideService(SessionManagerStateTag, stateRef),
 					);
 				}),
-			sendSessionLists: (send, options) =>
+			pushViewerFamilies: () =>
 				Effect.gen(function* () {
-					const roots = yield* serviceListSessions({
-						roots: true,
-						statuses: options?.statuses,
-					});
-					send({ type: "session_list", sessions: roots, roots: true });
 					if (wsHandlerOption._tag === "None") return;
 					const ws = wsHandlerOption.value;
+					if (readQueryEffectOption._tag === "Some") {
+						const lineage = yield* readQueryEffectOption.value
+							.getSessionLineage()
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "pushViewerFamilies",
+											cause,
+										}),
+								),
+							);
+						yield* Ref.update(stateRef, (current) => ({
+							...current,
+							cachedParentMap: sessionRowsParentMap(lineage.rows),
+							lastKnownSessionCount: lineage.count,
+						}));
+						yield* updateRelaySessionCountSnapshot(lineage.count);
+					}
 					const parentMap = (yield* Ref.get(stateRef)).cachedParentMap;
 					const families = new Map<string, string[]>();
 					for (const clientId of ws.getClientIds()) {
@@ -1880,4 +2168,4 @@ export const SessionManagerServiceLive: Layer.Layer<
 				}),
 		} satisfies SessionManagerService;
 	}),
-);
+).pipe(Layer.provideMerge(PendingSendOwnershipLive));

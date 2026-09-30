@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 function openMenu(
-	session: SessionInfo,
+	session: Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>,
 	options?: {
 		anchor?: HTMLElement;
 		projectLabel?: string;
@@ -57,7 +57,7 @@ function openMenu(
 ) {
 	render(SessionContextMenu, {
 		props: {
-			session,
+			session: { status: "idle", ...session },
 			anchor: options?.anchor ?? document.body,
 			projectLabel: options?.projectLabel,
 			branch: options?.branch,

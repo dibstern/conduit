@@ -342,7 +342,7 @@ class SessionNamespace {
 	 */
 	async messages(
 		sessionId: string,
-		options?: { limit?: number },
+		options?: { limit?: number; signal?: AbortSignal },
 	): Promise<Message[]> {
 		const data = await this.api.sdk(
 			"session.messages",
@@ -351,6 +351,7 @@ class SessionNamespace {
 				call(
 					this.api._sdk.session.messages({
 						path: { id: sessionId },
+						...(options?.signal ? { signal: options.signal } : {}),
 						...(options?.limit != null
 							? { query: { limit: options.limit } }
 							: {}),

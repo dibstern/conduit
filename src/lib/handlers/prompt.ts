@@ -1,8 +1,9 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // ─── Prompt Handlers ─────────────────────────────────────────────────────────
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import {
 	makeProviderTurnService,
 	ProviderTurnServiceTag,
@@ -60,6 +61,7 @@ export interface SendMessageToSessionInput {
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
+		const ownership = yield* PendingSendOwnershipTag;
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
@@ -67,7 +69,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text) return;
+		if (!text) return activeId;
 		if (!activeId) {
 			if (input.missingSessionClientId) {
 				wsHandler.sendTo(
@@ -78,7 +80,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 					).toSystemError(),
 				);
 			}
-			return;
+			return activeId;
 		}
 		const originalActiveId = activeId;
 		const sessionModel = yield* getModel(activeId);
@@ -115,9 +117,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				{ settled: false },
 			);
 			if (unsnoozed || unsettled) {
-				yield* sessionManagerService.sendSessionLists((msg) =>
-					wsHandler.broadcast(msg),
-				);
+				yield* sessionManagerService.pushViewerFamilies();
 			}
 		}).pipe(
 			Effect.catchAll((error) =>
@@ -165,6 +165,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		});
 		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
 			Effect.sync(() => {
+				ownership.remove(activeId, input.commandId);
 				log.warn(
 					`client=${clientId} session=${activeId} Processing timeout (120s) — broadcasting done`,
 				);
@@ -183,19 +184,33 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}),
 		);
 
-		yield* providerTurnService.sendTurn({
-			clientId,
-			sessionId: activeId,
-			text,
+		ownership.register(activeId, {
 			commandId: input.commandId,
-			...(imageList ? { images: imageList } : {}),
-			...(sessionModel ? { model: sessionModel } : {}),
-			modelUserSelected: sessionModelUserSelected,
-			...(sessionAgent ? { agent: sessionAgent } : {}),
-			...(variant ? { variant } : {}),
-			...(contextWindow ? { contextWindow } : {}),
-			...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
+			text,
+			originId: originalActiveId === activeId ? originId : undefined,
 		});
+		yield* providerTurnService
+			.sendTurn({
+				clientId,
+				sessionId: activeId,
+				text,
+				commandId: input.commandId,
+				...(imageList ? { images: imageList } : {}),
+				...(sessionModel ? { model: sessionModel } : {}),
+				modelUserSelected: sessionModelUserSelected,
+				...(sessionAgent ? { agent: sessionAgent } : {}),
+				...(variant ? { variant } : {}),
+				...(contextWindow ? { contextWindow } : {}),
+				...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
+			})
+			.pipe(
+				Effect.onError(() =>
+					Effect.sync(() => {
+						ownership.remove(activeId, input.commandId);
+					}),
+				),
+			);
+		return activeId;
 	});
 
 export const handleMessage = (
@@ -240,6 +255,14 @@ export const cancelSessionById = (
 		});
 	});
 
+export class RewindTargetNotFound extends Data.TaggedError(
+	"RewindTargetNotFound",
+)<{
+	readonly sessionId: string;
+	readonly messageId: string;
+	readonly message: string;
+}> {}
+
 export const rewindSessionToMessage = ({
 	clientId,
 	sessionId,
@@ -251,18 +274,26 @@ export const rewindSessionToMessage = ({
 }) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		if (messageId) {
-			yield* Effect.tryPromise(() =>
-				client.session.revert(sessionId, { messageID: messageId }),
-			);
-			yield* sessionManagerService.clearPaginationCursor(sessionId);
-			log.info(
-				`client=${clientId} session=${sessionId} Reverted to message: ${messageId}`,
+		const messages = yield* Effect.tryPromise(() =>
+			client.session.messages(sessionId),
+		);
+		if (!messages.some((message) => message.id === messageId)) {
+			return yield* Effect.fail(
+				new RewindTargetNotFound({
+					sessionId,
+					messageId,
+					message: `Rewind target ${messageId} not found in session ${sessionId}`,
+				}),
 			);
 		}
+		yield* Effect.tryPromise(() =>
+			client.session.revert(sessionId, { messageID: messageId }),
+		);
+		log.info(
+			`client=${clientId} session=${sessionId} Reverted to message: ${messageId}`,
+		);
 	});
 
 export const syncInputDraftForSession = ({

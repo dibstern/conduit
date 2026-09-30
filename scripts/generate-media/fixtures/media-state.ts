@@ -7,13 +7,20 @@
 import type {
 	PermissionId,
 	RelayMessage,
+	SessionInfo,
 } from "../../../src/lib/shared-types.js";
 import type { MockMessage } from "../../../test/e2e/fixtures/mockup-state.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Compile-time validation wrapper — ensures all messages satisfy RelayMessage. */
-function msgs(...messages: RelayMessage[]): MockMessage[] {
+type ShellSnapshot = {
+	type: "shell_snapshot";
+	roots: true;
+	sessions: SessionInfo[];
+};
+
+function msgs(...messages: (RelayMessage | ShellSnapshot)[]): MockMessage[] {
 	return messages as MockMessage[];
 }
 
@@ -76,24 +83,27 @@ export const mainUiInit: MockMessage[] = msgs(
 	},
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
 				id: "sess-media-001",
 				title: "Build landing page",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 6,
 			},
 			{
 				id: "sess-media-002",
 				title: "Fix mobile layout",
+				status: "idle",
 				updatedAt: Date.now() - 3600_000,
 				messageCount: 4,
 			},
 			{
 				id: "sess-media-003",
 				title: "Add contact form",
+				status: "idle",
 				updatedAt: Date.now() - 7200_000,
 				messageCount: 8,
 			},
@@ -209,12 +219,13 @@ export const approvalInit: MockMessage[] = msgs(
 	},
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
 				id: "sess-media-approval",
 				title: "Deploy to production",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 2,
 			},
@@ -256,12 +267,13 @@ export const splitInit: MockMessage[] = msgs(
 	},
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
 				id: "sess-media-split",
 				title: "Build landing page",
+				status: "idle",
 				updatedAt: Date.now(),
 				messageCount: 4,
 			},
@@ -300,47 +312,55 @@ export const sidebarInit: MockMessage[] = msgs(
 	},
 	{ type: "client_count", count: 1 },
 	{
-		type: "session_list",
+		type: "shell_snapshot",
 		roots: true,
 		sessions: [
 			{
 				id: "sess-sidebar-001",
 				title: "Build landing page",
+				status: "idle",
 				updatedAt: now,
 			},
 			{
 				id: "sess-sidebar-002",
 				title: "Fix WebSocket reconnect logic",
+				status: "idle",
 				updatedAt: now - 1_800_000,
 			},
 			{
 				id: "sess-sidebar-003",
 				title: "Add dark mode theme",
+				status: "idle",
 				updatedAt: now - 3_600_000,
 			},
 			{
 				id: "sess-sidebar-004",
 				title: "Refactor auth middleware",
+				status: "idle",
 				updatedAt: now - 86_400_000,
 			},
 			{
 				id: "sess-sidebar-005",
 				title: "Database migration scripts",
+				status: "idle",
 				updatedAt: now - 86_400_000 - 7_200_000,
 			},
 			{
 				id: "sess-sidebar-006",
 				title: "Set up CI/CD pipeline",
+				status: "idle",
 				updatedAt: now - 172_800_000,
 			},
 			{
 				id: "sess-sidebar-007",
 				title: "Mobile responsive layout",
+				status: "idle",
 				updatedAt: now - 259_200_000,
 			},
 			{
 				id: "sess-sidebar-008",
 				title: "API rate limiting",
+				status: "idle",
 				updatedAt: now - 345_600_000,
 			},
 		],

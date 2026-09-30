@@ -255,11 +255,12 @@ describe("handleSSEEventEffect", () => {
 		const services = makeSSETestServices();
 		const message: RelayMessage =
 			kind === "done"
-				? { type: "done", sessionId: "s1", code: 0 }
+				? { type: "done", sessionId: "s1", code: 0, alertId: "done-1" }
 				: kind === "retry"
 					? {
 							type: "error",
 							sessionId: "s1",
+							alertId: "error-1",
 							code: "RETRY",
 							message: "Retrying...",
 						}
@@ -351,7 +352,6 @@ describe("handleSSEEventEffect", () => {
 
 	it("translates and routes question.asked events to the question's session", async () => {
 		const deps = createMockSSEWiringDeps();
-		const services = makeSSETestServices();
 		const translated: RelayMessage = {
 			type: "ask_user",
 			sessionId: "s1",
@@ -367,7 +367,7 @@ describe("handleSSEEventEffect", () => {
 			type: "question.asked",
 			properties: { id: "q-1", questions: [], sessionID: "active-session" },
 		};
-		await runSSEEvent(deps, event, services);
+		await runSSEEvent(deps, event);
 
 		// ask_user messages are routed to the question's session, not broadcast
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
@@ -375,12 +375,12 @@ describe("handleSSEEventEffect", () => {
 			translated,
 		);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
-		expect(
-			services.sessionService.incrementPendingQuestionCount,
-		).toHaveBeenCalledWith("active-session");
-		expect(
-			services.sessionService.incrementPendingQuestionCount,
-		).toHaveBeenCalledTimes(1);
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "notification_event",
+			eventType: "ask_user",
+			sessionId: "active-session",
+			alertId: "active-session:question:que_q1",
+		});
 	});
 
 	it("broadcasts question resolutions so family viewers drop replayed questions", async () => {
@@ -599,13 +599,17 @@ describe("handleSSEEventEffect", () => {
 
 	it("sends push notification for permission.asked", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 
 		const event: OpenCodeEvent = {
 			type: "permission.asked",
-			properties: { id: "perm-1", permission: "Bash" },
+			properties: { id: "perm-1", permission: "Bash", sessionID: "s1" },
 		};
 		await runSSEEvent(deps, event);
 
@@ -616,19 +620,24 @@ describe("handleSSEEventEffect", () => {
 			body: "Bash needs approval",
 			tag: "perm-perm-1",
 			slug: "test-project",
-			sessionId: "",
+			sessionId: "s1",
+			alertId: "s1:permission:perm-1",
 		});
 	});
 
 	it("sends push notification for question.asked", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 
 		const event: OpenCodeEvent = {
 			type: "question.asked",
-			properties: { id: "q-1", questions: [] },
+			properties: { id: "q-1", sessionID: "s1", questions: [] },
 		};
 		await runSSEEvent(deps, event);
 
@@ -639,12 +648,18 @@ describe("handleSSEEventEffect", () => {
 			body: "Agent has a question for you.",
 			tag: "opencode-ask",
 			slug: "test-project",
+			sessionId: "s1",
+			alertId: "s1:question:q-1",
 		});
 	});
 
-	it("sends push notification for done events", async () => {
+	it("keeps anonymous done status hints on the UI channel", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
@@ -659,19 +674,25 @@ describe("handleSSEEventEffect", () => {
 		};
 		await runSSEEvent(deps, event);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mockPush!.sendToAll).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "done", title: "Task Complete" }),
+		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
+			"active-session",
+			expect.objectContaining({ type: "done", code: 0 }),
 		);
+		expect(mockPush?.sendToAll).not.toHaveBeenCalled();
 	});
 
 	it("sends push notification for error events", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = {
 			type: "error",
+			alertId: "error-1",
 			sessionId: "s1",
 			code: "SEND_FAILED",
 			message: "Something broke",
@@ -702,10 +723,19 @@ describe("handleSSEEventEffect", () => {
 
 	it("sends push notification for done/error on ANY session (not just active)", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -1012,7 +1042,7 @@ describe("wireSSEConsumerEffect", () => {
 		).not.toHaveBeenCalled();
 	});
 
-	it("sets pending question counts from API on SSE connect", async () => {
+	it("re-announces pending questions from the API on SSE connect", async () => {
 		const listPendingQuestions = vi.fn().mockResolvedValue([
 			{ id: "que-1", sessionID: "sess-a", questions: [] },
 			{ id: "que-2", sessionID: "sess-a", questions: [] },
@@ -1033,15 +1063,20 @@ describe("wireSSEConsumerEffect", () => {
 		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
 		listeners.get("connected")!();
 
+		// The badge for these comes from pending_approvals now (ni8.23); what
+		// recovery still owes the browser is the questions themselves.
 		await vi.waitFor(() => {
-			expect(
-				services.sessionService.setPendingQuestionCounts,
-			).toHaveBeenCalledWith(
-				new Map([
-					["sess-a", 2],
-					["sess-b", 1],
-				]),
-			);
+			expect(listPendingQuestions).toHaveBeenCalled();
+			for (const [sessionId, toolId] of [
+				["sess-a", "que-1"],
+				["sess-a", "que-2"],
+				["sess-b", "que-3"],
+			] as const) {
+				expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
+					sessionId,
+					expect.objectContaining({ type: "ask_user", toolId }),
+				);
+			}
 		});
 	});
 
@@ -1181,7 +1216,11 @@ describe("handleSSEEventEffect – tool_result truncation", () => {
 describe("notification routing: push gating via resolveNotifications", () => {
 	it("does NOT call push for non-notification-worthy events (delta)", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
@@ -1203,7 +1242,11 @@ describe("notification routing: push gating via resolveNotifications", () => {
 
 	it("calls push for done event from root session (no parent)", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
@@ -1215,7 +1258,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1229,7 +1279,11 @@ describe("notification routing: push gating via resolveNotifications", () => {
 
 	it("does NOT call push for done event from subagent session", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
@@ -1241,7 +1295,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1262,7 +1323,14 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
-			messages: [{ type: "done", sessionId: "s1", code: 0 } as RelayMessage],
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
 		});
 
 		const event: OpenCodeEvent = {
@@ -1280,7 +1348,11 @@ describe("notification routing: push gating via resolveNotifications", () => {
 
 	it("DOES call push for subagent error (errors always notify)", async () => {
 		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue(undefined),
+			sendToAll: vi.fn().mockResolvedValue({
+				delivered: ["device-1"],
+				expired: [],
+				failed: [],
+			}),
 		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
@@ -1295,6 +1367,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			messages: [
 				{
 					type: "error",
+					alertId: "error-1",
 					sessionId: "s1",
 					code: "FATAL",
 					message: "crashed",
@@ -1316,7 +1389,12 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 	it("broadcasts notification_event when done is dropped (no viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -1331,6 +1409,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
 			eventType: "done",
+			alertId: "done-1",
 			sessionId: "other-session",
 		});
 	});
@@ -1340,6 +1419,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
 			type: "error",
+			alertId: "error-1",
 			sessionId: "s1",
 			code: "FATAL",
 			message: "Something broke",
@@ -1358,6 +1438,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "notification_event",
 			eventType: "error",
+			alertId: "error-1",
 			message: "Something broke",
 			sessionId: "other-session",
 		});
@@ -1367,7 +1448,12 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 		const deps = createMockSSEWiringDeps();
 		// Has viewers — event is sent normally
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],

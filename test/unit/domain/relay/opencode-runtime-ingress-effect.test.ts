@@ -13,9 +13,11 @@ import {
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import {
 	makeSSEEvent,
 	makeUnknownSSEEvent,
@@ -49,8 +51,12 @@ function makeLogger(): OpenCodeRuntimeIngressLog & {
 
 function makeProjectionRunner(): ProjectionRunnerEffect {
 	return {
-		projectEvent: vi.fn(() => Effect.void),
-		projectBatch: vi.fn(() => Effect.void),
+		projectEvent: vi.fn(() =>
+			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+		),
+		projectBatch: vi.fn(() =>
+			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+		),
 		recover: vi.fn(() =>
 			Effect.succeed({
 				startCursor: 0,
@@ -62,6 +68,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 		getFailures: vi.fn(() => Effect.succeed([])),
 		isRecovered: vi.fn(() => Effect.succeed(true)),
 		markRecovered: vi.fn(() => Effect.void),
+		nextVersion: Effect.succeed(0),
 	} satisfies ProjectionRunnerEffect;
 }
 
@@ -73,8 +80,15 @@ function makeFakeIngress(options?: {
 	const ingestion = {
 		ingest: vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1)),
 		ingestBatch: vi.fn(
-			(events: readonly ProviderRuntimeEvent[]) =>
-				options?.ingestBatch?.(events) ?? Effect.succeed(events.length),
+			(
+				events: readonly ProviderRuntimeEvent[],
+				ingestOptions?: { readonly afterCommit?: Effect.Effect<void> },
+			) =>
+				(options?.ingestBatch?.(events) ?? Effect.succeed(events.length)).pipe(
+					// Stand in for the durable boundary: only a batch that committed
+					// runs afterCommit.
+					Effect.tap(() => ingestOptions?.afterCommit ?? Effect.void),
+				),
 		),
 		drain: vi.fn(() => Effect.void),
 	} satisfies ProviderRuntimeIngestion;
@@ -120,6 +134,7 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 					info: { role: "assistant", parts: [] },
 				}),
 				SESSION_ID,
+				"opencode",
 			),
 		);
 
@@ -159,6 +174,49 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 			},
 		]);
 	});
+
+	it("does not recreate a durable OpenCode session after ingress restarts", async () => {
+		if (!runtime) throw new Error("test runtime not initialized");
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					opencodeSessionCreatedRuntimeEvent(SESSION_ID, "opencode"),
+				);
+			}),
+		);
+
+		const restartedIngress = await runtime.runPromise(
+			makeEffectOpenCodeRuntimeIngress(makeLogger()),
+		);
+		const result = await Effect.runPromise(
+			restartedIngress.onSSEEventEffect(
+				makeSSEEvent("message.created", {
+					sessionID: SESSION_ID,
+					messageID: "msg-after-restart",
+					info: { role: "assistant", parts: [] },
+				}),
+				SESSION_ID,
+				"opencode",
+			),
+		);
+		const creationCount = runtime.runSync(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const rows = yield* sql<{ readonly count: number }>`
+					SELECT COUNT(*) AS count FROM events
+					WHERE session_id = ${SESSION_ID} AND type = 'session.created'`;
+				return rows[0]?.count;
+			}),
+		);
+
+		expect(result).toMatchObject({
+			ok: true,
+			eventsWritten: 1,
+			sessionSeeded: true,
+		});
+		expect(creationCount).toBe(1);
+	});
 });
 
 describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () => {
@@ -171,7 +229,7 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		});
 
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(event, undefined),
+			hook.onSSEEventEffect(event, undefined, "opencode"),
 		);
 
 		expect(result).toEqual({ ok: false, reason: "no-session" });
@@ -186,7 +244,7 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		});
 
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(event, SESSION_ID),
+			hook.onSSEEventEffect(event, SESSION_ID, "opencode"),
 		);
 
 		expect(result).toEqual({ ok: false, reason: "not-translatable" });
@@ -202,7 +260,7 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		});
 
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(event, SESSION_ID),
+			hook.onSSEEventEffect(event, SESSION_ID, "opencode"),
 		);
 
 		expect(result).toMatchObject({
@@ -242,6 +300,104 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		});
 	});
 
+	it("seeds the first translatable event with the per-call provider instance id", async () => {
+		const { hook, ingestion } = makeFakeIngress();
+		const event = makeSSEEvent("message.created", {
+			sessionID: SESSION_ID,
+			messageID: "msg-effect-named-001",
+			info: { role: "assistant", parts: [] },
+		});
+
+		await Effect.runPromise(
+			hook.onSSEEventEffect(event, SESSION_ID, "work-oc"),
+		);
+
+		const batch = ingestion.ingestBatch.mock.calls[0]?.[0];
+		expect(batch?.[0]).toMatchObject({
+			type: "session.created",
+			providerId: "opencode",
+			data: {
+				provider: "work-oc",
+			},
+		});
+		expect(batch?.[1]).toMatchObject({
+			type: "message.created",
+			providerId: "opencode",
+		});
+	});
+
+	it("keeps interleaved provider instance ids isolated on one shared ingress", async () => {
+		const { hook, ingestion } = makeFakeIngress();
+		const workSessionId = "sess-effect-work-001";
+		const personalSessionId = "sess-effect-personal-001";
+
+		await Effect.runPromise(
+			hook.onSSEEventEffect(
+				makeSSEEvent("message.created", {
+					sessionID: workSessionId,
+					messageID: "msg-effect-work-001",
+					info: { role: "assistant", parts: [] },
+				}),
+				workSessionId,
+				"work-oc",
+			),
+		);
+		await Effect.runPromise(
+			hook.onSSEEventEffect(
+				makeSSEEvent("message.created", {
+					sessionID: personalSessionId,
+					messageID: "msg-effect-personal-001",
+					info: { role: "assistant", parts: [] },
+				}),
+				personalSessionId,
+				"personal-oc",
+			),
+		);
+		await Effect.runPromise(
+			hook.onSSEEventEffect(
+				makeSSEEvent("message.part.delta", {
+					sessionID: workSessionId,
+					messageID: "msg-effect-work-001",
+					partID: "part-effect-work-001",
+					field: "text",
+					delta: "work",
+				}),
+				workSessionId,
+				"work-oc",
+			),
+		);
+		await Effect.runPromise(
+			hook.onSSEEventEffect(
+				makeSSEEvent("message.part.delta", {
+					sessionID: personalSessionId,
+					messageID: "msg-effect-personal-001",
+					partID: "part-effect-personal-001",
+					field: "text",
+					delta: "personal",
+				}),
+				personalSessionId,
+				"personal-oc",
+			),
+		);
+
+		expect(ingestion.ingestBatch.mock.calls[0]?.[0]?.[0]).toMatchObject({
+			type: "session.created",
+			sessionId: workSessionId,
+			data: { provider: "work-oc" },
+		});
+		expect(ingestion.ingestBatch.mock.calls[1]?.[0]?.[0]).toMatchObject({
+			type: "session.created",
+			sessionId: personalSessionId,
+			data: { provider: "personal-oc" },
+		});
+		expect(
+			ingestion.ingestBatch.mock.calls[2]?.[0]?.map((event) => event.type),
+		).toEqual(["text.delta"]);
+		expect(
+			ingestion.ingestBatch.mock.calls[3]?.[0]?.map((event) => event.type),
+		).toEqual(["text.delta"]);
+	});
+
 	it("does not emit duplicate session.created events for later events in the same session", async () => {
 		const { hook, ingestion } = makeFakeIngress();
 		const createEvent = makeSSEEvent("message.created", {
@@ -249,7 +405,9 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 			messageID: "msg-effect-001",
 			info: { role: "assistant", parts: [] },
 		});
-		await Effect.runPromise(hook.onSSEEventEffect(createEvent, SESSION_ID));
+		await Effect.runPromise(
+			hook.onSSEEventEffect(createEvent, SESSION_ID, "opencode"),
+		);
 		ingestion.ingestBatch.mockClear();
 
 		const deltaEvent = makeSSEEvent("message.part.delta", {
@@ -260,7 +418,7 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 			delta: "Hello world",
 		});
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(deltaEvent, SESSION_ID),
+			hook.onSSEEventEffect(deltaEvent, SESSION_ID, "opencode"),
 		);
 
 		expect(result).toMatchObject({
@@ -287,7 +445,7 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		});
 
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(event, SESSION_ID),
+			hook.onSSEEventEffect(event, SESSION_ID, "opencode"),
 		);
 
 		expect(result).toMatchObject({
@@ -305,7 +463,9 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 			messageID: "msg-effect-001",
 			info: { role: "assistant", parts: [] },
 		});
-		await Effect.runPromise(hook.onSSEEventEffect(createEvent, SESSION_ID));
+		await Effect.runPromise(
+			hook.onSSEEventEffect(createEvent, SESSION_ID, "opencode"),
+		);
 
 		const toolPending = makeSSEEvent("message.part.updated", {
 			sessionID: SESSION_ID,
@@ -319,7 +479,9 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 				state: { status: "pending", input: {} },
 			},
 		});
-		await Effect.runPromise(hook.onSSEEventEffect(toolPending, SESSION_ID));
+		await Effect.runPromise(
+			hook.onSSEEventEffect(toolPending, SESSION_ID, "opencode"),
+		);
 
 		hook.onReconnect();
 		expect(log.info).toHaveBeenCalledWith(
@@ -340,7 +502,7 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 			},
 		});
 		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(toolRunning, SESSION_ID),
+			hook.onSSEEventEffect(toolRunning, SESSION_ID, "opencode"),
 		);
 
 		expect(result).toMatchObject({

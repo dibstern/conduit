@@ -295,6 +295,9 @@ export async function startForegroundDaemon(
 			defaultOpencodeUrl: options.opencodeUrl,
 		}),
 		smartDefault: options.smartDefault ?? true,
+		...(options.smartDefaultUrl !== undefined && {
+			smartDefaultUrl: options.smartDefaultUrl,
+		}),
 		keepAwake: initialConfig.keepAwakeCommand
 			? {
 					command: initialConfig.keepAwakeCommand,

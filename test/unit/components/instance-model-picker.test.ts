@@ -1,11 +1,16 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
 	clearDiscoveryState,
 	discoveryState,
+	handleDefaultModelInfo,
+	handleModelInfo,
+	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 
 const wsSendSpy = vi.hoisted(() => vi.fn());
 const getAgentsRpcSpy = vi.hoisted(() =>
@@ -74,6 +79,24 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastSpy,
 }));
 
+const CLAUDE_PROVIDER: ProviderInfo = {
+	id: "claude",
+	name: "Anthropic - claude",
+	configured: true,
+	models: [
+		{
+			id: "claude-sonnet-4-7",
+			name: "Claude Sonnet 4.7",
+			provider: "claude",
+		},
+		{
+			id: "claude-opus-4-7",
+			name: "Claude Opus 4.7",
+			provider: "claude",
+		},
+	],
+};
+
 describe("InstanceModelPicker", () => {
 	beforeEach(() => {
 		wsSendSpy.mockClear();
@@ -83,29 +106,21 @@ describe("InstanceModelPicker", () => {
 		reloadProviderSessionRpcSpy.mockClear();
 		showToastSpy.mockClear();
 		clearDiscoveryState();
-		discoveryState.currentModelId = "claude-sonnet-4-7";
-		discoveryState.currentProviderId = "claude";
-		discoveryState.defaultModelId = "claude-sonnet-4-7";
-		discoveryState.defaultProviderId = "claude";
-		discoveryState.providers = [
-			{
-				id: "claude",
-				name: "Anthropic - claude",
-				configured: true,
-				models: [
-					{
-						id: "claude-sonnet-4-7",
-						name: "Claude Sonnet 4.7",
-						provider: "claude",
-					},
-					{
-						id: "claude-opus-4-7",
-						name: "Claude Opus 4.7",
-						provider: "claude",
-					},
-				],
-			},
-		];
+		handleModelInfo({
+			type: "model_info",
+			model: "claude-sonnet-4-7",
+			provider: "claude",
+		});
+		handleDefaultModelInfo({
+			type: "default_model_info",
+			model: "claude-sonnet-4-7",
+			provider: "claude",
+			variant: "",
+		});
+		handleModelList({
+			type: "model_list",
+			providers: [CLAUDE_PROVIDER],
+		});
 		sessionState.currentId = "session-1";
 	});
 
@@ -116,6 +131,26 @@ describe("InstanceModelPicker", () => {
 
 	// The drift indicator moved to InputArea (it is a status line, not a
 	// control); its copy and gating are covered by features/model-drift.feature.
+	it.each([
+		null,
+		"session-1",
+	])("derives the displayed model from a default update only without a session (%s)", async (sessionId) => {
+		sessionState.currentId = sessionId;
+		const { getByTitle } = render(InstanceModelPicker);
+		expect(getByTitle("Switch model").textContent).toContain("Sonnet 4.7");
+		handleDefaultModelInfo({
+			type: "default_model_info",
+			model: "claude-opus-4-7",
+			provider: "claude",
+			variant: "",
+		});
+		await tick();
+		await waitFor(() => {
+			expect(getByTitle("Switch model").textContent).toContain(
+				sessionId ? "Sonnet 4.7" : "Opus 4.7",
+			);
+		});
+	});
 
 	it("refreshes active-provider agents after switching model", async () => {
 		const { container, getByTitle } = render(InstanceModelPicker);
@@ -229,21 +264,24 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("locks the rail to the bound harness for an existing session", async () => {
-		discoveryState.providers = [
-			...discoveryState.providers,
-			{
-				id: "anthropic",
-				name: "Anthropic - opencode",
-				configured: true,
-				models: [
-					{
-						id: "claude-sonnet-4",
-						name: "claude-sonnet-4",
-						provider: "anthropic",
-					},
-				],
-			},
-		];
+		handleModelList({
+			type: "model_list",
+			providers: [
+				CLAUDE_PROVIDER,
+				{
+					id: "anthropic",
+					name: "Anthropic - opencode",
+					configured: true,
+					models: [
+						{
+							id: "claude-sonnet-4",
+							name: "claude-sonnet-4",
+							provider: "anthropic",
+						},
+					],
+				},
+			],
+		});
 
 		const { container, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));

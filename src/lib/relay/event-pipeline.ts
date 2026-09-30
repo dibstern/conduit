@@ -150,7 +150,7 @@ export interface PipelineDeps {
 	 * Phase 0b: per-session events are broadcast to every client on the
 	 * project's `/p/<slug>` regardless of per-tab viewed-session state. The
 	 * handler buffers events for clients still in bootstrap so that
-	 * `session_list` always arrives first — see
+	 * initial state arrives before buffered events — see
 	 * {@link WebSocketHandler.broadcastPerSessionEvent} and
 	 * {@link WebSocketHandler.markClientBootstrapped}.
 	 */

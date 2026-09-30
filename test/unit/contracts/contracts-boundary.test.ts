@@ -38,6 +38,12 @@ describe("contracts boundary", () => {
 		expect(violations).toEqual([]);
 	});
 
+	it("keeps the stored-event contract free of Node builtins", () => {
+		expect(
+			readFileSync(join(CONTRACTS_ROOT, "stored-event.ts"), "utf8"),
+		).not.toMatch(/["']node:/);
+	});
+
 	it("makes frontend and server consume the same WebSocket RPC contract entry", () => {
 		expect(readFileSync(FRONTEND_RPC_ENTRY, "utf8")).toContain(
 			"../../contracts/ws-rpc.js",
