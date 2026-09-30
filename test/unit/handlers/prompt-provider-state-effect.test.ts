@@ -169,14 +169,15 @@ describe("handleMessage with Effect provider state persistence", () => {
 				);
 
 				const providerState = yield* ProviderStateEffectTag;
-				let updated = yield* providerState.getState("session-provider-state");
-				for (let attempt = 0; attempt < 10; attempt++) {
-					if (updated["resumeSessionId"] === "sdk-session-next") break;
-					yield* Effect.promise(
-						() => new Promise((resolve) => setTimeout(resolve, 5)),
-					);
-					updated = yield* providerState.getState("session-provider-state");
-				}
+				const updated = yield* Effect.promise(() =>
+					vi.waitFor(async () => {
+						const state = await Effect.runPromise(
+							providerState.getState("session-provider-state"),
+						);
+						expect(state["resumeSessionId"]).toBe("sdk-session-next");
+						return state;
+					}),
+				);
 				expect(updated).toEqual({ resumeSessionId: "sdk-session-next" });
 			}).pipe(
 				Effect.provide(layer),
@@ -457,22 +458,22 @@ describe("handleMessage with Effect provider state persistence", () => {
 				});
 
 				const readQuery = yield* ReadQueryEffectTag;
-				let messages = yield* readQuery.getSessionMessagesWithParts(
-					"session-claude-sink-effect",
+				const messages = yield* Effect.promise(() =>
+					vi.waitFor(async () => {
+						const result = await Effect.runPromise(
+							readQuery.getSessionMessagesWithParts(
+								"session-claude-sink-effect",
+							),
+						);
+						expect(
+							result.find((message) => message.id === "assistant-message-1"),
+						).toMatchObject({
+							role: "assistant",
+							text: "assistant through sink",
+						});
+						return result;
+					}),
 				);
-				for (let attempt = 0; attempt < 10; attempt++) {
-					if (
-						messages.some((message) => message.id === "assistant-message-1")
-					) {
-						break;
-					}
-					yield* Effect.promise(
-						() => new Promise((resolve) => setTimeout(resolve, 5)),
-					);
-					messages = yield* readQuery.getSessionMessagesWithParts(
-						"session-claude-sink-effect",
-					);
-				}
 
 				const assistant = messages.find(
 					(message) => message.id === "assistant-message-1",
@@ -566,19 +567,16 @@ describe("handleMessage with Effect provider state persistence", () => {
 				commandId: "cmd-provider-state-child-event",
 			});
 			const sendToSession = ws.sendToSession as ReturnType<typeof vi.fn>;
-			for (let attempt = 0; attempt < 10; attempt++) {
-				if (
-					sendToSession.mock.calls.some((call: unknown[]) => {
-						const msg = call[1] as { readonly type?: string } | undefined;
-						return msg?.type === "delta";
-					})
-				) {
-					break;
-				}
-				yield* Effect.promise(
-					() => new Promise((resolve) => setTimeout(resolve, 5)),
-				);
-			}
+			yield* Effect.promise(() =>
+				vi.waitFor(() =>
+					expect(
+						sendToSession.mock.calls.some((call: unknown[]) => {
+							const msg = call[1] as { readonly type?: string } | undefined;
+							return msg?.type === "delta";
+						}),
+					).toBe(true),
+				),
+			);
 
 			expect(sendToSession).toHaveBeenCalledWith(
 				"child-session",

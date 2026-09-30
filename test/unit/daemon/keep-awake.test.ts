@@ -993,11 +993,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			ka.deactivate();
 			expect(ka.isActive()).toBe(false);
 
-			// Give OS a moment to clean up
-			await new Promise((r) => setTimeout(r, 100));
-
-			// Verify process is dead
-			expect(() => process.kill(pid, 0)).toThrow();
+			await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
 		});
 	});
 

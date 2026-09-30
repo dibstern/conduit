@@ -159,9 +159,9 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		// Give the microtask queue a tick.
-		await new Promise((r) => setTimeout(r, 0));
-		expect(ctx.pendingApprovals.size).toBe(1);
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(1));
+		// Allow the sink's deferred resolver to register before resolving it.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		const pending = [...ctx.pendingApprovals.values()][0];
 		expect(pending?.toolName).toBe("Bash");
 
@@ -209,12 +209,12 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(sink.requestQuestion).toHaveBeenCalled());
 		let settled = false;
 		void callbackPromise.then(() => {
 			settled = true;
 		});
-		await new Promise((r) => setTimeout(r, 0));
+		await Promise.resolve();
 		expect(settled).toBe(false);
 		expect(sink.requestQuestion).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -288,7 +288,7 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(1));
 		ac.abort();
 		const result = await callbackPromise;
 		expect(result.behavior).toBe("deny");
@@ -408,7 +408,9 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(1));
+		// Allow the interactive sink to start awaiting this permission.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		const pending = [...ctx.pendingApprovals.values()][0];
 		expect(pending).toBeDefined();
 
@@ -476,9 +478,9 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		// Let microtasks settle — both pending approvals should exist
-		await new Promise((r) => setTimeout(r, 0));
-		expect(ctx.pendingApprovals.size).toBe(2);
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(2));
+		// Allow both sink resolvers to register before resolving either call.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		// Resolve only the first call
 		resolveSinkA({ decision: "once" });
@@ -490,7 +492,7 @@ describe("ClaudePermissionBridge", () => {
 		void promiseB.then(() => {
 			bSettled = true;
 		});
-		await new Promise((r) => setTimeout(r, 0));
+		await Promise.resolve();
 		expect(bSettled).toBe(false);
 
 		// Now resolve the second call

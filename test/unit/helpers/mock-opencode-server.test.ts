@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 
@@ -240,7 +248,7 @@ describe("MockOpenCodeServer", () => {
 			body: "{}",
 		});
 
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() => expect(events).toHaveLength(6));
 		controller.abort();
 		await collecting;
 
@@ -269,7 +277,7 @@ describe("MockOpenCodeServer", () => {
 			method: "POST",
 			body: "{}",
 		});
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() => expect(events).toHaveLength(6));
 		controller.abort();
 		await collecting;
 
@@ -299,7 +307,7 @@ describe("MockOpenCodeServer", () => {
 			body: "{}",
 		});
 
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() => expect(events).toHaveLength(6));
 		controller.abort();
 		await collecting;
 
@@ -388,7 +396,7 @@ describe("MockOpenCodeServer", () => {
 				method: "POST",
 				body: "{}",
 			});
-			await new Promise((r) => setTimeout(r, 100));
+			await vi.waitFor(() => expect(events).toHaveLength(4));
 
 			// First frame is the server.connected handshake, as on real OpenCode.
 			expect(events).toHaveLength(4);
@@ -401,7 +409,7 @@ describe("MockOpenCodeServer", () => {
 				method: "POST",
 				body: "{}",
 			});
-			await new Promise((r) => setTimeout(r, 100));
+			await vi.waitFor(() => expect(events).toHaveLength(6));
 			controller.abort();
 			await collecting;
 
@@ -423,7 +431,7 @@ describe("MockOpenCodeServer", () => {
 		const collecting = collectSseEvents(sseRes.body?.getReader(), events);
 
 		mock.flushPendingSse();
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() => expect(events).toHaveLength(6));
 		controller.abort();
 		await collecting;
 
@@ -482,19 +490,19 @@ describe("MockOpenCodeServer", () => {
 		await paginationMock.start();
 		try {
 			paginationMock.triggerPromptSse("ses_1");
-			await new Promise((resolve) => setTimeout(resolve, 100));
+			await vi.waitFor(async () => {
+				const newest = (await (
+					await fetch(`${paginationMock.url}/session/ses_1/message?limit=2`)
+				).json()) as Array<{ info: { id: string } }>;
+				const older = (await (
+					await fetch(
+						`${paginationMock.url}/session/ses_1/message?before=m4&limit=2`,
+					)
+				).json()) as Array<{ info: { id: string } }>;
 
-			const newest = (await (
-				await fetch(`${paginationMock.url}/session/ses_1/message?limit=2`)
-			).json()) as Array<{ info: { id: string } }>;
-			const older = (await (
-				await fetch(
-					`${paginationMock.url}/session/ses_1/message?before=m4&limit=2`,
-				)
-			).json()) as Array<{ info: { id: string } }>;
-
-			expect(newest.map((message) => message.info.id)).toEqual(["m3", "m4"]);
-			expect(older.map((message) => message.info.id)).toEqual(["m2", "m3"]);
+				expect(newest.map((message) => message.info.id)).toEqual(["m3", "m4"]);
+				expect(older.map((message) => message.info.id)).toEqual(["m2", "m3"]);
+			});
 		} finally {
 			await paginationMock.stop();
 		}

@@ -14,7 +14,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
@@ -282,8 +282,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		socket.destroy();
 	});
 
-	// Wait for SSE to connect
-	await new Promise((r) => setTimeout(r, 200));
+	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 
 	return {
 		relay,

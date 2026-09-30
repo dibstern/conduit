@@ -1190,19 +1190,19 @@ describe("handleClientConnectedEffect — model list", () => {
 		);
 
 		const initPromise = runClientInit(deps, "client-1");
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_list",
-			providers: [
-				{
-					id: "openai",
-					name: "OpenAI",
-					configured: true,
-					models: [{ id: "gpt-4", name: "GPT-4", provider: "openai" }],
-				},
-			],
-		});
+		await vi.waitFor(() =>
+			expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+				type: "model_list",
+				providers: [
+					{
+						id: "openai",
+						name: "OpenAI",
+						configured: true,
+						models: [{ id: "gpt-4", name: "GPT-4", provider: "openai" }],
+					},
+				],
+			}),
+		);
 
 		resolveDiscovery(makeClaudeCapabilities());
 		await initPromise;

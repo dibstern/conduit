@@ -148,19 +148,7 @@ function resolvedTurns(sink: EventSink): Array<{
 }
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
-	const deadline = Date.now() + 500;
-	let lastError: unknown;
-	while (Date.now() < deadline) {
-		try {
-			assertion();
-			return;
-		} catch (err) {
-			lastError = err;
-			await new Promise((resolve) => setTimeout(resolve, 5));
-		}
-	}
-	assertion();
-	if (lastError) throw lastError;
+	await vi.waitFor(assertion, { timeout: 500 });
 }
 
 describe("ClaudeProviderInstance mid-session setting changes", () => {

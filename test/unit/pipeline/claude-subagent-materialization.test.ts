@@ -295,17 +295,16 @@ describe("Claude subagent materialization pipeline", () => {
 						}),
 					);
 					const waitForFinalCatchUp = () =>
-						Effect.gen(function* () {
-							const deadline = Date.now() + 2_000;
-							while (Date.now() < deadline) {
-								const rows = yield* sql<MessageRow>`
-									SELECT * FROM messages WHERE session_id = ${childSessionId}`;
-								if (rows.length >= 2) return;
-								yield* Effect.promise(
-									() => new Promise<void>((resolve) => setTimeout(resolve, 25)),
-								);
-							}
-						});
+						Effect.promise(() =>
+							vi.waitFor(
+								async () => {
+									const rows = await Effect.runPromise(sql<MessageRow>`
+								SELECT * FROM messages WHERE session_id = ${childSessionId}`);
+									expect(rows.length).toBeGreaterThanOrEqual(2);
+								},
+								{ timeout: 2_000 },
+							),
+						);
 					yield* waitForFinalCatchUp();
 
 					const parentMessages = yield* sql<MessageRow>`
@@ -447,25 +446,16 @@ describe("Claude subagent materialization pipeline", () => {
 								message.rawText === "Auth is fine",
 						);
 					const waitForProjectedChildTranscript = () =>
-						Effect.gen(function* () {
-							const timeoutMs = 2_000;
-							const pollIntervalMs = 25;
-							const deadline = Date.now() + timeoutMs;
-							let state = yield* readProjectedState();
-							while (
-								!hasProjectedChildTranscript(state) &&
-								Date.now() < deadline
-							) {
-								yield* Effect.promise(
-									() =>
-										new Promise<void>((resolve) =>
-											setTimeout(resolve, pollIntervalMs),
-										),
-								);
-								state = yield* readProjectedState();
-							}
-							return state;
-						});
+						Effect.promise(() =>
+							vi.waitFor(
+								async () => {
+									const state = await Effect.runPromise(readProjectedState());
+									expect(hasProjectedChildTranscript(state)).toBe(true);
+									return state;
+								},
+								{ timeout: 2_000 },
+							),
+						);
 
 					const parentSessionId = "parent-live-session";
 					const parentClaudeSessionId = "sdk-parent-live";

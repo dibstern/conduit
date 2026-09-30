@@ -108,22 +108,7 @@ function delay(ms: number): Promise<void> {
 }
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
-	const deadline = Date.now() + 500;
-	let lastError: unknown;
-	while (Date.now() < deadline) {
-		try {
-			assertion();
-			return;
-		} catch (err) {
-			lastError = err;
-			await delay(5);
-		}
-	}
-	try {
-		assertion();
-	} catch (err) {
-		throw lastError ?? err;
-	}
+	await vi.waitFor(assertion, { timeout: 500 });
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -1206,6 +1191,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 			await Effect.runPromise(instance.shutdownEffect());
 			releaseMaterializer?.();
+			// No tool.running event may arrive after shutdown during this window.
 			await delay(25);
 
 			expect(
@@ -1300,7 +1286,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					}),
 				),
 			);
-			await delay(0);
+			await new Promise<void>((resolve) => setImmediate(resolve));
 			releaseMaterializer?.();
 			await waitForAssertion(() => {
 				expect(
@@ -1496,6 +1482,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 		expect(result._tag).toBe("Left");
+		// No subagent message poll may start after the parent fails during this window.
 		await delay(650);
 		expect(subagentSdk.getSubagentMessages).not.toHaveBeenCalled();
 
@@ -1524,7 +1511,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			for (let i = 0; i < 3; i++) {
 				const releases = finishPolls.splice(0);
 				for (const release of releases) release([]);
-				await delay(0);
+				await new Promise<void>((resolve) => setImmediate(resolve));
 			}
 		};
 		const subagentSdk: ClaudeSubagentSdk = {
@@ -1816,7 +1803,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 
 		try {
-			await new Promise((resolve) => setTimeout(resolve, 0));
+			await vi.waitFor(() => expect(queryFactorySpy).toHaveBeenCalledTimes(2));
 			expect(queryFactorySpy).toHaveBeenCalledTimes(2);
 			expect(oldQuery.close).toHaveBeenCalledTimes(1);
 			expect(
@@ -2054,7 +2041,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				}),
 			),
 		);
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await vi.waitFor(() => expect(queryFactorySpy).toHaveBeenCalledOnce());
 
 		const secondResult = await Effect.runPromise(
 			instance.sendTurnEffect(

@@ -20,7 +20,7 @@ import {
 	PubSub,
 	Ref,
 } from "effect";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	type DaemonLiveOptions,
@@ -93,23 +93,26 @@ const waitForTraceRecord = (
 	predicate: (record: Record<string, unknown>) => boolean,
 ) =>
 	Effect.tryPromise({
-		try: async () => {
-			for (let attempt = 0; attempt < 80; attempt++) {
-				try {
-					const records = readFileSync(path, "utf8")
-						.trim()
-						.split("\n")
-						.filter(Boolean)
-						.map((line) => JSON.parse(line) as Record<string, unknown>);
-					const record = records.find(predicate);
-					if (record !== undefined) return record;
-				} catch {
-					// The trace file may not exist yet, or a writer may still be appending.
-				}
-				await new Promise((resolve) => setTimeout(resolve, 5));
-			}
-			throw new Error(`Timed out waiting for matching trace record in ${path}`);
-		},
+		try: () =>
+			vi.waitFor(
+				() => {
+					try {
+						const records = readFileSync(path, "utf8")
+							.trim()
+							.split("\n")
+							.filter(Boolean)
+							.map((line) => JSON.parse(line) as Record<string, unknown>);
+						const record = records.find(predicate);
+						if (record !== undefined) return record;
+					} catch {
+						// The trace file may not exist yet, or a writer may still be appending.
+					}
+					throw new Error(
+						`Timed out waiting for matching trace record in ${path}`,
+					);
+				},
+				{ timeout: 1_000 },
+			),
 		catch: (cause) => cause,
 	});
 

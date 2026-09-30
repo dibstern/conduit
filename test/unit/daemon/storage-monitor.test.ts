@@ -434,7 +434,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			// Record call count after drain
 			const callsAfterDrain = statfs.mock.calls.length;
 
-			// Wait enough time for at least one more interval tick
+			// No statfs call may occur during this interval after drain.
 			await new Promise((resolve) => setTimeout(resolve, 50));
 
 			// No new calls should have been made after drain

@@ -35,7 +35,7 @@ async function collectAfter(
 			: wsMessageStream(ws as unknown as WebSocket, { onProtocolError });
 	const effect = Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray));
 	const promise = Effect.runPromise(effect);
-	await new Promise((resolve) => setTimeout(resolve, 0));
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	await fn(ws);
 	ws.close();
 	return promise;
@@ -93,7 +93,7 @@ describe("frontend runtime WebSocket validation", () => {
 		const promise = Effect.runPromiseExit(
 			Stream.runDrain(wsMessageStream(ws as unknown as WebSocket)),
 		);
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		ws.emitError();
 

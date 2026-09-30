@@ -15,7 +15,8 @@ import {
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
-const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
+const flushPromises = () =>
+	new Promise<void>((resolve) => setImmediate(resolve));
 
 function createHarness() {
 	let changed: ChangedCallback | undefined;

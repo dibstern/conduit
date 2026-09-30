@@ -309,8 +309,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		);
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
 		resolveOldStatus(new Response(null, { status: 401 }));
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
+		// Flush the stale response handler before asserting it did not replace the new status.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(wsState.relayStatus).toBe("ready");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 		expect(fetchMock.mock.calls).toEqual([
@@ -431,9 +431,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			),
 		);
 		bodyController.close();
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
-		expect(wsState.relayStatus).toBe("ready");
+		// Flush the closed stale stream before asserting it did not change relay state.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(wsState.relayError).toBeUndefined();
 	});
 
@@ -483,9 +482,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 
 		first?.emitMessage(JSON.stringify({ type: "client_count", count: 1 }));
 		second?.emitMessage(JSON.stringify({ type: "client_count", count: 2 }));
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
-		expect(handleMessageMock).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(handleMessageMock).toHaveBeenCalledTimes(1));
 		expect(handleMessageMock).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "client_count", count: 2 }),
 		);
@@ -498,8 +495,13 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
 
 		ws?.emitMessage(JSON.stringify({ type: "delta" }));
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
+		await vi.waitFor(() =>
+			expect(getDebugEvents()).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ event: "protocol:error" }),
+				]),
+			),
+		);
 		expect(handleMessageMock).not.toHaveBeenCalled();
 		expect(getDebugEvents()).toEqual(
 			expect.arrayContaining([

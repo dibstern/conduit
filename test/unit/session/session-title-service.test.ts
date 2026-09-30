@@ -187,11 +187,13 @@ const getRenameEvents = (sessionId = "session-1") =>
 const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		for (let attempt = 0; attempt < 100; attempt++) {
-			const rows = yield* sql<{
-				latest_sequence: number | null;
-				cursor_sequence: number | null;
-			}>`
+		return yield* Effect.promise(() =>
+			vi.waitFor(
+				async () => {
+					const rows = await Effect.runPromise(sql<{
+						latest_sequence: number | null;
+						cursor_sequence: number | null;
+					}>`
 				SELECT
 					(
 						SELECT MAX(sequence)
@@ -202,14 +204,14 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 						SELECT last_applied_seq
 						FROM projector_cursors
 						WHERE projector_name = 'session'
-					) AS cursor_sequence`;
-			const latest = Number(rows[0]?.latest_sequence ?? 0);
-			const cursor = Number(rows[0]?.cursor_sequence ?? 0);
-			if (latest > 0 && cursor >= latest) return latest;
-			yield* Effect.sleep("10 millis");
-		}
-		return yield* Effect.fail(
-			new Error("Timed out waiting for session projector cursor"),
+					) AS cursor_sequence`);
+					const latest = Number(rows[0]?.latest_sequence ?? 0);
+					const cursor = Number(rows[0]?.cursor_sequence ?? 0);
+					if (latest > 0 && cursor >= latest) return latest;
+					throw new Error("Timed out waiting for session projector cursor");
+				},
+				{ timeout: 1_000 },
+			),
 		);
 	});
 
@@ -517,8 +519,13 @@ describe("SessionTitleService", () => {
 						sessionId: "session-1",
 						firstMessage: "Fix OAuth callback loop.",
 					});
-					yield* Effect.promise(
-						() => new Promise<void>((resolve) => setTimeout(resolve, 50)),
+					yield* Effect.promise(() =>
+						vi.waitFor(async () => {
+							const rows = await Effect.runPromise(sql<{ title: string }>`
+							SELECT title FROM sessions WHERE id = 'session-1'`);
+							expect(rows[0]?.title).toBe("Fix OAuth Callback Loop");
+							expect(sendSessionLists).toHaveBeenCalled();
+						}),
 					);
 
 					expect(yield* getSessionTitle()).toBe("Fix OAuth Callback Loop");

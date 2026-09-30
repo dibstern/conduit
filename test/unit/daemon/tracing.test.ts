@@ -7,7 +7,7 @@ import {
 	SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { Context, Effect, Option, Tracer } from "effect";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 
 import {
 	makeDaemonTracingLive,
@@ -27,16 +27,19 @@ const waitForTraceRecord = (
 	predicate: (record: Record<string, unknown>) => boolean,
 ) =>
 	Effect.tryPromise({
-		try: async () => {
-			for (let attempt = 0; attempt < 80; attempt++) {
-				if (existsSync(path)) {
-					const record = readTraceRecords(path).find(predicate);
-					if (record !== undefined) return record;
-				}
-				await new Promise((resolve) => setTimeout(resolve, 5));
-			}
-			throw new Error(`Timed out waiting for matching trace record in ${path}`);
-		},
+		try: () =>
+			vi.waitFor(
+				() => {
+					if (existsSync(path)) {
+						const record = readTraceRecords(path).find(predicate);
+						if (record !== undefined) return record;
+					}
+					throw new Error(
+						`Timed out waiting for matching trace record in ${path}`,
+					);
+				},
+				{ timeout: 1_000 },
+			),
 		catch: (cause) => cause,
 	});
 

@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -231,8 +231,15 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			});
 		});
 
-		// Wait for SSE to connect and rehydration to complete
-		await new Promise((r) => setTimeout(r, 1000));
+		await vi.waitFor(async () => {
+			const pending = await relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					const interactions = yield* PendingInteractionServiceTag;
+					return yield* interactions.listPendingPermissions();
+				}),
+			);
+			expect(pending).toHaveLength(1);
+		});
 	}, 15_000);
 
 	afterAll(async () => {

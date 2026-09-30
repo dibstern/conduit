@@ -284,8 +284,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		socket.destroy();
 	});
 
-	// Wait for SSE + status poller to initialize
-	await new Promise((r) => setTimeout(r, 200));
+	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 
 	return {
 		relay,
@@ -438,7 +437,7 @@ describe("Status poller → browser processing/done transitions", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		// Client B should NOT get status:processing — give it time to NOT arrive
+		// Client B must receive no processing status during this window.
 		await new Promise((r) => setTimeout(r, 150));
 		const bStatuses = clientB
 			.getReceivedOfType("status")

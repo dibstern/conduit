@@ -81,20 +81,16 @@ function createMockIO() {
 	};
 }
 
-/** Wait for a given number of milliseconds. */
-function tick(ms = 15): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+/** Flush queued prompt work before the next interaction. */
+function tick(): Promise<void> {
+	return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-/** Send a sequence of keys with delays between them. */
-async function sendKeys(
-	stdin: EventEmitter,
-	keys: string[],
-	delay = 15,
-): Promise<void> {
+/** Send a sequence of keys, flushing prompt work between them. */
+async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	for (const key of keys) {
 		stdin.emit("data", key);
-		await tick(delay);
+		await tick();
 	}
 }
 
@@ -345,7 +341,7 @@ describe("showProjectsMenu actions", () => {
 
 		// First item should be "Add work (cwd)" — select it with Enter
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		expect(addProject).toHaveBeenCalledWith("/home/user/work");
 	});
@@ -369,7 +365,7 @@ describe("showProjectsMenu actions", () => {
 		await tick();
 
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		const text = io.text();
 		expect(text).toContain("Added: work");
@@ -397,7 +393,7 @@ describe("showProjectsMenu actions", () => {
 		await tick();
 
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		const text = io.text();
 		expect(text).toContain("Permission denied");
@@ -437,7 +433,7 @@ describe("showProjectsMenu actions", () => {
 
 		// Type a path and confirm — just press Enter for default (cwd)
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		expect(addProject).toHaveBeenCalled();
 	});
@@ -456,7 +452,7 @@ describe("showProjectsMenu actions", () => {
 
 		// Press Backspace to trigger the back item
 		await sendKeys(io.stdin, ["\x7f"]);
-		await tick(50);
+		await tick();
 
 		expect(onBack).toHaveBeenCalled();
 	});
@@ -493,7 +489,7 @@ describe("showProjectsMenu actions", () => {
 		// Items: "Add cwd" (cwd not registered), "Add project...", "Back"
 		// Navigate to last item (Back) and press Enter
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		expect(onBack).toHaveBeenCalled();
 	});
@@ -512,7 +508,7 @@ describe("showProjectsMenu actions", () => {
 
 		// Press Escape to trigger back
 		await sendKeys(io.stdin, ["\x1b"]);
-		await tick(50);
+		await tick();
 
 		expect(onBack).toHaveBeenCalled();
 	});
@@ -548,7 +544,7 @@ describe("showProjectsMenu actions", () => {
 		// Menu items should be: "Add project...", "My Project"
 		// Navigate down to "My Project" and select
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		// Should show project detail view
 		const text = io.text();
@@ -648,10 +644,10 @@ describe("showProjectDetail", () => {
 		// Type "New Title"
 		for (const ch of "New Title") {
 			io.stdin.emit("data", ch);
-			await tick(5);
+			await tick();
 		}
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		expect(setProjectTitle).toHaveBeenCalledWith("p1", "New Title");
 	});
@@ -681,10 +677,10 @@ describe("showProjectDetail", () => {
 		// Type and confirm
 		for (const ch of "Hello") {
 			io.stdin.emit("data", ch);
-			await tick(5);
+			await tick();
 		}
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await tick();
 
 		const text = io.text();
 		expect(text).toContain("Title updated");
@@ -711,7 +707,7 @@ describe("showProjectDetail", () => {
 
 		// Navigate to "Remove project" (second item) and select
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		expect(removeProject).toHaveBeenCalledWith("p1");
 	});
@@ -736,7 +732,7 @@ describe("showProjectDetail", () => {
 
 		// Navigate to "Remove project" and select
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick(50);
+		await tick();
 
 		const text = io.text();
 		expect(text).toContain("Removed: p1");
@@ -761,7 +757,7 @@ describe("showProjectDetail", () => {
 
 		// Press Backspace for "Back"
 		await sendKeys(io.stdin, ["\x7f"]);
-		await tick(50);
+		await tick();
 
 		// Should re-render project list (getProjects called again)
 		expect(callCount).toBeGreaterThanOrEqual(1);
