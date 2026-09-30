@@ -15,6 +15,7 @@
 		FLOATING_POSITIONING_DEFAULTS,
 	} from "./floating-styles.js";
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
+	import { getDialogTarget } from "./dialog-context.js";
 
 	type MenuSide = "top" | "right" | "bottom" | "left";
 	type MenuAlign = "start" | "center" | "end";
@@ -71,8 +72,9 @@
 		...rest
 	}: MenuOwnProps = $props();
 	setContext<MenuDensityContext>(menuDensityContextKey, () =>
-		presentation === "sheet" ? "touch" : "default",
+		presentation === "sheet" ? "sheet" : "default",
 	);
+	const dialogTarget = getDialogTarget();
 
 	const contentClass = $derived(
 		[FLOATING_MENU_CONTENT_CLASSES, className].filter(Boolean).join(" "),
@@ -89,6 +91,41 @@
 	const contentId = $props.id();
 	let contentNode = $state<HTMLElement | null>(null);
 	let scrimInteractive = $state(false);
+	let touchClickDeadline = 0;
+
+	// bits-ui 2.18.1 DropdownMenuTrigger opens on touch pointerup, then its
+	// onclick toggles again when the synthetic click arrives with detail=0.
+	function triggerProps(props: Record<string, unknown>): Record<string, unknown> {
+		if (presentation !== "sheet") return props;
+		const onPointerDown = props["onpointerdown"] as ((event: PointerEvent) => void) | undefined;
+		const onPointerUp = props["onpointerup"] as ((event: PointerEvent) => void) | undefined;
+		const onKeyDown = props["onkeydown"] as ((event: KeyboardEvent) => void) | undefined;
+		const onClick = props["onclick"] as ((event: MouseEvent) => void) | undefined;
+		return {
+			...props,
+			onpointerdown: (event: PointerEvent) => {
+				if (event.pointerType !== "touch") touchClickDeadline = 0;
+				onPointerDown?.(event);
+			},
+			onpointerup: (event: PointerEvent) => {
+				if (event.pointerType === "touch") touchClickDeadline = event.timeStamp + 500;
+				onPointerUp?.(event);
+			},
+			onkeydown: (event: KeyboardEvent) => {
+				touchClickDeadline = 0;
+				onKeyDown?.(event);
+			},
+			onclick: (event: MouseEvent) => {
+				const followsTouch = event.timeStamp <= touchClickDeadline;
+				touchClickDeadline = 0;
+				if (followsTouch && event.detail === 0) {
+					event.preventDefault();
+					return;
+				}
+				onClick?.(event);
+			},
+		};
+	}
 
 	function handleOpenChange(nextOpen: boolean) {
 		open = nextOpen;
@@ -129,9 +166,10 @@
 		});
 	}
 
-	const portalProps: DropdownMenuPortalProps = $derived(
-		portalTo === undefined ? {} : { to: portalTo },
-	);
+	const portalProps: DropdownMenuPortalProps = $derived.by(() => {
+		const target = dialogTarget?.() ?? portalTo;
+		return target === undefined ? {} : { to: target };
+	});
 	const contentProps: Omit<
 		DropdownMenuContentProps,
 		"child" | "children"
@@ -168,7 +206,7 @@
 <DropdownMenu.Root bind:open onOpenChange={handleOpenChange}>
 	<DropdownMenu.Trigger>
 		{#snippet child({ props })}
-			{@render trigger({ props })}
+			{@render trigger({ props: triggerProps(props) })}
 		{/snippet}
 	</DropdownMenu.Trigger>
 

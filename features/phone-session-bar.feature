@@ -6,6 +6,31 @@ Scenario: The session owns the top bar on a phone
   Then the session bar title is above the transcript
   And only the session bar is rendered above the transcript
 
+Scenario Outline: The island floats at the bottom of the transcript
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  When I scroll the transcript back to the bottom
+  Then the session bar is collapsed
+  And the session-bar region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline              | threshold |
+  | session-bar-collapsed | 98        |
+
+Scenario Outline: The full bar returns when the transcript is scrolled up
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  And the session bar is expanded
+  And the session-bar region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                | threshold |
+  | session-bar-scrolled-up | 98        |
+
 Scenario: Back returns to the session list
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup

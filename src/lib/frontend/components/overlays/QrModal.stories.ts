@@ -25,7 +25,7 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: {
 		layout: "fullscreen",
-		// Modal uses fixed inset-0; needs own iframe viewport.
+		// ui/Dialog uses the native top layer; capture it in its own iframe.
 		docs: { story: { inline: false, height: "400px" } },
 	},
 	// This stub is what makes the QR baseline capturable at all, for two reasons.
@@ -87,6 +87,9 @@ export const Visible: Story = {
 	//   could have captured.
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		expect(dialog.matches(":modal")).toBe(true);
 
 		await waitFor(() => {
 			expect(

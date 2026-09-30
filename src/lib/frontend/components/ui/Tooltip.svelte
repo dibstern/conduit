@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getDialogTarget } from "./dialog-context.js";
 	import {
 		Tooltip as BitsTooltip,
 		type TooltipContentProps,
@@ -63,6 +64,7 @@
 		children,
 		...rest
 	}: TooltipOwnProps = $props();
+	const dialogTarget = getDialogTarget();
 
 	const uid = $props.id();
 	const generatedContentId = `${uid}-content`;
@@ -85,9 +87,10 @@
 		onopenchange?.(nextOpen);
 	}
 
-	const portalProps: TooltipPortalProps = $derived(
-		portalTo === undefined ? {} : { to: portalTo },
-	);
+	const portalProps: TooltipPortalProps = $derived.by(() => {
+		const target = dialogTarget?.() ?? portalTo;
+		return target === undefined ? {} : { to: target };
+	});
 	const contentProps: Omit<
 		TooltipContentProps,
 		"child" | "children"

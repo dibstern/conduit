@@ -47,26 +47,20 @@ describe("backgroundInert", () => {
 		expect(preexistingBackground.getAttribute("aria-hidden")).toBe("true");
 	});
 
-	it("restores outer modal controls when a nested modal closes", async () => {
+	it("keeps the outer dialog open when a nested dialog closes", async () => {
 		const view = render(NestedModals);
 		const outerAction = view.getByTestId("outer-action");
-		const outerHeader = view.getByText("Outer modal").closest("header");
-
-		expect(outerHeader).not.toBeNull();
-		await waitFor(() => {
-			expect(outerHeader?.hasAttribute("inert")).toBe(true);
-			expect(outerHeader?.getAttribute("aria-hidden")).toBe("true");
-			expect(outerAction.hasAttribute("inert")).toBe(true);
-			expect(outerAction.getAttribute("aria-hidden")).toBe("true");
-		});
+		const outer = view.getByRole("dialog", { name: "Outer modal" });
+		const inner = view.getByRole("dialog", { name: "Inner modal" });
+		expect((outer as HTMLDialogElement).open).toBe(true);
+		expect((inner as HTMLDialogElement).open).toBe(true);
 
 		await view.rerender({ innerOpen: false });
 
 		await waitFor(() => {
-			expect(outerHeader?.hasAttribute("inert")).toBe(false);
-			expect(outerHeader?.hasAttribute("aria-hidden")).toBe(false);
-			expect(outerAction.hasAttribute("inert")).toBe(false);
-			expect(outerAction.hasAttribute("aria-hidden")).toBe(false);
+			expect((inner as HTMLDialogElement).open).toBe(false);
+			expect((outer as HTMLDialogElement).open).toBe(true);
+			expect(outer.contains(outerAction)).toBe(true);
 		});
 	});
 	it("keeps a later overlay live but inerts it when a subsequent boundary activates", async () => {
@@ -120,18 +114,19 @@ describe("backgroundInert", () => {
 		);
 	});
 
-	it("closes an earlier Menu on modal open and keeps a later Menu inside the modal open", async () => {
+	it("keeps Menu state while a native modal takes the top layer", async () => {
 		const onopenchange = vi.fn();
 		const view = render(ModalSurfaceHost, { surfaceOpen: true, onopenchange });
 		await waitFor(() =>
 			expect(view.queryByTestId("surface-content")).not.toBeNull(),
 		);
 		await view.rerender({ modalOpen: true });
-		await waitFor(() =>
-			expect(view.getByTestId("surface-open").textContent).toBe("false"),
+		expect(view.getByRole("dialog", { name: "Host modal" })).toHaveProperty(
+			"open",
+			true,
 		);
-		expect(view.queryByTestId("surface-content")).toBeNull();
-		expect(onopenchange).toHaveBeenCalledWith(false);
+		expect(view.getByTestId("surface-open").textContent).toBe("true");
+		expect(onopenchange).not.toHaveBeenCalledWith(false);
 		view.unmount();
 
 		const innerChange = vi.fn();
@@ -156,12 +151,9 @@ describe("backgroundInert", () => {
 				.getByRole("dialog", { name: "Host modal" })
 				.closest("[inert], [aria-hidden='true']"),
 		).toBeNull();
-		const overlay = document.querySelector("[data-dialog-overlay]");
-		expect(overlay).not.toBeNull();
-		expect(overlay?.closest("[inert], [aria-hidden='true']")).toBeNull();
 	});
 
-	it("closes an earlier Popover on modal open and keeps a later Popover inside the modal open", async () => {
+	it("keeps Popover state while a native modal takes the top layer", async () => {
 		const onopenchange = vi.fn();
 		const view = render(ModalSurfaceHost, {
 			surfaceOpen: true,
@@ -172,11 +164,12 @@ describe("backgroundInert", () => {
 			expect(view.queryByTestId("surface-content")).not.toBeNull(),
 		);
 		await view.rerender({ modalOpen: true });
-		await waitFor(() =>
-			expect(view.getByTestId("surface-open").textContent).toBe("false"),
+		expect(view.getByRole("dialog", { name: "Host modal" })).toHaveProperty(
+			"open",
+			true,
 		);
-		expect(view.queryByTestId("surface-content")).toBeNull();
-		expect(onopenchange).toHaveBeenCalledWith(false);
+		expect(view.getByTestId("surface-open").textContent).toBe("true");
+		expect(onopenchange).not.toHaveBeenCalledWith(false);
 		view.unmount();
 
 		const innerChange = vi.fn();
@@ -202,8 +195,5 @@ describe("backgroundInert", () => {
 				.getByRole("dialog", { name: "Host modal" })
 				.closest("[inert], [aria-hidden='true']"),
 		).toBeNull();
-		const overlay = document.querySelector("[data-dialog-overlay]");
-		expect(overlay).not.toBeNull();
-		expect(overlay?.closest("[inert], [aria-hidden='true']")).toBeNull();
 	});
 });

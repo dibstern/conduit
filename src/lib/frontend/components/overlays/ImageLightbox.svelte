@@ -6,10 +6,10 @@
 <script lang="ts">
   import { uiState, closeLightbox } from "../../stores/ui.svelte.js";
   import Button from "../ui/Button.svelte";
-  import Modal from "./Modal.svelte";
+  import Dialog from "../ui/Dialog.svelte";
 </script>
 
-<Modal open={!!uiState.lightboxSrc} onclose={closeLightbox} backdrop="dark">
+<Dialog open={!!uiState.lightboxSrc} onclose={closeLightbox} backdrop="dark">
     <!-- Empty colour axes keep the fixed white scrim colours without a theme hover wash. -->
     <!-- design-token-waiver: Close button sits on the lightbox's fixed dark backdrop, which does not follow the runtime theme; --overlay-rgb flips to black in light themes and would invert this hover tint to near-invisible against a black backdrop. -->
     <Button
@@ -29,5 +29,4 @@
       src={uiState.lightboxSrc ?? ""}
       alt="Preview"
     />
-</Modal>
-
+</Dialog>

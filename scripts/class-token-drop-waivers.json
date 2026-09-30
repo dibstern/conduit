@@ -1,4 +1,7 @@
 {
+	"test/unit/components/Menu.test.ts :: data-dropdown-menu-content]": "Not a class: this was a DOM selector in a jsdom assertion that a menu opened inside a native dialog was portaled outside it. The assertion was replaced by a browser story that selects modal menu items by keyboard and pointer.",
+	"test/unit/components/Popover.test.ts :: data-popover-content]": "Not a class: this was a DOM selector in a jsdom assertion that a popover opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
+	"test/unit/components/Tooltip.test.ts :: data-tooltip-content]": "Not a class: this was a DOM selector in a jsdom assertion that a tooltip opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
 	"src/lib/frontend/components/ui/Button.svelte :: cursor-pointer,no-underline,transition-colors": {
 		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
 		"reason": "BASE_CLASSES moved intact into buttonClasses; Button still derives its rendered class through that function.",
@@ -135,9 +138,18 @@
 		"reason": "The checkbox primitive owns the fixed-width leading check slot."
 	},
 	"src/lib/frontend/components/session/SessionContextMenu.svelte :: w-[13px]": {
-		"movedTo": "src/lib/frontend/components/ui/MenuCheckboxItem.svelte",
-		"requires": "<MenuCheckboxItem",
-		"reason": "The checkbox primitive owns the fixed-width leading check slot."
+		"movedTo": "src/lib/frontend/components/session/SessionVerbItems.svelte",
+		"requires": "<SessionVerbItems",
+		"reason": "The shared verb rows preserve the empty leading icon slot for checkbox entries."
+	},
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: md:min-h-0,min-h-[44px],ml-auto,text-[14px],text-text-muted": {
+		"movedTo": "src/lib/frontend/components/session/SessionVerbItems.svelte",
+		"requires": "<SessionVerbItems",
+		"reason": "Both the title menu and island now render the same verb row component, which carries these row sizes, sheet type, and trailing hint styles."
+	},
+	"src/lib/frontend/components/overlays/Modal.svelte :: bg-transparent,border-none,focus:outline-none,m-auto,max-w-[100vw],overflow-visible,p-0,text-text": {
+		"movedTo": "src/lib/frontend/components/ui/Dialog.svelte",
+		"reason": "The native top-layer dialog moved intact from overlays/Modal.svelte to the design system."
 	},
 	"src/lib/frontend/components/session/SessionList.svelte :: This,its": "Words in a removed comment; neither is a class token.",
 	"src/lib/frontend/components/session/SheetActionItem.svelte :: className,danger,disabled:text-text-dimmer,flex,font-brand,gap-3,items-center,min-h-[44px],px-4,text-[14px],text-error,text-text,variant": "SheetActionItem was removed in favor of MenuItem with touch density. SessionContextMenu supplies the 44px floor and inner typography; MenuItem supplies padding, colors, disabled state and danger icon. className, danger and variant are parser artifacts from the deleted component.",
@@ -167,5 +179,15 @@
 	"test/helpers/dom-fixtures.ts :: client-count-badge,font-semibold,header-icon-btn,notif-menu,terminal-badge,text-[15px],truncate": "The fixture's Header DOM was removed with the Header component (17xt.15). SessionBar owns the desktop chrome these tests now build.",
 	"test/unit/components/chat-layout-ws.test.ts :: src/lib/frontend/components/layout/Header.svelte": "A module mock path, not a class. Header.svelte was deleted (17xt.15), so its mock went with it.",
 	"test/unit/visual-baseline-uniqueness.test.ts :: at,capture,connected,dot,freezes,green,once,opacity,processing,pulse,screen-reader,share,text,title": "Words from a duplicate-group reason string, not classes. The layout-header connected/processing group was removed with the Header stories (17xt.15).",
+	"src/lib/frontend/components/ui/Modal.svelte :: backdrop-blur-[2px]": "The native dialog's ::backdrop rule owns the same 2px blur in ui/Dialog.svelte.",
+	"src/lib/frontend/components/ui/Modal.svelte :: bg-backdrop": "The native dialog's ::backdrop rule owns the scrim colour in ui/Dialog.svelte.",
+	"src/lib/frontend/components/ui/Modal.svelte :: items-center": "ui/Dialog centers itself with m-auto; no flex positioning wrapper remains.",
+	"src/lib/frontend/components/ui/Modal.svelte :: justify-center": "ui/Dialog centers itself with m-auto; no flex positioning wrapper remains.",
+	"src/lib/frontend/components/ui/Modal.svelte :: placement": "The checker reads ui/Dialog's Svelte class interpolation as a token; placement is the conditional prop, not a CSS class.",
+	"src/lib/frontend/components/ui/Modal.svelte :: z-[var(--z-modal)]": "ui/Dialog calls showModal to promote the dialog and backdrop to the top layer; the removed z-index token is obsolete.",
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: md:min-h-0,min-h-[44px],text-[14px]": "The extracted SessionVerbItems renders the shared rows. ui/Menu now supplies the sheet font and 44px minimum; desktop rows retain their compact menu recipe.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: px-4,py-3,text-[14px]": "The phone Views headers are now MenuGroup headings. ui/MenuGroup owns their sheet padding and design typography instead of SessionBar's former header classes.",
+	"src/lib/frontend/components/layout/SessionBar.stories.ts :: session-bar-overflow-menu": "The phone collapsed bar story now opens the island sheet, whose stable test id is session-bar-island-menu; the desktop overflow id remains in production.",
+	"test/unit/components/Modal.test.ts :: data-dialog-overlay]": "Native dialog ::backdrop replaces the separate overlay element, so this old selector assertion no longer applies.",
 	"test/unit/bridges/client-init.test.ts :: claude-session": "A test session ID, not a CSS class. It belonged to a test of the removed Promise-shaped client init path, deleted with that path; the checker misreads the old sendTo payload string as a class."
 }

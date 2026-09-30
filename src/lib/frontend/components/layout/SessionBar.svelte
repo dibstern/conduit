@@ -2,8 +2,8 @@
   SessionBar — the session's top bar on phones and desktop (design bar 20).
 
   One component for both layouts. On phones the expanded form has an identity
-  row and a title/Views row; at the bottom of the transcript it collapses to a
-  single 46px row. Desktop keeps one row regardless of transcript position.
+  row and a title/Views row; at the bottom of the transcript it floats as an
+  island outside the layout. Desktop keeps one row regardless of position.
 
   You collapse by scrolling to the bottom and expand by scrolling up or by
   pressing the chevron. There is deliberately no collapse button: hiding chrome
@@ -17,7 +17,6 @@
 -->
 
 <script lang="ts">
-	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 	import { getAttentionSessions } from "../../stores/notification-reducer.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -29,9 +28,9 @@
 		isBarCollapsed,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { isSessionUnreadHeld } from "../../stores/session-unread-hold.svelte.js";
-	import { backToSessions, toggleSessionRead } from "../../utils/session-read.js";
+	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
 	import Badge from "../ui/Badge.svelte";
@@ -39,21 +38,19 @@
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
+	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
+	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
-	import { getSettleVerb, sessionVerbActions } from "../session/session-verbs.js";
+	import { getSessionVerbs, getSettleVerb, sessionVerbActions } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
-	import {
-		openSettings,
-		shareViaQr,
-		toggleDebugPanel,
-	} from "./chrome-actions.js";
+	import { chromeMenuActions } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import { activeSessionView, sessionViews } from "./session-views.js";
 
@@ -86,11 +83,15 @@
 		getAttentionSessions(sessionState.currentId, getDescendantSessionIds).size,
 	);
 
-	const collapsed = $derived(isBarCollapsed());
 	const activeView = $derived(activeSessionView());
+	const collapsed = $derived(isBarCollapsed() && activeView === "chat");
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
+	const islandVerbs = $derived(session
+		? getSessionVerbs(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, "sheet")
+		: []);
+	const globalActions = $derived(chromeMenuActions());
 
 	let barEl: HTMLElement | null = $state(null);
 
@@ -105,6 +106,12 @@
 
 	let overflowOpen = $state(false);
 	let overflowOpener: HTMLElement | null = null;
+	// A selected phone action may open a dialog or move focus itself.
+	let overflowSelected = false;
+	function selectOverflow(action: (returnFocus?: () => HTMLElement | null) => void) {
+		if (sessionViewState.compact) overflowSelected = true;
+		action(() => overflowOpener?.isConnected ? overflowOpener : null);
+	}
 	let stateMenuOpen = $state(false);
 	let titleMenuOpen = $state(false);
 	let titleMenuAnchor: HTMLElement | null = $state(null);
@@ -119,6 +126,35 @@
 	});
 
 </script>
+
+{#snippet viewItems(testIdPrefix: string)}
+	<MenuRadioGroup value={activeView} aria-label="Views">
+		{#each sessionViews as view (view.id)}
+			<MenuRadioItem
+				value={view.id}
+				icon={view.icon}
+				data-testid={`${testIdPrefix}-${view.id}`}
+				disabled={view.disabled === true}
+				onselect={view.select}
+			>
+				<span class="flex items-center gap-2">
+					<span class="min-w-0 flex-1">{view.label}</span>
+					{#if view.badge?.()}
+						<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
+					{/if}
+				</span>
+			</MenuRadioItem>
+		{/each}
+	</MenuRadioGroup>
+{/snippet}
+
+{#snippet globalActionItems()}
+	{#each globalActions as action (action.id)}
+		<MenuItem title={action.label} icon={sessionViewState.compact ? action.icon : undefined} data-testid={`overflow-${action.id}`} onselect={() => selectOverflow(action.run)}>
+			{action.label}
+		</MenuItem>
+	{/each}
+{/snippet}
 
 <!--
 	Where you are. Identity is the first thing to give: it truncates while the
@@ -176,7 +212,7 @@
 		data-testid="session-bar-back"
 		onclick={sessionViewState.compact ? backToSessions : expandSidebar}
 	>
-		<span class:sr-only={collapsed}>Sessions</span>
+		<span>Sessions</span>
 		{#if attentionCount > 0}
 			<Badge
 				variant="accent-solid"
@@ -234,7 +270,7 @@
 				}}
 			/>
 		{/if}
-		{#if session?.unread === true && isSessionUnreadHeld(session.id)}
+		{#if session?.unread === true && isSessionUnreadHeld(session.id) && !collapsed}
 			<Menu ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
 				{#snippet trigger({ props })}
 					<Button {...props} variant="ghost" size="content" hoverFill="none" class="group -my-[13px] min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
@@ -246,11 +282,11 @@
 				<MenuItem data-testid="session-bar-unread-mark-read" onselect={() => void sessionVerbActions.markRead(session)}>Mark read</MenuItem>
 			</Menu>
 		{/if}
-		{#if stateChip && session}
+		{#if stateChip && session && !collapsed}
 			{#if stateChip.kind === "woke"}
 				<Badge variant="quiet" shape="pill" size="sm" class="shrink-0" data-testid="session-bar-state-chip" data-state="woke" title={stateChip.label}>
 					<Icon name={stateChip.icon} size={13} class="text-accent" />
-					{#if !collapsed}<span class="desktop-state-label">{stateChip.label}</span>{/if}
+					<span class="desktop-state-label">{stateChip.label}</span>
 				</Badge>
 			{:else}
 				<Menu bind:open={stateMenuOpen} ariaLabel="Session state options" align="end" data-testid="session-bar-state-menu">
@@ -258,7 +294,7 @@
 						<Button {...props} variant="ghost" size="content" class="min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
 							<Badge variant="quiet" shape="pill" size="sm">
 								<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-brand-b" : "text-success"} />
-								{#if !collapsed}<span class="desktop-state-label">{stateChip.label}</span>{/if}
+								<span class="desktop-state-label">{stateChip.label}</span>
 							</Badge>
 						</Button>
 					{/snippet}
@@ -302,7 +338,7 @@
 			title={settleVerb.disabledReason ?? settleVerb.label}
 			ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
 			data-testid="session-bar-settle"
-			onclick={settleVerb.run}
+			onclick={() => settleVerb.run()}
 		>
 			<span id="session-bar-settle-label">{settleVerb.label}</span>
 		</Button>
@@ -317,7 +353,8 @@
 		</div>
 	{/if}
 
-	{#if sessionViewState.compact && !collapsed}
+	{#if sessionViewState.compact}
+	{#if !collapsed}
 		<Menu presentation="sheet" ariaLabel="Views" data-testid="session-bar-views-sheet">
 			{#snippet trigger({ props })}
 				<Button
@@ -336,42 +373,16 @@
 					{/if}
 				</Button>
 			{/snippet}
-			<div class="border-b border-border px-4 py-3 font-brand text-[14px] font-semibold text-text">Views</div>
-			<MenuRadioGroup value={activeView}>
-				{#each sessionViews as view (view.id)}
-					<MenuRadioItem
-						value={view.id}
-						data-testid={`session-bar-view-${view.id}`}
-						class="min-h-[44px]"
-						disabled={view.disabled === true}
-						onselect={view.select}
-					>
-						<span class="flex items-center gap-2">
-							<Icon name={view.icon} size={16} class="shrink-0" />
-							<span class="min-w-0 flex-1">{view.label}</span>
-							{#if view.badge?.()}
-								<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
-							{/if}
-						</span>
-					</MenuRadioItem>
-				{/each}
-			</MenuRadioGroup>
+			<MenuGroup label="Views">
+				{@render viewItems("session-bar-view")}
+			</MenuGroup>
 		</Menu>
-	{/if}
-
-	{#if sessionViewState.compact && collapsed}
-		<!--
-			Getting the bar back. `secondary` rather than `ghost` so it does not
-			read as the same kind of thing as the overflow beside it: at the bar's
-			smallest state the two glyphs are all you have, and one of them is the
-			way back to everything else.
-
-			Mode glyphs are exactly what you should not have to decode at the
-			moment the bar is smallest, so the switcher is not duplicated here.
-		-->
+	{:else}
+		<!-- Ghost like the ⋯ beside it: the same visual size and a 44px hit target
+		     fit inside the 46px island without a bordered box. -->
 		<Button
 			id="session-bar-chevron"
-			variant="secondary"
+			variant="ghost"
 			size="content"
 			iconOnly
 			icon="chevron-down"
@@ -385,10 +396,11 @@
 			onclick={showControls}
 		/>
 	{/if}
+	{/if}
 
 	{#if collapsed || !sessionViewState.compact}
 		<!--
-		The phone's collapsed row and the desktop bar use this overflow. Expanded
+		The phone island and the desktop bar use this overflow. Expanded
 		phone actions remain in the title menu.
 
 		Deliberately not here: the connection status dot and the client count,
@@ -397,10 +409,12 @@
 		-->
 	<Menu
 		bind:open={overflowOpen}
+		onopenchange={(open) => { if (open) overflowSelected = false; }}
 		presentation={sessionViewState.compact ? "sheet" : "popover"}
 		ariaLabel="More actions"
 		align="end"
 		onCloseAutoFocus={(event) => {
+			if (overflowSelected) { event.preventDefault(); return; }
 			const opener = overflowOpener;
 			if (opener?.isConnected) {
 				event.preventDefault();
@@ -409,7 +423,7 @@
 				}, 0);
 			}
 		}}
-		data-testid="session-bar-overflow-menu"
+		data-testid={sessionViewState.compact ? "session-bar-island-menu" : "session-bar-overflow-menu"}
 	>
 		{#snippet trigger({ props })}
 			<Button
@@ -423,61 +437,28 @@
 				class="shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
 				title="More actions"
 				ariaLabel="More actions"
-				data-testid="session-bar-overflow"
+				data-testid={sessionViewState.compact ? "session-bar-island-overflow" : "session-bar-overflow"}
 				onpointerdowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
 				onkeydowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
 			/>
 		{/snippet}
 
 		{#if sessionViewState.compact}
-		{#each sessionViews as view (view.id)}
-			<MenuItem
-				data-testid={`overflow-view-${view.id}`}
-				disabled={view.disabled === true}
-				aria-current={view.id === activeView ? "true" : undefined}
-				onselect={view.select}
-			>
-				<Icon name={view.icon} size={16} class="shrink-0" />
-				<span class="min-w-0 flex-1">{view.label}</span>
-				{#if view.badge?.()}
-					<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
-				{/if}
-				{#if view.id === activeView}<Icon name="check" size={14} class="shrink-0 text-accent" />{/if}
-			</MenuItem>
-		{/each}
-		<MenuSeparator />
-		{/if}
-
-		{#if sessionViewState.compact && session && session.settledAt == null && !isSessionSnoozed(session, sessionState.now)}
-			<MenuItem
-				data-testid={session.unread ? "overflow-mark-read" : "overflow-mark-unread"}
-				onselect={() => void toggleSessionRead(session)}
-			>
-				{session.unread ? "Mark read" : "Mark unread"}
-			</MenuItem>
+			<MenuGroup label="Views">
+				{@render viewItems("overflow-view")}
+			</MenuGroup>
 			<MenuSeparator />
+			{#if session}
+				<MenuGroup label="Session">
+					<SessionVerbItems verbs={islandVerbs} presentation="sheet" onselect={selectOverflow} />
+				</MenuGroup>
+			{/if}
 		{/if}
-
-		<MenuItem title="Share" data-testid="overflow-share" onselect={shareViaQr}>
-			Share
-		</MenuItem>
-		<MenuItem
-			title="Settings"
-			data-testid="overflow-settings"
-			onselect={() => openSettings()}
-		>
-			Settings
-		</MenuItem>
-
-		{#if featureFlags.debug}
-			<MenuSeparator />
-			<MenuItem
-				title="Toggle debug panel"
-				data-testid="overflow-debug"
-				onselect={toggleDebugPanel}
-			>
-				Debug panel
-			</MenuItem>
+		{#if sessionViewState.compact}<MenuSeparator />{/if}
+		{#if sessionViewState.compact}
+			<MenuGroup label="More actions">{@render globalActionItems()}</MenuGroup>
+		{:else}
+			<div role="group" aria-label="More actions">{@render globalActionItems()}</div>
 		{/if}
 	</Menu>
 	{/if}
@@ -492,11 +473,7 @@
 			now={sessionState.now}
 			host={{ rename: () => { renaming = true; } }}
 			onclose={() => { titleMenuOpen = false; }}
-			extras={[
-				{ testId: "session-title-share", label: "Share", icon: "share", run: shareViaQr },
-				{ testId: "session-title-settings", label: "Settings", icon: "settings", run: () => openSettings() },
-				...(featureFlags.debug ? [{ testId: "session-title-debug", label: "Debug panel", icon: "bug", run: toggleDebugPanel } as const] : []),
-			]}
+			extras={globalActions.map((action) => ({ testId: `session-title-${action.id}`, label: action.label, icon: action.icon, run: action.run }))}
 		/>
 	{/if}
 

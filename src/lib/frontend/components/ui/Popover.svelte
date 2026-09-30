@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getDialogTarget } from "./dialog-context.js";
 	import {
 		Popover as BitsPopover,
 		type PopoverContentProps,
@@ -65,6 +66,7 @@
 		children,
 		...rest
 	}: PopoverOwnProps = $props();
+	const dialogTarget = getDialogTarget();
 
 	const uid = $props.id();
 	const titleId = `${uid}-title`;
@@ -84,9 +86,10 @@
 		return undefined;
 	});
 
-	const portalProps: PopoverPortalProps = $derived(
-		portalTo === undefined ? {} : { to: portalTo },
-	);
+	const portalProps: PopoverPortalProps = $derived.by(() => {
+		const target = dialogTarget?.() ?? portalTo;
+		return target === undefined ? {} : { to: target };
+	});
 	const contentProps: Omit<
 		PopoverContentProps,
 		"child" | "children"

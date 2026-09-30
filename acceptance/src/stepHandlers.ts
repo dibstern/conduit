@@ -26,7 +26,7 @@ const driver = new PlaywrightDriver();
 const relayControls = new WeakMap<Page, WsMockControl>();
 const rpcControls = new WeakMap<Page, RpcMockControl>();
 const composerMessages = new WeakMap<Page, string>();
-const transcriptScrollPositions = new WeakMap<Page, number>();
+const transcriptMessageTops = new WeakMap<Page, number>();
 const rememberedSessionViews = new WeakMap<Page, string[]>();
 const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
 const inheritedClaudeCommitAttribution = "Inherited commit attribution";
@@ -156,15 +156,19 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "remember transcript scroll position",
 		match: /^I remember the transcript scroll position$/,
 		run: async ({ world }) => {
-			const { position, maxScroll } = await world.page
+			const { position, maxScroll, messageTop } = await world.page
 				.locator("#messages")
 				.evaluate((el) => ({
 					position: el.scrollTop,
 					maxScroll: el.scrollHeight - el.clientHeight,
+					messageTop: el.querySelector(".msg-user")?.getBoundingClientRect()
+						.top,
 				}));
 			if (maxScroll <= 0 || position >= maxScroll)
 				throw new Error("transcript did not scroll before switching views");
-			transcriptScrollPositions.set(world.page, position);
+			if (messageTop === undefined)
+				throw new Error("transcript has no user message");
+			transcriptMessageTops.set(world.page, messageTop);
 		},
 	},
 	{
@@ -198,9 +202,19 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "open session overflow menu",
 		match: /^I open the session overflow menu$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("session-bar-overflow").click();
+			const compact =
+				(await world.page
+					.getByTestId("session-bar")
+					.getAttribute("data-compact")) === "true";
 			await world.page
-				.getByTestId("session-bar-overflow-menu")
+				.getByTestId(
+					compact ? "session-bar-island-overflow" : "session-bar-overflow",
+				)
+				.click();
+			await world.page
+				.getByTestId(
+					compact ? "session-bar-island-menu" : "session-bar-overflow-menu",
+				)
 				.waitFor({ state: "visible" });
 		},
 	},
@@ -212,8 +226,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 			if (!expected?.length)
 				throw new Error("session views were not remembered");
 			const actual = await world.page
-				.getByTestId("session-bar-overflow-menu")
-				.getByRole("menuitem")
+				.getByTestId("session-bar-island-menu")
+				.getByRole("menuitemradio")
 				.evaluateAll(
 					(items, count) =>
 						items.slice(0, count).map((item) => item.textContent?.trim() ?? ""),
@@ -231,8 +245,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 		match: /^I choose the (Chat|Terminal|Files) view from the menu$/,
 		run: async ({ world, match }) => {
 			await world.page
-				.getByTestId("session-bar-overflow-menu")
-				.getByRole("menuitem", { name: match[1] ?? "", exact: true })
+				.getByTestId("session-bar-island-menu")
+				.getByRole("menuitemradio", { name: match[1] ?? "", exact: true })
 				.click();
 		},
 	},
@@ -241,7 +255,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 		match: /^the session overflow menu is closed$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByTestId("session-bar-overflow-menu")
+				.getByTestId("session-bar-island-menu")
 				.waitFor({ state: "hidden" });
 		},
 	},
@@ -260,14 +274,14 @@ export const conduitVisualHandlers: StepHandler[] = [
 				(await world.page.getByTestId("session-bar-views-button").count()) > 0;
 			await world.page
 				.getByTestId(
-					expanded ? "session-bar-views-button" : "session-bar-overflow",
+					expanded ? "session-bar-views-button" : "session-bar-island-overflow",
 				)
 				.click();
 			const selected = await world.page
 				.getByTestId(
 					`${expanded ? "session-bar-view" : "overflow-view"}-${match[1]?.toLowerCase()}`,
 				)
-				.getAttribute(expanded ? "aria-checked" : "aria-current");
+				.getAttribute("aria-checked");
 			await world.page.keyboard.press("Escape");
 			if (selected !== "true")
 				throw new Error(`${match[1]} view is not selected`);
@@ -278,12 +292,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 		match: /^the transcript is visible at the remembered scroll position$/,
 		run: async ({ world }) => {
 			await world.page.locator("#messages").waitFor({ state: "visible" });
-			const before = transcriptScrollPositions.get(world.page);
+			const before = transcriptMessageTops.get(world.page);
 			const after = await world.page
-				.locator("#messages")
-				.evaluate((el) => el.scrollTop);
+				.locator("#messages .msg-user")
+				.first()
+				.evaluate((el) => el.getBoundingClientRect().top);
 			if (before === undefined || Math.abs(after - before) > 1) {
-				throw new Error(`transcript scroll moved from ${before} to ${after}`);
+				throw new Error(`transcript message moved from ${before} to ${after}`);
 			}
 		},
 	},
@@ -317,15 +332,19 @@ export const conduitVisualHandlers: StepHandler[] = [
 			const title = world.page.locator("[data-testid='session-bar-title']");
 			await title.waitFor({ state: "visible" });
 			const titleBox = await title.boundingBox();
-			const transcriptBox = await world.page.locator("#messages").boundingBox();
+			const transcript = world.page.locator("#messages");
+			const transcriptBox = await transcript.boundingBox();
 			if (!titleBox || !transcriptBox) {
 				throw new Error("session bar title or transcript has no layout box");
 			}
-			if (titleBox.y + titleBox.height > transcriptBox.y + 1) {
+			const contentInset = await transcript.evaluate((el) =>
+				Number.parseFloat(getComputedStyle(el).paddingTop),
+			);
+			if (titleBox.y + titleBox.height > transcriptBox.y + contentInset + 1) {
 				throw new Error(
-					`session bar title overlaps the transcript: title ends at ${
+					`session bar title overlaps the transcript content: title ends at ${
 						titleBox.y + titleBox.height
-					}, transcript starts at ${transcriptBox.y}`,
+					}, content starts at ${transcriptBox.y + contentInset}`,
 				);
 			}
 		},
@@ -334,10 +353,12 @@ export const conduitVisualHandlers: StepHandler[] = [
 		name: "only the session bar is rendered above the transcript",
 		match: /^only the session bar is rendered above the transcript$/,
 		run: async ({ world }) => {
-			const count = await world.page.locator("#app > #session-bar").count();
-			if (count !== 1) {
+			const shown = await world.page
+				.locator("#session-chrome > :visible")
+				.evaluateAll((elements) => elements.map((element) => element.id));
+			if (shown.length !== 1 || shown[0] !== "session-bar") {
 				throw new Error(
-					`expected one session bar above the transcript, found ${count}`,
+					`expected only the session bar above the transcript, found [${shown.join(", ")}]`,
 				);
 			}
 		},
@@ -456,9 +477,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 		},
 	},
 	{
-		// The chevron expands the bar, which shrinks the scroll container. If the
-		// transcript is not re-pinned the newest message slides off the bottom —
-		// pressing a control to see more chrome must not cost you your place.
+		// The chevron changes the overlaid bar's height. The transcript must
+		// remain pinned while its top clearance changes.
 		name: "transcript is pinned to the bottom",
 		match: /^the transcript is pinned to the bottom$/,
 		run: async ({ world }) => {

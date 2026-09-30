@@ -83,7 +83,7 @@ describe("Tooltip", () => {
 		expect(onopenchange).toHaveBeenLastCalledWith(false);
 	});
 
-	it("keeps a body-portaled tooltip live while its trigger is inside a modal", async () => {
+	it("portals a tooltip into its enclosing modal", async () => {
 		const view = render(TooltipTestHarness, {
 			props: { insideModal: true, open: false },
 		});
@@ -94,29 +94,9 @@ describe("Tooltip", () => {
 		await fireEvent.focus(trigger);
 		expect(view.getByTestId("tooltip-open").textContent).toBe("true");
 
-		await waitFor(() => {
-			const tooltip = document.querySelector<HTMLElement>(
-				"[data-tooltip-content]",
-			);
-			expect(tooltip).not.toBeNull();
-			expect(document.body.contains(tooltip)).toBe(true);
-			expect(modal.contains(tooltip)).toBe(false);
-			const modalBranch = [...document.body.children].find((element) =>
-				element.contains(modal),
-			);
-			const tooltipBranch = [...document.body.children].find((element) =>
-				element.contains(tooltip),
-			);
-			expect(tooltipBranch).toBeDefined();
-			expect(tooltipBranch).not.toBe(modalBranch);
-
-			let current: HTMLElement | null = tooltip;
-			while (current && current !== document.body) {
-				expect(current.hasAttribute("inert")).toBe(false);
-				expect(current.hasAttribute("aria-hidden")).toBe(false);
-				current = current.parentElement;
-			}
-		});
+		await waitFor(() =>
+			expect(modal.contains(view.getByRole("tooltip"))).toBe(true),
+		);
 	});
 
 	it("portals content to an explicit target", () => {

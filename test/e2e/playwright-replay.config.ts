@@ -20,6 +20,7 @@ export default defineConfig({
 		"session-auto-settle.spec.ts",
 		"session-arrange.spec.ts",
 		"session-snooze.spec.ts",
+		"session-island.spec.ts",
 		"session-mark-unread.spec.ts",
 		"session-git-identity.spec.ts",
 		"session-gestures.spec.ts",

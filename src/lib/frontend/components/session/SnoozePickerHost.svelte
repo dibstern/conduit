@@ -11,6 +11,7 @@
 		placement={snoozePicker.placement}
 		sessionTitle={session.title}
 		now={snoozePicker.now}
+		returnFocus={snoozePicker.returnFocus}
 		onclose={() => { snoozePicker.session = null; }}
 		onsnooze={(until) => { void sessionVerbActions.snooze(session, until, snoozePicker.now); }}
 	/>

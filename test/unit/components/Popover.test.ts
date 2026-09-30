@@ -55,7 +55,7 @@ describe("Popover", () => {
 		expect(onopenchange).toHaveBeenLastCalledWith(false);
 	});
 
-	it("keeps a body-portaled popover live while its trigger is inside a modal", async () => {
+	it("portals a popover into its enclosing modal", async () => {
 		const view = render(PopoverTestHarness, {
 			props: { insideModal: true, open: false },
 		});
@@ -66,29 +66,11 @@ describe("Popover", () => {
 		await fireEvent.click(trigger);
 		expect(view.getByTestId("popover-open").textContent).toBe("true");
 
-		await waitFor(() => {
-			const popover = document.querySelector<HTMLElement>(
-				"[data-popover-content]",
-			);
-			expect(popover).not.toBeNull();
-			expect(document.body.contains(popover)).toBe(true);
-			expect(modal.contains(popover)).toBe(false);
-			const modalBranch = [...document.body.children].find((element) =>
-				element.contains(modal),
-			);
-			const popoverBranch = [...document.body.children].find((element) =>
-				element.contains(popover),
-			);
-			expect(popoverBranch).toBeDefined();
-			expect(popoverBranch).not.toBe(modalBranch);
-
-			let current: HTMLElement | null = popover;
-			while (current && current !== document.body) {
-				expect(current.hasAttribute("inert")).toBe(false);
-				expect(current.hasAttribute("aria-hidden")).toBe(false);
-				current = current.parentElement;
-			}
-		});
+		await waitFor(() =>
+			expect(
+				modal.contains(view.getByRole("dialog", { name: "Modal details" })),
+			).toBe(true),
+		);
 	});
 
 	it("portals content to an explicit target", () => {

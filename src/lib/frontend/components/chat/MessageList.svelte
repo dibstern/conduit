@@ -18,7 +18,6 @@
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
 	import {
-		isBarCollapsed,
 		noteSessionChanged,
 		noteUserScroll,
 		publishAtBottom,
@@ -36,6 +35,7 @@
 	import BlockGrid from "../ui/BlockGrid.svelte";
 
 	let messagesEl: HTMLDivElement | undefined = $state();
+	let { topClearance = 0 }: { topClearance?: number } = $props();
 	let sentinelEl: HTMLElement | undefined = $state();
 
 	// ─── Scroll controller ────────────────────────────────────────────────────
@@ -71,11 +71,27 @@
 		);
 	});
 
-	// A Svelte $effect runs after the DOM is committed but before paint, so the
-	// bar's new height is already applied when we re-pin the transcript.
+	// Container resizes can change the bottom gap without a scroll event.
 	$effect(() => {
-		isBarCollapsed(); // track the bar's state
-		scrollCtrl.onContainerResize();
+		const scroller = messagesEl;
+		if (!scroller) return;
+		const observer = new ResizeObserver(() => scrollCtrl.onContainerResize());
+		observer.observe(scroller);
+		return () => observer.disconnect();
+	});
+
+	// The transcript's top padding follows topClearance (ChatLayout sets the
+	// CSS variable). Chromium does not scroll-anchor on a scroller's own padding
+	// change, so keep a detached reading position in place by hand. Svelte runs
+	// this after the DOM update and before paint, so it lands in the same frame.
+	let appliedClearance: number | undefined;
+	$effect(() => {
+		const scroller = messagesEl;
+		if (!scroller) return;
+		const delta = appliedClearance === undefined ? 0 : topClearance - appliedClearance;
+		appliedClearance = topClearance;
+		if (delta !== 0 && untrack(() => scrollCtrl.isDetached)) scroller.scrollTop += delta;
+		untrack(() => scrollCtrl.onContainerResize());
 	});
 
 	// Scroll to bottom when loadLifecycle transitions to "ready" after settling.

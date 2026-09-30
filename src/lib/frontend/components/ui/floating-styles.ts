@@ -58,7 +58,7 @@ export const MENU_RADIO_ITEM_COLOR_CLASSES =
 // Everything a menu row is regardless of how tightly it is packed. Emits no
 // `gap-*` and no padding, so the density recipe below owns that group outright.
 export const FLOATING_ITEM_BASE_CLASSES =
-	"flex cursor-default select-none items-center text-sm " +
+	"flex cursor-default select-none items-center " +
 	"hover:bg-bg focus:bg-bg focus:outline-hidden " +
 	"data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
 
@@ -78,11 +78,15 @@ export const FLOATING_ITEM_BASE_CLASSES =
 // every pointer menu thumb-sized. The union member is the cheap way to say
 // "these are two things".
 export const MENU_ITEM_DENSITY_CLASSES = {
-	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES}`,
-	touch: "gap-2.5 px-4 py-3",
+	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES} text-sm`,
+	touch: "gap-2.5 px-4 py-3 text-sm",
+	sheet: "min-h-[44px] gap-[13px] px-4 py-0 font-[system-ui] text-[14.5px]",
 } as const;
 
 export type MenuItemDensity = keyof typeof MENU_ITEM_DENSITY_CLASSES;
+
+export const MENU_SHEET_LEADING_ICON_CLASSES =
+	"grid w-[20px] shrink-0 place-items-center";
 
 export const FLOATING_ITEM_CLASSES = `${FLOATING_ITEM_BASE_CLASSES} ${MENU_ITEM_DENSITY_CLASSES.default}`;
 

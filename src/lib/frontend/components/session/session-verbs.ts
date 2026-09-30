@@ -52,7 +52,7 @@ export type SessionVerb = {
 	disabledReason?: string | null;
 	checked?: boolean;
 	danger?: boolean;
-	run(): void;
+	run(returnFocus?: () => HTMLElement | null): void;
 };
 export type SessionVerbEntry = SessionVerb | { divider: true };
 
@@ -184,11 +184,15 @@ async function unsnooze(session: SessionInfo) {
 	}
 }
 
-async function remove(session: SessionInfo) {
+async function remove(
+	session: SessionInfo,
+	returnFocus?: () => HTMLElement | null,
+) {
 	const title = session.title || "New Session";
 	const confirmed = await confirm(
 		`Delete "${title}"? This session and its history will be permanently removed.`,
 		"Delete",
+		returnFocus,
 	);
 	if (!confirmed) return;
 	const input = rpcInput(session);
@@ -280,7 +284,8 @@ export function getSessionVerbs(
 				icon: "moon",
 				hint: "z",
 				disabledReason: actions.snoozeDisabledReason,
-				run: () => openSnoozePicker(session, snoozePlacement),
+				run: (returnFocus) =>
+					openSnoozePicker(session, snoozePlacement, returnFocus),
 			});
 			if (actions.snoozed)
 				items.push({
@@ -355,8 +360,8 @@ export function getSessionVerbs(
 				testId: "session-ctx-delete",
 				label: "Delete",
 				danger: true,
-				run: () => {
-					void remove(session);
+				run: (returnFocus) => {
+					void remove(session, returnFocus);
 				},
 			},
 		);

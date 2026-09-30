@@ -34,13 +34,13 @@
 	{/snippet}
 
 	<MenuGroup label="Project">
-		<MenuItem>Archive</MenuItem>
+		<MenuItem icon="archive">Archive</MenuItem>
 		<MenuItem>Duplicate</MenuItem>
 		<MenuCheckboxItem bind:checked>Auto-settle when idle</MenuCheckboxItem>
 		<MenuSeparator />
 		<MenuRadioGroup bind:value={selected}>
 			<MenuRadioItem value="private">Private</MenuRadioItem>
-			<MenuRadioItem value="shared">Shared</MenuRadioItem>
+			<MenuRadioItem value="shared" icon="share">Shared</MenuRadioItem>
 		</MenuRadioGroup>
 		<MenuItem variant="danger">Delete</MenuItem>
 	</MenuGroup>

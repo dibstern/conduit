@@ -7,7 +7,6 @@ import {
 	MENU_ITEM_VARIANT_CLASSES,
 	MENU_RADIO_ITEM_COLOR_CLASSES,
 } from "../../../src/lib/frontend/components/ui/floating-styles.js";
-import MenuInModalHarness from "./fixtures/MenuInModalHarness.svelte";
 import MenuTestHarness from "./fixtures/MenuTestHarness.svelte";
 
 const textColorClasses = (classes: string): string[] =>
@@ -79,7 +78,7 @@ describe("Menu", () => {
 		stylesheet.remove();
 	});
 
-	it("presents a sheet with a token scrim, touch rows, and Escape dismissal", async () => {
+	it("presents a sheet with one row recipe and Escape dismissal", async () => {
 		const view = render(MenuTestHarness, {
 			props: { open: false, presentation: "sheet" },
 		});
@@ -93,9 +92,30 @@ describe("Menu", () => {
 		expect(
 			view.getByTestId("menu-sheet-scrim").classList.contains("bg-backdrop"),
 		).toBe(true);
-		expect(view.getByTestId("archive-item").classList.contains("py-3")).toBe(
-			true,
-		);
+		for (const item of ["archive-item", "pinned-item", "compact-item"]) {
+			const row = view.getByTestId(item);
+			for (const className of [
+				"min-h-[44px]",
+				"text-[14.5px]",
+				"font-[system-ui]",
+				"gap-[13px]",
+				"px-4",
+			]) {
+				expect(row.classList.contains(className)).toBe(true);
+			}
+			expect(row.querySelector(".w-\\[20px\\]")).not.toBeNull();
+		}
+		expect(
+			view
+				.getByRole("menuitem", { name: "Open project" })
+				.querySelector(".w-\\[20px\\]"),
+		).not.toBeNull();
+		expect(
+			view
+				.getByRole("group", { name: "Actions" })
+				.querySelector("[data-dropdown-menu-group-heading]")
+				?.classList.contains("uppercase"),
+		).toBe(true);
 		expect(
 			view.getByTestId("explicit-density-item").classList.contains("py-1.5"),
 		).toBe(true);
@@ -105,38 +125,20 @@ describe("Menu", () => {
 		await waitFor(() => expect(document.activeElement).toBe(trigger));
 	});
 
-	it("keeps a body-portaled menu live while its trigger is inside a modal", async () => {
-		const view = render(MenuInModalHarness);
-		const modal = view.getByRole("dialog", { name: "Modal with menu" });
-		const trigger = view.getByRole("button", { name: "Open modal actions" });
-
-		expect(view.getByTestId("modal-menu-open").textContent).toBe("false");
-		await fireEvent.click(trigger);
-		expect(view.getByTestId("modal-menu-open").textContent).toBe("true");
-
-		await waitFor(() => {
-			const menu = document.querySelector<HTMLElement>(
-				"[data-dropdown-menu-content]",
-			);
-			expect(menu).not.toBeNull();
-			expect(document.body.contains(menu)).toBe(true);
-			expect(modal.contains(menu)).toBe(false);
-			const modalBranch = [...document.body.children].find((element) =>
-				element.contains(modal),
-			);
-			const menuBranch = [...document.body.children].find((element) =>
-				element.contains(menu),
-			);
-			expect(menuBranch).toBeDefined();
-			expect(menuBranch).not.toBe(modalBranch);
-
-			let current: HTMLElement | null = menu;
-			while (current && current !== document.body) {
-				expect(current.hasAttribute("inert")).toBe(false);
-				expect(current.hasAttribute("aria-hidden")).toBe(false);
-				current = current.parentElement;
-			}
-		});
+	it("keeps compact dropdown rows and heading typography", () => {
+		const view = render(MenuTestHarness);
+		for (const item of ["archive-item", "pinned-item", "compact-item"]) {
+			const row = view.getByTestId(item);
+			expect(row.classList.contains("text-sm")).toBe(true);
+			expect(row.classList.contains("py-1.5")).toBe(true);
+			expect(row.classList.contains("min-h-[44px]")).toBe(false);
+		}
+		expect(
+			view
+				.getByRole("group", { name: "Actions" })
+				.querySelector("[data-dropdown-menu-group-heading]")
+				?.classList.contains("text-xs"),
+		).toBe(true);
 	});
 
 	it("transitions radio selection, its binding, and the visible checkmark", async () => {

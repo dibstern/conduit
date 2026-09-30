@@ -54,6 +54,13 @@ const LIGHT_STORY_IDS = new Set([
 	"input-inputarea--with-context-bar",
 	// Menus and the shortcut sheet cover popovers and larger overlays.
 	"ui-menu--default",
+	"ui-menu--sheet",
+	"ui-dialog--default",
+	"ui-dialog--dark-backdrop",
+	"ui-dialog--subtle-backdrop",
+	"session-sessionverbitems--sheet",
+	"layout-sessionbar--collapsed",
+	"layout-sessionbar--overflow-menu-open",
 	"input-commandmenu--open",
 	"session-shortcutsheet--default",
 	// Toast uses the inverse palette; settings uses a blurred overlay surface.
@@ -424,6 +431,8 @@ if (stories.length > 0) {
 	// story ("all"), but some are a property of the layout at one width only.
 	// See conduit-test-7jv.
 	const SKIP_STORIES = new Map<string, "all" | "desktop" | "mobile">([
+		// Interaction-only: both selections leave a closed menu in the same modal.
+		["ui-menu-in-modal--keyboard-and-pointer-selection", "all"],
 		["fixtures-modalfocus--default", "all"],
 		["ui-modal--escape-restores-focus", "all"],
 		["model-agentselector--single-agent", "all"],

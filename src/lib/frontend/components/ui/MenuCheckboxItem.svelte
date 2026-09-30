@@ -6,12 +6,14 @@
 		FLOATING_ITEM_BASE_CLASSES,
 		MENU_ITEM_DENSITY_CLASSES,
 		MENU_ITEM_VARIANT_CLASSES,
+		MENU_SHEET_LEADING_ICON_CLASSES,
 		type MenuItemDensity,
 	} from "./floating-styles.js";
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 
 	type MenuCheckboxItemProps = {
 		checked: boolean;
+		icon?: string | undefined;
 		density?: MenuItemDensity | undefined;
 		disabled?: boolean | undefined;
 		closeOnSelect?: boolean | undefined;
@@ -32,6 +34,7 @@
 
 	let {
 		checked = $bindable(),
+		icon,
 		density,
 		disabled = false,
 		closeOnSelect = true,
@@ -41,11 +44,12 @@
 		...rest
 	}: MenuCheckboxItemProps = $props();
 	const menuDensity = getContext<MenuDensityContext | undefined>(menuDensityContextKey);
+	const resolvedDensity = $derived(density ?? menuDensity?.() ?? "default");
 
 	const itemClass = $derived(
 		[
 			FLOATING_ITEM_BASE_CLASSES,
-			MENU_ITEM_DENSITY_CLASSES[density ?? menuDensity?.() ?? "default"],
+			MENU_ITEM_DENSITY_CLASSES[resolvedDensity],
 			MENU_ITEM_VARIANT_CLASSES.default,
 			className,
 		]
@@ -72,6 +76,11 @@
 		<!-- The box sits at the tail, like MenuRadioItem's check, so it never reads
 		     as the leading icon of a neighbouring item. -->
 		<div {...props}>
+			{#if resolvedDensity === "sheet"}
+				<span aria-hidden="true" class={`${MENU_SHEET_LEADING_ICON_CLASSES} text-text-secondary`}>
+					{#if icon}<Icon name={icon} size={15} />{/if}
+				</span>
+			{/if}
 			{@render children()}
 			<span
 				class="ml-auto grid size-[16px] shrink-0 place-items-center rounded-[5px] border-[1.5px] {itemChecked ? 'border-accent bg-accent text-on-brand' : 'border-border-chip'}"

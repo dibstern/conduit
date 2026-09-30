@@ -1,11 +1,7 @@
 <script lang="ts">
-	import { Dialog } from "bits-ui";
 	import type { Snippet } from "svelte";
+	import Dialog from "./Dialog.svelte";
 	import Button from "./Button.svelte";
-	import {
-		backgroundInert,
-		exemptFromBackgroundInert,
-	} from "./actions/use-background-inert.svelte.js";
 
 	type ModalSize = "sm" | "md" | "lg";
 
@@ -56,18 +52,18 @@
 	}: ModalOwnProps = $props();
 
 	const resolvedTitle = $derived(title?.trim() ? title : undefined);
-
+	const titleId = $props.id();
+	const descriptionId = `${titleId}-description`;
 	const SIZE_CLASSES: Record<ModalSize, string> = {
 		sm: "max-w-80",
 		md: "max-w-md",
 		lg: "max-w-2xl",
 	};
-
 	const panelClass = $derived(
 		[
 			placement === "sheet"
 				? "relative flex max-h-[90vh] w-full flex-col gap-4 rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal"
-				: "relative flex max-h-[85vh] w-[90%] flex-col gap-4 rounded-xl border border-border bg-bg-alt py-5 shadow-modal",
+				: "relative flex max-h-[85vh] w-[90vw] flex-col gap-4 rounded-xl border border-border bg-bg-alt py-5 shadow-modal",
 			flush ? undefined : "px-6",
 			placement === "center" ? SIZE_CLASSES[size] : undefined,
 			className,
@@ -76,123 +72,56 @@
 			.join(" "),
 	);
 
-	function containFocusWithoutTabbables(event: KeyboardEvent) {
-		if (event.key !== "Tab") return;
-		const dialog = event.currentTarget as HTMLElement;
-		const hasTabbableDescendant = Array.from(
-			dialog.querySelectorAll<HTMLElement>(
-				'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
-			),
-		).some(
-			(element) =>
-				element.offsetParent !== null || element.getClientRects().length > 0,
-		);
-		if (hasTabbableDescendant) return;
-
-		// Bits' focus scope returns early for an empty tabbable list, which would
-		// otherwise let Tab escape a supported showClose={false} read-only modal.
-		event.preventDefault();
-		dialog.focus();
-	}
 </script>
 
-{#if open}
-	<!-- Keep the inert boundary in the consumer tree; live portal content is explicitly exempted. -->
-	<span hidden use:backgroundInert></span>
-{/if}
-
-<Dialog.Root
-	bind:open={
-		() => open,
-		(value) => {
-			if (!value) onclose();
-		}
-	}
+<Dialog
+	{open}
+	{onclose}
+	{placement}
+	{dismissible}
+	{returnFocus}
+	initialFocus="first"
+	labelledBy={resolvedTitle ? titleId : undefined}
+	ariaLabel={resolvedTitle ? undefined : ariaLabel}
+	describedBy={description ? descriptionId : undefined}
 >
-	<Dialog.Portal>
-		<Dialog.Overlay
-			class="fixed inset-0 z-[var(--z-modal)] bg-backdrop backdrop-blur-[2px]"
-			data-testid={placement === "sheet" ? "modal-sheet-scrim" : undefined}
-		>
-			{#snippet child({ props })}
-				<div {...props} use:exemptFromBackgroundInert></div>
-			{/snippet}
-		</Dialog.Overlay>
-		<Dialog.Content
-			aria-label={resolvedTitle ? undefined : ariaLabel}
-			onCloseAutoFocus={(event) => {
-				const target = returnFocus?.();
-				if (target?.isConnected) {
-					event.preventDefault();
-					target.focus();
-				}
-			}}
-			onEscapeKeydown={(event) => {
-				event.preventDefault();
-				if (dismissible) onclose();
-			}}
-			onInteractOutside={(event) => {
-				event.preventDefault();
-				if (dismissible) onclose();
-			}}
-		>
-			{#snippet child({ props })}
-				<div class="fixed inset-0 z-[var(--z-modal)] flex items-center {placement === 'sheet' ? 'justify-end flex-col' : 'justify-center'}">
-					<div
-						{...props}
-						class={panelClass}
-						data-testid={placement === "sheet" ? "modal-sheet-panel" : undefined}
-						onkeydown={containFocusWithoutTabbables}
-						use:exemptFromBackgroundInert
-					>
-						{#if placement === "sheet"}<div class="mx-auto mt-2 -mb-2 h-1 w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>{/if}
-						{#if resolvedTitle || description}
-							<header class="flex flex-col gap-1 pr-8">
-								{#if resolvedTitle}
-									<Dialog.Title>
-										{#snippet child({ props: titleProps })}
-											<h2 {...titleProps} class="text-base font-semibold text-text">
-												{resolvedTitle}
-											</h2>
-										{/snippet}
-									</Dialog.Title>
-								{/if}
-								{#if description}
-									<Dialog.Description>
-										{#snippet child({ props: descriptionProps })}
-											<p {...descriptionProps} class="text-sm text-text-secondary">
-												{description}
-											</p>
-										{/snippet}
-									</Dialog.Description>
-								{/if}
-							</header>
-						{/if}
-						<div class="min-h-0 overflow-y-auto">{@render children()}</div>
-						{#if footer}
-							<footer class="flex justify-end gap-2">{@render footer()}</footer>
-						{/if}
-						{#if showClose}
-							<div class="absolute top-3 right-3">
-								<!-- `icon`, not a child <Icon>: Button suppresses children
-								     entirely when `iconOnly` is set, so passing the glyph as a
-								     child rendered an empty ghost button — no background, no
-								     border, nothing. Every ui-modal baseline was captured
-								     without a visible close button. See conduit-test-uv4b; the Button trap
-								     itself is conduit-test-arl1. -->
-								<Button
-									variant="ghost"
-									size="sm"
-									iconOnly
-									icon="x"
-									ariaLabel="Close"
-									onclick={onclose}
-								/>
-							</div>
-						{/if}
-					</div>
-				</div>
-			{/snippet}
-		</Dialog.Content>
-	</Dialog.Portal>
-</Dialog.Root>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class={panelClass}
+		data-testid={placement === "sheet" ? "modal-sheet-panel" : undefined}
+	>
+		{#if placement === "sheet"}
+			<div class="mx-auto mt-2 -mb-2 h-1 w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
+		{/if}
+		{#if resolvedTitle || description}
+			<header class="flex flex-col gap-1 pr-8">
+				{#if resolvedTitle}
+					<h2 id={titleId} class="text-base font-semibold text-text">{resolvedTitle}</h2>
+				{/if}
+				{#if description}
+					<p id={descriptionId} class="text-sm text-text-secondary">{description}</p>
+				{/if}
+			</header>
+		{/if}
+		<div class="min-h-0 overflow-y-auto">{@render children()}</div>
+		{#if footer}
+			<footer class="flex justify-end gap-2">{@render footer()}</footer>
+		{/if}
+		{#if showClose}
+			<div class="absolute top-3 right-3">
+				<!-- `icon`, not a child <Icon>: Button suppresses children
+				     entirely when `iconOnly` is set, so passing the glyph as a
+				     child rendered an empty ghost button. The baselines captured
+				     that absence (conduit-test-uv4b); Button's trap is conduit-test-arl1. -->
+				<Button
+					variant="ghost"
+					size="sm"
+					iconOnly
+					icon="x"
+					ariaLabel="Close"
+					onclick={onclose}
+				/>
+			</div>
+		{/if}
+	</div>
+</Dialog>

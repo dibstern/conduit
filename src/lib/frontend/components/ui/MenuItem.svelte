@@ -7,6 +7,7 @@
 		FLOATING_ITEM_BASE_CLASSES,
 		MENU_ITEM_DENSITY_CLASSES,
 		MENU_ITEM_VARIANT_CLASSES,
+		MENU_SHEET_LEADING_ICON_CLASSES,
 		type MenuItemDensity,
 	} from "./floating-styles.js";
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
@@ -18,15 +19,10 @@
 	> &
 		HTMLAttributes<HTMLElement>;
 
-	type MenuItemVariantProps =
-		| {
-				variant?: Exclude<MenuItemVariant, "danger"> | undefined;
-				icon?: never;
-		  }
-		| {
-				variant: "danger";
-				icon?: string | undefined;
-		  };
+	type MenuItemVariantProps = {
+		variant?: MenuItemVariant | undefined;
+		icon?: string | undefined;
+	};
 
 	type MenuItemOwnProps = MenuItemVariantProps & {
 		density?: MenuItemDensity | undefined;
@@ -64,7 +60,7 @@
 	let {
 		variant = "default",
 		density,
-		icon = "trash-2",
+		icon,
 		disabled = false,
 		href,
 		id,
@@ -75,11 +71,12 @@
 		...rest
 	}: MenuItemProps = $props();
 	const menuDensity = getContext<MenuDensityContext | undefined>(menuDensityContextKey);
+	const resolvedDensity = $derived(density ?? menuDensity?.() ?? "default");
 
 	const itemClass = $derived(
 		[
 			FLOATING_ITEM_BASE_CLASSES,
-			MENU_ITEM_DENSITY_CLASSES[density ?? menuDensity?.() ?? "default"],
+			MENU_ITEM_DENSITY_CLASSES[resolvedDensity],
 			MENU_ITEM_VARIANT_CLASSES[variant],
 			className,
 		]
@@ -105,9 +102,13 @@
 </script>
 
 {#snippet itemContent()}
-	{#if variant === "danger"}
+	{#if resolvedDensity === "sheet"}
+		<span aria-hidden="true" data-menu-item-icon class={`${MENU_SHEET_LEADING_ICON_CLASSES} ${variant === "danger" ? "text-error" : "text-text-secondary"}`}>
+			{#if icon || variant === "danger"}<Icon name={icon ?? "trash-2"} size={15} />{/if}
+		</span>
+	{:else if variant === "danger"}
 		<span aria-hidden="true" data-menu-item-icon class="shrink-0">
-			<Icon name={icon} size={13} />
+			<Icon name={icon ?? "trash-2"} size={13} />
 		</span>
 	{/if}
 	{@render children()}

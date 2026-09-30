@@ -42,6 +42,7 @@ export const uiState = $state({
 	confirmDialog: null as {
 		text: string;
 		actionLabel: string;
+		returnFocus?: () => HTMLElement | null;
 		resolve: (result: boolean) => void;
 	} | null,
 
@@ -177,9 +178,15 @@ export function dismissToast(id: string): void {
 export function confirm(
 	text: string,
 	actionLabel = "Confirm",
+	returnFocus?: () => HTMLElement | null,
 ): Promise<boolean> {
 	return new Promise((resolve) => {
-		uiState.confirmDialog = { text, actionLabel, resolve };
+		uiState.confirmDialog = {
+			text,
+			actionLabel,
+			resolve,
+			...(returnFocus ? { returnFocus } : {}),
+		};
 	});
 }
 
