@@ -45,7 +45,7 @@
 		}).catch(() => undefined);
 	}
 
-	onMount(() => {
+	function initializeTerminal(): () => void {
 		const xterm = new XtermAdapter(fontSize ? { fontSize } : undefined);
 		adapter = xterm;
 		xterm.mount(containerEl);
@@ -138,6 +138,23 @@
 			unsubOutput();
 			xterm.dispose();
 			adapter = null;
+		};
+	}
+
+	onMount(() => {
+		let destroyed = false;
+		let cleanup: (() => void) | undefined;
+		// xterm measures the first font it sees. Wait for the hosted face so its
+		// row height cannot be measured from a fallback and change after paint.
+		void document.fonts
+			.load(`${fontSize ?? 13}px "IBM Plex Mono"`)
+			.catch(() => [])
+			.then(() => {
+				if (!destroyed) cleanup = initializeTerminal();
+			});
+		return () => {
+			destroyed = true;
+			cleanup?.();
 		};
 	});
 

@@ -1001,3 +1001,11 @@
 			</div>
 		</div>
 </Dialog>
+
+<style>
+	/* 80vh is fractional on most phones. A whole-pixel cap keeps the panel's
+	   bottom border crisp; the max-h-[80vh] class is the fallback. */
+	#settings-panel {
+		max-height: round(down, 80vh, 1px);
+	}
+</style>

@@ -150,6 +150,7 @@
 	aria-label={ariaLabel}
 	aria-describedby={describedBy}
 	data-backdrop={backdrop}
+	data-placement={placement}
 	data-testid={placement === "sheet" ? "modal-sheet-scrim" : undefined}
 	tabindex="-1"
 	class="max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none {placement === 'sheet' ? 'fixed inset-x-0 bottom-0 top-auto m-0 w-full' : 'm-auto'}"
@@ -183,5 +184,18 @@
 	dialog[data-backdrop="subtle"]::backdrop {
 		background: var(--color-backdrop-subtle);
 		backdrop-filter: blur(var(--blur-sm));
+	}
+
+	/* Auto margins centre an odd-height dialog on a half pixel. Its borders
+	   then render soft, and Chromium rasterises them a pixel apart between
+	   identical frames. Snap the offset to whole pixels; m-auto remains the
+	   fallback where round() is unsupported. Content height is capped by the
+	   UA's max-height, so the dialog never overflows the top edge. */
+	@supports (top: round(50%, 1px)) {
+		dialog[data-placement="center"] {
+			inset-block: round(50%, 1px) auto;
+			margin-block: 0;
+			translate: 0 round(-50%, 1px);
+		}
 	}
 </style>

@@ -108,5 +108,5 @@ export const CopyInteraction: Story = {
 
 export const Hover: Story = {
 	...SimpleParagraph,
-	parameters: { pseudo: { hover: true } },
+	tags: ["visual-pointer-hover"],
 };

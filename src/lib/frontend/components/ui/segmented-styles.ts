@@ -59,7 +59,9 @@ export const SEGMENTED_VARIANTS = {
 	 */
 	underline: {
 		list: "flex border-b border-border px-5 gap-1 font-brand",
-		item: "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer bg-transparent",
+		// A whole-pixel line box (text-sm's 1.4 gives 15.4px) keeps the strip,
+		// and the scrolling panel below it, on the pixel grid.
+		item: "px-3 py-2 text-sm leading-[15px] font-medium border-b-2 -mb-px transition-colors cursor-pointer bg-transparent",
 		selected: "border-accent text-text",
 		unselected: "border-transparent text-text-muted hover:text-text",
 	},

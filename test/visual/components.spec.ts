@@ -12,7 +12,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
 import { errors, expect, test } from "@playwright/test";
-import { freezeAnimations } from "../e2e/helpers/visual-helpers.js";
+import {
+	freezeAnimations,
+	waitForFonts,
+} from "../e2e/helpers/visual-helpers.js";
 
 // ─── Story Discovery ─────────────────────────────────────────────────────────
 
@@ -25,6 +28,7 @@ interface StoryEntry {
 }
 
 const VIEWPORT_CAPTURE_TAG = "viewport-capture";
+const POINTER_HOVER_TAG = "visual-pointer-hover";
 
 const LIGHT_STORY_IDS = new Set([
 	// The sidebar and the file browser expose the main navigation palette.
@@ -536,10 +540,15 @@ if (stories.length > 0) {
 							waitUntil: "domcontentloaded",
 						},
 					);
+					await waitForFonts(page);
 					await waitForStoryTerminalPhase(page, story.id);
 					// Keep the historical settle after the phase wait/fallback. Waiting may
 					// only increase; shortening it risks baseline churn across all stories.
 					await page.waitForTimeout(800);
+					// The pseudo-state addon cannot activate Tailwind's nested group-hover rule.
+					if (story.tags?.includes(POINTER_HOVER_TAG)) {
+						await page.locator("#storybook-root > :first-child").hover();
+					}
 					// Freeze before quiescence: intrinsic infinite animations never resolve
 					// `animation.finished`, and freezing only after the timeout made the
 					// timeout frame decide the committed pixels.
