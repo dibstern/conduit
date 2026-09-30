@@ -43,7 +43,7 @@ describe("AC3 — Permission Flow Shape Validation", () => {
 			// concurrent usage or previous test runs.
 			const before = await apiGet<unknown[]>("/permission");
 			expect(Array.isArray(before)).toBe(true);
-			// Wait briefly and re-check — count must not grow while idle
+			// Observe the idle window to ensure the permission count does not grow.
 			await new Promise((r) => setTimeout(r, 1_000));
 			const after = await apiGet<unknown[]>("/permission");
 			expect(after.length).toBeLessThanOrEqual(before.length);

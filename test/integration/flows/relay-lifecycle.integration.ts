@@ -15,7 +15,9 @@ import {
 /** Make an HTTP request and return the status code, or "ECONNREFUSED" on failure. */
 async function httpStatus(url: string): Promise<number | "ECONNREFUSED"> {
 	return new Promise((resolve) => {
-		const req = http.get(url, (res) => {
+		// agent: false forces a fresh connection; a pooled keep-alive socket
+		// from an earlier request would not test whether new ones are refused.
+		const req = http.get(url, { agent: false }, (res) => {
 			res.resume();
 			resolve(res.statusCode ?? 0);
 		});
@@ -60,8 +62,7 @@ describe("Relay stack lifecycle (real timers)", () => {
 		harness = await createRelayHarness("chat-simple");
 		const client = await harness.connectWsClient();
 
-		// Wait for initial messages
-		await new Promise((r) => setTimeout(r, 200));
+		await client.waitForInitialState();
 
 		// Stop relay — should close WS connections and shut down cleanly
 		// If services leak, this would hang or leave timers running

@@ -12,8 +12,6 @@ import type { ReceivedMessage } from "../helpers/test-ws-client.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 /** Collect all pty_output data for a given ptyId from received messages */
 function collectOutput(messages: ReceivedMessage[], ptyId: string): string {
 	return messages
@@ -73,7 +71,6 @@ describe("Integration: Terminal (PTY)", () => {
 		// Client 2 should also get pty_created (broadcast)
 		await client2.waitFor("pty_created", { timeout: 5_000 });
 
-		await delay(500);
 		client1.clearReceived();
 		client2.clearReceived();
 
@@ -117,7 +114,6 @@ describe("Integration: Terminal (PTY)", () => {
 		const created = await clientA.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
-		await delay(500);
 		clientA.clearReceived();
 		clientB.clearReceived();
 
@@ -207,8 +203,8 @@ describe("Integration: Terminal (PTY)", () => {
 			data: "hello\n",
 		});
 
-		// Wait a moment — should not produce an error
-		await delay(1000);
+		// Observe a full window because input to an unknown PTY must produce no error.
+		await new Promise((resolve) => setTimeout(resolve, 1000));
 		const errors = client.getReceivedOfType("error");
 		expect(errors).toHaveLength(0);
 
@@ -232,8 +228,8 @@ describe("Integration: Terminal (PTY)", () => {
 		// Send input to the closed PTY
 		client.send({ type: "pty_input", ptyId, data: "should not crash\n" });
 
-		// Wait a moment — should not produce an error or crash
-		await delay(1000);
+		// Observe a full window because input to a closed PTY must not crash the relay.
+		await new Promise((resolve) => setTimeout(resolve, 1000));
 
 		// The relay should still be responsive
 		await client.createPty();
@@ -258,7 +254,6 @@ describe("Integration: Terminal (PTY)", () => {
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
-		await delay(300);
 		client.clearReceived();
 
 		const list = await client.listPtys();
@@ -287,8 +282,11 @@ describe("Integration: Terminal (PTY)", () => {
 		const created = await client.waitFor("pty_created", { timeout: 5_000 });
 		const ptyId = (created["pty"] as { id: string }).id;
 
-		// Wait for initial shell output
-		await delay(1000);
+		// Wait for the shell's first output before checking its framing.
+		await client.waitFor("pty_output", {
+			timeout: 5_000,
+			predicate: (message) => message["ptyId"] === ptyId,
+		});
 
 		// Collect all output received so far
 		const output = collectOutput(client.getReceived(), ptyId);

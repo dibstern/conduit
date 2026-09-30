@@ -2,7 +2,7 @@
 // Validates that OpenCode's SSE events match our expected shapes.
 // Connects to both /global/event and /event streams.
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	authHeaders,
 	checkServerHealth,
@@ -38,10 +38,17 @@ describe("AC1 — SSE Event Shape Validation", () => {
 				events.push(evt);
 			});
 
-			await ready;
-			// Wait briefly for the initial event
-			await new Promise((r) => setTimeout(r, 1000));
-			controller.abort();
+			try {
+				await ready;
+				await vi.waitFor(
+					() => expect(events.length).toBeGreaterThanOrEqual(1),
+					{
+						timeout: 1_000,
+					},
+				);
+			} finally {
+				controller.abort();
+			}
 
 			// Should have received at least one event
 			expect(events.length).toBeGreaterThanOrEqual(1);
@@ -65,9 +72,17 @@ describe("AC1 — SSE Event Shape Validation", () => {
 				events.push(evt);
 			});
 
-			await ready;
-			await new Promise((r) => setTimeout(r, 1000));
-			controller.abort();
+			try {
+				await ready;
+				await vi.waitFor(
+					() => expect(events.length).toBeGreaterThanOrEqual(1),
+					{
+						timeout: 1_000,
+					},
+				);
+			} finally {
+				controller.abort();
+			}
 
 			for (const evt of events) {
 				const parsed = JSON.parse(evt.data);
@@ -87,9 +102,17 @@ describe("AC1 — SSE Event Shape Validation", () => {
 				events.push(evt);
 			});
 
-			await ready;
-			await new Promise((r) => setTimeout(r, 1000));
-			controller.abort();
+			try {
+				await ready;
+				await vi.waitFor(
+					() => expect(events.length).toBeGreaterThanOrEqual(1),
+					{
+						timeout: 1_000,
+					},
+				);
+			} finally {
+				controller.abort();
+			}
 
 			expect(events.length).toBeGreaterThanOrEqual(1);
 
@@ -109,9 +132,17 @@ describe("AC1 — SSE Event Shape Validation", () => {
 				events.push(evt);
 			});
 
-			await ready;
-			await new Promise((r) => setTimeout(r, 1000));
-			controller.abort();
+			try {
+				await ready;
+				await vi.waitFor(
+					() => expect(events.length).toBeGreaterThanOrEqual(1),
+					{
+						timeout: 1_000,
+					},
+				);
+			} finally {
+				controller.abort();
+			}
 
 			for (const evt of events) {
 				const parsed = JSON.parse(evt.data);
@@ -130,9 +161,20 @@ describe("AC1 — SSE Event Shape Validation", () => {
 				events.push(evt);
 			});
 
-			await ready;
-			await new Promise((r) => setTimeout(r, 500));
-			controller.abort();
+			try {
+				await ready;
+				await vi.waitFor(
+					() =>
+						expect(
+							events.some(
+								(event) => JSON.parse(event.data).type === "server.connected",
+							),
+						).toBe(true),
+					{ timeout: 500 },
+				);
+			} finally {
+				controller.abort();
+			}
 
 			const connected = events
 				.map((e) => JSON.parse(e.data))

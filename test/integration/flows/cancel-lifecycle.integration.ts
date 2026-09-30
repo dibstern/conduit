@@ -21,7 +21,8 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
+		// Drain: a cancelled turn keeps emitting events after its first done, and
+		// nothing marks the end of that stream, so give it time to finish.
 		await new Promise((r) => setTimeout(r, 500));
 	});
 
@@ -63,8 +64,9 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		await client.cancelSession();
 		await client.waitFor("done", { timeout: 15_000 });
 
-		// Let SSE stream settle — stale events from the cancelled message may
-		// still be in flight. Wait for OpenCode to fully return to idle.
+		// Drain: the cancelled turn can still send a late second done, and no
+		// event marks the end of its stream. Without this the second turn's
+		// waitFor("done") below could match the stale one.
 		await new Promise((r) => setTimeout(r, 3000));
 
 		// Clear messages between turns
@@ -95,7 +97,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		// Send cancel without having sent a message
 		await client.cancelSession();
 
-		// Wait a moment — should not crash or produce unexpected messages
+		// Observe a full window to ensure idle cancel produces no unexpected errors.
 		await new Promise((r) => setTimeout(r, 1000));
 
 		// Filter out model/quota errors from the SSE stream (session.error events)

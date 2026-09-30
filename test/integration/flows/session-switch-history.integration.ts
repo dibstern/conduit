@@ -2,7 +2,15 @@
 // Verifies that switching sessions delivers history embedded in session_switched
 // so agent output doesn't disappear when switching away and back.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -21,8 +29,9 @@ describe("Integration: Session Switch History", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
+		await vi.waitFor(() => {
+			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
+		});
 	});
 
 	// ── Core regression: switching back to a session with messages ────────
@@ -52,9 +61,9 @@ describe("Integration: Session Switch History", () => {
 		// accumulated data. In integration tests the relay's prompt may route
 		// through the orchestration engine without hitting the mock's
 		// prompt_async endpoint directly, leaving sseMessages empty.
+		client.clearReceived();
 		harness.mock.triggerPromptSse(sessionA);
-		// Allow time for SSE events to propagate and trackSseMessage to accumulate
-		await new Promise((r) => setTimeout(r, 200));
+		await client.waitFor("delta", { timeout: 10_000 });
 
 		client.clearReceived();
 
@@ -121,26 +130,52 @@ describe("Integration: Session Switch History", () => {
 		const deltaSnippet = (firstDelta["text"] as string).trim();
 		expect(deltaSnippet.length).toBeGreaterThan(0);
 
-		// Collect a few more deltas so we have substantial streamed text
-		await new Promise((r) => setTimeout(r, 2_000));
+		// Collect another delta before switching away mid-stream.
+		await vi.waitFor(
+			() => {
+				expect(client.getReceivedOfType("delta").length).toBeGreaterThan(1);
+			},
+			{ timeout: 5_000 },
+		);
 		const allDeltas = client.getReceivedOfType("delta");
 		const streamedText = allDeltas.map((d) => d["text"] as string).join("");
 		expect(streamedText.length).toBeGreaterThan(0);
 
 		// Populate the mock's sseMessages so GET /session/{id}/message returns
 		// accumulated data when switching back.
+		client.clearReceived();
 		harness.mock.triggerPromptSse(sessionA);
-		await new Promise((r) => setTimeout(r, 200));
+		await client.waitFor("delta", { timeout: 10_000 });
 
 		// ── Switch away mid-stream ──────────────────────────────────────
 		await client.createSession("Mid-Stream Switch Target");
 		const switchedToB = await client.waitFor("session_switched");
 		expect(switchedToB["id"]).toBeTruthy();
 
-		// Wait for session A to finish processing in the background.
-		// The mock completes SSE delivery in <1s; 3s is ample for the relay
-		// to cache all events and finalize the session.
-		await new Promise((r) => setTimeout(r, 3_000));
+		// Wait for the mock's SSE replay to finish session A's assistant message.
+		await vi.waitFor(
+			async () => {
+				const response = await fetch(
+					`${harness.mock.url}/session/${sessionA}/message`,
+				);
+				const messages = (await response.json()) as Array<{
+					info?: {
+						role?: string;
+						sessionID?: string;
+						time?: { completed?: number };
+					};
+				}>;
+				expect(
+					messages.some(
+						(message) =>
+							message.info?.role === "assistant" &&
+							message.info.sessionID === sessionA &&
+							message.info.time?.completed !== undefined,
+					),
+				).toBe(true);
+			},
+			{ timeout: 10_000 },
+		);
 
 		// ── Switch back ─────────────────────────────────────────────────
 		client.clearReceived();
@@ -319,8 +354,7 @@ describe("Integration: Session Switch History", () => {
 		// Verify client1 received session_switched with the right session
 		expect(switched1["id"]).toBe(sessionA);
 
-		// client2 should NOT receive session_switched for this per-tab switch.
-		// Give it a moment then verify no session_switched arrived.
+		// Observe a full window because client2 must receive no per-tab switch.
 		await new Promise((r) => setTimeout(r, 1_000));
 		const client2Switches = client2.getReceivedOfType("session_switched");
 		expect(client2Switches.length).toBe(0);

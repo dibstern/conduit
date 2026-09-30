@@ -815,15 +815,15 @@ export class TestWsClient {
 		});
 	}
 
-	/** Wait for the initial connect handshake to settle (session_switched + status + lists) */
+	/** Wait for the initial connect handshake and discovery messages. */
 	async waitForInitialState(timeout = 5000): Promise<void> {
 		await Promise.all([
 			this.waitFor("session_switched", { timeout }),
 			this.waitFor("status", { timeout }),
 			this.waitFor("session_list", { timeout }),
+			this.waitFor("agent_list", { timeout }),
+			this.waitFor("model_list", { timeout }),
 		]);
-		// Give agents/models a moment to arrive (they're async)
-		await new Promise((r) => setTimeout(r, 100));
 	}
 
 	/**

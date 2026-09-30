@@ -15,7 +15,15 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { resolveSessionHistoryFromRows } from "../../../src/lib/session/session-switch.js";
 import type {
@@ -186,20 +194,18 @@ async function waitForProjectedMessage(
 	messageId: string,
 	timeoutMs = 20_000,
 ): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		const projected = await projectedHistory(dbPath, sessionId, 200);
-		if (
-			projected.kind === "rest-history" &&
-			(projected.history as DifferentialHistory).messages.some(
-				(message) => message.id === messageId,
-			)
-		)
-			return;
-		if (Date.now() > deadline)
-			throw new Error(`projection never ingested ${messageId}`);
-		await new Promise((resolve) => setTimeout(resolve, 100));
-	}
+	await vi.waitFor(
+		async () => {
+			const projected = await projectedHistory(dbPath, sessionId, 200);
+			expect(
+				projected.kind === "rest-history" &&
+					(projected.history as DifferentialHistory).messages.some(
+						(message) => message.id === messageId,
+					),
+			).toBe(true);
+		},
+		{ timeout: timeoutMs },
+	);
 }
 
 function readStore<A, E>(
@@ -255,8 +261,12 @@ async function bindOpenCodeSession(
 	const created = await client.createSession(title, { providerId: "claude" });
 	const localId = created["id"] as string;
 	if (!localId) throw new Error("createSession returned no id");
+	client.clearReceived();
 	await client.switchModel(model.id, provider.id, localId);
-	await new Promise((resolve) => setTimeout(resolve, 250));
+	await client.waitFor("model_info", {
+		predicate: (message) =>
+			message["model"] === model.id && message["provider"] === provider.id,
+	});
 	client.clearReceived();
 	return localId;
 }
@@ -304,7 +314,14 @@ async function runPaginationDifferential(count: number) {
 		);
 		const lastMessageId = `msg-${String(count).padStart(3, "0")}`;
 		await waitForProjectedMessage(dbPath, sessionId, lastMessageId);
-		await new Promise((resolve) => setTimeout(resolve, 1_000));
+		await vi.waitFor(
+			async () => {
+				expect(
+					JSON.stringify(await projectedHistory(dbPath, sessionId, 200)),
+				).toContain(`text-${String(count).padStart(3, "0")}`);
+			},
+			{ timeout: 20_000 },
+		);
 
 		client2 = new TestWsClient(
 			`ws://127.0.0.1:${paginationHarness.relayPort}/ws?session=${sessionId}`,
@@ -370,13 +387,15 @@ describe("Integration: Session Visibility Repros", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
-		await new Promise((r) => setTimeout(r, 500));
+		await vi.waitFor(() => {
+			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
+		});
 	});
 
 	it("second client connecting with ?session= gets populated history after a turn", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
-		const sessionId = client1.getActiveSessionId();
+		const sessionId = client1.getActiveSessionId() ?? "";
 		expect(sessionId).toBeTruthy();
 		client1.clearReceived();
 
@@ -384,8 +403,22 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.sendMessage("Reply with just the word 'pong'.");
 		await client1.waitFor("done");
 
-		// Give the event pipeline a moment to persist/project.
-		await new Promise((r) => setTimeout(r, 750));
+		await vi.waitFor(
+			async () => {
+				const projected = await projectedHistory(persistenceDbPath, sessionId);
+				expect(projected.kind).toBe("rest-history");
+				if (projected.kind === "rest-history") {
+					expect(
+						projected.history.messages.some(
+							(message) =>
+								message.role === "assistant" &&
+								JSON.stringify(message).includes("pong"),
+						),
+					).toBe(true);
+				}
+			},
+			{ timeout: 10_000 },
+		);
 
 		// Fresh client (second browser tab) opens the same session URL.
 		const client2 = new TestWsClient(
@@ -436,8 +469,13 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// 2. User selects an OpenCode model for the session (unbinds/rebinds engine).
 		// biome-ignore lint/style/noNonNullAssertion: guarded above
-		await client1.switchModel(model.id, provider!.id, localId);
-		await new Promise((r) => setTimeout(r, 250));
+		const providerId = provider!.id;
+		client1.clearReceived();
+		await client1.switchModel(model.id, providerId, localId);
+		await client1.waitFor("model_info", {
+			predicate: (message) =>
+				message["model"] === model.id && message["provider"] === providerId,
+		});
 		client1.clearReceived();
 
 		// 3. First message → prepareTurnSession materializes an OpenCode session.
@@ -477,7 +515,22 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// Let the turn complete and the pipeline persist.
 		await client1.waitFor("done", { timeout: 10_000 });
-		await new Promise((r) => setTimeout(r, 750));
+		await vi.waitFor(
+			async () => {
+				const projected = await projectedHistory(persistenceDbPath, newId);
+				expect(projected.kind).toBe("rest-history");
+				if (projected.kind === "rest-history") {
+					expect(
+						projected.history.messages.some(
+							(message) =>
+								message.role === "assistant" &&
+								JSON.stringify(message).includes("pong"),
+						),
+					).toBe(true);
+				}
+			},
+			{ timeout: 10_000 },
+		);
 
 		// Bug 4: a second tab opening the materialized session URL must get
 		// populated history.
@@ -548,7 +601,23 @@ describe("Integration: Session Visibility Repros", () => {
 			"Reply with just the word 'pong'.",
 		);
 		await client1.waitFor("done");
-		await new Promise((r) => setTimeout(r, 750));
+		await vi.waitFor(
+			async () => {
+				const projected = await projectedHistory(textDbPath, sessionId);
+				expect(projected.kind).toBe("rest-history");
+				if (projected.kind === "rest-history") {
+					expect(projected.history.messages.length).toBeGreaterThanOrEqual(2);
+					expect(
+						projected.history.messages.some(
+							(message) =>
+								message.role === "assistant" &&
+								JSON.stringify(message).includes("pong"),
+						),
+					).toBe(true);
+				}
+			},
+			{ timeout: 10_000 },
+		);
 
 		// REST-served history: what a fresh client currently receives.
 		const client2 = new TestWsClient(
@@ -627,11 +696,16 @@ describe("Integration: Session Visibility Repros", () => {
 				localId,
 				"List the files in the current directory.",
 			);
-			// This recording streams the full turn but does not replay a
-			// trailing done frame — wait for the tool result, then let the
-			// stream drain.
+			// This recording has no trailing done frame; wait for its tool result.
 			await client1.waitFor("tool_result", { timeout: 15_000 });
-			await new Promise((r) => setTimeout(r, 2_000));
+			await vi.waitFor(
+				async () => {
+					expect(
+						JSON.stringify(await projectedHistory(toolDbPath, sessionId)),
+					).toContain("0.1.0");
+				},
+				{ timeout: 20_000 },
+			);
 
 			const client2 = new TestWsClient(
 				`ws://127.0.0.1:${toolHarness.relayPort}/ws?session=${sessionId}`,
@@ -792,7 +866,14 @@ describe("Integration: Session Visibility Repros", () => {
 				synthetic.prompt,
 			);
 			await client1.waitFor("tool_result", { timeout: 15_000 });
-			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			await vi.waitFor(
+				async () => {
+					expect(
+						JSON.stringify(await projectedHistory(dbPath, sessionId)),
+					).toContain("Delegation complete");
+				},
+				{ timeout: 20_000 },
+			);
 
 			client2 = new TestWsClient(
 				`ws://127.0.0.1:${metadataHarness.relayPort}/ws?session=${sessionId}`,
@@ -911,10 +992,16 @@ describe("Integration: Session Visibility Repros", () => {
 				localId,
 				synthetic.prompt,
 			);
-			// The synthetic stream has no done marker (the base recording's SSE
-			// was stripped) — wait for the projection to settle, then drain.
+			// The synthetic stream has no done marker; wait for final assistant text.
 			await waitForProjectedMessage(dbPath, sessionId, "msg-assistant-h");
-			await new Promise((resolve) => setTimeout(resolve, 1_500));
+			await vi.waitFor(
+				async () => {
+					expect(
+						JSON.stringify(await projectedHistory(dbPath, sessionId)),
+					).toContain("Image received");
+				},
+				{ timeout: 20_000 },
+			);
 
 			client2 = new TestWsClient(
 				`ws://127.0.0.1:${fileHarness.relayPort}/ws?session=${sessionId}`,
@@ -991,7 +1078,27 @@ describe("Integration: Session Visibility Repros", () => {
 				"allow",
 			);
 			await client1.waitFor("tool_result", { timeout: 20_000 });
-			await new Promise((resolve) => setTimeout(resolve, 3_000));
+			await vi.waitFor(
+				async () => {
+					const eventTypes = await readStore(
+						dbPath,
+						Effect.flatMap(
+							SqlClient.SqlClient,
+							(sql) =>
+								sql<{
+									type: string;
+								}>`SELECT type FROM events WHERE session_id = ${sessionId} ORDER BY sequence`,
+						),
+					);
+					expect(eventTypes.map((event) => event.type)).toContain(
+						"permission.resolved",
+					);
+					expect(
+						JSON.stringify(await projectedHistory(dbPath, sessionId)),
+					).toContain("Files listed");
+				},
+				{ timeout: 20_000 },
+			);
 
 			client2 = new TestWsClient(
 				`ws://127.0.0.1:${permissionHarness.relayPort}/ws?session=${sessionId}`,
