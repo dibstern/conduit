@@ -9,7 +9,15 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { sendIPCCommand } from "../../../src/bin/cli-utils.js";
+import { sendIpcRequest } from "../../../src/bin/cli-utils.js";
+import {
+	InstanceAdd,
+	InstanceList,
+	InstanceRemove,
+	InstanceStatus,
+	InstanceStop,
+	InstanceUpdate,
+} from "../../../src/lib/contracts/ipc-requests.js";
 import {
 	startDaemonChildProcess,
 	startForegroundDaemon,
@@ -286,13 +294,15 @@ describe("startForegroundDaemon", () => {
 		});
 
 		try {
-			const addResult = await sendIPCCommand(socketPath, {
-				cmd: "instance_add",
-				name: "Alt Provider",
-				port: 4555,
-				managed: false,
-				url: "http://127.0.0.1:4555",
-			});
+			const addResult = await sendIpcRequest(
+				socketPath,
+				new InstanceAdd({
+					name: "Alt Provider",
+					port: 4555,
+					managed: false,
+					url: "http://127.0.0.1:4555",
+				}),
+			);
 			expect(addResult.ok).toBe(true);
 			const added = (addResult as { instance: OpenCodeInstance }).instance;
 			expect(added).toMatchObject({
@@ -303,12 +313,14 @@ describe("startForegroundDaemon", () => {
 				status: "starting",
 			});
 
-			const updateResult = await sendIPCCommand(socketPath, {
-				cmd: "instance_update",
-				id: added.id,
-				name: "Renamed Provider",
-				port: 4556,
-			});
+			const updateResult = await sendIpcRequest(
+				socketPath,
+				new InstanceUpdate({
+					id: added.id,
+					name: "Renamed Provider",
+					port: 4556,
+				}),
+			);
 			expect(updateResult.ok).toBe(true);
 			expect(
 				(updateResult as { instance: OpenCodeInstance }).instance,
@@ -318,16 +330,20 @@ describe("startForegroundDaemon", () => {
 				port: 4556,
 			});
 
-			const stopResult = await sendIPCCommand(socketPath, {
-				cmd: "instance_stop",
-				id: added.id,
-			});
+			const stopResult = await sendIpcRequest(
+				socketPath,
+				new InstanceStop({
+					id: added.id,
+				}),
+			);
 			expect(stopResult.ok).toBe(true);
 
-			const statusResult = await sendIPCCommand(socketPath, {
-				cmd: "instance_status",
-				id: added.id,
-			});
+			const statusResult = await sendIpcRequest(
+				socketPath,
+				new InstanceStatus({
+					id: added.id,
+				}),
+			);
 			expect(statusResult.ok).toBe(true);
 			expect(
 				(statusResult as { instance: OpenCodeInstance }).instance,
@@ -336,9 +352,7 @@ describe("startForegroundDaemon", () => {
 				status: "stopped",
 			});
 
-			const listResult = await sendIPCCommand(socketPath, {
-				cmd: "instance_list",
-			});
+			const listResult = await sendIpcRequest(socketPath, new InstanceList({}));
 			expect(listResult.ok).toBe(true);
 			expect(
 				(listResult as { instances: ReadonlyArray<OpenCodeInstance> })
@@ -351,10 +365,12 @@ describe("startForegroundDaemon", () => {
 				}),
 			]);
 
-			const removeResult = await sendIPCCommand(socketPath, {
-				cmd: "instance_remove",
-				id: added.id,
-			});
+			const removeResult = await sendIpcRequest(
+				socketPath,
+				new InstanceRemove({
+					id: added.id,
+				}),
+			);
 			expect(removeResult.ok).toBe(true);
 			expect(daemon.getInstances()).toEqual([]);
 		} finally {

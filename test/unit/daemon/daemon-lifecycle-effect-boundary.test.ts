@@ -11,9 +11,10 @@ describe("daemon lifecycle Effect boundary", () => {
 			"utf8",
 		);
 
-		expect(source).not.toMatch(
-			/Effect\s*\.\s*run(?:Promise|Sync)\s*\(\s*decodeTaggedRequest\s*\(/,
+		expect(source).toContain(
+			"Schema.decodeUnknownEither(IpcTaggedRequestSchema)",
 		);
+		expect(source).not.toMatch(/Effect\s*\.\s*run(?:Promise|Sync)/);
 	});
 
 	it("does not own a default runtime dispatcher for tagged IPC", () => {
@@ -28,13 +29,13 @@ describe("daemon lifecycle Effect boundary", () => {
 		expect(source).not.toMatch(/defaultTaggedIpcDispatcher/);
 	});
 
-	it("does not dispatch legacy cmd IPC through the old promise router", () => {
+	it("has only the tagged IPC dispatch path", () => {
 		const source = readFileSync(
 			join(REPO_ROOT, "src/lib/daemon/daemon-lifecycle.ts"),
 			"utf8",
 		);
 
-		expect(source).not.toMatch(/createCommandRouter/);
-		expect(source).not.toMatch(/router\(cmd\)/);
+		expect(source).toContain("dispatchTaggedRequest(decoded.right)");
+		expect(source).not.toContain("DEPRECATED");
 	});
 });

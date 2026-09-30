@@ -201,7 +201,7 @@ export const IpcHandlersLayer: Layer.Layer<
 			),
 		),
 	SetPin: (request) =>
-		handleSetPin({ cmd: "set_pin", pin: request.pin }).pipe(
+		handleSetPin(request).pipe(
 			Effect.flatMap((response) =>
 				response.ok
 					? Effect.succeed({ ok: true as const })
@@ -209,10 +209,7 @@ export const IpcHandlersLayer: Layer.Layer<
 			),
 		),
 	SetKeepAwake: (request) =>
-		handleSetKeepAwake({
-			cmd: "set_keep_awake",
-			enabled: request.enabled,
-		}).pipe(
+		handleSetKeepAwake(request).pipe(
 			Effect.flatMap((response) =>
 				response.ok
 					? decodeKeepAwake(response).pipe(
@@ -224,21 +221,15 @@ export const IpcHandlersLayer: Layer.Layer<
 			),
 		),
 	SetKeepAwakeCommand: (request) =>
-		handleSetKeepAwakeCommand({
-			cmd: "set_keep_awake_command",
-			command: request.command,
-			args: [...request.args],
-		}).pipe(
+		handleSetKeepAwakeCommand(request).pipe(
 			Effect.flatMap((response) =>
 				response.ok
 					? Effect.succeed({ ok: true as const })
 					: Effect.fail(failureFromResponse(response)),
 			),
 		),
-	Shutdown: () =>
-		handleShutdown({ cmd: "shutdown" }).pipe(
-			Effect.map(() => ({ ok: true as const })),
-		),
+	Shutdown: (request) =>
+		handleShutdown(request).pipe(Effect.map(() => ({ ok: true as const }))),
 	SetAgent: (request) =>
 		RelayCacheTag.pipe(
 			Effect.flatMap((cache) => cache.get(request.slug)),
@@ -296,10 +287,7 @@ export const IpcHandlersLayer: Layer.Layer<
 			),
 		),
 	RestartWithConfig: (request) =>
-		handleRestartWithConfig({
-			cmd: "restart_with_config",
-			...(request.config !== undefined ? { config: request.config } : {}),
-		}).pipe(
+		handleRestartWithConfig(request).pipe(
 			Effect.flatMap((response) =>
 				response.ok
 					? Effect.succeed({ ok: true as const })

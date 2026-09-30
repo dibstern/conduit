@@ -1,4 +1,25 @@
 import {
+	AddProject,
+	GetStatus,
+	InstanceAdd,
+	InstanceList,
+	InstanceRemove,
+	InstanceStart,
+	InstanceStatus,
+	InstanceStop,
+	InstanceUpdate,
+	ListProjects,
+	RemoveProject,
+	RestartWithConfig,
+	SetAgent,
+	SetKeepAwake,
+	SetKeepAwakeCommand,
+	SetModel,
+	SetPin,
+	SetProjectTitle,
+	Shutdown,
+} from "../../../src/lib/contracts/ipc-requests.js";
+import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
 } from "../../../src/lib/domain/daemon/Services/management-service.js";
@@ -178,10 +199,11 @@ describe("IPC handlers", () => {
 				// Pre-populate with no projects
 				yield* Ref.update(ref, (s) => ({ ...s, projects: [] }));
 
-				const result = yield* handleAddProject({
-					cmd: "add_project",
-					directory: "/home/new-project",
-				});
+				const result = yield* handleAddProject(
+					new AddProject({
+						directory: "/home/new-project",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				expect(result.slug).toBeDefined();
@@ -207,10 +229,11 @@ describe("IPC handlers", () => {
 					],
 				}));
 
-				const result = yield* handleAddProject({
-					cmd: "add_project",
-					directory: "/home/existing",
-				});
+				const result = yield* handleAddProject(
+					new AddProject({
+						directory: "/home/existing",
+					}),
+				);
 
 				expect(result.ok).toBe(false);
 				expect(result.error).toBeDefined();
@@ -235,10 +258,11 @@ describe("IPC handlers", () => {
 					],
 				}));
 
-				const result = yield* handleRemoveProject({
-					cmd: "remove_project",
-					slug: "proj",
-				});
+				const result = yield* handleRemoveProject(
+					new RemoveProject({
+						slug: "proj",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				const state = yield* Ref.get(ref);
@@ -248,10 +272,11 @@ describe("IPC handlers", () => {
 
 		it.effect("returns error for non-existent slug", () =>
 			Effect.gen(function* () {
-				const result = yield* handleRemoveProject({
-					cmd: "remove_project",
-					slug: "nonexistent",
-				});
+				const result = yield* handleRemoveProject(
+					new RemoveProject({
+						slug: "nonexistent",
+					}),
+				);
 
 				expect(result.ok).toBe(false);
 				expect(result.error).toBeDefined();
@@ -266,12 +291,12 @@ describe("IPC handlers", () => {
 			Effect.gen(function* () {
 				const stateRef = yield* DaemonStateTag;
 				const configRef = yield* DaemonConfigRefTag;
-				yield* handleSetPin({ cmd: "set_pin", pin: "1234" });
+				yield* handleSetPin(new SetPin({ pin: "1234" }));
 				expect((yield* Ref.get(stateRef)).pinHash).toBe(hashPin("1234"));
 				expect((yield* Ref.get(configRef)).pinHash).toBe(hashPin("1234"));
 				const saved = yield* Ref.make(false);
 
-				const result = yield* handleSetPin({ cmd: "set_pin", pin: null }).pipe(
+				const result = yield* handleSetPin(new SetPin({ pin: null })).pipe(
 					Effect.provideService(ConfigPersistenceTag, {
 						requestSave: Effect.gen(function* () {
 							expect((yield* Ref.get(stateRef)).pinHash).toBeNull();
@@ -293,10 +318,11 @@ describe("IPC handlers", () => {
 			Effect.gen(function* () {
 				const ref = yield* DaemonStateTag;
 
-				const result = yield* handleSetPin({
-					cmd: "set_pin",
-					pin: "1234",
-				});
+				const result = yield* handleSetPin(
+					new SetPin({
+						pin: "1234",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				const state = yield* Ref.get(ref);
@@ -315,10 +341,11 @@ describe("IPC handlers", () => {
 	describe("handleSetKeepAwake", () => {
 		it.effect("enables keep awake and activates KeepAwakeTag", () =>
 			Effect.gen(function* () {
-				const result = yield* handleSetKeepAwake({
-					cmd: "set_keep_awake",
-					enabled: true,
-				});
+				const result = yield* handleSetKeepAwake(
+					new SetKeepAwake({
+						enabled: true,
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				expect(result["supported"]).toBe(true);
@@ -343,10 +370,11 @@ describe("IPC handlers", () => {
 				const ka = yield* KeepAwakeTag;
 				yield* ka.activate();
 
-				const result = yield* handleSetKeepAwake({
-					cmd: "set_keep_awake",
-					enabled: false,
-				});
+				const result = yield* handleSetKeepAwake(
+					new SetKeepAwake({
+						enabled: false,
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				expect(result["active"]).toBe(false);
@@ -369,7 +397,7 @@ describe("IPC handlers", () => {
 	describe("handleShutdown", () => {
 		it.effect("sets shuttingDown and completes ShutdownSignal Deferred", () =>
 			Effect.gen(function* () {
-				const result = yield* handleShutdown({ cmd: "shutdown" });
+				const result = yield* handleShutdown(new Shutdown({}));
 
 				expect(result.ok).toBe(true);
 				const ref = yield* DaemonStateTag;
@@ -402,7 +430,7 @@ describe("IPC handlers", () => {
 					],
 				}));
 
-				const result = yield* handleListProjects({ cmd: "list_projects" });
+				const result = yield* handleListProjects(new ListProjects({}));
 
 				expect(result.ok).toBe(true);
 				expect(result.projects).toHaveLength(2);
@@ -415,7 +443,7 @@ describe("IPC handlers", () => {
 	describe("handleGetStatus", () => {
 		it.effect("returns daemon status", () =>
 			Effect.gen(function* () {
-				const result = yield* handleGetStatus({ cmd: "get_status" });
+				const result = yield* handleGetStatus(new GetStatus({}));
 
 				expect(result.ok).toBe(true);
 				expect(result.uptime).toBeDefined();
@@ -437,11 +465,12 @@ describe("IPC handlers", () => {
 					projects: [{ path: "/proj", slug: "proj", addedAt: 1 }],
 				}));
 
-				const result = yield* handleSetProjectTitle({
-					cmd: "set_project_title",
-					slug: "proj",
-					title: "New Title",
-				});
+				const result = yield* handleSetProjectTitle(
+					new SetProjectTitle({
+						slug: "proj",
+						title: "New Title",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				const state = yield* Ref.get(ref);
@@ -455,11 +484,12 @@ describe("IPC handlers", () => {
 	describe("handleSetKeepAwakeCommand", () => {
 		it.effect("updates keep awake command in state", () =>
 			Effect.gen(function* () {
-				const result = yield* handleSetKeepAwakeCommand({
-					cmd: "set_keep_awake_command",
-					command: "caffeinate",
-					args: ["-d"],
-				});
+				const result = yield* handleSetKeepAwakeCommand(
+					new SetKeepAwakeCommand({
+						command: "caffeinate",
+						args: ["-d"],
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				const ref = yield* DaemonStateTag;
@@ -479,11 +509,12 @@ describe("IPC handlers", () => {
 	describe("handleSetAgent", () => {
 		it.effect("sets agent via Effect override state using slug", () =>
 			Effect.gen(function* () {
-				const result = yield* handleSetAgent({
-					cmd: "set_agent",
-					slug: "my-project",
-					agent: "claude-3",
-				});
+				const result = yield* handleSetAgent(
+					new SetAgent({
+						slug: "my-project",
+						agent: "claude-3",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				// IPC protocol uses slug as the override-state key.
@@ -497,12 +528,13 @@ describe("IPC handlers", () => {
 	describe("handleSetModel", () => {
 		it.effect("sets model via Effect override state using slug", () =>
 			Effect.gen(function* () {
-				const result = yield* handleSetModel({
-					cmd: "set_model",
-					slug: "my-project",
-					provider: "anthropic",
-					model: "claude-3-opus",
-				});
+				const result = yield* handleSetModel(
+					new SetModel({
+						slug: "my-project",
+						provider: "anthropic",
+						model: "claude-3-opus",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				const model = yield* getModel("my-project");
@@ -518,15 +550,16 @@ describe("IPC handlers", () => {
 	describe("handleRestartWithConfig", () => {
 		it.effect("sets shuttingDown and completes ShutdownSignal", () =>
 			Effect.gen(function* () {
-				const result = yield* handleRestartWithConfig({
-					cmd: "restart_with_config",
-					config: {
-						port: 2634,
-						tls: true,
-						pinHash: "next-pin-hash",
-						keepAwake: true,
-					},
-				});
+				const result = yield* handleRestartWithConfig(
+					new RestartWithConfig({
+						config: {
+							port: 2634,
+							tls: true,
+							pinHash: "next-pin-hash",
+							keepAwake: true,
+						},
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				const ref = yield* DaemonStateTag;
@@ -558,7 +591,7 @@ describe("IPC handlers", () => {
 	describe("handleInstanceList", () => {
 		it.effect("returns instances from InstanceMgmt", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceList({ cmd: "instance_list" });
+				const result = yield* handleInstanceList(new InstanceList({}));
 
 				expect(result.ok).toBe(true);
 				expect(result.instances).toBeDefined();
@@ -570,12 +603,13 @@ describe("IPC handlers", () => {
 	describe("handleInstanceAdd", () => {
 		it.effect("adds a managed instance", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceAdd({
-					cmd: "instance_add",
-					name: "New Instance",
-					managed: true,
-					port: 5000,
-				});
+				const result = yield* handleInstanceAdd(
+					new InstanceAdd({
+						name: "New Instance",
+						managed: true,
+						port: 5000,
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				expect(result.instance).toBeDefined();
@@ -605,12 +639,13 @@ describe("IPC handlers", () => {
 				);
 
 				const exit = yield* Effect.exit(
-					handleInstanceAdd({
-						cmd: "instance_add",
-						name: "Overflow",
-						managed: true,
-						port: 5001,
-					}).pipe(Effect.provide(layers)),
+					handleInstanceAdd(
+						new InstanceAdd({
+							name: "Overflow",
+							managed: true,
+							port: 5001,
+						}),
+					).pipe(Effect.provide(layers)),
 				);
 
 				expect(Exit.isSuccess(exit)).toBe(true);
@@ -628,10 +663,11 @@ describe("IPC handlers", () => {
 	describe("handleInstanceRemove", () => {
 		it.effect("removes an instance", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceRemove({
-					cmd: "instance_remove",
-					id: "inst-1",
-				});
+				const result = yield* handleInstanceRemove(
+					new InstanceRemove({
+						id: "inst-1",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
@@ -641,10 +677,11 @@ describe("IPC handlers", () => {
 			Effect.gen(function* () {
 				const persistConfig = vi.fn();
 				const exit = yield* Effect.exit(
-					handleInstanceRemove({
-						cmd: "instance_remove",
-						id: "missing",
-					}).pipe(
+					handleInstanceRemove(
+						new InstanceRemove({
+							id: "missing",
+						}),
+					).pipe(
 						Effect.provide(
 							makeTestLayersWithInstanceMgmt({
 								removeInstance: () => {
@@ -671,10 +708,11 @@ describe("IPC handlers", () => {
 	describe("handleInstanceStart", () => {
 		it.effect("starts an instance", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceStart({
-					cmd: "instance_start",
-					id: "inst-1",
-				});
+				const result = yield* handleInstanceStart(
+					new InstanceStart({
+						id: "inst-1",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
@@ -685,10 +723,11 @@ describe("IPC handlers", () => {
 			() =>
 				Effect.gen(function* () {
 					const exit = yield* Effect.exit(
-						handleInstanceStart({
-							cmd: "instance_start",
-							id: "missing",
-						}).pipe(
+						handleInstanceStart(
+							new InstanceStart({
+								id: "missing",
+							}),
+						).pipe(
 							Effect.provide(
 								makeTestLayersWithInstanceMgmt({
 									startInstance: () =>
@@ -713,10 +752,11 @@ describe("IPC handlers", () => {
 			() =>
 				Effect.gen(function* () {
 					const exit = yield* Effect.exit(
-						handleInstanceStart({
-							cmd: "instance_start",
-							id: "external",
-						}).pipe(
+						handleInstanceStart(
+							new InstanceStart({
+								id: "external",
+							}),
+						).pipe(
 							Effect.provide(
 								makeTestLayersWithInstanceMgmt({
 									startInstance: () =>
@@ -740,10 +780,11 @@ describe("IPC handlers", () => {
 	describe("handleInstanceStop", () => {
 		it.effect("stops an instance", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceStop({
-					cmd: "instance_stop",
-					id: "inst-1",
-				});
+				const result = yield* handleInstanceStop(
+					new InstanceStop({
+						id: "inst-1",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 			}).pipe(Effect.provide(makeTestLayers())),
@@ -752,10 +793,11 @@ describe("IPC handlers", () => {
 		it.effect("returns an IPC error when stop rejects", () =>
 			Effect.gen(function* () {
 				const exit = yield* Effect.exit(
-					handleInstanceStop({
-						cmd: "instance_stop",
-						id: "missing",
-					}).pipe(
+					handleInstanceStop(
+						new InstanceStop({
+							id: "missing",
+						}),
+					).pipe(
 						Effect.provide(
 							makeTestLayersWithInstanceMgmt({
 								stopInstance: () => {
@@ -780,10 +822,11 @@ describe("IPC handlers", () => {
 	describe("handleInstanceStatus", () => {
 		it.effect("returns instance status", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceStatus({
-					cmd: "instance_status",
-					id: "inst-1",
-				});
+				const result = yield* handleInstanceStatus(
+					new InstanceStatus({
+						id: "inst-1",
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				expect(result.instance).toBeDefined();
@@ -794,12 +837,13 @@ describe("IPC handlers", () => {
 	describe("handleInstanceUpdate", () => {
 		it.effect("updates an instance", () =>
 			Effect.gen(function* () {
-				const result = yield* handleInstanceUpdate({
-					cmd: "instance_update",
-					id: "inst-1",
-					name: "Renamed",
-					port: 9999,
-				});
+				const result = yield* handleInstanceUpdate(
+					new InstanceUpdate({
+						id: "inst-1",
+						name: "Renamed",
+						port: 9999,
+					}),
+				);
 
 				expect(result.ok).toBe(true);
 				expect(result.instance).toBeDefined();
@@ -810,11 +854,12 @@ describe("IPC handlers", () => {
 			Effect.gen(function* () {
 				const persistConfig = vi.fn();
 				const exit = yield* Effect.exit(
-					handleInstanceUpdate({
-						cmd: "instance_update",
-						id: "missing",
-						name: "Renamed",
-					}).pipe(
+					handleInstanceUpdate(
+						new InstanceUpdate({
+							id: "missing",
+							name: "Renamed",
+						}),
+					).pipe(
 						Effect.provide(
 							makeTestLayersWithInstanceMgmt({
 								updateInstance: () => {

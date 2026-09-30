@@ -6,6 +6,22 @@
 import { resolve } from "node:path";
 import { getTailscaleIP } from "../lib/cli/tls.js";
 import {
+	AddProject,
+	GetStatus,
+	InstanceAdd,
+	InstanceList,
+	InstanceRemove,
+	InstanceStart,
+	InstanceStatus,
+	InstanceStop,
+	type IpcTaggedRequest,
+	ListProjects,
+	RemoveProject,
+	SetPin,
+	SetProjectTitle,
+	Shutdown,
+} from "../lib/contracts/ipc-requests.js";
+import {
 	isDaemonSpawnPortInUseError,
 	spawnDaemon,
 } from "../lib/daemon/daemon-spawn.js";
@@ -18,7 +34,7 @@ import {
 } from "../lib/domain/daemon/Layers/daemon-foreground.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
-import type { IPCCommand, IPCResponse } from "../lib/types.js";
+import type { IPCResponse } from "../lib/types.js";
 import { defaultInteractiveMenu } from "./cli-commands.js";
 import {
 	DEFAULT_CONFIG_DIR,
@@ -29,7 +45,7 @@ import {
 	getNetworkAddress,
 	HELP_TEXT,
 	parseArgs,
-	sendIPCCommand,
+	sendIpcRequest,
 } from "./cli-utils.js";
 
 // ─── Re-exports (preserve public API) ──────────────────────────────────────
@@ -39,7 +55,7 @@ export {
 	generateQR,
 	getNetworkAddress,
 	parseArgs,
-	sendIPCCommand,
+	sendIpcRequest,
 } from "./cli-utils.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -50,7 +66,7 @@ export interface CLIOptions {
 	stdout?: { write(s: string): void };
 	stderr?: { write(s: string): void };
 	exit?: (code: number) => void;
-	sendIPC?: (cmd: IPCCommand) => Promise<IPCResponse>;
+	sendIPC?: (cmd: IpcTaggedRequest) => Promise<IPCResponse>;
 	isDaemonRunning?: () => Promise<boolean>;
 	spawnDaemon?: (
 		opts?: DaemonOptions,
@@ -74,7 +90,7 @@ export interface InteractiveContext {
 	stdout: { write(s: string): void };
 	stderr: { write(s: string): void };
 	exit: (code: number) => void;
-	ipcSend: (cmd: IPCCommand) => Promise<IPCResponse>;
+	ipcSend: (cmd: IpcTaggedRequest) => Promise<IPCResponse>;
 	checkDaemon: () => Promise<boolean>;
 	spawnDaemon: (opts?: DaemonOptions) => Promise<{ pid: number; port: number }>;
 	getAddr: () => string | null;
@@ -93,7 +109,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 
 	const ipcSend =
 		options?.sendIPC ??
-		((cmd: IPCCommand) => sendIPCCommand(DEFAULT_SOCKET_PATH, cmd));
+		((request: IpcTaggedRequest) =>
+			sendIpcRequest(DEFAULT_SOCKET_PATH, request));
 
 	const checkDaemon =
 		options?.isDaemonRunning ?? (() => isDaemonRunning(DEFAULT_SOCKET_PATH));
@@ -165,7 +182,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			try {
 				const running = await checkDaemon();
 				if (running) {
-					await ipcSend({ cmd: "shutdown" });
+					await ipcSend(new Shutdown({}));
 					stdout.write("Stopped existing daemon.\n");
 				}
 			} catch {
@@ -226,7 +243,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return;
 		}
 
-		const response = await ipcSend({ cmd: "get_status" });
+		const response = await ipcSend(new GetStatus({}));
 		if (!response.ok) {
 			stderr.write(
 				`Failed to get status: ${response.error ?? "unknown error"}\n`,
@@ -261,7 +278,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		}
 
 		try {
-			await ipcSend({ cmd: "shutdown" });
+			await ipcSend(new Shutdown({}));
 			stdout.write("Daemon stopped.\n");
 		} catch (err) {
 			stderr.write(`Failed to stop daemon: ${formatErrorDetail(err)}\n`);
@@ -286,7 +303,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return;
 		}
 
-		const response = await ipcSend({ cmd: "set_pin", pin: args.pin });
+		const response = await ipcSend(new SetPin({ pin: args.pin }));
 		if (response.ok) {
 			stdout.write("PIN updated.\n");
 		} else {
@@ -308,7 +325,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return;
 		}
 
-		const response = await ipcSend({ cmd: "add_project", directory: addDir });
+		const response = await ipcSend(new AddProject({ directory: addDir }));
 		if (response.ok) {
 			stdout.write(`Project added: ${response.slug ?? addDir}\n`);
 		} else {
@@ -331,7 +348,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		}
 
 		// First, list projects to find the slug for cwd
-		const listResponse = await ipcSend({ cmd: "list_projects" });
+		const listResponse = await ipcSend(new ListProjects({}));
 		if (!listResponse.ok || !Array.isArray(listResponse.projects)) {
 			stderr.write("Failed to list projects.\n");
 			exit(1);
@@ -350,7 +367,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return;
 		}
 
-		const response = await ipcSend({ cmd: "remove_project", slug: match.slug });
+		const response = await ipcSend(new RemoveProject({ slug: match.slug }));
 		if (response.ok) {
 			stdout.write(`Project removed: ${match.slug}\n`);
 		} else {
@@ -372,7 +389,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return;
 		}
 
-		const response = await ipcSend({ cmd: "list_projects" });
+		const response = await ipcSend(new ListProjects({}));
 		if (!response.ok || !Array.isArray(response.projects)) {
 			stderr.write("Failed to list projects.\n");
 			exit(1);
@@ -415,7 +432,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		}
 
 		// Find slug for cwd
-		const listResponse = await ipcSend({ cmd: "list_projects" });
+		const listResponse = await ipcSend(new ListProjects({}));
 		if (!listResponse.ok || !Array.isArray(listResponse.projects)) {
 			stderr.write("Failed to list projects.\n");
 			exit(1);
@@ -434,11 +451,12 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return;
 		}
 
-		const response = await ipcSend({
-			cmd: "set_project_title",
-			slug: match.slug,
-			title: args.title,
-		});
+		const response = await ipcSend(
+			new SetProjectTitle({
+				slug: match.slug,
+				title: args.title,
+			}),
+		);
 
 		if (response.ok) {
 			stdout.write(`Title updated: ${args.title}\n`);
@@ -463,7 +481,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 
 		switch (args.instanceAction) {
 			case "list": {
-				const response = await ipcSend({ cmd: "instance_list" });
+				const response = await ipcSend(new InstanceList({}));
 				if (!response.ok) {
 					stderr.write(
 						`Failed to list instances: ${response.error ?? "unknown error"}\n`,
@@ -499,13 +517,14 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 					exit(1);
 					return;
 				}
-				const response = await ipcSend({
-					cmd: "instance_add",
-					name: args.instanceName,
-					managed: args.instanceManaged ?? false,
-					...(args.instancePort != null && { port: args.instancePort }),
-					...(args.instanceUrl != null && { url: args.instanceUrl }),
-				});
+				const response = await ipcSend(
+					new InstanceAdd({
+						name: args.instanceName,
+						managed: args.instanceManaged ?? false,
+						...(args.instancePort != null && { port: args.instancePort }),
+						...(args.instanceUrl != null && { url: args.instanceUrl }),
+					}),
+				);
 				if (response.ok) {
 					stdout.write(
 						`Instance added: ${(response.instance as { id: string })?.id ?? args.instanceName}\n`,
@@ -527,10 +546,11 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 					exit(1);
 					return;
 				}
-				const response = await ipcSend({
-					cmd: "instance_remove",
-					id: args.instanceName,
-				});
+				const response = await ipcSend(
+					new InstanceRemove({
+						id: args.instanceName,
+					}),
+				);
 				if (response.ok) {
 					stdout.write(`Instance removed: ${args.instanceName}\n`);
 				} else {
@@ -550,10 +570,11 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 					exit(1);
 					return;
 				}
-				const response = await ipcSend({
-					cmd: "instance_start",
-					id: args.instanceName,
-				});
+				const response = await ipcSend(
+					new InstanceStart({
+						id: args.instanceName,
+					}),
+				);
 				if (response.ok) {
 					stdout.write(`Instance started: ${args.instanceName}\n`);
 				} else {
@@ -573,10 +594,11 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 					exit(1);
 					return;
 				}
-				const response = await ipcSend({
-					cmd: "instance_stop",
-					id: args.instanceName,
-				});
+				const response = await ipcSend(
+					new InstanceStop({
+						id: args.instanceName,
+					}),
+				);
 				if (response.ok) {
 					stdout.write(`Instance stopped: ${args.instanceName}\n`);
 				} else {
@@ -596,10 +618,11 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 					exit(1);
 					return;
 				}
-				const response = await ipcSend({
-					cmd: "instance_status",
-					id: args.instanceName,
-				});
+				const response = await ipcSend(
+					new InstanceStatus({
+						id: args.instanceName,
+					}),
+				);
 				if (!response.ok) {
 					stderr.write(
 						`Failed to get instance status: ${response.error ?? "unknown error"}\n`,
@@ -691,16 +714,17 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	}
 
 	// 2. Register current directory as a project
-	const registerResponse = await ipcSend({
-		cmd: "add_project",
-		directory: cwd,
-	});
+	const registerResponse = await ipcSend(
+		new AddProject({
+			directory: cwd,
+		}),
+	);
 	const slug = registerResponse.ok
 		? (registerResponse.slug as string)
 		: undefined;
 
 	// 3. Build URL (check daemon TLS status for correct scheme)
-	const statusResponse = await ipcSend({ cmd: "get_status" });
+	const statusResponse = await ipcSend(new GetStatus({}));
 	const scheme = statusResponse["tlsEnabled"] === true ? "https" : "http";
 	// 3b. Build URLs with Tailscale priority (consistent with interactive path)
 	const tsIP = getTsIP();

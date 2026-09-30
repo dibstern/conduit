@@ -41,7 +41,6 @@ import {
 	type TaggedIpcDispatcher,
 } from "../../../src/lib/daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../src/lib/daemon/daemon-types.js";
-import { parseCommand } from "../../../src/lib/daemon/ipc-protocol.js";
 import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
@@ -169,14 +168,16 @@ const makeStatus = (overrides: Partial<DaemonStatus> = {}): DaemonStatus => ({
 
 const sendJsonLine = (
 	socketPath: string,
-	payload: Record<string, unknown>,
+	payload: Record<string, unknown> | string,
 ): Promise<Record<string, unknown>> =>
 	new Promise((resolve, reject) => {
 		const client = createConnection(socketPath);
 		let buffer = "";
 
 		client.on("connect", () => {
-			client.write(`${JSON.stringify(payload)}\n`);
+			client.write(
+				`${typeof payload === "string" ? payload : JSON.stringify(payload)}\n`,
+			);
 		});
 		client.on("data", (chunk: Buffer) => {
 			buffer += chunk.toString("utf-8");
@@ -194,7 +195,7 @@ const sendJsonLine = (
 	});
 
 describe("daemon IPC lifecycle RPC transition", () => {
-	it("routes _tag IPC through daemon RPC handlers instead of parseCommand", async () => {
+	it("routes tagged IPC through daemon RPC handlers", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		const dispatchTaggedRequest = vi.fn(
@@ -211,10 +212,6 @@ describe("daemon IPC lifecycle RPC transition", () => {
 
 		try {
 			await startTestIPCServer(ctx, dispatchTaggedRequest);
-
-			expect(
-				parseCommand('{"_tag":"AddProject","directory":"/tmp/rpc"}'),
-			).toBeNull();
 
 			const response = await sendJsonLine(ctx.socketPath, {
 				_tag: "AddProject",
@@ -350,7 +347,7 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		}
 	});
 
-	it("routes legacy set_agent through the project override port", async () => {
+	it("routes tagged SetAgent through the project override port", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
 		const setProjectAgentCalls: Array<[string, string]> = [];
@@ -368,54 +365,56 @@ describe("daemon IPC lifecycle RPC transition", () => {
 		try {
 			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
-				cmd: "set_agent",
+				_tag: "SetAgent",
 				slug: "project-a",
 				agent: "plan",
 			});
 
 			expect(response).toEqual({ ok: true });
 			expect(setProjectAgentCalls).toEqual([["project-a", "plan"]]);
-			expect(warnSpy).toHaveBeenCalledWith(
-				"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
-			);
+			expect(warnSpy).not.toHaveBeenCalled();
 		} finally {
 			await closeIPCServer(ctx);
 			await rm(tmp, { recursive: true, force: true });
 		}
 	});
 
-	it("keeps legacy cmd fallback with deprecation warning", async () => {
+	it("rejects a legacy get_status line", async () => {
 		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
 		const ctx = makeContext(join(tmp, "daemon.sock"));
-		warnSpy.mockClear();
-		const dispatchTaggedRequest = async (
-			request: IpcTaggedRequest,
-		): Promise<IPCResponse> => {
-			if (request._tag !== "AddProject") {
-				return { ok: false, error: `Unexpected request: ${request._tag}` };
-			}
-			return {
-				ok: true,
-				slug: "legacy-project",
-				directory: request.directory,
-			};
-		};
-
+		const dispatchTaggedRequest = vi.fn(
+			async (): Promise<IPCResponse> => ({ ok: true }),
+		);
 		try {
 			await startTestIPCServer(ctx, dispatchTaggedRequest);
 			const response = await sendJsonLine(ctx.socketPath, {
-				cmd: "add_project",
-				directory: "/tmp/legacy",
+				cmd: "get_status",
 			});
-
 			expect(response).toEqual({
-				ok: true,
-				slug: "legacy-project",
-				directory: "/tmp/legacy",
+				ok: false,
+				error:
+					"The cmd-format IPC request is no longer supported; update your CLI.",
 			});
-			expect(warnSpy).toHaveBeenCalledWith(
-				"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
-			);
+			expect(dispatchTaggedRequest).not.toHaveBeenCalled();
+		} finally {
+			await closeIPCServer(ctx);
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
+	it("retains the Invalid JSON response for malformed lines", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "conduit-daemon-ipc-"));
+		const ctx = makeContext(join(tmp, "daemon.sock"));
+		const dispatchTaggedRequest = vi.fn(
+			async (): Promise<IPCResponse> => ({ ok: true }),
+		);
+		try {
+			await startTestIPCServer(ctx, dispatchTaggedRequest);
+			expect(await sendJsonLine(ctx.socketPath, "{invalid")).toEqual({
+				ok: false,
+				error: "Invalid JSON",
+			});
+			expect(dispatchTaggedRequest).not.toHaveBeenCalled();
 		} finally {
 			await closeIPCServer(ctx);
 			await rm(tmp, { recursive: true, force: true });

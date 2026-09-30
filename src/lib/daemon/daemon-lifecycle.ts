@@ -20,7 +20,6 @@ import {
 import * as Headers from "@effect/platform/Headers";
 import { Effect, Either, Schema } from "effect";
 import {
-	commandToTaggedRequestPayload,
 	type IpcTaggedRequest,
 	IpcTaggedRequestSchema,
 } from "../contracts/ipc-requests.js";
@@ -30,27 +29,13 @@ import { createLogger } from "../logger.js";
 import { serveStaticFile, tryServeStatic } from "../server/static-files.js";
 import type { SetupInfoResponse } from "../shared-types.js";
 import type { IPCResponse } from "../types.js";
-import {
-	parseCommand,
-	serializeResponse,
-	validateCommand,
-} from "./ipc-protocol.js";
+import { serializeResponse } from "./ipc-protocol.js";
 import { removeSocketFile } from "./pid-manager.js";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const log = createLogger("daemon");
-
-function decodeTaggedRequest(line: string) {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(line);
-	} catch {
-		return Either.left(new Error("Invalid JSON"));
-	}
-	return Schema.decodeUnknownEither(IpcTaggedRequestSchema)(parsed);
-}
 
 function isTaggedPayload(value: unknown): value is { _tag: string } {
 	return (
@@ -512,97 +497,44 @@ export function startIPCServer(
 					try {
 						parsedLine = JSON.parse(line);
 					} catch {
-						parsedLine = null;
-					}
-
-					if (isTaggedPayload(parsedLine)) {
-						const ipcT0 = Date.now();
-						const decoded = decodeTaggedRequest(line);
-						const response = Either.isRight(decoded)
-							? await dispatchTaggedRequest(decoded.right)
-							: {
-									ok: false,
-									error: formatErrorDetail(decoded.left),
-								};
-						const ipcMs = Date.now() - ipcT0;
-						if (ipcMs > 100) {
-							log.warn(`[ipc] ${parsedLine._tag} took ${ipcMs}ms`);
-						} else {
-							log.debug(`[ipc] ${parsedLine._tag} ${ipcMs}ms`);
-						}
 						socket.write(
-							serializeResponse(response),
-							makeTaggedPostResponseAction(
-								Either.isRight(decoded) ? decoded.right : undefined,
-								response,
-								postResponseActions,
-							),
+							serializeResponse({ ok: false, error: "Invalid JSON" }),
 						);
 						continue;
 					}
 
-					const cmd = parseCommand(line);
-					if (!cmd) {
-						const errResponse = serializeResponse({
-							ok: false,
-							error: "Invalid JSON",
-						});
-						socket.write(errResponse);
+					if (!isTaggedPayload(parsedLine)) {
+						socket.write(
+							serializeResponse({
+								ok: false,
+								error:
+									"The cmd-format IPC request is no longer supported; update your CLI.",
+							}),
+						);
 						continue;
 					}
 
 					const ipcT0 = Date.now();
-					try {
-						log.warn(
-							"DEPRECATED: cmd-format IPC will be removed in the next release. Update your CLI.",
-						);
-						const validationError = validateCommand(
-							cmd as Record<string, unknown> & { cmd: string },
-						);
-						let response: IPCResponse;
-						let decodedRequest: IpcTaggedRequest | undefined;
-						if (validationError) {
-							response = validationError;
-						} else {
-							const decoded = Schema.decodeUnknownEither(
-								IpcTaggedRequestSchema,
-							)(commandToTaggedRequestPayload(cmd));
-							decodedRequest = Either.isRight(decoded)
-								? decoded.right
-								: undefined;
-							response = Either.isRight(decoded)
-								? await dispatchTaggedRequest(decoded.right)
-								: {
-										ok: false,
-										error: formatErrorDetail(decoded.left),
-									};
-						}
-						const ipcMs = Date.now() - ipcT0;
-						if (ipcMs > 100) {
-							log.warn(`[ipc] ${cmd.cmd} took ${ipcMs}ms`);
-						} else {
-							log.debug(`[ipc] ${cmd.cmd} ${ipcMs}ms`);
-						}
-						socket.write(
-							serializeResponse(response),
-							makeTaggedPostResponseAction(
-								decodedRequest,
-								response,
-								postResponseActions,
-							),
-						);
-					} catch (err) {
-						const ipcMs = Date.now() - ipcT0;
-						log.warn(
-							`[ipc] ${cmd.cmd} failed after ${ipcMs}ms: ${formatErrorDetail(err)}`,
-						);
-						socket.write(
-							serializeResponse({
-								ok: false,
-								error: formatErrorDetail(err),
-							}),
-						);
+					const decoded = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(
+						parsedLine,
+					);
+					const response = Either.isRight(decoded)
+						? await dispatchTaggedRequest(decoded.right)
+						: { ok: false, error: formatErrorDetail(decoded.left) };
+					const ipcMs = Date.now() - ipcT0;
+					if (ipcMs > 100) {
+						log.warn(`[ipc] ${parsedLine._tag} took ${ipcMs}ms`);
+					} else {
+						log.debug(`[ipc] ${parsedLine._tag} ${ipcMs}ms`);
 					}
+					socket.write(
+						serializeResponse(response),
+						makeTaggedPostResponseAction(
+							Either.isRight(decoded) ? decoded.right : undefined,
+							response,
+							postResponseActions,
+						),
+					);
 				}
 			});
 

@@ -11,7 +11,7 @@
 // T8: Error handling — daemon not reachable, IPC errors (AC8)
 // T9: getNetworkAddress — returns first non-internal IPv4 (AC1)
 // T10: QR generation — mock (AC7)
-// T11: sendIPCCommand — rejects for non-existent socket (IPC client)
+// T11: sendIpcRequest — rejects for non-existent socket (IPC client)
 // PBT: Property-based arg parsing
 
 import fc from "fast-check";
@@ -23,12 +23,18 @@ import {
 	type InteractiveContext,
 	parseArgs,
 	run,
-	sendIPCCommand,
+	sendIpcRequest,
 } from "../../../src/bin/cli-core.js";
 import { HELP_TEXT } from "../../../src/bin/cli-utils.js";
+import {
+	AddProject,
+	GetStatus,
+	InstanceAdd,
+	type IpcTaggedRequest,
+} from "../../../src/lib/contracts/ipc-requests.js";
 import { DaemonSpawnPortInUseError } from "../../../src/lib/daemon/daemon-spawn.js";
 import { RELAY_ENV_KEYS } from "../../../src/lib/env.js";
-import type { IPCCommand, IPCResponse } from "../../../src/lib/types.js";
+import type { IPCResponse } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
@@ -40,7 +46,7 @@ interface MockCLIState {
 	output: string;
 	errors: string;
 	exitCode: number | null;
-	ipcCommands: IPCCommand[];
+	ipcCommands: IpcTaggedRequest[];
 }
 
 /** Create a mock CLIOptions with captured output.
@@ -72,7 +78,7 @@ function createMockCLI(
 		exit: (code: number) => {
 			state.exitCode = code;
 		},
-		sendIPC: async (cmd: IPCCommand): Promise<IPCResponse> => {
+		sendIPC: async (cmd: IpcTaggedRequest): Promise<IPCResponse> => {
 			state.ipcCommands.push(cmd);
 			return { ok: true };
 		},
@@ -341,7 +347,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 			},
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") {
+				if (cmd._tag === "AddProject") {
 					return { ok: true, slug: "my-project" };
 				}
 				return { ok: true };
@@ -367,7 +373,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 			},
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") {
+				if (cmd._tag === "AddProject") {
 					return { ok: true, slug: "my-project" };
 				}
 				return { ok: true };
@@ -385,7 +391,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") {
+				if (cmd._tag === "AddProject") {
 					return { ok: true, slug: "my-project" };
 				}
 				return { ok: true };
@@ -394,7 +400,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 
 		await run([], cli);
 
-		const addCmd = cli.state.ipcCommands.find((c) => c.cmd === "add_project");
+		const addCmd = cli.state.ipcCommands.find((c) => c._tag === "AddProject");
 		expect(addCmd).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(addCmd!.directory).toBe("/home/user/my-project");
@@ -405,7 +411,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 			getNetworkAddress: () => null,
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") return { ok: true, slug: "test" };
+				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
 				return { ok: true };
 			},
 		});
@@ -419,7 +425,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") return { ok: true, slug: "test" };
+				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
 				return { ok: true };
 			},
 		});
@@ -433,7 +439,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") return { ok: true, slug: "test" };
+				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
 				return { ok: true };
 			},
 		});
@@ -468,7 +474,7 @@ describe("T3: --status — sends get_status, formats output (AC2)", () => {
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "get_status") {
+				if (cmd._tag === "GetStatus") {
 					return {
 						ok: true,
 						uptime: 3661,
@@ -489,7 +495,7 @@ describe("T3: --status — sends get_status, formats output (AC2)", () => {
 		expect(cli.state.output).toContain("3");
 		expect(cli.state.output).toContain("2");
 		// Also verifies the correct IPC command was sent
-		expect(cli.state.ipcCommands[0]?.cmd).toBe("get_status");
+		expect(cli.state.ipcCommands[0]?._tag).toBe("GetStatus");
 	});
 
 	it.each([
@@ -527,7 +533,7 @@ describe("T4: --stop — sends shutdown (AC3)", () => {
 
 		expect(cli.state.ipcCommands).toHaveLength(1);
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(cli.state.ipcCommands[0]!.cmd).toBe("shutdown");
+		expect(cli.state.ipcCommands[0]!._tag).toBe("Shutdown");
 		expect(cli.state.output).toContain("Daemon stopped");
 	});
 
@@ -564,7 +570,7 @@ describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
 
 		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
 		const pinCmd = cli.state.ipcCommands[0]!;
-		expect(pinCmd.cmd === "set_pin" && pinCmd.pin).toBe(pin);
+		expect(pinCmd._tag === "SetPin" && pinCmd.pin).toBe(pin);
 		expect(cli.state.output).toContain("PIN updated");
 	});
 
@@ -645,7 +651,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "add_project") {
+					if (cmd._tag === "AddProject") {
 						return { ok: true, slug: "test-project" };
 					}
 					return { ok: true };
@@ -654,7 +660,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 			await run(["--add", "/tmp/test-project"], cli);
 
-			const addCmd = cli.state.ipcCommands.find((c) => c.cmd === "add_project");
+			const addCmd = cli.state.ipcCommands.find((c) => c._tag === "AddProject");
 			expect(addCmd).toBeDefined();
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 			expect(addCmd!.directory).toBe("/tmp/test-project");
@@ -665,7 +671,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -677,7 +683,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							],
 						};
 					}
-					if (cmd.cmd === "remove_project") {
+					if (cmd._tag === "RemoveProject") {
 						return { ok: true };
 					}
 					return { ok: true };
@@ -687,7 +693,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			await run(["--remove"], cli);
 
 			const removeCmd = cli.state.ipcCommands.find(
-				(c) => c.cmd === "remove_project",
+				(c) => c._tag === "RemoveProject",
 			);
 			expect(removeCmd).toBeDefined();
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -699,7 +705,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return { ok: true, projects: [] };
 					}
 					return { ok: true };
@@ -730,7 +736,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -738,7 +744,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							],
 						};
 					}
-					if (cmd.cmd === "remove_project") {
+					if (cmd._tag === "RemoveProject") {
 						return { ok: false, error: "permission denied" };
 					}
 					return { ok: true };
@@ -757,7 +763,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -799,7 +805,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -807,7 +813,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							],
 						};
 					}
-					if (cmd.cmd === "set_project_title") {
+					if (cmd._tag === "SetProjectTitle") {
 						return { ok: true };
 					}
 					return { ok: true };
@@ -817,7 +823,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			await run(["--title", "New Title"], cli);
 
 			const titleCmd = cli.state.ipcCommands.find(
-				(c) => c.cmd === "set_project_title",
+				(c) => c._tag === "SetProjectTitle",
 			);
 			expect(titleCmd).toBeDefined();
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
@@ -840,7 +846,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return { ok: true, projects: [] };
 					}
 					return { ok: true };
@@ -871,7 +877,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			const cli = createMockCLI({
 				sendIPC: async (cmd) => {
 					cli.state.ipcCommands.push(cmd);
-					if (cmd.cmd === "list_projects") {
+					if (cmd._tag === "ListProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -879,7 +885,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							],
 						};
 					}
-					if (cmd.cmd === "set_project_title") {
+					if (cmd._tag === "SetProjectTitle") {
 						return { ok: false, error: "title too long" };
 					}
 					return { ok: true };
@@ -901,7 +907,7 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") return { ok: true, slug: "test" };
+				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
 				return { ok: true };
 			},
 		});
@@ -921,7 +927,7 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 			},
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") return { ok: true, slug: "test" };
+				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
 				return { ok: true };
 			},
 		});
@@ -1021,18 +1027,32 @@ describe("T9/T10: getNetworkAddress and generateQR", () => {
 	});
 });
 
-// ─── T11: sendIPCCommand ──────────────────────────────────────────────
+// ─── T11: sendIpcRequest ──────────────────────────────────────────────
 
-describe("T11: sendIPCCommand", () => {
-	it("sendIPCCommand rejects for non-existent socket path", async () => {
+describe("T11: sendIpcRequest", () => {
+	it("sendIpcRequest rejects for non-existent socket path", async () => {
 		await expect(
-			sendIPCCommand("/tmp/nonexistent-cli-test-socket.sock", {
-				cmd: "get_status",
-			}),
+			sendIpcRequest(
+				"/tmp/nonexistent-cli-test-socket.sock",
+				new GetStatus({}),
+			),
 		).rejects.toThrow();
 	});
 
-	it("sendIPCCommand retries and succeeds when server starts late", async () => {
+	it("sendIpcRequest returns the daemon-style error for a request the daemon would reject", async () => {
+		// Unmanaged with neither url nor port fails the InstanceAdd cross-field
+		// filter; it must come back as { ok: false }, not a thrown ParseError.
+		const response = await sendIpcRequest(
+			"/tmp/nonexistent-cli-test-socket.sock",
+			new InstanceAdd({ name: "work", managed: false }),
+		);
+		expect(response.ok).toBe(false);
+		expect(response.error).toContain(
+			"require either a 'url' or a valid 'port'",
+		);
+	});
+
+	it("sendIpcRequest retries and succeeds when server starts late", async () => {
 		const { createServer } = await import("node:net");
 		const { mkdtempSync } = await import("node:fs");
 		const { tmpdir } = await import("node:os");
@@ -1058,9 +1078,7 @@ describe("T11: sendIPCCommand", () => {
 		}, 800);
 
 		try {
-			const result = await sendIPCCommand(sockPath, {
-				cmd: "get_status",
-			});
+			const result = await sendIpcRequest(sockPath, new GetStatus({}));
 			expect(result).toEqual({ ok: true });
 		} finally {
 			clearTimeout(startTimer);
@@ -1068,7 +1086,7 @@ describe("T11: sendIPCCommand", () => {
 		}
 	});
 
-	it("sendIPCCommand serializes commands with _tag request format", async () => {
+	it("sendIpcRequest serializes commands with _tag request format", async () => {
 		const { createServer } = await import("node:net");
 		const { mkdtempSync } = await import("node:fs");
 		const { tmpdir } = await import("node:os");
@@ -1093,10 +1111,12 @@ describe("T11: sendIPCCommand", () => {
 		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
 
 		try {
-			const result = await sendIPCCommand(sockPath, {
-				cmd: "add_project",
-				directory: "/tmp/conduit-project",
-			});
+			const result = await sendIpcRequest(
+				sockPath,
+				new AddProject({
+					directory: "/tmp/conduit-project",
+				}),
+			);
 
 			expect(result).toEqual({ ok: true });
 			expect(received).toEqual({
@@ -1108,7 +1128,7 @@ describe("T11: sendIPCCommand", () => {
 		}
 	});
 
-	it("sendIPCCommand rejects malformed IPC responses", async () => {
+	it("sendIpcRequest rejects malformed IPC responses", async () => {
 		const { createServer } = await import("node:net");
 		const { mkdtempSync } = await import("node:fs");
 		const { tmpdir } = await import("node:os");
@@ -1131,9 +1151,9 @@ describe("T11: sendIPCCommand", () => {
 		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
 
 		try {
-			await expect(
-				sendIPCCommand(sockPath, { cmd: "get_status" }),
-			).rejects.toThrow("Invalid IPC response");
+			await expect(sendIpcRequest(sockPath, new GetStatus({}))).rejects.toThrow(
+				"Invalid IPC response",
+			);
 		} finally {
 			server.close();
 		}
@@ -1361,7 +1381,7 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
-				if (cmd.cmd === "add_project") {
+				if (cmd._tag === "AddProject") {
 					return { ok: true, slug: "my-project" };
 				}
 				return { ok: true };
@@ -1495,7 +1515,7 @@ describe("instance subcommands", () => {
 			},
 		});
 		await run(["--instance", "list"], cli);
-		expect(cli.state.ipcCommands).toContainEqual({ cmd: "instance_list" });
+		expect(cli.state.ipcCommands).toContainEqual({ _tag: "InstanceList" });
 		expect(cli.state.output).toContain("No instances");
 	});
 
@@ -1534,7 +1554,7 @@ describe("instance subcommands", () => {
 			cli,
 		);
 		expect(cli.state.ipcCommands).toContainEqual(
-			expect.objectContaining({ cmd: "instance_add", name: "work" }),
+			expect.objectContaining({ _tag: "InstanceAdd", name: "work" }),
 		);
 		expect(cli.state.output).toContain("Instance added");
 	});
@@ -1547,10 +1567,10 @@ describe("instance subcommands", () => {
 	});
 
 	it.each([
-		["remove", "instance_remove"],
-		["start", "instance_start"],
-		["stop", "instance_stop"],
-	] as const)("instance %s sends %s IPC", async (action, expectedCmd) => {
+		["remove", "InstanceRemove"],
+		["start", "InstanceStart"],
+		["stop", "InstanceStop"],
+	] as const)("instance %s sends %s IPC", async (action, expectedTag) => {
 		const cli = createMockCLI({
 			sendIPC: async (cmd) => {
 				cli.state.ipcCommands.push(cmd);
@@ -1559,7 +1579,7 @@ describe("instance subcommands", () => {
 		});
 		await run(["--instance", action, "work"], cli);
 		expect(cli.state.ipcCommands).toContainEqual(
-			expect.objectContaining({ cmd: expectedCmd, id: "work" }),
+			expect.objectContaining({ _tag: expectedTag, id: "work" }),
 		);
 	});
 
@@ -1581,7 +1601,7 @@ describe("instance subcommands", () => {
 		});
 		await run(["--instance", "status", "work"], cli);
 		expect(cli.state.ipcCommands).toContainEqual(
-			expect.objectContaining({ cmd: "instance_status", id: "work" }),
+			expect.objectContaining({ _tag: "InstanceStatus", id: "work" }),
 		);
 		expect(cli.state.output).toContain("Work");
 		expect(cli.state.output).toContain("4097");
@@ -1663,7 +1683,7 @@ describe("instance subcommands", () => {
 		await run(["--instance", "add", "ext", "--url", "http://host:4096"], cli);
 		expect(cli.state.ipcCommands).toContainEqual(
 			expect.objectContaining({
-				cmd: "instance_add",
+				_tag: "InstanceAdd",
 				name: "ext",
 				url: "http://host:4096",
 				managed: false,
@@ -1683,7 +1703,7 @@ describe("instance subcommands", () => {
 			["--instance", "add", "work", "--port", "4097", "--managed"],
 			cli,
 		);
-		const addCmd = cli.state.ipcCommands.find((c) => c.cmd === "instance_add");
+		const addCmd = cli.state.ipcCommands.find((c) => c._tag === "InstanceAdd");
 		expect(addCmd).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
 		expect(addCmd!.url).toBeUndefined();

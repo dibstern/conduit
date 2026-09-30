@@ -1,14 +1,34 @@
 import { InstanceMgmtTag } from "./management-service.js";
 // ─── IPC Effect Handlers ─────────────────────────────────────────────────────
 // Effect-returning handlers for each IPC command. Each handler:
-// 1. Receives the decoded command (narrowed by `cmd` discriminant)
+// 1. Receives the decoded tagged request
 // 2. Accesses services via `yield* Tag`
 // 3. Returns an IPCResponse-compatible object
 // 4. Error channel is `never` (handlers catch/transform expected errors)
 
-import { Data, Deferred, Effect, Ref, type Schema } from "effect";
+import { Data, Deferred, Effect, Ref } from "effect";
 import { hashPin } from "../../../auth.js";
-import type { IPCCommandSchema } from "../../../daemon/ipc-protocol.js";
+import type {
+	AddProject,
+	GetStatus,
+	InstanceAdd,
+	InstanceList,
+	InstanceRemove,
+	InstanceStart,
+	InstanceStatus,
+	InstanceStop,
+	InstanceUpdate,
+	ListProjects,
+	RemoveProject,
+	RestartWithConfig,
+	SetAgent,
+	SetKeepAwake,
+	SetKeepAwakeCommand,
+	SetModel,
+	SetPin,
+	SetProjectTitle,
+	Shutdown,
+} from "../../../contracts/ipc-requests.js";
 import type { IPCResponse } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 
@@ -28,11 +48,6 @@ import {
 	type DaemonConfigRefTag,
 } from "./daemon-config-ref.js";
 import { DaemonStateTag } from "./daemon-state.js";
-
-// ─── Type extraction ─────────────────────────────────────────────────────────
-
-type DecodedCommand = Schema.Schema.Type<typeof IPCCommandSchema>;
-type CmdOf<C extends string> = Extract<DecodedCommand, { cmd: C }>;
 
 // ─── Shared dependency types ─────────────────────────────────────────────────
 
@@ -130,21 +145,21 @@ const applyRestartRuntimeConfig = (
 // ─── Project handlers ────────────────────────────────────────────────────────
 
 export const handleAddProject = (
-	cmd: CmdOf<"add_project">,
+	request: AddProject,
 ): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 		const state = yield* Ref.get(ref);
 
 		// Check for duplicate directory
-		const existing = state.projects.find((p) => p.path === cmd.directory);
+		const existing = state.projects.find((p) => p.path === request.directory);
 		if (existing) {
 			return { ok: false, error: `Project already exists: ${existing.slug}` };
 		}
 
 		// Generate slug
 		const existingSlugs = new Set(state.projects.map((p) => p.slug));
-		const slug = generateSlug(cmd.directory, existingSlugs);
+		const slug = generateSlug(request.directory, existingSlugs);
 
 		// Add project to state
 		yield* Ref.update(ref, (s) => ({
@@ -152,7 +167,7 @@ export const handleAddProject = (
 			projects: [
 				...s.projects,
 				{
-					path: cmd.directory,
+					path: request.directory,
 					slug,
 					addedAt: Date.now(),
 				},
@@ -160,24 +175,24 @@ export const handleAddProject = (
 		}));
 
 		yield* requestConfigSave;
-		return { ok: true, slug, directory: cmd.directory };
+		return { ok: true, slug, directory: request.directory };
 	});
 
 export const handleRemoveProject = (
-	cmd: CmdOf<"remove_project">,
+	request: RemoveProject,
 ): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 		const state = yield* Ref.get(ref);
 
-		const exists = state.projects.some((p) => p.slug === cmd.slug);
+		const exists = state.projects.some((p) => p.slug === request.slug);
 		if (!exists) {
-			return { ok: false, error: `Project not found: ${cmd.slug}` };
+			return { ok: false, error: `Project not found: ${request.slug}` };
 		}
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
-			projects: s.projects.filter((p) => p.slug !== cmd.slug),
+			projects: s.projects.filter((p) => p.slug !== request.slug),
 		}));
 
 		yield* requestConfigSave;
@@ -185,21 +200,21 @@ export const handleRemoveProject = (
 	});
 
 export const handleSetProjectTitle = (
-	cmd: CmdOf<"set_project_title">,
+	request: SetProjectTitle,
 ): Effect.Effect<IPCResponse, never, DaemonStateTag | PersistDeps> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 		const state = yield* Ref.get(ref);
 
-		const exists = state.projects.some((p) => p.slug === cmd.slug);
+		const exists = state.projects.some((p) => p.slug === request.slug);
 		if (!exists) {
-			return { ok: false, error: `Project not found: ${cmd.slug}` };
+			return { ok: false, error: `Project not found: ${request.slug}` };
 		}
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
 			projects: s.projects.map((p) =>
-				p.slug === cmd.slug ? { ...p, title: cmd.title } : p,
+				p.slug === request.slug ? { ...p, title: request.title } : p,
 			),
 		}));
 
@@ -210,7 +225,7 @@ export const handleSetProjectTitle = (
 // ─── State handlers ──────────────────────────────────────────────────────────
 
 export const handleSetPin = (
-	cmd: CmdOf<"set_pin">,
+	request: SetPin,
 ): Effect.Effect<
 	IPCResponse,
 	never,
@@ -218,7 +233,7 @@ export const handleSetPin = (
 > =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
-		const hashed = cmd.pin === null ? null : hashPin(cmd.pin);
+		const hashed = request.pin === null ? null : hashPin(request.pin);
 
 		// AP-24: Update DaemonConfigRef so AuthManager sees the new pinHash reactively.
 		// AuthManager reads pinHash from DaemonConfigRef, not DaemonState.
@@ -234,7 +249,7 @@ export const handleSetPin = (
 	});
 
 export const handleSetKeepAwake = (
-	cmd: CmdOf<"set_keep_awake">,
+	request: SetKeepAwake,
 ): Effect.Effect<
 	IPCResponse,
 	never,
@@ -247,7 +262,7 @@ export const handleSetKeepAwake = (
 		// AP-22: Delegate to KeepAwakeTag for actual system keep-awake toggling,
 		// not just the Ref update. KeepAwakeTag.activate/deactivate manages the
 		// platform-specific process (caffeinate, systemd-inhibit, etc.).
-		if (cmd.enabled) {
+		if (request.enabled) {
 			yield* keepAwake.activate();
 		} else {
 			yield* keepAwake.deactivate();
@@ -258,11 +273,11 @@ export const handleSetKeepAwake = (
 
 		yield* Ref.update(ref, (s) => ({
 			...s,
-			keepAwake: cmd.enabled,
+			keepAwake: request.enabled,
 		}));
 		yield* commitDaemonRuntimeConfig((c) => ({
 			...c,
-			keepAwake: cmd.enabled,
+			keepAwake: request.enabled,
 		}));
 
 		yield* requestConfigSave;
@@ -270,7 +285,7 @@ export const handleSetKeepAwake = (
 	});
 
 export const handleSetKeepAwakeCommand = (
-	cmd: CmdOf<"set_keep_awake_command">,
+	request: SetKeepAwakeCommand,
 ): Effect.Effect<
 	IPCResponse,
 	never,
@@ -280,13 +295,13 @@ export const handleSetKeepAwakeCommand = (
 		const ref = yield* DaemonStateTag;
 		yield* Ref.update(ref, (s) => ({
 			...s,
-			keepAwakeCommand: cmd.command,
-			keepAwakeArgs: [...cmd.args],
+			keepAwakeCommand: request.command,
+			keepAwakeArgs: [...request.args],
 		}));
 		yield* commitDaemonRuntimeConfig((c) => ({
 			...c,
-			keepAwakeCommand: cmd.command,
-			keepAwakeArgs: [...cmd.args],
+			keepAwakeCommand: request.command,
+			keepAwakeArgs: [...request.args],
 		}));
 
 		yield* requestConfigSave;
@@ -294,7 +309,7 @@ export const handleSetKeepAwakeCommand = (
 	});
 
 export const handleShutdown = (
-	_cmd: CmdOf<"shutdown">,
+	_request: Shutdown,
 ): Effect.Effect<
 	IPCResponse,
 	never,
@@ -320,7 +335,7 @@ export const handleShutdown = (
 	});
 
 export const handleListProjects = (
-	_cmd: CmdOf<"list_projects">,
+	_request: ListProjects,
 ): Effect.Effect<IPCResponse, never, DaemonStateTag> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
@@ -337,7 +352,7 @@ export const handleListProjects = (
 	});
 
 export const handleGetStatus = (
-	_cmd: CmdOf<"get_status">,
+	_request: GetStatus,
 ): Effect.Effect<IPCResponse, never, DaemonStateTag> =>
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
@@ -368,7 +383,7 @@ export const handleGetStatus = (
 // ─── Instance handlers ──────────────────────────────────────────────────────
 
 export const handleInstanceList = (
-	_cmd: CmdOf<"instance_list">,
+	_request: InstanceList,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
@@ -386,21 +401,22 @@ export const handleInstanceList = (
 	});
 
 export const handleInstanceAdd = (
-	cmd: CmdOf<"instance_add">,
+	request: InstanceAdd,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
 		const id = `inst-${Date.now()}`;
 		const config: import("../../../shared-types.js").InstanceConfig = {
-			name: cmd.name,
-			port: cmd.port ?? 0,
-			managed: cmd.managed,
+			name: request.name,
+			port: request.port ?? 0,
+			managed: request.managed,
 		};
-		if (cmd.env !== undefined) config.env = cmd.env as Record<string, string>;
-		if (cmd.url !== undefined) config.url = cmd.url;
-		if (cmd.driver !== undefined) config.driver = cmd.driver;
-		if (cmd.configDir !== undefined) config.configDir = cmd.configDir;
+		if (request.env !== undefined)
+			config.env = request.env as Record<string, string>;
+		if (request.url !== undefined) config.url = request.url;
+		if (request.driver !== undefined) config.driver = request.driver;
+		if (request.configDir !== undefined) config.configDir = request.configDir;
 		return yield* tryInstanceMgmtOperation("addInstance", () => {
 			const instance = mgmt.addInstance(id, config);
 			mgmt.persistConfig();
@@ -416,13 +432,13 @@ export const handleInstanceAdd = (
 	});
 
 export const handleInstanceRemove = (
-	cmd: CmdOf<"instance_remove">,
+	request: InstanceRemove,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
 		return yield* tryInstanceMgmtOperation("removeInstance", () => {
-			mgmt.removeInstance(cmd.id);
+			mgmt.removeInstance(request.id);
 			mgmt.persistConfig();
 			return { ok: true } as IPCResponse;
 		}).pipe(
@@ -436,13 +452,13 @@ export const handleInstanceRemove = (
 	});
 
 export const handleInstanceStart = (
-	cmd: CmdOf<"instance_start">,
+	request: InstanceStart,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
 		return yield* tryInstanceMgmtPromise("startInstance", () =>
-			mgmt.startInstance(cmd.id),
+			mgmt.startInstance(request.id),
 		).pipe(
 			Effect.map(() => ({ ok: true }) as IPCResponse),
 			Effect.catchAll((failure) =>
@@ -455,13 +471,13 @@ export const handleInstanceStart = (
 	});
 
 export const handleInstanceStop = (
-	cmd: CmdOf<"instance_stop">,
+	request: InstanceStop,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
 
 		return yield* tryInstanceMgmtOperation("stopInstance", () => {
-			mgmt.stopInstance(cmd.id);
+			mgmt.stopInstance(request.id);
 			return { ok: true } as IPCResponse;
 		}).pipe(
 			Effect.catchAll((failure) =>
@@ -474,7 +490,7 @@ export const handleInstanceStop = (
 	});
 
 export const handleInstanceStatus = (
-	cmd: CmdOf<"instance_status">,
+	request: InstanceStatus,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
@@ -485,10 +501,10 @@ export const handleInstanceStatus = (
 				Effect.fail(failInstanceMgmtOperation("getInstances", failure)),
 			),
 		);
-		const instance = instances.find((i) => i.id === cmd.id);
+		const instance = instances.find((i) => i.id === request.id);
 
 		if (!instance) {
-			return { ok: false, error: `Instance not found: ${cmd.id}` };
+			return { ok: false, error: `Instance not found: ${request.id}` };
 		}
 
 		return { ok: true, instance };
@@ -502,7 +518,7 @@ export const handleInstanceStatus = (
 	);
 
 export const handleInstanceUpdate = (
-	cmd: CmdOf<"instance_update">,
+	request: InstanceUpdate,
 ): Effect.Effect<IPCResponse, never, InstanceMgmtTag> =>
 	Effect.gen(function* () {
 		const mgmt = yield* InstanceMgmtTag;
@@ -515,13 +531,14 @@ export const handleInstanceUpdate = (
 				driver?: string;
 				configDir?: string;
 			} = {};
-			if (cmd.name !== undefined) updates.name = cmd.name;
-			if (cmd.env !== undefined)
-				updates.env = cmd.env as Record<string, string>;
-			if (cmd.port !== undefined) updates.port = cmd.port;
-			if (cmd.driver !== undefined) updates.driver = cmd.driver;
-			if (cmd.configDir !== undefined) updates.configDir = cmd.configDir;
-			const instance = mgmt.updateInstance(cmd.id, updates);
+			if (request.name !== undefined) updates.name = request.name;
+			if (request.env !== undefined)
+				updates.env = request.env as Record<string, string>;
+			if (request.port !== undefined) updates.port = request.port;
+			if (request.driver !== undefined) updates.driver = request.driver;
+			if (request.configDir !== undefined)
+				updates.configDir = request.configDir;
+			const instance = mgmt.updateInstance(request.id, updates);
 			mgmt.persistConfig();
 			return { ok: true, instance } as IPCResponse;
 		}).pipe(
@@ -537,22 +554,22 @@ export const handleInstanceUpdate = (
 // ─── Session override handlers ──────────────────────────────────────────────
 
 export const handleSetAgent = (
-	cmd: CmdOf<"set_agent">,
+	request: SetAgent,
 ): Effect.Effect<IPCResponse, never, OverridesStateTag> =>
 	Effect.gen(function* () {
 		// Protocol uses `slug` as the identifier (not sessionId)
-		yield* setAgent(cmd.slug, cmd.agent);
+		yield* setAgent(request.slug, request.agent);
 		return { ok: true };
 	});
 
 export const handleSetModel = (
-	cmd: CmdOf<"set_model">,
+	request: SetModel,
 ): Effect.Effect<IPCResponse, never, OverridesStateTag> =>
 	Effect.gen(function* () {
 		// Protocol uses `slug` as the identifier (not sessionId)
-		yield* setModel(cmd.slug, {
-			providerID: cmd.provider,
-			modelID: cmd.model,
+		yield* setModel(request.slug, {
+			providerID: request.provider,
+			modelID: request.model,
 		});
 		return { ok: true };
 	});
@@ -560,7 +577,7 @@ export const handleSetModel = (
 // ─── Restart handler ─────────────────────────────────────────────────────────
 
 export const handleRestartWithConfig = (
-	cmd: CmdOf<"restart_with_config">,
+	request: RestartWithConfig,
 ): Effect.Effect<
 	IPCResponse,
 	never,
@@ -569,11 +586,11 @@ export const handleRestartWithConfig = (
 	Effect.gen(function* () {
 		const ref = yield* DaemonStateTag;
 		yield* Ref.update(ref, (s) => ({
-			...applyRestartConfig(s, cmd.config),
+			...applyRestartConfig(s, request.config),
 			shuttingDown: true,
 		}));
 		yield* commitDaemonRuntimeConfig((c) => ({
-			...applyRestartRuntimeConfig(c, cmd.config),
+			...applyRestartRuntimeConfig(c, request.config),
 			shuttingDown: true,
 		}));
 

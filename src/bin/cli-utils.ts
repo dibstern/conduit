@@ -6,9 +6,10 @@ import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
-
+import { Either, Schema } from "effect";
 import {
-	commandToTaggedRequestPayload,
+	type IpcTaggedRequest,
+	IpcTaggedRequestSchema,
 	isIpcResponse,
 } from "../lib/contracts/ipc-requests.js";
 import {
@@ -17,8 +18,9 @@ import {
 	DEFAULT_PORT,
 	ENV,
 } from "../lib/env.js";
+import { formatErrorDetail } from "../lib/errors.js";
 import type { LogFormat, LogLevel } from "../lib/logger.js";
-import type { IPCCommand, IPCResponse } from "../lib/types.js";
+import type { IPCResponse } from "../lib/types.js";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -306,7 +308,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 /** Single-attempt IPC command with a per-attempt timeout. */
 function sendIPCOnce(
 	socketPath: string,
-	cmd: IPCCommand,
+	encoded: typeof IpcTaggedRequestSchema.Encoded,
 	timeoutMs: number,
 ): Promise<IPCResponse> {
 	return new Promise((resolve, reject) => {
@@ -319,7 +321,7 @@ function sendIPCOnce(
 		}, timeoutMs);
 
 		client.on("connect", () => {
-			client.write(`${JSON.stringify(commandToTaggedRequestPayload(cmd))}\n`);
+			client.write(`${JSON.stringify(encoded)}\n`);
 		});
 
 		client.on("data", (chunk: Buffer) => {
@@ -367,16 +369,23 @@ function isRetryableError(err: unknown): boolean {
  * times out — covering the startup race where the CLI proceeds before the
  * daemon's IPC server is listening.
  */
-export async function sendIPCCommand(
+export async function sendIpcRequest(
 	socketPath: string,
-	cmd: IPCCommand,
+	request: IpcTaggedRequest,
 ): Promise<IPCResponse> {
 	const MAX_RETRIES = 4;
 	const RETRY_DELAY = 500;
 	const PER_ATTEMPT_TIMEOUT = 5000;
 
+	// A request the daemon would reject gets the same { ok: false } reply
+	// locally, so callers keep one error path instead of catching ParseError.
+	const encoded = Schema.encodeEither(IpcTaggedRequestSchema)(request);
+	if (Either.isLeft(encoded)) {
+		return { ok: false, error: formatErrorDetail(encoded.left) };
+	}
+
 	let lastError: Error | undefined;
-	const cmdName = "cmd" in cmd ? (cmd as { cmd: string }).cmd : "unknown";
+	const cmdName = request._tag;
 	const t0 = Date.now();
 	const logPath = join(DEFAULT_CONFIG_DIR, "daemon.log");
 
@@ -397,7 +406,11 @@ export async function sendIPCCommand(
 
 	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 		try {
-			const result = await sendIPCOnce(socketPath, cmd, PER_ATTEMPT_TIMEOUT);
+			const result = await sendIPCOnce(
+				socketPath,
+				encoded.right,
+				PER_ATTEMPT_TIMEOUT,
+			);
 			if (attempt > 0) {
 				ipcLog(
 					`[ipc] ${cmdName} succeeded on attempt ${attempt + 1} after ${Date.now() - t0}ms`,

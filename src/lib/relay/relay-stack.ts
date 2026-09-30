@@ -142,13 +142,19 @@ import { makeSessionBackgroundLiveness } from "../session/background-liveness.js
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
-/** Runtime bridge between imperative relay-stack and Effect handler pipeline. */
-// biome-ignore lint/suspicious/noExplicitAny: ManagedRuntime context is the full relay Layer graph.
-type RelayRuntimeContext = any;
+/**
+ * Services callers may run against through ProjectRelay.effectRuntime. The real
+ * runtime provides the whole relay Layer graph; this is the promised subset.
+ */
+type RelayRuntimeServices =
+	| OverridesStateTag
+	| Layer.Layer.Success<typeof PendingInteractionServiceLive>
+	| PollerStateTag
+	| ReadQueryEffectTag;
 
 interface RelayRuntime {
 	runtime: ManagedRuntime.ManagedRuntime<
-		RelayRuntimeContext,
+		RelayRuntimeServices,
 		PersistenceEffectError
 	>;
 	dispose: () => Promise<void>;
@@ -658,10 +664,6 @@ export async function createProjectRelay(
 	});
 
 	const translator = createTranslator();
-	let relayManagedRuntime: ManagedRuntime.ManagedRuntime<
-		RelayRuntimeContext,
-		PersistenceEffectError
-	>;
 	// Load persisted default model and variant from relay settings
 	const relaySettings = loadRelaySettings(config.configDir);
 	const initialDefaultModel = parseDefaultModel(relaySettings.defaultModel);
@@ -856,13 +858,6 @@ export async function createProjectRelay(
 		),
 	);
 
-	const effectRuntime: RelayRuntime = {
-		get runtime() {
-			return relayManagedRuntime;
-		},
-		dispose: () => relayManagedRuntime.dispose(),
-	};
-
 	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
 	// Monitoring state is created before the runtime so lifecycle wiring and
 	// monitoring wiring share one view, while the poller manager itself remains
@@ -882,7 +877,11 @@ export async function createProjectRelay(
 		makeRelayCommandGateLive(config.slug),
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers);
-	relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
+	const effectRuntime: RelayRuntime = {
+		runtime: relayManagedRuntime,
+		dispose: () => relayManagedRuntime.dispose(),
+	};
 	let stopMonitoring = () => {};
 	let startup: {
 		sql: SqlClient.SqlClient | undefined;

@@ -92,44 +92,6 @@ export interface ModelEntry {
 
 // ─── IPC Protocol ───────────────────────────────────────────────────────────
 
-export type IPCCommand =
-	| { cmd: "get_status" }
-	| { cmd: "list_projects" }
-	| { cmd: "shutdown" }
-	| { cmd: "restart_with_config"; config?: Record<string, unknown> }
-	| { cmd: "add_project"; directory: string }
-	| { cmd: "remove_project"; slug: string }
-	| { cmd: "set_project_title"; slug: string; title: string }
-	| { cmd: "set_pin"; pin: string | null }
-	| { cmd: "set_keep_awake"; enabled: boolean }
-	| { cmd: "set_keep_awake_command"; command: string; args: string[] }
-	| { cmd: "set_agent"; slug: string; agent: string }
-	| { cmd: "set_model"; slug: string; provider: string; model: string }
-	| { cmd: "instance_list" }
-	| {
-			cmd: "instance_add";
-			name: string;
-			managed: boolean;
-			port?: number;
-			env?: Record<string, string>;
-			url?: string;
-			driver?: import("./contracts/provider-instance.js").ProviderDriverKind;
-			configDir?: string;
-	  }
-	| { cmd: "instance_remove"; id: string }
-	| { cmd: "instance_start"; id: string }
-	| { cmd: "instance_stop"; id: string }
-	| {
-			cmd: "instance_update";
-			id: string;
-			name?: string;
-			env?: Record<string, string>;
-			port?: number;
-			driver?: import("./contracts/provider-instance.js").ProviderDriverKind;
-			configDir?: string;
-	  }
-	| { cmd: "instance_status"; id: string };
-
 export interface IPCResponse {
 	ok: boolean;
 	error?: string;

@@ -14,8 +14,6 @@ import {
 import { expect } from "vitest";
 import {
 	AddProject,
-	commandToTaggedRequestPayload,
-	decodeTaggedIpcCommand,
 	IpcError,
 	IpcTaggedRequestSchema,
 } from "../../../src/lib/contracts/ipc-requests.js";
@@ -525,19 +523,17 @@ describe("IPC RPC request group", () => {
 		),
 	);
 
-	it.effect("decodes _tag AddProject requests to legacy command shape", () =>
-		Effect.gen(function* () {
-			const command = yield* decodeTaggedIpcCommand({
-				_tag: "AddProject",
-				directory: "/tmp/project",
-			});
-
-			expect(command).toEqual({
-				cmd: "add_project",
-				directory: "/tmp/project",
-			});
-		}),
-	);
+	it("decodes AddProject as a tagged request", () => {
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "AddProject",
+			directory: "/tmp/project",
+		});
+		expect(Either.isRight(result)).toBe(true);
+		if (Either.isRight(result))
+			expect(result.right).toEqual(
+				new AddProject({ directory: "/tmp/project" }),
+			);
+	});
 
 	it("rejects invalid _tag InstanceAdd payloads at the RPC request boundary", () => {
 		const invalidRequests = [
@@ -641,41 +637,24 @@ describe("IPC RPC request group", () => {
 		).toBe(true);
 	});
 
-	it("encodes legacy add_project commands to _tag request payloads", () => {
-		const payload = commandToTaggedRequestPayload({
-			cmd: "add_project",
-			directory: "/tmp/project",
-		});
-
-		expect(payload).toEqual({
-			_tag: "AddProject",
-			directory: "/tmp/project",
-		});
+	it("encodes AddProject requests for the wire", () => {
+		const payload = Schema.encodeSync(IpcTaggedRequestSchema)(
+			new AddProject({ directory: "/tmp/project" }),
+		);
+		expect(payload).toEqual({ _tag: "AddProject", directory: "/tmp/project" });
 	});
 
-	it.effect("preserves restart config in both IPC conversion directions", () =>
-		Effect.gen(function* () {
-			const payload = commandToTaggedRequestPayload({
-				cmd: "restart_with_config",
-				config: { tls: true, port: 2634 },
-			});
-
-			expect(payload).toEqual({
-				_tag: "RestartWithConfig",
-				config: { tls: true, port: 2634 },
-			});
-
-			const command = yield* decodeTaggedIpcCommand({
-				_tag: "RestartWithConfig",
-				config: { tls: true, port: 2634 },
-			});
-
-			expect(command).toEqual({
-				cmd: "restart_with_config",
-				config: { tls: true, port: 2634 },
-			});
-		}),
-	);
+	it("preserves restart config through schema encoding and decoding", () => {
+		const request = Schema.decodeUnknownSync(IpcTaggedRequestSchema)({
+			_tag: "RestartWithConfig",
+			config: { tls: true, port: 2634 },
+		});
+		const payload = Schema.encodeSync(IpcTaggedRequestSchema)(request);
+		expect(payload).toEqual({
+			_tag: "RestartWithConfig",
+			config: { tls: true, port: 2634 },
+		});
+	});
 
 	it("constructs concrete TaggedRequest instances", () => {
 		expect(new AddProject({ directory: "/tmp/project" })._tag).toBe(

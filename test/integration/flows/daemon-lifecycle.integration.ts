@@ -1,3 +1,4 @@
+import { GetStatus, SetPin } from "../../../src/lib/contracts/ipc-requests.js";
 /**
  * Integration test: Daemon start/stop lifecycle cleans up all async work.
  *
@@ -12,7 +13,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { sendIPCCommand } from "../../../src/bin/cli-utils.js";
+import { sendIpcRequest } from "../../../src/bin/cli-utils.js";
 import { hashPin } from "../../../src/lib/auth.js";
 import {
 	type ForegroundDaemonHandle,
@@ -108,7 +109,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(before.status).toBe(302);
 		expect(before.headers.get("location")).toBe("/auth");
 		expect(
-			await sendIPCCommand(options.socketPath, { cmd: "set_pin", pin: "1234" }),
+			await sendIpcRequest(options.socketPath, new SetPin({ pin: "1234" })),
 		).toEqual({ ok: true });
 		await expect
 			.poll(() => {
@@ -120,7 +121,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 			.toMatchObject({ pinHash: hashPin("1234") });
 
 		expect(
-			await sendIPCCommand(options.socketPath, { cmd: "set_pin", pin: null }),
+			await sendIpcRequest(options.socketPath, new SetPin({ pin: null })),
 		).toEqual({ ok: true });
 
 		const after = await fetch(baseUrl, { redirect: "manual" });
@@ -129,7 +130,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(after.headers.get("location")).not.toBe("/auth");
 		expect(await httpStatus(`${baseUrl}/api/projects`)).toBe(200);
 		expect(
-			await sendIPCCommand(options.socketPath, { cmd: "get_status" }),
+			await sendIpcRequest(options.socketPath, new GetStatus({})),
 		).toMatchObject({
 			ok: true,
 			pinEnabled: false,
@@ -153,7 +154,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(restarted.headers.get("location")).not.toBe("/auth");
 		expect(await httpStatus(`${restartedUrl}/api/projects`)).toBe(200);
 		expect(
-			await sendIPCCommand(options.socketPath, { cmd: "get_status" }),
+			await sendIpcRequest(options.socketPath, new GetStatus({})),
 		).toMatchObject({
 			ok: true,
 			pinEnabled: false,

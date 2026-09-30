@@ -1,30 +1,21 @@
 import { Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { SetPin } from "../../../src/lib/contracts/ipc-requests.js";
 import {
-	IPCCommandSchema,
-	parseCommand,
-	VALID_COMMANDS,
-	validateCommand,
-} from "../../../src/lib/daemon/ipc-protocol.js";
+	IpcTaggedRequestSchema,
+	SetPin,
+} from "../../../src/lib/contracts/ipc-requests.js";
 
 describe("IPC Command Schema validation", () => {
 	it.each([
 		null,
 		"1234",
 		"12345678",
-	])("accepts explicit SetPin value %j in both protocols", (pin) => {
+	])("accepts explicit SetPin value %j", (pin) => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(SetPin)({ _tag: "SetPin", pin }),
 			),
 		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(IPCCommandSchema)({ cmd: "set_pin", pin }),
-			),
-		).toBe(true);
-		expect(validateCommand({ cmd: "set_pin", pin })).toBeNull();
 	});
 
 	it.each([
@@ -33,104 +24,85 @@ describe("IPC Command Schema validation", () => {
 		"123456789",
 		"abcd",
 		undefined,
-	])("rejects invalid SetPin value %j in both protocols", (pin) => {
+	])("rejects invalid SetPin value %j", (pin) => {
 		expect(
 			Either.isLeft(
 				Schema.decodeUnknownEither(SetPin)({ _tag: "SetPin", pin }),
 			),
 		).toBe(true);
-		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(IPCCommandSchema)({ cmd: "set_pin", pin }),
-			),
-		).toBe(true);
-		expect(validateCommand({ cmd: "set_pin", pin })).toMatchObject({
-			ok: false,
-		});
 	});
 
 	// ─── Basic decode tests ────────────────────────────────────────────────
 
 	it("decodes add_project command", () => {
-		const raw = { cmd: "add_project", directory: "/home/user/project" };
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)(raw);
+		const raw = { _tag: "AddProject", directory: "/home/user/project" };
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(raw);
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("rejects add_project with empty directory", () => {
-		const raw = { cmd: "add_project", directory: "" };
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)(raw);
+		const raw = { _tag: "AddProject", directory: "" };
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(raw);
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("rejects unknown command", () => {
-		const raw = { cmd: "not_a_command" };
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)(raw);
+		const raw = { _tag: "not_a_command" };
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(raw);
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("parseCommand handles invalid JSON", () => {
-		const result = parseCommand("not json");
-		expect(result).toBeNull();
-	});
-
-	it("parseCommand decodes valid command", () => {
-		const result = parseCommand('{"cmd":"get_status"}');
-		expect(result).not.toBeNull();
-		expect(result?.cmd).toBe("get_status");
-	});
-
-	it("parseCommand leaves _tag AddProject requests to the RPC dispatcher", () => {
-		const result = parseCommand(
-			'{"_tag":"AddProject","directory":"/home/user/project"}',
+	it("decodes a parsed tagged JSON request", () => {
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(
+			JSON.parse('{"_tag":"AddProject","directory":"/home/user/project"}'),
 		);
-		expect(result).toBeNull();
+		expect(Either.isRight(result)).toBe(true);
 	});
 
 	// ─── No-field commands ─────────────────────────────────────────────────
 
 	it("decodes get_status command", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "get_status",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "GetStatus",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("decodes list_projects command", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "list_projects",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "ListProjects",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("decodes shutdown command", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "shutdown",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "Shutdown",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("decodes restart_with_config command", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "restart_with_config",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "RestartWithConfig",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("decodes restart_with_config command with config overrides", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "restart_with_config",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "RestartWithConfig",
 			config: { tls: true, port: 2634 },
 		});
 		expect(Either.isRight(result)).toBe(true);
-		if (Either.isRight(result) && result.right.cmd === "restart_with_config") {
+		if (Either.isRight(result) && result.right._tag === "RestartWithConfig") {
 			expect(result.right.config).toEqual({ tls: true, port: 2634 });
 		}
 	});
 
 	it("decodes instance_list command", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_list",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceList",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
@@ -138,24 +110,24 @@ describe("IPC Command Schema validation", () => {
 	// ─── Commands with fields ──────────────────────────────────────────────
 
 	it("decodes remove_project with slug", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "remove_project",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "RemoveProject",
 			slug: "my-project",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("rejects remove_project with empty slug", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "remove_project",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "RemoveProject",
 			slug: "",
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("decodes set_project_title", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_project_title",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetProjectTitle",
 			slug: "proj",
 			title: "My Title",
 		});
@@ -163,8 +135,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("rejects set_project_title with empty slug", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_project_title",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetProjectTitle",
 			slug: "",
 			title: "foo",
 		});
@@ -172,48 +144,48 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes set_pin with valid PIN", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_pin",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetPin",
 			pin: "1234",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("rejects set_pin with non-digit PIN", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_pin",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetPin",
 			pin: "abcd",
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("rejects set_pin with too-short PIN", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_pin",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetPin",
 			pin: "12",
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("decodes set_keep_awake", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_keep_awake",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetKeepAwake",
 			enabled: true,
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("rejects set_keep_awake without boolean enabled", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_keep_awake",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetKeepAwake",
 			enabled: "yes",
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("decodes set_keep_awake_command with args", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_keep_awake_command",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetKeepAwakeCommand",
 			command: "caffeinate",
 			args: ["-d"],
 		});
@@ -221,28 +193,29 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes set_keep_awake_command with args defaulting to []", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_keep_awake_command",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetKeepAwakeCommand",
 			command: "caffeinate",
 		});
 		expect(Either.isRight(result)).toBe(true);
 		if (Either.isRight(result)) {
-			const cmd = result.right as { cmd: string; args: string[] };
-			expect(cmd.args).toEqual([]);
+			expect(result.right._tag).toBe("SetKeepAwakeCommand");
+			if (result.right._tag === "SetKeepAwakeCommand")
+				expect(result.right.args).toEqual([]);
 		}
 	});
 
 	it("rejects set_keep_awake_command with empty command", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_keep_awake_command",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetKeepAwakeCommand",
 			command: "",
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("decodes set_agent", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_agent",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetAgent",
 			slug: "proj",
 			agent: "claude",
 		});
@@ -250,8 +223,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes set_model", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "set_model",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "SetModel",
 			slug: "proj",
 			provider: "anthropic",
 			model: "claude-3",
@@ -262,8 +235,8 @@ describe("IPC Command Schema validation", () => {
 	// ─── Instance commands ─────────────────────────────────────────────────
 
 	it("decodes instance_add managed with port", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_add",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
 			name: "work",
 			managed: true,
 			port: 4097,
@@ -272,8 +245,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("rejects instance_add managed without port", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_add",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
 			name: "work",
 			managed: true,
 		});
@@ -281,8 +254,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("rejects instance_add managed with url", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_add",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
 			name: "work",
 			managed: true,
 			port: 4097,
@@ -292,8 +265,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes instance_add unmanaged with url", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_add",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
 			name: "remote",
 			managed: false,
 			url: "http://host:4096",
@@ -302,8 +275,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes instance_add unmanaged with port", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_add",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
 			name: "remote",
 			managed: false,
 			port: 4096,
@@ -312,8 +285,8 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("rejects instance_add unmanaged without url or port", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_add",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceAdd",
 			name: "remote",
 			managed: false,
 		});
@@ -321,32 +294,32 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes instance_remove with id", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_remove",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceRemove",
 			id: "abc",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("rejects instance_remove with empty id", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_remove",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceRemove",
 			id: "",
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("decodes instance_update with id", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_update",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceUpdate",
 			id: "abc",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("decodes instance_update with optional fields", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_update",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceUpdate",
 			id: "abc",
 			name: "new-name",
 			port: 4097,
@@ -356,26 +329,18 @@ describe("IPC Command Schema validation", () => {
 	});
 
 	it("decodes instance_status with id", () => {
-		const result = Schema.decodeUnknownEither(IPCCommandSchema)({
-			cmd: "instance_status",
+		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
+			_tag: "InstanceStatus",
 			id: "abc",
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
-	// ─── Compatibility ─────────────────────────────────────────────────────
-
-	it("validateCommand still works (backward compat)", () => {
-		const valid = validateCommand({ cmd: "get_status" });
-		expect(valid).toBeNull();
-
-		const invalid = validateCommand({ cmd: "not_a_command" });
-		expect(invalid).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(invalid!.ok).toBe(false);
-	});
-
-	it("VALID_COMMANDS still has 19 entries", () => {
-		expect(VALID_COMMANDS.size).toBe(19);
+	it("rejects missing and unknown request tags", () => {
+		for (const raw of [{}, { _tag: "Unknown" }]) {
+			expect(
+				Either.isLeft(Schema.decodeUnknownEither(IpcTaggedRequestSchema)(raw)),
+			).toBe(true);
+		}
 	});
 });

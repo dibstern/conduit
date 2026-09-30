@@ -3,11 +3,15 @@
 // path traversal, long inputs, invalid shapes, duplicates, ordering permutations.
 // Uses fc.oneof with { weight, arbitrary } syntax (fast-check v4).
 
+import { Schema } from "effect";
 import fc from "fast-check";
+import {
+	type IpcTaggedRequest,
+	IpcTaggedRequestSchema,
+} from "../../src/lib/contracts/ipc-requests.js";
 import type { SSEEvent } from "../../src/lib/relay/opencode-events.js";
 import type {
 	FrontendDecision,
-	IPCCommand,
 	OpenCodeDecision,
 	PartType,
 	RecentProject,
@@ -322,122 +326,110 @@ export const unknownEvent = fc
 
 // ─── IPC generators ─────────────────────────────────────────────────────────
 
-/** Valid IPC commands */
-export const validIPCCommand: fc.Arbitrary<IPCCommand> = fc.oneof(
-	fc.record({ cmd: fc.constant("get_status") }),
-	fc.record({ cmd: fc.constant("list_projects") }),
-	fc.record({ cmd: fc.constant("shutdown") }),
-	fc.record({ cmd: fc.constant("restart_with_config") }),
-	fc.record({
-		cmd: fc.constant("add_project"),
-		directory: fc.string({ minLength: 1, maxLength: 200 }),
-	}),
-	fc.record({
-		cmd: fc.constant("remove_project"),
-		slug: fc.string({ minLength: 1, maxLength: 50 }),
-	}),
-	fc.record({
-		cmd: fc.constant("set_pin"),
-		pin: fc.stringMatching(/^\d{4,8}$/),
-	}),
-	fc.record({
-		cmd: fc.constant("set_keep_awake"),
-		enabled: fc.boolean(),
-	}),
-	fc.record({
-		cmd: fc.constant("set_keep_awake_command" as const),
-		command: fc.string({ minLength: 1, maxLength: 50 }),
-		args: fc.array(fc.string({ minLength: 0, maxLength: 30 }), {
-			maxLength: 5,
+/** Valid wire requests, decoded through the same schema as the daemon. */
+export const validIpcRequest: fc.Arbitrary<IpcTaggedRequest> = fc
+	.oneof(
+		fc.constant({ _tag: "GetStatus" }),
+		fc.constant({ _tag: "ListProjects" }),
+		fc.constant({ _tag: "Shutdown" }),
+		fc.constant({ _tag: "RestartWithConfig" }),
+		fc.record({
+			_tag: fc.constant("AddProject"),
+			directory: fc.string({ minLength: 1, maxLength: 200 }),
 		}),
-	}),
-	fc.record({
-		cmd: fc.constant("set_project_title"),
-		slug: fc.string({ minLength: 1, maxLength: 50 }),
-		title: fc.string({ minLength: 0, maxLength: 100 }),
-	}),
-	fc.record({
-		cmd: fc.constant("set_agent"),
-		slug: fc.string({ minLength: 1, maxLength: 50 }),
-		agent: fc.constantFrom("build", "plan", "general"),
-	}),
-	fc.record({
-		cmd: fc.constant("set_model"),
-		slug: fc.string({ minLength: 1, maxLength: 50 }),
-		provider: fc.string({ minLength: 1, maxLength: 50 }),
-		model: fc.string({ minLength: 1, maxLength: 100 }),
-	}),
-	fc.record({ cmd: fc.constant("instance_list") }),
-	fc.record({
-		cmd: fc.constant("instance_add"),
-		name: fc.string({ minLength: 1, maxLength: 50 }),
-		managed: fc.constant(true),
-		port: fc.integer({ min: 1, max: 65535 }),
-	}),
-	fc.record({
-		cmd: fc.constant("instance_add"),
-		name: fc.string({ minLength: 1, maxLength: 50 }),
-		managed: fc.constant(false),
-		url: fc.constant("http://host:4096"),
-	}),
-	fc.record({
-		cmd: fc.constant("instance_add"),
-		name: fc.string({ minLength: 1, maxLength: 50 }),
-		managed: fc.constant(false),
-		port: fc.integer({ min: 1, max: 65535 }),
-	}),
-	fc.record({
-		cmd: fc.constant("instance_remove"),
-		id: fc.string({ minLength: 1, maxLength: 50 }),
-	}),
-	fc.record({
-		cmd: fc.constant("instance_start"),
-		id: fc.string({ minLength: 1, maxLength: 50 }),
-	}),
-	fc.record({
-		cmd: fc.constant("instance_stop"),
-		id: fc.string({ minLength: 1, maxLength: 50 }),
-	}),
-	fc.record({
-		cmd: fc.constant("instance_status"),
-		id: fc.string({ minLength: 1, maxLength: 50 }),
-	}),
-) as fc.Arbitrary<IPCCommand>;
+		fc.record({
+			_tag: fc.constant("RemoveProject"),
+			slug: fc.string({ minLength: 1, maxLength: 50 }),
+		}),
+		fc.record({
+			_tag: fc.constant("SetPin"),
+			pin: fc.stringMatching(/^\d{4,8}$/),
+		}),
+		fc.record({ _tag: fc.constant("SetKeepAwake"), enabled: fc.boolean() }),
+		fc.record({
+			_tag: fc.constant("SetKeepAwakeCommand"),
+			command: fc.string({ minLength: 1, maxLength: 50 }),
+			args: fc.array(fc.string({ maxLength: 30 }), { maxLength: 5 }),
+		}),
+		fc.record({
+			_tag: fc.constant("SetProjectTitle"),
+			slug: fc.string({ minLength: 1, maxLength: 50 }),
+			title: fc.string({ maxLength: 100 }),
+		}),
+		fc.record({
+			_tag: fc.constant("SetAgent"),
+			slug: fc.string({ maxLength: 50 }),
+			agent: fc.constantFrom("build", "plan", "general"),
+		}),
+		fc.record({
+			_tag: fc.constant("SetModel"),
+			slug: fc.string({ maxLength: 50 }),
+			provider: fc.string({ maxLength: 50 }),
+			model: fc.string({ maxLength: 100 }),
+		}),
+		fc.constant({ _tag: "InstanceList" }),
+		fc.record({
+			_tag: fc.constant("InstanceAdd"),
+			name: fc.string({ minLength: 1, maxLength: 50 }),
+			managed: fc.constant(true),
+			port: fc.integer({ min: 1, max: 65535 }),
+		}),
+		fc.record({
+			_tag: fc.constant("InstanceAdd"),
+			name: fc.string({ minLength: 1, maxLength: 50 }),
+			managed: fc.constant(false),
+			url: fc.constant("http://host:4096"),
+		}),
+		fc.record({
+			_tag: fc.constant("InstanceRemove"),
+			id: fc.string({ minLength: 1, maxLength: 50 }),
+		}),
+		fc.record({
+			_tag: fc.constant("InstanceStart"),
+			id: fc.string({ minLength: 1, maxLength: 50 }),
+		}),
+		fc.record({
+			_tag: fc.constant("InstanceStop"),
+			id: fc.string({ minLength: 1, maxLength: 50 }),
+		}),
+		fc.record({
+			_tag: fc.constant("InstanceStatus"),
+			id: fc.string({ minLength: 1, maxLength: 50 }),
+		}),
+	)
+	.map((payload) => Schema.decodeUnknownSync(IpcTaggedRequestSchema)(payload));
 
-/** Invalid IPC commands */
-export const invalidIPCCommand = fc.oneof(
-	{
-		weight: 3,
-		arbitrary: fc
-			.record({ cmd: fc.string({ minLength: 1, maxLength: 30 }) })
-			.filter(
-				(c) =>
-					c.cmd !== "" &&
-					![
-						"get_status",
-						"list_projects",
-						"shutdown",
-						"restart_with_config",
-						"add_project",
-						"remove_project",
-						"set_pin",
-						"set_keep_awake",
-						"set_keep_awake_command",
-						"set_project_title",
-						"set_agent",
-						"set_model",
-						"instance_list",
-						"instance_add",
-						"instance_remove",
-						"instance_start",
-						"instance_stop",
-						"instance_status",
-					].includes(c.cmd),
-			),
-	},
-	{ weight: 2, arbitrary: fc.constant({ cmd: "nonexistent" }) },
-	{ weight: 1, arbitrary: fc.constant({ cmd: "" }) },
-) as fc.Arbitrary<IPCCommand>;
+/** Invalid wire requests. */
+export const invalidIpcRequest = fc.oneof(
+	fc
+		.record({ _tag: fc.string({ minLength: 1, maxLength: 30 }) })
+		.filter(
+			(value) =>
+				![
+					"GetStatus",
+					"ListProjects",
+					"Shutdown",
+					"RestartWithConfig",
+					"AddProject",
+					"RemoveProject",
+					"SetPin",
+					"SetKeepAwake",
+					"SetKeepAwakeCommand",
+					"SetProjectTitle",
+					"SetAgent",
+					"SetModel",
+					"InstanceList",
+					"InstanceAdd",
+					"InstanceRemove",
+					"InstanceStart",
+					"InstanceStop",
+					"InstanceStatus",
+					"InstanceUpdate",
+				].includes(value._tag),
+		),
+	fc.constant({ _tag: "AddProject", directory: "" }),
+	fc.constant({ _tag: "InstanceAdd", name: "work", managed: true }),
+);
 
 /** Invalid JSON strings */
 export const invalidJSON = fc.oneof(

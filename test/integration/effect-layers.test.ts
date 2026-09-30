@@ -1,22 +1,11 @@
-import {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-} from "../../src/lib/domain/daemon/Services/management-service.js";
 // ─── Integration: Full Layer Composition ─────────────────────────────────────
 // Verifies that all Effect-native state modules compose into a single Layer
 // and key services work end-to-end.
 
-import { FileSystem } from "@effect/platform";
-import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer, Queue, Ref } from "effect";
+import { Effect, Layer, Queue, Schema } from "effect";
 import { expect } from "vitest";
-import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
-import { ConfigPersistenceTag } from "../../src/lib/domain/daemon/Services/config-persistence-service.js";
-import { PersistencePathTag } from "../../src/lib/domain/daemon/Services/daemon-config-persistence.js";
-import type { DaemonRuntimeConfig } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
-import { DaemonConfigRefTag } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { IpcTaggedRequestSchema } from "../../src/lib/contracts/ipc-requests.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
@@ -31,7 +20,7 @@ import {
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { decodeAndDispatch } from "../../src/lib/domain/daemon/Services/ipc-dispatch.js";
+import { handleGetStatus } from "../../src/lib/domain/daemon/Services/ipc-handlers.js";
 import {
 	makeRelayCacheLive,
 	RelayCacheTag,
@@ -61,47 +50,7 @@ import {
 	PollerStateTag,
 } from "../../src/lib/domain/relay/Services/session-status-poller.js";
 
-// ─── In-memory FileSystem for IPC persistence ────────────────────────────────
-
-const makeTestFileSystem = () => {
-	const files = new Map<string, string>();
-	const fs: FileSystem.FileSystem = FileSystem.makeNoop({
-		readFileString: (path: string) =>
-			Effect.gen(function* () {
-				const content = files.get(path);
-				if (content === undefined) {
-					return yield* Effect.fail(
-						new SystemError({
-							reason: "NotFound",
-							module: "FileSystem",
-							method: "readFileString",
-							description: `File not found: ${path}`,
-							pathOrDescriptor: path,
-						}),
-					);
-				}
-				return content;
-			}),
-		writeFileString: (path: string, data: string) =>
-			Effect.sync(() => {
-				files.set(path, data);
-			}),
-		rename: (oldPath: string, newPath: string) =>
-			Effect.sync(() => {
-				const content = files.get(oldPath);
-				if (content !== undefined) {
-					files.set(newPath, content);
-					files.delete(oldPath);
-				}
-			}),
-		makeDirectory: () => Effect.void,
-	});
-	return Layer.succeed(FileSystem.FileSystem, fs);
-};
-
 // ─── Composed Layer ──────────────────────────────────────────────────────────
-
-const CONFIG_PATH = "/test-config/daemon.json";
 
 /** All Effect-native state layers + mock Tags for imperative services. */
 const composedLayer = Layer.mergeAll(
@@ -122,83 +71,6 @@ const composedLayer = Layer.mergeAll(
 	RateLimiterLive({ maxRequests: 3, windowMs: 60_000 }),
 	DaemonEventBusLive,
 	makeOverridesStateLive(),
-);
-
-const makeMockKeepAwake = () =>
-	Layer.effect(
-		KeepAwakeTag,
-		Effect.gen(function* () {
-			const activeRef = yield* Ref.make(false);
-			return {
-				activate: () => Ref.set(activeRef, true),
-				deactivate: () => Ref.set(activeRef, false),
-				isActive: () => Ref.get(activeRef),
-				isSupported: () => Effect.succeed(true),
-			};
-		}),
-	);
-
-const makeMockConfigRef = () => {
-	const initial: DaemonRuntimeConfig = {
-		port: 2633,
-		host: "127.0.0.1",
-		pinHash: null,
-		tlsEnabled: false,
-		keepAwake: false,
-		keepAwakeCommand: undefined,
-		keepAwakeArgs: undefined,
-		claudeConfigDir: undefined,
-		shuttingDown: false,
-		dismissedPaths: new Set<string>(),
-		startTime: Date.now(),
-		hostExplicit: false,
-		persistedSessionCounts: new Map<string, number>(),
-	};
-	return Layer.effect(DaemonConfigRefTag, Ref.make(initial));
-};
-
-const makeMockShutdownSignal = () =>
-	Layer.effect(ShutdownSignalTag, Deferred.make<void>());
-
-/** Layers needed by IPC dispatch (imperative service mocks + FS + persistence path). */
-const ipcDepsLayer = Layer.mergeAll(
-	makeTestFileSystem(),
-	Layer.succeed(PersistencePathTag, CONFIG_PATH),
-	Layer.succeed(ProjectMgmtTag, {
-		getProjects: () => [],
-		setProjectInstance: () => {},
-	}),
-	Layer.succeed(InstanceMgmtTag, {
-		getInstances: () => [],
-		addInstance: (id, config) => ({
-			id,
-			...config,
-			status: "stopped" as const,
-			restartCount: 0,
-			createdAt: Date.now(),
-		}),
-		removeInstance: () => {},
-		startInstance: () => Promise.resolve(),
-		stopInstance: () => {},
-		updateInstance: (id, updates) => ({
-			id,
-			name: updates.name ?? "Mock",
-			port: updates.port ?? 0,
-			managed: true,
-			status: "healthy" as const,
-			restartCount: 0,
-			createdAt: Date.now(),
-		}),
-		persistConfig: () => {},
-	}),
-	makeOverridesStateLive(),
-	makeMockKeepAwake(),
-	makeMockConfigRef(),
-	makeMockShutdownSignal(),
-	Layer.succeed(ConfigPersistenceTag, {
-		requestSave: Effect.void,
-		flush: Effect.void,
-	}),
 );
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -228,18 +100,16 @@ describe("Integration: Full Layer Composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(composedLayer))),
 	);
 
-	it.effect("IPC dispatch end-to-end: get_status", () =>
+	it.effect("decodes and handles a tagged GetStatus request", () =>
 		Effect.gen(function* () {
-			const raw = JSON.stringify({ cmd: "get_status" });
-			const result = yield* decodeAndDispatch(raw);
-
+			const request = yield* Schema.decodeUnknown(IpcTaggedRequestSchema)(
+				JSON.parse('{"_tag":"GetStatus"}'),
+			);
+			if (request._tag !== "GetStatus") throw new Error("Expected GetStatus");
+			const result = yield* handleGetStatus(request);
 			expect(result.ok).toBe(true);
 			expect(result.uptime).toBeDefined();
-		}).pipe(
-			Effect.provide(
-				Layer.fresh(Layer.mergeAll(makeDaemonStateLive(), ipcDepsLayer)),
-			),
-		),
+		}).pipe(Effect.provide(Layer.fresh(makeDaemonStateLive()))),
 	);
 
 	it.scoped("PubSub events flow between publisher and subscriber", () =>
