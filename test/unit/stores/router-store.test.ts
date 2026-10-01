@@ -1,5 +1,6 @@
 // ─── Router Store Tests ──────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 // Mock window.history and window.location before importing
 let historyState: unknown = null;
@@ -19,18 +20,20 @@ const addEventListenerSpy = vi.fn(
 	},
 );
 
+const history = partialFake<History>({
+	get state() {
+		return historyState;
+	},
+	pushState: pushStateSpy,
+	replaceState: replaceStateSpy,
+	back: backSpy,
+});
+
 // Set up window mocks
 vi.stubGlobal("window", {
 	...(typeof window !== "undefined" ? window : {}),
 	location: { pathname: "/", search: "" } as Location,
-	history: {
-		get state() {
-			return historyState;
-		},
-		pushState: pushStateSpy,
-		replaceState: replaceStateSpy,
-		back: backSpy,
-	} as unknown as History,
+	history,
 	addEventListener: addEventListenerSpy,
 });
 

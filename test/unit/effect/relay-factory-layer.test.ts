@@ -33,6 +33,7 @@ import {
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const createProjectRelayMock = vi.hoisted(() =>
 	vi.fn<(config: ProjectRelayConfig) => Promise<ProjectRelay>>(),
@@ -57,10 +58,9 @@ describe("HttpServerRefTag", () => {
 	it.effect("can be set to a mock server value", () =>
 		Effect.gen(function* () {
 			const ref = yield* HttpServerRefTag;
-			// Use a plain object as a mock http.Server
-			const mockServer = {
+			const mockServer = partialFake<import("node:http").Server>({
 				listening: true,
-			} as unknown as import("node:http").Server;
+			});
 			yield* Ref.set(ref, mockServer);
 			const value = yield* Ref.get(ref);
 			expect(value).toBe(mockServer);
@@ -70,9 +70,9 @@ describe("HttpServerRefTag", () => {
 	it.effect("can be reset to null", () =>
 		Effect.gen(function* () {
 			const ref = yield* HttpServerRefTag;
-			const mockServer = {
+			const mockServer = partialFake<import("node:http").Server>({
 				listening: true,
-			} as unknown as import("node:http").Server;
+			});
 			yield* Ref.set(ref, mockServer);
 			yield* Ref.set(ref, null);
 			const value = yield* Ref.get(ref);

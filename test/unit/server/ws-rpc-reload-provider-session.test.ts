@@ -3,7 +3,6 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockLogger,
@@ -32,7 +31,7 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 			})) as typeof api.provider.list;
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({ models: [], commands: [] })),
-			} as unknown as OrchestrationEngine);
+			});
 
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);

@@ -13,35 +13,45 @@ import {
 	setVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { applyLiveSessionSettings } from "../../../src/lib/handlers/model.js";
-import type { Logger } from "../../../src/lib/logger.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderRegistryLive } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { makeMockLogger } from "../../helpers/mock-factories.js";
 
+type ApplyLiveSettingsEffect = Exclude<
+	ProviderInstance["applyLiveSettingsEffect"],
+	undefined
+>;
+
 function makeClaudeInstance(
-	applyLiveSettingsEffect: ProviderInstance["applyLiveSettingsEffect"],
+	applyLiveSettingsEffect: ApplyLiveSettingsEffect,
 ): ProviderInstance {
 	return {
 		providerId: "claude",
 		applyLiveSettingsEffect,
-	} as unknown as ProviderInstance;
+		discoverEffect: () => Effect.die("not used"),
+		sendTurnEffect: () => Effect.die("not used"),
+		interruptTurnEffect: () => Effect.die("not used"),
+		resolvePermissionEffect: () => Effect.die("not used"),
+		resolveQuestionEffect: () => Effect.die("not used"),
+		shutdownEffect: () => Effect.die("not used"),
+		endSessionEffect: () => Effect.die("not used"),
+	} satisfies ProviderInstance;
 }
 
 const layerFor = (instance: ProviderInstance) =>
 	Layer.mergeAll(
 		makeOverridesStateLive(),
 		ProviderRegistryLive([instance]),
-		Layer.succeed(LoggerTag, makeMockLogger() as Logger),
+		Layer.succeed(LoggerTag, makeMockLogger()),
 	);
 
 describe("applyLiveSessionSettings", () => {
 	it.effect(
 		"sends the whole settings triple when only the effort level changed",
 		() => {
-			const applySpy = vi.fn(() => Effect.void);
-			const instance = makeClaudeInstance(
-				applySpy as unknown as ProviderInstance["applyLiveSettingsEffect"],
-			);
+			const applySpy: ApplyLiveSettingsEffect = vi.fn(() => Effect.void);
+			const instance = makeClaudeInstance(applySpy);
 
 			return Effect.gen(function* () {
 				yield* setModel("s1", {
@@ -66,10 +76,15 @@ describe("applyLiveSessionSettings", () => {
 	it.effect(
 		"swallows provider failures so the override write still stands",
 		() => {
-			const instance = makeClaudeInstance((() =>
+			const applyLiveSettingsEffect: ApplyLiveSettingsEffect = () =>
 				Effect.fail(
-					new Error("query gone"),
-				)) as unknown as ProviderInstance["applyLiveSettingsEffect"]);
+					new ProviderInstanceFailure({
+						providerId: "claude",
+						operation: "applyLiveSettings",
+						cause: new Error("query gone"),
+					}),
+				);
+			const instance = makeClaudeInstance(applyLiveSettingsEffect);
 
 			return Effect.gen(function* () {
 				yield* setModel("s1", {
@@ -84,10 +99,8 @@ describe("applyLiveSessionSettings", () => {
 	);
 
 	it.effect("leaves non-Claude sessions alone", () => {
-		const applySpy = vi.fn(() => Effect.void);
-		const instance = makeClaudeInstance(
-			applySpy as unknown as ProviderInstance["applyLiveSettingsEffect"],
-		);
+		const applySpy: ApplyLiveSettingsEffect = vi.fn(() => Effect.void);
+		const instance = makeClaudeInstance(applySpy);
 
 		return Effect.gen(function* () {
 			yield* setModel("s1", { providerID: "openai", modelID: "gpt-4" });

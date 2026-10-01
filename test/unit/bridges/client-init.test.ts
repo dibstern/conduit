@@ -4,7 +4,10 @@ import { handleClientConnectedEffect } from "../../../src/lib/bridges/client-ini
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { AgentService } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import type { PendingInteractionService } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import type {
+	PendingInteractionService,
+	PendingQuestion,
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
 	OpenCodeModelService,
@@ -15,7 +18,7 @@ import {
 	StatusPollerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
-import { type SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import type { SessionManagerService } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	getDefaultModel,
 	type ModelOverride,
@@ -47,6 +50,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 /** Cast a plain string to PermissionId for test data. */
 const pid = (s: string) => s as PermissionId;
@@ -193,32 +197,30 @@ function makeClientInitEffectLayer(
 		getActiveAgent: vi.fn(() => Effect.succeed(undefined)),
 		switchAgent: vi.fn(() => Effect.void),
 	};
-	const pendingQuestions: Array<{
-		requestId: string;
-		sessionId: string;
-		timestamp: number;
-		questions: Array<{
-			question: string;
-			header?: string;
-			options?: Array<{ label: string; description?: string }>;
-			multiSelect?: boolean;
-		}>;
-	}> = [];
-	const pendingInteractions = {
-		listPendingPermissions: vi.fn(() => Effect.succeed([])),
-		recoverPendingPermissions: vi.fn(() => Effect.succeed([])),
-		listPendingQuestions: vi.fn(() => Effect.succeed(pendingQuestions)),
-		recordQuestionRequest: vi.fn((input: (typeof pendingQuestions)[number]) =>
+	const pendingQuestions: PendingQuestion[] = [];
+	const pendingInteractions = partialFake<PendingInteractionService>({
+		listPendingPermissions: vi.fn<
+			PendingInteractionService["listPendingPermissions"]
+		>(() => Effect.succeed([])),
+		recoverPendingPermissions: vi.fn<
+			PendingInteractionService["recoverPendingPermissions"]
+		>(() => Effect.succeed([])),
+		listPendingQuestions: vi.fn<
+			PendingInteractionService["listPendingQuestions"]
+		>(() => Effect.succeed(pendingQuestions)),
+		recordQuestionRequest: vi.fn<
+			PendingInteractionService["recordQuestionRequest"]
+		>((input) =>
 			Effect.sync(() => {
 				const question = { ...input, timestamp: Date.now() };
 				pendingQuestions.push(question);
 				return question;
 			}),
 		),
-	} as unknown as PendingInteractionService;
-	const terminal = {
+	});
+	const terminal = partialFake<OpenCodeTerminalService>({
 		replay: vi.fn(() => Effect.void),
-	} as unknown as OpenCodeTerminalService;
+	});
 	const discoverClaudeCapabilities = vi.fn(() =>
 		Effect.succeed(makeClaudeCapabilities()),
 	);

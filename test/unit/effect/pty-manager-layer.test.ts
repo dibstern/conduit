@@ -25,10 +25,11 @@ import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const makeApi = (): OpenCodeAPI =>
-	({
-		pty: {
+	partialFake<OpenCodeAPI>({
+		pty: partialFake<OpenCodeAPI["pty"]>({
 			create: vi.fn(async () => ({
 				id: "pty-1",
 				title: "Shell",
@@ -40,9 +41,9 @@ const makeApi = (): OpenCodeAPI =>
 			list: vi.fn(async () => []),
 			delete: vi.fn(async () => undefined),
 			resize: vi.fn(async () => undefined),
-		},
+		}),
 		getAuthHeaders: vi.fn(() => ({ authorization: "Bearer test" })),
-	}) as unknown as OpenCodeAPI;
+	});
 
 describe("PtyManagerLive", () => {
 	it.effect(

@@ -31,6 +31,7 @@ import type {
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
 const TRACES_DIR = join(
@@ -65,18 +66,18 @@ function makeCtx(): ClaudeSessionContext {
 		sessionId: "trace-replay-session",
 		workspaceRoot: "/tmp/ws",
 		startedAt: "2026-07-16T00:00:00.000Z",
-		promptQueue: {
+		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),
 			close: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["promptQueue"],
-		query: {
+		}),
+		query: partialFake<ClaudeSessionContext["query"]>({
 			interrupt: vi.fn(),
 			close: vi.fn(),
 			setModel: vi.fn(),
 			setPermissionMode: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["query"],
+		}),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),

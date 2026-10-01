@@ -16,7 +16,7 @@ function msg(text: string): SDKUserMessage {
 		type: "user",
 		parent_tool_use_id: null,
 		message: { role: "user", content: [{ type: "text", text }] },
-	} as unknown as SDKUserMessage;
+	} satisfies SDKUserMessage;
 }
 
 async function takeN<T>(iter: AsyncIterable<T>, n: number): Promise<T[]> {

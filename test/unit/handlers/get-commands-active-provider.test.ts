@@ -11,8 +11,10 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { handleGetCommands } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import type { Logger } from "../../../src/lib/logger.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	makeHandlerLogger,
+	makeHandlerOpenCodeAPI,
+} from "../../helpers/handler-fakes.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
@@ -38,22 +40,13 @@ function mockWsHandler(
 	};
 }
 
-function mockLogger(): Logger {
-	return {
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	} as unknown as Logger;
-}
-
 function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.merge(
 		apiLayer,
 		Layer.merge(
 			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
-			Layer.succeed(LoggerTag, mockLogger()),
+			Layer.succeed(LoggerTag, makeHandlerLogger()),
 		),
 	);
 }
@@ -63,10 +56,10 @@ describe("handleGetCommands active provider", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: { commands: vi.fn(async () => [{ name: "opencode-only" }]) },
-		} as unknown as OpenCodeAPI;
-		const engine = {
+		});
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				models: [],
@@ -86,13 +79,13 @@ describe("handleGetCommands active provider", () => {
 					},
 				],
 			})),
-		} as unknown as OrchestrationEngine;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-			Layer.succeed(LoggerTag, mockLogger()),
+			Layer.succeed(OrchestrationEngineTag, engine),
+			Layer.succeed(LoggerTag, makeHandlerLogger()),
 		);
 
 		return handleGetCommands("client-1", {}).pipe(
@@ -120,18 +113,18 @@ describe("handleGetCommands active provider", () => {
 				getClientSession: vi.fn(() => "session-1"),
 			});
 			const opencodeCommands = [{ name: "opencode-only" }];
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: { commands: vi.fn(async () => opencodeCommands) },
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatch: vi.fn(),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag, engine),
 			);
 
 			return handleGetCommands("client-1", {}).pipe(
@@ -153,9 +146,9 @@ describe("handleGetCommands active provider", () => {
 			getClientSession: vi.fn(() => undefined),
 		});
 		const opencodeCommands = [{ name: "opencode-default" }];
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: { commands: vi.fn(async () => opencodeCommands) },
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
@@ -181,14 +174,14 @@ describe("handleGetCommands active provider", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: {
 					commands: vi.fn(async () => {
 						throw new Error("opencode offline");
 					}),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [],
 					supportsTools: true,
@@ -207,13 +200,13 @@ describe("handleGetCommands active provider", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				Layer.succeed(LoggerTag, mockLogger()),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(LoggerTag, makeHandlerLogger()),
 			);
 
 			return handleGetCommands("client-1", {}).pipe(
@@ -239,21 +232,21 @@ describe("handleGetCommands active provider", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: { commands: vi.fn(async () => [{ name: "opencode-only" }]) },
-		} as unknown as OpenCodeAPI;
-		const log = mockLogger();
-		const engine = {
+		});
+		const log = makeHandlerLogger();
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => {
 				throw new Error("discover failed");
 			}),
-		} as unknown as OrchestrationEngine;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+			Layer.succeed(OrchestrationEngineTag, engine),
 			Layer.succeed(LoggerTag, log),
 		);
 

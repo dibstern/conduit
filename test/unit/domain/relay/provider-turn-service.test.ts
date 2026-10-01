@@ -81,6 +81,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 } from "../../../helpers/mock-factories.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
 const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
@@ -1394,9 +1395,11 @@ describe("ProviderTurnService", () => {
 	it.effect(
 		"uses OpenCode abort for an unbound session, clears processing timeout, and broadcasts done",
 		() => {
-			const api = {
-				session: { abort: vi.fn(async () => undefined) },
-			} as unknown as OpenCodeAPI;
+			const api = partialFake<OpenCodeAPI>({
+				session: partialFake<OpenCodeAPI["session"]>({
+					abort: vi.fn(async () => undefined),
+				}),
+			});
 			const { layer, wsHandler } = serviceLayer({ api });
 
 			return Effect.gen(function* () {
@@ -1649,9 +1652,11 @@ describe("ProviderTurnService", () => {
 				const registry = new ProviderRegistry();
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({ registry });
-				const api = {
-					session: { abort: vi.fn(async () => undefined) },
-				} as unknown as OpenCodeAPI;
+				const api = partialFake<OpenCodeAPI>({
+					session: partialFake<OpenCodeAPI["session"]>({
+						abort: vi.fn(async () => undefined),
+					}),
+				});
 				const { layer } = serviceLayer({ engine, api });
 
 				yield* Effect.gen(function* () {
@@ -1689,9 +1694,11 @@ describe("ProviderTurnService", () => {
 					}),
 					dispatchEffect,
 				} as unknown as OrchestrationEngine;
-				const api = {
-					session: { abort: vi.fn(async () => undefined) },
-				} as unknown as OpenCodeAPI;
+				const api = partialFake<OpenCodeAPI>({
+					session: partialFake<OpenCodeAPI["session"]>({
+						abort: vi.fn(async () => undefined),
+					}),
+				});
 				const { layer } = serviceLayer({ engine, api });
 
 				yield* Effect.gen(function* () {

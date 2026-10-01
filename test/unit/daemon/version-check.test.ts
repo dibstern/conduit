@@ -16,29 +16,29 @@ import {
 
 /** Create a mock fetch that returns a given version. */
 function mockFetchOk(version: string): typeof globalThis.fetch {
-	return vi.fn(
+	return vi.fn<typeof globalThis.fetch>(
 		async () =>
 			new Response(JSON.stringify({ version }), {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
 			}),
-	) as unknown as typeof globalThis.fetch;
+	);
 }
 
 /** Create a mock fetch that returns an HTTP error. */
 function mockFetchError(status: number): typeof globalThis.fetch {
-	return vi.fn(
+	return vi.fn<typeof globalThis.fetch>(
 		async () => new Response("Not Found", { status }),
-	) as unknown as typeof globalThis.fetch;
+	);
 }
 
 /** Create a mock fetch that rejects with a network error. */
 function mockFetchNetworkError(
 	message = "Network error",
 ): typeof globalThis.fetch {
-	return vi.fn(async () => {
+	return vi.fn<typeof globalThis.fetch>(async () => {
 		throw new Error(message);
-	}) as unknown as typeof globalThis.fetch;
+	});
 }
 
 // ─── isNewer() ─────────────────────────────────────────────────────────────────
@@ -201,13 +201,13 @@ describe("Ticket 3.4 — fetchLatestVersion()", () => {
 	});
 
 	it("throws if response has no version field", async () => {
-		const fetcher = vi.fn(
+		const fetcher = vi.fn<typeof globalThis.fetch>(
 			async () =>
 				new Response(JSON.stringify({ name: "conduit" }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				}),
-		) as unknown as typeof globalThis.fetch;
+		);
 
 		const rejected = fetchLatestVersion(
 			"conduit",
@@ -546,7 +546,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 
 	it("continues interval after error", async () => {
 		let callCount = 0;
-		const fetcher = vi.fn(async () => {
+		const fetcher = vi.fn<typeof globalThis.fetch>(async () => {
 			callCount++;
 			if (callCount === 1) {
 				throw new Error("First call fails");
@@ -555,7 +555,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
 			});
-		}) as unknown as typeof globalThis.fetch;
+		});
 
 		const checker = new VersionChecker({
 			currentVersion: "1.0.0",
@@ -605,7 +605,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 
 	it("recovers after error: start() -> error on first check -> timer -> succeeds on second", async () => {
 		let callCount = 0;
-		const fetcher = vi.fn(async () => {
+		const fetcher = vi.fn<typeof globalThis.fetch>(async () => {
 			callCount++;
 			if (callCount === 1) {
 				throw new Error("Temporary failure");
@@ -614,7 +614,7 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
 			});
-		}) as unknown as typeof globalThis.fetch;
+		});
 
 		const checker = new VersionChecker({
 			currentVersion: "1.0.0",
@@ -680,7 +680,7 @@ describe("Ticket 3.4 — drain() integration", () => {
 
 	it("in-flight fetch is aborted by drain", async () => {
 		let capturedSignal: AbortSignal | undefined;
-		const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+		const fetcher = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
 			capturedSignal = init?.signal ?? undefined;
 			// Simulate a slow response that rejects on abort
 			return new Promise<Response>((resolve, reject) => {
@@ -701,7 +701,7 @@ describe("Ticket 3.4 — drain() integration", () => {
 					60_000,
 				);
 			});
-		}) as unknown as typeof globalThis.fetch;
+		});
 
 		const checker = new VersionChecker({
 			currentVersion: "1.0.0",

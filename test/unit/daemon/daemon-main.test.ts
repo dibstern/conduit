@@ -4,6 +4,8 @@ import {
 	ProjectMgmtTag,
 } from "../../../src/lib/domain/daemon/Services/management-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import type { Logger } from "../../../src/lib/logger.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 // ─── Daemon Main Tests ──────────────────────────────────────────────────────
 // TDD tests for daemon-main.ts: the top-level Effect entry point that replaces
@@ -99,19 +101,24 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 			slug: "test-project",
 			persistenceDbPath: tempEventsDbPath(),
 		}),
-		Layer.succeed(LoggerTag, {
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			debug: vi.fn(),
-			child: vi.fn().mockReturnValue({
-				info: vi.fn(),
-				warn: vi.fn(),
-				error: vi.fn(),
-				debug: vi.fn(),
-				child: vi.fn(),
+		Layer.succeed(
+			LoggerTag,
+			partialFake<Logger>({
+				info: vi.fn<Logger["info"]>(),
+				warn: vi.fn<Logger["warn"]>(),
+				error: vi.fn<Logger["error"]>(),
+				debug: vi.fn<Logger["debug"]>(),
+				child: vi.fn<Logger["child"]>().mockReturnValue(
+					partialFake<Logger>({
+						info: vi.fn<Logger["info"]>(),
+						warn: vi.fn<Logger["warn"]>(),
+						error: vi.fn<Logger["error"]>(),
+						debug: vi.fn<Logger["debug"]>(),
+						child: vi.fn<Logger["child"]>(),
+					}),
+				),
 			}),
-		} as unknown as import("../../../src/lib/logger.js").Logger),
+		),
 	);
 }
 

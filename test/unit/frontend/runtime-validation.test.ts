@@ -6,9 +6,10 @@ import {
 	type WsProtocolError,
 	wsMessageStream,
 } from "../../../src/lib/frontend/transport/runtime.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 class MockWebSocket extends EventTarget {
-	readyState: number = WebSocket.OPEN;
+	readyState: WebSocket["readyState"] = WebSocket.OPEN;
 
 	close(): void {
 		this.readyState = WebSocket.CLOSED;
@@ -31,8 +32,8 @@ async function collectAfter(
 	const ws = new MockWebSocket();
 	const stream =
 		onProtocolError === undefined
-			? wsMessageStream(ws as unknown as WebSocket)
-			: wsMessageStream(ws as unknown as WebSocket, { onProtocolError });
+			? wsMessageStream(partialFake<WebSocket>(ws))
+			: wsMessageStream(partialFake<WebSocket>(ws), { onProtocolError });
 	const effect = Stream.runCollect(stream).pipe(Effect.map(Chunk.toArray));
 	const promise = Effect.runPromise(effect);
 	await new Promise<void>((resolve) => setImmediate(resolve));
@@ -91,7 +92,7 @@ describe("frontend runtime WebSocket validation", () => {
 	it("fails the stream with a typed socket error", async () => {
 		const ws = new MockWebSocket();
 		const promise = Effect.runPromiseExit(
-			Stream.runDrain(wsMessageStream(ws as unknown as WebSocket)),
+			Stream.runDrain(wsMessageStream(partialFake<WebSocket>(ws))),
 		);
 		await new Promise<void>((resolve) => setImmediate(resolve));
 

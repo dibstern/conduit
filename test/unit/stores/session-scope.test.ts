@@ -1,16 +1,19 @@
 // ─── Session Scope Tests ─────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const pushStateSpy = vi.fn();
 let popstateListener: (() => void) | undefined;
 
+const history = partialFake<History>({
+	pushState: pushStateSpy,
+	replaceState: vi.fn(),
+});
+
 vi.stubGlobal("window", {
 	...(typeof window !== "undefined" ? window : {}),
 	location: { pathname: "/", search: "" } as Location,
-	history: {
-		pushState: pushStateSpy,
-		replaceState: vi.fn(),
-	} as unknown as History,
+	history,
 	addEventListener: (event: string, listener: () => void): void => {
 		if (event === "popstate") popstateListener = listener;
 	},

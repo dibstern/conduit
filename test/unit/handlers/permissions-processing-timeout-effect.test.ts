@@ -23,10 +23,10 @@ import {
 	handleAskUserResponse,
 	handleQuestionReject,
 } from "../../../src/lib/handlers/permissions.js";
-import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
@@ -58,9 +58,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 	it.effect(
 		"restarts the processing timeout after answering a question",
 		() => {
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				question: { reply: vi.fn(async () => undefined) },
-			} as unknown as OpenCodeAPI;
+			});
 			const persistence = makePersistenceEffectLayer(":memory:");
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -98,9 +98,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 	it.effect(
 		"restarts the processing timeout after rejecting a question",
 		() => {
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				question: { reject: vi.fn(async () => undefined) },
-			} as unknown as OpenCodeAPI;
+			});
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),

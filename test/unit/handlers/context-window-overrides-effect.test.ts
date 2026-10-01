@@ -15,12 +15,11 @@ import {
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
-import type { Logger } from "../../../src/lib/logger.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeHandlerLogger } from "../../helpers/handler-fakes.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
@@ -46,14 +45,7 @@ function mockWsHandler(
 	};
 }
 
-function mockLogger(): Logger {
-	return {
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	} as unknown as Logger;
-}
+const mockLogger = makeHandlerLogger;
 
 describe("handleSwitchContextWindow with Effect override state", () => {
 	it.effect(
@@ -66,7 +58,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
 			});
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -77,7 +69,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, mockLogger()),
@@ -116,7 +108,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -127,7 +119,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 			const layer = Layer.mergeAll(
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, mockLogger()),

@@ -22,7 +22,12 @@ import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { OrchestrationEngine as OrchestrationEngineLive } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	makeHandlerLogger,
+	makeHandlerOpenCodeAPI,
+} from "../../helpers/handler-fakes.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -47,20 +52,11 @@ function mockWsHandler(
 	};
 }
 
-function mockLogger(): Logger {
-	return {
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	} as unknown as Logger;
-}
-
 function agentHandlerLayer({
 	client,
 	ws,
 	engine,
-	log = mockLogger(),
+	log = makeHandlerLogger(),
 }: {
 	client: OpenCodeAPI;
 	ws: WebSocketHandlerShape;
@@ -91,10 +87,10 @@ describe("handleGetAgents active provider", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
-		} as unknown as OpenCodeAPI;
-		const engine = {
+		});
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatchEffect: vi.fn(() =>
 				Effect.succeed({
@@ -118,7 +114,7 @@ describe("handleGetAgents active provider", () => {
 					],
 				}),
 			),
-		} as unknown as OrchestrationEngine;
+		});
 
 		return Effect.gen(function* () {
 			yield* setAgent("session-1", "Explore");
@@ -147,10 +143,10 @@ describe("handleGetAgents active provider", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
 			});
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed({
@@ -171,7 +167,7 @@ describe("handleGetAgents active provider", () => {
 						],
 					}),
 				),
-			} as unknown as OrchestrationEngine;
+			});
 
 			return handleGetAgents("client-1", {}).pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
@@ -201,13 +197,13 @@ describe("handleGetAgents active provider", () => {
 				{ id: "build", name: "build", mode: "primary" as const },
 				{ id: "title", name: "title", mode: "subagent" as const, hidden: true },
 			];
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: { agents: vi.fn(async () => rawAgents) },
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatchEffect: vi.fn(),
-			} as unknown as OrchestrationEngine;
+			});
 
 			return handleGetAgents("client-1", {}).pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
@@ -229,17 +225,17 @@ describe("handleGetAgents active provider", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
 			});
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => [
 						{ id: "build", name: "build", mode: "primary" as const },
 					]),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatchEffect: vi.fn(),
-			} as unknown as OrchestrationEngine;
+			});
 
 			return handleGetAgents("client-1", { instanceId: "opencode" }).pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
@@ -260,13 +256,13 @@ describe("handleGetAgents active provider", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => undefined),
 		});
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: {
 				agents: vi.fn(async () => [
 					{ id: "build", name: "build", mode: "primary" as const },
 				]),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 
 		return handleGetAgents("client-1", {}).pipe(
 			Effect.provide(agentHandlerLayer({ client, ws })),
@@ -287,14 +283,14 @@ describe("handleGetAgents active provider", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => {
 						throw new Error("opencode offline");
 					}),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed({
 						models: [],
@@ -309,7 +305,7 @@ describe("handleGetAgents active provider", () => {
 						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 					}),
 				),
-			} as unknown as OrchestrationEngine;
+			});
 
 			return handleGetAgents("client-1", {}).pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
@@ -335,14 +331,14 @@ describe("handleGetAgents active provider", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => {
 						throw new Error("opencode should not be queried");
 					}),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				dispatchEffect: vi.fn(() =>
 					Effect.succeed({
 						models: [],
@@ -357,7 +353,7 @@ describe("handleGetAgents active provider", () => {
 						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 					}),
 				),
-			} as unknown as OrchestrationEngine;
+			});
 
 			return Effect.gen(function* () {
 				yield* setDefaultModel({
@@ -383,10 +379,10 @@ describe("handleGetAgents active provider", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
-		} as unknown as OpenCodeAPI;
-		const engine = {
+		});
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatchEffect: vi.fn(() =>
 				Effect.succeed({
@@ -402,7 +398,7 @@ describe("handleGetAgents active provider", () => {
 					agents: [{ id: "Explore", name: "Explore" }],
 				}),
 			),
-		} as unknown as OrchestrationEngine;
+		});
 
 		return Effect.gen(function* () {
 			yield* setAgent("session-1", "Missing");

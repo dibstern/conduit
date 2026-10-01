@@ -153,10 +153,16 @@ import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
+	makeHandlerLogger,
+	makeHandlerOpenCodeAPI,
+} from "../../helpers/handler-fakes.js";
+import {
 	makeMockAgentService,
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
+	makeMockSessionManagerShape,
 	makeMockSessionTitleService,
 	makeMockStatusPoller,
 	makeTestHandlerLayer,
@@ -193,12 +199,46 @@ const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 function mockLogger(): Logger {
+	return makeHandlerLogger();
+}
+
+type ProviderListResult = Awaited<ReturnType<OpenCodeAPI["provider"]["list"]>>;
+type SessionDetail = Awaited<ReturnType<OpenCodeAPI["session"]["get"]>>;
+type Message = Awaited<ReturnType<OpenCodeAPI["session"]["message"]>>;
+
+function makeProviderListResult(
+	overrides: Partial<ProviderListResult> = {},
+): ProviderListResult {
 	return {
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
-	} as unknown as Logger;
+		connected: [],
+		defaults: {},
+		providers: [],
+		...overrides,
+	};
+}
+
+function makeSessionDetail(
+	overrides: Partial<SessionDetail> = {},
+): SessionDetail {
+	return {
+		id: "session",
+		projectID: "project",
+		directory: "/tmp/project",
+		title: "Session",
+		version: "1.0.0",
+		time: { created: 0, updated: 0 },
+		...overrides,
+	};
+}
+
+function makeMessage(overrides: Partial<Message> = {}): Message {
+	return {
+		id: "message",
+		role: "assistant",
+		sessionID: "session",
+		time: { created: 0 },
+		...overrides,
+	};
 }
 
 function openCodeFileLayer(client: OpenCodeAPI) {
@@ -268,13 +308,13 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 function mockConfig(
 	overrides?: Partial<ProjectRelayConfig>,
 ): ProjectRelayConfig {
-	return {
+	return makeMockConfig({
 		opencodeUrl: "http://localhost:3000",
 		slug: "test-project",
 		projectDir: "/tmp/test",
 		configDir: "/tmp/test-config",
 		...overrides,
-	} as unknown as ProjectRelayConfig;
+	});
 }
 
 // ─── Agent handler tests ───────────────────────────────────────────────────
@@ -302,9 +342,9 @@ describe("handleGetAgents", () => {
 				{ name: "title", id: "title", mode: "subagent" as const, hidden: true },
 				{ name: "plan", id: "plan", mode: "all" as const },
 			];
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: { agents: vi.fn(async () => mockAgents) },
-			} as unknown as OpenCodeAPI;
+			});
 
 			return handleGetAgents("client-1", {}).pipe(
 				Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
@@ -327,9 +367,9 @@ describe("handleGetCommands", () => {
 	it.effect("fetches commands and sends to client", () => {
 		const ws = mockWsHandler();
 		const mockCommands = [{ name: "test" }];
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			app: { commands: vi.fn(async () => mockCommands) },
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
@@ -358,7 +398,7 @@ describe("handleGetProjects", () => {
 		const config = mockConfig({
 			getProjects: () => projects,
 		});
-		const client = {} as unknown as OpenCodeAPI;
+		const client = makeHandlerOpenCodeAPI();
 
 		const layer = Layer.mergeAll(
 			projectManagementLayer(client, config),
@@ -382,13 +422,13 @@ describe("handleGetProjects", () => {
 		() => {
 			const ws = mockWsHandler();
 			const config = mockConfig();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				app: {
 					projects: vi.fn(async () => [
 						{ id: "p1", name: "Proj 1", path: "/proj1" },
 					]),
 				},
-			} as unknown as OpenCodeAPI;
+			});
 
 			const layer = Layer.mergeAll(
 				projectManagementLayer(client, config),
@@ -415,11 +455,11 @@ describe("handleGetProjects", () => {
 describe("handleGetFileContent", () => {
 	it.effect("reads file content and sends to client", () => {
 		const ws = mockWsHandler();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			file: {
 				read: vi.fn(async () => ({ content: "hello world" })),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeFileLayer(client),
@@ -441,9 +481,9 @@ describe("handleGetFileContent", () => {
 
 	it.effect("does nothing when path is empty", () => {
 		const ws = mockWsHandler();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			file: { read: vi.fn() },
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeFileLayer(client),
@@ -463,7 +503,7 @@ describe("handleGetFileContent", () => {
 describe("handleGetFileList", () => {
 	it.effect("lists files and filters with gitignore rules", () => {
 		const ws = mockWsHandler();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			file: {
 				list: vi.fn(async () => [
 					{ name: "src", type: "directory" },
@@ -472,7 +512,7 @@ describe("handleGetFileList", () => {
 				]),
 				read: vi.fn(async () => ({ content: "" })),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeFileLayer(client),
@@ -503,13 +543,13 @@ describe("reloadProviderSessionForClient", () => {
 			getClientSession: vi.fn(() => "session-42"),
 		});
 		const log = mockLogger();
-		const engine = {
+		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
 			bindSession: vi.fn(),
-		} as unknown as OrchestrationEngine;
-		const client = {
+		});
+		const client = makeHandlerOpenCodeAPI({
 			provider: {
-				list: vi.fn(async () => ({
+				list: vi.fn(async () => makeProviderListResult({
 					connected: [],
 					providers: [],
 				})),
@@ -517,7 +557,7 @@ describe("reloadProviderSessionForClient", () => {
 			app: {
 				commands: vi.fn(async () => []),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
@@ -560,12 +600,12 @@ describe("reloadProviderSessionForClient", () => {
 describe("sendModelsStateToClient", () => {
 	it.effect("fetches providers and sends model_list to client", () => {
 		const ws = mockWsHandler();
-		const engine = {
+		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
-		} as unknown as OrchestrationEngine;
-		const client = {
+		});
+		const client = makeHandlerOpenCodeAPI({
 			provider: {
-				list: vi.fn(async () => ({
+				list: vi.fn(async () => makeProviderListResult({
 					connected: ["openai"],
 					providers: [
 						{
@@ -577,7 +617,7 @@ describe("sendModelsStateToClient", () => {
 				})),
 			},
 			session: { get: vi.fn() },
-		} as unknown as OpenCodeAPI;
+		});
 		const log = mockLogger();
 
 		const layer = Layer.mergeAll(
@@ -610,7 +650,7 @@ describe("sendModelsStateToClient", () => {
 		"includes variants and contextWindowOptions in claude provider entries in model_list",
 		() => {
 			const ws = mockWsHandler();
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -625,16 +665,16 @@ describe("sendModelsStateToClient", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
-			const client = {
+			});
+			const client = makeHandlerOpenCodeAPI({
 				provider: {
-					list: vi.fn(async () => ({
+					list: vi.fn(async () => makeProviderListResult({
 						connected: [],
 						providers: [],
 					})),
 				},
 				session: { get: vi.fn() },
-			} as unknown as OpenCodeAPI;
+			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
@@ -681,7 +721,7 @@ describe("sendModelsStateToClient", () => {
 		"sends Claude models when OpenCode provider discovery fails",
 		() => {
 			const ws = mockWsHandler();
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -691,15 +731,15 @@ describe("sendModelsStateToClient", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
-			const client = {
+			});
+			const client = makeHandlerOpenCodeAPI({
 				provider: {
 					list: vi.fn(async () => {
 						throw new Error("opencode offline");
 					}),
 				},
 				session: { get: vi.fn() },
-			} as unknown as OpenCodeAPI;
+			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
@@ -742,7 +782,7 @@ describe("sendModelsStateToClient", () => {
 				{ value: "1m", label: "1M (beta)" },
 			];
 			const ws = mockWsHandler();
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -753,16 +793,16 @@ describe("sendModelsStateToClient", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
-			const client = {
+			});
+			const client = makeHandlerOpenCodeAPI({
 				provider: {
-					list: vi.fn(async () => ({
+					list: vi.fn(async () => makeProviderListResult({
 						connected: [],
 						providers: [],
 					})),
 				},
 				session: { get: vi.fn() },
-			} as unknown as OpenCodeAPI;
+			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
@@ -792,7 +832,7 @@ describe("sendModelsStateToClient", () => {
 		"keeps OpenCode discovery while skipping session lookup for a Claude-bound model refresh",
 		() => {
 			const ws = mockWsHandler();
-			const engine = {
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -803,10 +843,10 @@ describe("sendModelsStateToClient", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
-			const client = {
+			});
+			const client = makeHandlerOpenCodeAPI({
 				provider: {
-					list: vi.fn(async () => ({
+					list: vi.fn(async () => makeProviderListResult({
 						connected: ["openai"],
 						defaults: {},
 						providers: [
@@ -823,7 +863,7 @@ describe("sendModelsStateToClient", () => {
 						throw new Error("opencode session lookup should be skipped");
 					}),
 				},
-			} as unknown as OpenCodeAPI;
+			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
@@ -890,17 +930,17 @@ describe("switchModelForSession", () => {
 		});
 		const log = mockLogger();
 		const config = mockConfig();
-		const engine = {
+		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
 			bindSession: vi.fn(),
-		} as unknown as OrchestrationEngine;
-		const client = {
+		});
+		const client = makeHandlerOpenCodeAPI({
 			provider: {
-				list: vi.fn(async () => ({
+				list: vi.fn(async () => makeProviderListResult({
 					providers: [],
 				})),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
@@ -932,14 +972,14 @@ describe("switchModelForSession", () => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
 			const config = mockConfig();
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({ models: [] })),
 				bindSession: vi.fn(),
 				unbindSession: vi.fn(),
-			} as unknown as OrchestrationEngine;
-			const client = {
+			});
+			const client = makeHandlerOpenCodeAPI({
 				provider: {
-					list: vi.fn(async () => ({
+					list: vi.fn(async () => makeProviderListResult({
 						connected: ["opencode"],
 						providers: [
 							{
@@ -961,7 +1001,7 @@ describe("switchModelForSession", () => {
 						throw new Error("session create should not run on model switch");
 					}),
 				},
-			} as unknown as OpenCodeAPI;
+			});
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
@@ -1055,7 +1095,7 @@ describe("switchModelForSession", () => {
 		const config = mockConfig({
 			configDir: `/tmp/conduit-switch-model-claude-${Date.now()}`,
 		});
-		const engine = {
+		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({
 				models: [
 					{
@@ -1067,15 +1107,15 @@ describe("switchModelForSession", () => {
 				],
 			})),
 			bindSession: vi.fn(),
-		} as unknown as OrchestrationEngine;
-		const client = {
+		});
+		const client = makeHandlerOpenCodeAPI({
 			provider: {
-				list: vi.fn(async () => ({
+				list: vi.fn(async () => makeProviderListResult({
 					connected: [],
 					providers: [],
 				})),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
@@ -1116,7 +1156,7 @@ describe("switchVariantForSession", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-42"),
 		});
-		const engine = {
+		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({
 				models: [
 					{
@@ -1127,15 +1167,15 @@ describe("switchVariantForSession", () => {
 					},
 				],
 			})),
-		} as unknown as OrchestrationEngine;
-		const client = {
+		});
+		const client = makeHandlerOpenCodeAPI({
 			provider: {
-				list: vi.fn(async () => ({
+				list: vi.fn(async () => makeProviderListResult({
 					connected: [],
 					providers: [],
 				})),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 		const log = mockLogger();
 		const config = mockConfig({
 			configDir: `/tmp/conduit-switch-variant-claude-${Date.now()}`,
@@ -1180,20 +1220,22 @@ describe("switchVariantForSession", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
 			});
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				provider: {
-					list: vi.fn(async () => ({
+					list: vi.fn(async () => makeProviderListResult({
 						connected: ["openai"],
 						providers: [
 							{
 								id: "openai",
 								name: "OpenAI",
-								models: [{ id: "gpt-4", variants: { v2: {}, v3: {} } }],
+							models: [
+								{ id: "gpt-4", name: "GPT-4", variants: { v2: {}, v3: {} } },
+							],
 							},
 						],
 					})),
 				},
-			} as unknown as OpenCodeAPI;
+			});
 			const log = mockLogger();
 			const config = mockConfig({
 				configDir: `/tmp/conduit-switch-variant-opencode-${Date.now()}`,
@@ -1239,7 +1281,7 @@ describe("handleSwitchContextWindow", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
 			});
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -1250,7 +1292,7 @@ describe("handleSwitchContextWindow", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
@@ -1288,7 +1330,7 @@ describe("handleSwitchContextWindow", () => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
 			});
-			const engine = {
+			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
 						{
@@ -1298,7 +1340,7 @@ describe("handleSwitchContextWindow", () => {
 						},
 					],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
@@ -1337,8 +1379,15 @@ describe("handleSwitchContextWindow", () => {
 function mockSessionManager(
 	overrides?: Partial<SessionManagerShape>,
 ): SessionManagerShape {
-	return {
-		createSession: vi.fn(async () => ({ id: "new-session-1", title: "" })),
+	return makeMockSessionManagerShape({
+		createSession: vi.fn(async () => ({
+			id: "new-session-1",
+			projectID: "project-1",
+			directory: "/tmp/project",
+			title: "",
+			version: "1.0.0",
+			time: { created: 0, updated: 0 },
+		})),
 		deleteSession: vi.fn(async () => {}),
 		renameSession: vi.fn(async () => {}),
 		listSessions: vi.fn(async () => []),
@@ -1350,7 +1399,7 @@ function mockSessionManager(
 		sendSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
 		...overrides,
-	} as unknown as SessionManagerShape;
+	});
 }
 
 function mockTerminalService(
@@ -1376,19 +1425,19 @@ function makeForkSessionLayer(options?: {
 }) {
 	const client =
 		options?.client ??
-		({
+		(makeHandlerOpenCodeAPI({
 			session: {
-				fork: vi.fn(async () => ({
+				fork: vi.fn(async () => makeSessionDetail({
 					id: "ses-child",
 					title: "Forked Session",
 					time: { created: 200, updated: 201 },
 				})),
-				message: vi.fn(async () => ({ time: { created: 123 } })),
-				messagesPage: vi.fn(async () => [{ id: "msg-last" }]),
-				get: vi.fn(async () => ({})),
+				message: vi.fn(async () => makeMessage({ time: { created: 123 } })),
+				messagesPage: vi.fn(async () => [makeMessage({ id: "msg-last" })]),
+				get: vi.fn(async () => makeSessionDetail()),
 			},
 			permission: { list: vi.fn(async () => []) },
-		} as unknown as OpenCodeAPI);
+		}));
 	const ws = options?.ws ?? mockWsHandler();
 	const _sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
@@ -1450,13 +1499,13 @@ function makeSessionLifecycleLayer(options?: {
 		options?.sessionManagerService ?? makeMockSessionManagerService();
 	const client =
 		options?.client ??
-		({
+		(makeHandlerOpenCodeAPI({
 			session: {
-				get: vi.fn(async () => ({})),
+				get: vi.fn(async () => makeSessionDetail()),
 			},
 			permission: { list: vi.fn(async () => []) },
 			question: { list: vi.fn(async () => []) },
-		} as unknown as OpenCodeAPI);
+		}));
 	const log = options?.log ?? mockLogger();
 
 	return Layer.mergeAll(
@@ -1571,19 +1620,19 @@ describe("handleForkSession", () => {
 			const setForkEntry = vi.fn(() => Effect.void);
 			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				session: {
-					fork: vi.fn(async () => ({
+					fork: vi.fn(async () => makeSessionDetail({
 						id: "ses-child",
 						title: "Forked Session",
 						time: { created: 200, updated: 201 },
 					})),
-					message: vi.fn(async () => ({ time: { created: 123 } })),
-					messagesPage: vi.fn(async () => [{ id: "msg-last" }]),
-					get: vi.fn(async () => ({})),
+					message: vi.fn(async () => makeMessage({ time: { created: 123 } })),
+					messagesPage: vi.fn(async () => [makeMessage({ id: "msg-last" })]),
+					get: vi.fn(async () => makeSessionDetail()),
 				},
 				permission: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
+			});
 			const layer = makeForkSessionLayer({
 				client,
 				ws,
@@ -1620,17 +1669,17 @@ describe("handleForkSession", () => {
 			const setForkEntry = vi.fn(() => Effect.void);
 			const pushViewerFamilies = vi.fn(() => Effect.void);
 			const ws = mockWsHandler();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				session: {
 					fork: vi.fn(async () => {
 						throw new Error("fork unavailable");
 					}),
-					message: vi.fn(async () => ({ time: { created: 123 } })),
+					message: vi.fn(async () => makeMessage({ time: { created: 123 } })),
 					messagesPage: vi.fn(async () => []),
-					get: vi.fn(async () => ({})),
+					get: vi.fn(async () => makeSessionDetail()),
 				},
 				permission: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
+			});
 			const layer = makeForkSessionLayer({
 				client,
 				ws,
@@ -1765,19 +1814,19 @@ describe("handleForkSession", () => {
 	it.effect("uses the whole-session fork fallback message as metadata", () => {
 		const legacySetForkEntry = vi.fn();
 		const serviceSetForkEntry = vi.fn(() => Effect.void);
-		const messagesPage = vi.fn(async () => [{ id: "msg-last" }]);
-		const client = {
+		const messagesPage = vi.fn(async () => [makeMessage({ id: "msg-last" })]);
+		const client = makeHandlerOpenCodeAPI({
 			session: {
-				fork: vi.fn(async () => ({
+				fork: vi.fn(async () => makeSessionDetail({
 					id: "ses-child",
 					title: "Forked Session",
 					time: { created: 200, updated: 201 },
 				})),
 				messagesPage,
-				get: vi.fn(async () => ({})),
+				get: vi.fn(async () => makeSessionDetail()),
 			},
 			permission: { list: vi.fn(async () => []) },
-		} as unknown as OpenCodeAPI;
+		});
 		const sessionMgr = mockSessionManager({
 			listSessions: vi.fn(async () => []),
 			loadPreRenderedHistory: vi.fn(async () => ({
@@ -1811,12 +1860,12 @@ describe("handleForkSession", () => {
 		() => {
 			const setForkEntry = vi.fn();
 			const fork = vi.fn();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				session: {
 					fork,
 				},
 				permission: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
+			});
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => undefined),
 			});
@@ -1924,10 +1973,10 @@ describe("handlePermissionResponse", () => {
 				getClientSession: vi.fn(() => "session-1"),
 			});
 			const log = mockLogger();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				permission: { reply: vi.fn(async () => {}) },
-				config: { get: vi.fn(async () => ({})) },
-			} as unknown as OpenCodeAPI;
+				config: { get: vi.fn(async () => makeSessionDetail()) },
+			});
 			const config = mockConfig();
 
 			const layer = Layer.mergeAll(
@@ -1980,10 +2029,10 @@ describe("handlePermissionResponse", () => {
 				getClientSession: vi.fn(() => "visible-session"),
 			});
 			const log = mockLogger();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				permission: { reply: vi.fn(async () => {}) },
-				config: { get: vi.fn(async () => ({})) },
-			} as unknown as OpenCodeAPI;
+				config: { get: vi.fn(async () => makeSessionDetail()) },
+			});
 			const config = mockConfig();
 
 			const layer = Layer.mergeAll(
@@ -2037,13 +2086,13 @@ describe("handlePermissionResponse", () => {
 				getClientSession: vi.fn(() => "session-claude"),
 			});
 			const log = mockLogger();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				permission: { reply: vi.fn(async () => {}) },
 				config: {
-					get: vi.fn(async () => ({})),
+					get: vi.fn(async () => makeSessionDetail()),
 					update: vi.fn(async () => {}),
 				},
-			} as unknown as OpenCodeAPI;
+			});
 			const config = mockConfig();
 			const engine = {
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
@@ -2093,13 +2142,13 @@ describe("handlePermissionResponse", () => {
 					getClientSession: vi.fn(() => "session-claude-in-flight"),
 				});
 				const log = mockLogger();
-				const client = {
+				const client = makeHandlerOpenCodeAPI({
 					permission: { reply: vi.fn(async () => {}) },
 					config: {
-						get: vi.fn(async () => ({})),
+						get: vi.fn(async () => makeSessionDetail()),
 						update: vi.fn(async () => {}),
 					},
-				} as unknown as OpenCodeAPI;
+				});
 				const config = mockConfig();
 				const sendStarted = yield* Deferred.make<void>();
 				const releaseSend = yield* Deferred.make<void>();
@@ -2193,10 +2242,10 @@ describe("handlePermissionResponse", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			permission: { reply: vi.fn(async () => {}) },
-			config: { get: vi.fn(async () => ({})) },
-		} as unknown as OpenCodeAPI;
+			config: { get: vi.fn(async () => makeSessionDetail()) },
+		});
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
@@ -2239,9 +2288,9 @@ describe("handlePermissionResponse", () => {
 			getClientSession: vi.fn(() => "session-1"),
 		});
 		const log = mockLogger();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			permission: { reply: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
+		});
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
@@ -2269,7 +2318,7 @@ describe("handleQuestionReject", () => {
 	it.effect("does nothing when toolId is empty", () => {
 		const ws = mockWsHandler();
 		const log = mockLogger();
-		const client = {} as unknown as OpenCodeAPI;
+		const client = makeHandlerOpenCodeAPI();
 		const sessionManagerService = makeMockSessionManagerService();
 
 		const layer = Layer.mergeAll(
@@ -2294,9 +2343,9 @@ describe("handleQuestionReject", () => {
 		});
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			question: { reject: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
@@ -2328,19 +2377,19 @@ describe("handleQuestionReject", () => {
 			});
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				question: {
 					reject: vi.fn(async () => {}),
 					list: vi.fn(async () => []),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn((sessionId: string) =>
 					Effect.succeed(
 						sessionId === "question-session" ? "claude" : "opencode",
 					),
 				),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
@@ -2465,9 +2514,9 @@ describe("handleAskUserResponse", () => {
 		});
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			question: { reply: vi.fn(async () => {}) },
-		} as unknown as OpenCodeAPI;
+		});
 
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -2511,19 +2560,19 @@ describe("handleAskUserResponse", () => {
 			});
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				question: {
 					reply: vi.fn(async () => {}),
 					list: vi.fn(async () => []),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn((sessionId: string) =>
 					Effect.succeed(
 						sessionId === "question-session" ? "claude" : "opencode",
 					),
 				),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -2728,12 +2777,12 @@ describe("handleNewSession", () => {
 			const log = mockLogger();
 			const startPolling = vi.fn();
 			const sessionManagerService = makeMockSessionManagerService();
-			const client = {
-				session: { get: vi.fn(async () => ({})) },
-				provider: { list: vi.fn(async () => ({ providers: [] })) },
+			const client = makeHandlerOpenCodeAPI({
+				session: { get: vi.fn(async () => makeSessionDetail()) },
+				provider: { list: vi.fn(async () => makeProviderListResult({ providers: [] })) },
 				permission: { list: vi.fn(async () => []) },
 				question: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
+			});
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
@@ -2825,12 +2874,12 @@ describe("handleNewSession", () => {
 			const log = mockLogger();
 			const dispatchEffect = vi.fn(() => Effect.void);
 			const startPolling = vi.fn();
-			const client = {
-				session: { get: vi.fn(async () => ({})) },
-				provider: { list: vi.fn(async () => ({ providers: [] })) },
+			const client = makeHandlerOpenCodeAPI({
+				session: { get: vi.fn(async () => makeSessionDetail()) },
+				provider: { list: vi.fn(async () => makeProviderListResult({ providers: [] })) },
 				permission: { list: vi.fn(async () => []) },
 				question: { list: vi.fn(async () => []) },
-			} as unknown as OpenCodeAPI;
+			});
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
@@ -2896,7 +2945,7 @@ describe("handleNewSession", () => {
 					withDispatchEffect({
 						dispatch: vi.fn(async () => undefined),
 						dispatchEffect,
-					} as unknown as OrchestrationEngine),
+					}),
 				),
 				Layer.succeed(
 					StatusPollerTag,
@@ -3912,12 +3961,12 @@ describe("syncInputDraftForSession", () => {
 describe("rewindSessionToMessage", () => {
 	it.effect("reverts to a specific message", () => {
 		const log = mockLogger();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			session: {
-				messages: vi.fn(async () => [{ id: "msg-1" }]),
+				messages: vi.fn(async () => [makeMessage({ id: "msg-1" })]),
 				revert: vi.fn(async () => {}),
 			},
-		} as unknown as OpenCodeAPI;
+		});
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag, client),
@@ -3946,7 +3995,7 @@ describe("handleMessage", () => {
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
-		const client = {} as unknown as OpenCodeAPI;
+		const client = makeHandlerOpenCodeAPI();
 
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -3986,7 +4035,7 @@ describe("handleMessage", () => {
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
-		const client = {} as unknown as OpenCodeAPI;
+		const client = makeHandlerOpenCodeAPI();
 
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -4019,8 +4068,8 @@ describe("handleMessage", () => {
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
-		const client = {} as unknown as OpenCodeAPI;
-		const engine = {
+		const client = makeHandlerOpenCodeAPI();
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed",
@@ -4029,7 +4078,7 @@ describe("handleMessage", () => {
 				durationMs: 0,
 				providerStateUpdates: [],
 			})),
-		} as unknown as OrchestrationEngine;
+		});
 
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -4079,9 +4128,9 @@ describe("handleMessage", () => {
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
-			const client = {} as unknown as OpenCodeAPI;
+			const client = makeHandlerOpenCodeAPI();
 			let questionPromise: Promise<Record<string, unknown>> | undefined;
-			const engine = {
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command) => {
 					if (
@@ -4113,7 +4162,7 @@ describe("handleMessage", () => {
 						providerStateUpdates: [],
 					};
 				}),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -4176,8 +4225,8 @@ describe("handleMessage", () => {
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
-			const client = {} as unknown as OpenCodeAPI;
-			const engine = {
+			const client = makeHandlerOpenCodeAPI();
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
@@ -4186,7 +4235,7 @@ describe("handleMessage", () => {
 					durationMs: 0,
 					providerStateUpdates: [],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
@@ -4336,8 +4385,8 @@ describe("handleMessage", () => {
 				pushViewerFamilies,
 			});
 			const config = mockConfig();
-			const client = {} as unknown as OpenCodeAPI;
-			const engine = {
+			const client = makeHandlerOpenCodeAPI();
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed",
@@ -4346,7 +4395,7 @@ describe("handleMessage", () => {
 					durationMs: 0,
 					providerStateUpdates: [{ key: "turnCount", value: 1 }],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -4406,8 +4455,8 @@ describe("handleMessage", () => {
 			pushViewerFamilies,
 		});
 		const config = mockConfig();
-		const client = {} as unknown as OpenCodeAPI;
-		const engine = {
+			const client = makeHandlerOpenCodeAPI();
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed",
@@ -4416,7 +4465,7 @@ describe("handleMessage", () => {
 				durationMs: 0,
 				providerStateUpdates: [{ key: "turnCount", value: 1 }],
 			})),
-		} as unknown as OrchestrationEngine;
+		});
 
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -4470,7 +4519,7 @@ describe("handleMessage", () => {
 				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const config = mockConfig();
-			const client = {} as unknown as OpenCodeAPI;
+			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
@@ -4515,7 +4564,7 @@ describe("handleMessage", () => {
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
-			const engine = {
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
 				bindSession: vi.fn(),
 				dispatch: vi.fn(async () => ({
@@ -4525,7 +4574,7 @@ describe("handleMessage", () => {
 					durationMs: 0,
 					providerStateUpdates: [],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -4605,9 +4654,9 @@ describe("handleMessage", () => {
 			const _sessionMgr = mockSessionManager();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
-			const client = {} as unknown as OpenCodeAPI;
+			const client = makeHandlerOpenCodeAPI();
 			const dispatchError = new Error("dispatch failed");
-			const engine = {
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command: { readonly type: string }) => {
 					if (command.type === "discover") {
@@ -4617,7 +4666,7 @@ describe("handleMessage", () => {
 					}
 					throw dispatchError;
 				}),
-			} as unknown as OrchestrationEngine;
+			});
 
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -4684,7 +4733,7 @@ describe("handleMessage", () => {
 		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({ models: [] })),
-		} as unknown as OrchestrationEngine);
+		});
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(

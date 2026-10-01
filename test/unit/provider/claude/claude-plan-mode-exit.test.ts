@@ -14,6 +14,7 @@ import type {
 	EventSink,
 	PermissionResponse,
 } from "../../../../src/lib/provider/types.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 
 function makeSink(): EventSink {
 	return {
@@ -38,18 +39,18 @@ function makeCtx(): ClaudeSessionContext {
 		sessionId: "sess-plan",
 		workspaceRoot: "/tmp/ws",
 		startedAt: new Date().toISOString(),
-		promptQueue: {
+		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),
 			close: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["promptQueue"],
-		query: {
+		}),
+		query: partialFake<ClaudeSessionContext["query"]>({
 			interrupt: vi.fn(),
 			close: vi.fn(),
 			setModel: vi.fn(),
 			setPermissionMode: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["query"],
+		}),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),

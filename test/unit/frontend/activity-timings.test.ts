@@ -14,6 +14,7 @@ import type {
 	MessageWithParts,
 } from "../../../src/lib/persistence/read-model-types.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const T0 = 1_789_475_347_363;
 
@@ -37,10 +38,25 @@ function part(
 	} as MessagePartRow;
 }
 
+function message(
+	value: Pick<
+		MessageWithParts,
+		| "id"
+		| "session_id"
+		| "role"
+		| "text"
+		| "created_at"
+		| "updated_at"
+		| "parts"
+	>,
+): MessageWithParts {
+	return partialFake<MessageWithParts>(value);
+}
+
 describe("activity timings", () => {
 	it("keeps per-step wall-clock for a finished turn", () => {
 		const rows: MessageWithParts[] = [
-			{
+			message({
 				id: "u1",
 				session_id: "s1",
 				role: "user",
@@ -60,8 +76,8 @@ describe("activity timings", () => {
 						created_at: T0,
 					}),
 				],
-			} as unknown as MessageWithParts,
-			{
+			}),
+			message({
 				id: "m1",
 				session_id: "s1",
 				role: "assistant",
@@ -78,7 +94,7 @@ describe("activity timings", () => {
 						sort_order: 2,
 					}),
 				],
-			} as unknown as MessageWithParts,
+			}),
 		];
 
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
@@ -104,7 +120,7 @@ describe("activity timings", () => {
 		// run concurrently. Measuring a step as "until the next step starts" hands
 		// the whole span to the last sibling and reports 0.0s for the others.
 		const rows: MessageWithParts[] = [
-			{
+			message({
 				id: "u1",
 				session_id: "s1",
 				role: "user",
@@ -124,8 +140,8 @@ describe("activity timings", () => {
 						created_at: T0,
 					}),
 				],
-			} as unknown as MessageWithParts,
-			{
+			}),
+			message({
 				id: "m1",
 				session_id: "s1",
 				role: "assistant",
@@ -152,7 +168,7 @@ describe("activity timings", () => {
 						sort_order: 2,
 					}),
 				],
-			} as unknown as MessageWithParts,
+			}),
 		];
 
 		const { messages } = messageRowsToHistory(rows, { pageSize: 50 });

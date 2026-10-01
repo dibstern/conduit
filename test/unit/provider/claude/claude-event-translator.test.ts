@@ -21,6 +21,7 @@ import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-s
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { makeSessionBackgroundLiveness } from "../../../../src/lib/session/background-liveness.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
@@ -58,18 +59,18 @@ function makeCtx(
 		sessionId: "sess-1",
 		workspaceRoot: "/tmp/ws",
 		startedAt: "2026-04-05T00:00:00.000Z",
-		promptQueue: {
+		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),
 			close: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["promptQueue"],
-		query: {
+		}),
+		query: partialFake<ClaudeSessionContext["query"]>({
 			interrupt: vi.fn(),
 			close: vi.fn(),
 			setModel: vi.fn(),
 			setPermissionMode: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["query"],
+		}),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),

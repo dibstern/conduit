@@ -99,7 +99,7 @@ describe("Claude provider instance types", () => {
 				content: [{ type: "text", text: "Hello" }],
 			},
 			parent_tool_use_id: null,
-		} as unknown as SDKUserMessage;
+		} satisfies SDKUserMessage;
 		expect(msg.type).toBe("user");
 	});
 });

@@ -21,6 +21,7 @@ import type {
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
 /** A hook marker built from characters the generated text cannot contain, so
@@ -160,8 +161,8 @@ function makeCtx(): ClaudeSessionContext {
 		sessionId: "property-session",
 		workspaceRoot: "/tmp/ws",
 		startedAt: "2026-07-16T00:00:00.000Z",
-		promptQueue: {} as unknown as ClaudeSessionContext["promptQueue"],
-		query: {} as unknown as ClaudeSessionContext["query"],
+		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({}),
+		query: partialFake<ClaudeSessionContext["query"]>({}),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),

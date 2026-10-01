@@ -26,6 +26,7 @@ import {
 	makeBaseSendTurnInput,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 
 function makeFakeSessionContext(
 	sessionId: string,
@@ -35,18 +36,18 @@ function makeFakeSessionContext(
 		sessionId,
 		workspaceRoot: "/tmp/ws",
 		startedAt: new Date().toISOString(),
-		promptQueue: {
+		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			close: vi.fn(() => Effect.void),
 			enqueue: vi.fn(() => Effect.void),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["promptQueue"],
-		query: {
-			interrupt: vi.fn(async () => {}),
+		}),
+		query: partialFake<ClaudeSessionContext["query"]>({
+			interrupt: vi.fn(async () => undefined),
 			close: vi.fn(),
 			setModel: vi.fn(),
 			setPermissionMode: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["query"],
+		}),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),

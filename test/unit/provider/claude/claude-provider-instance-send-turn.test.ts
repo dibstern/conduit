@@ -374,10 +374,10 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		const gen = (async function* () {
 			// Yield first result
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			// Wait until second turn is enqueued
 			await secondReady;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 		})();
 
 		const mockQuery = Object.assign(gen, {
@@ -520,12 +520,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			releaseTurn2 = resolve;
 		});
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await turn2Ready;
 			yield turn2MessageStart;
 			yield turn2TextStart;
 			yield turn2TextDelta;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 		})();
 		const mockQuery = Object.assign(gen, {
 			interrupt: vi.fn(async () => {}),
@@ -618,7 +618,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			tool_use_id: "toolu-task",
 			description: "Audit auth",
 			task_type: "explore",
-		} as unknown as SDKMessage;
+		} satisfies SDKMessage;
 		const result = makeSuccessResult({
 			session_id: "sdk-parent",
 			uuid: "00000000-0000-0000-0000-000000000501" as `${string}-${string}-${string}-${string}-${string}`,
@@ -780,9 +780,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			taskProgressTranslated = resolve;
 		});
 		const gen = (async function* () {
-			yield messageStart as unknown as SDKMessage;
-			yield taskToolUse as unknown as SDKMessage;
-			yield taskToolStop as unknown as SDKMessage;
+			yield messageStart;
+			yield taskToolUse;
+			yield taskToolStop;
 			yield taskStarted;
 			taskStartedTranslated?.();
 			yield taskProgress;
@@ -991,9 +991,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			taskStartedTranslated = resolve;
 		});
 		const gen = (async function* () {
-			yield messageStart as unknown as SDKMessage;
-			yield taskToolUse as unknown as SDKMessage;
-			yield taskToolStop as unknown as SDKMessage;
+			yield messageStart;
+			yield taskToolUse;
+			yield taskToolStop;
 			yield taskStarted;
 			for (const message of transcript) {
 				yield {
@@ -1097,7 +1097,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			session_id: "sdk-parent-slow-catchup",
 			uuid: "00000000-0000-0000-0000-000000000621" as `${string}-${string}-${string}-${string}-${string}`,
 		} as Record<string, unknown>);
-		const mockQuery = createMockQuery([result as unknown as SDKMessage]);
+		const mockQuery = createMockQuery([result]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 		let releaseMaterializer: (() => void) | undefined;
 		let markMaterializerStarted: (() => void) | undefined;
@@ -1150,7 +1150,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			session_id: "sdk-parent-shutdown-catchup",
 			uuid: "00000000-0000-0000-0000-000000000624" as `${string}-${string}-${string}-${string}-${string}`,
 		} as Record<string, unknown>);
-		const mockQuery = createMockQuery([result as unknown as SDKMessage]);
+		const mockQuery = createMockQuery([result]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 		let releaseMaterializer: (() => void) | undefined;
 		let markMaterializerStarted: (() => void) | undefined;
@@ -1231,9 +1231,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			releaseSecondResult = resolve;
 		});
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await secondResultReady;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 		})();
 		queryFactorySpy = vi.fn(() => createQueryFromGenerator(gen));
 		let releaseMaterializer: (() => void) | undefined;
@@ -1521,9 +1521,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					}),
 			),
 		};
-		queryFactorySpy = vi.fn(() =>
-			createMockQuery([taskStarted, result as unknown as SDKMessage]),
-		);
+		queryFactorySpy = vi.fn(() => createMockQuery([taskStarted, result]));
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
@@ -1672,7 +1670,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				makeSuccessResult({
 					session_id: parentClaudeSessionId,
 					uuid: "00000000-0000-0000-0000-000000000642" as `${string}-${string}-${string}-${string}-${string}`,
-				}) as unknown as SDKMessage,
+				}),
 			]),
 		);
 		const instance = makeTestClaudeProviderInstance({
@@ -1732,9 +1730,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			releaseOldQuery = resolve;
 		});
 		const oldGen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await oldQueryReleased;
-			yield resultFromOldQuery as unknown as SDKMessage;
+			yield resultFromOldQuery;
 		})();
 		const oldQuery = Object.assign(oldGen, {
 			interrupt: vi.fn(async () => {}),
@@ -1763,9 +1761,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			throw: oldGen.throw.bind(oldGen),
 			[Symbol.asyncIterator]: () => oldGen,
 		}) as unknown as Query;
-		const newQuery = createMockQuery([
-			resultFromNewQuery as unknown as SDKMessage,
-		]);
+		const newQuery = createMockQuery([resultFromNewQuery]);
 		queryFactorySpy = vi
 			.fn()
 			.mockReturnValueOnce(oldQuery)
@@ -1830,13 +1826,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
 				string,
 				unknown
-			>) as unknown as SDKMessage,
+			>),
 		]);
 		const newQuery = createMockQuery([
 			makeSuccessResult({
 				session_id: "sdk-session-2",
 				total_cost_usd: 0.22,
-			} as Record<string, unknown>) as unknown as SDKMessage,
+			} as Record<string, unknown>),
 		]);
 		queryFactorySpy = vi
 			.fn()
@@ -1932,13 +1928,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
 				string,
 				unknown
-			>) as unknown as SDKMessage,
+			>),
 		]);
 		const newQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-2" } as Record<
 				string,
 				unknown
-			>) as unknown as SDKMessage,
+			>),
 		]);
 		queryFactorySpy = vi
 			.fn()
@@ -1993,7 +1989,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		const gen = (async function* () {
 			await resultReady;
-			yield result as unknown as SDKMessage;
+			yield result;
 		})();
 		const query = Object.assign(gen, {
 			interrupt: vi.fn(async () => {}),
@@ -2503,11 +2499,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			resolveThird = r;
 		});
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await secondReady;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 			await thirdReady;
-			yield result3 as unknown as SDKMessage;
+			yield result3;
 		})();
 
 		const setModel = vi.fn(async () => {});
@@ -2914,9 +2910,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		>);
 
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await ready;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 		})();
 
 		const mockQuery = Object.assign(gen, {
@@ -3146,9 +3142,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await secondReady;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 		})();
 
 		const mockQuery = Object.assign(gen, {
@@ -3227,7 +3223,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			// Block forever — interrupt will close the prompt queue
 			// which causes the generator to end
 			await secondReady;
@@ -3319,9 +3315,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const gen = (async function* () {
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			await secondReady;
-			yield result2 as unknown as SDKMessage;
+			yield result2;
 		})();
 
 		const mockQuery = Object.assign(gen, {
@@ -3911,7 +3907,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const gen = (async function* () {
 			// First turn completes normally
-			yield result1 as unknown as SDKMessage;
+			yield result1;
 			// Then the SDK throws before the second message is consumed
 			throw new Error("SDK crashed between turns");
 		})();

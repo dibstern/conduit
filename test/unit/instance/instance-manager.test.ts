@@ -22,6 +22,7 @@ import type {
 	InstanceConfig,
 	OpenCodeInstance,
 } from "../../../src/lib/types.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,12 +53,12 @@ function externalConfig(
 }
 
 function createMockProcess(pid = 99999): ChildProcess {
-	return {
+	return partialFake<ChildProcess>({
 		kill: vi.fn(),
 		pid,
 		on: vi.fn(),
 		removeAllListeners: vi.fn(),
-	} as unknown as ChildProcess;
+	});
 }
 
 function createMockSpawner(mockProcess?: ChildProcess) {
@@ -992,7 +993,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1005,7 +1006,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1045,7 +1046,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1058,7 +1059,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1099,7 +1100,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1112,7 +1113,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1152,7 +1153,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1165,7 +1166,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1215,7 +1216,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1228,7 +1229,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1277,7 +1278,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1290,7 +1291,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1330,7 +1331,7 @@ describe("InstanceManager", () => {
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 55555,
 						on: vi.fn().mockImplementation(
@@ -1343,7 +1344,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1374,7 +1375,7 @@ describe("InstanceManager", () => {
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 55555,
 						on: vi.fn().mockImplementation(
@@ -1387,7 +1388,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1420,7 +1421,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1433,7 +1434,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1497,7 +1498,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1510,7 +1511,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1656,7 +1657,7 @@ describe("InstanceManager", () => {
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 55555,
 						on: vi.fn().mockImplementation(
@@ -1669,7 +1670,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1713,7 +1714,7 @@ describe("InstanceManager", () => {
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 55557,
 						on: vi.fn().mockImplementation(
@@ -1726,7 +1727,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1773,7 +1774,7 @@ describe("InstanceManager", () => {
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 55556,
 						on: vi.fn().mockImplementation(
@@ -1786,7 +1787,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);
@@ -1838,7 +1839,7 @@ describe("InstanceManager", () => {
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
 					spawnCount++;
-					const proc = {
+					const proc = partialFake<ChildProcess>({
 						kill: vi.fn(),
 						pid: 10000 + spawnCount,
 						on: vi.fn().mockImplementation(
@@ -1851,7 +1852,7 @@ describe("InstanceManager", () => {
 							},
 						),
 						removeAllListeners: vi.fn(),
-					} as unknown as ChildProcess;
+					});
 					return Promise.resolve({ pid: proc.pid, process: proc });
 				}),
 			);

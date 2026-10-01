@@ -12,16 +12,17 @@ import {
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createMockProcess(pid = 99999): ChildProcess {
-	return {
+	return partialFake<ChildProcess>({
 		kill: vi.fn(),
 		pid,
 		on: vi.fn(),
 		removeAllListeners: vi.fn(),
-	} as unknown as ChildProcess;
+	});
 }
 
 describe("InstanceManager performance", () => {

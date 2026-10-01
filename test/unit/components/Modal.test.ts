@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModalDemo from "../../../src/lib/frontend/components/ui/__fixtures__/ModalDemo.svelte";
+import { partialFake } from "../../helpers/partial-fake.js";
 import OverlappingModals from "./fixtures/OverlappingModals.svelte";
 
 describe("Modal", () => {
@@ -28,9 +29,11 @@ describe("Modal", () => {
 			this.open = false;
 			nativeOpeners.get(this)?.focus();
 		});
-		vi.spyOn(Element.prototype, "getClientRects").mockReturnValue({
-			length: 1,
-		} as unknown as DOMRectList);
+		vi.spyOn(Element.prototype, "getClientRects").mockReturnValue(
+			partialFake<DOMRectList>({
+				length: 1,
+			}),
+		);
 		vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
 			x: 100,
 			y: 100,

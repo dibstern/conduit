@@ -231,9 +231,9 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 		});
 
 		it("T19: passes networkInterfaces through to getTailscaleIP", () => {
-			const niSpy = vi.fn(() => ({
+			const niSpy = vi.fn<() => NetworkInterfaces>(() => ({
 				tailscale0: [makeIPv4("100.100.1.1")],
-			})) as unknown as () => NetworkInterfaces;
+			}));
 			hasTailscale({ networkInterfaces: niSpy });
 			expect(niSpy).toHaveBeenCalled();
 		});

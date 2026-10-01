@@ -16,6 +16,7 @@ import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestrati
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
 	EventSink,
+	PermissionResponse,
 	ProviderCapabilities,
 	ProviderInstance,
 	SendTurnInput,
@@ -208,12 +209,14 @@ describe("ProviderSideEffectReactor", () => {
 			});
 			const interactions = {
 				push: vi.fn(() => Effect.void),
-				requestPermission: vi.fn(() => Effect.succeed({ decision: "once" })),
+				requestPermission: vi.fn(() =>
+					Effect.succeed<PermissionResponse>({ decision: "once" }),
+				),
 				requestQuestion: vi.fn(() => Effect.succeed({})),
 				resolvePermission: vi.fn(() => Effect.void),
 				resolveQuestion: vi.fn(() => Effect.void),
 				noteActivity: vi.fn(),
-			} as unknown as EventSink & { noteActivity: () => void };
+			} satisfies EventSink & { noteActivity: () => void };
 			const sendTurn = vi.fn(
 				(
 					input: SendTurnInput,

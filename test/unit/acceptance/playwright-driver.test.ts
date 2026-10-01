@@ -1,12 +1,13 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Browser, Page } from "@playwright/test";
+import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
 import { afterEach, expect, test, vi } from "vitest";
 import {
 	PHONE_VIEWPORT,
 	PlaywrightDriver,
 } from "../../../acceptance/src/playwrightDriver.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 vi.mock("../../e2e/helpers/visual-helpers.js", () => ({
 	waitForFonts: vi.fn(),
@@ -35,19 +36,25 @@ test.each([
 	vi.stubEnv("VISUAL_ACCEPTANCE_BASELINE_ROOT", undefined);
 	const root = await mkdtemp(join(tmpdir(), "conduit-viewport-"));
 	vi.spyOn(process, "cwd").mockReturnValue(root);
-	const page = {
-		setViewportSize: vi.fn(),
-		locator: vi.fn(() => ({ waitFor: vi.fn() })),
-	} as unknown as Page;
-	const newContext = vi.fn(async () => ({
-		addInitScript: vi.fn(),
-		newPage: vi.fn(async () => page),
-		close: vi.fn(),
-	}));
+	const page = partialFake<Page>({
+		setViewportSize: vi.fn<Page["setViewportSize"]>(),
+		locator: vi.fn<Page["locator"]>(() =>
+			partialFake<Locator>({ waitFor: vi.fn<Locator["waitFor"]>() }),
+		),
+	});
+	const newContext = vi.fn<Browser["newContext"]>(async () =>
+		partialFake<BrowserContext>({
+			addInitScript: vi.fn<BrowserContext["addInitScript"]>(),
+			newPage: vi.fn<BrowserContext["newPage"]>(async () => page),
+			close: vi.fn<BrowserContext["close"]>(),
+		}),
+	);
 	const driver = new PlaywrightDriver();
-	vi.spyOn(driver, "launch").mockResolvedValue({
-		newContext,
-	} as unknown as Browser);
+	vi.spyOn(driver, "launch").mockResolvedValue(
+		partialFake<Browser>({
+			newContext,
+		}),
+	);
 
 	try {
 		await driver.newExecution();

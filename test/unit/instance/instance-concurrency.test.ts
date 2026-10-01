@@ -4,16 +4,17 @@
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createMockProcess(pid = 99999): ChildProcess {
-	return {
+	return partialFake<ChildProcess>({
 		kill: vi.fn(),
 		pid,
 		on: vi.fn(),
 		removeAllListeners: vi.fn(),
-	} as unknown as ChildProcess;
+	});
 }
 
 describe("InstanceManager concurrency", () => {

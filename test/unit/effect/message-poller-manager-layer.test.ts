@@ -19,6 +19,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const flushMicrotasks = async () => {
 	await Promise.resolve();
@@ -49,9 +50,9 @@ async function buildLayerHarness(options?: {
 		options?.messages ??
 			(async (sessionId: string) => [textMessage(sessionId, "")]),
 	);
-	const api = {
-		session: { messages },
-	} as unknown as OpenCodeAPI;
+	const api = partialFake<OpenCodeAPI>({
+		session: partialFake<OpenCodeAPI["session"]>({ messages }),
+	});
 	const dependencyLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(

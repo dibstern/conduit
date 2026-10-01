@@ -21,7 +21,6 @@ import { switchModelForSession } from "../../../src/lib/handlers/model.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -172,7 +171,7 @@ describe("model handlers with Effect override state", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				recordMessageActivity: vi.fn(() => Effect.void),
 			});
-			const engine = {
+			const engine = withDispatchEffect({
 				bindSession: vi.fn(),
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
 				dispatch: vi.fn(async () => ({
@@ -182,7 +181,7 @@ describe("model handlers with Effect override state", () => {
 					durationMs: 0,
 					providerStateUpdates: [],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 
 			return Effect.gen(function* () {
 				yield* switchModelForSession({

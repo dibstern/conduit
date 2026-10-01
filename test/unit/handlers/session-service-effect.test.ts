@@ -19,7 +19,6 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
@@ -41,6 +40,7 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -60,7 +60,7 @@ function makeSessionMetadataLayer(options: {
 }) {
 	const api =
 		options.api ??
-		({
+		makeHandlerOpenCodeAPI({
 			session: {
 				get: vi.fn(async () => {
 					throw new Error("session.get must come from model service");
@@ -68,7 +68,7 @@ function makeSessionMetadataLayer(options: {
 			},
 			permission: { list: vi.fn(async () => []) },
 			question: { list: vi.fn(async () => []) },
-		} as unknown as OpenCodeAPI);
+		});
 	const modelService =
 		options.modelService ??
 		({

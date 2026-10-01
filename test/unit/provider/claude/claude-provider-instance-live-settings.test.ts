@@ -172,17 +172,17 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 				}),
 		);
 		const gen = (async function* () {
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 			await waits[0];
 			yield makeSuccessResult({
 				session_id: "sdk-1",
 				total_cost_usd: 0.1,
-			}) as unknown as SDKMessage;
+			});
 			await waits[1];
 			yield makeSuccessResult({
 				session_id: "sdk-1",
 				total_cost_usd: 0.2,
-			}) as unknown as SDKMessage;
+			});
 		})();
 		const { query, applyFlagSettings } = makeMockQuery(gen);
 
@@ -252,13 +252,13 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		const gen = (async function* () {
 			yield initMessage(SONNET);
 			yield assistantMessage("a1", SONNET);
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 			await gate;
 			yield assistantMessage("a2", OPUS);
 			yield makeSuccessResult({
 				session_id: "sdk-1",
 				total_cost_usd: 0.1,
-			}) as unknown as SDKMessage;
+			});
 		})();
 		const { query, setModel } = makeMockQuery(gen);
 
@@ -314,15 +314,15 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		const gen = (async function* () {
 			yield initMessage(SONNET);
 			await gates[0];
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 			await gates[1];
 			yield assistantMessage("a2", OPUS);
 			await gates[2];
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 			await gates[3];
 			yield assistantMessage("a3", SONNET);
 			await gates[4];
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		const instance = makeTestClaudeProviderInstance({
@@ -419,9 +419,9 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			releaseNextTurn = resolve;
 		});
 		const gen = (async function* () {
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 			await nextTurnGate;
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-1" });
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		applyFlagSettings.mockRejectedValueOnce(new Error("flag settings failed"));
@@ -481,13 +481,13 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			releaseTurn2 = resolve;
 		});
 		const gen = (async function* () {
-			yield initMessage(SONNET) as unknown as SDKMessage;
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield initMessage(SONNET);
+			yield makeSuccessResult({ session_id: "sdk-1" });
 			await gate;
 			yield makeSuccessResult({
 				session_id: "sdk-1",
 				total_cost_usd: 0.1,
-			}) as unknown as SDKMessage;
+			});
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		const instance = makeTestClaudeProviderInstance({
@@ -550,12 +550,12 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			releaseTurn = resolve;
 		});
 		const gen = (async function* () {
-			yield initMessage(SONNET) as unknown as SDKMessage;
+			yield initMessage(SONNET);
 			await gate;
 			// The SDK honours the mid-turn setModel, so the rest of the turn is
 			// served by the new model and the next assistant message says so.
-			yield assistantMessage("asst-opus", OPUS) as unknown as SDKMessage;
-			yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+			yield assistantMessage("asst-opus", OPUS);
+			yield makeSuccessResult({ session_id: "sdk-1" });
 		})();
 		const { query, setModel } = makeMockQuery(gen);
 		const instance = makeTestClaudeProviderInstance({

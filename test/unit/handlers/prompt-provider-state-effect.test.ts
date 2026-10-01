@@ -26,7 +26,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
-import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -34,11 +33,9 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import type {
-	OrchestrationEngine,
-	SendTurnCommand,
-} from "../../../src/lib/provider/orchestration-engine.js";
+import type { SendTurnCommand } from "../../../src/lib/provider/orchestration-engine.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
@@ -123,12 +120,12 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const filename = join(dir, "events.db");
 			const ws = mockWsHandler();
 			const log = createSilentLogger();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				session: {
 					messagesPage: vi.fn(async () => []),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
 					status: "completed" as const,
@@ -139,7 +136,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						{ key: "resumeSessionId", value: "sdk-session-next" },
 					],
 				})),
-			} as unknown as OrchestrationEngine;
+			});
 			const persistence = makePersistenceEffectLayer(filename);
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
@@ -162,7 +159,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					PendingSendOwnershipLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(OrchestrationEngineTag, engine),
 					persistence,
 					makeIngestionLayer(persistence, ws),
 					makeOverridesStateLive(),
@@ -224,12 +221,12 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const filename = join(dir, "events.db");
 		const ws = mockWsHandler("session-history-effect");
 		const log = createSilentLogger();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			session: {
 				messagesPage: vi.fn(async () => []),
 			},
-		} as unknown as OpenCodeAPI;
-		const engine = {
+		});
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed" as const,
@@ -237,7 +234,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				tokens: { input: 0, output: 0 },
 				durationMs: 0,
 			})),
-		} as unknown as OrchestrationEngine;
+		});
 		const persistence = makePersistenceEffectLayer(filename);
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -260,7 +257,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				PendingSendOwnershipLive,
 				Layer.succeed(AgentServiceTag, makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag, engine),
 				persistence,
 				makeIngestionLayer(persistence, ws),
 				makeOverridesStateLive(),
@@ -333,12 +330,12 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const filename = join(dir, "events.db");
 		const ws = mockWsHandler("session-claude-user-effect");
 		const log = createSilentLogger();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			session: {
 				messagesPage: vi.fn(async () => []),
 			},
-		} as unknown as OpenCodeAPI;
-		const engine = {
+		});
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				status: "completed" as const,
@@ -346,7 +343,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				tokens: { input: 0, output: 0 },
 				durationMs: 0,
 			})),
-		} as unknown as OrchestrationEngine;
+		});
 		const persistence = makePersistenceEffectLayer(filename);
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -369,7 +366,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				PendingSendOwnershipLive,
 				Layer.succeed(AgentServiceTag, makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag, engine),
 				persistence,
 				makeIngestionLayer(persistence, ws),
 				makeOverridesStateLive(),
@@ -419,12 +416,12 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const persistence = makePersistenceEffectLayer(filename);
 			const ws = mockWsHandler("session-claude-sink-effect");
 			const log = createSilentLogger();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				session: {
 					messagesPage: vi.fn(async () => []),
 				},
-			} as unknown as OpenCodeAPI;
-			const engine = {
+			});
+			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async (command: SendTurnCommand) => {
 					await Effect.runPromise(
@@ -462,7 +459,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						durationMs: 0,
 					};
 				}),
-			} as unknown as OrchestrationEngine;
+			});
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
@@ -484,7 +481,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					PendingSendOwnershipLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(OrchestrationEngineTag, engine),
 					persistence,
 					makeIngestionLayer(persistence, ws),
 					makeOverridesStateLive(),
@@ -547,12 +544,12 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const persistence = makePersistenceEffectLayer(filename);
 		const ws = mockWsHandler("parent-session");
 		const log = createSilentLogger();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			session: {
 				messagesPage: vi.fn(async () => []),
 			},
-		} as unknown as OpenCodeAPI;
-		const engine = {
+		});
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async (command: SendTurnCommand) => {
 				await Effect.runPromise(
@@ -605,7 +602,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					durationMs: 0,
 				};
 			}),
-		} as unknown as OrchestrationEngine;
+		});
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -627,7 +624,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				PendingSendOwnershipLive,
 				Layer.succeed(AgentServiceTag, makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+				Layer.succeed(OrchestrationEngineTag, engine),
 				persistence,
 				makeIngestionLayer(persistence, ws),
 				makeOverridesStateLive(),

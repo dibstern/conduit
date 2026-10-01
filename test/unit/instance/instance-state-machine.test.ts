@@ -11,6 +11,7 @@ import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig } from "../../../src/lib/types.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,19 +22,19 @@ function managedConfig(
 }
 
 function createMockProcess(pid = 99999): ChildProcess {
-	return {
+	return partialFake<ChildProcess>({
 		kill: vi.fn(),
 		pid,
 		on: vi.fn(),
 		removeAllListeners: vi.fn(),
-	} as unknown as ChildProcess;
+	});
 }
 
 /** Create a mock spawner that also captures the exit callback. */
 function createExitCapturingSpawner(pid = 99999) {
 	let exitCb: ((code: number | null, signal: string | null) => void) | null =
 		null;
-	const proc = {
+	const proc = partialFake<ChildProcess>({
 		kill: vi.fn(),
 		pid,
 		on: vi.fn().mockImplementation(
@@ -47,7 +48,7 @@ function createExitCapturingSpawner(pid = 99999) {
 			},
 		),
 		removeAllListeners: vi.fn(),
-	} as unknown as ChildProcess;
+	});
 
 	const spawner = vi.fn().mockResolvedValue({ pid: proc.pid, process: proc });
 

@@ -380,9 +380,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			);
 
 			// Result
-			yield makeSuccessResult({
-				session_id: "sdk-sess-perm-1",
-			} as Record<string, unknown>) as unknown as SDKMessage;
+			yield makeSuccessResult({ session_id: "sdk-sess-perm-1" });
 		})();
 
 		const mockQuery = Object.assign(gen, {

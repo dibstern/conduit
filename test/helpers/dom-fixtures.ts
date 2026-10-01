@@ -60,7 +60,7 @@ export function createMockWebSocket(sentMessages: unknown[] = []): WebSocket {
 		OPEN: 1,
 		CLOSING: 2,
 		CLOSED: 3,
-	} as unknown as WebSocket;
+	} satisfies WebSocket;
 }
 
 /**

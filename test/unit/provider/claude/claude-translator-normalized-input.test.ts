@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
+import { partialFake } from "../../../helpers/partial-fake.js";
 
 function makeCtx(
 	overrides: Partial<ClaudeSessionContext> = {},
@@ -11,18 +12,18 @@ function makeCtx(
 		sessionId: "ses-1",
 		workspaceRoot: "/tmp/ws",
 		startedAt: "2026-04-22T00:00:00.000Z",
-		promptQueue: {
+		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),
 			close: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["promptQueue"],
-		query: {
+		}),
+		query: partialFake<ClaudeSessionContext["query"]>({
 			interrupt: vi.fn(),
 			close: vi.fn(),
 			setModel: vi.fn(),
 			setPermissionMode: vi.fn(),
 			[Symbol.asyncIterator]: vi.fn(),
-		} as unknown as ClaudeSessionContext["query"],
+		}),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),

@@ -13,7 +13,6 @@ import {
 	handleGetProjects,
 } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
@@ -81,7 +80,7 @@ describe("settings handler wire snapshots", () => {
 		const api = makeSettingsApi({
 			commands: vi.fn(async () => [{ name: "opencode-only" }]),
 		});
-		const engine = {
+		const engine = withDispatchEffect({
 			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			dispatch: vi.fn(async () => ({
 				models: [],
@@ -94,7 +93,7 @@ describe("settings handler wire snapshots", () => {
 					},
 				],
 			})),
-		} as unknown as OrchestrationEngine;
+		});
 
 		await Effect.runPromise(
 			handleGetCommands("client-1", {}).pipe(

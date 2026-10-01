@@ -8,7 +8,6 @@ import {
 	getContextWindow,
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockLogger,
@@ -35,7 +34,7 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 					},
 				],
 			})),
-		} as unknown as OrchestrationEngine);
+		});
 
 		return Effect.gen(function* () {
 			yield* setModel("session-1", {

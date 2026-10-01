@@ -59,6 +59,7 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
@@ -184,9 +185,9 @@ const withHandlerStack = async (
 };
 
 it("answering an OpenCode question resolves the row and announces the advance", async () => {
-	const client = {
+	const client = makeHandlerOpenCodeAPI({
 		question: { reply: vi.fn(async () => undefined) },
-	} as unknown as OpenCodeAPI;
+	});
 
 	await withHandlerStack(client, ({ advances, pendingQuestions }) =>
 		Effect.gen(function* () {
@@ -211,9 +212,9 @@ it("answering an OpenCode question resolves the row and announces the advance", 
 });
 
 it("skipping an OpenCode question resolves the row and announces the advance", async () => {
-	const client = {
+	const client = makeHandlerOpenCodeAPI({
 		question: { reject: vi.fn(async () => undefined) },
-	} as unknown as OpenCodeAPI;
+	});
 
 	await withHandlerStack(client, ({ advances, pendingQuestions }) =>
 		Effect.gen(function* () {
@@ -238,7 +239,7 @@ it("the recovery path resolves the question it actually replied to", async () =>
 	// The direct reply fails and the handler falls back to whatever OpenCode
 	// still has pending. The durable resolution has to name that id, not the one
 	// the browser sent, or the row it clears is the wrong one.
-	const client = {
+	const client = makeHandlerOpenCodeAPI({
 		question: {
 			reply: vi
 				.fn()
@@ -249,7 +250,7 @@ it("the recovery path resolves the question it actually replied to", async () =>
 				{ id: QUESTION, sessionID: SESSION },
 			]),
 		},
-	} as unknown as OpenCodeAPI;
+	});
 
 	await withHandlerStack(client, ({ pendingQuestions }) =>
 		Effect.gen(function* () {

@@ -17,6 +17,10 @@ import {
 	SessionCommandError,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type {
+	Message,
+	SessionDetail,
+} from "../../../src/lib/instance/sdk-types.js";
 import type { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
@@ -36,6 +40,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 // The seam's contract: append the canonical event, project it strictly, then
 // sync upstream best-effort. These tests pin the parts a caller cannot see —
@@ -44,12 +49,18 @@ describe("applySessionCommand", () => {
 	const makeMockApi = () => ({
 		session: {
 			list: vi.fn(async () => []),
-			create: vi.fn(async () => ({ id: "s-new", title: "New" })),
+			create: vi.fn(async () =>
+				partialFake<SessionDetail>({ id: "s-new", title: "New" }),
+			),
 			delete: vi.fn(async () => undefined),
 			update: vi.fn(async () => undefined),
-			fork: vi.fn(async () => ({ id: "ses-fork", title: "Forked" })),
-			message: vi.fn(async () => ({ id: "msg-7", time: { created: 123 } })),
-			messagesPage: vi.fn(async () => [{ id: "msg-7" }]),
+			fork: vi.fn(async () =>
+				partialFake<SessionDetail>({ id: "ses-fork", title: "Forked" }),
+			),
+			message: vi.fn(async () =>
+				partialFake<Message>({ id: "msg-7", time: { created: 123 } }),
+			),
+			messagesPage: vi.fn(async () => [partialFake<Message>({ id: "msg-7" })]),
 		},
 	});
 
@@ -79,7 +90,12 @@ describe("applySessionCommand", () => {
 			Effect.provide(
 				Layer.mergeAll(
 					persistenceLayer,
-					Layer.succeed(OpenCodeAPITag, api as unknown as OpenCodeAPI),
+					Layer.succeed(
+						OpenCodeAPITag,
+						partialFake<OpenCodeAPI>({
+							session: partialFake<OpenCodeAPI["session"]>(api.session),
+						}),
+					),
 					Layer.succeed(LoggerTag, log),
 					// An empty config dir keeps provider routing at its defaults instead
 					// of reading the developer's real ~/.config/conduit.
@@ -138,7 +154,9 @@ describe("applySessionCommand", () => {
 							yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
 						VALUES ('b', 'ses-parent', 'assistant', 200, 200), ('c', 'ses-parent', 'user', 300, 300)`;
 						}
-						api.session.messagesPage.mockResolvedValue([{ id: "b" }]);
+						api.session.messagesPage.mockResolvedValue([
+							partialFake<Message>({ id: "b" }),
+						]);
 						api.session.message.mockRejectedValue(
 							new Error("timestamp unavailable"),
 						);

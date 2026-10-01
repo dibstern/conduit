@@ -28,6 +28,7 @@ import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const openState = 1;
 const closedState = 3;
@@ -46,8 +47,8 @@ const makeUpstream = (
 });
 
 const makeApi = (overrides?: Partial<OpenCodeAPI["pty"]>): OpenCodeAPI =>
-	({
-		pty: {
+	partialFake<OpenCodeAPI>({
+		pty: partialFake<OpenCodeAPI["pty"]>({
 			create: vi.fn(async () => ({
 				id: "pty-1",
 				title: "Shell",
@@ -60,8 +61,8 @@ const makeApi = (overrides?: Partial<OpenCodeAPI["pty"]>): OpenCodeAPI =>
 			delete: vi.fn(async () => undefined),
 			resize: vi.fn(async () => undefined),
 			...overrides,
-		},
-	}) as unknown as OpenCodeAPI;
+		}),
+	});
 
 const makeLayer = (options?: {
 	readonly api?: OpenCodeAPI;

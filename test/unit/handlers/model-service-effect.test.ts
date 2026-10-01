@@ -27,12 +27,12 @@ import {
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
-import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -418,7 +418,7 @@ describe("model handlers with Effect-native model service", () => {
 			const projectDir = mkdtempSync(join(tmpdir(), "conduit-model-live-"));
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-model-live-cfg-"));
 			const logger = makeMockLogger();
-			const api = {
+			const api = makeHandlerOpenCodeAPI({
 				config: {
 					update: vi.fn(async (patch: Record<string, unknown>) => {
 						await writeFile(
@@ -435,9 +435,16 @@ describe("model handlers with Effect-native model service", () => {
 					})),
 				},
 				session: {
-					get: vi.fn(async () => ({})),
+					get: vi.fn(async () => ({
+						id: "session",
+						projectID: "project",
+						directory: projectDir,
+						title: "Session",
+						version: "1.0.0",
+						time: { created: 0, updated: 0 },
+					})),
 				},
-			} as unknown as OpenCodeAPI;
+			});
 
 			const layer = OpenCodeModelServiceLive.pipe(
 				Layer.provide(

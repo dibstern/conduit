@@ -27,10 +27,10 @@ import {
 	cancelSessionById,
 	handleMessage,
 } from "../../../src/lib/handlers/prompt.js";
-import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
@@ -68,9 +68,9 @@ function makeWsHandler() {
 describe("prompt processing timeouts through Effect state", () => {
 	it.effect("removes pending send ownership when processing times out", () => {
 		const ws = makeWsHandler();
-		const client = {
+		const client = makeHandlerOpenCodeAPI({
 			session: { prompt: vi.fn(async () => undefined) },
-		} as unknown as OpenCodeAPI;
+		});
 		const persistence = makePersistenceEffectLayer(":memory:");
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -122,9 +122,9 @@ describe("prompt processing timeouts through Effect state", () => {
 		"clears the processing timeout when the active prompt is cancelled",
 		() => {
 			const ws = makeWsHandler();
-			const client = {
+			const client = makeHandlerOpenCodeAPI({
 				session: { abort: vi.fn(async () => undefined) },
-			} as unknown as OpenCodeAPI;
+			});
 			const persistence = makePersistenceEffectLayer(":memory:");
 			const baseLayer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),

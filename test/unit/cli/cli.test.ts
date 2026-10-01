@@ -122,7 +122,7 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			expect(args[field]).toBe(expected);
 		});
 
-		it.each([
+		const parseCases: Array<[string[], Record<string, unknown>]> = [
 			[["--pin", "123456"], { command: "pin", pin: "123456" }],
 			[["--pin"], { command: "pin", pin: undefined }],
 			[["--add", "/some/path"], { command: "add", addPath: "/some/path" }],
@@ -131,8 +131,11 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			[["--port", "3000"], { port: 3000 }],
 			[["-p", "8080"], { port: 8080 }],
 			[["--oc-port", "5000"], { ocPort: 5000 }],
-		] as const)("parseArgs(%j) sets expected fields", (argv, expected) => {
-			const args = parseArgs(argv as unknown as string[]);
+		];
+		it.each(
+			parseCases,
+		)("parseArgs(%j) sets expected fields", (argv, expected) => {
+			const args = parseArgs(argv);
 			for (const [key, value] of Object.entries(expected)) {
 				expect(args[key as keyof typeof args]).toBe(value);
 			}
@@ -158,13 +161,16 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			expect(args.noUpdate).toBe(true);
 		});
 
-		it.each([
+		const defaultCases: Array<[string[], "port" | "ocPort", number]> = [
 			[["--port", "not-a-number"], "port", 2633],
 			[["--port", "99999"], "port", 2633],
 			[["--port"], "port", 2633],
 			[["--oc-port"], "ocPort", 4096],
-		] as const)("keeps default when parseArgs(%j).%s should be %d", (argv, field, expected) => {
-			const args = parseArgs(argv as unknown as string[]);
+		];
+		it.each(
+			defaultCases,
+		)("keeps default when parseArgs(%j).%s should be %d", (argv, field, expected) => {
+			const args = parseArgs(argv);
 			expect(args[field]).toBe(expected);
 		});
 	});
@@ -1727,11 +1733,14 @@ describe("T17-T20: --log-level, --log-format, --host, --restart-daemon", () => {
 		expect(parseArgs(["--log-level", level]).logLevel).toBe(level);
 	});
 
-	it.each([
+	const invalidLogLevelCases: Array<[string[], string]> = [
 		[["--log-level", "trace"], "info"],
 		[["--log-level"], "info"],
-	] as const)("--log-level rejects invalid/missing value: %j → %s", (argv, expected) => {
-		expect(parseArgs(argv as unknown as string[]).logLevel).toBe(expected);
+	];
+	it.each(
+		invalidLogLevelCases,
+	)("--log-level rejects invalid/missing value: %j → %s", (argv, expected) => {
+		expect(parseArgs(argv).logLevel).toBe(expected);
 	});
 
 	it.each([
@@ -1741,11 +1750,14 @@ describe("T17-T20: --log-level, --log-format, --host, --restart-daemon", () => {
 		expect(parseArgs(["--log-format", fmt]).logFormat).toBe(fmt);
 	});
 
-	it.each([
+	const invalidLogFormatCases: Array<[string[]]> = [
 		[["--log-format", "csv"]],
 		[["--log-format"]],
-	] as const)("--log-format rejects invalid/missing value: %j", (argv) => {
-		expect(parseArgs(argv as unknown as string[]).logFormat).toBeUndefined();
+	];
+	it.each(
+		invalidLogFormatCases,
+	)("--log-format rejects invalid/missing value: %j", (argv) => {
+		expect(parseArgs(argv).logFormat).toBeUndefined();
 	});
 
 	it.each([

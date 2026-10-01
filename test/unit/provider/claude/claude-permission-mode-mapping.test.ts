@@ -72,7 +72,7 @@ function makeMockQuery(gen: AsyncGenerator<SDKMessage, void, unknown>) {
 
 const singleTurn = () =>
 	(async function* () {
-		yield makeSuccessResult({ session_id: "sdk-1" }) as unknown as SDKMessage;
+		yield makeSuccessResult({ session_id: "sdk-1" });
 	})();
 
 /** conduit mode -> the SDK mode the live query must actually be put into. */

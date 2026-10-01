@@ -39,6 +39,7 @@ import {
 	makeOverridesStateLive,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
@@ -63,16 +64,22 @@ import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 describe("SessionManager Effect", () => {
-	const makeMockApi = () => ({
-		session: {
-			list: vi.fn(async () => [{ id: "s1", title: "Test" }]),
-			create: vi.fn(async () => ({ id: "s-new", title: "New" })),
-			delete: vi.fn(async () => undefined),
-			update: vi.fn(async () => undefined),
-		},
-	});
+	const makeMockApi = () =>
+		partialFake<OpenCodeAPI>({
+			session: partialFake<OpenCodeAPI["session"]>({
+				list: vi.fn(async () => [
+					partialFake<SessionDetail>({ id: "s1", title: "Test" }),
+				]),
+				create: vi.fn(async () =>
+					partialFake<SessionDetail>({ id: "s-new", title: "New" }),
+				),
+				delete: vi.fn(async () => undefined),
+				update: vi.fn(async () => undefined),
+			}),
+		});
 
 	const makeTestLayer = (
 		mockApi: ReturnType<typeof makeMockApi>,
@@ -86,7 +93,7 @@ describe("SessionManager Effect", () => {
 		return Layer.mergeAll(
 			makeSessionManagerStateLive(),
 			PendingSendOwnershipLive,
-			Layer.succeed(OpenCodeAPITag, mockApi as unknown as OpenCodeAPI),
+			Layer.succeed(OpenCodeAPITag, mockApi),
 			makePersistenceEffectLayer(":memory:"),
 			configLayer,
 			loggerLayer,

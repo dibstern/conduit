@@ -116,6 +116,7 @@ import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
 import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
+import { partialFake } from "./partial-fake.js";
 
 // ─── Sub-component factories ────────────────────────────────────────────────
 
@@ -262,7 +263,7 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 }
 
 function createMockPtyManager(): HandlerDeps["ptyManager"] {
-	return {
+	return partialFake<HandlerDeps["ptyManager"]>({
 		sendInput: vi.fn(),
 		closeSession: vi.fn(),
 		hasSession: vi.fn().mockReturnValue(false),
@@ -271,7 +272,7 @@ function createMockPtyManager(): HandlerDeps["ptyManager"] {
 		getSession: vi.fn().mockReturnValue(undefined),
 		registerSession: vi.fn(),
 		sessionCount: 0,
-	} as unknown as HandlerDeps["ptyManager"];
+	});
 }
 
 function createMockConfig(): HandlerDeps["config"] {
@@ -281,7 +282,7 @@ function createMockConfig(): HandlerDeps["config"] {
 		projectDir: "/test/project",
 		slug: "test-project",
 		persistenceDbPath: "/test/project/.conduit/events.db",
-	} as unknown as HandlerDeps["config"];
+	} satisfies HandlerDeps["config"];
 }
 
 function createMockTranslator(): SSEWiringDeps["translator"] {
@@ -346,15 +347,15 @@ export function createMockProjectRelay(
 ): ProjectRelay {
 	return {
 		settleIdleSessions: () => Effect.succeed(0),
-		wsHandler: {
+		wsHandler: partialFake<ProjectRelay["wsHandler"]>({
 			...createMockWsHandlerFull(),
 			attach: vi.fn(() => () => {}),
-		} as unknown as ProjectRelay["wsHandler"],
+		}),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
 			drain: vi.fn().mockResolvedValue(undefined),
-		} as unknown as ProjectRelay["rpcWsHandler"],
-		sseStream: {
+		} satisfies ProjectRelay["rpcWsHandler"],
+		sseStream: partialFake<ProjectRelay["sseStream"]>({
 			connectEffect: vi.fn(),
 			disconnectEffect: vi.fn(),
 			drainEffect: vi.fn(),
@@ -366,9 +367,9 @@ export function createMockProjectRelay(
 			})),
 			isConnected: vi.fn(),
 			on: vi.fn(),
-		} as unknown as ProjectRelay["sseStream"],
-		client: createMockClient() as unknown as ProjectRelay["client"],
-		translator: {} as unknown as ProjectRelay["translator"],
+		}),
+		client: createMockClient(),
+		translator: partialFake<ProjectRelay["translator"]>({}),
 		orchestration: {
 			engine: {
 				dispatch: vi.fn().mockResolvedValue({
@@ -767,7 +768,7 @@ export function makeMockLogger(): Logger {
 export function makeMockPtyManager(
 	overrides?: Partial<PtyManager>,
 ): PtyManager {
-	return {
+	return partialFake<PtyManager>({
 		sendInput: vi.fn(),
 		closeSession: vi.fn(),
 		hasSession: vi.fn(() => false),
@@ -777,7 +778,7 @@ export function makeMockPtyManager(
 		registerSession: vi.fn(),
 		sessionCount: 0,
 		...overrides,
-	} as unknown as PtyManager;
+	});
 }
 
 /** Create a mock StatusPoller service for Effect tests. */

@@ -1,23 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
+import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type {
+	SessionDetail,
+	SessionStatus,
+} from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 describe("SessionManager.listSessions — status", () => {
 	let mgr: SessionManager;
 	const mockSessions = [
-		{ id: "sess_1", title: "Session 1", time: { updated: 1000 } },
-		{ id: "sess_2", title: "Session 2", time: { updated: 2000 } },
-		{ id: "sess_3", title: "Session 3", time: { updated: 500 } },
+		partialFake<SessionDetail>({
+			id: "sess_1",
+			title: "Session 1",
+			time: partialFake<SessionDetail["time"]>({ updated: 1000 }),
+		}),
+		partialFake<SessionDetail>({
+			id: "sess_2",
+			title: "Session 2",
+			time: partialFake<SessionDetail["time"]>({ updated: 2000 }),
+		}),
+		partialFake<SessionDetail>({
+			id: "sess_3",
+			title: "Session 3",
+			time: partialFake<SessionDetail["time"]>({ updated: 500 }),
+		}),
 	];
 
 	beforeEach(() => {
 		mgr = new SessionManager({
-			client: {
-				session: {
-					list: vi.fn().mockResolvedValue(mockSessions),
-				},
-			} as unknown as ConstructorParameters<typeof SessionManager>[0]["client"],
+			client: partialFake<OpenCodeAPI>({
+				session: partialFake<OpenCodeAPI["session"]>({
+					list: vi
+						.fn<OpenCodeAPI["session"]["list"]>()
+						.mockResolvedValue(mockSessions),
+				}),
+			}),
 			log: createSilentLogger(),
 		});
 	});

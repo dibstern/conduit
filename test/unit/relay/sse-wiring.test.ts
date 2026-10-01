@@ -15,6 +15,7 @@ import {
 import { TRUNCATION_THRESHOLD } from "../../../src/lib/relay/truncate-content.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 import {
 	makeSSETestServices,
 	runSSEEvent,
@@ -598,13 +599,15 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("sends push notification for permission.asked", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 
 		const event: OpenCodeEvent = {
@@ -626,13 +629,15 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("sends push notification for question.asked", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 
 		const event: OpenCodeEvent = {
@@ -654,13 +659,15 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("keeps anonymous done status hints on the UI channel", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -682,13 +689,15 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("sends push notification for error events", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = {
 			type: "error",
@@ -722,13 +731,15 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("sends push notification for done/error on ANY session (not just active)", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = {
 			type: "done",
@@ -1215,13 +1226,15 @@ describe("handleSSEEventEffect – tool_result truncation", () => {
 
 describe("notification routing: push gating via resolveNotifications", () => {
 	it("does NOT call push for non-notification-worthy events (delta)", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		vi.mocked(deps.translator.translate).mockReturnValue({
@@ -1241,13 +1254,15 @@ describe("notification routing: push gating via resolveNotifications", () => {
 	});
 
 	it("calls push for done event from root session (no parent)", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
 		});
@@ -1278,13 +1293,15 @@ describe("notification routing: push gating via resolveNotifications", () => {
 	});
 
 	it("does NOT call push for done event from subagent session", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
 		});
@@ -1347,13 +1364,15 @@ describe("notification routing: push gating via resolveNotifications", () => {
 	});
 
 	it("DOES call push for subagent error (errors always notify)", async () => {
-		const mockPush = {
-			sendToAll: vi.fn().mockResolvedValue({
-				delivered: ["device-1"],
-				expired: [],
-				failed: [],
-			}),
-		} as unknown as NonNullable<SSEWiringDeps["pushManager"]>;
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
 		const deps = createMockSSEWiringDeps({
 			pushManager: mockPush,
 		});
