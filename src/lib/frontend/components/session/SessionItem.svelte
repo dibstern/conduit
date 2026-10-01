@@ -490,8 +490,8 @@
 	}
 
 	function swipeToneClass(direction: "settle" | "snooze", stage: string): string {
-		if (stage === "commit") return direction === "settle" ? "bg-success text-bg" : "bg-accent text-bg";
-		return direction === "settle" ? "bg-success/15 text-success" : "bg-accent/15 text-accent";
+		if (stage === "commit") return direction === "settle" ? "bg-success text-bg" : "bg-fill-indigo text-on-fill";
+		return direction === "settle" ? "bg-success/15 text-success" : "bg-status-indigo/15 text-status-indigo";
 	}
 
 	function swipeIcon(verb: string): "check" | "moon" | "undo" {
