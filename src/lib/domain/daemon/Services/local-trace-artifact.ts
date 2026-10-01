@@ -261,8 +261,7 @@ const truncateString = (value: string, maxLength: number): string => {
 	return `${value.slice(0, Math.max(0, maxLength))}...[truncated:${value.length - Math.max(0, maxLength)}]`;
 };
 
-const jsonLine = (record: Record<string, unknown>): string =>
-	`${JSON.stringify(record)}\n`;
+const jsonLine = (record: object): string => `${JSON.stringify(record)}\n`;
 
 const isLikelyProviderPayloadKey = (key: string): boolean =>
 	PROVIDER_PAYLOAD_KEYS.has(key.toLowerCase());
@@ -281,7 +280,7 @@ const safeJsonLine = (record: TraceRecord, maxBytes: number): string => {
 			}),
 		})),
 	};
-	let line = jsonLine(compacted as unknown as Record<string, unknown>);
+	let line = jsonLine(compacted);
 	if (Buffer.byteLength(line) <= maxBytes) return line;
 
 	const summarized: TraceRecord = {
@@ -298,7 +297,7 @@ const safeJsonLine = (record: TraceRecord, maxBytes: number): string => {
 				? compacted.exit
 				: { _tag: compacted.exit._tag, cause: "[truncated]" },
 	};
-	line = jsonLine(summarized as unknown as Record<string, unknown>);
+	line = jsonLine(summarized);
 	if (Buffer.byteLength(line) <= maxBytes) return line;
 
 	const minimum = {

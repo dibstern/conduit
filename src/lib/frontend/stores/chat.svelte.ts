@@ -154,9 +154,7 @@ for (const methodName of Object.keys(
 	EMPTY_MESSAGES_RAW.toolRegistry,
 ) as (keyof ToolRegistry)[]) {
 	if (typeof EMPTY_MESSAGES_RAW.toolRegistry[methodName] === "function") {
-		(EMPTY_MESSAGES_RAW.toolRegistry as unknown as Record<string, unknown>)[
-			methodName
-		] = throwingRegistryStub;
+		EMPTY_MESSAGES_RAW.toolRegistry[methodName] = throwingRegistryStub;
 	}
 }
 export const EMPTY_ACTIVITY: SessionActivity =

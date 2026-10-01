@@ -186,9 +186,11 @@ export function clearDebugLog(): void {
 // Always available in browser console, even when debug UI is off.
 
 if (typeof window !== "undefined") {
-	(window as unknown as Record<string, unknown>)["__wsDebug"] = () => {
-		const snap = getDebugSnapshot();
-		console.table(snap.events);
-		return snap;
-	};
+	Object.assign(window, {
+		__wsDebug: () => {
+			const snap = getDebugSnapshot();
+			console.table(snap.events);
+			return snap;
+		},
+	});
 }

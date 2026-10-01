@@ -48,11 +48,11 @@ export class GapEndpoints {
 		};
 	}
 
-	async listPendingPermissions(): Promise<unknown[]> {
+	async listPendingPermissions(): Promise<readonly unknown[]> {
 		return this.get("/permission", decodeOpenCodePendingPermissionListResponse);
 	}
 
-	async listPendingQuestions(): Promise<unknown[]> {
+	async listPendingQuestions(): Promise<readonly unknown[]> {
 		return this.get("/question", decodeOpenCodePendingQuestionListResponse);
 	}
 
@@ -76,9 +76,12 @@ export class GapEndpoints {
 		);
 	}
 
-	async listSkills(
-		directory?: string,
-	): Promise<Array<{ name: string; description?: string }>> {
+	async listSkills(directory?: string): Promise<
+		ReadonlyArray<{
+			readonly name: string;
+			readonly description?: string | undefined;
+		}>
+	> {
 		const path = directory
 			? `/skill?directory=${encodeURIComponent(directory)}`
 			: "/skill";
@@ -88,7 +91,7 @@ export class GapEndpoints {
 	async getMessagesPage(
 		sessionId: string,
 		options?: { limit?: number; before?: string },
-	): Promise<unknown[]> {
+	): Promise<readonly unknown[]> {
 		const params = new URLSearchParams();
 		if (options?.limit) params.set("limit", String(options.limit));
 		if (options?.before) params.set("before", options.before);

@@ -115,6 +115,7 @@ import { serializePriorConversation } from "./history-transcript.js";
 import { toSdkPermissionMode } from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
+	CanUseTool,
 	ClaudeSessionContext,
 	PromptQueueController,
 	Query,
@@ -437,15 +438,22 @@ export class ClaudeProviderRuntime {
 					typeof input.providerState["resumeSessionId"] === "string"
 						? input.providerState["resumeSessionId"]
 						: undefined;
-				// 4. Create session context (query assigned after creation below).
-				const ctx: ClaudeSessionContext = {
+				let ctx: ClaudeSessionContext | undefined;
+				const canUseTool: CanUseTool = async (
+					toolName,
+					toolInput,
+					permissionOptions,
+				) => {
+					if (!ctx)
+						return { behavior: "deny", message: "Claude session is not ready" };
+					return bridge.canUseTool(ctx, toolName, toolInput, permissionOptions);
+				};
+				const context = {
 					sessionId,
 					workspaceRoot: input.workspaceRoot,
 					startedAt: new Date().toISOString(),
 					promptQueue: queue,
 					turnAdmissionSemaphore,
-					// Placeholder — immediately overwritten after query factory call.
-					query: undefined as unknown as ClaudeSessionContext["query"],
 					pendingApprovals: new Map(),
 					pendingQuestions: new Map(),
 					inFlightTools: new Map(),
@@ -467,7 +475,7 @@ export class ClaudeProviderRuntime {
 					stopped: false,
 				};
 
-				// 5. Build SDK options — canUseTool captures ctx by reference.
+				// 5. Build SDK options — canUseTool resolves the complete context lazily.
 				const options = yield* Effect.try({
 					try: () =>
 						validateOptionsJsonShape({
@@ -484,7 +492,7 @@ export class ClaudeProviderRuntime {
 								this.claudeSettingsOverrides?.(),
 							),
 							settingSources: ["user", "project", "local"],
-							canUseTool: bridge.createCanUseTool(ctx),
+							canUseTool,
 							model: apiModelId,
 							// The SDK refuses bypassPermissions, at launch or via a later
 							// setPermissionMode, unless the query opted in here. Opting in
@@ -504,7 +512,7 @@ export class ClaudeProviderRuntime {
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 
-				// 6. Call query factory and assign to context.
+				// 6. Call query factory, then construct the complete session context.
 				const query = yield* Effect.try({
 					try: () =>
 						this.queryFactory({
@@ -514,7 +522,7 @@ export class ClaudeProviderRuntime {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				(ctx as { query: ClaudeSessionContext["query"] }).query = query;
+				ctx = { ...context, query };
 
 				// 7. Store session.
 				yield* setSession(this.stateRef, sessionId, ctx);

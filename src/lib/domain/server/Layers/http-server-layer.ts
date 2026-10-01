@@ -68,16 +68,11 @@ export const HttpServerConfigFromEnv: Layer.Layer<
  * When TLS is enabled, reads cert/key from disk synchronously (they are
  * needed at server construction time).
  */
-const makeServerFactory = (
-	config: HttpServerConfig,
-): (() => ReturnType<typeof createHttpServer>) => {
+const makeServerFactory = (config: HttpServerConfig) => {
 	if (config.tls && config.tlsCertPath && config.tlsKeyPath) {
 		const cert = readFileSync(config.tlsCertPath);
 		const key = readFileSync(config.tlsKeyPath);
-		return () =>
-			createHttpsServer({ key, cert }) as unknown as ReturnType<
-				typeof createHttpServer
-			>;
+		return () => createHttpsServer({ key, cert });
 	}
 	return () => createHttpServer();
 };

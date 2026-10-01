@@ -94,13 +94,13 @@ function runSdkInWorker<T>(
 export const defaultClaudeSessionForkSdk: ClaudeSessionForkSdk = {
 	readTranscript: async (sessionId, options) => {
 		const entries = await runSdkInWorker<
-			{ type: string; isSidechain?: boolean }[]
+			Array<SessionMessage & { readonly isSidechain?: boolean }>
 		>("readTranscript", sessionId, options);
 		return entries.filter(
 			(entry) =>
 				(entry.type === "user" || entry.type === "assistant") &&
 				entry.isSidechain !== true,
-		) as unknown as SessionMessage[];
+		);
 	},
 	forkSession: (sessionId, options) =>
 		runSdkInWorker("forkSession", sessionId, options),

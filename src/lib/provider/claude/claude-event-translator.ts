@@ -699,15 +699,13 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Effect.Effect<void, EventSinkError> {
 		if (!message.tool_use_id) return Effect.void;
-		const extras = message as unknown as Record<string, unknown>;
+		const childSessionId: unknown = Reflect.get(message, "child_session_id");
 		return this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: "running",
 			description: message.description,
 			...(message.task_type ? { subagentType: message.task_type } : {}),
-			...(typeof extras["child_session_id"] === "string"
-				? { childSessionId: extras["child_session_id"] }
-				: {}),
+			...(typeof childSessionId === "string" ? { childSessionId } : {}),
 			...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
 			...(message.prompt ? { prompt: message.prompt } : {}),
 			...(message.skip_transcript !== undefined
@@ -722,17 +720,14 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		if (!message.tool_use_id) return Effect.void;
 		const usage = message.usage as Record<string, unknown>;
-		const extras = message as unknown as Record<string, unknown>;
+		const subagentType: unknown = Reflect.get(message, "subagent_type");
+		const childSessionId: unknown = Reflect.get(message, "child_session_id");
 		return this.pushTaskMetadata(ctx, message.tool_use_id, {
 			providerTaskId: message.task_id,
 			status: "running",
 			description: message.description,
-			...(typeof extras["subagent_type"] === "string"
-				? { subagentType: extras["subagent_type"] }
-				: {}),
-			...(typeof extras["child_session_id"] === "string"
-				? { childSessionId: extras["child_session_id"] }
-				: {}),
+			...(typeof subagentType === "string" ? { subagentType } : {}),
+			...(typeof childSessionId === "string" ? { childSessionId } : {}),
 			totalTokens: usage["total_tokens"] ?? 0,
 			toolUses: usage["tool_uses"] ?? 0,
 			durationMs: usage["duration_ms"] ?? 0,
@@ -750,15 +745,13 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			if (!message.tool_use_id) return;
 			const usage = message.usage as Record<string, unknown> | undefined;
-			const extras = message as unknown as Record<string, unknown>;
+			const childSessionId: unknown = Reflect.get(message, "child_session_id");
 			const metadata = {
 				providerTaskId: message.task_id,
 				status: message.status,
 				outputFile: message.output_file,
 				summary: message.summary,
-				...(typeof extras["child_session_id"] === "string"
-					? { childSessionId: extras["child_session_id"] }
-					: {}),
+				...(typeof childSessionId === "string" ? { childSessionId } : {}),
 				...(usage
 					? {
 							totalTokens: usage["total_tokens"] ?? 0,

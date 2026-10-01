@@ -219,13 +219,11 @@ export function buildUserMessage(input: SendTurnInput): SDKUserMessage {
 		}
 	}
 	content.push({ type: "text" as const, text: input.prompt });
-	// SDKUserMessage.message is MessageParam (a complex union from the
-	// Anthropic SDK). The cast is confined to this single construction site.
 	return {
 		type: "user",
 		message: { role: "user" as const, content },
 		parent_tool_use_id: null,
-	} as unknown as SDKUserMessage;
+	};
 }
 
 export function settleQueuedTurnDeferredsEffect(

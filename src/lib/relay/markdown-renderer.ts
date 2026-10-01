@@ -8,7 +8,7 @@
 // - dompurify's default export crashes in Node without a window object
 // - The factory pattern (createDOMPurify(window)) works with dompurify 3.3.1
 
-import createDOMPurify, { type WindowLike } from "dompurify";
+import createDOMPurify from "dompurify";
 import { JSDOM } from "jsdom";
 import { Marked, Renderer } from "marked";
 
@@ -23,7 +23,7 @@ let _serverMarked: Marked | undefined;
 function getPurify(): ReturnType<typeof createDOMPurify> {
 	if (!_purify) {
 		const jsdomWindow = new JSDOM("").window;
-		_purify = createDOMPurify(jsdomWindow as unknown as WindowLike);
+		_purify = createDOMPurify(jsdomWindow);
 	}
 	return _purify;
 }

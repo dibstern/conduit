@@ -79,11 +79,10 @@ export class EffectPromptQueue implements PromptQueueController {
 		const iterator = this.iterable[Symbol.asyncIterator]();
 		return {
 			next: () => iterator.next(),
-			return: async () => {
+			return: async (): Promise<IteratorResult<SDKUserMessage>> => {
 				this._closed = true;
-				return iterator.return
-					? iterator.return()
-					: { value: undefined as unknown as SDKUserMessage, done: true };
+				if (iterator.return) return iterator.return();
+				return { value: undefined, done: true };
 			},
 		};
 	}

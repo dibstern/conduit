@@ -500,7 +500,12 @@ class SessionNamespace {
 	async diff(
 		sessionId: string,
 		options?: { messageID?: string },
-	): Promise<{ diffs: Array<{ path: string; diff: string }> }> {
+	): Promise<{
+		readonly diffs: ReadonlyArray<{
+			readonly path: string;
+			readonly diff: string;
+		}>;
+	}> {
 		return this.api.sdk("session.diff", decodeOpenCodeDiffResponse, () =>
 			call(
 				this.api._sdk.session.diff({
@@ -647,7 +652,9 @@ class ProviderNamespace {
 class PtyNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
-	async list(): Promise<Array<{ id: string; [key: string]: unknown }>> {
+	async list(): Promise<
+		ReadonlyArray<{ readonly id: string; readonly [key: string]: unknown }>
+	> {
 		return this.api.sdk("pty.list", decodeOpenCodePtyListResponse, () =>
 			call(this.api._sdk.pty.list()),
 		);
@@ -716,11 +723,11 @@ class FileNamespace {
 	}
 
 	async status(): Promise<
-		Array<{
-			path: string;
-			added: number;
-			removed: number;
-			status: "added" | "deleted" | "modified";
+		ReadonlyArray<{
+			readonly path: string;
+			readonly added: number;
+			readonly removed: number;
+			readonly status: "added" | "deleted" | "modified";
 		}>
 	> {
 		return this.api.sdk(
@@ -736,13 +743,16 @@ class FileNamespace {
 class FindNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
-	async text(pattern: string): Promise<unknown[]> {
+	async text(pattern: string): Promise<readonly unknown[]> {
 		return this.api.sdk("find.text", decodeOpenCodeFindTextResponse, () =>
 			call(this.api._sdk.find.text({ query: { pattern } })),
 		);
 	}
 
-	async files(query: string, options?: { dirs?: boolean }): Promise<unknown[]> {
+	async files(
+		query: string,
+		options?: { dirs?: boolean },
+	): Promise<readonly unknown[]> {
 		return this.api.sdk("find.files", decodeOpenCodeFindFilesResponse, () =>
 			call(
 				this.api._sdk.find.files({
@@ -757,7 +767,7 @@ class FindNamespace {
 		);
 	}
 
-	async symbols(query: string): Promise<unknown[]> {
+	async symbols(query: string): Promise<readonly unknown[]> {
 		return this.api.sdk("find.symbols", decodeOpenCodeFindSymbolsResponse, () =>
 			call(this.api._sdk.find.symbols({ query: { query } })),
 		);
@@ -784,7 +794,12 @@ class AppNamespace {
 		}));
 	}
 
-	async commands(): Promise<Array<{ name: string; description?: string }>> {
+	async commands(): Promise<
+		ReadonlyArray<{
+			readonly name: string;
+			readonly description?: string | undefined;
+		}>
+	> {
 		return this.api.sdk("app.commands", decodeOpenCodeCommandListResponse, () =>
 			call(this.api._sdk.command.list()),
 		);
@@ -804,14 +819,22 @@ class AppNamespace {
 		return { cwd: path.directory };
 	}
 
-	async vcs(): Promise<{ branch?: string; dirty?: boolean }> {
+	async vcs(): Promise<{
+		readonly branch?: string | undefined;
+		readonly dirty?: boolean | undefined;
+	}> {
 		return this.api.sdk("app.vcs", decodeOpenCodeVcsResponse, () =>
 			call(this.api._sdk.vcs.get()),
 		);
 	}
 
 	async projects(): Promise<
-		Array<{ id?: string; name?: string; path?: string; worktree?: string }>
+		ReadonlyArray<{
+			readonly id?: string;
+			readonly name?: string;
+			readonly path?: string;
+			readonly worktree?: string;
+		}>
 	> {
 		return this.api.sdk("app.projects", decodeOpenCodeProjectListResponse, () =>
 			call(this.api._sdk.project.list()),
