@@ -89,9 +89,9 @@ export class PtyManager {
 			session.scrollbackSize > this.scrollbackMax &&
 			session.scrollback.length > 1
 		) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			session.scrollbackSize -= session.scrollback[0]!.length;
-			session.scrollback.shift();
+			const removed = session.scrollback.shift();
+			if (removed === undefined) break;
+			session.scrollbackSize -= removed.length;
 		}
 	}
 

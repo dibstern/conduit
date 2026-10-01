@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	PtyManager,
@@ -37,14 +37,11 @@ describe("PtyManager", () => {
 		mgr.registerSession("pty-1", mockUpstream);
 		const session = mgr.getSession("pty-1");
 		expect(session).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(session!.exited).toBe(false);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(session!.exitCode).toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(session!.scrollback).toEqual([]);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(session!.scrollbackSize).toBe(0);
+		assert.exists(session, "expected PTY session");
+		expect(session.exited).toBe(false);
+		expect(session.exitCode).toBeNull();
+		expect(session.scrollback).toEqual([]);
+		expect(session.scrollbackSize).toBe(0);
 	});
 
 	it("getSession returns undefined for unknown ptyId", () => {
@@ -169,10 +166,9 @@ describe("PtyManager", () => {
 		mgr.registerSession("pty-1", createMockUpstream());
 		mgr.markExited("pty-1", 42);
 		const session = mgr.getSession("pty-1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(session!.exited).toBe(true);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(session!.exitCode).toBe(42);
+		assert.exists(session, "expected PTY session");
+		expect(session.exited).toBe(true);
+		expect(session.exitCode).toBe(42);
 	});
 
 	it("markExited is a no-op for unknown pty", () => {

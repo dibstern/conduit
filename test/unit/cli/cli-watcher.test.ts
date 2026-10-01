@@ -3,7 +3,15 @@
 // Uses vi.useFakeTimers() to control intervals and injectable mock connect/readCrashInfo.
 
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	DaemonWatcher,
 	type WatcherCallbacks,
@@ -532,14 +540,15 @@ describe("multiple consecutive crashes", () => {
 		}
 
 		expect(diedCalls).toHaveLength(4);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(diedCalls[0]!.attempt).toBe(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(diedCalls[1]!.attempt).toBe(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(diedCalls[2]!.attempt).toBe(3);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(diedCalls[3]!.attempt).toBe(4);
+		const [firstCall, secondCall, thirdCall, fourthCall] = diedCalls;
+		assert.exists(firstCall, "expected first died call");
+		assert.exists(secondCall, "expected second died call");
+		assert.exists(thirdCall, "expected third died call");
+		assert.exists(fourthCall, "expected fourth died call");
+		expect(firstCall.attempt).toBe(1);
+		expect(secondCall.attempt).toBe(2);
+		expect(thirdCall.attempt).toBe(3);
+		expect(fourthCall.attempt).toBe(4);
 
 		// 5th crash exceeds max → onGiveUp
 		await triggerErrorPoll();

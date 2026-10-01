@@ -8,7 +8,7 @@
 //                              (all ← stopInstance → stopped)
 
 import type { ChildProcess } from "node:child_process";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig } from "../../../src/lib/types.js";
 import { partialFake } from "../../helpers/partial-fake.js";
@@ -79,8 +79,9 @@ describe("Instance state machine transitions", () => {
 
 		// Status should remain "starting" (initial health check failed,
 		// but the process is still alive)
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t4")!.status).toBe("starting");
+		const t4 = mgr.getInstance("t4");
+		assert.exists(t4, "expected the t4 instance");
+		expect(t4.status).toBe("starting");
 	});
 
 	// ── #6: starting → process exits (code=0) → stopped ──
@@ -96,8 +97,9 @@ describe("Instance state machine transitions", () => {
 
 		mgr.addInstance("t6", managedConfig());
 		await mgr.startInstance("t6");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t6")!.status).toBe("healthy");
+		const t6 = mgr.getInstance("t6");
+		assert.exists(t6, "expected the t6 instance");
+		expect(t6.status).toBe("healthy");
 
 		const events: string[] = [];
 		mgr.on("status_changed", (i) => events.push(i.status));
@@ -105,19 +107,20 @@ describe("Instance state machine transitions", () => {
 		// Process exits cleanly after becoming healthy
 		const exitCb = getExitCb();
 		expect(exitCb).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		exitCb!(0, null);
+		assert.exists(exitCb, "expected the process exit callback");
+		exitCb(0, null);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t6")!.status).toBe("stopped");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t6")!.exitCode).toBe(0);
+		const stoppedT6 = mgr.getInstance("t6");
+		assert.exists(stoppedT6, "expected the t6 instance");
+		expect(stoppedT6.status).toBe("stopped");
+		expect(stoppedT6.exitCode).toBe(0);
 		expect(events).toEqual(["stopped"]);
 
 		// Advance timers — no restart
 		await vi.advanceTimersByTimeAsync(10_000);
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t6")!.status).toBe("stopped");
+		const timedOutT6 = mgr.getInstance("t6");
+		assert.exists(timedOutT6, "expected the t6 instance");
+		expect(timedOutT6.status).toBe("stopped");
 
 		mgr.stopAll();
 	});
@@ -134,12 +137,13 @@ describe("Instance state machine transitions", () => {
 
 		mgr.addInstance("t7", managedConfig());
 		await mgr.startInstance("t7");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t7")!.status).toBe("healthy");
+		const t7 = mgr.getInstance("t7");
+		assert.exists(t7, "expected the t7 instance");
+		expect(t7.status).toBe("healthy");
 
 		// Manually set to starting to test this specific transition
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		const inst = mgr.getInstance("t7")!;
+		const inst = mgr.getInstance("t7");
+		assert.exists(inst, "expected the t7 instance");
 		(inst as { status: string }).status = "starting";
 
 		const events: string[] = [];
@@ -147,8 +151,9 @@ describe("Instance state machine transitions", () => {
 
 		mgr.stopInstance("t7");
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t7")!.status).toBe("stopped");
+		const stoppedT7 = mgr.getInstance("t7");
+		assert.exists(stoppedT7, "expected the t7 instance");
+		expect(stoppedT7.status).toBe("stopped");
 		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
 		expect(events).toContain("stopped");
 	});
@@ -176,8 +181,9 @@ describe("Instance state machine transitions", () => {
 
 		mgr.addInstance("t9", managedConfig());
 		await mgr.startInstance("t9");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t9")!.status).toBe("healthy");
+		const t9 = mgr.getInstance("t9");
+		assert.exists(t9, "expected the t9 instance");
+		expect(t9.status).toBe("healthy");
 
 		const events: string[] = [];
 		mgr.on("status_changed", (i) => events.push(i.status));
@@ -203,26 +209,29 @@ describe("Instance state machine transitions", () => {
 
 		mgr.addInstance("t11", managedConfig());
 		await mgr.startInstance("t11");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t11")!.status).toBe("healthy");
+		const t11 = mgr.getInstance("t11");
+		assert.exists(t11, "expected the t11 instance");
+		expect(t11.status).toBe("healthy");
 
 		const events: string[] = [];
 		mgr.on("status_changed", (i) => events.push(i.status));
 
 		// Clean exit
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		getExitCb()!(0, null);
+		const exitCallback = getExitCb();
+		assert.exists(exitCallback, "expected the process exit callback");
+		exitCallback(0, null);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t11")!.status).toBe("stopped");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t11")!.exitCode).toBe(0);
+		const stoppedT11 = mgr.getInstance("t11");
+		assert.exists(stoppedT11, "expected the t11 instance");
+		expect(stoppedT11.status).toBe("stopped");
+		expect(stoppedT11.exitCode).toBe(0);
 		expect(events).toEqual(["stopped"]);
 
 		// Advance timers — no restart should happen
 		await vi.advanceTimersByTimeAsync(10_000);
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t11")!.status).toBe("stopped");
+		const timedOutT11 = mgr.getInstance("t11");
+		assert.exists(timedOutT11, "expected the t11 instance");
+		expect(timedOutT11.status).toBe("stopped");
 
 		mgr.stopAll();
 	});
@@ -241,8 +250,8 @@ describe("Instance state machine transitions", () => {
 		await mgr.startInstance("t14");
 
 		// Manually set to unhealthy
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		const inst = mgr.getInstance("t14")!;
+		const inst = mgr.getInstance("t14");
+		assert.exists(inst, "expected the t14 instance");
 		(inst as { status: string }).status = "unhealthy";
 
 		const events: string[] = [];
@@ -250,8 +259,9 @@ describe("Instance state machine transitions", () => {
 
 		mgr.stopInstance("t14");
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t14")!.status).toBe("stopped");
+		const stoppedT14 = mgr.getInstance("t14");
+		assert.exists(stoppedT14, "expected the t14 instance");
+		expect(stoppedT14.status).toBe("stopped");
 		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
 		expect(events).toContain("stopped");
 	});
@@ -280,8 +290,8 @@ describe("Instance state machine transitions", () => {
 		expect(spawnCount).toBe(1);
 
 		// Set to unhealthy
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		const inst = mgr.getInstance("t16")!;
+		const inst = mgr.getInstance("t16");
+		assert.exists(inst, "expected the t16 instance");
 		(inst as { status: string }).status = "unhealthy";
 
 		const events: string[] = [];
@@ -291,10 +301,10 @@ describe("Instance state machine transitions", () => {
 
 		expect(oldProc.kill).toHaveBeenCalledWith("SIGTERM");
 		expect(spawnCount).toBe(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t16")!.status).toBe("healthy");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t16")!.pid).toBe(10006);
+		const restartedT16 = mgr.getInstance("t16");
+		assert.exists(restartedT16, "expected the t16 instance");
+		expect(restartedT16.status).toBe("healthy");
+		expect(restartedT16.pid).toBe(10006);
 		expect(events).toContain("starting");
 		expect(events).toContain("healthy");
 	});
@@ -322,18 +332,21 @@ describe("Instance state machine transitions", () => {
 
 		// First start
 		await mgr.startInstance("t17");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t17")!.status).toBe("healthy");
+		const t17 = mgr.getInstance("t17");
+		assert.exists(t17, "expected the t17 instance");
+		expect(t17.status).toBe("healthy");
 
 		// Stop
 		mgr.stopInstance("t17");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t17")!.status).toBe("stopped");
+		const stoppedT17 = mgr.getInstance("t17");
+		assert.exists(stoppedT17, "expected the t17 instance");
+		expect(stoppedT17.status).toBe("stopped");
 
 		// Second start
 		await mgr.startInstance("t17");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t17")!.status).toBe("healthy");
+		const restartedT17 = mgr.getInstance("t17");
+		assert.exists(restartedT17, "expected the t17 instance");
+		expect(restartedT17.status).toBe("healthy");
 		expect(spawnCount).toBe(2);
 
 		mgr.stopAll();
@@ -392,8 +405,9 @@ describe("Instance state machine transitions", () => {
 
 		mgr.addInstance("t20", managedConfig());
 		await mgr.startInstance("t20");
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-		expect(mgr.getInstance("t20")!.status).toBe("healthy");
+		const t20 = mgr.getInstance("t20");
+		assert.exists(t20, "expected the t20 instance");
+		expect(t20.status).toBe("healthy");
 		expect(spawnCount).toBe(1);
 
 		// Start again — should be a no-op

@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Cause, Effect, type Layer, Logger, LogLevel } from "effect";
-import { expect, vi } from "vitest";
+import { assert, expect, vi } from "vitest";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
 
 /** Create a separate set of spies (used for child loggers). */
@@ -38,8 +38,9 @@ describe("PinoLoggerLive", () => {
 			const mock = mockPino();
 			yield* Effect.logInfo("test message").pipe(Effect.provide(layer(mock)));
 			expect(mock.root.info).toHaveBeenCalled();
-			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
-			expect(mock.root.info.mock.calls[0]![0]).toContain("test message");
+			const call = mock.root.info.mock.calls[0];
+			assert.exists(call, "expected info call");
+			expect(call[0]).toContain("test message");
 		}),
 	);
 
@@ -48,8 +49,9 @@ describe("PinoLoggerLive", () => {
 			const mock = mockPino();
 			yield* Effect.logWarning("warning msg").pipe(Effect.provide(layer(mock)));
 			expect(mock.root.warn).toHaveBeenCalled();
-			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
-			expect(mock.root.warn.mock.calls[0]![0]).toContain("warning msg");
+			const call = mock.root.warn.mock.calls[0];
+			assert.exists(call, "expected warning call");
+			expect(call[0]).toContain("warning msg");
 		}),
 	);
 
@@ -69,8 +71,9 @@ describe("PinoLoggerLive", () => {
 				Effect.provide(layer(mock)),
 			);
 			expect(mock.root.debug).toHaveBeenCalled();
-			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
-			expect(mock.root.debug.mock.calls[0]![0]).toContain("debug msg");
+			const call = mock.root.debug.mock.calls[0];
+			assert.exists(call, "expected debug call");
+			expect(call[0]).toContain("debug msg");
 		}),
 	);
 
@@ -152,8 +155,10 @@ describe("PinoLoggerLive", () => {
 				error: "sqlite module version mismatch",
 			}).pipe(Effect.provide(layer(mock)));
 			expect(mock.root.warn).toHaveBeenCalled();
-			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
-			const text = mock.root.warn.mock.calls[0]![0] as string;
+			const call = mock.root.warn.mock.calls[0];
+			assert.exists(call, "expected warning call");
+			const text = call[0];
+			assert(typeof text === "string", "expected warning text");
 			expect(text).not.toContain("[object Object]");
 			expect(text).toContain("sqlite module version mismatch");
 		}),
@@ -166,8 +171,9 @@ describe("PinoLoggerLive", () => {
 				Effect.provide(layer(mock)),
 			);
 			expect(mock.root.warn).toHaveBeenCalled();
-			// biome-ignore lint/style/noNonNullAssertion: safe — prior assertion guarantees called
-			expect(mock.root.warn.mock.calls[0]![0]).toContain("boom");
+			const call = mock.root.warn.mock.calls[0];
+			assert.exists(call, "expected warning call");
+			expect(call[0]).toContain("boom");
 		}),
 	);
 

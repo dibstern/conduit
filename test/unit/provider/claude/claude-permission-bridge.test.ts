@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudePermissionBridge } from "../../../../src/lib/provider/claude/claude-permission-bridge.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 import type {
@@ -385,8 +385,8 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 		expect(result).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result!.behavior).toBe("allow");
+		assert.exists(result, "expected permission result");
+		expect(result.behavior).toBe("allow");
 	});
 
 	it("resolvePermission resolves the pending approval's deferred", async () => {

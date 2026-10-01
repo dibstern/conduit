@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type {
 	AssistantMessage,
 	ThinkingMessage,
@@ -233,10 +233,12 @@ describe("Multi-turn conversation pipeline", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(thinkingBlocks).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(thinkingBlocks[0]!.text).toBe("Turn 1 reasoning");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(thinkingBlocks[1]!.text).toBe("Turn 2 reasoning");
+		const firstThinkingBlock = thinkingBlocks[0];
+		const secondThinkingBlock = thinkingBlocks[1];
+		assert.exists(firstThinkingBlock, "expected first thinking block");
+		assert.exists(secondThinkingBlock, "expected second thinking block");
+		expect(firstThinkingBlock.text).toBe("Turn 1 reasoning");
+		expect(secondThinkingBlock.text).toBe("Turn 2 reasoning");
 
 		// Verify all thinking blocks done
 		for (const t of thinkingBlocks) {
@@ -305,11 +307,14 @@ describe("Multi-turn conversation pipeline", () => {
 			(m): m is AssistantMessage => m.type === "assistant",
 		);
 		expect(assistants).toHaveLength(3);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(assistants[0]!.rawText).toBe("Answer 1");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(assistants[1]!.rawText).toBe("Answer 2");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(assistants[2]!.rawText).toBe("Answer 3");
+		const firstAssistant = assistants[0];
+		const secondAssistant = assistants[1];
+		const thirdAssistant = assistants[2];
+		assert.exists(firstAssistant, "expected first assistant message");
+		assert.exists(secondAssistant, "expected second assistant message");
+		assert.exists(thirdAssistant, "expected third assistant message");
+		expect(firstAssistant.rawText).toBe("Answer 1");
+		expect(secondAssistant.rawText).toBe("Answer 2");
+		expect(thirdAssistant.rawText).toBe("Answer 3");
 	});
 });

@@ -18,8 +18,10 @@ export interface FileAttachment {
  */
 export function parseAtReferences(text: string): string[] {
 	const matches = text.matchAll(/(?:^|(?<=\s))@(\S+)/g);
-	// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-	return [...matches].map((m) => m[1]!);
+	return [...matches].flatMap((match) => {
+		const reference = match[1];
+		return reference === undefined ? [] : [reference];
+	});
 }
 
 // ─── Build XML message ──────────────────────────────────────────────────────

@@ -100,6 +100,5 @@ export function generateUuid(): string {
  */
 export function extractDisplayText(text: string): string {
 	const match = text.match(/<user-message>\n([\s\S]*?)\n<\/user-message>/);
-	// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-	return match ? match[1]! : text;
+	return match?.[1] ?? text;
 }

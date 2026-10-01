@@ -1,7 +1,7 @@
 // ─── Svelte Diff Utilities — Unit Tests ──────────────────────────────────────
 // Tests computeDiff, renderUnifiedDiff, renderSplitDiff, buildSplitRows, diffStats.
 
-import { describe, expect, test } from "vitest";
+import { assert, describe, expect, test } from "vitest";
 import type { DiffOp } from "../../../src/lib/frontend/utils/diff.js";
 import {
 	buildSplitRows,
@@ -63,23 +63,27 @@ describe("computeDiff", () => {
 		// "a" and "c" should be equal
 		const equalOps = result.filter((op) => op.type === "equal");
 		expect(equalOps).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(equalOps[0]!.line).toBe("a");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(equalOps[1]!.line).toBe("c");
+		const firstEqualOp = equalOps[0];
+		const secondEqualOp = equalOps[1];
+		assert.exists(firstEqualOp, "expected first equal operation");
+		assert.exists(secondEqualOp, "expected second equal operation");
+		expect(firstEqualOp.line).toBe("a");
+		expect(secondEqualOp.line).toBe("c");
 		// "b" is added
 		const addOps = result.filter((op) => op.type === "add");
 		expect(addOps).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(addOps[0]!.line).toBe("b");
+		const firstAddOp = addOps[0];
+		assert.exists(firstAddOp, "expected added operation");
+		expect(firstAddOp.line).toBe("b");
 	});
 
 	test("detects deletion in the middle", () => {
 		const result = computeDiff(["a", "b", "c"], ["a", "c"]);
 		const removeOps = result.filter((op) => op.type === "remove");
 		expect(removeOps).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(removeOps[0]!.line).toBe("b");
+		const firstRemoveOp = removeOps[0];
+		assert.exists(firstRemoveOp, "expected removed operation");
+		expect(firstRemoveOp.line).toBe("b");
 	});
 
 	test("handles multi-line diff with mixed operations", () => {
@@ -238,10 +242,12 @@ describe("buildSplitRows", () => {
 		];
 		const rows = buildSplitRows(ops);
 		expect(rows).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[0]!.type).toBe("remove");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.type).toBe("equal");
+		const firstRow = rows[0];
+		const secondRow = rows[1];
+		assert.exists(firstRow, "expected first diff row");
+		assert.exists(secondRow, "expected second diff row");
+		expect(firstRow.type).toBe("remove");
+		expect(secondRow.type).toBe("equal");
 	});
 
 	test("handles complex sequence: equal, remove+add, equal", () => {
@@ -253,16 +259,17 @@ describe("buildSplitRows", () => {
 		];
 		const rows = buildSplitRows(ops);
 		expect(rows).toHaveLength(3);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[0]!.type).toBe("equal");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.type).toBe("change");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.oldLine).toBe("b");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.newLine).toBe("B");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[2]!.type).toBe("equal");
+		const firstRow = rows[0];
+		const secondRow = rows[1];
+		const thirdRow = rows[2];
+		assert.exists(firstRow, "expected first diff row");
+		assert.exists(secondRow, "expected second diff row");
+		assert.exists(thirdRow, "expected third diff row");
+		expect(firstRow.type).toBe("equal");
+		expect(secondRow.type).toBe("change");
+		expect(secondRow.oldLine).toBe("b");
+		expect(secondRow.newLine).toBe("B");
+		expect(thirdRow.type).toBe("equal");
 	});
 
 	test("handles multiple consecutive removes", () => {
@@ -272,10 +279,12 @@ describe("buildSplitRows", () => {
 		];
 		const rows = buildSplitRows(ops);
 		expect(rows).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[0]!.type).toBe("remove");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.type).toBe("remove");
+		const firstRow = rows[0];
+		const secondRow = rows[1];
+		assert.exists(firstRow, "expected first diff row");
+		assert.exists(secondRow, "expected second diff row");
+		expect(firstRow.type).toBe("remove");
+		expect(secondRow.type).toBe("remove");
 	});
 
 	test("handles remove then remove then add (only first remove+? check applies per iteration)", () => {
@@ -288,16 +297,15 @@ describe("buildSplitRows", () => {
 		// First remove is followed by another remove, not add, so it's standalone remove.
 		// Second remove is followed by add, so it pairs as change.
 		expect(rows).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[0]!.type).toBe("remove");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[0]!.oldLine).toBe("a");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.type).toBe("change");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.oldLine).toBe("b");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(rows[1]!.newLine).toBe("c");
+		const firstRow = rows[0];
+		const secondRow = rows[1];
+		assert.exists(firstRow, "expected first diff row");
+		assert.exists(secondRow, "expected second diff row");
+		expect(firstRow.type).toBe("remove");
+		expect(firstRow.oldLine).toBe("a");
+		expect(secondRow.type).toBe("change");
+		expect(secondRow.oldLine).toBe("b");
+		expect(secondRow.newLine).toBe("c");
 	});
 });
 

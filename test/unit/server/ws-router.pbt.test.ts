@@ -16,7 +16,7 @@
 // P13: buildNewClientMessages output shape verification                    [REMOVED — dead code removed from ws-router.ts]
 
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { EFFECT_MESSAGE_HANDLERS } from "../../../src/lib/handlers/index.js";
 import {
 	createClientCountMessage,
@@ -216,8 +216,9 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 						}
 						const countBefore = tracker.getClientCount();
 						const idxToRemove = removeIdx % unique.length;
-						// biome-ignore lint/style/noNonNullAssertion: safe — index is bounded by modulo
-						tracker.removeClient(unique[idxToRemove]!);
+						const client = unique[idxToRemove];
+						assert.exists(client, "expected tracked client");
+						tracker.removeClient(client);
 						expect(tracker.getClientCount()).toBe(countBefore - 1);
 					},
 				),

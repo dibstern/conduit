@@ -562,6 +562,7 @@ export class ProviderSideEffectReactor {
 				resolveQuestion: () => Effect.void,
 			};
 		}
+		const { cancelSessionInteractions } = interactions;
 		return {
 			push,
 			requestPermission: (request) => interactions.requestPermission(request),
@@ -570,14 +571,12 @@ export class ProviderSideEffectReactor {
 				interactions.resolvePermission(requestId, response),
 			resolveQuestion: (requestId, answers) =>
 				interactions.resolveQuestion(requestId, answers),
-			...(interactions.cancelSessionInteractions
+			...(cancelSessionInteractions
 				? {
 						cancelSessionInteractions: (
 							reason: string,
 							options?: { readonly recoverQuestions?: boolean },
-						) =>
-							// biome-ignore lint/style/noNonNullAssertion: guarded by the truthy check above.
-							interactions.cancelSessionInteractions!(reason, options),
+						) => cancelSessionInteractions(reason, options),
 					}
 				: {}),
 		};

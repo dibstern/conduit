@@ -270,8 +270,8 @@ function touchLRU(id: string): void {
 
 function ensureLRUCap(): void {
 	while (sessionMessages.size > TIER2_LRU_CAP && lruOrder.length > 0) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — length check above
-		const candidate = lruOrder[0]!;
+		const candidate = lruOrder[0];
+		if (candidate === undefined) break;
 		// Never evict the current session
 		if (candidate === sessionState.currentId) {
 			lruOrder.shift();
@@ -293,9 +293,7 @@ export function findMessage<T extends ChatMessage["type"]>(
 	type: T,
 	predicate: (message: Extract<ChatMessage, { type: T }>) => boolean,
 ): { index: number; message: Extract<ChatMessage, { type: T }> } | undefined {
-	for (let i = 0; i < messages.length; i++) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const message = messages[i]!;
+	for (const [i, message] of messages.entries()) {
 		if (
 			message.type === type &&
 			predicate(message as Extract<ChatMessage, { type: T }>)
@@ -524,8 +522,8 @@ export function updateLastMessage<T extends ChatMessage["type"]>(
 ): { messages: ChatMessage[]; found: boolean } {
 	const out = [...messages];
 	for (let i = out.length - 1; i >= 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const message = out[i]!;
+		const message = out[i];
+		if (message === undefined) continue;
 		if (
 			message.type === type &&
 			predicate(message as Extract<ChatMessage, { type: T }>)
@@ -603,8 +601,8 @@ export function advanceTurnIfNewMessage(
 	if (partId != null) {
 		const currentMessages = getMessages(messages);
 		for (let i = currentMessages.length - 1; i >= 0; i--) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const message = currentMessages[i]!;
+			const message = currentMessages[i];
+			if (message === undefined) continue;
 			if (message.type === "assistant" && message.partId === partId) {
 				activity.seenMessageIds.add(messageId);
 				break;
@@ -829,8 +827,8 @@ export function applyTerminalTurn(
 	if (finResult.action === "finalized") {
 		const msgs = [...getMessages(messages)];
 		for (const idx of finResult.indices) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — index from finalizeAll
-			const message = msgs[idx]!;
+			const message = msgs[idx];
+			if (message === undefined) continue;
 			if (message.type === "tool") {
 				msgs[idx] = { ...message, status: "completed" };
 			}

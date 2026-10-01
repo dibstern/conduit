@@ -1,5 +1,5 @@
 // ─── Permissions Store Tests ─────────────────────────────────────────────────
-import { beforeEach, describe, expect, it } from "vitest";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	buildAnswerPayload,
 	clearAll,
@@ -235,10 +235,10 @@ describe("handlePermissionRequest", () => {
 			toolInput: { path: "/foo/bar.ts" },
 		});
 		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(permissionsState.pendingPermissions[0]!.toolName).toBe("Write");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(permissionsState.pendingPermissions[0]!.toolInput).toEqual({
+		const permission = permissionsState.pendingPermissions[0];
+		assert.exists(permission, "expected pending permission");
+		expect(permission.toolName).toBe("Write");
+		expect(permission.toolInput).toEqual({
 			path: "/foo/bar.ts",
 		});
 	});
@@ -270,8 +270,9 @@ describe("handlePermissionRequest", () => {
 			always: ["git *"],
 		});
 		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(permissionsState.pendingPermissions[0]!.always).toEqual(["git *"]);
+		const permission = permissionsState.pendingPermissions[0];
+		assert.exists(permission, "expected pending permission");
+		expect(permission.always).toEqual(["git *"]);
 	});
 
 	it("always adds to pending (no in-memory auto-approve)", () => {
@@ -338,8 +339,9 @@ describe("handleAskUser", () => {
 			questions,
 		});
 		expect(permissionsState.pendingQuestions).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(permissionsState.pendingQuestions[0]!.toolId).toBe("t1");
+		const question = permissionsState.pendingQuestions[0];
+		assert.exists(question, "expected pending question");
+		expect(question.toolId).toBe("t1");
 	});
 
 	it("ignores missing toolId", () => {
@@ -470,8 +472,9 @@ describe("removePermission", () => {
 		});
 		removePermission("r1");
 		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(permissionsState.pendingPermissions[0]!.requestId).toBe("r2");
+		const permission = permissionsState.pendingPermissions[0];
+		assert.exists(permission, "expected pending permission");
+		expect(permission.requestId).toBe("r2");
 	});
 });
 
@@ -631,8 +634,9 @@ describe("getLocalPermissions", () => {
 		});
 		const local = getLocalPermissions("sess-1");
 		expect(local).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(local[0]!.requestId).toBe("r1");
+		const localPermission = local[0];
+		assert.exists(localPermission, "expected local permission");
+		expect(localPermission.requestId).toBe("r1");
 	});
 
 	it("returns empty array when currentSessionId is null", () => {
@@ -678,8 +682,9 @@ describe("getRemotePermissions", () => {
 		});
 		const remote = getRemotePermissions("sess-1");
 		expect(remote).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(remote[0]!.requestId).toBe("r2");
+		const remotePermission = remote[0];
+		assert.exists(remotePermission, "expected remote permission");
+		expect(remotePermission.requestId).toBe("r2");
 	});
 
 	it("returns all permissions when currentSessionId is null", () => {
@@ -731,10 +736,12 @@ describe("session switch re-derives", () => {
 		// Viewing sess-2: r2 is local, r1 is remote
 		expect(getLocalPermissions("sess-2")).toHaveLength(1);
 		expect(getRemotePermissions("sess-2")).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(getLocalPermissions("sess-2")[0]!.requestId).toBe("r2");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(getRemotePermissions("sess-2")[0]!.requestId).toBe("r1");
+		const localPermission = getLocalPermissions("sess-2")[0];
+		const remotePermission = getRemotePermissions("sess-2")[0];
+		assert.exists(localPermission, "expected local permission");
+		assert.exists(remotePermission, "expected remote permission");
+		expect(localPermission.requestId).toBe("r2");
+		expect(remotePermission.requestId).toBe("r1");
 	});
 });
 
@@ -861,8 +868,9 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 
 		const local = getLocalPermissions("parent");
 		expect(local).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(local[0]!.requestId).toBe("r1");
+		const localPermission = local[0];
+		assert.exists(localPermission, "expected local permission");
+		expect(localPermission.requestId).toBe("r1");
 	});
 
 	it("includes permissions from deeply nested subagent sessions", () => {
@@ -893,8 +901,9 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 
 		const local = getLocalPermissions("root");
 		expect(local).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(local[0]!.requestId).toBe("r1");
+		const localPermission = local[0];
+		assert.exists(localPermission, "expected local permission");
+		expect(localPermission.requestId).toBe("r1");
 	});
 
 	it("includes own permissions alongside descendant permissions", () => {
@@ -969,8 +978,9 @@ describe("getLocalPermissions with unknown session (sessionId='')", () => {
 
 		const local = getLocalPermissions("sess-1");
 		expect(local).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(local[0]!.requestId).toBe("r-unknown");
+		const localPermission = local[0];
+		assert.exists(localPermission, "expected local permission");
+		expect(localPermission.requestId).toBe("r-unknown");
 	});
 
 	it("includes unknown-session permissions alongside session-matched ones", () => {
@@ -1026,8 +1036,9 @@ describe("getRemotePermissions with unknown session (sessionId='')", () => {
 
 		const remote = getRemotePermissions("sess-1");
 		expect(remote).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(remote[0]!.requestId).toBe("r-other");
+		const remotePermission = remote[0];
+		assert.exists(remotePermission, "expected remote permission");
+		expect(remotePermission.requestId).toBe("r-other");
 	});
 });
 
@@ -1079,8 +1090,9 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 
 		const remote = getRemotePermissions("parent");
 		expect(remote).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(remote[0]!.requestId).toBe("r1");
+		const remotePermission = remote[0];
+		assert.exists(remotePermission, "expected remote permission");
+		expect(remotePermission.requestId).toBe("r1");
 	});
 
 	it("excludes deeply nested descendant permissions from remote", () => {
@@ -1118,7 +1130,8 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 
 		const remote = getRemotePermissions("root");
 		expect(remote).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(remote[0]!.requestId).toBe("r2");
+		const remotePermission = remote[0];
+		assert.exists(remotePermission, "expected remote permission");
+		expect(remotePermission.requestId).toBe("r2");
 	});
 });

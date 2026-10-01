@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { lookupSummarizer } from "../../../../src/lib/frontend/utils/tool-summarizers/index.js";
 
 describe("Bash summarizer", () => {
@@ -19,8 +19,8 @@ describe("Bash summarizer", () => {
 		const s = lookupSummarizer("Bash");
 		const long = "x".repeat(60);
 		const result = s.summarize({ tool: "Bash", command: long } as never, {});
-		// biome-ignore lint/style/noNonNullAssertion: test assertion
-		expect(result.subtitle!.length).toBeLessThanOrEqual(41);
+		assert.exists(result.subtitle, "expected summary subtitle");
+		expect(result.subtitle.length).toBeLessThanOrEqual(41);
 	});
 
 	it("falls back to description when command is empty", () => {

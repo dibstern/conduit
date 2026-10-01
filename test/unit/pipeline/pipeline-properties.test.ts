@@ -1,5 +1,5 @@
 import fc from "fast-check";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
@@ -352,8 +352,11 @@ function shuffle<T>(arr: T[], rng: () => number): T[] {
 	const result = [...arr];
 	for (let i = result.length - 1; i > 0; i--) {
 		const j = Math.floor(rng() * (i + 1));
-		// biome-ignore lint/style/noNonNullAssertion: indices are within bounds by construction
-		[result[i]!, result[j]!] = [result[j]!, result[i]!];
+		const current = result[i];
+		const swapped = result[j];
+		assert.exists(current, "expected current shuffled item");
+		assert.exists(swapped, "expected swapped shuffled item");
+		[result[i], result[j]] = [swapped, current];
 	}
 	return result;
 }
@@ -607,9 +610,10 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						for (let i = 0; i < Math.min(dropCount, droppable.length); i++) {
 							toDrop.add(Math.floor(rng() * droppable.length));
 						}
+						const firstEvent = events[0];
+						assert.exists(firstEvent, "expected message.created event");
 						const filtered = [
-							// biome-ignore lint/style/noNonNullAssertion: events always has at least one element (message.created)
-							events[0]!,
+							firstEvent,
 							...droppable.filter((_, idx) => !toDrop.has(idx)),
 						];
 
@@ -737,8 +741,9 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 						const withDups = [...events];
 						for (let i = 0; i < dupCount; i++) {
 							const idx = Math.floor(rng() * events.length);
-							// biome-ignore lint/style/noNonNullAssertion: idx is within bounds by construction
-							withDups.splice(idx + 1, 0, events[idx]!);
+							const duplicate = events[idx];
+							assert.exists(duplicate, "expected event to duplicate");
+							withDups.splice(idx + 1, 0, duplicate);
 						}
 
 						await expect(

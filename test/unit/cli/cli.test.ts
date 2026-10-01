@@ -15,7 +15,7 @@
 // PBT: Property-based arg parsing
 
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	type CLIOptions,
 	generateQR,
@@ -408,8 +408,8 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 
 		const addCmd = cli.state.ipcCommands.find((c) => c._tag === "AddProject");
 		expect(addCmd).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(addCmd!.directory).toBe("/home/user/my-project");
+		assert.exists(addCmd, "expected add command");
+		expect(addCmd.directory).toBe("/home/user/my-project");
 	});
 
 	it("uses localhost when no network address available", async () => {
@@ -538,8 +538,9 @@ describe("T4: --stop — sends shutdown (AC3)", () => {
 		await run(["--stop"], cli);
 
 		expect(cli.state.ipcCommands).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(cli.state.ipcCommands[0]!._tag).toBe("Shutdown");
+		const command = cli.state.ipcCommands[0];
+		assert.exists(command, "expected IPC command");
+		expect(command._tag).toBe("Shutdown");
 		expect(cli.state.output).toContain("Daemon stopped");
 	});
 
@@ -574,8 +575,8 @@ describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
 
 		await run(["--pin", pin], cli);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const pinCmd = cli.state.ipcCommands[0]!;
+		const pinCmd = cli.state.ipcCommands[0];
+		assert.exists(pinCmd, "expected pin command");
 		expect(pinCmd._tag === "SetPin" && pinCmd.pin).toBe(pin);
 		expect(cli.state.output).toContain("PIN updated");
 	});
@@ -668,8 +669,8 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 			const addCmd = cli.state.ipcCommands.find((c) => c._tag === "AddProject");
 			expect(addCmd).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(addCmd!.directory).toBe("/tmp/test-project");
+			assert.exists(addCmd, "expected add command");
+			expect(addCmd.directory).toBe("/tmp/test-project");
 			expect(cli.state.output).toContain("Project added");
 		});
 
@@ -702,8 +703,8 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 				(c) => c._tag === "RemoveProject",
 			);
 			expect(removeCmd).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(removeCmd!.slug).toBe("my-project");
+			assert.exists(removeCmd, "expected remove command");
+			expect(removeCmd.slug).toBe("my-project");
 			expect(cli.state.output).toContain("Project removed");
 		});
 
@@ -832,10 +833,9 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 				(c) => c._tag === "SetProjectTitle",
 			);
 			expect(titleCmd).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(titleCmd!.slug).toBe("my-project");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(titleCmd!.title).toBe("New Title");
+			assert.exists(titleCmd, "expected title command");
+			expect(titleCmd.slug).toBe("my-project");
+			expect(titleCmd.title).toBe("New Title");
 			expect(cli.state.output).toContain("Title updated");
 		});
 
@@ -1286,63 +1286,61 @@ describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () 
 describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)", () => {
 	it("enters interactive mode when showInteractiveMenu is injected", async () => {
 		let interactiveCalled = false;
-		let capturedCtx: InteractiveContext | null = null;
+		const capturedContexts: InteractiveContext[] = [];
 
 		const cli = createMockCLI({
 			showInteractiveMenu: async (ctx) => {
 				interactiveCalled = true;
-				capturedCtx = ctx;
+				capturedContexts.push(ctx);
 			},
 		});
 
 		await run([], cli);
 
 		expect(interactiveCalled).toBe(true);
-		expect(capturedCtx).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedCtx!.cwd).toBe("/home/user/my-project");
+		expect(capturedContexts).toHaveLength(1);
+		const capturedCtx = capturedContexts[0];
+		assert.exists(capturedCtx, "expected CLI context");
+		expect(capturedCtx.cwd).toBe("/home/user/my-project");
 	});
 
 	it("passes args to interactive context", async () => {
-		let capturedCtx: InteractiveContext | null = null;
+		const capturedContexts: InteractiveContext[] = [];
 
 		const cli = createMockCLI({
 			showInteractiveMenu: async (ctx) => {
-				capturedCtx = ctx;
+				capturedContexts.push(ctx);
 			},
 		});
 
 		await run(["--port", "4000", "-y", "--no-https"], cli);
 
-		expect(capturedCtx).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedCtx!.args.port).toBe(4000);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedCtx!.args.yes).toBe(true);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedCtx!.args.noHttps).toBe(true);
+		expect(capturedContexts).toHaveLength(1);
+		const capturedCtx = capturedContexts[0];
+		assert.exists(capturedCtx, "expected CLI context");
+		expect(capturedCtx.args.port).toBe(4000);
+		expect(capturedCtx.args.yes).toBe(true);
+		expect(capturedCtx.args.noHttps).toBe(true);
 	});
 
 	it("interactive context has ipcSend, checkDaemon, spawnDaemon", async () => {
-		let capturedCtx: InteractiveContext | null = null;
+		const capturedContexts: InteractiveContext[] = [];
 
 		const cli = createMockCLI({
 			showInteractiveMenu: async (ctx) => {
-				capturedCtx = ctx;
+				capturedContexts.push(ctx);
 			},
 		});
 
 		await run([], cli);
 
-		expect(capturedCtx).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(typeof capturedCtx!.ipcSend).toBe("function");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(typeof capturedCtx!.checkDaemon).toBe("function");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(typeof capturedCtx!.spawnDaemon).toBe("function");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(typeof capturedCtx!.getAddr).toBe("function");
+		expect(capturedContexts).toHaveLength(1);
+		const capturedCtx = capturedContexts[0];
+		assert.exists(capturedCtx, "expected CLI context");
+		expect(typeof capturedCtx.ipcSend).toBe("function");
+		expect(typeof capturedCtx.checkDaemon).toBe("function");
+		expect(typeof capturedCtx.spawnDaemon).toBe("function");
+		expect(typeof capturedCtx.getAddr).toBe("function");
 	});
 
 	it("uses showInteractiveMenu for default command only (not --status)", async () => {
@@ -1420,7 +1418,7 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 	});
 
 	it("interactive mode receives stdin from options", async () => {
-		let capturedCtx: InteractiveContext | null = null;
+		const capturedContexts: InteractiveContext[] = [];
 		const mockStdin = {
 			on: () => {},
 			isTTY: true,
@@ -1431,15 +1429,16 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 		const cli = createMockCLI({
 			stdin: mockStdin,
 			showInteractiveMenu: async (ctx) => {
-				capturedCtx = ctx;
+				capturedContexts.push(ctx);
 			},
 		});
 
 		await run([], cli);
 
-		expect(capturedCtx).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedCtx!.stdin).toBe(mockStdin);
+		expect(capturedContexts).toHaveLength(1);
+		const capturedCtx = capturedContexts[0];
+		assert.exists(capturedCtx, "expected CLI context");
+		expect(capturedCtx.stdin).toBe(mockStdin);
 	});
 });
 
@@ -1711,8 +1710,8 @@ describe("instance subcommands", () => {
 		);
 		const addCmd = cli.state.ipcCommands.find((c) => c._tag === "InstanceAdd");
 		expect(addCmd).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(addCmd!.url).toBeUndefined();
+		assert.exists(addCmd, "expected add command");
+		expect(addCmd.url).toBeUndefined();
 	});
 });
 

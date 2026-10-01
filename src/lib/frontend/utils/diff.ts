@@ -20,12 +20,13 @@ export function computeDiff(oldLines: string[], newLines: string[]): DiffOp[] {
 	);
 	for (let i = 1; i <= oldLineCount; i++) {
 		for (let j = 1; j <= newLineCount; j++) {
+			const row = dp[i];
+			const previousRow = dp[i - 1];
+			if (row === undefined || previousRow === undefined) continue;
 			if (oldLines[i - 1] === newLines[j - 1]) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-				dp[i]![j] = dp[i - 1]![j - 1]! + 1;
+				row[j] = (previousRow[j - 1] ?? 0) + 1;
 			} else {
-				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-				dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+				row[j] = Math.max(previousRow[j] ?? 0, row[j - 1] ?? 0);
 			}
 		}
 	}
@@ -36,25 +37,30 @@ export function computeDiff(oldLines: string[], newLines: string[]): DiffOp[] {
 	let j = newLineCount;
 	while (i > 0 || j > 0) {
 		if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+			const line = oldLines[i - 1];
+			if (line === undefined) break;
 			ops.unshift({
 				type: "equal",
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				line: oldLines[i - 1]!,
+				line,
 				oldLineNo: i,
 				newLineNo: j,
 			});
 			i--;
 			j--;
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		} else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			ops.unshift({ type: "add", line: newLines[j - 1]!, newLineNo: j });
+		} else if (
+			j > 0 &&
+			(i === 0 || (dp[i]?.[j - 1] ?? 0) >= (dp[i - 1]?.[j] ?? 0))
+		) {
+			const line = newLines[j - 1];
+			if (line === undefined) break;
+			ops.unshift({ type: "add", line, newLineNo: j });
 			j--;
 		} else {
+			const line = oldLines[i - 1];
+			if (line === undefined) break;
 			ops.unshift({
 				type: "remove",
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				line: oldLines[i - 1]!,
+				line,
 				oldLineNo: i,
 			});
 			i--;
@@ -112,8 +118,8 @@ export function buildSplitRows(ops: DiffOp[]): SplitRow[] {
 	const rows: SplitRow[] = [];
 	let i = 0;
 	while (i < ops.length) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const op = ops[i]!;
+		const op = ops[i];
+		if (op === undefined) break;
 		if (op.type === "equal") {
 			rows.push({
 				type: "equal",
@@ -126,11 +132,10 @@ export function buildSplitRows(ops: DiffOp[]): SplitRow[] {
 		} else if (
 			op.type === "remove" &&
 			i + 1 < ops.length &&
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			ops[i + 1]!.type === "add"
+			ops[i + 1]?.type === "add"
 		) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			const next = ops[i + 1]!;
+			const next = ops[i + 1];
+			if (next === undefined) break;
 			rows.push({
 				type: "change",
 				oldLineNo: op.oldLineNo ?? null,

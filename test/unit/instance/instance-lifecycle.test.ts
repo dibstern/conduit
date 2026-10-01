@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	type DaemonConfig,
 	loadDaemonConfig,
@@ -39,9 +39,11 @@ describe("instance lifecycle integration", () => {
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
 		});
-		expect(daemon.getInstances()).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(daemon.getInstances()[0]!.id).toBe("opencode");
+		const instances = daemon.getInstances();
+		expect(instances).toHaveLength(1);
+		const [instance] = instances;
+		assert.exists(instance, "expected the default instance");
+		expect(instance.id).toBe("opencode");
 	});
 
 	it("daemon without opencodeUrl has no instances (smartDefault=false)", async () => {
@@ -81,10 +83,11 @@ describe("instance lifecycle integration", () => {
 
 		const loaded = loadDaemonConfig(tmpDir);
 		expect(loaded).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.instances).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.projects[0]!.instanceId).toBe("personal");
+		assert.exists(loaded, "expected the saved daemon configuration");
+		expect(loaded.instances).toHaveLength(2);
+		const [project] = loaded.projects;
+		assert.exists(project, "expected the saved personal project");
+		expect(project.instanceId).toBe("personal");
 	});
 
 	it("addProject assigns instanceId from available instances", async () => {

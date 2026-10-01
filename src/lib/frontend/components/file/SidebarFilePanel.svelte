@@ -47,9 +47,9 @@
 	// ─── Directory loading ──────────────────────────────────────────────────────
 
 	function loadDirectory(path: string) {
-		if (fileTreeState.browserCache.has(path)) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after has() check
-			fileTreeState.browserEntries = fileTreeState.browserCache.get(path)!;
+		const cachedEntries = fileTreeState.browserCache.get(path);
+		if (cachedEntries !== undefined) {
+			fileTreeState.browserEntries = cachedEntries;
 			fileTreeState.browserPath = path;
 			return;
 		}

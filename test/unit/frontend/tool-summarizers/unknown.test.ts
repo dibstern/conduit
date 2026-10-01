@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { unknownSummarizer } from "../../../../src/lib/frontend/utils/tool-summarizers/unknown.js";
 
 describe("Unknown summarizer", () => {
@@ -12,8 +12,8 @@ describe("Unknown summarizer", () => {
 			{},
 		);
 		expect(result.subtitle).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: test assertion after toBeDefined
-		expect(result.subtitle!.length).toBeLessThanOrEqual(63); // 60 + "..."
+		assert.exists(result.subtitle, "expected summary subtitle");
+		expect(result.subtitle.length).toBeLessThanOrEqual(63); // 60 + "..."
 	});
 
 	it("renders expanded text content as formatted JSON", () => {
@@ -33,7 +33,7 @@ describe("Unknown summarizer", () => {
 			{},
 		);
 		expect(result.subtitle).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: test assertion after toBeDefined
-		expect(result.subtitle!.length).toBeGreaterThan(0);
+		assert.exists(result.subtitle, "expected summary subtitle");
+		expect(result.subtitle.length).toBeGreaterThan(0);
 	});
 });

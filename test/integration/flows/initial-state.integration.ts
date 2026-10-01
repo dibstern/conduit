@@ -2,7 +2,7 @@
 // Verifies Bug C: when a browser connects, the relay sends all the initial
 // state needed for the UI to populate (session, agents, models, etc.)
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -49,8 +49,9 @@ describe("Integration: Initial State on Connect", () => {
 		await client.waitFor("agent_list");
 		const msg = client.getReceivedOfType("agent_list");
 		expect(msg.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const agents = msg[0]!["agents"] as Array<{ id: string; name: string }>;
+		const agentList = msg[0];
+		assert.exists(agentList, "expected an agent list message");
+		const agents = agentList["agents"] as Array<{ id: string; name: string }>;
 		expect(Array.isArray(agents)).toBe(true);
 		// OpenCode should have at least one agent
 		expect(agents.length).toBeGreaterThan(0);
@@ -68,8 +69,9 @@ describe("Integration: Initial State on Connect", () => {
 		await client.waitFor("model_list");
 		const msg = client.getReceivedOfType("model_list");
 		expect(msg.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const providers = msg[0]!["providers"] as Array<{
+		const modelList = msg[0];
+		assert.exists(modelList, "expected a model list message");
+		const providers = modelList["providers"] as Array<{
 			id: string;
 			name: string;
 			models: unknown[];

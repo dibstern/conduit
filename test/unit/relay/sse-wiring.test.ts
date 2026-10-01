@@ -1,5 +1,5 @@
 import { Effect, Ref } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import {
 	OverridesStateTag,
 	startProcessingTimeout,
@@ -616,8 +616,8 @@ describe("handleSSEEventEffect", () => {
 		};
 		await runSSEEvent(deps, event);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mockPush!.sendToAll).toHaveBeenCalledWith({
+		assert.exists(mockPush, "expected push service");
+		expect(mockPush.sendToAll).toHaveBeenCalledWith({
 			type: "permission_request",
 			title: "Permission Needed",
 			body: "Bash needs approval",
@@ -646,8 +646,8 @@ describe("handleSSEEventEffect", () => {
 		};
 		await runSSEEvent(deps, event);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mockPush!.sendToAll).toHaveBeenCalledWith({
+		assert.exists(mockPush, "expected push service");
+		expect(mockPush.sendToAll).toHaveBeenCalledWith({
 			type: "ask_user",
 			title: "Question from Agent",
 			body: "Agent has a question for you.",
@@ -720,8 +720,8 @@ describe("handleSSEEventEffect", () => {
 		};
 		await runSSEEvent(deps, event);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mockPush!.sendToAll).toHaveBeenCalledWith(
+		assert.exists(mockPush, "expected push service");
+		expect(mockPush.sendToAll).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "error",
 				title: "Error",
@@ -758,8 +758,8 @@ describe("handleSSEEventEffect", () => {
 		};
 		await runSSEEvent(deps, event);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const calls = vi.mocked(mockPush!.sendToAll).mock.calls;
+		assert.exists(mockPush, "expected push service");
+		const calls = vi.mocked(mockPush.sendToAll).mock.calls;
 		const doneCalls = calls.filter(
 			(c) => (c[0] as { type: string }).type === "done",
 		);
@@ -871,8 +871,9 @@ describe("wireSSEConsumerEffect", () => {
 			type: "message.part.delta",
 			properties: { sessionID: "active-session" },
 		};
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("event")!(event);
+		const eventListener = listeners.get("event");
+		assert.exists(eventListener, "expected event listener");
+		eventListener(event);
 
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
@@ -904,8 +905,9 @@ describe("wireSSEConsumerEffect", () => {
 				delta: "hi",
 			},
 		};
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("event")!(event);
+		const eventListener = listeners.get("event");
+		assert.exists(eventListener, "expected event listener");
+		eventListener(event);
 
 		expect(deps.translator.translate).toHaveBeenCalled();
 		expect(warnSpy).not.toHaveBeenCalledWith(
@@ -930,8 +932,9 @@ describe("wireSSEConsumerEffect", () => {
 			type: "server.brand.new.v99",
 			properties: { sessionID: "s1" },
 		};
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("event")!(unknownEvent);
+		const eventListener = listeners.get("event");
+		assert.exists(eventListener, "expected event listener");
+		eventListener(unknownEvent);
 
 		// Forwarded raw despite decode failure (never dropped)…
 		expect(deps.translator.translate).toHaveBeenCalledWith(
@@ -958,18 +961,21 @@ describe("wireSSEConsumerEffect", () => {
 
 		await wireSSEConsumerForTest(deps, consumer);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("connected")!();
+		const connectedListener = listeners.get("connected");
+		assert.exists(connectedListener, "expected connected listener");
+		connectedListener();
 		expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Connected"));
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("disconnected")!(undefined);
+		const disconnectedListener = listeners.get("disconnected");
+		assert.exists(disconnectedListener, "expected disconnected listener");
+		disconnectedListener(undefined);
 		expect(warnSpy).toHaveBeenCalledWith(
 			expect.stringContaining("Disconnected"),
 		);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("reconnecting")!({ attempt: 3, delay: 5000 });
+		const reconnectingListener = listeners.get("reconnecting");
+		assert.exists(reconnectingListener, "expected reconnecting listener");
+		reconnectingListener({ attempt: 3, delay: 5000 });
 		expect(infoSpy).toHaveBeenCalledWith(
 			expect.stringContaining("Reconnecting"),
 		);
@@ -997,8 +1003,9 @@ describe("wireSSEConsumerEffect", () => {
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
 		await wireSSEConsumerForTest(deps, consumer, services);
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("connected")!();
+		const connectedListener = listeners.get("connected");
+		assert.exists(connectedListener, "expected connected listener");
+		connectedListener();
 
 		// Wait for async rehydration
 		await vi.waitFor(() => {
@@ -1040,8 +1047,9 @@ describe("wireSSEConsumerEffect", () => {
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
 		await wireSSEConsumerForTest(deps, consumer, services);
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("connected")!();
+		const connectedListener = listeners.get("connected");
+		assert.exists(connectedListener, "expected connected listener");
+		connectedListener();
 
 		await vi.waitFor(() => {
 			expect(listPendingPermissions).toHaveBeenCalled();
@@ -1071,8 +1079,9 @@ describe("wireSSEConsumerEffect", () => {
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
 		await wireSSEConsumerForTest(deps, consumer, services);
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("connected")!();
+		const connectedListener = listeners.get("connected");
+		assert.exists(connectedListener, "expected connected listener");
+		connectedListener();
 
 		// The badge for these comes from pending_approvals now (ni8.23); what
 		// recovery still owes the browser is the questions themselves.
@@ -1101,8 +1110,9 @@ describe("wireSSEConsumerEffect", () => {
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
 		await wireSSEConsumerForTest(deps, consumer);
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("connected")!();
+		const connectedListener = listeners.get("connected");
+		assert.exists(connectedListener, "expected connected listener");
+		connectedListener();
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "connection_status",
@@ -1120,8 +1130,9 @@ describe("wireSSEConsumerEffect", () => {
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
 		await wireSSEConsumerForTest(deps, consumer);
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("disconnected")!(new Error("connection lost"));
+		const disconnectedListener = listeners.get("disconnected");
+		assert.exists(disconnectedListener, "expected disconnected listener");
+		disconnectedListener(new Error("connection lost"));
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "connection_status",
@@ -1139,8 +1150,9 @@ describe("wireSSEConsumerEffect", () => {
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 
 		await wireSSEConsumerForTest(deps, consumer);
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("reconnecting")!({ attempt: 1, delay: 1000 });
+		const reconnectingListener = listeners.get("reconnecting");
+		assert.exists(reconnectingListener, "expected reconnecting listener");
+		reconnectingListener({ attempt: 1, delay: 1000 });
 
 		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
 			type: "connection_status",
@@ -1174,9 +1186,10 @@ describe("handleSSEEventEffect – tool_result truncation", () => {
 		await runSSEEvent(deps, event);
 
 		// broadcastPerSessionEvent should receive truncated content under Phase 0b
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const sendArg = vi.mocked(deps.wsHandler.broadcastPerSessionEvent).mock
-			.calls[0]![1];
+		const call = vi.mocked(deps.wsHandler.broadcastPerSessionEvent).mock
+			.calls[0];
+		assert.exists(call, "expected per-session broadcast");
+		const sendArg = call[1];
 		expect(sendArg.type).toBe("tool_result");
 		if (sendArg.type === "tool_result") {
 			expect(sendArg.content.length).toBeLessThan(largeContent.length);

@@ -20,7 +20,7 @@
 //   - Reset empties everything
 
 import fc from "fast-check";
-import { describe, it } from "vitest";
+import { assert, describe, it } from "vitest";
 import {
 	createTranslator,
 	mapToolName,
@@ -83,8 +83,8 @@ class ReceiveToolPartCommand implements fc.Command<ModelState, RealState> {
 
 		// Real: should emit tool_start for new pending tool
 		if (result.ok && result.messages.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: length-checked
-			const first = result.messages[0]!;
+			const first = result.messages[0];
+			assert.exists(first, "expected first message");
 			if (first.type === "tool_start") {
 				// Expected — new part emits tool_start
 				const expected = mapToolName(this.tool);
@@ -152,8 +152,8 @@ class UpdateToolStatusCommand implements fc.Command<ModelState, RealState> {
 
 		// Real: should NOT emit tool_start (part already seen)
 		if (result.ok && result.messages.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: length-checked
-			const msg = result.messages[0]!;
+			const msg = result.messages[0];
+			assert.exists(msg, "expected message");
 			if (msg.type === "tool_start") {
 				throw new Error(
 					`Duplicate tool_start for already-seen part "${this.partID}"`,
@@ -163,8 +163,8 @@ class UpdateToolStatusCommand implements fc.Command<ModelState, RealState> {
 
 		// Verify correct event type for status
 		if (result.ok && result.messages.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: length-checked
-			const msg = result.messages[0]!;
+			const msg = result.messages[0];
+			assert.exists(msg, "expected message");
 			if (this.status === "running" && msg.type !== "tool_executing") {
 				throw new Error(
 					`Expected tool_executing for running status, got ${msg.type}`,
@@ -218,8 +218,8 @@ class ReceiveReasoningPartCommand implements fc.Command<ModelState, RealState> {
 
 		// Should emit thinking_start for new reasoning part
 		if (result.ok && result.messages.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: length-checked
-			const msg = result.messages[0]!;
+			const msg = result.messages[0];
+			assert.exists(msg, "expected message");
 			if (msg.type !== "thinking_start") {
 				throw new Error(
 					`Expected thinking_start for new reasoning part, got ${msg.type}`,
@@ -261,8 +261,8 @@ class FinalizeReasoningCommand implements fc.Command<ModelState, RealState> {
 
 		// Should emit thinking_stop (not thinking_start since part is already seen)
 		if (result.ok && result.messages.length === 1) {
-			// biome-ignore lint/style/noNonNullAssertion: length-checked
-			const msg = result.messages[0]!;
+			const msg = result.messages[0];
+			assert.exists(msg, "expected message");
 			if (msg.type === "thinking_start") {
 				throw new Error(
 					`Duplicate thinking_start for already-seen reasoning part "${this.partID}"`,

@@ -1,5 +1,5 @@
 // test/unit/persistence/projectors-effect/approval-projector.test.ts
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	createAllEffectProjectors,
 	type EffectProjector,
@@ -122,8 +122,8 @@ describe("ApprovalProjector", () => {
 			expect(row?.type).toBe("permission");
 			expect(row?.status).toBe("pending");
 			expect(row?.tool_name).toBe("bash");
-			// biome-ignore lint/style/noNonNullAssertion: test assertion after expect(row).toBeDefined()
-			expect(JSON.parse(row!.input ?? "null")).toEqual({ command: "rm -rf /" });
+			assert.exists(row, "expected approval row");
+			expect(JSON.parse(row.input ?? "null")).toEqual({ command: "rm -rf /" });
 			expect(row?.decision).toBeNull();
 			expect(row?.created_at).toBe(now);
 			expect(row?.resolved_at).toBeNull();
@@ -260,8 +260,8 @@ describe("ApprovalProjector", () => {
 			expect(row?.type).toBe("question");
 			expect(row?.status).toBe("pending");
 			expect(row?.tool_name).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: test assertion after expect(row).toBeDefined()
-			expect(JSON.parse(row!.input ?? "null")).toEqual([
+			assert.exists(row, "expected approval row");
+			expect(JSON.parse(row.input ?? "null")).toEqual([
 				{ id: "q1-a", text: "Are you sure?", type: "confirm" },
 			]);
 			expect(row?.decision).toBeNull();
@@ -328,8 +328,8 @@ describe("ApprovalProjector", () => {
 				["q-1"],
 			);
 			expect(row?.status).toBe("resolved");
-			// biome-ignore lint/style/noNonNullAssertion: test assertion after expect(row).toBeDefined()
-			expect(JSON.parse(row!.decision ?? "null")).toEqual({ "q1-a": true });
+			assert.exists(row, "expected approval row");
+			expect(JSON.parse(row.decision ?? "null")).toEqual({ "q1-a": true });
 			expect(row?.resolved_at).toBe(resolveTime);
 		});
 	});

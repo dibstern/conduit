@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -202,8 +202,8 @@ describe("Concurrent projection — interleaved sessions", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(think1).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(think1!.text).toBe("session 1 thought");
+		assert.exists(think1, "expected first session thinking message");
+		expect(think1.text).toBe("session 1 thought");
 		expect(chat1.some((m) => m.type === "assistant")).toBe(true);
 
 		// Session 2: assistant only, no thinking
@@ -215,8 +215,8 @@ describe("Concurrent projection — interleaved sessions", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(think3).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(think3!.text).toBe("session 3 thought");
+		assert.exists(think3, "expected third session thinking message");
+		expect(think3.text).toBe("session 3 thought");
 		expect(chat3.some((m) => m.type === "assistant")).toBe(false);
 	});
 

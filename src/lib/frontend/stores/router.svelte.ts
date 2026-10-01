@@ -112,10 +112,11 @@ export function getCurrentRoute(): Route {
 	// Legacy session links remain readable until App normalizes the address.
 	const sessionMatch = path.match(/^(?:\/p\/[^/]+)?\/s\/([^/]+)\/?$/);
 	if (sessionMatch) {
+		const sessionId = sessionMatch[1];
+		if (sessionId === undefined) return { page: "chat" };
 		return {
 			page: "chat",
-			// biome-ignore lint/style/noNonNullAssertion: safe — regex match guarantees capture group
-			sessionId: sessionMatch[1]!,
+			sessionId,
 		};
 	}
 

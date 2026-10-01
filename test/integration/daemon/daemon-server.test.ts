@@ -15,7 +15,15 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import WebSocket from "ws";
 import {
 	type ForegroundDaemonHandle,
@@ -269,8 +277,9 @@ describe("instance status broadcast", () => {
 		});
 		const instances = daemon.getInstances();
 		expect(instances.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instances[0]!.id).toBe("opencode");
+		const instance = instances[0];
+		assert.exists(instance, "expected an OpenCode instance");
+		expect(instance.id).toBe("opencode");
 	});
 
 	it("status_changed listener is wired (does not throw without relays)", async () => {
@@ -281,9 +290,11 @@ describe("instance status broadcast", () => {
 
 		// The daemon wires status_changed events internally.
 		// Verify getInstances works and the daemon was started successfully.
-		expect(daemon.getInstances()).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(daemon.getInstances()[0]!.id).toBe("opencode");
+		const instances = daemon.getInstances();
+		expect(instances).toHaveLength(1);
+		const instance = instances[0];
+		assert.exists(instance, "expected an OpenCode instance");
+		expect(instance.id).toBe("opencode");
 	});
 
 	it("health checker authenticates with real OpenCode server", async () => {
@@ -335,9 +346,9 @@ describe("instance status broadcast", () => {
 
 		const instances = daemon.getInstances();
 		expect(instances).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instances[0]!.id).toBe("opencode");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instances[0]!.status).toBe("healthy");
+		const instance = instances[0];
+		assert.exists(instance, "expected an OpenCode instance");
+		expect(instance.id).toBe("opencode");
+		expect(instance.status).toBe("healthy");
 	}, 20_000);
 });

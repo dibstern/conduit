@@ -49,7 +49,7 @@
 //   T32: Includes all IPs + localhost in cert generation command
 
 import type * as os from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import {
 	ensureCerts,
 	getAllIPs,
@@ -325,13 +325,11 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 			});
 
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.key).toEqual(Buffer.from(keyContent));
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.cert).toEqual(Buffer.from(certContent));
+			assert.exists(result, "expected TLS material");
+			expect(result.key).toEqual(Buffer.from(keyContent));
+			expect(result.cert).toEqual(Buffer.from(certContent));
 			// No mkcert and no local rootCA.pem → caRoot is null
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.caRoot).toBeNull();
+			expect(result.caRoot).toBeNull();
 		});
 
 		it("T26: generates certs on first run", async () => {
@@ -415,10 +413,9 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 			});
 
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.key).toEqual(Buffer.from(keyContent));
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.cert).toEqual(Buffer.from(certContent));
+			assert.exists(result, "expected TLS material");
+			expect(result.key).toEqual(Buffer.from(keyContent));
+			expect(result.cert).toEqual(Buffer.from(certContent));
 			// Verify mkcert was NOT called to regenerate
 			const mkcertGenCall = exec.mock.calls.find(
 				([c]: [string]) =>
@@ -549,12 +546,10 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 			expect(result).toHaveProperty("key");
 			expect(result).toHaveProperty("cert");
 			expect(result).toHaveProperty("caRoot");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(Buffer.isBuffer(result!.key)).toBe(true);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(Buffer.isBuffer(result!.cert)).toBe(true);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.caRoot).toBe("/ca/root/rootCA.pem");
+			assert.exists(result, "expected TLS material");
+			expect(Buffer.isBuffer(result.key)).toBe(true);
+			expect(Buffer.isBuffer(result.cert)).toBe(true);
+			expect(result.caRoot).toBe("/ca/root/rootCA.pem");
 		});
 
 		it("T31: handles mkcert generation failure gracefully", async () => {

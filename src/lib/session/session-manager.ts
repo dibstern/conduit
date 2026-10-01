@@ -287,8 +287,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				const bTime = this.lastMessageAt.get(b.id) ?? b.time?.created ?? 0;
 				return bTime - aTime;
 			});
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			return sorted[0]!.id;
+			const latest = sorted[0];
+			if (latest !== undefined) return latest.id;
 		}
 		const session = await this.client.session.create(title ? { title } : {});
 		return session.id;
@@ -304,8 +304,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			// Prefer a top-level session over a subagent (forked) session so
 			// that fresh loads don't land on a child session.
 			const topLevel = sessions.find((s) => !s.parentID);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			return (topLevel ?? sessions[0]!).id;
+			const firstSession = sessions[0];
+			if (topLevel !== undefined) return topLevel.id;
+			if (firstSession !== undefined) return firstSession.id;
 		}
 		const created = await this.client.session.create(title ? { title } : {});
 		this.emit("session_lifecycle", { type: "created", sessionId: created.id });

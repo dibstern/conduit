@@ -563,10 +563,9 @@
 		const vv = window.visualViewport;
 		if (!vv) return;
 
-		function onViewportResize() {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded above
-			vvHeight = Math.round(vv!.height);
-		}
+		const onViewportResize = () => {
+			vvHeight = Math.round(vv.height);
+		};
 		onViewportResize(); // capture initial height
 		vv.addEventListener("resize", onViewportResize);
 		return () => vv.removeEventListener("resize", onViewportResize);

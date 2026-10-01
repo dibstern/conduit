@@ -15,7 +15,7 @@
 import type { ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import { createSdkClientEffect } from "../../../src/lib/instance/sdk-factory.js";
 import type {
@@ -179,20 +179,14 @@ describe("InstanceManager", () => {
 			mgr.addInstance("dev", managedConfig());
 			const inst = mgr.getInstance("dev");
 			expect(inst).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.id).toBe("dev");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.name).toBe("Test Instance");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.port).toBe(4096);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.managed).toBe(true);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.restartCount).toBe(0);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.createdAt).toBeGreaterThan(0);
+			assert.exists(inst, "expected the created instance");
+			expect(inst.id).toBe("dev");
+			expect(inst.name).toBe("Test Instance");
+			expect(inst.port).toBe(4096);
+			expect(inst.managed).toBe(true);
+			expect(inst.status).toBe("stopped");
+			expect(inst.restartCount).toBe(0);
+			expect(inst.createdAt).toBeGreaterThan(0);
 		});
 
 		it("rejects duplicate IDs", () => {
@@ -271,8 +265,8 @@ describe("InstanceManager", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig({ env: { API_KEY: "sk-test" } }));
 			const inst = mgr.getInstance("dev");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.env).toEqual({ API_KEY: "sk-test" });
+			assert.exists(inst, "expected the configured instance");
+			expect(inst.env).toEqual({ API_KEY: "sk-test" });
 		});
 
 		it("returns the created instance", () => {
@@ -307,8 +301,8 @@ describe("InstanceManager", () => {
 			mgr.addInstance("dev", managedConfig());
 			const inst = mgr.getInstance("dev");
 			expect(inst).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst!.id).toBe("dev");
+			assert.exists(inst, "expected the instance by ID");
+			expect(inst.id).toBe("dev");
 		});
 
 		it("returns undefined for unknown ID", () => {
@@ -405,8 +399,8 @@ describe("InstanceManager", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
 			// Simulate running state
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("test-1")!;
+			const inst = mgr.getInstance("test-1");
+			assert.exists(inst, "expected the test instance");
 			(inst as { status: string }).status = "healthy";
 			mgr.updateInstance("test-1", { env: { FOO: "bar" } });
 			expect(mgr.getInstance("test-1")?.needsRestart).toBe(true);
@@ -415,8 +409,8 @@ describe("InstanceManager", () => {
 		it("sets needsRestart when port changes on running instance", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test", port: 5000 }));
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("test-1")!;
+			const inst = mgr.getInstance("test-1");
+			assert.exists(inst, "expected the test instance");
 			(inst as { status: string }).status = "healthy";
 			mgr.updateInstance("test-1", { port: 6000 });
 			expect(mgr.getInstance("test-1")?.needsRestart).toBe(true);
@@ -432,8 +426,8 @@ describe("InstanceManager", () => {
 		it("does not set needsRestart for name-only change on running instance", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("test-1")!;
+			const inst = mgr.getInstance("test-1");
+			assert.exists(inst, "expected the test instance");
 			(inst as { status: string }).status = "healthy";
 			mgr.updateInstance("test-1", { name: "Renamed" });
 			expect(mgr.getInstance("test-1")?.needsRestart).toBeFalsy();
@@ -442,8 +436,8 @@ describe("InstanceManager", () => {
 		it("clears needsRestart on stopInstance", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("test-1")!;
+			const inst = mgr.getInstance("test-1");
+			assert.exists(inst, "expected the test instance");
 			(inst as { status: string }).status = "healthy";
 			(inst as { needsRestart: boolean }).needsRestart = true;
 			mgr.stopInstance("test-1");
@@ -453,8 +447,8 @@ describe("InstanceManager", () => {
 		it("emits status_changed when needsRestart set", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("test-1", managedConfig({ name: "Test" }));
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("test-1")!;
+			const inst = mgr.getInstance("test-1");
+			assert.exists(inst, "expected the test instance");
 			(inst as { status: string }).status = "healthy";
 			const events: OpenCodeInstance[] = [];
 			mgr.on("status_changed", (i) => events.push(i));
@@ -526,16 +520,14 @@ describe("InstanceManager", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			// Manually set to healthy to test stop
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("dev")!;
+			const inst = mgr.getInstance("dev");
+			assert.exists(inst, "expected the dev instance");
 			// Instance starts as stopped, so simulate it being healthy
 			(inst as { status: string }).status = "healthy";
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.status).toBe("healthy");
+			expect(inst.status).toBe("healthy");
 
 			mgr.stopInstance("dev");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.status).toBe("stopped");
+			expect(inst.status).toBe("stopped");
 		});
 
 		it("throws for unknown ID", () => {
@@ -560,8 +552,9 @@ describe("InstanceManager", () => {
 			mgr.addInstance("dev", managedConfig());
 			// Already stopped by default
 			mgr.stopInstance("dev");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.status).toBe("stopped");
+			const inst = mgr.getInstance("dev");
+			assert.exists(inst, "expected the dev instance");
+			expect(inst.status).toBe("stopped");
 		});
 	});
 
@@ -575,22 +568,21 @@ describe("InstanceManager", () => {
 			mgr.addInstance("c", managedConfig({ port: 4098 }));
 
 			// Simulate some as running
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const a = mgr.getInstance("a")!;
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const b = mgr.getInstance("b")!;
+			const a = mgr.getInstance("a");
+			const b = mgr.getInstance("b");
+			assert.exists(a, "expected instance a");
+			assert.exists(b, "expected instance b");
 			(a as { status: string }).status = "healthy";
 			(b as { status: string }).status = "starting";
 			// c stays stopped
 
 			mgr.stopAll();
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("a")!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("b")!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("c")!.status).toBe("stopped");
+			expect(a.status).toBe("stopped");
+			expect(b.status).toBe("stopped");
+			const c = mgr.getInstance("c");
+			assert.exists(c, "expected instance c");
+			expect(c.status).toBe("stopped");
 		});
 
 		it("does nothing when no instances exist", () => {
@@ -615,8 +607,9 @@ describe("InstanceManager", () => {
 				managed: false,
 				url: "https://opencode.example.com",
 			});
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("ext")!.status).toBe("stopped");
+			const ext = mgr.getInstance("ext");
+			assert.exists(ext, "expected the external instance");
+			expect(ext.status).toBe("stopped");
 
 			// Verify health polling is active by advancing time
 			await vi.advanceTimersByTimeAsync(1100);
@@ -684,8 +677,8 @@ describe("InstanceManager", () => {
 
 			await mgr.startInstance("dev");
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("dev")!;
+			const inst = mgr.getInstance("dev");
+			assert.exists(inst, "expected the started instance");
 			expect(inst.status).toBe("healthy");
 			expect(inst.pid).toBe(12345);
 			expect(statusChanges).toEqual(["starting", "healthy"]);
@@ -789,11 +782,14 @@ describe("InstanceManager", () => {
 			const before = Date.now();
 			await mgr.startInstance("dev");
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("dev")!;
+			const inst = mgr.getInstance("dev");
+			assert.exists(inst, "expected the started instance");
 			expect(inst.lastHealthCheck).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(inst.lastHealthCheck!).toBeGreaterThanOrEqual(before);
+			assert.exists(
+				inst.lastHealthCheck,
+				"expected the health-check timestamp",
+			);
+			expect(inst.lastHealthCheck).toBeGreaterThanOrEqual(before);
 		});
 	});
 
@@ -813,18 +809,16 @@ describe("InstanceManager", () => {
 			mgr.addInstance("dev", managedConfig({ port: 14100 }));
 			await mgr.startInstance("dev");
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.status).toBe("healthy");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.pid).toBe(55555);
+			const started = mgr.getInstance("dev");
+			assert.exists(started, "expected the started instance");
+			expect(started.status).toBe("healthy");
+			expect(started.pid).toBe(55555);
 
 			mgr.stopInstance("dev");
 
 			expect(mockProc.kill).toHaveBeenCalledWith("SIGTERM");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("dev")!.pid).toBeUndefined();
+			expect(started.status).toBe("stopped");
+			expect(started.pid).toBeUndefined();
 		});
 
 		it("clears health polling on stop", async () => {
@@ -883,10 +877,12 @@ describe("InstanceManager", () => {
 
 			expect(procA.kill).toHaveBeenCalledWith("SIGTERM");
 			expect(procB.kill).toHaveBeenCalledWith("SIGTERM");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("a")!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("b")!.status).toBe("stopped");
+			const a = mgr.getInstance("a");
+			const b = mgr.getInstance("b");
+			assert.exists(a, "expected instance a");
+			assert.exists(b, "expected instance b");
+			expect(a.status).toBe("stopped");
+			expect(b.status).toBe("stopped");
 		});
 	});
 
@@ -923,8 +919,9 @@ describe("InstanceManager", () => {
 			const mgr = new InstanceManager();
 			mgr.addInstance("dev", managedConfig());
 			// Set to healthy first
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			(mgr.getInstance("dev")! as { status: string }).status = "healthy";
+			const inst = mgr.getInstance("dev");
+			assert.exists(inst, "expected the dev instance");
+			(inst as { status: string }).status = "healthy";
 
 			const handler = vi.fn();
 			mgr.on("status_changed", handler);
@@ -945,10 +942,12 @@ describe("InstanceManager", () => {
 			mgr.addInstance("a", managedConfig({ port: 4096 }));
 			mgr.addInstance("b", managedConfig({ port: 4097 }));
 			// Set both to healthy
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			(mgr.getInstance("a")! as { status: string }).status = "healthy";
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			(mgr.getInstance("b")! as { status: string }).status = "healthy";
+			const a = mgr.getInstance("a");
+			const b = mgr.getInstance("b");
+			assert.exists(a, "expected instance a");
+			assert.exists(b, "expected instance b");
+			(a as { status: string }).status = "healthy";
+			(b as { status: string }).status = "healthy";
 
 			const handler = vi.fn();
 			mgr.on("status_changed", handler);
@@ -1016,19 +1015,20 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("crashy");
 
 			expect(spawnCount).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("crashy")!.status).toBe("healthy");
+			const crashy = mgr.getInstance("crashy");
+			assert.exists(crashy, "expected the crashy instance");
+			expect(crashy.status).toBe("healthy");
 
 			// Simulate crash (non-zero exit)
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[0]!(1);
+			const [firstExitCallback] = exitCallbacks;
+			assert.exists(firstExitCallback, "expected the first exit callback");
+			firstExitCallback(1);
 
 			// Advance past backoff delay (first restart: 1000ms base)
 			await vi.advanceTimersByTimeAsync(2000);
 
 			expect(spawnCount).toBe(2);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("crashy")!.restartCount).toBe(1);
+			expect(crashy.restartCount).toBe(1);
 
 			mgr.stopAll();
 		});
@@ -1041,7 +1041,7 @@ describe("InstanceManager", () => {
 			});
 
 			let spawnCount = 0;
-			let exitCallback: ((code: number | null) => void) | null = null;
+			const exitCallbacks: ((code: number | null) => void)[] = [];
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
@@ -1055,7 +1055,7 @@ describe("InstanceManager", () => {
 								cb: Function,
 							) => {
 								if (event === "exit")
-									exitCallback = cb as (code: number | null) => void;
+									exitCallbacks.push(cb as (code: number | null) => void);
 							},
 						),
 						removeAllListeners: vi.fn(),
@@ -1071,18 +1071,19 @@ describe("InstanceManager", () => {
 			expect(spawnCount).toBe(1);
 
 			// Simulate clean exit
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallback!(0);
+			const [exitCallback] = exitCallbacks;
+			assert.exists(exitCallback, "expected the process exit callback");
+			exitCallback(0);
 
 			// Advance past any potential backoff
 			await vi.advanceTimersByTimeAsync(5000);
 
 			// Should NOT have respawned
 			expect(spawnCount).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("clean")!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("clean")!.exitCode).toBe(0);
+			const clean = mgr.getInstance("clean");
+			assert.exists(clean, "expected the clean instance");
+			expect(clean.status).toBe("stopped");
+			expect(clean.exitCode).toBe(0);
 
 			mgr.stopAll();
 		});
@@ -1095,7 +1096,7 @@ describe("InstanceManager", () => {
 			});
 
 			let spawnCount = 0;
-			let exitCallback: ((code: number | null) => void) | null = null;
+			const exitCallbacks: ((code: number | null) => void)[] = [];
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
@@ -1109,7 +1110,7 @@ describe("InstanceManager", () => {
 								cb: Function,
 							) => {
 								if (event === "exit")
-									exitCallback = cb as (code: number | null) => void;
+									exitCallbacks.push(cb as (code: number | null) => void);
 							},
 						),
 						removeAllListeners: vi.fn(),
@@ -1128,8 +1129,9 @@ describe("InstanceManager", () => {
 			mgr.stopInstance("manual");
 
 			// If the process fires exit after being killed, it shouldn't restart
+			const [exitCallback] = exitCallbacks;
 			if (exitCallback) {
-				(exitCallback as (code: number | null) => void)(1);
+				exitCallback(1);
 			}
 
 			await vi.advanceTimersByTimeAsync(5000);
@@ -1179,20 +1181,23 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("fragile");
 
 			// First crash → restart #1
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[0]!(1);
+			const [firstExitCallback] = exitCallbacks;
+			assert.exists(firstExitCallback, "expected the first exit callback");
+			firstExitCallback(1);
 			await vi.advanceTimersByTimeAsync(2000);
 			expect(spawnCount).toBe(2);
 
 			// Second crash → should give up (maxRestartsPerWindow = 2, recent.length >= 2)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallbacks[1]!(1);
+			const [, secondExitCallback] = exitCallbacks;
+			assert.exists(secondExitCallback, "expected the second exit callback");
+			secondExitCallback(1);
 			await vi.advanceTimersByTimeAsync(5000);
 
 			// Should NOT have spawned a 3rd time
 			expect(spawnCount).toBe(2);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("fragile")!.status).toBe("stopped");
+			const fragile = mgr.getInstance("fragile");
+			assert.exists(fragile, "expected the fragile instance");
+			expect(fragile.status).toBe("stopped");
 			expect(errorHandler).toHaveBeenCalledWith(
 				expect.objectContaining({
 					id: "fragile",
@@ -1239,8 +1244,9 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("backoff");
 
 			// First crash → backoff should be ~1000ms
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[0]!(1);
+			const [firstExitCallback] = exitCallbacks;
+			assert.exists(firstExitCallback, "expected the first exit callback");
+			firstExitCallback(1);
 
 			// After 500ms, should NOT have restarted yet
 			await vi.advanceTimersByTimeAsync(500);
@@ -1251,8 +1257,9 @@ describe("InstanceManager", () => {
 			expect(spawnCount).toBe(2);
 
 			// Second crash → backoff should be ~2000ms
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[1]!(1);
+			const [, secondExitCallback] = exitCallbacks;
+			assert.exists(secondExitCallback, "expected the second exit callback");
+			secondExitCallback(1);
 
 			// After 1500ms, should NOT have restarted yet
 			await vi.advanceTimersByTimeAsync(1500);
@@ -1300,22 +1307,23 @@ describe("InstanceManager", () => {
 			mgr.addInstance("counting", managedConfig({ port: 14205 }));
 			await mgr.startInstance("counting");
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("counting")!.restartCount).toBe(0);
+			const counting = mgr.getInstance("counting");
+			assert.exists(counting, "expected the counting instance");
+			expect(counting.restartCount).toBe(0);
 
 			// First crash
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[0]!(1);
+			const [firstExitCallback] = exitCallbacks;
+			assert.exists(firstExitCallback, "expected the first exit callback");
+			firstExitCallback(1);
 			await vi.advanceTimersByTimeAsync(2000);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("counting")!.restartCount).toBe(1);
+			expect(counting.restartCount).toBe(1);
 
 			// Second crash
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[1]!(1);
+			const [, secondExitCallback] = exitCallbacks;
+			assert.exists(secondExitCallback, "expected the second exit callback");
+			secondExitCallback(1);
 			await vi.advanceTimersByTimeAsync(3000);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("counting")!.restartCount).toBe(2);
+			expect(counting.restartCount).toBe(2);
 
 			mgr.stopAll();
 		});
@@ -1327,7 +1335,7 @@ describe("InstanceManager", () => {
 				restartWindowMs: 60_000,
 			});
 
-			let exitCallback: ((code: number | null) => void) | null = null;
+			const exitCallbacks: ((code: number | null) => void)[] = [];
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
@@ -1340,7 +1348,7 @@ describe("InstanceManager", () => {
 								cb: Function,
 							) => {
 								if (event === "exit")
-									exitCallback = cb as (code: number | null) => void;
+									exitCallbacks.push(cb as (code: number | null) => void);
 							},
 						),
 						removeAllListeners: vi.fn(),
@@ -1354,11 +1362,12 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("exit-code");
 
 			// Crash with exit code 137 (OOM kill)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallback!(137);
+			const [exitCallback] = exitCallbacks;
+			assert.exists(exitCallback, "expected the process exit callback");
+			exitCallback(137);
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("exit-code")!;
+			const inst = mgr.getInstance("exit-code");
+			assert.exists(inst, "expected the exit-code instance");
 			expect(inst.exitCode).toBe(137);
 
 			mgr.stopAll();
@@ -1371,7 +1380,7 @@ describe("InstanceManager", () => {
 				restartWindowMs: 60_000,
 			});
 
-			let exitCallback: ((code: number | null) => void) | null = null;
+			const exitCallbacks: ((code: number | null) => void)[] = [];
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
@@ -1384,7 +1393,7 @@ describe("InstanceManager", () => {
 								cb: Function,
 							) => {
 								if (event === "exit")
-									exitCallback = cb as (code: number | null) => void;
+									exitCallbacks.push(cb as (code: number | null) => void);
 							},
 						),
 						removeAllListeners: vi.fn(),
@@ -1396,14 +1405,15 @@ describe("InstanceManager", () => {
 
 			mgr.addInstance("crash-status", managedConfig({ port: 14207 }));
 			await mgr.startInstance("crash-status");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("crash-status")!.status).toBe("healthy");
+			const crashStatus = mgr.getInstance("crash-status");
+			assert.exists(crashStatus, "expected the crash-status instance");
+			expect(crashStatus.status).toBe("healthy");
 
 			// Crash — status should be unhealthy IMMEDIATELY, before backoff fires
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallback!(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("crash-status")!.status).toBe("unhealthy");
+			const [exitCallback] = exitCallbacks;
+			assert.exists(exitCallback, "expected the process exit callback");
+			exitCallback(1);
+			expect(crashStatus.status).toBe("unhealthy");
 
 			mgr.stopAll();
 		});
@@ -1416,7 +1426,7 @@ describe("InstanceManager", () => {
 			});
 
 			let spawnCount = 0;
-			let exitCallback: ((code: number | null) => void) | null = null;
+			const exitCallbacks: ((code: number | null) => void)[] = [];
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
@@ -1430,7 +1440,7 @@ describe("InstanceManager", () => {
 								cb: Function,
 							) => {
 								if (event === "exit")
-									exitCallback = cb as (code: number | null) => void;
+									exitCallbacks.push(cb as (code: number | null) => void);
 							},
 						),
 						removeAllListeners: vi.fn(),
@@ -1445,15 +1455,16 @@ describe("InstanceManager", () => {
 			expect(spawnCount).toBe(1);
 
 			// Crash — starts backoff timer
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallback!(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("cancel-restart")!.status).toBe("unhealthy");
+			const [exitCallback] = exitCallbacks;
+			assert.exists(exitCallback, "expected the process exit callback");
+			exitCallback(1);
+			const cancelRestart = mgr.getInstance("cancel-restart");
+			assert.exists(cancelRestart, "expected the cancel-restart instance");
+			expect(cancelRestart.status).toBe("unhealthy");
 
 			// Stop during backoff — should cancel the pending restart
 			mgr.stopInstance("cancel-restart");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("cancel-restart")!.status).toBe("stopped");
+			expect(cancelRestart.status).toBe("stopped");
 
 			// Advance past backoff — should NOT have respawned
 			await vi.advanceTimersByTimeAsync(5000);
@@ -1476,8 +1487,9 @@ describe("InstanceManager", () => {
 
 			mgr.addInstance("running", managedConfig({ port: 14209 }));
 			await mgr.startInstance("running");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("running")!.status).toBe("healthy");
+			const running = mgr.getInstance("running");
+			assert.exists(running, "expected the running instance");
+			expect(running.status).toBe("healthy");
 
 			mgr.removeInstance("running");
 
@@ -1493,7 +1505,7 @@ describe("InstanceManager", () => {
 			});
 
 			let spawnCount = 0;
-			let exitCallback: ((code: number | null) => void) | null = null;
+			const exitCallbacks: ((code: number | null) => void)[] = [];
 
 			mgr.setSpawner(
 				vi.fn().mockImplementation(() => {
@@ -1507,7 +1519,7 @@ describe("InstanceManager", () => {
 								cb: Function,
 							) => {
 								if (event === "exit")
-									exitCallback = cb as (code: number | null) => void;
+									exitCallbacks.push(cb as (code: number | null) => void);
 							},
 						),
 						removeAllListeners: vi.fn(),
@@ -1521,8 +1533,9 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("remove-backoff");
 
 			// Crash — starts backoff timer
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallback!(1);
+			const [exitCallback] = exitCallbacks;
+			assert.exists(exitCallback, "expected the process exit callback");
+			exitCallback(1);
 
 			// Remove during backoff
 			mgr.removeInstance("remove-backoff");
@@ -1563,16 +1576,15 @@ describe("InstanceManager", () => {
 			expect(callCount).toBe(1);
 
 			// Simulate unhealthy status
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("unhealthy-start")!;
+			const inst = mgr.getInstance("unhealthy-start");
+			assert.exists(inst, "expected the unhealthy-start instance");
 			(inst as { status: string }).status = "unhealthy";
 
 			// Start again — should kill old process and spawn new
 			await mgr.startInstance("unhealthy-start");
 			expect(oldProc.kill).toHaveBeenCalledWith("SIGTERM");
 			expect(callCount).toBe(2);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("unhealthy-start")!.pid).toBe(22222);
+			expect(inst.pid).toBe(22222);
 		});
 
 		it("resets to stopped if spawner rejects", async () => {
@@ -1589,8 +1601,9 @@ describe("InstanceManager", () => {
 				"spawn failed",
 			);
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("spawn-fail")!.status).toBe("stopped");
+			const spawnFail = mgr.getInstance("spawn-fail");
+			assert.exists(spawnFail, "expected the spawn-fail instance");
+			expect(spawnFail.status).toBe("stopped");
 			expect(statusChanges).toContain("starting");
 			expect(statusChanges).toContain("stopped");
 		});
@@ -1614,10 +1627,10 @@ describe("InstanceManager", () => {
 			// Process should have been killed and cleaned up
 			expect(mockProc.kill).toHaveBeenCalledWith("SIGTERM");
 			expect(mockProc.removeAllListeners).toHaveBeenCalledWith("exit");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("leak-test")!.status).toBe("stopped");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("leak-test")!.pid).toBeUndefined();
+			const leakTest = mgr.getInstance("leak-test");
+			assert.exists(leakTest, "expected the leak-test instance");
+			expect(leakTest.status).toBe("stopped");
+			expect(leakTest.pid).toBeUndefined();
 		});
 	});
 
@@ -1691,8 +1704,9 @@ describe("InstanceManager", () => {
 
 			// After startInstance, instance should be stopped (max restarts exceeded, gave up)
 			// The exit fired during health check: handleProcessExit → unhealthy → then stopped
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const status = mgr.getInstance("race")!.status;
+			const race = mgr.getInstance("race");
+			assert.exists(race, "expected the race instance");
+			const { status } = race;
 			expect(status === "unhealthy" || status === "stopped").toBe(true);
 
 			// Advance past several polling intervals — health polling should NOT run
@@ -1749,8 +1763,12 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("race-healthy-crash");
 
 			// Status must NOT be "healthy" — the guard should have prevented that write
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const finalStatus = mgr.getInstance("race-healthy-crash")!.status;
+			const raceHealthyCrash = mgr.getInstance("race-healthy-crash");
+			assert.exists(
+				raceHealthyCrash,
+				"expected the race-healthy-crash instance",
+			);
+			const { status: finalStatus } = raceHealthyCrash;
 			expect(finalStatus === "unhealthy" || finalStatus === "stopped").toBe(
 				true,
 			);
@@ -1806,8 +1824,9 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("race-stop");
 
 			// After startInstance, status should be stopped (clean exit)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("race-stop")!.status).toBe("stopped");
+			const raceStop = mgr.getInstance("race-stop");
+			assert.exists(raceStop, "expected the race-stop instance");
+			expect(raceStop.status).toBe("stopped");
 
 			// No health polling should fire
 			const callsAfterStart = healthCheckerFn2.mock.calls.length;
@@ -1865,27 +1884,31 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("exact-limit");
 
 			// Crash 1 → restart
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[0]!(1);
+			const [firstExitCallback] = exitCallbacks;
+			assert.exists(firstExitCallback, "expected the first exit callback");
+			firstExitCallback(1);
 			await vi.advanceTimersByTimeAsync(2000);
 			expect(spawnCount).toBe(2);
 			expect(errorHandler).not.toHaveBeenCalled();
 
 			// Crash 2 → restart
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			exitCallbacks[1]!(1);
+			const [, secondExitCallback] = exitCallbacks;
+			assert.exists(secondExitCallback, "expected the second exit callback");
+			secondExitCallback(1);
 			await vi.advanceTimersByTimeAsync(3000);
 			expect(spawnCount).toBe(3);
 			expect(errorHandler).not.toHaveBeenCalled();
 
 			// Crash 3 → should give up (recent.length = 3, 3 >= maxRestartsPerWindow = 3)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			exitCallbacks[2]!(1);
+			const [, , thirdExitCallback] = exitCallbacks;
+			assert.exists(thirdExitCallback, "expected the third exit callback");
+			thirdExitCallback(1);
 			await vi.advanceTimersByTimeAsync(5000);
 
 			expect(spawnCount).toBe(3); // No 4th spawn
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("exact-limit")!.status).toBe("stopped");
+			const exactLimit = mgr.getInstance("exact-limit");
+			assert.exists(exactLimit, "expected the exact-limit instance");
+			expect(exactLimit.status).toBe("stopped");
 			expect(errorHandler).toHaveBeenCalledWith(
 				expect.objectContaining({ id: "exact-limit" }),
 			);
@@ -1912,8 +1935,9 @@ describe("InstanceManager", () => {
 			await expect(mgr.startInstance("spawn-err")).rejects.toThrow(
 				"spawn ENOENT",
 			);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("spawn-err")!.status).toBe("stopped");
+			const spawnErr = mgr.getInstance("spawn-err");
+			assert.exists(spawnErr, "expected the spawn-err instance");
+			expect(spawnErr.status).toBe("stopped");
 		});
 
 		it("spawner resolves with pid on successful spawn", async () => {
@@ -1925,10 +1949,10 @@ describe("InstanceManager", () => {
 			mgr.addInstance("spawn-ok", managedConfig({ port: 14311 }));
 			await mgr.startInstance("spawn-ok");
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("spawn-ok")!.status).toBe("healthy");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("spawn-ok")!.pid).toBe(42000);
+			const spawnOk = mgr.getInstance("spawn-ok");
+			assert.exists(spawnOk, "expected the spawn-ok instance");
+			expect(spawnOk.status).toBe("healthy");
+			expect(spawnOk.pid).toBe(42000);
 		});
 	});
 
@@ -1952,12 +1976,11 @@ describe("InstanceManager", () => {
 
 			mgr.addInstance("poll-stop", managedConfig({ port: 14320 }));
 			await mgr.startInstance("poll-stop");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("poll-stop")!.status).toBe("healthy");
+			const inst = mgr.getInstance("poll-stop");
+			assert.exists(inst, "expected the poll-stop instance");
+			expect(inst.status).toBe("healthy");
 
 			// Simulate external process death: mark unhealthy (as handleProcessExit does)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("poll-stop")!;
 			(inst as { status: string }).status = "unhealthy";
 
 			// Track health checker calls after we mark unhealthy
@@ -1998,8 +2021,8 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("poll-unhealthy");
 
 			// Manually set to unhealthy
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("poll-unhealthy")!;
+			const inst = mgr.getInstance("poll-unhealthy");
+			assert.exists(inst, "expected the poll-unhealthy instance");
 			(inst as { status: string }).status = "unhealthy";
 
 			const callsBefore = callCount;
@@ -2032,8 +2055,9 @@ describe("InstanceManager", () => {
 
 			mgr.addInstance("stale-poll", managedConfig({ port: 14322 }));
 			await mgr.startInstance("stale-poll");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("stale-poll")!.status).toBe("healthy");
+			const inst = mgr.getInstance("stale-poll");
+			assert.exists(inst, "expected the stale-poll instance");
+			expect(inst.status).toBe("healthy");
 
 			// Simulate restart cycle: status is set to "starting" (as handleProcessExit's
 			// restart timer would do before calling startInstance again).
@@ -2041,8 +2065,6 @@ describe("InstanceManager", () => {
 			// clears the old interval first. This test verifies that if the status is
 			// "starting" and the poll fires, it correctly transitions the status
 			// rather than silently self-terminating.
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const inst = mgr.getInstance("stale-poll")!;
 			(inst as { status: string }).status = "starting";
 
 			const statusChanges: string[] = [];
@@ -2053,8 +2075,7 @@ describe("InstanceManager", () => {
 
 			// The poll should have transitioned the instance to "unhealthy"
 			expect(statusChanges).toContain("unhealthy");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("stale-poll")!.status).toBe("unhealthy");
+			expect(inst.status).toBe("unhealthy");
 
 			mgr.stopAll();
 		});
@@ -2093,14 +2114,14 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("slow-start");
 
 			// After startInstance, status should still be "starting" (initial check failed)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("slow-start")!.status).toBe("starting");
+			const slowStart = mgr.getInstance("slow-start");
+			assert.exists(slowStart, "expected the slow-start instance");
+			expect(slowStart.status).toBe("starting");
 
 			// Advance past one polling interval — the poll should transition to "healthy"
 			await vi.advanceTimersByTimeAsync(1100);
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("slow-start")!.status).toBe("healthy");
+			expect(slowStart.status).toBe("healthy");
 			expect(statusChanges).toContain("healthy");
 
 			mgr.stopAll();
@@ -2122,13 +2143,13 @@ describe("InstanceManager", () => {
 			await mgr.startInstance("always-failing");
 
 			// After startInstance: status = "starting" (initial check failed)
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("always-failing")!.status).toBe("starting");
+			const alwaysFailing = mgr.getInstance("always-failing");
+			assert.exists(alwaysFailing, "expected the always-failing instance");
+			expect(alwaysFailing.status).toBe("starting");
 
 			// Advance 1s — first poll tick: starting → unhealthy
 			await vi.advanceTimersByTimeAsync(1100);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("always-failing")!.status).toBe("unhealthy");
+			expect(alwaysFailing.status).toBe("unhealthy");
 
 			// Advance several more intervals — polling should stop after seeing "unhealthy"
 			// (the guard catches it on the next tick after the transition)
@@ -2167,8 +2188,9 @@ describe("InstanceManager", () => {
 				// Wait for a health poll cycle
 				await vi.waitFor(
 					() => {
-						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior addInstance
-						expect(mgr.getInstance("no-auth")!.status).toBe("unhealthy");
+						const noAuth = mgr.getInstance("no-auth");
+						assert.exists(noAuth, "expected the no-auth instance");
+						expect(noAuth.status).toBe("unhealthy");
 					},
 					{ timeout: 1000 },
 				);
@@ -2220,8 +2242,9 @@ describe("InstanceManager", () => {
 				// Wait for a health poll cycle
 				await vi.waitFor(
 					() => {
-						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior addInstance
-						expect(mgr.getInstance("with-auth")!.status).toBe("healthy");
+						const withAuth = mgr.getInstance("with-auth");
+						assert.exists(withAuth, "expected the with-auth instance");
+						expect(withAuth.status).toBe("healthy");
 					},
 					{ timeout: 1000 },
 				);
@@ -2262,8 +2285,9 @@ describe("InstanceManager", () => {
 			// The instance should eventually be polled and transition to "healthy"
 			await vi.advanceTimersByTimeAsync(6000);
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("default")!.status).toBe("healthy");
+			const defaultInstance = mgr.getInstance("default");
+			assert.exists(defaultInstance, "expected the default instance");
+			expect(defaultInstance.status).toBe("healthy");
 			expect(statusChanges).toContain("healthy");
 
 			mgr.stopAll();
@@ -2291,13 +2315,13 @@ describe("InstanceManager", () => {
 
 			// First poll — should become healthy
 			await vi.advanceTimersByTimeAsync(1100);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("ext-down")!.status).toBe("healthy");
+			const extDown = mgr.getInstance("ext-down");
+			assert.exists(extDown, "expected the ext-down instance");
+			expect(extDown.status).toBe("healthy");
 
 			// Second poll — should become unhealthy
 			await vi.advanceTimersByTimeAsync(1000);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("ext-down")!.status).toBe("unhealthy");
+			expect(extDown.status).toBe("unhealthy");
 
 			mgr.stopAll();
 		});

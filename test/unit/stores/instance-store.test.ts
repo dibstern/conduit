@@ -1,5 +1,5 @@
 // ─── Instance Store Tests ────────────────────────────────────────────────────
-import { beforeEach, describe, expect, it } from "vitest";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyInstanceListResponse,
 	clearInstanceState,
@@ -56,10 +56,12 @@ describe("Instance Store", () => {
 		});
 
 		expect(instanceState.instances).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instanceState.instances[0]!.id).toBe("default");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instanceState.instances[1]!.id).toBe("work");
+		const firstInstance = instanceState.instances[0];
+		const secondInstance = instanceState.instances[1];
+		assert.exists(firstInstance, "expected default instance");
+		assert.exists(secondInstance, "expected work instance");
+		expect(firstInstance.id).toBe("default");
+		expect(secondInstance.id).toBe("work");
 	});
 
 	it("handleInstanceList ignores non-array instances", () => {
@@ -134,10 +136,12 @@ describe("Instance Store", () => {
 			status: "unhealthy",
 		});
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instanceState.instances[0]!.status).toBe("healthy");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instanceState.instances[1]!.status).toBe("unhealthy");
+		const firstInstance = instanceState.instances[0];
+		const secondInstance = instanceState.instances[1];
+		assert.exists(firstInstance, "expected healthy instance");
+		assert.exists(secondInstance, "expected unhealthy instance");
+		expect(firstInstance.status).toBe("healthy");
+		expect(secondInstance.status).toBe("unhealthy");
 	});
 
 	it("handleInstanceStatus is a no-op for unknown instanceId", () => {
@@ -154,8 +158,9 @@ describe("Instance Store", () => {
 
 		// Should remain unchanged
 		expect(instanceState.instances).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instanceState.instances[0]!.status).toBe("healthy");
+		const firstInstance = instanceState.instances[0];
+		assert.exists(firstInstance, "expected healthy instance");
+		expect(firstInstance.status).toBe("healthy");
 	});
 
 	it("getInstanceById returns matching instance", () => {
@@ -169,8 +174,8 @@ describe("Instance Store", () => {
 
 		const found = getInstanceById("b");
 		expect(found).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(found!.name).toBe("Beta");
+		assert.exists(found, "expected Beta instance");
+		expect(found.name).toBe("Beta");
 	});
 
 	it("getInstanceById returns undefined for nonexistent", () => {

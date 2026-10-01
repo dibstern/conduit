@@ -1,5 +1,5 @@
 // ─── Discovery Store Tests ───────────────────────────────────────────────────
-import { beforeEach, describe, expect, it } from "vitest";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
@@ -130,8 +130,9 @@ describe("filterCommands", () => {
 	it("matches exact name", () => {
 		const result = filterCommands(commands, "clear");
 		expect(result).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result[0]!.name).toBe("clear");
+		const firstResult = result[0];
+		assert.exists(firstResult, "expected discovered command");
+		expect(firstResult.name).toBe("clear");
 	});
 });
 
@@ -241,8 +242,9 @@ describe("handleModelList", () => {
 		];
 		handleModelList({ type: "model_list", providers });
 		expect(discoveryState.providers).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(discoveryState.providers[0]!.models).toHaveLength(1);
+		const firstProvider = discoveryState.providers[0];
+		assert.exists(firstProvider, "expected discovered provider");
+		expect(firstProvider.models).toHaveLength(1);
 	});
 
 	it("ignores non-array providers", () => {

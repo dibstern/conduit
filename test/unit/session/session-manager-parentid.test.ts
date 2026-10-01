@@ -1,5 +1,5 @@
 // ─── Session Manager parentID propagation (ticket 5.3) ──────────────────────
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
@@ -30,12 +30,12 @@ describe("toSessionInfoList parentID propagation (ticket 5.3)", () => {
 
 		const child = sessions.find((s) => s.id === "ses_child");
 		expect(child).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(child!.parentID).toBe("ses_parent");
+		assert.exists(child, "expected child session");
+		expect(child.parentID).toBe("ses_parent");
 
 		const parent = sessions.find((s) => s.id === "ses_parent");
 		expect(parent).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(parent!.parentID).toBeUndefined();
+		assert.exists(parent, "expected parent session");
+		expect(parent.parentID).toBeUndefined();
 	});
 });

@@ -17,7 +17,7 @@ import {
 } from "node:http";
 import { dirname } from "node:path";
 import { Effect, Ref } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -145,8 +145,8 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		// Get specific session
 		const sessionMatch = url.pathname.match(/^\/session\/([\w-]+)$/);
 		if (sessionMatch && req.method === "GET") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — regex guarantees capture group
-			const id = sessionMatch[1]!;
+			const id = sessionMatch[1];
+			assert.exists(id, "expected session ID capture");
 			const session = sessions[id] ?? {
 				id,
 				projectID: "project-1",

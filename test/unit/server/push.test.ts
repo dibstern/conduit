@@ -11,7 +11,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	PushNotificationManager,
 	PushNotificationManagerNotInitializedError,
@@ -332,8 +340,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			await mgr.sendToAll(payload);
 
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const sentJson = sendNotification.mock.calls[0]![1];
+			const call = sendNotification.mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const sentJson = call[1];
 			const sentPayload = JSON.parse(sentJson);
 			expect(sentPayload.title).toBe("Approval needed");
 			expect(sentPayload.type).toBe("permission_request");
@@ -362,8 +371,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			await mgr.sendToAll(payload);
 
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const sentJson = sendNotification.mock.calls[0]![1];
+			const call = sendNotification.mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const sentJson = call[1];
 			const sentPayload = JSON.parse(sentJson);
 			expect(sentPayload.title).toBe("Task complete");
 			expect(sentPayload.body).toContain("refactor auth");
@@ -392,8 +402,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			await mgr.sendToAll(payload);
 
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const sentJson = sendNotification.mock.calls[0]![1];
+			const call = sendNotification.mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const sentJson = call[1];
 			const sentPayload = JSON.parse(sentJson);
 			expect(sentPayload.title).toBe("Error");
 			expect(sentPayload.body).toContain("429");
@@ -455,8 +466,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			await mgr.sendTo("client-1", { title: "Direct", body: "Just for you" });
 
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const firstCallSub = sendNotification.mock.calls[0]![0];
+			const call = sendNotification.mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const firstCallSub = call[0];
 			expect(firstCallSub.endpoint).toBe("https://push.example.com/1");
 		});
 
@@ -638,8 +650,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			await mgr.sendToAll({ title: "Test", body: "VAPID check" });
 
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const callOptions = sendNotification.mock.calls[0]![2];
+			const call = sendNotification.mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const callOptions = call[2];
 			expect(callOptions).toBeDefined();
 			expect(callOptions?.vapidDetails).toBeDefined();
 			expect(callOptions?.vapidDetails?.subject).toBe(
@@ -776,8 +789,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			await mgr2.init();
 
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const [, payload, options] = sendNotification.mock.calls[0]!;
+			const call = sendNotification.mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const [, payload, options] = call;
 			expect(JSON.parse(payload)).toEqual({ type: "test" });
 			expect(options?.TTL).toBe(0);
 		});
@@ -908,9 +922,9 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			(sendNotification as ReturnType<typeof vi.fn>).mockClear();
 			await mgr2.sendToAll({ title: "Test", body: "Keys check" });
 			expect(sendNotification).toHaveBeenCalledTimes(1);
-			const sub =
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				(sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0];
+			assert.exists(call, "expected notification call");
+			const sub = call[0];
 			expect(sub.keys).toEqual({ p256dh: "key-p256dh", auth: "key-auth" });
 		});
 	});

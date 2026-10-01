@@ -255,9 +255,7 @@ export function createToolRegistry(
 	function finalizeAll(messages: readonly ChatMessage[]): FinalizationResult {
 		const indices: number[] = [];
 
-		for (let i = 0; i < messages.length; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
-			const msg = messages[i]!;
+		for (const [i, msg] of messages.entries()) {
 			if (msg.type !== "tool") continue;
 			if (msg.status !== "pending" && msg.status !== "running") continue;
 			// A running subagent tool is NOT finished just because the parent turn

@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -161,8 +161,8 @@ async function createMockOpenCode(
 
 		const sessionMatch = url.pathname.match(/^\/session\/([\w-]+)$/);
 		if (sessionMatch && req.method === "GET") {
-			// biome-ignore lint/style/noNonNullAssertion: regex guarantees capture
-			const id = sessionMatch[1]!;
+			const id = sessionMatch[1];
+			assert.exists(id, "expected a session id in the request path");
 			const found = sessionList.find((s) => s.id === id);
 			const session = toOpenCodeSession(found ?? { id, title: "Unknown" });
 			res.end(JSON.stringify(session));
@@ -172,8 +172,8 @@ async function createMockOpenCode(
 		// Count message requests per session — this is how we detect poller activity
 		const msgMatch = url.pathname.match(/^\/session\/([\w-]+)\/message$/);
 		if (msgMatch && req.method === "GET") {
-			// biome-ignore lint/style/noNonNullAssertion: regex guarantees capture
-			const sid = msgMatch[1]!;
+			const sid = msgMatch[1];
+			assert.exists(sid, "expected a session id in the message request path");
 			messageRequestCounts[sid] = (messageRequestCounts[sid] ?? 0) + 1;
 			res.end(JSON.stringify([]));
 			return;

@@ -880,13 +880,19 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						pendingPermissionCounts: pending.permissions,
 					});
 					return {
-						rows: rows.map((row, index) => ({
-							item: items[index]!,
-							version: range?.roots
-								? (row as SessionRow & { effective_version: number })
-										.effective_version
-								: row.version,
-						})),
+						rows: rows.flatMap((row, index) => {
+							const item = items[index];
+							if (item === undefined) return [];
+							return [
+								{
+									item,
+									version: range?.roots
+										? (row as SessionRow & { effective_version: number })
+												.effective_version
+										: row.version,
+								},
+							];
+						}),
 						version,
 					};
 				}),

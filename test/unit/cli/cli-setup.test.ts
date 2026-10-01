@@ -3,7 +3,7 @@
 // Uses mock stdin (EventEmitter), stdout, and exit from the prompts test pattern.
 
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	printLogo,
 	runSetup,
@@ -587,8 +587,9 @@ describe("restore projects", () => {
 		const result = await setupPromise;
 
 		expect(result.restoredProjects).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result.restoredProjects[0]!.slug).toBe("project-b");
+		const restoredProject = result.restoredProjects[0];
+		assert.exists(restoredProject, "expected restored project");
+		expect(restoredProject.slug).toBe("project-b");
 	});
 
 	it("returns empty array when all deselected via Escape", async () => {
@@ -690,8 +691,9 @@ describe("full flow", () => {
 		expect(result.pin).toBe("9999");
 		expect(result.keepAwake).toBe(true);
 		expect(result.restoredProjects).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result.restoredProjects[0]!.slug).toBe("myproject");
+		const restoredProject = result.restoredProjects[0];
+		assert.exists(restoredProject, "expected restored project");
+		expect(restoredProject.slug).toBe("myproject");
 	});
 
 	it("Ctrl+C at disclaimer calls exit(0)", async () => {

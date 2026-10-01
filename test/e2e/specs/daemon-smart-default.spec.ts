@@ -125,22 +125,19 @@ test.describe("Smart Default Detection", () => {
 			(i: { id: string }) => i.id === "opencode",
 		);
 		expect(defaultInst).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(defaultInst!.name).toBe("Default");
+		if (!defaultInst) throw new Error("expected default instance");
+		expect(defaultInst.name).toBe("Default");
 
 		// Should be unmanaged (connected to existing OpenCode, not spawned)
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(defaultInst!.managed).toBe(false);
+		expect(defaultInst.managed).toBe(false);
 
 		// Should be on the port smart default probed
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(defaultInst!.port).toBe(
+		expect(defaultInst.port).toBe(
 			Number(new URL(SMART_DEFAULT_OPENCODE_URL ?? "").port),
 		);
 
 		// Should be healthy (auth-aware health check passed)
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(defaultInst!.status).toBe("healthy");
+		expect(defaultInst.status).toBe("healthy");
 	});
 
 	test("browser connects to smart-default daemon and receives instance_list", async ({

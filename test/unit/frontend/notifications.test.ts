@@ -3,7 +3,7 @@
 // The old getPreferences/setPreferences tests were removed when those functions
 // were replaced by getNotifSettings/saveNotifSettings in notif-settings.ts.
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { assert, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	enablePushSubscription,
 	urlBase64ToUint8Array,
@@ -251,8 +251,9 @@ describe("enablePushSubscription", () => {
 		expect(storage["vapid-public-key"]).toBe("test-vapid-key");
 		// Verify server registration was called
 		expect(mockFetch).toHaveBeenCalledTimes(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mockFetch.mock.calls[1]![0]).toBe("/api/push/subscribe");
+		const secondCall = mockFetch.mock.calls[1];
+		assert.exists(secondCall, "expected second fetch call");
+		expect(secondCall[0]).toBe("/api/push/subscribe");
 	});
 
 	// ─── Activation wait tests ──────────────────────────────────────────────

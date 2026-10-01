@@ -1,5 +1,5 @@
 // test/unit/persistence/projectors-effect/activity-projector.test.ts
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	createAllEffectProjectors,
 	type EffectProjector,
@@ -337,8 +337,8 @@ describe("ActivityProjector", () => {
 				"SELECT * FROM activities WHERE kind = 'tool.started'",
 				[],
 			);
-			// biome-ignore lint/style/noNonNullAssertion: test assertion after queryOne
-			const payload = JSON.parse(row!.payload) as Record<string, unknown>;
+			assert.exists(row, "expected activity row");
+			const payload = JSON.parse(row.payload) as Record<string, unknown>;
 			expect(payload).toBeDefined();
 			expect(payload?.["toolName"]).toBe("bash");
 			expect(payload?.["callId"]).toBe("call-1");

@@ -30,7 +30,7 @@
 // P15: translateMessageRemoved handles valid messageID and missing messageID
 
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	createTranslator,
 	mapToolName,
@@ -115,8 +115,9 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			fc.assert(
 				fc.property(knownToolName, (name) => {
 					const mapped = mapToolName(name);
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-					expect(mapped[0]).toBe(mapped[0]!.toUpperCase());
+					const first = mapped[0];
+					assert.exists(first, "expected mapped tool name");
+					expect(first).toBe(first.toUpperCase());
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
@@ -178,8 +179,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 						),
 					);
 					if (msgs.length > 0) {
-						// biome-ignore lint/style/noNonNullAssertion: length-checked
-						const first = msgs[0]!;
+						const first = msgs[0];
+						assert.exists(first, "expected first message");
 						expect(first.type).toBe("tool_start");
 						if (first.type === "tool_start") {
 							expect(first.name).toBe(mapToolName(tool));
@@ -206,8 +207,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 					);
 					if (msgs.length > 0) {
 						// Last message should be tool_executing (may be preceded by tool_start)
-						// biome-ignore lint/style/noNonNullAssertion: length-checked
-						const last = msgs[msgs.length - 1]!;
+						const last = msgs.at(-1);
+						assert.exists(last, "expected final message");
 						expect(last.type).toBe("tool_executing");
 					}
 				}),
@@ -230,8 +231,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 							),
 						);
 						if (msgs.length > 0) {
-							// biome-ignore lint/style/noNonNullAssertion: length-checked
-							const last = msgs[msgs.length - 1]!;
+							const last = msgs.at(-1);
+							assert.exists(last, "expected final message");
 							expect(last.type).toBe("tool_result");
 							if (last.type === "tool_result") {
 								expect(last.is_error).toBe(false);
@@ -258,8 +259,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 							),
 						);
 						if (msgs.length > 0) {
-							// biome-ignore lint/style/noNonNullAssertion: length-checked
-							const last = msgs[msgs.length - 1]!;
+							const last = msgs.at(-1);
+							assert.exists(last, "expected final message");
 							expect(last.type).toBe("tool_result");
 							if (last.type === "tool_result") {
 								expect(last.is_error).toBe(true);
@@ -326,8 +327,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 				),
 			);
 			expect(msgs).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: length-checked
-			const msg = msgs[0]!;
+			const msg = msgs[0];
+			assert.exists(msg, "expected message");
 			expect(msg.type).toBe("tool_executing");
 			if (msg.type === "tool_executing") {
 				expect(msg.metadata).toEqual(meta);
@@ -368,9 +369,9 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 				),
 			);
 			expect(msgs).toHaveLength(1);
-			if (msgs[0]?.type === "tool_executing") {
-				// biome-ignore lint/style/noNonNullAssertion: guarded by optional chain above
-				expect(msgs[0]!).not.toHaveProperty("metadata");
+			const first = msgs[0];
+			if (first?.type === "tool_executing") {
+				expect(first).not.toHaveProperty("metadata");
 			}
 		});
 	});
@@ -550,18 +551,17 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 							expect(result.questions).toHaveLength(props.questions.length);
 
 							// Verify field mapping: multiple → multiSelect
-							for (let i = 0; i < props.questions.length; i++) {
-								// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-								expect(result.questions[i]!.multiSelect).toBe(
-									// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-									props.questions[i]!.multiple ?? false,
+							for (const [
+								i,
+								translatedQuestion,
+							] of result.questions.entries()) {
+								const question = props.questions.at(i);
+								assert.exists(question, "expected source question");
+								expect(translatedQuestion.multiSelect).toBe(
+									question.multiple ?? false,
 								);
 								// custom defaults to true when undefined
-								// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-								expect(result.questions[i]!.custom).toBe(
-									// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-									props.questions[i]!.custom ?? true,
-								);
+								expect(translatedQuestion.custom).toBe(question.custom ?? true);
 							}
 						}
 					}
@@ -808,22 +808,15 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translatePtyEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.type).toBe("pty_created");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "pty_created") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.id).toBe("pty-1");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.title).toBe("bash");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.command).toBe("/bin/bash");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.cwd).toBe("/home/user");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.status).toBe("running");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.pid).toBe(12345);
+			assert.exists(result, "expected translated PTY event");
+			expect(result.type).toBe("pty_created");
+			if (result.type === "pty_created") {
+				expect(result.pty.id).toBe("pty-1");
+				expect(result.pty.title).toBe("bash");
+				expect(result.pty.command).toBe("/bin/bash");
+				expect(result.pty.cwd).toBe("/home/user");
+				expect(result.pty.status).toBe("running");
+				expect(result.pty.pid).toBe(12345);
 			}
 		});
 
@@ -841,14 +834,11 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translatePtyEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "pty_created") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.id).toBe("pty-1b");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.title).toBe("zsh");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.command).toBe("/bin/zsh");
+			assert.exists(result, "expected translated PTY event");
+			if (result.type === "pty_created") {
+				expect(result.pty.id).toBe("pty-1b");
+				expect(result.pty.title).toBe("zsh");
+				expect(result.pty.command).toBe("/bin/zsh");
 			}
 		});
 
@@ -859,20 +849,14 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translatePtyEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "pty_created") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.id).toBe("");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.title).toBe("");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.command).toBe("");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.cwd).toBe("");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.status).toBe("running");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.pty.pid).toBe(0);
+			assert.exists(result, "expected translated PTY event");
+			if (result.type === "pty_created") {
+				expect(result.pty.id).toBe("");
+				expect(result.pty.title).toBe("");
+				expect(result.pty.command).toBe("");
+				expect(result.pty.cwd).toBe("");
+				expect(result.pty.status).toBe("running");
+				expect(result.pty.pid).toBe(0);
 			}
 		});
 
@@ -883,14 +867,11 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translatePtyEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.type).toBe("pty_exited");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "pty_exited") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.ptyId).toBe("pty-2");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.exitCode).toBe(1);
+			assert.exists(result, "expected translated PTY event");
+			expect(result.type).toBe("pty_exited");
+			if (result.type === "pty_exited") {
+				expect(result.ptyId).toBe("pty-2");
+				expect(result.exitCode).toBe(1);
 			}
 		});
 
@@ -901,10 +882,9 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translatePtyEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "pty_exited") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.exitCode).toBe(0);
+			assert.exists(result, "expected translated PTY event");
+			if (result.type === "pty_exited") {
+				expect(result.exitCode).toBe(0);
 			}
 		});
 
@@ -915,12 +895,10 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translatePtyEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.type).toBe("pty_deleted");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "pty_deleted") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.ptyId).toBe("pty-4");
+			assert.exists(result, "expected translated PTY event");
+			expect(result.type).toBe("pty_deleted");
+			if (result.type === "pty_deleted") {
+				expect(result.ptyId).toBe("pty-4");
 			}
 		});
 
@@ -982,14 +960,11 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translateFileEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.type).toBe("file_changed");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "file_changed") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.path).toBe("/src/main.ts");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.changeType).toBe("edited");
+			assert.exists(result, "expected translated file event");
+			expect(result.type).toBe("file_changed");
+			if (result.type === "file_changed") {
+				expect(result.path).toBe("/src/main.ts");
+				expect(result.changeType).toBe("edited");
 			}
 		});
 
@@ -1000,14 +975,11 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translateFileEvent(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.type).toBe("file_changed");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "file_changed") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.path).toBe("/src/index.ts");
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.changeType).toBe("external");
+			assert.exists(result, "expected translated file event");
+			expect(result.type).toBe("file_changed");
+			if (result.type === "file_changed") {
+				expect(result.path).toBe("/src/index.ts");
+				expect(result.changeType).toBe("external");
 			}
 		});
 
@@ -1074,12 +1046,10 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			};
 			const result = translateMessageRemoved(event);
 			expect(result).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.type).toBe("message_removed");
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			if (result!.type === "message_removed") {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-				expect(result!.messageId).toBe("msg-123");
+			assert.exists(result, "expected translated message removal");
+			expect(result.type).toBe("message_removed");
+			if (result.type === "message_removed") {
+				expect(result.messageId).toBe("msg-123");
 			}
 		});
 
@@ -1375,8 +1345,8 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			}
 			// session-A should have been evicted down
 			const seenA = translator.getSeenParts("ses-A");
-			// biome-ignore lint/style/noNonNullAssertion: guarded — 10k parts were added to this session
-			expect(seenA!.size).toBeLessThanOrEqual(10_000);
+			assert.exists(seenA, "expected seen parts for session A");
+			expect(seenA.size).toBeLessThanOrEqual(10_000);
 			// session-B should be unaffected
 			translator.translate(
 				{

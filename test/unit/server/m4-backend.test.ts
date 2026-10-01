@@ -1,7 +1,7 @@
 // ─── M4 Backend Additions Tests ──────────────────────────────────────────────
 // Tests for Phase 0B: new types, client methods, router types, todo extraction.
 
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	isRouteError,
 	parseIncomingMessage,
@@ -24,8 +24,8 @@ describe("ws-router — retired M4 browser commands", () => {
 			JSON.stringify({ type: "question_reject" }),
 		);
 		expect(msg).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const result = routeMessage(msg!);
+		assert.exists(msg, "expected message");
+		const result = routeMessage(msg);
 		expect(isRouteError(result)).toBe(true);
 	});
 
@@ -34,8 +34,8 @@ describe("ws-router — retired M4 browser commands", () => {
 			JSON.stringify({ type: "nonexistent_type" }),
 		);
 		expect(msg).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const result = routeMessage(msg!);
+		assert.exists(msg, "expected message");
+		const result = routeMessage(msg);
 		expect(isRouteError(result)).toBe(true);
 	});
 });

@@ -17,7 +17,7 @@
 //     the output is not a known lowercase key)
 
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type { TranslateResult } from "../../../src/lib/relay/event-translator.js";
 import {
 	createTranslator,
@@ -227,11 +227,13 @@ describe("Ticket 1.3 — Event Translator Metamorphic PBT", () => {
 						for (let i = 0; i < knownEvents.length; i++) {
 							// Inject unknown events
 							if (i < unknownEvents.length) {
-								// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-								dirty.translate(unknownEvents[i]!);
+								const unknownEvent = unknownEvents[i];
+								assert.exists(unknownEvent, "expected unknown event");
+								dirty.translate(unknownEvent);
 							}
-							// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-							dirtyResults.push(dirty.translate(knownEvents[i]!));
+							const knownEvent = knownEvents[i];
+							assert.exists(knownEvent, "expected known event");
+							dirtyResults.push(dirty.translate(knownEvent));
 						}
 
 						// Known event results should be identical

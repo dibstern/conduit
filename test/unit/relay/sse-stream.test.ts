@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { calculateBackoffDelay } from "../../../src/lib/relay/sse-backoff.js";
 import { SSEStream } from "../../../src/lib/relay/sse-stream.js";
@@ -880,8 +880,8 @@ describe("SSEStream reconnection", () => {
 				"reconnecting after healthy connection",
 				2000,
 			);
-			// biome-ignore lint/style/noNonNullAssertion: safe — waitFor guarantees the index exists
-			const next = payloads[priorPayloads]!;
+			const next = payloads[priorPayloads];
+			assert.exists(next, "expected next payload");
 			expect(next.attempt).toBe(1);
 			expect(next.delay).toBeGreaterThanOrEqual(0.8 * cfg.baseDelay);
 			expect(next.delay).toBeLessThanOrEqual(1.2 * cfg.baseDelay);
@@ -1142,10 +1142,14 @@ describe("SSEStream reconnection", () => {
 		// loop while the payload claims backoff. Lower bound is the guard;
 		// upper bound is generous for load.
 		for (let i = 0; i < 4; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — waitFor guarantees 5 entries
-			const spacing = subscribeTimes[i + 1]! - subscribeTimes[i]!;
-			// biome-ignore lint/style/noNonNullAssertion: safe — one payload precedes each retry
-			const reported = payloads[i]!.delay;
+			const previousSubscribeTime = subscribeTimes[i];
+			const nextSubscribeTime = subscribeTimes[i + 1];
+			const payload = payloads[i];
+			assert.exists(previousSubscribeTime, "expected prior subscription time");
+			assert.exists(nextSubscribeTime, "expected next subscription time");
+			assert.exists(payload, "expected retry payload");
+			const spacing = nextSubscribeTime - previousSubscribeTime;
+			const reported = payload.delay;
 			expect(spacing).toBeGreaterThanOrEqual(reported - 3);
 			expect(spacing).toBeLessThanOrEqual(reported + 250);
 		}

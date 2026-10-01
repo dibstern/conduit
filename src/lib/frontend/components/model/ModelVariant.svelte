@@ -60,9 +60,8 @@
 		const cycle = ["", ...variants];
 		const currentIdx = cycle.indexOf(currentVariant);
 		const nextIdx = (currentIdx + 1) % cycle.length;
-		// biome-ignore lint/style/noNonNullAssertion: index is always valid (modulo cycle.length)
-		const next = cycle[nextIdx]!;
-		switchVariant(next);
+		const next = cycle[nextIdx];
+		if (next !== undefined) switchVariant(next);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

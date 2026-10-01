@@ -21,9 +21,8 @@ const { triggerNotificationsMock } = vi.hoisted(() => {
 		private listeners: Record<string, Array<(ev?: unknown) => void>> = {};
 		send(_data: string): void {}
 		addEventListener(event: string, fn: (ev?: unknown) => void): void {
-			if (!this.listeners[event]) this.listeners[event] = [];
-			// biome-ignore lint/style/noNonNullAssertion: safe — initialized above
-			this.listeners[event]!.push(fn);
+			const listeners = (this.listeners[event] ??= []);
+			listeners.push(fn);
 		}
 		close(): void {
 			this.readyState = MockWebSocket.CLOSED;

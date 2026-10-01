@@ -5,7 +5,15 @@
 //   - Model switch works and messages succeed
 //   - New session resets model selection
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	assert,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+} from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -33,9 +41,9 @@ describe("Integration: Model Selection", () => {
 		await client.waitFor("model_list");
 		const modelList = client.getReceivedOfType("model_list");
 		expect(modelList.length).toBeGreaterThan(0);
-
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const providers = modelList[0]!["providers"] as Array<{
+		const modelListMessage = modelList[0];
+		assert.exists(modelListMessage, "expected a model list message");
+		const providers = modelListMessage["providers"] as Array<{
 			id: string;
 			name: string;
 			configured: boolean;
@@ -62,9 +70,8 @@ describe("Integration: Model Selection", () => {
 		await client.waitFor("model_info");
 		const modelInfos = client.getReceivedOfType("model_info");
 		expect(modelInfos.length).toBeGreaterThan(0);
-
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const info = modelInfos[0]!;
+		const info = modelInfos[0];
+		assert.exists(info, "expected a model info message");
 		expect(typeof info["model"]).toBe("string");
 		expect((info["model"] as string).length).toBeGreaterThan(0);
 
@@ -78,8 +85,9 @@ describe("Integration: Model Selection", () => {
 		// Get available models from model_list
 		await client.waitFor("model_list");
 		const modelList = client.getReceivedOfType("model_list");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const providers = modelList[0]!["providers"] as Array<{
+		const modelListMessage = modelList[0];
+		assert.exists(modelListMessage, "expected a model list message");
+		const providers = modelListMessage["providers"] as Array<{
 			id: string;
 			models: Array<{ id: string }>;
 		}>;
@@ -87,11 +95,11 @@ describe("Integration: Model Selection", () => {
 		// Find a provider with at least one model
 		const provider = providers.find((p) => p.models.length > 0);
 		expect(provider).toBeDefined();
-
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const targetModel = provider!.models[0]!.id;
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const targetProvider = provider!.id;
+		assert.exists(provider, "expected a provider with models");
+		const target = provider.models[0];
+		assert.exists(target, "expected the provider to have a model");
+		const targetModel = target.id;
+		const targetProvider = provider.id;
 
 		client.clearReceived();
 
@@ -112,19 +120,18 @@ describe("Integration: Model Selection", () => {
 		// Pick first model from first provider
 		await client.waitFor("model_list");
 		const modelList = client.getReceivedOfType("model_list");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const providers = modelList[0]!["providers"] as Array<{
+		const modelListMessage = modelList[0];
+		assert.exists(modelListMessage, "expected a model list message");
+		const providers = modelListMessage["providers"] as Array<{
 			id: string;
 			models: Array<{ id: string }>;
 		}>;
 		const provider = providers.find((p) => p.models.length > 0);
 		expect(provider).toBeDefined();
-		await client.switchModel(
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			provider!.models[0]!.id,
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			provider!.id,
-		);
+		assert.exists(provider, "expected a provider with models");
+		const target = provider.models[0];
+		assert.exists(target, "expected the provider to have a model");
+		await client.switchModel(target.id, provider.id);
 
 		await client.waitFor("model_info");
 		client.clearReceived();
@@ -151,19 +158,18 @@ describe("Integration: Model Selection", () => {
 		// Switch model explicitly — pick first from model list
 		await client.waitFor("model_list");
 		const modelList = client.getReceivedOfType("model_list");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const providers = modelList[0]!["providers"] as Array<{
+		const modelListMessage = modelList[0];
+		assert.exists(modelListMessage, "expected a model list message");
+		const providers = modelListMessage["providers"] as Array<{
 			id: string;
 			models: Array<{ id: string }>;
 		}>;
 		const provider = providers.find((p) => p.models.length > 0);
 		expect(provider).toBeDefined();
-		await client.switchModel(
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			provider!.models[0]!.id,
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			provider!.id,
-		);
+		assert.exists(provider, "expected a provider with models");
+		const target = provider.models[0];
+		assert.exists(target, "expected the provider to have a model");
+		await client.switchModel(target.id, provider.id);
 
 		await client.waitFor("model_info");
 

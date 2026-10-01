@@ -38,8 +38,8 @@ export function groupIntoTurns(messages: HistoryMessage[]): Turn[] {
 	let i = 0;
 
 	while (i < messages.length) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const msg = messages[i]!;
+		const msg = messages[i];
+		if (msg === undefined) break;
 
 		if (msg.role === "user") {
 			const turn: Turn = { user: msg };
@@ -76,16 +76,15 @@ export function findPageBoundary(
 	if (targetCount <= 0) return 0;
 
 	// Look at the message at the boundary
-	// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-	const boundaryMsg = messages[targetCount - 1]!;
+	const boundaryMsg = messages[targetCount - 1];
+	if (boundaryMsg === undefined) return targetCount;
 
 	// If the boundary message is a user message and the next message is
 	// an assistant response, extend to include the assistant too
 	if (
 		boundaryMsg.role === "user" &&
 		targetCount < messages.length &&
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		messages[targetCount]!.role === "assistant"
+		messages[targetCount]?.role === "assistant"
 	) {
 		return targetCount + 1;
 	}

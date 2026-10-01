@@ -10,7 +10,15 @@
 // Setup mirrors sw-push.test.ts — we capture the listener by stubbing self
 // before importing the module.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 
 // ─── ServiceWorkerGlobalScope simulation ────────────────────────────────────
 // sw.ts calls self.addEventListener("notificationclick", ...) at module level.
@@ -267,8 +275,9 @@ describe("SW notificationclick handler", () => {
 			await Promise.all(event._waitUntilPromises);
 
 			expect(mockClient.postMessage).toHaveBeenCalledOnce();
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by toHaveBeenCalledOnce
-			const payload = mockClient.postMessage.mock.calls[0]![0];
+			const firstCall = mockClient.postMessage.mock.calls[0];
+			assert.exists(firstCall, "expected postMessage call");
+			const payload = firstCall[0];
 			expect(payload).toEqual({
 				type: "navigate_to_session",
 				sessionId: "sess-456",

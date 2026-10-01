@@ -8,7 +8,7 @@
 // longer served there. Tests that previously compared the live spec against
 // the snapshot for these schemas now validate the snapshot directly.
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { assert, beforeAll, describe, expect, it } from "vitest";
 import {
 	apiGet,
 	checkServerHealth,
@@ -59,10 +59,9 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 	it("snapshot exists and is a valid OpenAPI document", () => {
 		if (skipIfNoServer()) return;
 		expect(snapshotSpec).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(snapshotSpec!.openapi).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(snapshotSpec!.paths).toBeDefined();
+		assert.exists(snapshotSpec, "expected a snapshot spec");
+		expect(snapshotSpec.openapi).toBeDefined();
+		expect(snapshotSpec.paths).toBeDefined();
 	});
 
 	it("live /doc endpoints are a subset of the snapshot (no regressions in documented routes)", () => {
@@ -91,8 +90,9 @@ describe("AC5 — OpenAPI Spec Snapshot Comparison", () => {
 		const removedMethods: string[] = [];
 		for (const [path, methods] of Object.entries(snapshotSpec.paths)) {
 			if (!(path in liveSpec.paths)) continue; // Path not in live /doc — covered elsewhere
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const liveMethods = liveSpec.paths[path]!;
+			const liveMethods: Record<string, unknown> | undefined =
+				liveSpec.paths[path];
+			assert.exists(liveMethods, `expected live path ${path}`);
 			for (const method of Object.keys(methods)) {
 				if (method === "parameters") continue; // Shared params, not a method
 				if (!(method in liveMethods)) {

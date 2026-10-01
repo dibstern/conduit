@@ -3,7 +3,7 @@
 // but translateMessageUpdated only checked "message". This meant usage/cost data never
 // reached the browser.
 
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	createTranslator,
 	translateMessageUpdated,
@@ -31,24 +31,16 @@ describe("translateMessageUpdated — properties.info regression", () => {
 
 		const result = translateMessageUpdated(event);
 		expect(result).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result!.type).toBe("result");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		if (result!.type === "result") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.input).toBe(100);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.output).toBe(200);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.cache_read).toBe(50);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.cache_creation).toBe(10);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.cost).toBe(0.0042);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.duration).toBe(1000);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.sessionId).toBe("ses_abc");
+		assert.exists(result, "expected translated result");
+		expect(result.type).toBe("result");
+		if (result.type === "result") {
+			expect(result.usage.input).toBe(100);
+			expect(result.usage.output).toBe(200);
+			expect(result.usage.cache_read).toBe(50);
+			expect(result.usage.cache_creation).toBe(10);
+			expect(result.cost).toBe(0.0042);
+			expect(result.duration).toBe(1000);
+			expect(result.sessionId).toBe("ses_abc");
 		}
 	});
 
@@ -72,18 +64,13 @@ describe("translateMessageUpdated — properties.info regression", () => {
 
 		const result = translateMessageUpdated(event);
 		expect(result).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result!.type).toBe("result");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		if (result!.type === "result") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.input).toBe(500);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.output).toBe(1000);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.cost).toBe(0.01);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.duration).toBe(2000);
+		assert.exists(result, "expected translated result");
+		expect(result.type).toBe("result");
+		if (result.type === "result") {
+			expect(result.usage.input).toBe(500);
+			expect(result.usage.output).toBe(1000);
+			expect(result.cost).toBe(0.01);
+			expect(result.duration).toBe(2000);
 		}
 	});
 
@@ -109,13 +96,11 @@ describe("translateMessageUpdated — properties.info regression", () => {
 
 		const result = translateMessageUpdated(event);
 		expect(result).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		if (result!.type === "result") {
+		assert.exists(result, "expected translated result");
+		if (result.type === "result") {
 			// Should use info, not message
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.cost).toBe(0.05);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.input).toBe(999);
+			expect(result.cost).toBe(0.05);
+			expect(result.usage.input).toBe(999);
 		}
 	});
 
@@ -164,16 +149,12 @@ describe("translateMessageUpdated — properties.info regression", () => {
 
 		const result = translateMessageUpdated(event);
 		expect(result).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		if (result!.type === "result") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.input).toBe(0);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.usage.output).toBe(0);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.cost).toBe(0);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(result!.duration).toBe(0);
+		assert.exists(result, "expected translated result");
+		if (result.type === "result") {
+			expect(result.usage.input).toBe(0);
+			expect(result.usage.output).toBe(0);
+			expect(result.cost).toBe(0);
+			expect(result.duration).toBe(0);
 		}
 	});
 });

@@ -14,7 +14,7 @@
 // P11: Lockout expiry in authenticate(): correct PIN succeeds after lockout expires
 
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
 import {
 	edgeCaseString,
@@ -39,8 +39,8 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 					expect(result.ok).toBe(true);
 					expect(result.cookie).toBeDefined();
 					expect(typeof result.cookie).toBe("string");
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-					expect(result.cookie!.length).toBeGreaterThan(0);
+					assert.exists(result.cookie, "expected auth cookie");
+					expect(result.cookie.length).toBeGreaterThan(0);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
@@ -175,8 +175,8 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 
 						const result = auth.authenticate(pin, ip);
 						expect(result.ok).toBe(true);
-						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-						const cookie = result.cookie!;
+						const cookie = result.cookie;
+						assert.exists(cookie, "expected auth cookie");
 
 						// Immediately valid
 						expect(auth.validateCookie(cookie)).toBe(true);
@@ -204,8 +204,8 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 			const after = new AuthManager();
 			after.setPinHash(before.getPinHash());
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(after.validateCookie(cookie!)).toBe(true);
+			assert.exists(cookie, "expected auth cookie");
+			expect(after.validateCookie(cookie)).toBe(true);
 		});
 
 		it("changing the PIN invalidates cookies issued under the old one", () => {
@@ -215,8 +215,8 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 
 			auth.setPin("5678");
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — issued above
-			expect(auth.validateCookie(cookie!)).toBe(false);
+			assert.exists(cookie, "expected auth cookie");
+			expect(auth.validateCookie(cookie)).toBe(false);
 		});
 
 		it("property: random strings are never valid cookies", () => {

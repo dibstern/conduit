@@ -1,5 +1,13 @@
 // ─── Chat Store Tests ────────────────────────────────────────────────────────
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 
 // Mock DOMPurify (browser-only) before importing the store
 vi.mock("dompurify", () => ({
@@ -106,8 +114,8 @@ describe("handleError", () => {
 			code: "RETRY",
 			message: "Retrying...",
 		});
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const m = chatState.messages[0]!;
+		const m = chatState.messages[0];
+		assert.exists(m, "expected chat message");
 		expect(m.type).toBe("system");
 		if (m.type === "system") {
 			expect(m.variant).toBe("info");
@@ -122,8 +130,8 @@ describe("handleError", () => {
 			code: "UNKNOWN",
 			message: "Something broke",
 		});
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const m = chatState.messages[0]!;
+		const m = chatState.messages[0];
+		assert.exists(m, "expected chat message");
 		expect(m.type).toBe("system");
 		if (m.type === "system") {
 			expect(m.variant).toBe("error");
@@ -160,8 +168,8 @@ describe("handleError", () => {
 			code: "",
 			message: "",
 		});
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const m = chatState.messages[0]!;
+		const m = chatState.messages[0];
+		assert.exists(m, "expected chat message");
 		if (m.type === "system") {
 			// Empty message is still passed through; the store uses msg.message directly
 			expect(m.text).toBe("");
@@ -175,21 +183,20 @@ describe("addUserMessage", () => {
 	it("adds a user message", () => {
 		addUserMessage(ta, tm, "hello");
 		expect(chatState.messages).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(chatState.messages[0]!.type).toBe("user");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		if (chatState.messages[0]!.type === "user") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(chatState.messages[0]!.text).toBe("hello");
+		const firstMessage = chatState.messages[0];
+		assert.exists(firstMessage, "expected user message");
+		expect(firstMessage.type).toBe("user");
+		if (firstMessage.type === "user") {
+			expect(firstMessage.text).toBe("hello");
 		}
 	});
 
 	it("includes images when provided", () => {
 		addUserMessage(ta, tm, "look", ["img1.png"]);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		if (chatState.messages[0]!.type === "user") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(chatState.messages[0]!.images).toEqual(["img1.png"]);
+		const firstMessage = chatState.messages[0];
+		assert.exists(firstMessage, "expected user message");
+		if (firstMessage.type === "user") {
+			expect(firstMessage.images).toEqual(["img1.png"]);
 		}
 	});
 });
@@ -197,8 +204,8 @@ describe("addUserMessage", () => {
 describe("addSystemMessage", () => {
 	it("adds an info system message by default", () => {
 		addSystemMessage(ta, tm, "info text");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const m = chatState.messages[0]!;
+		const m = chatState.messages[0];
+		assert.exists(m, "expected system message");
 		if (m.type === "system") {
 			expect(m.variant).toBe("info");
 		}
@@ -206,8 +213,8 @@ describe("addSystemMessage", () => {
 
 	it("adds an error system message when variant specified", () => {
 		addSystemMessage(ta, tm, "error text", "error");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const m = chatState.messages[0]!;
+		const m = chatState.messages[0];
+		assert.exists(m, "expected system message");
 		if (m.type === "system") {
 			expect(m.variant).toBe("error");
 		}
@@ -274,16 +281,16 @@ describe("queued user message (sentDuringEpoch)", () => {
 	it("addUserMessage sets sentDuringEpoch when sent while processing", () => {
 		addUserMessage(ta, tm, "hello", undefined, true);
 		expect(chatState.messages).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const msg = chatState.messages[0]!;
+		const msg = chatState.messages[0];
+		assert.exists(msg, "expected error message");
 		expect(msg.type).toBe("user");
 		expect((msg as UserMsg).sentDuringEpoch).toBe(chatState.turnEpoch);
 	});
 
 	it("addUserMessage defaults sentDuringEpoch to undefined", () => {
 		addUserMessage(ta, tm, "hello");
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const msg = chatState.messages[0]!;
+		const msg = chatState.messages[0];
+		assert.exists(msg, "expected user message");
 		expect((msg as UserMsg).sentDuringEpoch).toBeUndefined();
 	});
 

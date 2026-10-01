@@ -95,8 +95,9 @@
 
 		function onTouchStart(e: TouchEvent) {
 			if (e.touches.length === 1) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				touchStartY = e.touches[0]!.clientY;
+				const touch = e.touches.item(0);
+				if (!touch) return;
+				touchStartY = touch.clientY;
 				touchAccum = 0;
 			}
 		}
@@ -104,8 +105,9 @@
 		function onTouchMove(e: TouchEvent) {
 			if (touchStartY === null || e.touches.length !== 1) return;
 			e.preventDefault(); // prevent page scroll while swiping terminal
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			const currentY = e.touches[0]!.clientY;
+			const touch = e.touches.item(0);
+			if (!touch) return;
+			const currentY = touch.clientY;
 			const deltaY = touchStartY - currentY; // positive = swiped up
 			touchStartY = currentY;
 			touchAccum += deltaY;

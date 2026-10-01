@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -44,10 +44,9 @@ describe("History conversion regression", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("reasoning text");
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.done).toBe(true);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("reasoning text");
+			expect(thinking.done).toBe(true);
 		});
 
 		it("'thinking' part type → ThinkingMessage (Task 0 fix — projected path)", () => {
@@ -59,10 +58,9 @@ describe("History conversion regression", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("thinking text");
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.done).toBe(true);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("thinking text");
+			expect(thinking.done).toBe(true);
 		});
 
 		it("'reasoning' and 'thinking' produce identical output shape", () => {
@@ -82,12 +80,11 @@ describe("History conversion regression", () => {
 
 			expect(thinkR).toBeDefined();
 			expect(thinkT).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinkR!.text).toBe(thinkT!.text);
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinkR!.done).toBe(thinkT!.done);
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinkR!.type).toBe(thinkT!.type);
+			assert.exists(thinkR, "expected replay thinking message");
+			assert.exists(thinkT, "expected transformed thinking message");
+			expect(thinkR.text).toBe(thinkT.text);
+			expect(thinkR.done).toBe(thinkT.done);
+			expect(thinkR.type).toBe(thinkT.type);
 		});
 	});
 
@@ -122,8 +119,8 @@ describe("History conversion regression", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.duration).toBe(2500);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.duration).toBe(2500);
 		});
 
 		it("duration undefined when only time.start present", () => {
@@ -133,8 +130,8 @@ describe("History conversion regression", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.duration).toBeUndefined();
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.duration).toBeUndefined();
 		});
 
 		it("duration undefined when only time.end present", () => {
@@ -144,8 +141,8 @@ describe("History conversion regression", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.duration).toBeUndefined();
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.duration).toBeUndefined();
 		});
 
 		it("duration undefined when no time data on part", () => {
@@ -155,8 +152,8 @@ describe("History conversion regression", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.duration).toBeUndefined();
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.duration).toBeUndefined();
 		});
 	});
 
@@ -228,10 +225,9 @@ describe("History conversion regression", () => {
 					(m): m is ThinkingMessage => m.type === "thinking",
 				);
 				expect(thinking).toBeDefined();
-				// biome-ignore lint/style/noNonNullAssertion: asserted above
-				expect(thinking!.text).toBe("pre-existing thought");
-				// biome-ignore lint/style/noNonNullAssertion: asserted above
-				expect(thinking!.done).toBe(true);
+				assert.exists(thinking, "expected thinking message");
+				expect(thinking.text).toBe("pre-existing thought");
+				expect(thinking.done).toBe(true);
 
 				// Assistant text also present
 				const assistant = chatMessages.find((m) => m.type === "assistant");
@@ -268,10 +264,9 @@ describe("History conversion regression", () => {
 					(m): m is ThinkingMessage => m.type === "thinking",
 				);
 				expect(thinking).toBeDefined();
-				// biome-ignore lint/style/noNonNullAssertion: asserted above
-				expect(thinking!.text).toBe("");
-				// biome-ignore lint/style/noNonNullAssertion: asserted above
-				expect(thinking!.done).toBe(true);
+				assert.exists(thinking, "expected thinking message");
+				expect(thinking.text).toBe("");
+				expect(thinking.done).toBe(true);
 			} finally {
 				await harness?.close();
 			}
@@ -332,10 +327,12 @@ describe("History conversion regression", () => {
 
 			// Only thinking + text survive
 			expect(chat).toHaveLength(2);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(chat[0]!.type).toBe("thinking");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(chat[1]!.type).toBe("assistant");
+			const firstMessage = chat[0];
+			const secondMessage = chat[1];
+			assert.exists(firstMessage, "expected thinking message");
+			assert.exists(secondMessage, "expected assistant message");
+			expect(firstMessage.type).toBe("thinking");
+			expect(secondMessage.type).toBe("assistant");
 		});
 
 		it.todo(

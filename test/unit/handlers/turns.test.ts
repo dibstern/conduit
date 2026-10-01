@@ -1,7 +1,7 @@
 // ─── Turns — Unit Tests ───────────────────────────────────────────────────────
 // Tests segmentTurns, turnStats/countsPhrase, step durations and economics.
 
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -138,10 +138,11 @@ describe("forkMessageIdAtReply", () => {
 		previous.messageId = `${kind}-id`;
 		const reply = say();
 		const between = kind === "text" ? read("/a.ts") : undefined;
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[user(), previous, ...(between ? [between] : []), reply],
 			false,
-		)[0]!;
+		);
+		assert.exists(turn, "expected turn");
 		expect(forkMessageIdAtReply(turn, reply)).toBe(`${kind}-id`);
 	});
 
@@ -150,7 +151,8 @@ describe("forkMessageIdAtReply", () => {
 		const end = result({ messageId: "end-id" });
 		const later = say("Later");
 		later.messageId = "later-id";
-		const turn = segmentTurns([user(), reply, end, later], false)[0]!;
+		const [turn] = segmentTurns([user(), reply, end, later], false);
+		assert.exists(turn, "expected turn");
 		expect(forkMessageIdAtReply(turn, reply)).toBeUndefined();
 		expect(forkMessageIdAtReply(turn, later)).toBe("later-id");
 	});
@@ -158,25 +160,27 @@ describe("forkMessageIdAtReply", () => {
 	it("uses an earlier segment end and returns undefined when no id exists", () => {
 		const first = say("First");
 		const second = say("Second");
-		const withEnd = segmentTurns(
+		const [withEnd] = segmentTurns(
 			[user(), first, result({ messageId: "end-id" }), second],
 			false,
-		)[0]!;
+		);
+		assert.exists(withEnd, "expected turn");
 		expect(forkMessageIdAtReply(withEnd, second)).toBe("end-id");
 		const noId = say();
-		expect(
-			forkMessageIdAtReply(segmentTurns([user(), noId], false)[0]!, noId),
-		).toBeUndefined();
+		const [turnWithoutId] = segmentTurns([user(), noId], false);
+		assert.exists(turnWithoutId, "expected turn");
+		expect(forkMessageIdAtReply(turnWithoutId, noId)).toBeUndefined();
 	});
 
 	it("uses a hand-back id from an earlier segment", () => {
 		const question = tool("AskUserQuestion", { questions: [] });
 		question.messageId = "hand-back-id";
 		const reply = say();
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[user(), say("Question"), question, reply],
 			false,
-		)[0]!;
+		);
+		assert.exists(turn, "expected turn");
 		expect(forkMessageIdAtReply(turn, reply)).toBe("hand-back-id");
 	});
 });
@@ -191,20 +195,19 @@ describe("segmentTurns", () => {
 	])("reopens liveness for new %s activity after a result", (kind) => {
 		const next =
 			kind === "assistant" ? say() : kind === "tool" ? read("/b.ts") : think();
-		const turn = segmentTurns(
-			[user(), read("/a.ts"), result(), next],
-			true,
-		)[0]!;
+		const [turn] = segmentTurns([user(), read("/a.ts"), result(), next], true);
+		assert.exists(turn, "expected turn");
 		expect(turn.live).toBe(true);
 		expect(turn.segments).toHaveLength(2);
 	});
 
 	it("keeps a finished segment closed without an empty trailing segment", () => {
 		const end = result();
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[user(), read("/a.ts"), say(), end, system()],
 			true,
-		)[0]!;
+		);
+		assert.exists(turn, "expected turn");
 		expect(turn.live).toBe(false);
 		expect(turn.segments).toHaveLength(1);
 		expect(turn.segments[0]?.end).toBe(end);
@@ -214,7 +217,8 @@ describe("segmentTurns", () => {
 		const reply = say();
 		const end = result({ cost: 0.02, duration: 100, createdAt: 200 });
 		const next = read("/b.ts", 300);
-		const turn = segmentTurns([user(undefined, 0), reply, end, next], true)[0]!;
+		const [turn] = segmentTurns([user(undefined, 0), reply, end, next], true);
+		assert.exists(turn, "expected turn");
 		expect(turn.segments[0]?.reply).toEqual([reply]);
 		expect(turn.segments[1]?.activity).toEqual([next]);
 		expect(lastResult(turn)).toBe(end);
@@ -224,10 +228,11 @@ describe("segmentTurns", () => {
 
 	it("settles again after resumed work finishes", () => {
 		const end = result();
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[user(), read("/a.ts"), result(), read("/b.ts"), end],
 			true,
-		)[0]!;
+		);
+		assert.exists(turn, "expected turn");
 		expect(turn.live).toBe(false);
 		expect(turn.segments).toHaveLength(2);
 		expect(turn.segments[1]?.end).toBe(end);
@@ -235,7 +240,8 @@ describe("segmentTurns", () => {
 
 	it("does not open a segment for consecutive result metadata", () => {
 		const end = result({ duration: 100 });
-		const turn = segmentTurns([user(), read("/a.ts"), result(), end], true)[0]!;
+		const [turn] = segmentTurns([user(), read("/a.ts"), result(), end], true);
+		assert.exists(turn, "expected turn");
 		expect(turn.segments).toHaveLength(1);
 		expect(lastResult(turn)).toBe(end);
 		expect(turn.live).toBe(false);
@@ -592,10 +598,11 @@ describe("stepDurations", () => {
 			],
 			false,
 		);
-		const turn = turns[0]!;
-		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
-			2_000, 5_000,
-		]);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 0)).toEqual([2_000, 5_000]);
 	});
 
 	it("runs the last step until now while the turn is live", () => {
@@ -603,10 +610,11 @@ describe("stepDurations", () => {
 			[user(undefined, 0), read("/a.ts", 1_000)],
 			true,
 		);
-		const turn = turns[0]!;
-		expect(stepDurations(turn.segments[0]!, turn, true, 6_000)).toEqual([
-			5_000,
-		]);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 6_000)).toEqual([5_000]);
 	});
 
 	it("reports unknown rather than guessing when a timestamp is missing", () => {
@@ -614,8 +622,11 @@ describe("stepDurations", () => {
 			[user(undefined, 0), read("/a.ts"), say("done", 5_000)],
 			false,
 		);
-		const turn = turns[0]!;
-		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toBeUndefined();
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 0)).toBeUndefined();
 	});
 
 	it("never returns a negative duration for out-of-order stamps", () => {
@@ -628,10 +639,13 @@ describe("stepDurations", () => {
 			],
 			false,
 		);
-		const turn = turns[0]!;
-		expect(
-			stepDurations(turn.segments[0]!, turn, true, 0)?.every((d) => d >= 0),
-		).toBe(true);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 0)?.every((d) => d >= 0)).toBe(
+			true,
+		);
 	});
 
 	it("stops the last step at the reply, not at now, once the reply streams", () => {
@@ -640,30 +654,35 @@ describe("stepDurations", () => {
 			true,
 		);
 		// The tool finished when the reply began; it must not keep growing.
-		const turn = turns[0]!;
-		expect(stepDurations(turn.segments[0]!, turn, true, 10_000)).toEqual([
-			2_000,
-		]);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 10_000)).toEqual([2_000]);
 	});
 
 	it("ends a non-final segment's last step at its hand-back", () => {
 		const question = tool("AskUserQuestion", {}, { createdAt: 4_000 });
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[user(undefined, 0), read("/a.ts", 1_000), question, say("done", 8_000)],
 			false,
-		)[0]!;
+		);
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
 
-		expect(stepDurations(turn.segments[0]!, turn, false, 10_000)).toEqual([
-			3_000,
-		]);
+		expect(stepDurations(segment, turn, false, 10_000)).toEqual([3_000]);
 	});
 });
 
 describe("stepWeights", () => {
 	it("falls back to equal widths when durations are unknown", () => {
 		const turns = segmentTurns([user(), read("/a.ts"), read("/b.ts")], false);
-		const turn = turns[0]!;
-		expect(stepWeights(turn.segments[0]!, turn, true, 0)).toEqual([1, 1]);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepWeights(segment, turn, true, 0)).toEqual([1, 1]);
 	});
 
 	it("gives every step a floor so brief steps stay visible", () => {
@@ -676,8 +695,11 @@ describe("stepWeights", () => {
 			],
 			false,
 		);
-		const turn = turns[0]!;
-		expect(stepWeights(turn.segments[0]!, turn, true, 0)).toEqual([300, 7_990]);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepWeights(segment, turn, true, 0)).toEqual([300, 7_990]);
 	});
 });
 
@@ -687,7 +709,9 @@ describe("turnDuration", () => {
 			[user(undefined, 0), read("/a.ts", 1_000), result({ duration: 42_300 })],
 			false,
 		);
-		expect(turnDuration(turns[0]!, 0)).toBe(42_300);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		expect(turnDuration(turn, 0)).toBe(42_300);
 	});
 
 	it("measures against now while live", () => {
@@ -695,12 +719,16 @@ describe("turnDuration", () => {
 			[user(undefined, 1_000), read("/a.ts", 2_000)],
 			true,
 		);
-		expect(turnDuration(turns[0]!, 6_000)).toBe(5_000);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		expect(turnDuration(turn, 6_000)).toBe(5_000);
 	});
 
 	it("is unknown when nothing carries a timestamp", () => {
 		const turns = segmentTurns([user(), read("/a.ts")], false);
-		expect(turnDuration(turns[0]!, 0)).toBeUndefined();
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		expect(turnDuration(turn, 0)).toBeUndefined();
 	});
 
 	it("keeps a reported duration of zero instead of re-deriving one", () => {
@@ -708,7 +736,9 @@ describe("turnDuration", () => {
 			[user(undefined, 0), read("/a.ts", 1_000), result({ duration: 0 })],
 			false,
 		);
-		expect(turnDuration(turns[0]!, 0)).toBe(0);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		expect(turnDuration(turn, 0)).toBe(0);
 	});
 
 	it("is unknown rather than negative when stamps arrive out of order", () => {
@@ -716,18 +746,20 @@ describe("turnDuration", () => {
 			[user(undefined, 5_000), read("/a.ts", 6_000), say("d", 1_000)],
 			false,
 		);
-		expect(turnDuration(turns[0]!, 0)).toBeUndefined();
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		expect(turnDuration(turn, 0)).toBeUndefined();
 	});
 });
 
 // ─── Economics ───────────────────────────────────────────────────────────────
 
 describe("economics", () => {
-	const withResult = (fields: Partial<ResultMessage>) =>
-		economics(
-			segmentTurns([user(), read("/a.ts"), result(fields)], false)[0]!,
-			0,
-		);
+	const withResult = (fields: Partial<ResultMessage>) => {
+		const [turn] = segmentTurns([user(), read("/a.ts"), result(fields)], false);
+		assert.exists(turn, "expected turn");
+		return economics(turn, 0);
+	};
 
 	it("sums fresh input, cache reads and cache writes into context used", () => {
 		const e = withResult({
@@ -765,7 +797,9 @@ describe("economics", () => {
 
 	it("is empty for a turn that never produced a result", () => {
 		const turns = segmentTurns([user(), read("/a.ts")], true);
-		const e = economics(turns[0]!, 0);
+		const [turn] = turns;
+		assert.exists(turn, "expected turn");
+		const e = economics(turn, 0);
 		expect(e.cost).toBeUndefined();
 		expect(e.context).toBeUndefined();
 	});
@@ -843,7 +877,7 @@ describe("compaction", () => {
 	});
 
 	it("takes no time, and the step before it ends where it began", () => {
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[
 				user(),
 				read("a.ts", 1000),
@@ -852,14 +886,15 @@ describe("compaction", () => {
 				say("ok", 6000),
 			],
 			false,
-		)[0]!;
-		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
-			3000, 0, 1000,
-		]);
+		);
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 0)).toEqual([3000, 0, 1000]);
 	});
 
 	it("does not void the timings when it carries no stamp", () => {
-		const turn = segmentTurns(
+		const [turn] = segmentTurns(
 			[
 				user(),
 				read("a.ts", 1000),
@@ -868,10 +903,11 @@ describe("compaction", () => {
 				say("ok", 6000),
 			],
 			false,
-		)[0]!;
-		expect(stepDurations(turn.segments[0]!, turn, true, 0)).toEqual([
-			4000, 0, 1000,
-		]);
+		);
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		expect(stepDurations(segment, turn, true, 0)).toEqual([4000, 0, 1000]);
 	});
 
 	it("labels the saving when both sizes are known", () => {
@@ -898,8 +934,11 @@ describe("skillChapters", () => {
 			createdAt !== undefined ? { createdAt } : {},
 		);
 	const chapters = (messages: ChatMessage[], live: boolean, now: number) => {
-		const turn = segmentTurns(messages, live)[0]!;
-		return skillChapters(turn.segments[0]!, turn, true, now);
+		const [turn] = segmentTurns(messages, live);
+		assert.exists(turn, "expected turn");
+		const [segment] = turn.segments;
+		assert.exists(segment, "expected segment");
+		return skillChapters(segment, turn, true, now);
 	};
 
 	it("runs each skill until the next one loads, and the last until the reply", () => {

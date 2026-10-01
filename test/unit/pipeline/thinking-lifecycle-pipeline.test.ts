@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
@@ -135,10 +135,9 @@ describe("Thinking lifecycle — full pipeline", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(thinkingMsg).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinkingMsg!.done).toBe(true);
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinkingMsg!.text).toBe("Let me reason about this...");
+		assert.exists(thinkingMsg, "expected thinking message");
+		expect(thinkingMsg.done).toBe(true);
+		expect(thinkingMsg.text).toBe("Let me reason about this...");
 
 		// Assert assistant message also present and ordered after thinking
 		const thinkingIdx = chatMessages.findIndex((m) => m.type === "thinking");
@@ -207,14 +206,12 @@ describe("Thinking lifecycle — full pipeline", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(thinking).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.done).toBe(true);
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.text).toBe("Deep reasoning about the problem...");
+		assert.exists(thinking, "expected thinking message");
+		expect(thinking.done).toBe(true);
+		expect(thinking.text).toBe("Deep reasoning about the problem...");
 		// Part rows carry their own created_at/updated_at, so the thinking block's
 		// span survives the round-trip instead of collapsing to nothing.
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.duration).toBe(100);
+		expect(thinking.duration).toBe(100);
 	});
 
 	it("documents divergence: SQLite has partial thinking, frontend marks done via safety net", async () => {
@@ -268,12 +265,11 @@ describe("Thinking lifecycle — full pipeline", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(thinking).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.text).toBe("Partial reasoning that never completed...");
+		assert.exists(thinking, "expected thinking message");
+		expect(thinking.text).toBe("Partial reasoning that never completed...");
 
 		// historyToChatMessages always marks history thinking blocks as done=true
 		// (history is static — if it's persisted, it's "done" by definition)
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.done).toBe(true);
+		expect(thinking.done).toBe(true);
 	});
 });

@@ -97,8 +97,9 @@ export const approvalScene: SceneDefinition = {
 
 		// Inject the permission request
 		await phase("inject-permission", async () => {
-			// biome-ignore lint/style/noNonNullAssertion: wsMock is assigned in the prior sequential phase
-			wsMock!.sendMessage(approvalPermission);
+			if (!wsMock)
+				throw new Error("expected the WebSocket mock to be initialized");
+			wsMock.sendMessage(approvalPermission);
 		});
 
 		await assert("permission-card-visible", async () => {

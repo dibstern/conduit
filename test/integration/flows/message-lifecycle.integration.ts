@@ -3,7 +3,15 @@
 // Verifies the complete message flow:
 //   send → status:processing → delta(s) → done(code:0) → idle
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	assert,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+} from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -103,8 +111,9 @@ describe("Integration: Message Lifecycle", () => {
 		// (no lingering processing status)
 		const allDone = client.getReceivedOfType("done");
 		expect(allDone.length).toBeGreaterThan(0);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(allDone[allDone.length - 1]!["code"]).toBe(0);
+		const lastDone = allDone.at(-1);
+		assert.exists(lastDone, "expected a done message");
+		expect(lastDone["code"]).toBe(0);
 
 		await client.close();
 	}, 15_000);

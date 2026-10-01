@@ -62,8 +62,8 @@ export class TestWsClient {
 
 				// Check waiters
 				for (let i = this.waiters.length - 1; i >= 0; i--) {
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-					const waiter = this.waiters[i]!;
+					const waiter = this.waiters[i];
+					if (waiter === undefined) continue;
 					if (waiter.predicate(msg)) {
 						clearTimeout(waiter.timer);
 						waiter.resolve(msg);

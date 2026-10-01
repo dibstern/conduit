@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { HttpApp } from "@effect/platform";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
@@ -250,10 +250,9 @@ describe("Effect HTTP Router", () => {
 			const body = await jsonBody(response);
 			expect(body).toEqual({ ok: true });
 			expect(subscriptions).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — length asserted above
-			expect(subscriptions[0]!.endpoint).toBe(
-				"https://push.example.com/sub123",
-			);
+			const subscription = subscriptions[0];
+			assert.exists(subscription, "expected subscription");
+			expect(subscription.endpoint).toBe("https://push.example.com/sub123");
 		});
 
 		it("returns 404 when PushProvider absent", async () => {

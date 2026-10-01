@@ -4,7 +4,7 @@
 // path validation and the filterExistingProjects function.
 
 import { existsSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import {
 	deserializeRecent,
 	filterExistingProjects,
@@ -86,8 +86,9 @@ describe("deserializeRecent — path validation", () => {
 		});
 		const result = deserializeRecent(json);
 		expect(result).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result[0]!.directory).toBe("/home/user/proj");
+		const project = result[0];
+		assert.exists(project, "expected recent project");
+		expect(project.directory).toBe("/home/user/proj");
 	});
 });
 
@@ -103,8 +104,9 @@ describe("filterExistingProjects", () => {
 		];
 		const result = filterExistingProjects(projects);
 		expect(result).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result[0]!.slug).toBe("a");
+		const project = result[0];
+		assert.exists(project, "expected recent project");
+		expect(project.slug).toBe("a");
 	});
 
 	it("returns empty array when no directories exist", () => {

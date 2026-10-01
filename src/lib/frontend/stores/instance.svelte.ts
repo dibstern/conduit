@@ -174,20 +174,18 @@ export function handleInstanceStatus(
 ): void {
 	const idx = instanceState.instances.findIndex((i) => i.id === msg.instanceId);
 	if (idx !== -1) {
-		instanceState.instances[idx] = {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-			...instanceState.instances[idx]!,
-			status: msg.status,
-		};
+		const instance = instanceState.instances[idx];
+		if (instance !== undefined) {
+			instanceState.instances[idx] = { ...instance, status: msg.status };
+		}
 	}
 	// Also update the cache
 	const cacheIdx = cachedInstances.findIndex((i) => i.id === msg.instanceId);
 	if (cacheIdx !== -1) {
-		cachedInstances[cacheIdx] = {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-			...cachedInstances[cacheIdx]!,
-			status: msg.status,
-		};
+		const instance = cachedInstances[cacheIdx];
+		if (instance !== undefined) {
+			cachedInstances[cacheIdx] = { ...instance, status: msg.status };
+		}
 	}
 }
 

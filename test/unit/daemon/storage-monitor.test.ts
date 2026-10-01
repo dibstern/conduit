@@ -9,7 +9,7 @@
 // T6:  `stop()` is idempotent (calling stop twice doesn't throw)
 // T7:  Custom threshold works
 
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import type {
 	DiskSpaceOkEvent,
 	LowDiskSpaceEvent,
@@ -38,8 +38,9 @@ function mockStatfsControlled(sequence: number[]) {
 	function next() {
 		const resolve = calls.shift();
 		if (!resolve) throw new Error("No pending statfs call to resolve");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const available = sequence[callIndex] ?? sequence[sequence.length - 1]!;
+		const lastAvailable = sequence[sequence.length - 1];
+		assert.exists(lastAvailable, "expected available-byte sequence");
+		const available = sequence[callIndex] ?? lastAvailable;
 		callIndex++;
 		resolve({ available });
 	}
@@ -95,8 +96,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			await vi.waitFor(() => expect(events).toHaveLength(1));
 			monitor.stop();
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(events[0]!.availableBytes).toBe(0);
+			const event = events[0];
+			assert.exists(event, "expected storage event");
+			expect(event.availableBytes).toBe(0);
 		});
 	});
 
@@ -258,8 +260,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 
 			// Should only emit once on the first transition to low
 			expect(lowEvents).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(lowEvents[0]!.availableBytes).toBe(low1);
+			const lowEvent = lowEvents[0];
+			assert.exists(lowEvent, "expected low-storage event");
+			expect(lowEvent.availableBytes).toBe(low1);
 		});
 
 		it("emits low_disk_space again after recovery and re-drop", async () => {
@@ -357,8 +360,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			await vi.waitFor(() => expect(lowEvents).toHaveLength(1));
 			monitor.stop();
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(lowEvents[0]!.thresholdBytes).toBe(customThreshold);
+			const lowEvent = lowEvents[0];
+			assert.exists(lowEvent, "expected low-storage event");
+			expect(lowEvent.thresholdBytes).toBe(customThreshold);
 		});
 
 		it("emits low_disk_space when below custom threshold", async () => {
@@ -403,8 +407,9 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			await vi.waitFor(() => expect(lowEvents).toHaveLength(1));
 			monitor.stop();
 
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(lowEvents[0]!.thresholdBytes).toBe(100 * 1024 * 1024);
+			const lowEvent = lowEvents[0];
+			assert.exists(lowEvent, "expected low-storage event");
+			expect(lowEvent.thresholdBytes).toBe(100 * 1024 * 1024);
 		});
 	});
 

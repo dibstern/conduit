@@ -117,7 +117,8 @@ export function segmentTurns(
 			};
 			turns.push(turn);
 		}
-		let segment = turn.segments.at(-1)!;
+		let segment = turn.segments.at(-1);
+		if (segment === undefined) continue;
 		if (msg.type === "system" && !isCompaction(msg)) {
 			turn.notices.push(msg);
 			continue;
@@ -143,14 +144,14 @@ export function segmentTurns(
 	// segment can never receive more work — the types see to that. So a result
 	// mid-turn no longer strands the transcript: the next part opens a fresh
 	// segment and the turn reads as live again.
-	if (last) last.live = processing && last.segments.at(-1)!.end === undefined;
+	if (last) last.live = processing && last.segments.at(-1)?.end === undefined;
 	return turns;
 }
 
 /** Latest reported usage remains available even when later work is running. */
 export function lastResult(turn: Turn): ResultMessage | undefined {
 	for (let i = turn.segments.length - 1; i >= 0; i--) {
-		const end = turn.segments[i]!.end;
+		const end = turn.segments[i]?.end;
 		if (end?.type === "result") return end;
 	}
 	return undefined;
@@ -511,7 +512,8 @@ export function turnDuration(turn: Turn, now: number): number | undefined {
 	let end = turn.live ? now : result?.createdAt;
 	if (end === undefined) {
 		for (let i = turn.segments.length - 1; i >= 0; i--) {
-			const segment = turn.segments[i]!;
+			const segment = turn.segments[i];
+			if (segment === undefined) continue;
 			end =
 				segment.handBack?.createdAt ??
 				segment.reply.at(-1)?.createdAt ??
@@ -596,7 +598,7 @@ export function stepDurations(
 	let next = segmentEnd(segment, turn, final, now);
 	for (let i = activity.length - 1; i >= 0; i--) {
 		nextStart[i] = next;
-		next = activity[i]!.createdAt ?? next;
+		next = activity[i]?.createdAt ?? next;
 	}
 	return activity.map((part, i) => {
 		if (part.type === "system") return 0;
@@ -604,7 +606,7 @@ export function stepDurations(
 		if (createdAt === undefined) return 0;
 		if (part.endedAt !== undefined && part.endedAt > createdAt)
 			return part.endedAt - createdAt;
-		return Math.max(0, nextStart[i]! - createdAt);
+		return Math.max(0, (nextStart[i] ?? createdAt) - createdAt);
 	});
 }
 

@@ -1,5 +1,5 @@
 // ─── Session Store Tests ─────────────────────────────────────────────────────
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
 	currentChat,
@@ -711,8 +711,8 @@ describe("SessionCreationStatus state machine", () => {
 	});
 
 	it("transitions creating -> idle on completeNewSession with matching requestId", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
+		const requestId = requestNewSession();
+		assert.exists(requestId, "expected session request ID");
 		completeNewSession(requestId);
 		expect(sessionCreation.value.phase).toBe("idle");
 	});
@@ -724,8 +724,8 @@ describe("SessionCreationStatus state machine", () => {
 	});
 
 	it("transitions creating -> error on failNewSession", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
+		const requestId = requestNewSession();
+		assert.exists(requestId, "expected session request ID");
 		failNewSession(requestId, "API timeout");
 		expect(sessionCreation.value.phase).toBe("error");
 		if (sessionCreation.value.phase === "error") {
@@ -734,8 +734,8 @@ describe("SessionCreationStatus state machine", () => {
 	});
 
 	it("transitions error -> idle on resetSessionCreation", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
+		const requestId = requestNewSession();
+		assert.exists(requestId, "expected session request ID");
 		failNewSession(requestId, "fail");
 		expect(sessionCreation.value.phase).toBe("error");
 		resetSessionCreation();
@@ -750,8 +750,8 @@ describe("SessionCreationStatus state machine", () => {
 	});
 
 	it("completeNewSession is a no-op when phase is error", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
+		const requestId = requestNewSession();
+		assert.exists(requestId, "expected session request ID");
 		failNewSession(requestId, "fail");
 		completeNewSession(requestId);
 		expect(sessionCreation.value.phase).toBe("error"); // Still error
@@ -763,8 +763,8 @@ describe("SessionCreationStatus state machine", () => {
 	});
 
 	it("failNewSession is a no-op with wrong requestId", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
+		const requestId = requestNewSession();
+		assert.exists(requestId, "expected session request ID");
 		failNewSession("wrong-id", "shouldn't matter");
 		expect(sessionCreation.value.phase).toBe("creating");
 		if (sessionCreation.value.phase === "creating") {
@@ -773,13 +773,13 @@ describe("SessionCreationStatus state machine", () => {
 	});
 
 	it("supports re-entrant create/complete cycles", () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const id1 = requestNewSession()!;
+		const id1 = requestNewSession();
+		assert.exists(id1, "expected first session request ID");
 		completeNewSession(id1);
 		expect(sessionCreation.value.phase).toBe("idle");
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — back to idle after complete
-		const id2 = requestNewSession()!;
+		const id2 = requestNewSession();
+		assert.exists(id2, "expected second session request ID");
 		expect(id2).not.toBe(id1);
 		expect(sessionCreation.value.phase).toBe("creating");
 		completeNewSession(id2);
@@ -808,8 +808,8 @@ describe("SessionCreationStatus state machine", () => {
 
 	it("timeout is cancelled when session completes before deadline", () => {
 		vi.useFakeTimers();
-		// biome-ignore lint/style/noNonNullAssertion: safe — tested idle->creating above
-		const requestId = requestNewSession()!;
+		const requestId = requestNewSession();
+		assert.exists(requestId, "expected session request ID");
 
 		vi.advanceTimersByTime(1000); // Not yet timed out
 		completeNewSession(requestId);
@@ -937,8 +937,8 @@ describe("sendNewSession", () => {
 
 	it("mirrors Sidebar button guard: disabled when creating, re-enabled after complete", () => {
 		// First click — succeeds, button should be disabled
-		// biome-ignore lint/style/noNonNullAssertion: safe — first call from idle
-		const requestId = sendNewSession(mockStart)!;
+		const requestId = sendNewSession(mockStart);
+		assert.exists(requestId, "expected session request ID");
 		expect(sessionCreation.value.phase === "creating").toBe(true);
 
 		// Second click while creating — guard blocks

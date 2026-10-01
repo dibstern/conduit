@@ -3,7 +3,7 @@
 // promptMultiSelect. Uses mock stdin (EventEmitter), stdout, and exit.
 
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type {
 	MultiSelectItem,
 	PromptOptions,
@@ -141,8 +141,8 @@ describe("promptToggle", () => {
 		const io = createMockIO();
 		promptToggle("Test", null, false, () => {}, io.opts());
 		// The toggle render is the second-to-last output (key hints line is last)
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const toggleLine = io.output[io.output.length - 2]!;
+		const toggleLine = io.output[io.output.length - 2];
+		assert.exists(toggleLine, "expected toggle line");
 		// No should be active (green+bold)
 		expect(toggleLine).toContain(`${a.green}${a.bold}`);
 		expect(stripAnsi(toggleLine)).toContain("No");
@@ -151,8 +151,8 @@ describe("promptToggle", () => {
 	it("defaults to true when defaultValue is true", () => {
 		const io = createMockIO();
 		promptToggle("Test", null, true, () => {}, io.opts());
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		const toggleLine = io.output[io.output.length - 2]!;
+		const toggleLine = io.output[io.output.length - 2];
+		assert.exists(toggleLine, "expected toggle line");
 		expect(toggleLine).toContain(`${a.green}${a.bold}`);
 		expect(stripAnsi(toggleLine)).toContain("Yes");
 	});

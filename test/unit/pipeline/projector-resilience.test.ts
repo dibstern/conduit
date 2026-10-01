@@ -1,5 +1,5 @@
 import { Cause, Effect, Runtime } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type {
 	AssistantMessage,
 	ThinkingMessage,
@@ -291,8 +291,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("early delta");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("early delta");
 		});
 
 		it("text.delta before message.created — message auto-created defensively", async () => {
@@ -421,8 +421,8 @@ describe("MessageProjector resilience", () => {
 			expect(thinking).toBeDefined();
 			// Documents the known risk: text is doubled during normal streaming
 			// because alreadyApplied() only checks when ctx.replaying === true.
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("hellohello");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("hellohello");
 		});
 
 		it("duplicate thinking.delta in replay mode — alreadyApplied() prevents doubling", async () => {
@@ -503,8 +503,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("hello"); // Not doubled
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("hello"); // Not doubled
 		});
 
 		it("duplicate thinking.start — ON CONFLICT DO NOTHING, no error", async () => {
@@ -649,8 +649,8 @@ describe("MessageProjector resilience", () => {
 			);
 			expect(thinking).toBeDefined();
 			// Text should be "first second" — NOT "firstfirst second" (overlap not doubled)
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("first second");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("first second");
 
 			// Assistant text also present
 			const assistant = chat.find((m) => m.type === "assistant");
@@ -733,10 +733,9 @@ describe("MessageProjector resilience", () => {
 			);
 			// Empty thinking block should exist with empty text, not silently dropped
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("");
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.done).toBe(true);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("");
+			expect(thinking.done).toBe(true);
 		});
 
 		it("thinking-only turn — no text.delta, only thinking", async () => {
@@ -809,8 +808,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("I thought about it but produced no text");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("I thought about it but produced no text");
 
 			// No assistant message — no text.delta was projected
 			const assistant = chat.find((m) => m.type === "assistant");
@@ -889,8 +888,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is AssistantMessage => m.type === "assistant",
 			);
 			expect(assistant).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(assistant!.rawText).toBe("alphabetagamma");
+			assert.exists(assistant, "expected assistant message");
+			expect(assistant.rawText).toBe("alphabetagamma");
 		});
 
 		it("3 sequential thinking.deltas concatenate in correct order", async () => {
@@ -983,8 +982,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("step1-step2-step3");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("step1-step2-step3");
 		});
 	});
 
@@ -1124,10 +1123,12 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinkingBlocks).toHaveLength(2);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(thinkingBlocks[0]!.text).toBe("first thought");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(thinkingBlocks[1]!.text).toBe("second thought");
+			const firstThinkingBlock = thinkingBlocks[0];
+			const secondThinkingBlock = thinkingBlocks[1];
+			assert.exists(firstThinkingBlock, "expected first thinking block");
+			assert.exists(secondThinkingBlock, "expected second thinking block");
+			expect(firstThinkingBlock.text).toBe("first thought");
+			expect(secondThinkingBlock.text).toBe("second thought");
 
 			// Verify ordering: think1 → assistant1 → think2 → assistant2
 			const types = chat
@@ -1339,11 +1340,10 @@ describe("MessageProjector resilience", () => {
 			);
 			expect(thinking).toBeDefined();
 			// Part exists from thinking.start but delta text was lost
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("");
 			// History-loaded = always done
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.done).toBe(true);
+			expect(thinking.done).toBe(true);
 		});
 	});
 
@@ -1596,8 +1596,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("");
 		});
 
 		it("text.delta with SQL-injection-like string — parameterized queries prevent injection", async () => {
@@ -1721,10 +1721,9 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe(longText);
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text.length).toBe(100_000);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe(longText);
+			expect(thinking.text.length).toBe(100_000);
 		});
 
 		it("thinking.delta with HTML entities — stored raw, not escaped at DB layer", async () => {
@@ -1800,8 +1799,8 @@ describe("MessageProjector resilience", () => {
 			);
 			expect(thinking).toBeDefined();
 			// DB stores raw text — sanitization is frontend's responsibility
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe(htmlText);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe(htmlText);
 		});
 	});
 
@@ -1885,8 +1884,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("🧠 Let me think 🤔💭");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("🧠 Let me think 🤔💭");
 		});
 
 		it("CJK characters round-trip through pipeline", async () => {
@@ -1900,8 +1899,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("这是一个测试。思考中…");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("这是一个测试。思考中…");
 		});
 
 		it("RTL text (Arabic) round-trips through pipeline", async () => {
@@ -1915,8 +1914,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("هذا اختبار للتفكير");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("هذا اختبار للتفكير");
 		});
 
 		it("surrogate pairs (𝕳𝖊𝖑𝖑𝖔) round-trip through pipeline", async () => {
@@ -1927,8 +1926,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe(surrogatePairText);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe(surrogatePairText);
 		});
 
 		it("null bytes in text — stored as-is by SQLite TEXT column", async () => {
@@ -1940,8 +1939,8 @@ describe("MessageProjector resilience", () => {
 			);
 			expect(thinking).toBeDefined();
 			// SQLite TEXT columns handle embedded nulls — verify no truncation
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text.length).toBeGreaterThanOrEqual("before".length);
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text.length).toBeGreaterThanOrEqual("before".length);
 		});
 
 		it("multi-byte concatenation via multiple deltas — boundary not corrupted", async () => {
@@ -2026,8 +2025,8 @@ describe("MessageProjector resilience", () => {
 			);
 			expect(thinking).toBeDefined();
 			// SQL || concatenation must not corrupt multi-byte boundary
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("思考🧠完了");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("思考🧠完了");
 		});
 	});
 
@@ -2174,11 +2173,10 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("reasoning before error");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("reasoning before error");
 			// History-loaded = always done=true
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.done).toBe(true);
+			expect(thinking.done).toBe(true);
 		});
 
 		it("duplicate message.created for same messageId — ON CONFLICT DO NOTHING", async () => {
@@ -2360,8 +2358,8 @@ describe("MessageProjector resilience", () => {
 				(m): m is ThinkingMessage => m.type === "thinking",
 			);
 			expect(thinking).toBeDefined();
-			// biome-ignore lint/style/noNonNullAssertion: asserted above
-			expect(thinking!.text).toBe("thought");
+			assert.exists(thinking, "expected thinking message");
+			expect(thinking.text).toBe("thought");
 		});
 
 		it("text.delta duplicate in normal mode — documents text doubling risk", async () => {

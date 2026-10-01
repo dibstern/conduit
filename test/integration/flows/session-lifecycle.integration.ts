@@ -2,7 +2,7 @@
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -113,8 +113,8 @@ describe("Integration: Session Lifecycle", () => {
 		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
 		const found = sessions.find((s) => s.id === sessionId);
 		expect(found).toBeTruthy();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(found!.title).toBe(newTitle);
+		assert.exists(found, "expected the renamed session");
+		expect(found.title).toBe(newTitle);
 
 		await client.close();
 	});

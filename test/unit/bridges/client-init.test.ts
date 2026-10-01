@@ -1,5 +1,5 @@
 import { Cause, Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { handleClientConnectedEffect } from "../../../src/lib/bridges/client-init.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { AgentService } from "../../../src/lib/domain/relay/Services/agent-service.js";
@@ -1482,8 +1482,9 @@ describe("handleClientConnectedEffect — pending questions", () => {
 		);
 		// Only the question matching the active session should be sent
 		expect(askCalls).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect((askCalls[0]![1] as { toolId: string }).toolId).toBe("que_this");
+		const askCall = askCalls[0];
+		assert.exists(askCall, "expected ask call");
+		expect((askCall[1] as { toolId: string }).toolId).toBe("que_this");
 	});
 });
 
@@ -1672,8 +1673,8 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 			(c) => (c[1] as { requestId: string }).requestId === "perm-r1",
 		);
 		expect(perm1Msg).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect((perm1Msg![1] as { toolName: string }).toolName).toBe("shell_exec");
+		assert.exists(perm1Msg, "expected permission message");
+		expect((perm1Msg[1] as { toolName: string }).toolName).toBe("shell_exec");
 	});
 });
 
@@ -1838,8 +1839,9 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 		);
 		// Should only send once (from service replay), not duplicated from API
 		expect(permCalls).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect((permCalls[0]![1] as { requestId: string }).requestId).toBe(
+		const permissionCall = permCalls[0];
+		assert.exists(permissionCall, "expected permission call");
+		expect((permissionCall[1] as { requestId: string }).requestId).toBe(
 			"per_dup",
 		);
 	});
@@ -2053,13 +2055,11 @@ describe("handleClientConnectedEffect — instance list", () => {
 			(c) => (c[1] as { type: string }).type === "instance_list",
 		);
 		expect(instanceListCall).toBeDefined();
+		assert.exists(instanceListCall, "expected instance-list call");
 		expect(
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			(instanceListCall![1] as { type: string; instances: unknown[] })
-				.instances,
+			(instanceListCall[1] as { type: string; instances: unknown[] }).instances,
 		).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(instanceListCall![1]).toEqual({ type: "instance_list", instances });
+		expect(instanceListCall[1]).toEqual({ type: "instance_list", instances });
 	});
 
 	it("sends instance_list via sendTo (not broadcast) to the specific client", async () => {

@@ -14,7 +14,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
@@ -143,8 +143,8 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		// Get specific session
 		const sessionMatch = url.pathname.match(/^\/session\/([\w-]+)$/);
 		if (sessionMatch && req.method === "GET") {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const id = sessionMatch[1]!;
+			const id = sessionMatch[1];
+			assert.exists(id, "expected session ID capture");
 			const session = sessions[id] ?? {
 				id,
 				projectID: "project-1",

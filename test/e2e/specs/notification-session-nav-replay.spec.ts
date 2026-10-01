@@ -168,8 +168,8 @@ test.describe("Notification → session navigation (replay)", () => {
 		const recording = loadOpenCodeRecording("chat-simple");
 		const watchedSession = findTargetSessionId(recording);
 		expect(watchedSession).toBeTruthy();
-		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
-		const watchedId = watchedSession!;
+		if (!watchedSession) throw new Error("expected watched session");
+		const watchedId = watchedSession;
 
 		// The relay registers the viewer before it sends session_switched, so
 		// this frame proves the session HAS a viewer before the error arrives.

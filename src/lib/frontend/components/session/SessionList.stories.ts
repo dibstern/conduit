@@ -242,9 +242,11 @@ export const PinnedAndSettledShelfOpen: Story = {
 export const WithItems: Story = {
 	beforeEach: () => {
 		seedSessions([...mockSessionsAllGroups]);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		sessionState.currentId = mockSessionsAllGroups[0]!.id;
-		routerState.path = `/s/${sessionState.currentId}`;
+		const firstSession = mockSessionsAllGroups[0];
+		if (firstSession !== undefined) {
+			sessionState.currentId = firstSession.id;
+			routerState.path = `/s/${sessionState.currentId}`;
+		}
 	},
 };
 

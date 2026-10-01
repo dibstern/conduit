@@ -61,8 +61,8 @@ export function splitAtForkPoint(
 
 	let splitIndex = -1;
 	for (let i = messages.length - 1; i >= 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: index within bounds
-		const msg = messages[i]!;
+		const msg = messages[i];
+		if (msg === undefined) continue;
 		if ("messageId" in msg && msg.messageId === forkMessageId) {
 			splitIndex = i;
 			break;

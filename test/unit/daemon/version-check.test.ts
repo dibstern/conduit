@@ -3,7 +3,15 @@
 // checking, event emission, error resilience, and property-based tests.
 
 import fc from "fast-check";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	fetchLatestVersion,
 	isNewer,
@@ -538,8 +546,9 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		await vi.advanceTimersByTimeAsync(1);
 
 		expect(errors).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(errors[0]!.error.message).toMatch(/ECONNREFUSED/);
+		const error = errors[0];
+		assert.exists(error, "expected version-check error");
+		expect(error.error.message).toMatch(/ECONNREFUSED/);
 
 		checker.stop();
 	});
@@ -597,8 +606,9 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 		await vi.advanceTimersByTimeAsync(1);
 
 		expect(errors).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(errors[0]!.error.message).toMatch(/500/);
+		const error = errors[0];
+		assert.exists(error, "expected version-check error");
+		expect(error.error.message).toMatch(/500/);
 
 		checker.stop();
 	});
@@ -716,13 +726,13 @@ describe("Ticket 3.4 — drain() integration", () => {
 		await vi.advanceTimersByTimeAsync(1);
 		expect(fetcher).toHaveBeenCalledTimes(1);
 		expect(capturedSignal).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedSignal!.aborted).toBe(false);
+		assert.exists(capturedSignal, "expected captured signal");
+		expect(capturedSignal.aborted).toBe(false);
 
 		// Drain aborts the signal
 		await checker.drain();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(capturedSignal!.aborted).toBe(true);
+		assert.exists(capturedSignal, "expected captured signal");
+		expect(capturedSignal.aborted).toBe(true);
 	});
 });
 

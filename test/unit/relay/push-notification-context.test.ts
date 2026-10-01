@@ -5,7 +5,7 @@
 //
 // Kept in a separate file to avoid modifying existing test files.
 
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { resolveNotifications } from "../../../src/lib/relay/notification-policy.js";
 import { sendPushForEvent } from "../../../src/lib/relay/sse-wiring.js";
@@ -55,8 +55,9 @@ describe("sendPushForEvent with context", () => {
 			},
 		);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior call
-		const payload = push.sendToAll.mock.calls[0]![0];
+		const call = push.sendToAll.mock.calls[0];
+		assert.exists(call, "expected push call");
+		const payload = call[0];
 		expect(payload).not.toHaveProperty("slug");
 		expect(payload).toHaveProperty("sessionId", "sess-123");
 	});
@@ -72,8 +73,9 @@ describe("sendPushForEvent with context", () => {
 			},
 		);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior call
-		const payload = push.sendToAll.mock.calls[0]![0];
+		const call = push.sendToAll.mock.calls[0];
+		assert.exists(call, "expected push call");
+		const payload = call[0];
 		expect(payload).toHaveProperty("slug", "my-project");
 		expect(payload).not.toHaveProperty("sessionId");
 	});
@@ -86,8 +88,9 @@ describe("sendPushForEvent with context", () => {
 			createSilentLogger(),
 		);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior call
-		const payload = push.sendToAll.mock.calls[0]![0];
+		const call = push.sendToAll.mock.calls[0];
+		assert.exists(call, "expected push call");
+		const payload = call[0];
 		expect(payload).toEqual({
 			type: "done",
 			title: "Task Complete",

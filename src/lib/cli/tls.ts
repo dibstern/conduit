@@ -80,14 +80,12 @@ export function isRoutableIP(addr: string): boolean {
 	if (addr.startsWith("192.168.")) return true;
 
 	if (addr.startsWith("172.")) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const second = Number.parseInt(addr.split(".")[1]!, 10);
+		const second = Number.parseInt(addr.split(".")[1] ?? "", 10);
 		return second >= 16 && second <= 31;
 	}
 
 	if (addr.startsWith("100.")) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const second = Number.parseInt(addr.split(".")[1]!, 10);
+		const second = Number.parseInt(addr.split(".")[1] ?? "", 10);
 		return second >= 64 && second <= 127;
 	}
 

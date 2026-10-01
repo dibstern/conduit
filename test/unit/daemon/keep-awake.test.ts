@@ -25,7 +25,7 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fc from "fast-check";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import {
 	_defaultWhichSync,
 	KeepAwake,
@@ -478,8 +478,9 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			child.emit("exit", 1, null);
 
 			expect(errors).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(errors[0]!.message).toContain("exited unexpectedly");
+			const error = errors[0];
+			assert.exists(error, "expected keep-awake error");
+			expect(error.message).toContain("exited unexpectedly");
 		});
 
 		it("resets active state on unexpected exit", () => {
@@ -568,8 +569,9 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			child.emit("error", new Error("ENOENT"));
 
 			expect(errors).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(errors[0]!.message).toBe("ENOENT");
+			const error = errors[0];
+			assert.exists(error, "expected keep-awake error");
+			expect(error.message).toBe("ENOENT");
 			expect(ka.isActive()).toBe(false);
 		});
 	});
@@ -763,8 +765,9 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			ka.activate();
 
 			expect(errors).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(errors[0]!.message).toBe("ENOENT: caffeinate not found");
+			const error = errors[0];
+			assert.exists(error, "expected keep-awake error");
+			expect(error.message).toBe("ENOENT: caffeinate not found");
 			expect(ka.isActive()).toBe(false);
 		});
 	});
@@ -1040,8 +1043,9 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			return new Promise<void>((resolve) => {
 				setTimeout(() => {
 					expect(errors.length).toBeGreaterThan(0);
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-					expect(errors[0]!.message).toContain("ENOENT");
+					const error = errors[0];
+					assert.exists(error, "expected keep-awake error");
+					expect(error.message).toContain("ENOENT");
 					expect(ka.isActive()).toBe(false);
 					resolve();
 				}, 200);

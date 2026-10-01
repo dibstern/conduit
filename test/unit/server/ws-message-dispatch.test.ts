@@ -6,7 +6,15 @@ import { seedSessions } from "../stores/session-fixtures.js";
 // Tests the handleMessage() dispatch for two message types that previously
 // had zero test coverage.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 
 // ─── Hoisted mocks (run before imports) ─────────────────────────────────────
 
@@ -26,8 +34,9 @@ const { showBannerMock, removeBannerMock, showToastMock } = vi.hoisted(() => {
 
 		addEventListener(event: string, fn: (ev?: unknown) => void): void {
 			if (!this.listeners[event]) this.listeners[event] = [];
-			// biome-ignore lint/style/noNonNullAssertion: safe — initialized in test setup
-			this.listeners[event]!.push(fn);
+			const listeners = this.listeners[event];
+			assert.exists(listeners, "expected event listeners");
+			listeners.push(fn);
 		}
 
 		close(): void {
@@ -426,8 +435,9 @@ describe("instance messages", () => {
 		expect(msg.type).toBe("instance_list");
 		if (msg.type === "instance_list") {
 			expect(msg.instances).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			expect(msg.instances[0]!.id).toBe("personal");
+			const instance = msg.instances[0];
+			assert.exists(instance, "expected instance");
+			expect(instance.id).toBe("personal");
 		}
 	});
 
@@ -485,10 +495,12 @@ describe("instance messages", () => {
 		});
 
 		expect(instanceState.instances).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(instanceState.instances[0]!.id).toBe("personal");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(instanceState.instances[1]!.id).toBe("work");
+		const personal = instanceState.instances[0];
+		const work = instanceState.instances[1];
+		assert.exists(personal, "expected personal instance");
+		assert.exists(work, "expected work instance");
+		expect(personal.id).toBe("personal");
+		expect(work.id).toBe("work");
 	});
 
 	it("receiving instance_status message updates instance status via handleMessage", () => {
@@ -508,8 +520,9 @@ describe("instance messages", () => {
 			],
 		});
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(instanceState.instances[0]!.status).toBe("healthy");
+		const personal = instanceState.instances[0];
+		assert.exists(personal, "expected personal instance");
+		expect(personal.status).toBe("healthy");
 
 		// Now dispatch a status update
 		handleMessage({
@@ -518,8 +531,9 @@ describe("instance messages", () => {
 			status: "unhealthy",
 		});
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(instanceState.instances[0]!.status).toBe("unhealthy");
+		const updatedPersonal = instanceState.instances[0];
+		assert.exists(updatedPersonal, "expected personal instance");
+		expect(updatedPersonal.status).toBe("unhealthy");
 	});
 });
 

@@ -342,9 +342,7 @@ export function promptText(
 		// Filter to directories only, matching partial prefix
 		const matches: string[] = [];
 		const lowerPartial = partial.toLowerCase();
-		for (let i = 0; i < entries.length; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const entry = entries[i]!;
+		for (const entry of entries) {
 			if (entry.charAt(0) === "." && !partial.startsWith(".")) continue;
 			if (lowerPartial && entry.toLowerCase().indexOf(lowerPartial) !== 0)
 				continue;
@@ -362,19 +360,21 @@ export function promptText(
 
 		if (matches.length === 1) {
 			// Single match -- complete it
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			const completed = path.join(dir, matches[0]!) + path.sep;
+			const match = matches[0];
+			if (match === undefined) return;
+			const completed = path.join(dir, match) + path.sep;
 			text = completed;
 			showingPlaceholder = false;
 			clearHint();
 			redrawInput();
 		} else {
 			// Multiple matches -- find longest common prefix and show candidates
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			let common = matches[0]!;
+			const firstMatch = matches[0];
+			if (firstMatch === undefined) return;
+			let common = firstMatch;
 			for (let matchIndex = 1; matchIndex < matches.length; matchIndex++) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-				const matchStr = matches[matchIndex]!;
+				const matchStr = matches[matchIndex];
+				if (matchStr === undefined) continue;
 				let k = 0;
 				while (
 					k < common.length &&
@@ -506,13 +506,12 @@ export function promptSelect<T = string>(
 		const maxLabelWidth = Math.max(cols - 7, 10);
 		const maxHintTextWidth = Math.max(cols - 5, 10);
 		let out = "";
-		for (let i = 0; i < items.length; i++) {
+		for (const [i, item] of items.entries()) {
 			const pfx =
 				i === idx
 					? `${a.green}${a.bold}  \u25CF ${a.reset}`
 					: `${a.dim}  \u25CB ${a.reset}`;
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const label = truncateToWidth(items[i]!.label, maxLabelWidth);
+			const label = truncateToWidth(item.label, maxLabelWidth);
 			out += `  ${sym.bar}${pfx}${label}\n`;
 		}
 		const keyHint = opts.backItem
@@ -535,9 +534,8 @@ export function promptSelect<T = string>(
 	let hintBoxLines = 0;
 	if (opts.hint && opts.hint.length > 0) {
 		log(sym.end, stdout);
-		for (let hintIndex = 0; hintIndex < opts.hint.length; hintIndex++) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			renderHintLine(opts.hint[hintIndex]!);
+		for (const hint of opts.hint) {
+			renderHintLine(hint);
 		}
 		hintBoxLines = 1 + opts.hint.length;
 	}
@@ -560,13 +558,13 @@ export function promptSelect<T = string>(
 			stdin.pause();
 			stdin.removeListener("data", onSelect);
 			clearUp(lineCount, stdout);
+			const item = items[idx];
+			if (item === undefined) return;
 			log(
-				// biome-ignore lint/style/noNonNullAssertion: safe — idx bounded by items.length
-				`${sym.done}  ${title} ${a.dim}\u00B7${a.reset} ${items[idx]!.label}`,
+				`${sym.done}  ${title} ${a.dim}\u00B7${a.reset} ${item.label}`,
 				stdout,
 			);
-			// biome-ignore lint/style/noNonNullAssertion: safe — idx bounded by items.length
-			callback(items[idx]!.value);
+			callback(item.value);
 			return;
 		} else if (ch === "\x03") {
 			if (stdin.setRawMode) stdin.setRawMode(false);
@@ -593,20 +591,20 @@ export function promptSelect<T = string>(
 			}
 			return;
 		} else if (opts.hotkeys?.has(ch)) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by .has() check
-			const hotkeyIdx = opts.hotkeys.get(ch)!;
+			const hotkeyIdx = opts.hotkeys.get(ch);
+			if (hotkeyIdx === undefined) return;
 			if (hotkeyIdx >= 0 && hotkeyIdx < items.length) {
+				const item = items[hotkeyIdx];
+				if (item === undefined) return;
 				if (stdin.setRawMode) stdin.setRawMode(false);
 				stdin.pause();
 				stdin.removeListener("data", onSelect);
 				clearUp(lineCount, stdout);
 				log(
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by bounds check
-					`${sym.done}  ${title} ${a.dim}\u00B7${a.reset} ${items[hotkeyIdx]!.label}`,
+					`${sym.done}  ${title} ${a.dim}\u00B7${a.reset} ${item.label}`,
 					stdout,
 				);
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by bounds check
-				callback(items[hotkeyIdx]!.value);
+				callback(item.value);
 				return;
 			}
 			return;
@@ -624,9 +622,8 @@ export function promptSelect<T = string>(
 		// Re-render hint lines
 		if (opts.hint && opts.hint.length > 0) {
 			log(sym.end, stdout);
-			for (let rh = 0; rh < opts.hint.length; rh++) {
-				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-				renderHintLine(opts.hint[rh]!);
+			for (const hint of opts.hint) {
+				renderHintLine(hint);
 			}
 		}
 	}
@@ -662,9 +659,8 @@ export function promptMultiSelect<T = string>(
 	}
 
 	const selected: boolean[] = [];
-	for (let si = 0; si < items.length; si++) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		selected.push(items[si]!.checked !== false);
+	for (const item of items) {
+		selected.push(item.checked !== false);
 	}
 	let idx = 0;
 
@@ -673,13 +669,12 @@ export function promptMultiSelect<T = string>(
 		const maxLabelWidth = Math.max(cols - 8, 10);
 		const maxKeyHintWidth = Math.max(cols - 5, 10);
 		let out = "";
-		for (let i = 0; i < items.length; i++) {
+		for (const [i, item] of items.entries()) {
 			const cursor = i === idx ? `${a.cyan}>${a.reset}` : " ";
 			const check = selected[i]
 				? `${a.green}${a.bold}\u25A0${a.reset}`
 				: `${a.dim}\u25A1${a.reset}`;
-			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			const label = truncateToWidth(items[i]!.label, maxLabelWidth);
+			const label = truncateToWidth(item.label, maxLabelWidth);
 			out += `  ${sym.bar} ${cursor} ${check} ${label}\n`;
 		}
 		const keyHint =
@@ -718,12 +713,10 @@ export function promptMultiSelect<T = string>(
 			clearUp(lineCount, stdout);
 			const result: T[] = [];
 			const labels: string[] = [];
-			for (let ri = 0; ri < items.length; ri++) {
+			for (const [ri, item] of items.entries()) {
 				if (selected[ri]) {
-					// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-					result.push(items[ri]!.value);
-					// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-					labels.push(items[ri]!.label);
+					result.push(item.value);
+					labels.push(item.label);
 				}
 			}
 			const summary =

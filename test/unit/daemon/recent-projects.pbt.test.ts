@@ -9,7 +9,7 @@
 // P6: deserializeRecent handles corrupt JSON gracefully (safety)
 
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	addRecent,
 	deserializeRecent,
@@ -89,8 +89,8 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 						expect(countAfterSecond).toBe(1);
 
 						// Latest timestamp should be the second
-						// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-						const entry = list.find((p) => p.directory === dir)!;
+						const entry = list.find((p) => p.directory === dir);
+						assert.exists(entry, "expected recent project");
 						expect(entry.lastUsed).toBe(time2);
 					},
 				),
@@ -107,11 +107,11 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 				fc.property(recentProjectList, (list) => {
 					const sorted = getRecent(list);
 					for (let i = 1; i < sorted.length; i++) {
-						// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-						expect(sorted[i - 1]!.lastUsed).toBeGreaterThanOrEqual(
-							// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-							sorted[i]!.lastUsed,
-						);
+						const previous = sorted[i - 1];
+						const project = sorted[i];
+						assert.exists(previous, "expected previous project");
+						assert.exists(project, "expected project");
+						expect(previous.lastUsed).toBeGreaterThanOrEqual(project.lastUsed);
 					}
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -185,12 +185,13 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 
 					expect(parsed).toHaveLength(valid.length);
 					for (let i = 0; i < valid.length; i++) {
-						// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-						expect(parsed[i]!.directory).toBe(valid[i]!.directory);
-						// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-						expect(parsed[i]!.slug).toBe(valid[i]!.slug);
-						// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-						expect(parsed[i]!.lastUsed).toBe(valid[i]!.lastUsed);
+						const parsedProject = parsed[i];
+						const validProject = valid[i];
+						assert.exists(parsedProject, "expected parsed project");
+						assert.exists(validProject, "expected valid project");
+						expect(parsedProject.directory).toBe(validProject.directory);
+						expect(parsedProject.slug).toBe(validProject.slug);
+						expect(parsedProject.lastUsed).toBe(validProject.lastUsed);
 					}
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },

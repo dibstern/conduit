@@ -609,8 +609,8 @@ async function main(): Promise<void> {
 						// The explicit CreateSession response selected a fresh session.
 
 						for (let i = 0; i < scenario.prompts.length; i++) {
-							// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
-							const prompt = scenario.prompts[i]!;
+							const prompt = scenario.prompts[i];
+							if (!prompt) throw new Error("expected scenario prompt");
 							console.log(
 								`  Turn ${i + 1}: "${prompt.slice(0, 50)}${prompt.length > 50 ? "..." : ""}"`,
 							);
@@ -646,8 +646,8 @@ async function main(): Promise<void> {
 					} else {
 						// Single-turn: each prompt gets its own session
 						for (let i = 0; i < scenario.prompts.length; i++) {
-							// biome-ignore lint/style/noNonNullAssertion: safe — bounded by length check
-							const prompt = scenario.prompts[i]!;
+							const prompt = scenario.prompts[i];
+							if (!prompt) throw new Error("expected scenario prompt");
 
 							if (i > 0) {
 								// Create a new session for each prompt after the first.
@@ -678,8 +678,9 @@ async function main(): Promise<void> {
 							(r) => r.json() as Promise<Array<{ id: string }>>,
 						);
 						if (sessions.length > 0) {
-							// biome-ignore lint/style/noNonNullAssertion: checked length
-							const sid = sessions[sessions.length - 1]!.id;
+							const session = sessions[sessions.length - 1];
+							if (!session) throw new Error("expected recorded session");
+							const sid = session.id;
 							await fetch(`${proxy.url}/session/${sid}/message`);
 							console.log(`  Captured message history for ${sid}`);
 						}

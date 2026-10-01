@@ -1,5 +1,5 @@
 // ─── UI Store Tests ──────────────────────────────────────────────────────────
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Must mock localStorage BEFORE the store module is loaded.
 // vi.hoisted runs before any imports are resolved.
@@ -190,20 +190,19 @@ describe("showToast", () => {
 	it("adds a toast with default options", () => {
 		showToast("Hello");
 		expect(uiState.toasts).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.message).toBe("Hello");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.variant).toBe("default");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.duration).toBe(7000);
+		const firstToast = uiState.toasts[0];
+		assert.exists(firstToast, "expected toast");
+		expect(firstToast.message).toBe("Hello");
+		expect(firstToast.variant).toBe("default");
+		expect(firstToast.duration).toBe(7000);
 	});
 
 	it("accepts custom options", () => {
 		showToast("Warning", { duration: 5000, variant: "warn" });
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.variant).toBe("warn");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.duration).toBe(5000);
+		const firstToast = uiState.toasts[0];
+		assert.exists(firstToast, "expected toast");
+		expect(firstToast.variant).toBe("warn");
+		expect(firstToast.duration).toBe(5000);
 	});
 
 	it("auto-dismisses after duration", () => {
@@ -218,12 +217,14 @@ describe("dismissToast", () => {
 	it("removes toast by id", () => {
 		showToast("A");
 		showToast("B");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const idToRemove = uiState.toasts[0]!.id;
+		const firstToast = uiState.toasts[0];
+		assert.exists(firstToast, "expected first toast");
+		const idToRemove = firstToast.id;
 		dismissToast(idToRemove);
 		expect(uiState.toasts).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.toasts[0]!.message).toBe("B");
+		const remainingToast = uiState.toasts[0];
+		assert.exists(remainingToast, "expected remaining toast");
+		expect(remainingToast.message).toBe("B");
 	});
 });
 
@@ -341,8 +342,9 @@ describe("removeBanner", () => {
 		});
 		removeBanner("b1");
 		expect(uiState.banners).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(uiState.banners[0]!.id).toBe("b2");
+		const firstBanner = uiState.banners[0];
+		assert.exists(firstBanner, "expected banner");
+		expect(firstBanner.id).toBe("b2");
 	});
 });
 

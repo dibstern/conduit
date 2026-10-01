@@ -117,8 +117,13 @@ export function startHttpServer(
 	return new Promise((resolve, reject) => {
 		let actualPort = config.port;
 		const handler = (req: IncomingMessage, res: ServerResponse) => {
-			// biome-ignore lint/style/noNonNullAssertion: safe — router set before startHttpServer
-			ctx.router!.handleRequest(req, res).catch((err) => {
+			const router = ctx.router;
+			if (!router) {
+				res.writeHead(500, { "Content-Type": "text/plain" });
+				res.end("Internal Server Error");
+				return;
+			}
+			router.handleRequest(req, res).catch((err) => {
 				log.error("Request error:", err);
 				if (!res.headersSent) {
 					res.writeHead(500, { "Content-Type": "text/plain" });
@@ -185,14 +190,15 @@ export function startHttpServer(
 			ctx.upgradeServer = null;
 		}
 
-		ctx.httpServer.on("error", (err) => {
+		const httpServer = ctx.httpServer;
+		if (!httpServer) return;
+		httpServer.on("error", (err) => {
 			reject(err);
 		});
 
-		ctx.httpServer.listen(config.port, config.host, () => {
+		httpServer.listen(config.port, config.host, () => {
 			// Resolve actual port (important when port 0 is used for OS-assigned ephemeral port)
-			// biome-ignore lint/style/noNonNullAssertion: safe — inside listen callback
-			const addr = ctx.httpServer!.address();
+			const addr = httpServer.address();
 			if (addr && typeof addr !== "string") {
 				actualPort = addr.port;
 			}

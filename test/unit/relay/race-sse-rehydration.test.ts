@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import type {
 	SSEWiringDeps,
 	wireSSEConsumerEffect,
@@ -63,8 +63,8 @@ describe("race: SSE rehydration generation counter", () => {
 		const { consumer, listeners } = createMockConsumer();
 		await wireSSEConsumerForTest(deps, consumer);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		const fireConnected = listeners.get("connected")!;
+		const fireConnected = listeners.get("connected");
+		assert.exists(fireConnected, "expected connected listener");
 
 		// ── Two rapid connects ──
 		fireConnected();
@@ -112,8 +112,8 @@ describe("race: SSE rehydration generation counter", () => {
 		const { consumer, listeners } = createMockConsumer();
 		await wireSSEConsumerForTest(deps, consumer);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		const fireConnected = listeners.get("connected")!;
+		const fireConnected = listeners.get("connected");
+		assert.exists(fireConnected, "expected connected listener");
 
 		// ── Two rapid connects ──
 		fireConnected();
@@ -162,8 +162,9 @@ describe("race: SSE rehydration generation counter", () => {
 		const { consumer, listeners } = createMockConsumer();
 		await wireSSEConsumerForTest(deps, consumer);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — Map.get after set
-		listeners.get("connected")!();
+		const fireConnected = listeners.get("connected");
+		assert.exists(fireConnected, "expected connected listener");
+		fireConnected();
 
 		const question = makePendingQuestion("que_2", "sess-c");
 		q.resolve([question]);

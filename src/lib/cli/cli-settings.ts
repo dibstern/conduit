@@ -239,11 +239,11 @@ export async function showSettingsMenu(
 									async (val) => {
 										if (val?.trim()) {
 											const parts = val.trim().split(/\s+/);
-											// biome-ignore lint/style/noNonNullAssertion: safe — split always returns at least one element
-											const command = parts[0]!;
+											const command = parts[0];
 											const args = parts.slice(1);
-											// biome-ignore lint/style/noNonNullAssertion: safe — guarded by opts.setKeepAwakeCommand check above
-											await opts.setKeepAwakeCommand!(command, args);
+											if (command === undefined || !opts.setKeepAwakeCommand)
+												return;
+											await opts.setKeepAwakeCommand(command, args);
 											await opts.setKeepAwake(true);
 											log(
 												`${sym.done}  ${a.green}Keep awake configured${a.reset}`,

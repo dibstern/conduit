@@ -621,8 +621,9 @@ export const handleQuestionReject = (
 					client.question.list(),
 				);
 				if (pendingQuestions.length > 0) {
-					// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-					const queId = pendingQuestions[0]!.id;
+					const question = pendingQuestions[0];
+					if (question === undefined) return;
+					const queId = question.id;
 					log.info(
 						`client=${clientId} session=${sessionId} reject fallback: ${toolId} → ${queId}`,
 					);

@@ -78,10 +78,11 @@ export function isNewer(current: string, latest: string): boolean {
 
 	// Compare major.minor.patch
 	for (let i = 0; i < 3; i++) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		if (parsedLatest.parts[i]! > parsedCurrent.parts[i]!) return true;
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		if (parsedLatest.parts[i]! < parsedCurrent.parts[i]!) return false;
+		const latestPart = parsedLatest.parts[i];
+		const currentPart = parsedCurrent.parts[i];
+		if (latestPart === undefined || currentPart === undefined) return false;
+		if (latestPart > currentPart) return true;
+		if (latestPart < currentPart) return false;
 	}
 
 	// Same major.minor.patch — check pre-release
@@ -120,9 +121,11 @@ function parseSemver(version: string): ParsedSemver | null {
 	const nums = segments.map(Number);
 	if (nums.some((n) => Number.isNaN(n) || n < 0)) return null;
 
+	const [major, minor, patch] = nums;
+	if (major === undefined || minor === undefined || patch === undefined)
+		return null;
 	return {
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		parts: [nums[0]!, nums[1]!, nums[2]!],
+		parts: [major, minor, patch],
 		prerelease,
 	};
 }
@@ -147,10 +150,9 @@ function comparePrereleases(a: string, b: string): number {
 		if (i >= aParts.length) return 1; // b has more segments, b is newer
 		if (i >= bParts.length) return -1; // a has more segments, a is newer
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-		const aPart = aParts[i]!;
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior null check
-		const bPart = bParts[i]!;
+		const aPart = aParts[i];
+		const bPart = bParts[i];
+		if (aPart === undefined || bPart === undefined) return 0;
 		const aIsNum = /^\d+$/.test(aPart);
 		const bIsNum = /^\d+$/.test(bPart);
 

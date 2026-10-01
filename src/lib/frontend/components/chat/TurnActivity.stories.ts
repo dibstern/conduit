@@ -10,9 +10,10 @@ import {
 } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
+const EMPTY_SEGMENT: Turn["segments"][number] = { activity: [], reply: [] };
 const EMPTY_TURN: Turn = {
 	id: "empty",
-	segments: [{ activity: [], reply: [] }],
+	segments: [EMPTY_SEGMENT],
 	notices: [],
 	live: false,
 };
@@ -23,8 +24,10 @@ function fixtureTurn(index: number, processing: boolean): Turn {
 
 /** Long finished turn: narration, reads, edits, a failing then passing test run, a subagent. */
 const settled = fixtureTurn(1, false);
+const [settledSegment = EMPTY_SEGMENT] = settled.segments;
 /** Same session mid-flight: an edit still running, no result yet. */
 const live = fixtureTurn(2, true);
+const [liveSegment = EMPTY_SEGMENT] = live.segments;
 
 const meta = {
 	title: "Chat/Turn Activity",
@@ -37,12 +40,12 @@ type Story = StoryObj<typeof meta>;
 
 /** Sentence + strip + bill across two lines, with the failed step called out. */
 export const Settled: Story = {
-	args: { turn: settled, segment: settled.segments[0]!, final: true },
+	args: { turn: settled, segment: settledSegment, final: true },
 };
 
 /** Elapsed time counts up, the strip grows, and the last three steps show as a fading ticker. */
 export const Live: Story = {
-	args: { turn: live, segment: live.segments[0]!, final: true },
+	args: { turn: live, segment: liveSegment, final: true },
 };
 
 /** A short turn — few steps, so segments stay legible at minimum width. */
@@ -50,8 +53,8 @@ export const Short: Story = {
 	args: {
 		turn: settled,
 		segment: {
-			...settled.segments[0]!,
-			activity: settled.segments[0]!.activity.slice(0, 3),
+			...settledSegment,
+			activity: settledSegment.activity.slice(0, 3),
 		},
 		final: true,
 	},
@@ -66,8 +69,9 @@ const billless: Turn = {
 			: segment,
 	),
 };
+const [billlessSegment = EMPTY_SEGMENT] = billless.segments;
 export const NoBill: Story = {
-	args: { turn: billless, segment: billless.segments[0]!, final: true },
+	args: { turn: billless, segment: billlessSegment, final: true },
 };
 
 const handBackMessages = [
@@ -123,11 +127,12 @@ const handBackMessages = [
 		finalized: true,
 	},
 ] satisfies ChatMessage[];
-const handBack = segmentTurns(handBackMessages, false)[0]!;
+const [handBack = EMPTY_TURN] = segmentTurns(handBackMessages, false);
+const [handBackSegment = EMPTY_SEGMENT] = handBack.segments;
 
 /** The pre-question ledger is settled and carries no turn-level bill. */
 export const HandBack: Story = {
-	args: { turn: handBack, segment: handBack.segments[0]!, final: false },
+	args: { turn: handBack, segment: handBackSegment, final: false },
 };
 
 // ─── Compaction ──────────────────────────────────────────────────────────────
@@ -153,7 +158,7 @@ function compaction(
 
 /** The settled turn with a compaction spliced in before each given step. */
 function compacted(...at: number[]): Turn {
-	const segment = settled.segments[0]!;
+	const [segment = EMPTY_SEGMENT] = settled.segments;
 	const activity = segment.activity.flatMap((part, i) => {
 		const n = at.indexOf(i);
 		return n === -1
@@ -171,6 +176,8 @@ function compacted(...at: number[]): Turn {
 
 const once = compacted(5);
 const twice = compacted(3, 8);
+const [onceSegment = EMPTY_SEGMENT] = once.segments;
+const [twiceSegment = EMPTY_SEGMENT] = twice.segments;
 
 async function expand(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
@@ -183,18 +190,18 @@ async function expand(canvasElement: HTMLElement) {
 
 /** A fixed-width seam cuts the strip, and the header discloses the compaction. */
 export const Compacted: Story = {
-	args: { turn: once, segment: once.segments[0]!, final: true },
+	args: { turn: once, segment: onceSegment, final: true },
 };
 
 /** Expanded, the seam is a rule across the log carrying the tokens saved. */
 export const CompactedExpanded: Story = {
-	args: { turn: once, segment: once.segments[0]!, final: true },
+	args: { turn: once, segment: onceSegment, final: true },
 	play: ({ canvasElement }) => expand(canvasElement),
 };
 
 /** Each compaction keeps its place, in order, and the marker counts them. */
 export const CompactedTwice: Story = {
-	args: { turn: twice, segment: twice.segments[0]!, final: true },
+	args: { turn: twice, segment: twiceSegment, final: true },
 	play: ({ canvasElement }) => expand(canvasElement),
 };
 
@@ -202,7 +209,7 @@ export const CompactedTwice: Story = {
 
 /** A turn with a Skill call spliced in before each named step, stamped where that step starts. */
 function withSkills(turn: Turn, skills: Record<number, string>): Turn {
-	const segment = turn.segments[0]!;
+	const [segment = EMPTY_SEGMENT] = turn.segments;
 	const activity = segment.activity.flatMap((part, i): ActivityPart[] => {
 		const name = skills[i];
 		if (name === undefined) return [part];
@@ -234,6 +241,8 @@ const skilledLive = withSkills(live, {
 	0: "brainstorming",
 	3: "writing-plans",
 });
+const [skilledSegment = EMPTY_SEGMENT] = skilled.segments;
+const [skilledLiveSegment = EMPTY_SEGMENT] = skilledLive.segments;
 
 async function openSkills(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
@@ -247,17 +256,17 @@ async function openSkills(canvasElement: HTMLElement) {
 
 /** The skills count sits beside the sentence as a control of its own. */
 export const Skills: Story = {
-	args: { turn: skilled, segment: skilled.segments[0]!, final: true },
+	args: { turn: skilled, segment: skilledSegment, final: true },
 };
 
 /** Open, it lists each skill with when it started and how long it governed, and the strip picks them out. */
 export const SkillsOpen: Story = {
-	args: { turn: skilled, segment: skilled.segments[0]!, final: true },
+	args: { turn: skilled, segment: skilledSegment, final: true },
 	play: ({ canvasElement }) => openSkills(canvasElement),
 };
 
 /** While live, the skill still in charge is running rather than given a guessed duration. */
 export const SkillsLive: Story = {
-	args: { turn: skilledLive, segment: skilledLive.segments[0]!, final: true },
+	args: { turn: skilledLive, segment: skilledLiveSegment, final: true },
 	play: ({ canvasElement }) => openSkills(canvasElement),
 };

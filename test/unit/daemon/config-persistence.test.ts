@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
 import {
 	type CrashInfo,
@@ -102,12 +102,10 @@ describe("loadDaemonConfig", () => {
 
 		const loaded = loadDaemonConfig(tempDir);
 		expect(loaded).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.pid).toBe(99999);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.port).toBe(3000);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.pinHash).toBeNull();
+		assert.exists(loaded, "expected daemon config");
+		expect(loaded.pid).toBe(99999);
+		expect(loaded.port).toBe(3000);
+		expect(loaded.pinHash).toBeNull();
 	});
 
 	it("returns null when file doesn't exist", () => {
@@ -326,16 +324,17 @@ describe("syncRecentProjects", () => {
 		const projects = deserializeRecent(data);
 
 		// The newest entry should be first (highest lastUsed)
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(projects[0]!.directory).toBe("/newest");
+		const newestProject = projects[0];
+		assert.exists(newestProject, "expected newest project");
+		expect(newestProject.directory).toBe("/newest");
 
 		// All entries should be sorted descending
 		for (let i = 1; i < projects.length; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			expect(projects[i - 1]!.lastUsed).toBeGreaterThanOrEqual(
-				// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-				projects[i]!.lastUsed,
-			);
+			const previousProject = projects[i - 1];
+			const project = projects[i];
+			assert.exists(previousProject, "expected previous project");
+			assert.exists(project, "expected project");
+			expect(previousProject.lastUsed).toBeGreaterThanOrEqual(project.lastUsed);
 		}
 	});
 
@@ -352,8 +351,9 @@ describe("syncRecentProjects", () => {
 		const data = readFileSync(join(subDir, "recent.json"), "utf-8");
 		const projects = deserializeRecent(data);
 		expect(projects).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(projects[0]!.directory).toBe("/first");
+		const project = projects[0];
+		assert.exists(project, "expected project");
+		expect(project.directory).toBe("/first");
 	});
 
 	it("updates existing entry's title when path matches", () => {
@@ -379,8 +379,8 @@ describe("syncRecentProjects", () => {
 		const projects = deserializeRecent(data);
 		const entry = projects.find((p) => p.directory === "/myapp");
 		expect(entry).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(entry!.title).toBe("New Title");
+		assert.exists(entry, "expected recent project");
+		expect(entry.title).toBe("New Title");
 	});
 });
 
@@ -410,10 +410,11 @@ describe("DaemonConfig with instances", () => {
 		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 		expect(loaded).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.instances).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		const inst = loaded!.instances![0]!;
+		assert.exists(loaded, "expected daemon config");
+		assert.exists(loaded.instances, "expected instances");
+		expect(loaded.instances).toHaveLength(1);
+		const inst = loaded.instances[0];
+		assert.exists(inst, "expected instance");
 		expect(inst.id).toBe("personal");
 		expect(inst.env).toEqual({ ANTHROPIC_API_KEY: "sk-test" });
 	});
@@ -432,8 +433,8 @@ describe("DaemonConfig with instances", () => {
 		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 		expect(loaded).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.instances).toBeUndefined();
+		assert.exists(loaded, "expected daemon config");
+		expect(loaded.instances).toBeUndefined();
 	});
 
 	it("saves config with project instanceId bindings", async () => {
@@ -457,8 +458,10 @@ describe("DaemonConfig with instances", () => {
 		};
 		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
-		// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-		expect(loaded!.projects[0]!.instanceId).toBe("personal");
+		assert.exists(loaded, "expected daemon config");
+		const project = loaded.projects[0];
+		assert.exists(project, "expected project");
+		expect(project.instanceId).toBe("personal");
 	});
 });
 
@@ -476,10 +479,9 @@ describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
 		const loaded = loadDaemonConfig(tempDir);
 
 		expect(loaded).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.keepAwakeCommand).toBe("systemd-inhibit");
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.keepAwakeArgs).toEqual([
+		assert.exists(loaded, "expected daemon config");
+		expect(loaded.keepAwakeCommand).toBe("systemd-inhibit");
+		expect(loaded.keepAwakeArgs).toEqual([
 			"--what=idle",
 			"--who=conduit",
 			"--why=active-session",
@@ -493,9 +495,8 @@ describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
 		const loaded = loadDaemonConfig(tempDir);
 
 		expect(loaded).not.toBeNull();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.keepAwakeCommand).toBeUndefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(loaded!.keepAwakeArgs).toBeUndefined();
+		assert.exists(loaded, "expected daemon config");
+		expect(loaded.keepAwakeCommand).toBeUndefined();
+		expect(loaded.keepAwakeArgs).toBeUndefined();
 	});
 });

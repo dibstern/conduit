@@ -26,9 +26,7 @@ const persistedSet: ReadonlySet<string> = new Set(PERSISTED_EVENT_TYPES);
  * the offending event type and index.
  */
 export function assertCacheRealisticEvents(events: RelayMessage[]): void {
-	for (let i = 0; i < events.length; i++) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const event = events[i]!;
+	for (const [i, event] of events.entries()) {
 		if (!persistedSet.has(event.type)) {
 			throw new Error(
 				`Event at index ${i} has type "${event.type}" which is NOT in ` +

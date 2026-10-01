@@ -4,7 +4,7 @@
 //
 // This powers ticket 11.2: History Tool & Thinking Block Rendering.
 
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	type HistoryMessage,
 	historyToChatMessages,
@@ -79,8 +79,9 @@ describe("historyToChatMessages: user messages", () => {
 			type: "user",
 			text: "Hello world",
 		});
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(result[0]!.uuid).toBeTruthy();
+		const firstResult = result[0];
+		assert.exists(firstResult, "expected first chat message");
+		expect(firstResult.uuid).toBeTruthy();
 	});
 
 	it("extracts text from the text-type part", () => {

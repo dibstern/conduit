@@ -33,7 +33,7 @@
 				"useLiteralKeys": "off"
 			},
 			"style": {
-				"noNonNullAssertion": "warn"
+				"noNonNullAssertion": "error"
 			},
 			"suspicious": {
 				"noAssignInExpressions": "off"

@@ -50,9 +50,8 @@ const tryConsume =
 			existing._tag === "Some" ? existing.value : { tokens: [] as number[] };
 		const validTokens = entry.tokens.filter((t) => now - t < config.windowMs);
 		if (validTokens.length >= config.maxRequests) {
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			const oldest = validTokens[0]!;
-			const retryAfterMs = oldest + config.windowMs - now;
+			const oldest = validTokens[0];
+			const retryAfterMs = (oldest ?? Number.NaN) + config.windowMs - now;
 			return [
 				{ allowed: false, retryAfterMs },
 				{ buckets: HashMap.set(state.buckets, ip, { tokens: validTokens }) },

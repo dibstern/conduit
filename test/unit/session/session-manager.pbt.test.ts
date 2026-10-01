@@ -1,7 +1,7 @@
 // ─── Session Manager PBT Tests (Ticket 2.3) ──────────────────────────────────
 
 import * as fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type {
 	Message,
@@ -156,8 +156,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 									(b.time?.updated ?? b.time?.created ?? 0) -
 									(a.time?.updated ?? a.time?.created ?? 0),
 							);
-						// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-						expect(id).toBe(sorted[0]!.id);
+						const firstSession = sorted[0];
+						assert.exists(firstSession, "expected sorted session");
+						expect(id).toBe(firstSession.id);
 					},
 				),
 				{ seed: SEED, numRuns: NUM_RUNS },
@@ -261,8 +262,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 					// Only root rows are broadcast.
 					expect(broadcasts.length).toBe(1);
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[0]!.type).toBe("session_list");
+					const broadcast = broadcasts[0];
+					assert.exists(broadcast, "expected broadcast");
+					expect(broadcast.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);
@@ -288,8 +290,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			// Verify session was actually created
 			const sessions = await client.session.list();
 			expect(sessions).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(sessions[0]!.id).toBe(defaultId);
+			const session = sessions[0];
+			assert.exists(session, "expected session");
+			expect(session.id).toBe(defaultId);
 		});
 
 		it("emits session_lifecycle when creating a new session", async () => {
@@ -302,10 +305,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const defaultId = await mgr.getDefaultSessionId();
 
 			expect(events).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(events[0]!.type).toBe("created");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(events[0]!.sessionId).toBe(defaultId);
+			const event = events[0];
+			assert.exists(event, "expected lifecycle event");
+			expect(event.type).toBe("created");
+			expect(event.sessionId).toBe(defaultId);
 		});
 
 		it("does not emit session_lifecycle when returning existing session", async () => {
@@ -340,10 +343,8 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						// Verify sorted descending by updatedAt
 						for (let i = 1; i < list.length; i++) {
 							expect(
-								// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-								Number(list[i - 1]!.updatedAt ?? 0),
-								// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-							).toBeGreaterThanOrEqual(Number(list[i]!.updatedAt ?? 0));
+								Number(list[i - 1]?.updatedAt ?? 0),
+							).toBeGreaterThanOrEqual(Number(list[i]?.updatedAt ?? 0));
 						}
 					},
 				),
@@ -373,10 +374,12 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const list = await mgr.listSessions();
 
 			// ses_older_but_active has time.updated=10000 > ses_newer_created time.updated=5000
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(list[0]!.id).toBe("ses_older_but_active");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(list[1]!.id).toBe("ses_newer_created");
+			const olderSession = list[0];
+			const newerSession = list[1];
+			assert.exists(olderSession, "expected older session");
+			assert.exists(newerSession, "expected newer session");
+			expect(olderSession.id).toBe("ses_older_but_active");
+			expect(newerSession.id).toBe("ses_newer_created");
 		});
 
 		it("property: each session has required fields", async () => {
@@ -447,10 +450,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			await mgr.deleteSession("ses_y");
 
 			expect(lifecycleEvents).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(lifecycleEvents[0]!.type).toBe("deleted");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(lifecycleEvents[0]!.sessionId).toBe("ses_y");
+			const lifecycleEvent = lifecycleEvents[0];
+			assert.exists(lifecycleEvent, "expected lifecycle event");
+			expect(lifecycleEvent.type).toBe("deleted");
+			expect(lifecycleEvent.sessionId).toBe("ses_y");
 		});
 
 		it("property: deleting last session emits lifecycle", async () => {
@@ -470,8 +473,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			await mgr.deleteSession("ses_only");
 
 			expect(lifecycleEvents).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(lifecycleEvents[0]!.type).toBe("deleted");
+			const lifecycleEvent = lifecycleEvents[0];
+			assert.exists(lifecycleEvent, "expected lifecycle event");
+			expect(lifecycleEvent.type).toBe("deleted");
 		});
 	});
 
@@ -495,8 +499,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					await mgr.renameSession("ses_r", newTitle);
 
 					// Title updated in mock
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(client._sessions[0]!.title).toBe(newTitle);
+					const session = client._sessions[0];
+					assert.exists(session, "expected mocked session");
+					expect(session.title).toBe(newTitle);
 
 					// Broadcasts session_list
 					expect(broadcasts.some((m) => m.type === "session_list")).toBe(true);
@@ -700,10 +705,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 			// session_lifecycle should still fire (needed for internal state like SSE filter)
 			expect(sessionChangedEvents.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(sessionChangedEvents[0]!.sessionId).toBe(session.id);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(sessionChangedEvents[0]!.type).toBe("created");
+			const changedEvent = sessionChangedEvents[0];
+			assert.exists(changedEvent, "expected session-change event");
+			expect(changedEvent.sessionId).toBe(session.id);
+			expect(changedEvent.type).toBe("created");
 		});
 
 		it("createSession without opts still broadcasts list (backward compatible)", async () => {
@@ -719,8 +724,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 					// Only root rows are broadcast.
 					expect(broadcasts.length).toBe(1);
-					// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-					expect(broadcasts[0]!.type).toBe("session_list");
+					const broadcast = broadcasts[0];
+					assert.exists(broadcast, "expected broadcast");
+					expect(broadcast.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);
@@ -758,10 +764,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 			// session_lifecycle should still fire for the deleted session
 			expect(sessionChangedEvents.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(sessionChangedEvents[0]!.sessionId).toBe("ses_b");
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(sessionChangedEvents[0]!.type).toBe("deleted");
+			const changedEvent = sessionChangedEvents[0];
+			assert.exists(changedEvent, "expected session-change event");
+			expect(changedEvent.sessionId).toBe("ses_b");
+			expect(changedEvent.type).toBe("deleted");
 		});
 
 		it("deleteSession without opts still broadcasts session_list (backward compatible)", async () => {
@@ -789,8 +795,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			mgr.on("session_lifecycle", (ev) => events.push(ev));
 			await mgr.createSession("test");
 			expect(events).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(events[0]!.type).toBe("created");
+			const event = events[0];
+			assert.exists(event, "expected lifecycle event");
+			expect(event.type).toBe("created");
 		});
 
 		it("emits { type: 'deleted' } on deleteSession", async () => {
@@ -803,8 +810,9 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			mgr.on("session_lifecycle", (ev) => events.push(ev));
 			await mgr.deleteSession("ses_1", { silent: true });
 			expect(events).toHaveLength(1);
-			// biome-ignore lint/style/noNonNullAssertion: safe — index within bounds
-			expect(events[0]!.type).toBe("deleted");
+			const event = events[0];
+			assert.exists(event, "expected lifecycle event");
+			expect(event.type).toBe("deleted");
 		});
 	});
 });

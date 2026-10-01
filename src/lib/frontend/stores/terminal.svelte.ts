@@ -143,10 +143,8 @@ export function onOutput(
 	listeners.add(cb);
 
 	return () => {
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized before this code path
-		listeners!.delete(cb);
-		// biome-ignore lint/style/noNonNullAssertion: safe — initialized before this code path
-		if (listeners!.size === 0) {
+		listeners.delete(cb);
+		if (listeners.size === 0) {
 			outputListeners.delete(ptyId);
 		}
 	};
@@ -264,8 +262,8 @@ export function handlePtyOutput(
 	let totalBytes = 0;
 	for (const chunk of buffer) totalBytes += chunk.length;
 	while (totalBytes > SCROLLBACK_MAX_BYTES && buffer.length > 1) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const removed = buffer.shift()!;
+		const removed = buffer.shift();
+		if (removed === undefined) break;
 		totalBytes -= removed.length;
 	}
 
@@ -303,9 +301,7 @@ export function handlePtyDeleted(
 	// Switch to another tab if the deleted one was active
 	if (clientTerminal.activeTabId === ptyId) {
 		const remaining = [...serverPtys.keys()];
-		clientTerminal.activeTabId =
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-			remaining.length > 0 ? remaining[remaining.length - 1]! : null;
+		clientTerminal.activeTabId = remaining.at(-1) ?? null;
 	}
 
 	// Close panel if no tabs left

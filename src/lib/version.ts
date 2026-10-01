@@ -19,6 +19,5 @@ export function getVersion(): string {
 	} catch {
 		cached = "0.0.0";
 	}
-	// biome-ignore lint/style/noNonNullAssertion: safe — initialized before this code path
-	return cached!;
+	return cached ?? "0.0.0";
 }

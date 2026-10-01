@@ -2,7 +2,7 @@
 // Rapid parallel operations to surface race conditions in InstanceManager.
 
 import type { ChildProcess } from "node:child_process";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -69,8 +69,9 @@ describe("InstanceManager concurrency", () => {
 			mgr.stopInstance("rapid");
 		}
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(mgr.getInstance("rapid")!.status).toBe("stopped");
+		const rapid = mgr.getInstance("rapid");
+		assert.exists(rapid, "expected the rapid instance");
+		expect(rapid.status).toBe("stopped");
 	});
 
 	it("concurrent startInstance calls don't double-spawn", async () => {
@@ -118,8 +119,9 @@ describe("InstanceManager concurrency", () => {
 				port: 3000 + i,
 				managed: true,
 			});
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			expect(mgr.getInstance("cycle")!.name).toBe(`Cycle-${i}`);
+			const cycle = mgr.getInstance("cycle");
+			assert.exists(cycle, "expected the cycle instance");
+			expect(cycle.name).toBe(`Cycle-${i}`);
 			mgr.removeInstance("cycle");
 			expect(mgr.getInstance("cycle")).toBeUndefined();
 		}

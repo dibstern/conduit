@@ -13,6 +13,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import {
 	afterAll,
+	assert,
 	beforeAll,
 	beforeEach,
 	describe,
@@ -472,8 +473,9 @@ describe("Integration: Session Visibility Repros", () => {
 		}>;
 		const provider = providers?.find((p) => p.models.length > 0);
 		expect(provider).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: guarded above
-		const model = provider!.models[0]!;
+		assert.exists(provider, "expected a provider with models");
+		const model = provider.models[0];
+		assert.exists(model, "expected the provider to have a model");
 
 		// 1. New session → local claude placeholder row.
 		const created = await client1.createSession("Materialize Repro", {
@@ -483,8 +485,7 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(localId).toBeTruthy();
 
 		// 2. User selects an OpenCode model for the session (unbinds/rebinds engine).
-		// biome-ignore lint/style/noNonNullAssertion: guarded above
-		const providerId = provider!.id;
+		const providerId = provider.id;
 		client1.clearReceived();
 		await client1.switchModel(model.id, providerId, localId);
 		await client1.waitFor("model_info", {

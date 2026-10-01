@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type { ThinkingMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -154,10 +154,9 @@ describe("Permission + thinking interleaving pipeline", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(thinking).toBeDefined();
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.text).toBe("I need to run a command to check this...");
-		// biome-ignore lint/style/noNonNullAssertion: asserted above
-		expect(thinking!.done).toBe(true);
+		assert.exists(thinking, "expected thinking message");
+		expect(thinking.text).toBe("I need to run a command to check this...");
+		expect(thinking.done).toBe(true);
 
 		// Tool message present
 		expect(chat.some((m) => m.type === "tool")).toBe(true);
@@ -311,10 +310,12 @@ describe("Permission + thinking interleaving pipeline", () => {
 			(m): m is ThinkingMessage => m.type === "thinking",
 		);
 		expect(thinkingBlocks).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(thinkingBlocks[0]!.text).toBe("pre-tool thought");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(thinkingBlocks[1]!.text).toBe("post-tool thought");
+		const firstThinkingBlock = thinkingBlocks[0];
+		const secondThinkingBlock = thinkingBlocks[1];
+		assert.exists(firstThinkingBlock, "expected pre-tool thinking block");
+		assert.exists(secondThinkingBlock, "expected post-tool thinking block");
+		expect(firstThinkingBlock.text).toBe("pre-tool thought");
+		expect(secondThinkingBlock.text).toBe("post-tool thought");
 
 		// Order: thinking → tool → thinking → assistant
 		const types = chat

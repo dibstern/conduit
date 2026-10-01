@@ -1,7 +1,7 @@
 // ─── Svelte History Logic — Unit Tests ───────────────────────────────────────
 // Tests groupIntoTurns, findPageBoundary, historyToChatMessages, applyHistoryQueuedFlag.
 
-import { describe, expect, test } from "vitest";
+import { assert, describe, expect, test } from "vitest";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -35,10 +35,10 @@ describe("groupIntoTurns", () => {
 		const msgs = [userMsg("u1"), assistantMsg("a1")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.id).toBe("u1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.id).toBe("a1");
+		const firstTurn = turns[0];
+		assert.exists(firstTurn, "expected first turn");
+		expect(firstTurn.user?.id).toBe("u1");
+		expect(firstTurn.assistant?.id).toBe("a1");
 	});
 
 	test("groups multiple user+assistant pairs", () => {
@@ -50,90 +50,90 @@ describe("groupIntoTurns", () => {
 		];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.id).toBe("u1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.id).toBe("a1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.user?.id).toBe("u2");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.assistant?.id).toBe("a2");
+		const firstTurn = turns[0];
+		const secondTurn = turns[1];
+		assert.exists(firstTurn, "expected first turn");
+		assert.exists(secondTurn, "expected second turn");
+		expect(firstTurn.user?.id).toBe("u1");
+		expect(firstTurn.assistant?.id).toBe("a1");
+		expect(secondTurn.user?.id).toBe("u2");
+		expect(secondTurn.assistant?.id).toBe("a2");
 	});
 
 	test("handles user message without assistant response", () => {
 		const msgs = [userMsg("u1")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.id).toBe("u1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant).toBeUndefined();
+		const firstTurn = turns[0];
+		assert.exists(firstTurn, "expected first turn");
+		expect(firstTurn.user?.id).toBe("u1");
+		expect(firstTurn.assistant).toBeUndefined();
 	});
 
 	test("handles orphan assistant message (no preceding user)", () => {
 		const msgs = [assistantMsg("a1")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user).toBeUndefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.id).toBe("a1");
+		const firstTurn = turns[0];
+		assert.exists(firstTurn, "expected first turn");
+		expect(firstTurn.user).toBeUndefined();
+		expect(firstTurn.assistant?.id).toBe("a1");
 	});
 
 	test("handles orphan assistant followed by user+assistant pair", () => {
 		const msgs = [assistantMsg("a0"), userMsg("u1"), assistantMsg("a1")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user).toBeUndefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.id).toBe("a0");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.user?.id).toBe("u1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.assistant?.id).toBe("a1");
+		const firstTurn = turns[0];
+		const secondTurn = turns[1];
+		assert.exists(firstTurn, "expected first turn");
+		assert.exists(secondTurn, "expected second turn");
+		expect(firstTurn.user).toBeUndefined();
+		expect(firstTurn.assistant?.id).toBe("a0");
+		expect(secondTurn.user?.id).toBe("u1");
+		expect(secondTurn.assistant?.id).toBe("a1");
 	});
 
 	test("handles user, user (back to back user messages)", () => {
 		const msgs = [userMsg("u1"), userMsg("u2")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.id).toBe("u1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant).toBeUndefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.user?.id).toBe("u2");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.assistant).toBeUndefined();
+		const firstTurn = turns[0];
+		const secondTurn = turns[1];
+		assert.exists(firstTurn, "expected first turn");
+		assert.exists(secondTurn, "expected second turn");
+		expect(firstTurn.user?.id).toBe("u1");
+		expect(firstTurn.assistant).toBeUndefined();
+		expect(secondTurn.user?.id).toBe("u2");
+		expect(secondTurn.assistant).toBeUndefined();
 	});
 
 	test("handles user, user, assistant (second user gets the assistant)", () => {
 		const msgs = [userMsg("u1"), userMsg("u2"), assistantMsg("a2")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.id).toBe("u1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant).toBeUndefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.user?.id).toBe("u2");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.assistant?.id).toBe("a2");
+		const firstTurn = turns[0];
+		const secondTurn = turns[1];
+		assert.exists(firstTurn, "expected first turn");
+		assert.exists(secondTurn, "expected second turn");
+		expect(firstTurn.user?.id).toBe("u1");
+		expect(firstTurn.assistant).toBeUndefined();
+		expect(secondTurn.user?.id).toBe("u2");
+		expect(secondTurn.assistant?.id).toBe("a2");
 	});
 
 	test("handles assistant, assistant (both orphan)", () => {
 		const msgs = [assistantMsg("a1"), assistantMsg("a2")];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.id).toBe("a1");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user).toBeUndefined();
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.assistant?.id).toBe("a2");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.user).toBeUndefined();
+		const firstTurn = turns[0];
+		const secondTurn = turns[1];
+		assert.exists(firstTurn, "expected first turn");
+		assert.exists(secondTurn, "expected second turn");
+		expect(firstTurn.assistant?.id).toBe("a1");
+		expect(firstTurn.user).toBeUndefined();
+		expect(secondTurn.assistant?.id).toBe("a2");
+		expect(secondTurn.user).toBeUndefined();
 	});
 
 	test("preserves message content through grouping", () => {
@@ -150,10 +150,10 @@ describe("groupIntoTurns", () => {
 			time: { created: 1001, completed: 1002 },
 		};
 		const turns = groupIntoTurns([u, a]);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user).toBe(u);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant).toBe(a);
+		const firstTurn = turns[0];
+		assert.exists(firstTurn, "expected first turn");
+		expect(firstTurn.user).toBe(u);
+		expect(firstTurn.assistant).toBe(a);
 	});
 });
 
@@ -249,14 +249,12 @@ describe("groupIntoTurns with OpenCode normalized messages", () => {
 		];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.role).toBe("user");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.parts?.[0]?.text).toBe("hello");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.role).toBe("assistant");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.parts?.[0]?.text).toBe("hi there");
+		const firstTurn = turns[0];
+		assert.exists(firstTurn, "expected first turn");
+		expect(firstTurn.user?.role).toBe("user");
+		expect(firstTurn.user?.parts?.[0]?.text).toBe("hello");
+		expect(firstTurn.assistant?.role).toBe("assistant");
+		expect(firstTurn.assistant?.parts?.[0]?.text).toBe("hi there");
 	});
 
 	test("correctly groups multi-turn conversation from OpenCode", () => {
@@ -284,14 +282,14 @@ describe("groupIntoTurns with OpenCode normalized messages", () => {
 		];
 		const turns = groupIntoTurns(msgs);
 		expect(turns).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.user?.parts?.[0]?.text).toBe("What is 2+2?");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[0]!.assistant?.parts?.[0]?.text).toBe("4");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.user?.parts?.[0]?.text).toBe("And 3+3?");
-		// biome-ignore lint/style/noNonNullAssertion: safe — bounded by array length
-		expect(turns[1]!.assistant?.parts?.[0]?.text).toBe("6");
+		const firstTurn = turns[0];
+		const secondTurn = turns[1];
+		assert.exists(firstTurn, "expected first turn");
+		assert.exists(secondTurn, "expected second turn");
+		expect(firstTurn.user?.parts?.[0]?.text).toBe("What is 2+2?");
+		expect(firstTurn.assistant?.parts?.[0]?.text).toBe("4");
+		expect(secondTurn.user?.parts?.[0]?.text).toBe("And 3+3?");
+		expect(secondTurn.assistant?.parts?.[0]?.text).toBe("6");
 	});
 });
 

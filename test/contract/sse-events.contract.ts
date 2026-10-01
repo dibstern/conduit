@@ -2,7 +2,7 @@
 // Validates that OpenCode's SSE events match our expected shapes.
 // Connects to both /global/event and /event streams.
 
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { assert, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	authHeaders,
 	checkServerHealth,
@@ -54,8 +54,9 @@ describe("AC1 — SSE Event Shape Validation", () => {
 			expect(events.length).toBeGreaterThanOrEqual(1);
 
 			// Parse the first data payload
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const firstData = JSON.parse(events[0]!.data);
+			const firstEvent = events[0];
+			assert.exists(firstEvent, "expected an SSE event");
+			const firstData = JSON.parse(firstEvent.data);
 			// Global event stream wraps in { payload: { type, properties } }
 			expect(firstData).toHaveProperty("payload");
 			const payload = firstData.payload;
@@ -117,8 +118,9 @@ describe("AC1 — SSE Event Shape Validation", () => {
 			expect(events.length).toBeGreaterThanOrEqual(1);
 
 			// Project event stream: events are { type, properties } directly
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const firstData = JSON.parse(events[0]!.data);
+			const firstEvent = events[0];
+			assert.exists(firstEvent, "expected an SSE event");
+			const firstData = JSON.parse(firstEvent.data);
 			expect(typeof firstData.type).toBe("string");
 			expect(firstData.type).toBe("server.connected");
 			expect(typeof firstData.properties).toBe("object");
@@ -200,8 +202,8 @@ describe("AC1 — SSE Event Shape Validation", () => {
 			expect(contentType).toContain("text/event-stream");
 
 			// Read first chunk
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const reader = res.body!.getReader();
+			assert.exists(res.body, "expected a response body");
+			const reader = res.body.getReader();
 			const { value } = await reader.read();
 			controller.abort();
 

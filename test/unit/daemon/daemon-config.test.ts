@@ -2,7 +2,7 @@
 
 import { describe, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer, Redacted } from "effect";
-import { expect } from "vitest";
+import { assert, expect } from "vitest";
 import {
 	DaemonEnvConfigLive,
 	DaemonEnvConfigTag,
@@ -64,8 +64,9 @@ describe("DaemonEnvConfig", () => {
 
 			expect(config.opencodePassword).toBeDefined();
 			expect(Redacted.isRedacted(config.opencodePassword)).toBe(true);
-			// biome-ignore lint/style/noNonNullAssertion: previous assertion guarantees defined
-			expect(Redacted.value(config.opencodePassword!)).toBe("super-secret");
+			const password = config.opencodePassword;
+			assert.exists(password, "expected OpenCode password");
+			expect(Redacted.value(password)).toBe("super-secret");
 		}).pipe(
 			Effect.provide(testLayer([["OPENCODE_SERVER_PASSWORD", "super-secret"]])),
 		),

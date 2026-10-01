@@ -77,9 +77,7 @@ export async function showProjectsMenu(
 	log(sym.bar, opts.stdout);
 
 	// Display each project
-	for (let i = 0; i < projects.length; i++) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by length
-		const project = projects[i]!;
+	for (const [i, project] of projects.entries()) {
 		const statusIcon = getStatusIcon(project);
 		const sessionLabel =
 			project.sessions === 1 ? "1 session" : `${project.sessions} sessions`;

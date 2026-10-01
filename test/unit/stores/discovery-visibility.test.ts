@@ -1,5 +1,5 @@
 // ─── Discovery Visibility Filtering Tests ────────────────────────────────────
-import { beforeEach, describe, expect, it } from "vitest";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
@@ -94,8 +94,9 @@ describe("visibility filtering", () => {
 
 		const groups = getVisibleProviderGroups();
 		expect(groups).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(groups[0]!.models).toEqual([
+		const firstGroup = groups[0];
+		assert.exists(firstGroup, "expected provider group");
+		expect(firstGroup.models).toEqual([
 			{ id: "gpt-4o", name: "GPT-4o", provider: "openai" },
 		]);
 	});
@@ -109,8 +110,9 @@ describe("visibility filtering", () => {
 
 		const groups = getVisibleProviderGroups();
 		expect(groups).toHaveLength(1);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(groups[0]!.provider.id).toBe("openai");
+		const firstGroup = groups[0];
+		assert.exists(firstGroup, "expected provider group");
+		expect(firstGroup.provider.id).toBe("openai");
 	});
 
 	it("never-brick: returns unfiltered groups when all models everywhere are hidden", () => {
@@ -126,10 +128,12 @@ describe("visibility filtering", () => {
 
 		const groups = getVisibleProviderGroups();
 		expect(groups).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(groups[0]!.models).toHaveLength(2);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-		expect(groups[1]!.models).toHaveLength(1);
+		const firstGroup = groups[0];
+		const secondGroup = groups[1];
+		assert.exists(firstGroup, "expected first provider group");
+		assert.exists(secondGroup, "expected second provider group");
+		expect(firstGroup.models).toHaveLength(2);
+		expect(secondGroup.models).toHaveLength(1);
 	});
 
 	it("handleVisibilityInfo updates state and clearDiscoveryState resets it", () => {

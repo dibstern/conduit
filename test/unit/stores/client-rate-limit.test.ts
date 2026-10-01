@@ -3,7 +3,15 @@
 // Verifies: immediate sends under limit, queuing at limit, drain timer,
 // queue replacement, and non-message bypass.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 
 // ─── Hoisted mocks (run before imports) ─────────────────────────────────────
 const { showToastMock, sentMessages } = vi.hoisted(() => {
@@ -21,9 +29,8 @@ const { showToastMock, sentMessages } = vi.hoisted(() => {
 		}
 
 		addEventListener(event: string, fn: (ev?: unknown) => void): void {
-			if (!this.listeners[event]) this.listeners[event] = [];
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			this.listeners[event]!.push(fn);
+			const listeners = (this.listeners[event] ??= []);
+			listeners.push(fn);
 		}
 
 		close(): void {
@@ -300,8 +307,9 @@ describe("wsSend client-side rate limiting", () => {
 			vi.advanceTimersByTime(10_000);
 
 			expect(sentMessages).toHaveLength(6);
-			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by prior assertion
-			const sixth = JSON.parse(sentMessages[5]!) as { text: string };
+			const sixthMessage = sentMessages[5];
+			assert.exists(sixthMessage, "expected sixth sent message");
+			const sixth = JSON.parse(sixthMessage) as { text: string };
 			expect(sixth.text).toBe("msg-7");
 
 			// Full sequence: msg-1..5 in order, then msg-7 (latest queued)

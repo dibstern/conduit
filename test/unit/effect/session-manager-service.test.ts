@@ -17,7 +17,7 @@ import {
 	Ref,
 	TestClock,
 } from "effect";
-import { expect, vi } from "vitest";
+import { assert, expect, vi } from "vitest";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type DaemonConfig,
@@ -104,11 +104,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
-import type {
-	HistoryMessage,
-	RelayMessage,
-	SessionInfo,
-} from "../../../src/lib/shared-types.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeMockAgentService,
@@ -179,10 +175,11 @@ function makeReadQueryEffect(
 		}),
 		readSessionList: vi.fn(() =>
 			Effect.succeed({
-				rows: rows.map((row) => ({
-					item: sessionRowsToSessionInfoList([row])[0]!,
-					version: row.version,
-				})),
+				rows: rows.map((row) => {
+					const item = sessionRowsToSessionInfoList([row])[0];
+					assert.exists(item, "expected session info");
+					return { item, version: row.version };
+				}),
 				version: 0,
 			}),
 		),

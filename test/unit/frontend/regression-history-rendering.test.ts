@@ -8,7 +8,7 @@
 //
 // The FIX: getAssistantText() finds all "text" type parts and concatenates them.
 
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	getAssistantText,
 	groupIntoTurns,
@@ -62,8 +62,8 @@ describe("Regression: HistoryView rendering of multi-part assistant messages", (
 		const turns = groupIntoTurns(messages);
 		expect(turns).toHaveLength(1);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const turn = turns[0]!;
+		const turn = turns[0];
+		assert.exists(turn, "expected first turn");
 
 		// User message renders correctly (parts[0] IS text type)
 		const userText = turn.user?.parts?.[0]?.text ?? "";
@@ -97,8 +97,8 @@ describe("Regression: HistoryView rendering of multi-part assistant messages", (
 		];
 
 		const turns = groupIntoTurns(messages);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const turn = turns[0]!;
+		const turn = turns[0];
+		assert.exists(turn, "expected first turn");
 
 		// OLD BEHAVIOR (BUG): shows thinking text
 		const oldRendering = turn.assistant?.parts?.[0]?.text ?? "";
@@ -129,8 +129,8 @@ describe("Regression: HistoryView rendering of multi-part assistant messages", (
 		];
 
 		const turns = groupIntoTurns(messages);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const turn = turns[0]!;
+		const turn = turns[0];
+		assert.exists(turn, "expected first turn");
 
 		// FIX: getAssistantText finds the text part
 		expect(getAssistantText(turn.assistant)).toBe(
@@ -151,8 +151,8 @@ describe("Regression: HistoryView rendering of multi-part assistant messages", (
 		];
 
 		const turns = groupIntoTurns(messages);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const turn = turns[0]!;
+		const turn = turns[0];
+		assert.exists(turn, "expected first turn");
 
 		expect(getAssistantText(turn.assistant)).toBe("Hello! How can I help?");
 	});
@@ -180,8 +180,8 @@ describe("Regression: HistoryView rendering of multi-part assistant messages", (
 		const turns = groupIntoTurns(messages);
 		expect(turns).toHaveLength(1);
 
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		const turn = turns[0]!;
+		const turn = turns[0];
+		assert.exists(turn, "expected first turn");
 
 		// User message is correct
 		expect(turn.user?.parts?.[0]?.text).toBe(
@@ -219,8 +219,9 @@ describe("Regression: HistoryView rendering of multi-part assistant messages", (
 		];
 
 		const turns = groupIntoTurns(messages);
-		// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
-		expect(getAssistantText(turns[0]!.assistant)).toBe(
+		const firstTurn = turns[0];
+		assert.exists(firstTurn, "expected first turn");
+		expect(getAssistantText(firstTurn.assistant)).toBe(
 			"Let me read the first file.\n\nNow the second file.\n\nBoth files have been read.",
 		);
 	});

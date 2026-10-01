@@ -618,8 +618,10 @@ export class InstanceManager {
 			});
 
 			proc.once("spawn", () => {
-				// biome-ignore lint/style/noNonNullAssertion: safe — initialized before this code path
-				resolve({ pid: proc.pid!, process: proc });
+				const pid = proc.pid;
+				if (pid === undefined)
+					reject(new Error("opencode spawned without a pid"));
+				else resolve({ pid, process: proc });
 			});
 
 			proc.once("error", (err) => {
