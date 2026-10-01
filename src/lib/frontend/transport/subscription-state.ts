@@ -1,4 +1,3 @@
-// ─── The applier ─────────────────────────────────────────────────────────────
 // One subscription's authoritative map, and the pure function that moves it.
 // Everything a subscription can say about the read model lands here, and the
 // stores read the result. That is why envelope vocabulary — snapshot, upsert,

@@ -1,4 +1,3 @@
-// ─── Integration: Session Lifecycle ──────────────────────────────────────────
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
@@ -18,8 +17,6 @@ describe("Integration: Session Lifecycle", () => {
 	afterAll(async () => {
 		if (harness) await harness.stop();
 	});
-
-	// ── Create ──────────────────────────────────────────────────────────────
 
 	it("create session and receive its id from RPC", async () => {
 		const client = await harness.connectWsClient();
@@ -58,8 +55,6 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	// ── Switch ──────────────────────────────────────────────────────────────
-
 	it("switch to a different session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -81,8 +76,6 @@ describe("Integration: Session Lifecycle", () => {
 
 		await client.close();
 	});
-
-	// ── Rename ──────────────────────────────────────────────────────────────
 
 	it("rename a session", async () => {
 		const client = await harness.connectWsClient();
@@ -119,8 +112,6 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	// ── Delete ──────────────────────────────────────────────────────────────
-
 	it("delete a session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -142,8 +133,6 @@ describe("Integration: Session Lifecycle", () => {
 
 		await client.close();
 	});
-
-	// ── State reset on switch ───────────────────────────────────────────────
 
 	it("switching session returns its draft and family", async () => {
 		const client = await harness.connectWsClient();

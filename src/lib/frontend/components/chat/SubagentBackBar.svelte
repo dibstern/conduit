@@ -1,4 +1,3 @@
-<!-- ─── Subagent Context Bar ──────────────────────────────────────────────────── -->
 <!-- Standalone context bar above the input box when viewing a subagent session. -->
 <!-- Shows parent session title and a "← PARENT" button to navigate back. -->
 

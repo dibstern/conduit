@@ -1,4 +1,3 @@
-<!-- ─── DirectoryAutocomplete ──────────────────────────────────────────────── -->
 <!-- Drop-up autocomplete for filesystem directory paths. Uses RPC on         -->
 <!-- debounced input changes. Arrow keys + Enter to select,                  -->
 <!-- Tab to drill into a directory level (terminal-style tab-completion).       -->
@@ -10,8 +9,6 @@
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import TextInput from "../ui/TextInput.svelte";
-
-	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	type DirectoryLoadResult = {
 		readonly path: string;
@@ -39,15 +36,11 @@
 		return listDirectoriesRpc({ projectSlug, path });
 	};
 
-	// ─── Identity ───────────────────────────────────────────────────────────────
-
 	// This component owns both halves of the combobox relationship, so it derives
 	// the ids locally instead of taking a `listboxId` prop.
 	const uid = $props.id();
 	const listboxId = `${uid}-listbox`;
 	const optionId = (index: number) => `${listboxId}-option-${index}`;
-
-	// ─── State ──────────────────────────────────────────────────────────────────
 
 	let entries: string[] = $state([]);
 	let activeIndex = $state(0);
@@ -58,8 +51,6 @@
 	const expanded = $derived(visible && entries.length > 0);
 	const activeOptionId = $derived(expanded ? optionId(activeIndex) : undefined);
 
-	// ─── Lifecycle ──────────────────────────────────────────────────────────────
-
 	onDestroy(() => {
 		if (debounceTimer) clearTimeout(debounceTimer);
 	});
@@ -69,8 +60,6 @@
 		void entries.length;
 		activeIndex = 0;
 	});
-
-	// ─── Input handling ─────────────────────────────────────────────────────────
 
 	async function requestDirectories(path: string) {
 		if (!path || path.length < 1) {

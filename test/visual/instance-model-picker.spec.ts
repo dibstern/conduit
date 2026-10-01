@@ -1,4 +1,3 @@
-// ─── InstanceModelPicker + ModelVariant Interaction Tests ────────────────────
 // Tests dropdown open/close, keyboard handling, and mutual exclusion between
 // the model dropdown and the variant dropdown.
 
@@ -12,8 +11,6 @@ function storyUrl(storyId: string): string {
 	// false` was added to prevent. See conduit-test-afp.
 	return `/iframe.html?id=${storyId}&viewMode=story`;
 }
-
-// ─── InstanceModelPicker ─────────────────────────────────────────────────────
 
 test.describe("InstanceModelPicker", () => {
 	test("displays current model name", async ({ page }) => {
@@ -93,8 +90,6 @@ test.describe("InstanceModelPicker", () => {
 	});
 });
 
-// ─── ModelVariant ────────────────────────────────────────────────────────────
-
 test.describe("ModelVariant", () => {
 	test("shows variant badge when model has variants", async ({ page }) => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
@@ -165,8 +160,6 @@ test.describe("ModelVariant", () => {
 		await expect(lowOption.locator("[data-menu-radio-check]")).toHaveCount(0);
 	});
 });
-
-// ─── InstanceModelPicker + ModelVariant coordination ─────────────────────────
 
 test.describe("InstanceModelPicker + ModelVariant coordination", () => {
 	test("opening model dropdown closes variant dropdown", async ({ page }) => {

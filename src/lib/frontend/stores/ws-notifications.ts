@@ -1,4 +1,3 @@
-// ─── WebSocket Notification Logic ────────────────────────────────────────────
 // Extracted from ws.svelte.ts — handles sound/browser notifications when the
 // tab is hidden and a notable event arrives, plus push-active tracking.
 
@@ -9,7 +8,6 @@ import { getNotifSettings } from "../utils/notif-settings.js";
 import { emitDoneSound, readyDoneSound } from "../utils/sound.js";
 import { getCurrentSlug, navigate } from "./router.svelte.js";
 
-// ─── Push-active tracking ────────────────────────────────────────────────────
 // When push notifications are active, browser alerts and the in-page ding are
 // suppressed: the alert travels through the service worker instead, which
 // offers it back to a focused tab. Set by NotifSettings/SettingsPanel on
@@ -58,7 +56,6 @@ export function isPushActive(): boolean {
 	return _pushActive;
 }
 
-// ─── Session navigation callback ─────────────────────────────────────────────
 // Registered by ChatLayout so notification clicks can switch to the correct
 // session without a circular dependency on session/router modules.
 
@@ -79,7 +76,6 @@ export function clearNavigateToSession(): void {
 	_navigateToSession = null;
 }
 
-// ─── Service worker message listener ─────────────────────────────────────────
 // Two messages come back from the SW: `navigate_to_session` when a push
 // notification is clicked, and `prepare_in_app_alert` when a push arrived while this
 // tab was focused and the SW would rather the page dinged than the OS.
@@ -151,7 +147,6 @@ export function initSWMessageListener(): void {
 	});
 }
 
-// ─── Notification triggers ───────────────────────────────────────────────────
 // Deliver through one channel when a notable event arrives.
 
 export const NOTIF_TYPES = new Set([

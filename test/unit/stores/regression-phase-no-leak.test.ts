@@ -1,5 +1,4 @@
 import { seedSessions } from "./session-fixtures.js";
-// ─── Regression: Phase No Leak Between Sessions ─────────────────────────────
 // Verifies that switching between sessions with different phases does not
 // cause phase leaks. When switching from A(streaming) to B(idle) and back
 // to A, the phase should reflect A's actual state.
@@ -74,8 +73,6 @@ afterEach(() => {
 	sessionMessages.clear();
 	clearSessionState();
 });
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Phase does not leak between sessions", () => {
 	it("status:idle clears the global phase for the dispatched session", () => {

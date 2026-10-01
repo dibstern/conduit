@@ -1,4 +1,3 @@
-// ─── Notification Policy ─────────────────────────────────────────────────────
 // Pure policy: given a relay message, its route decision, and whether the
 // session is a subagent, decide what notifications to fire.
 //

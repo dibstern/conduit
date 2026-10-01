@@ -1,4 +1,3 @@
-// ─── Visual Testing Helpers ──────────────────────────────────────────────────
 // Utilities for visual comparison tests: freeze animations, take region
 // screenshots, and compare images with pixelmatch.
 

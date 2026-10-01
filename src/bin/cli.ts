@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// ─── CLI Entry Point ───────────────────────────────────────────
 // Thin wrapper around cli-core.ts for testability.
 
 import { run } from "./cli-core.js";

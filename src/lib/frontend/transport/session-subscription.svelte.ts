@@ -1,4 +1,3 @@
-// ─── The shell subscription's map ────────────────────────────────────────────
 // Every session the server has told us about, and the one door changes come
 // through. The session store is a view over this; it holds no copy of its own.
 //

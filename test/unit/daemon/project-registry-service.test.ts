@@ -27,8 +27,6 @@ import {
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
-// ─── Test helpers ────────────────────────────────────────────────────────────
-
 const testProject: StoredProject = {
 	slug: "test-project",
 	directory: "/tmp/test",
@@ -114,8 +112,6 @@ describe("projectInfos", () => {
 	);
 });
 
-// ─── Tests: broadcastToAll ──────────────────────────────────────────────────
-
 describe("broadcastToAll", () => {
 	it.scoped("publishes a RelayBroadcast event to the event bus", () =>
 		Effect.gen(function* () {
@@ -129,8 +125,6 @@ describe("broadcastToAll", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });
-
-// ─── Tests: waitForRelay ────────────────────────────────────────────────────
 
 describe("waitForRelay", () => {
 	it.scoped("resolves immediately if project is already Ready", () =>
@@ -167,8 +161,6 @@ describe("waitForRelay", () => {
 	);
 });
 
-// ─── Tests: evictOldestSessions ─────────────────────────────────────────────
-
 describe("evictOldestSessions", () => {
 	it.effect("returns empty array (stub)", () =>
 		Effect.gen(function* () {
@@ -177,8 +169,6 @@ describe("evictOldestSessions", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });
-
-// ─── Tests: isStarting ─────────────────────────────────────────────────────
 
 describe("isStarting", () => {
 	it.effect("returns true for a project in Registering state", () =>

@@ -1,4 +1,3 @@
-// ─── Tool Registry ──────────────────────────────────────────────────────────
 // Centralized state machine for tool lifecycle transitions.
 // Pure TypeScript — no Svelte dependencies.
 
@@ -8,8 +7,6 @@ import { generateUuid } from "../utils/format.js";
 import type { FrontendLogger } from "../utils/logger.js";
 import { isSubagentToolName } from "../utils/subagent-tools.js";
 import { createToolMessage } from "../utils/tool-message-factory.js";
-
-// ─── Public Types ───────────────────────────────────────────────────────────
 
 /** Fields accepted by seedFromHistory — required core + optional rich data. */
 export type HistoryToolSeed = Pick<
@@ -66,8 +63,6 @@ export interface ToolRegistry {
 	seedFromHistory(tools: ReadonlyArray<HistoryToolSeed>): void;
 }
 
-// ─── Transition Table ───────────────────────────────────────────────────────
-
 // NOTE: complete() intentionally allows overriding "completed" status
 // for late SSE results after handleDone force-finalization. See complete() impl.
 const VALID_TRANSITIONS: Record<ToolStatus, ReadonlySet<ToolStatus>> = {
@@ -81,15 +76,11 @@ function canTransition(from: ToolStatus, to: ToolStatus): boolean {
 	return VALID_TRANSITIONS[from].has(to);
 }
 
-// ─── Internal Entry ─────────────────────────────────────────────────────────
-
 interface ToolEntry {
 	uuid: string;
 	status: ToolStatus;
 	tool: ToolMessage;
 }
-
-// ─── Factory ────────────────────────────────────────────────────────────────
 
 export function createToolRegistry(
 	options?: ToolRegistryOptions,

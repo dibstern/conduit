@@ -134,7 +134,6 @@ export const WithVariants: Story = {
 	},
 };
 
-// ─── Controls migrated onto ui/Button ───────────────
 // Four of the seven had no baseline at all: the favourites toggle in its lit
 // state, the geo-routing chips, and the whole locked-mode rail. `Open` covers
 // the rest (search row, model rows, the set-default star, the reload footer).

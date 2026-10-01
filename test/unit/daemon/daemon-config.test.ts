@@ -1,4 +1,4 @@
-// ─── Tests: DaemonEnvConfig Layer (Effect.Config-based env parsing) ──────────
+// Tests: DaemonEnvConfig Layer (Effect.Config-based env parsing)
 
 import { describe, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer, Redacted } from "effect";
@@ -8,8 +8,6 @@ import {
 	DaemonEnvConfigTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-config.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Build a test layer with the given env var map. */
 const testLayer = (vars: ReadonlyArray<readonly [string, string]>) =>
 	DaemonEnvConfigLive.pipe(
@@ -17,8 +15,6 @@ const testLayer = (vars: ReadonlyArray<readonly [string, string]>) =>
 			Layer.setConfigProvider(ConfigProvider.fromMap(new Map(vars))),
 		),
 	);
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("DaemonEnvConfig", () => {
 	it.effect("reads host and port from env", () =>

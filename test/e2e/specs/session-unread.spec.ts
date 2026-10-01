@@ -1,4 +1,3 @@
-// ─── Session unread: the turn-end dot across windows ─────────────────────────
 // A session shows a dot when a turn ends, in every window, until the user
 // picks it in the sidebar (click or keyboard) or interacts with its view: a
 // click, a wheel scroll, a keypress, focus moved into the view, or a pointer
@@ -265,7 +264,7 @@ async function dotLifecycle(
 	await windows.B.context().close();
 }
 
-// ─── Interaction with the session view (conduit-test-hk9m.4) ─────────────────
+// Interaction with the session view (conduit-test-hk9m.4)
 // Window A is the one the user touches; B only watches, so B's dot shows that
 // A's report reached every window. A runs on Playwright's clock: interaction
 // steps pause it, so the ~300 ms pointer dwell fires only when a step runs the
@@ -531,7 +530,7 @@ async function dwellAndViewport(
 	await ctx.windows.B.context().close();
 }
 
-// ─── Mark unread holds until switch-away (conduit-test-hk9m.5) ───────────────
+// Mark unread holds until switch-away (conduit-test-hk9m.5)
 // A row that turns unread while its turn end stays put was marked unread, from
 // this window or another: touching the view leaves it until the user switches
 // away from the session. A clears the first turn end itself before marking it,
@@ -639,7 +638,7 @@ async function markUnreadHolds(
 	await B.context().close();
 }
 
-// ─── Failing toward unread (conduit-test-hk9m.6) ─────────────────────────────
+// Failing toward unread (conduit-test-hk9m.6)
 // A's sockets go through a proxy that can hold its MarkSessionSeen frames in
 // flight, cut the connection and keep it down, so a report can be made to
 // land late or not at all.

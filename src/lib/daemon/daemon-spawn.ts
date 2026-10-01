@@ -1,4 +1,4 @@
-// ─── Daemon Spawn / Process Management (extracted from daemon.ts) ───────────
+// Daemon Spawn / Process Management (extracted from daemon.ts)
 // Handles building spawn configuration and launching daemon child processes.
 // These were originally static methods on the Daemon class.
 
@@ -55,8 +55,6 @@ export function isDaemonSpawnPortInUseError(
 	);
 }
 
-// ─── buildSpawnConfig ───────────────────────────────────────────────────────
-
 /**
  * Build spawn configuration without actually spawning.
  * Pure function — testable without mocking or side effects.
@@ -103,8 +101,6 @@ export function buildSpawnConfig(options?: DaemonOptions): SpawnConfig {
 		},
 	};
 }
-
-// ─── spawnDaemon ────────────────────────────────────────────────────────────
 
 /**
  * Spawn a new daemon as a detached background process.

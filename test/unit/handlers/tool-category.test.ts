@@ -1,5 +1,3 @@
-// ─── Tool Category — Unit Tests ───────────────────────────────────────────────
-
 import { describe, expect, it } from "vitest";
 import { getToolCategory } from "../../../src/lib/frontend/utils/tool-category.js";
 

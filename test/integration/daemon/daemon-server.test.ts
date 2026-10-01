@@ -1,4 +1,3 @@
-// ─── Integration Tests: Daemon HTTP/WS Server ──────────────────────────────
 //
 // Extracted from test/unit/daemon/daemon.test.ts — these tests start real
 // HTTP servers and make real network requests, making them too slow for the
@@ -30,8 +29,6 @@ import {
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function makeTmpDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
 }
@@ -54,8 +51,6 @@ function daemonOpts(tmpDir: string, port = 0) {
 		smartDefault: false,
 	};
 }
-
-// ─── WS Upgrade Tests ───────────────────────────────────────────────────────
 
 describe("Daemon WS upgrade — waitForRelay integration", () => {
 	let tmpDir: string;
@@ -249,8 +244,6 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 		}
 	});
 });
-
-// ─── Instance Status Broadcast Tests ────────────────────────────────────────
 
 describe("instance status broadcast", () => {
 	let tmpDir: string;

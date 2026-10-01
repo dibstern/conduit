@@ -1,4 +1,3 @@
-<!-- ─── Model Variant Picker ─────────────────────────────────────────────── -->
 <!-- Thinking level badge + dropdown for cycling model variants. -->
 <!-- Uses the shared menu and keeps the Ctrl+T shortcut. -->
 
@@ -18,16 +17,10 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { switchVariantRpc } from "../../transport/ws-rpc-client.js";
 
-	// ─── Props ──────────────────────────────────────────────────────────────────
-
 	let { onOpen }: { onOpen?: (() => void) | undefined } = $props();
 
 
-	// ─── State ──────────────────────────────────────────────────────────────────
-
 	let open = $state(false);
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	/** Available variants for the active model. */
 	const variants = $derived(getActiveModelVariants());
@@ -37,8 +30,6 @@
 
 	/** Display label for the variant badge. */
 	const variantLabel = $derived(currentVariant || "default");
-
-	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function switchVariant(variant: string) {
 		const undoVariant = chooseVariant(variant);
@@ -71,16 +62,12 @@
 		}
 	}
 
-	// ─── Lifecycle ──────────────────────────────────────────────────────────────
-
 	$effect(() => {
 		document.addEventListener("keydown", handleKeydown);
 		return () => {
 			document.removeEventListener("keydown", handleKeydown);
 		};
 	});
-
-	// ─── Public API ─────────────────────────────────────────────────────────────
 
 	/** Close the dropdown (called by parent for mutual exclusion). */
 	export function close() {

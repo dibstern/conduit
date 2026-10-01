@@ -1,4 +1,3 @@
-<!-- ─── Todo Header ───────────────────────────────────────────────────────── -->
 <!-- Collapsible header showing "Tasks" label, completion count, and chevron. -->
 
 <script lang="ts">

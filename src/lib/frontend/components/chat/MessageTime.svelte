@@ -1,4 +1,3 @@
-<!-- ─── Message Time ────────────────────────────────────────────────────────── -->
 <!-- The send time shown in a message card header.
      Renders nothing when the message has no `createdAt`: live messages stamp it
      on arrival and history carries it from the event store, but rows persisted

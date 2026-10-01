@@ -1,4 +1,3 @@
-// ─── Daemon Utility Functions ───────────────────────────────────────────────
 // Pure utility functions extracted from the Daemon class.
 
 import { execFile } from "node:child_process";

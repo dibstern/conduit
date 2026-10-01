@@ -1,4 +1,3 @@
-// ─── Sound Notification ──────────────────────────────────────────────────────
 // Synthesized tone via Web Audio API. No audio files needed.
 // Pattern from claude-relay (notifications.js:24-39).
 

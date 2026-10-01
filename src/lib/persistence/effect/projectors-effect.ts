@@ -1,4 +1,3 @@
-// ─── Effect-based Projectors ────────────────────────────────────────────────
 // Each projector's `project` method is an Effect program over @effect/sql SqlClient.
 
 import { SqlClient } from "@effect/sql";
@@ -19,15 +18,11 @@ import {
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
 
-// ─── Error type ─────────────────────────────────────────────────────────────
-
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 	readonly projector: string;
 	readonly operation: string;
 	readonly cause: unknown;
 }> {}
-
-// ─── Effect Projector interface ─────────────────────────────────────────────
 
 export interface ProjectionContext {
 	/**
@@ -99,16 +94,12 @@ export interface EffectProjector {
 	>;
 }
 
-// ─── Type guard ─────────────────────────────────────────────────────────────
-
 function isEventType<K extends CanonicalEventType>(
 	event: StoredEvent,
 	type: K,
 ): event is StoredEvent & { type: K; data: EventPayloadMap[K] } {
 	return event.type === type;
 }
-
-// ─── Read-model stamping ────────────────────────────────────────────────────
 
 // A child-table row naming the session row it belongs to. `turns`, `activities`,
 // `pending_approvals` and `session_providers` carry no version of their own, so
@@ -214,8 +205,6 @@ function mergeMetadata(
 	}
 }
 
-// ─── Session Projector ──────────────────────────────────────────────────────
-
 export const makeSessionProjector = (): EffectProjector => ({
 	name: "session",
 	handles: SESSION_HANDLED_TYPES,
@@ -264,8 +253,6 @@ export const makeSessionProjector = (): EffectProjector => ({
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
-
-// ─── Message Projector ──────────────────────────────────────────────────────
 
 export const makeMessageProjector = (): EffectProjector => ({
 	name: "message",
@@ -713,8 +700,6 @@ export const makeMessageProjector = (): EffectProjector => ({
 		),
 });
 
-// ─── Turn Projector ─────────────────────────────────────────────────────────
-
 export const makeTurnProjector = (): EffectProjector => ({
 	name: "turn",
 	handles: [
@@ -980,8 +965,6 @@ export const makeTurnProjector = (): EffectProjector => ({
 		),
 });
 
-// ─── Activity Projector ─────────────────────────────────────────────────────
-
 export const makeActivityProjector = (): EffectProjector => ({
 	name: "activity",
 	handles: [
@@ -1091,8 +1074,6 @@ export const makeActivityProjector = (): EffectProjector => ({
 		),
 });
 
-// ─── Approval Projector ─────────────────────────────────────────────────────
-
 export const makeApprovalProjector = (): EffectProjector => ({
 	name: "approval",
 	handles: [
@@ -1166,8 +1147,6 @@ export const makeApprovalProjector = (): EffectProjector => ({
 		),
 });
 
-// ─── Provider Projector ─────────────────────────────────────────────────────
-
 export const makeProviderProjector = (): EffectProjector => ({
 	name: "provider",
 	handles: ["session.created", "session.provider_changed"],
@@ -1211,8 +1190,6 @@ export const makeProviderProjector = (): EffectProjector => ({
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
-
-// ─── Factory ────────────────────────────────────────────────────────────────
 
 /**
  * Canonical event types that deliberately reach no projector.

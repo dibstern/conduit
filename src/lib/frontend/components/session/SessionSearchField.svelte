@@ -1,4 +1,3 @@
-<!-- ─── SessionSearchField ──────────────────────────────────────────────────── -->
 <!-- One row for both "which sessions" questions: a scope chip that narrows the -->
 <!-- list to a project, and the title search. Typing project:<slug> sets the    -->
 <!-- same chip. Both write ?p=<slug> in the URL (stores/session-scope.ts).      -->

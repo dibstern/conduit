@@ -53,7 +53,6 @@ import {
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
 
-// ─── Real-stack harness ──────────────────────────────────────────────────────
 // A fresh temp-file persistence stack + the real SessionEventBus per test. The
 // detail subscription reads the projected transcript and nothing else, so the
 // contracts under test are contracts WITH the store: the version the message

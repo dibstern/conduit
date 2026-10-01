@@ -1,4 +1,3 @@
-// ─── Turns — Unit Tests ───────────────────────────────────────────────────────
 // Tests segmentTurns, turnStats/countsPhrase, step durations and economics.
 
 import { assert, describe, expect, it } from "vitest";
@@ -30,8 +29,6 @@ import {
 	turnDuration,
 	turnStats,
 } from "../../../src/lib/frontend/utils/turns.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 let seq = 0;
 const id = () => `m${++seq}`;
@@ -184,8 +181,6 @@ describe("forkMessageIdAtReply", () => {
 		expect(forkMessageIdAtReply(turn, reply)).toBe("hand-back-id");
 	});
 });
-
-// ─── segmentTurns ────────────────────────────────────────────────────────────
 
 describe("segmentTurns", () => {
 	it.each([
@@ -473,8 +468,6 @@ describe("segmentTurns", () => {
 	});
 });
 
-// ─── turnStats / countsPhrase ────────────────────────────────────────────────
-
 describe("turnStats", () => {
 	it("counts files uniquely and buckets tools by what they do", () => {
 		const s = turnStats({
@@ -584,8 +577,6 @@ describe("countsPhrase", () => {
 		);
 	});
 });
-
-// ─── Timing ──────────────────────────────────────────────────────────────────
 
 describe("stepDurations", () => {
 	it("runs each step until the next starts, and the last until the reply", () => {
@@ -752,8 +743,6 @@ describe("turnDuration", () => {
 	});
 });
 
-// ─── Economics ───────────────────────────────────────────────────────────────
-
 describe("economics", () => {
 	const withResult = (fields: Partial<ResultMessage>) => {
 		const [turn] = segmentTurns([user(), read("/a.ts"), result(fields)], false);
@@ -822,8 +811,6 @@ describe("isSoloTool", () => {
 		expect(isSoloTool(tool("Read"))).toBe(false);
 	});
 });
-
-// ─── Compaction in the ledger ────────────────────────────────────────────────
 
 describe("compaction", () => {
 	it("puts a completed compaction in the activity log where it happened", () => {

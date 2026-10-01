@@ -1,12 +1,9 @@
-// ─── Daemon Types ──────────────────────────────────────────────────────────
 // Shared type definitions extracted from daemon.ts so daemon lifecycle, spawn,
 // and layer modules can import types without pulling in the full Daemon class
 // and its heavy transitive dependencies.
 
 import type { LogFormat, LogLevel } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
-
-// ─── DaemonOptions ─────────────────────────────────────────────────────────
 
 export interface DaemonOptions {
 	port?: number;
@@ -46,8 +43,6 @@ export interface DaemonOptions {
 	logFormat?: LogFormat;
 }
 
-// ─── DaemonStatus ──────────────────────────────────────────────────────────
-
 export interface DaemonStatus {
 	ok: boolean;
 	uptime: number;
@@ -72,8 +67,6 @@ export interface DaemonStatus {
 		sse?: ConnectionHealth;
 	}>;
 }
-
-// ─── SpawnConfig ───────────────────────────────────────────────────────────
 
 /** Spawn configuration built by buildSpawnConfig() — testable without mocking */
 export interface SpawnConfig {

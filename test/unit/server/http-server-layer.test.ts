@@ -1,4 +1,3 @@
-// ─── HTTP Server Layer Tests ────────────────────────────────────────────────
 // Tests for the Effect-based HTTP server layer (http-server-layer.ts).
 //
 // Uses NodeHttpServer.layerTest to spin up a real HTTP server on a random port
@@ -42,8 +41,6 @@ import {
 	SetupInfoProvider,
 } from "../../../src/lib/server/effect-http-router.js";
 
-// ─── Test Data ─────────────────────────────────────────────────────────────
-
 const testProjects: RouterProjectInfo[] = [
 	{
 		slug: "test-project",
@@ -55,8 +52,6 @@ const testProjects: RouterProjectInfo[] = [
 		isProcessing: false,
 	},
 ];
-
-// ─── Test Layers ───────────────────────────────────────────────────────────
 
 const TestProjectsLayer = Layer.succeed(ProjectsProvider, {
 	getProjects: () => Effect.succeed(testProjects),
@@ -90,7 +85,7 @@ const baseRouterLayer = () =>
 		NodePath.layer,
 	);
 
-// ─── Web Handler Helpers (for unit-style route tests) ──────────────────────
+// Web Handler Helpers (for unit-style route tests)
 
 const disposers: Array<() => Promise<void>> = [];
 
@@ -108,8 +103,6 @@ afterAll(async () => {
 	await Promise.all(disposers.map((d) => d()));
 	if (staticDir) await rm(staticDir, { recursive: true, force: true });
 });
-
-// ─── Route Tests: Push Unsubscribe ─────────────────────────────────────────
 
 describe("Effect HTTP Router - Extended Routes", () => {
 	describe("POST /api/push/unsubscribe", () => {
@@ -161,8 +154,6 @@ describe("Effect HTTP Router - Extended Routes", () => {
 			expect(body.error.code).toBe("NOT_AVAILABLE");
 		});
 	});
-
-	// ─── Route Tests: Setup Info ────────────────────────────────────────────
 
 	describe("GET /api/setup-info", () => {
 		it("returns setup info when SetupInfoProvider present", async () => {
@@ -252,8 +243,6 @@ describe("Effect HTTP Router - Extended Routes", () => {
 		});
 	});
 });
-
-// ─── HTTP Server Layer Tests ───────────────────────────────────────────────
 
 describe("HTTP Server Layer", () => {
 	// The NodeHttpServer.layerTest provides:
@@ -358,8 +347,6 @@ describe("HTTP Server Layer", () => {
 		}).pipe(Effect.provide(TestServerLayer)),
 	);
 });
-
-// ─── HttpServerLive Layer Construction Test ────────────────────────────────
 
 describe("HttpServerLive layer construction", () => {
 	it.scoped("can construct and start a server on port 0", () =>

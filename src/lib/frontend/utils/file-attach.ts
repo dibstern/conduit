@@ -1,15 +1,10 @@
-// ─── File Attach Utilities ───────────────────────────────────────────────────
 // Parse @references from text and build XML-wrapped messages.
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface FileAttachment {
 	path: string;
 	type: "file" | "directory" | "binary";
 	content?: string;
 }
-
-// ─── Parse @references ──────────────────────────────────────────────────────
 
 /**
  * Extract all @file references from message text.
@@ -23,8 +18,6 @@ export function parseAtReferences(text: string): string[] {
 		return reference === undefined ? [] : [reference];
 	});
 }
-
-// ─── Build XML message ──────────────────────────────────────────────────────
 
 /**
  * Build an XML-wrapped message with file attachments.

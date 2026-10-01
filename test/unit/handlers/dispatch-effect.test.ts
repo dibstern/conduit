@@ -1,4 +1,3 @@
-// ─── Effect Dispatch Table Tests ────────────────────────────────────────────
 // Verifies that dispatchMessageEffect correctly:
 //   1. Schema-validates incoming payloads
 //   2. Routes to the correct Effect handler
@@ -15,8 +14,6 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-// ─── Dispatch routing ───────────────────────────────────────────────────────
-
 describe("dispatchMessageEffect", () => {
 	it.effect("dispatches pty_input with validated payload", () => {
 		const ptyManager = makeMockPtyManager();
@@ -30,8 +27,6 @@ describe("dispatchMessageEffect", () => {
 			expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
 		}).pipe(Effect.provide(layer));
 	});
-
-	// ─── Unknown message type ──────────────────────────────────────────────
 
 	it.effect("fails with WebSocketError for unknown message types", () => {
 		const effect = dispatchMessageEffect(
@@ -54,8 +49,6 @@ describe("dispatchMessageEffect", () => {
 			}),
 		);
 	});
-
-	// ─── Schema validation ─────────────────────────────────────────────────
 
 	it.effect("fails with ParseError when payload is malformed", () => {
 		// pty_input requires { ptyId: string; data: string }.

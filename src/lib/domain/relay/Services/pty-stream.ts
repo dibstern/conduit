@@ -1,4 +1,4 @@
-// ─── PTY Stream (Effect) ─────────────────────────────────────────────────────
+// PTY Stream (Effect)
 // Upstream PTY connection as an Effect.Stream over WebSocket.
 //
 // ptyStream  – connects to a WebSocket PTY endpoint and emits PtyEvent items.
@@ -8,14 +8,10 @@
 import { Data, Duration, Effect, Stream } from "effect";
 import WebSocket from "ws";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 export interface PtyEvent {
 	type: "output" | "exit" | "error";
 	data: string;
 }
-
-// ─── Error types ────────────────────────────────────────────────────────────
 
 export class PtyConnectionError extends Data.TaggedError("PtyConnectionError")<{
 	cause: unknown;
@@ -24,8 +20,6 @@ export class PtyConnectionError extends Data.TaggedError("PtyConnectionError")<{
 export class PtyConnectionTimeout extends Data.TaggedError(
 	"PtyConnectionTimeout",
 )<Record<string, never>> {}
-
-// ─── Core PTY stream ────────────────────────────────────────────────────────
 
 /**
  * Connect to a PTY WebSocket endpoint and emit parsed PtyEvent items.

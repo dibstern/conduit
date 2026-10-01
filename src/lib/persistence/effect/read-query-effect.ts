@@ -493,7 +493,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	// ─── The session list reads ───────────────────────────────────────────
 	// `readSessionList` is the only producer of the single session type (ni8.5
 	// T-1) — what the shell subscription streams and what the browser holds.
 	// The per-row re-query it replaced is gone: a subscriber asks for what moved
@@ -720,7 +719,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	// ─── The versioned subscription reads ─────────────────────────────────
 	// One query per source serves cold start, resume catch-up and every live
 	// advance. `version` is the read-model counter, read FIRST inside the
 	// transaction so the rows that follow are from the same consistent state:

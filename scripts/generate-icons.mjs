@@ -99,7 +99,7 @@ const APP_ICON_PADDING = 0.18;
 async function main() {
 	console.log("Generating Conduit icons...\n");
 
-	// ── Favicons (transparent background, tight padding) ──────────────────
+	// Favicons (transparent background, tight padding)
 
 	const svgFavicon = generateSVG(32); // transparent, default padding
 	const svgPath = join(STATIC_DIR, "favicon.svg");
@@ -125,7 +125,7 @@ async function main() {
 	writeFileSync(join(STATIC_DIR, "favicon.ico"), icoBuffer);
 	console.log(`  ✓ favicon.ico (${icoSizes.join(", ")}px, transparent)`);
 
-	// ── App icons (dark background, generous padding) ─────────────────────
+	// App icons (dark background, generous padding)
 
 	for (const { name, size } of APP_ICON_OUTPUTS) {
 		const svg = generateSVG(size, { bg: BG_COLOR, padding: APP_ICON_PADDING });

@@ -1,4 +1,3 @@
-// ─── ToolItem Interaction Tests ──────────────────────────────────────────────
 // Tests the ToolItem dispatcher and its three sub-components:
 // ToolGenericCard, ToolQuestionCard, and ToolSubagentCard.
 
@@ -12,8 +11,6 @@ function storyUrl(storyId: string): string {
 	// false` was added to prevent. See conduit-test-afp.
 	return `/iframe.html?id=${storyId}&viewMode=story`;
 }
-
-// ─── ToolGenericCard ────────────────────────────────────────────────────────
 
 test.describe("ToolGenericCard", () => {
 	test("renders tool name and status", async ({ page }) => {
@@ -121,8 +118,6 @@ test.describe("ToolGenericCard", () => {
 	});
 });
 
-// ─── ToolQuestionCard ───────────────────────────────────────────────────────
-
 test.describe("ToolQuestionCard", () => {
 	test("renders interactive question card for running question", async ({
 		page,
@@ -184,8 +179,6 @@ test.describe("ToolQuestionCard", () => {
 		await expect(options.first()).toHaveText(/Production/);
 	});
 });
-
-// ─── ToolSubagentCard ───────────────────────────────────────────────────────
 
 test.describe("ToolSubagentCard", () => {
 	test("renders agent type and description", async ({ page }) => {

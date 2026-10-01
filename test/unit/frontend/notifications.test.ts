@@ -1,4 +1,3 @@
-// ─── Svelte Notifications — Unit Tests ───────────────────────────────────────
 // Tests urlBase64ToUint8Array and enablePushSubscription.
 // The old getPreferences/setPreferences tests were removed when those functions
 // were replaced by getNotifSettings/saveNotifSettings in notif-settings.ts.
@@ -9,13 +8,11 @@ import {
 	urlBase64ToUint8Array,
 } from "../../../src/lib/frontend/utils/notifications.js";
 
-// ─── localStorage mock (still needed for atob in some environments) ──────────
+// localStorage mock (still needed for atob in some environments)
 
 beforeEach(() => {
 	vi.unstubAllGlobals();
 });
-
-// ─── urlBase64ToUint8Array ───────────────────────────────────────────────────
 
 describe("urlBase64ToUint8Array", () => {
 	test("converts a base64url string to Uint8Array", () => {
@@ -86,7 +83,6 @@ describe("urlBase64ToUint8Array", () => {
 	});
 });
 
-// ─── enablePushSubscription ─────────────────────────────────────────────────
 // Regression tests for the hang bug: the old code used navigator.serviceWorker.ready
 // which never resolves when the SW fails to activate, permanently freezing the
 // toggle button.  The rewritten function uses the registration from register()
@@ -255,8 +251,6 @@ describe("enablePushSubscription", () => {
 		assert.exists(secondCall, "expected second fetch call");
 		expect(secondCall[0]).toBe("/api/push/subscribe");
 	});
-
-	// ─── Activation wait tests ──────────────────────────────────────────────
 
 	test("waits for SW activation via statechange events", async () => {
 		const mockSubscriptionJSON = {

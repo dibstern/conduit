@@ -1,4 +1,3 @@
-// ─── Config Persistence Module ─────────────────────────────────
 // Handles persistent daemon config at ~/.conduit/daemon.json,
 // recent projects at ~/.conduit/recent.json, and crash info at
 // ~/.conduit/crash.json. Uses atomic writes (tmp + rename) for
@@ -25,8 +24,6 @@ import {
 	deserializeRecent,
 	serializeRecent,
 } from "./recent-projects.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
@@ -78,8 +75,6 @@ export interface CrashInfo {
 	timestamp: number;
 }
 
-// ─── Schema ─────────────────────────────────────────────────────────────────
-
 const DaemonProjectSchema = Schema.Struct({
 	path: Schema.String,
 	slug: Schema.String,
@@ -120,8 +115,6 @@ export const DaemonConfigSchema = Schema.Struct({
 	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
 	dismissedPaths: Schema.optional(Schema.Array(Schema.String)),
 });
-
-// ─── Service Tag & Layer ────────────────────────────────────────────────────
 
 export class DaemonConfigTag extends Context.Tag("DaemonConfig")<
 	DaemonConfigTag,
@@ -290,8 +283,6 @@ export const ServerConfigLive = (configDir?: string) =>
 		}),
 	);
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function resolveDir(configDir?: string): string {
 	return configDir ?? DEFAULT_CONFIG_DIR;
 }
@@ -310,14 +301,10 @@ function safeUnlink(filePath: string): void {
 	}
 }
 
-// ─── Config Dir ─────────────────────────────────────────────────────────────
-
 /** Return the default config directory (~/.conduit) */
 export function getConfigDir(): string {
 	return DEFAULT_CONFIG_DIR;
 }
-
-// ─── Daemon Config ──────────────────────────────────────────────────────────
 
 /**
  * Normalize the legacy default OpenCode instance id to the canonical one.
@@ -388,8 +375,6 @@ export function clearDaemonConfig(configDir?: string): void {
 	safeUnlink(join(dir, "daemon.pid"));
 }
 
-// ─── Crash Info ─────────────────────────────────────────────────────────────
-
 /** Read crash.json. Returns null if missing or corrupt. */
 export function readCrashInfo(configDir?: string): CrashInfo | null {
 	try {
@@ -417,8 +402,6 @@ export function clearCrashInfo(configDir?: string): void {
 	const dir = resolveDir(configDir);
 	safeUnlink(join(dir, "crash.json"));
 }
-
-// ─── Recent Projects Sync ───────────────────────────────────────────────────
 
 /**
  * Sync projects into recent.json by merging with existing entries.

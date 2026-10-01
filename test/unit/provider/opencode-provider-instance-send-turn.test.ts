@@ -9,8 +9,6 @@ import type {
 	SendTurnInput,
 } from "../../../src/lib/provider/types.js";
 
-// ─── Mocks ──────────────────────────────────────────────────────────────────
-
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
 		session: {

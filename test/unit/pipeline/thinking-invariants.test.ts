@@ -17,7 +17,6 @@ import type {
 } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 
-// ─── Per-session tiers for handler calls ────────────────────────────────────
 let _ta: SessionActivity;
 let _tm: SessionMessages;
 
@@ -118,7 +117,6 @@ describe("Fork-split thinking invariants", () => {
 	});
 });
 
-// ─── Future feature specs: Rewind / Fork ─────────────────────────────
 // These document expected invariants for features not yet implemented.
 // Replace it.todo with real tests when implementing.
 

@@ -15,8 +15,6 @@ import type {
 	UserMessage,
 } from "../types.js";
 
-// ─── Projects ────────────────────────────────────────────────────────────────
-
 export const mockProject: ProjectInfo = {
 	slug: "conduit",
 	title: "Conduit",
@@ -24,8 +22,6 @@ export const mockProject: ProjectInfo = {
 	clientCount: 2,
 	instanceId: "instance-local",
 };
-
-// ─── Sessions ────────────────────────────────────────────────────────────────
 
 export const mockSession: SessionInfo = {
 	id: "sess_01JTEST000000000000000001",
@@ -202,8 +198,6 @@ export const mockSessionsAllGroups: SessionInfo[] = [
 	},
 ];
 
-// ─── User Messages ───────────────────────────────────────────────────────────
-
 export const mockUserMessage: UserMessage = {
 	type: "user",
 	uuid: "msg-user-001",
@@ -222,8 +216,6 @@ export const mockUserMessageShort: UserMessage = {
 	uuid: "msg-user-003",
 	text: "Fix the bug",
 };
-
-// ─── Assistant Messages ──────────────────────────────────────────────────────
 
 export const mockAssistantSimple: AssistantMessage = {
 	type: "assistant",
@@ -286,8 +278,6 @@ export const mockAssistantMarkdown: AssistantMessage = {
 	finalized: true,
 };
 
-// ─── Thinking Messages ───────────────────────────────────────────────────────
-
 export const mockThinkingActive: ThinkingMessage = {
 	type: "thinking",
 	uuid: "msg-think-001",
@@ -310,8 +300,6 @@ export const mockThinkingLong: ThinkingMessage = {
 	duration: 12500,
 	done: true,
 };
-
-// ─── Tool Messages ───────────────────────────────────────────────────────────
 
 export const mockToolPending: ToolMessage = {
 	type: "tool",
@@ -527,8 +515,6 @@ export const mockToolTruncated: ToolMessage = {
 	fullContentLength: 24576,
 };
 
-// ─── Question Tool Messages ──────────────────────────────────────────────────
-
 export const mockQuestionRunning: ToolMessage = {
 	type: "tool",
 	uuid: "msg-tool-q-001",
@@ -612,8 +598,6 @@ export const mockQuestionPending: ToolMessage = {
 	status: "pending",
 };
 
-// ─── Result Messages ─────────────────────────────────────────────────────────
-
 export const mockResultFull: ResultMessage = {
 	type: "result",
 	uuid: "msg-result-001",
@@ -649,8 +633,6 @@ export const mockResultExpensive: ResultMessage = {
 	cacheRead: 15000,
 };
 
-// ─── System Messages ─────────────────────────────────────────────────────────
-
 export const mockSystemInfo: SystemMessage = {
 	type: "system",
 	uuid: "msg-sys-001",
@@ -679,8 +661,6 @@ export const mockSystemErrorWithDetails: SystemMessage = {
 	},
 };
 
-// ─── Todos ──────────────────────────────────────────────────────────────────
-
 export const mockTodoPending: TodoItem = {
 	id: "todo-001",
 	subject: "Add Storybook coverage for setup components",
@@ -707,8 +687,6 @@ export const mockTodoCancelled: TodoItem = {
 	subject: "Capture baseline PNGs automatically",
 	status: "cancelled",
 };
-
-// ─── File Tree ───────────────────────────────────────────────────────────────
 
 export const mockFileTree = [
 	{
@@ -740,12 +718,10 @@ export const loadProject = (slug: string) =>
 	});
 `;
 
-// ─── Terminal ────────────────────────────────────────────────────────────────
-
 export const mockTerminalOutput =
 	"\x1b[32m$\x1b[0m pnpm test\n\n \x1b[32m✓\x1b[0m src/utils.test.ts (3 tests) 45ms\n \x1b[32m✓\x1b[0m src/main.test.ts (5 tests) 120ms\n\n\x1b[32m Tests  8 passed\x1b[0m\n\x1b[2m Duration  210ms\x1b[0m\n";
 
-// ─── Conversation (mixed messages) ──────────────────────────────────────────
+// Conversation (mixed messages)
 
 export const mockConversation = [
 	mockUserMessage,

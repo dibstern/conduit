@@ -1,4 +1,4 @@
-// ─── Session-Detail Subscription (delta source #1) ───────────────────────────
+// Session-Detail Subscription (delta source #1)
 // The concrete SubscriptionSource for a session's detail view — the transcript
 // of messages, streamed text, thinking, and tool activity.
 //
@@ -30,8 +30,6 @@ import { type Envelope, stream } from "./read-model-subscription.js";
 import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 /**
  * A single detail row shared by the base and the deltas, as the seam requires.
  * - `transcriptMessage`: a projected transcript message — what this source
@@ -45,8 +43,6 @@ export type SessionDetailSubscriptionError =
 	| ReadQueryEffectError
 	| SqlError
 	| TranscriptPageCursorNotFoundError;
-
-// ─── Public entry point ──────────────────────────────────────────────────────
 
 /**
  * Subscribe to a session's detail stream. Cold start emits the transcript

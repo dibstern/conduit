@@ -1,4 +1,3 @@
-<!-- ─── Activity Strip ──────────────────────────────────────────────────────── -->
 <!-- One segment per step: colour is the kind of work, width is how long it took. -->
 <!-- Hovering reports the step up so the header can caption it; clicking jumps to  -->
 <!-- it in the expanded log. Supplementary — every segment is also a row below.    -->

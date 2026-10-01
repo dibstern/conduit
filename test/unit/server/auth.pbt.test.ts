@@ -1,4 +1,4 @@
-// ─── Property-Based Tests: PIN Auth & Rate Limiting (Ticket 2.4) ────────────
+// Property-Based Tests: PIN Auth & Rate Limiting (Ticket 2.4)
 //
 // Properties tested:
 // P1: Correct PIN always succeeds (when not locked) → AC2
@@ -27,8 +27,6 @@ const SEED = 42;
 const NUM_RUNS = 300;
 
 describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
-	// ─── P1: Correct PIN always succeeds ──────────────────────────────────
-
 	describe("P1: Correct PIN always succeeds when not locked (AC2)", () => {
 		it("property: correct PIN → ok=true with cookie", () => {
 			fc.assert(
@@ -46,8 +44,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 			);
 		});
 	});
-
-	// ─── P2: Incorrect PIN always fails ───────────────────────────────────
 
 	describe("P2: Incorrect PIN always fails (AC3)", () => {
 		it("property: wrong PIN → ok=false, no cookie", () => {
@@ -69,8 +65,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 			);
 		});
 	});
-
-	// ─── P3: Rate limiting state machine ──────────────────────────────────
 
 	describe("P3: Rate limit locks after maxAttempts failures (AC4)", () => {
 		it("property: maxAttempts+1 incorrect → locked, even correct PIN blocked", () => {
@@ -114,8 +108,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 		});
 	});
 
-	// ─── P4: Lockout expiry ───────────────────────────────────────────────
-
 	describe("P4: Lockout expires after timeout (AC4)", () => {
 		it("property: after lockout period, correct PIN succeeds again", () => {
 			fc.assert(
@@ -155,8 +147,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 			);
 		});
 	});
-
-	// ─── P5: Cookie validation ────────────────────────────────────────────
 
 	describe("P5: Cookie validation (AC2, AC5)", () => {
 		it("property: freshly issued cookie validates; after expiry it doesn't", () => {
@@ -231,8 +221,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 		});
 	});
 
-	// ─── P6: PIN format validation ────────────────────────────────────────
-
 	describe("P6: setPin validates 4-8 digit format (AC6)", () => {
 		it("property: valid PINs (4-8 digits) are accepted", () => {
 			fc.assert(
@@ -258,8 +246,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 		});
 	});
 
-	// ─── P7: No-PIN mode ─────────────────────────────────────────────────
-
 	describe("P7: No PIN mode always grants access (AC7)", () => {
 		it("property: without PIN, any attempt succeeds", () => {
 			fc.assert(
@@ -274,8 +260,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 			);
 		});
 	});
-
-	// ─── P8: Independent IP lockouts ──────────────────────────────────────
 
 	describe("P8: Different IPs have independent lockout state (AC4)", () => {
 		it("property: locking IP-A does not affect IP-B", () => {
@@ -306,8 +290,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 			);
 		});
 	});
-
-	// ─── P9: getRemainingAttempts ─────────────────────────────────────────
 
 	describe("P9: getRemainingAttempts returns correct count at each stage", () => {
 		it("returns maxAttempts when no failures have occurred", () => {
@@ -400,8 +382,6 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 		});
 	});
 
-	// ─── P10: PIN re-setting ──────────────────────────────────────────────
-
 	describe("P10: PIN re-setting: only latest PIN works", () => {
 		it("setting PIN twice means only the latest PIN authenticates", () => {
 			fc.assert(
@@ -460,7 +440,7 @@ describe("Ticket 2.4 — PIN Auth & Rate Limiting PBT", () => {
 		});
 	});
 
-	// ─── P11: Lockout expiry in authenticate() ────────────────────────────
+	// P11: Lockout expiry in authenticate()
 
 	describe("P11: Lockout expiry in authenticate(): correct PIN succeeds after lockout expires", () => {
 		it("authenticate() auto-clears expired lockout and succeeds with correct PIN", () => {

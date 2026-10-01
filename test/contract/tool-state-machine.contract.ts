@@ -1,4 +1,3 @@
-// ─── AC6: Tool Part State Machine Validation ─────────────────────────────
 // Validates tool execution state transitions via the committed OpenAPI snapshot
 // and SSE event schema definitions. Starting with OpenCode v1.14.x the live
 // /doc endpoint only exposes global-level schemas, so project-scoped schemas

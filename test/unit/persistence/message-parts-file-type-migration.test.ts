@@ -1,4 +1,4 @@
-// ─── message_parts file-type migration (0005) ───────────────────────────────
+// message_parts file-type migration (0005)
 // Legacy databases created before 0005 have
 // CHECK(type IN ('text', 'thinking', 'tool')) on message_parts, which rejects
 // the file parts persisted by the file.attached canonical event. 0005 rebuilds

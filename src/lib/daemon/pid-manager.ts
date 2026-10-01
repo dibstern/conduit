@@ -1,4 +1,3 @@
-// ─── PID & Socket File Management ───────────────────────────────────────────
 // Manages PID and Unix socket files for daemon lifecycle tracking.
 // Extracted from daemon.ts for isolated testability.
 

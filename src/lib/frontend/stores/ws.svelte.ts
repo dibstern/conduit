@@ -1,4 +1,3 @@
-// ─── WebSocket Store ─────────────────────────────────────────────────────────
 // Manages WebSocket connection lifecycle and centralized message dispatch.
 // Creates WebSocket synchronously in connect(). The transport module preloads
 // the message decoder; server-side waitForRelay() handles relay readiness.
@@ -30,7 +29,6 @@ import {
 	wsDebugResetMessageCount,
 } from "./ws-debug.svelte.js";
 
-// ─── Re-exports from extracted modules ──────────────────────────────────────
 // These were extracted for modularity but consumers still import from here.
 
 // Re-export dispatch module — consumers import handleMessage from here.
@@ -73,8 +71,6 @@ import { setWsGetter } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 /** Max time to wait for onopen before force-closing and retrying. */
 const CONNECT_TIMEOUT_MS = 5_000;
 
@@ -83,8 +79,6 @@ const RECONNECT_BASE_MS = 1_000;
 
 /** Maximum reconnect delay (ms). */
 const RECONNECT_MAX_MS = 10_000;
-
-// ─── State ──────────────────────────────────────────────────────────────────
 
 let _ws: WebSocket | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,8 +100,6 @@ export const wsState = $state({
 // Wire up the send module's WS getter to our connection state.
 setWsGetter(() => _ws);
 
-// ─── Derived getters ────────────────────────────────────────────────────────
-
 /** Get whether the WebSocket is connected. */
 export function getIsConnected(): boolean {
 	return wsState.status === "connected" || wsState.status === "processing";
@@ -118,8 +110,6 @@ function setStatus(status: ConnectionStatus, text: string): void {
 	wsState.status = status;
 	wsState.statusText = text;
 }
-
-// ─── Connection lifecycle ───────────────────────────────────────────────────
 
 /** Connect callbacks — called after connection established. */
 let _onConnectFn: (() => void) | null = null;
@@ -316,7 +306,6 @@ function doConnect(
 		wsDebugLog("ws:error", wsState.status);
 	});
 
-	// ── Message handling via Effect Stream ──────────────────────────────────
 	// The stream handles JSON parsing and cleanup. Self-healing and dispatch
 	// happen in the runForEach callback synchronously per message.
 	getRuntime().then((runtime) => {

@@ -1,4 +1,3 @@
-<!-- ─── Turn Economics ──────────────────────────────────────────────────────── -->
 <!-- What the turn cost: cost · tokens in/out · how full the context was when it  -->
 <!-- finished. The context gauge is absent, not zeroed, when the provider reports -->
 <!-- no window.                                                                   -->

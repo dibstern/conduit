@@ -1,4 +1,3 @@
-// ─── Daemon Health Watcher ─────────────────────────────────────
 // Polls a Unix domain socket to detect when the daemon process dies.
 // On crash: reads crash info, manages restart attempts with backoff.
 // On intentional shutdown (no crash info): calls onShutdown.
@@ -8,8 +7,6 @@ import net from "node:net";
 
 import type { CrashInfo } from "../daemon/config-persistence.js";
 import { readCrashInfo as defaultReadCrashInfo } from "../daemon/config-persistence.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface WatcherCallbacks {
 	/** Called when daemon died (crash or shutdown). */
@@ -47,16 +44,12 @@ export interface WatcherOptions {
 	};
 }
 
-// ─── Default connect factory ────────────────────────────────────────────────
-
 function defaultConnect(socketPath: string): {
 	on: (event: string, cb: (...args: unknown[]) => void) => void;
 	destroy: () => void;
 } {
 	return net.connect(socketPath);
 }
-
-// ─── DaemonWatcher ──────────────────────────────────────────────────────────
 
 export class DaemonWatcher {
 	private readonly callbacks: WatcherCallbacks;
@@ -119,8 +112,6 @@ export class DaemonWatcher {
 	isRunning(): boolean {
 		return this.intervalId !== null;
 	}
-
-	// ─── Private ────────────────────────────────────────────────────────────
 
 	private poll(): void {
 		const client = this.connectFn(this.socketPath);

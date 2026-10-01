@@ -42,8 +42,6 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 	createProjectRelay: createProjectRelayMock,
 }));
 
-// ─── HttpServerRefTag tests ─────────────────────────────────────────────────
-
 describe("HttpServerRefTag", () => {
 	const testLayer = HttpServerRefLive;
 
@@ -80,8 +78,6 @@ describe("HttpServerRefTag", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });
-
-// ─── RelayFactoryTag tests ──────────────────────────────────────────────────
 
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
@@ -221,8 +217,6 @@ describe("RelayFactoryTag", () => {
 		);
 	});
 });
-
-// ─── RelayFactoryError tests ────────────────────────────────────────────────
 
 describe("RelayFactoryError", () => {
 	it("has correct tag", () => {

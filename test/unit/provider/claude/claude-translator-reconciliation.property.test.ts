@@ -1,4 +1,3 @@
-// ─── Snapshot↔stream reconciliation, checked mechanically ───────────────────
 // The example tests next door pin the shapes we have actually seen on the
 // wire. This one asks the question the examples can't: for ANY turn — any
 // number of blocks, any kind, any chunking of the deltas, any rewrite a

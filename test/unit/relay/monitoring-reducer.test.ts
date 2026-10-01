@@ -317,8 +317,6 @@ it("notifies parent idle once, only after the last busy descendant finishes", ()
 });
 
 describe("evaluateSession", () => {
-	// ── from idle ────────────────────────────────────────────────────────
-
 	it("idle + idle status → idle, no effects", () => {
 		const result = evaluateSession(
 			"s1",
@@ -375,8 +373,6 @@ describe("evaluateSession", () => {
 			sessionId: "s1",
 		});
 	});
-
-	// ── from busy-grace ──────────────────────────────────────────────────
 
 	it("busy-grace + idle → idle + notify-idle", () => {
 		const result = evaluateSession(
@@ -497,8 +493,6 @@ describe("evaluateSession", () => {
 		});
 	});
 
-	// ── from busy-sse-covered ────────────────────────────────────────────
-
 	it("busy-sse-covered + idle → idle + notify-idle", () => {
 		const result = evaluateSession(
 			"s1",
@@ -561,8 +555,6 @@ describe("evaluateSession", () => {
 		});
 		expect(result.effects).toEqual([]);
 	});
-
-	// ── from busy-polling ────────────────────────────────────────────────
 
 	it("busy-polling + idle + no viewers → stop-poller(idle-no-viewers) + notify-idle", () => {
 		const result = evaluateSession(
@@ -634,8 +626,6 @@ describe("evaluateSession", () => {
 		});
 		expect(result.effects).toEqual([]);
 	});
-
-	// ── from busy-capped ────────────────────────────────────────────────
 
 	it("busy-capped + idle → idle + notify-idle", () => {
 		const result = evaluateSession(

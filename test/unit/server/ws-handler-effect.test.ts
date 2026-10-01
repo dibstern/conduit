@@ -20,8 +20,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Create a mock WsConn that records sent messages. */
 function mockWs(options?: { readyState?: number }): WsConn & {
 	sent: string[];
@@ -49,11 +47,7 @@ const freshLayer = () => Layer.fresh(makeWsHandlerStateLive());
 const testMsg = (type: string, extra?: Record<string, unknown>): RelayMessage =>
 	({ type, ...extra }) as unknown as RelayMessage;
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe("WebSocket Handler Effect", () => {
-	// ── addClient / removeClient ──────────────────────────────────────────
-
 	it.effect("addClient registers and removeClient cleans up", () =>
 		Effect.gen(function* () {
 			const ws1 = mockWs();
@@ -95,8 +89,6 @@ describe("WebSocket Handler Effect", () => {
 		}).pipe(Effect.provide(freshLayer())),
 	);
 
-	// ── broadcast ─────────────────────────────────────────────────────────
-
 	it.effect("broadcast sends to all connected clients", () =>
 		Effect.gen(function* () {
 			const ws1 = mockWs();
@@ -127,8 +119,6 @@ describe("WebSocket Handler Effect", () => {
 		}).pipe(Effect.provide(freshLayer())),
 	);
 
-	// ── sendTo ────────────────────────────────────────────────────────────
-
 	it.effect("sendTo targets a specific client", () =>
 		Effect.gen(function* () {
 			const ws1 = mockWs();
@@ -153,8 +143,6 @@ describe("WebSocket Handler Effect", () => {
 			);
 		}).pipe(Effect.provide(freshLayer())),
 	);
-
-	// ── Bootstrap queue ──────────────────────────────────────────────────
 
 	it.effect("events buffered until markBootstrapped flushes", () =>
 		Effect.gen(function* () {
@@ -233,8 +221,6 @@ describe("WebSocket Handler Effect", () => {
 			}).pipe(Effect.provide(freshLayer())),
 	);
 
-	// ── bindClientSession + getSessionViewers ────────────────────────────
-
 	it.effect("bindClientSession + getSessionViewers", () =>
 		Effect.gen(function* () {
 			const ws1 = mockWs();
@@ -280,8 +266,6 @@ describe("WebSocket Handler Effect", () => {
 			expect(Option.isNone(session)).toBe(true);
 		}).pipe(Effect.provide(freshLayer())),
 	);
-
-	// ── sendToSession ────────────────────────────────────────────────────
 
 	it.effect("sendToSession sends only to viewers of that session", () =>
 		Effect.gen(function* () {
@@ -331,8 +315,6 @@ describe("WebSocket Handler Effect", () => {
 		}).pipe(Effect.provide(freshLayer())),
 	);
 
-	// ── getClientCount + getClientIds ─────────────────────────────────────
-
 	it.effect("getClientCount reflects current state", () =>
 		Effect.gen(function* () {
 			expect(yield* getClientCount).toBe(0);
@@ -353,8 +335,6 @@ describe("WebSocket Handler Effect", () => {
 			expect(ids.sort()).toEqual(["c1", "c2"]);
 		}).pipe(Effect.provide(freshLayer())),
 	);
-
-	// ── safeSend ─────────────────────────────────────────────────────────
 
 	it.effect("safeSend returns true on success", () =>
 		Effect.gen(function* () {
@@ -388,8 +368,6 @@ describe("WebSocket Handler Effect", () => {
 		}),
 	);
 
-	// ── removeClient cleans up bootstrap state ───────────────────────────
-
 	it.effect("removeClient clears bootstrap queue", () =>
 		Effect.gen(function* () {
 			const ws = mockWs();
@@ -412,8 +390,6 @@ describe("WebSocket Handler Effect", () => {
 			expect(ws.sent).toEqual([]);
 		}).pipe(Effect.provide(freshLayer())),
 	);
-
-	// ── Edge case: bootstrap flush with closed connection ────────────────
 
 	it.effect("markClientBootstrapped does not flush to closed connection", () =>
 		Effect.gen(function* () {

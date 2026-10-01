@@ -1,4 +1,3 @@
-// ─── E2E Debug Panel Tests ───────────────────────────────────────────────────
 // Smoke tests for the WS debug observability feature: feature flags, debug
 // panel, Settings debug tab, desktop overflow action, keyboard shortcut, and the
 // window.__wsDebug() console API.
@@ -8,8 +7,6 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 test.use({ recording: "chat-simple" });
-
-// ─── Selectors ───────────────────────────────────────────────────────────────
 
 const DEBUG_PANEL = ".debug-panel";
 const DEBUG_BTN = '[data-testid="overflow-debug"]';
@@ -25,8 +22,6 @@ const VERBOSE_BTN = 'button[title*="logging"]';
 async function openMoreActions(page: import("@playwright/test").Page) {
 	await page.getByTestId("session-bar-overflow").click();
 }
-
-// ─── URL param activation ────────────────────────────────────────────────────
 
 test.describe("Debug Panel — URL Activation", () => {
 	test("?feats=debug activates the debug panel", async ({ page, relayUrl }) => {
@@ -61,8 +56,6 @@ test.describe("Debug Panel — URL Activation", () => {
 	});
 });
 
-// ─── Keyboard shortcut ───────────────────────────────────────────────────────
-
 test.describe("Debug Panel — Keyboard Shortcut", () => {
 	test("Ctrl+Shift+D toggles the debug feature", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
@@ -94,8 +87,6 @@ test.describe("Debug Panel — Keyboard Shortcut", () => {
 		await expect(page.locator(DEBUG_BTN)).not.toBeAttached();
 	});
 });
-
-// ─── Settings tab ────────────────────────────────────────────────────────────
 
 test.describe("Debug Panel — Settings Tab", () => {
 	test("Settings Debug tab toggles the feature", async ({ page, relayUrl }) => {
@@ -151,8 +142,6 @@ test.describe("Debug Panel — Settings Tab", () => {
 	});
 });
 
-// ─── Desktop overflow action ────────────────────────────────────────────────
-
 test.describe("Debug Panel — Desktop Overflow", () => {
 	test("Debug panel action toggles visibility", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
@@ -171,8 +160,6 @@ test.describe("Debug Panel — Desktop Overflow", () => {
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible();
 	});
 });
-
-// ─── Panel UI elements ──────────────────────────────────────────────────────
 
 test.describe("Debug Panel — Panel Content", () => {
 	test("panel shows status and event log", async ({ page, relayUrl }) => {
@@ -267,8 +254,6 @@ test.describe("Debug Panel — Panel Content", () => {
 		expect(restoredCount).toBe(throttledCount);
 	});
 });
-
-// ─── Console API ─────────────────────────────────────────────────────────────
 
 test.describe("Debug Panel — Console API", () => {
 	test("window.__wsDebug() returns a valid snapshot", async ({

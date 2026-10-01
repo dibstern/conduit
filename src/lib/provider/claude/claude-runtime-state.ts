@@ -121,5 +121,3 @@ export function markStreamEnded(
 		endedStreams: HashSet.add(state.endedStreams, sessionId),
 	}));
 }
-
-// ─── discover ─────────────────────────────────────────────────────────

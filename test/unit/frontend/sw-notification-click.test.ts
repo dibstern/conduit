@@ -1,4 +1,3 @@
-// ─── Service Worker Notification Click Handler Tests ─────────────────────────
 // Tests the notificationclick event handler in sw.ts: URL construction from
 // notification data (slug/sessionId), client matching priority (exact URL →
 // project prefix → visible → any → openWindow), and postMessage dispatch
@@ -20,7 +19,6 @@ import {
 	vi,
 } from "vitest";
 
-// ─── ServiceWorkerGlobalScope simulation ────────────────────────────────────
 // sw.ts calls self.addEventListener("notificationclick", ...) at module level.
 // We capture the listener by stubbing self before importing.
 
@@ -48,8 +46,6 @@ function createNotificationEvent(data: Record<string, unknown>) {
 		_waitUntilPromises: waitUntilPromises,
 	};
 }
-
-// ─── Setup ──────────────────────────────────────────────────────────────────
 
 beforeEach(async () => {
 	vi.resetModules();
@@ -99,14 +95,10 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe("SW notificationclick handler", () => {
 	it("registers a notificationclick listener", () => {
 		expect(notificationClickListener).toBeTypeOf("function");
 	});
-
-	// ─── URL construction ──────────────────────────────────────────────
 
 	describe("URL construction", () => {
 		it("uses data.url when provided", async () => {
@@ -162,8 +154,6 @@ describe("SW notificationclick handler", () => {
 			expect(openWindowMock).toHaveBeenCalledWith("http://localhost:2633/");
 		});
 	});
-
-	// ─── Client matching ───────────────────────────────────────────────
 
 	describe("client matching", () => {
 		it("focuses client already on exact URL", async () => {

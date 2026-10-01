@@ -9,8 +9,6 @@ import {
 	messageRowsToHistory,
 } from "../../../src/lib/persistence/session-history-adapter.js";
 
-// ─── Fixtures ────────────────────────────────────────────────────────────────
-
 function makePartRow(
 	id: string,
 	messageId: string,
@@ -60,8 +58,6 @@ function makeMessageWithParts(
 		...overrides,
 	};
 }
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("messageRowsToHistory", () => {
 	it("converts message rows to HistoryMessage format", () => {

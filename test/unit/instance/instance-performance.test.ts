@@ -1,4 +1,3 @@
-// ─── Performance Tests: Instance Scaling ─────────────────────────────────────
 // Verify InstanceManager handles many instances without excessive resource use,
 // and that config persistence handles large instance lists.
 
@@ -13,8 +12,6 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import { partialFake } from "../../helpers/partial-fake.js";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createMockProcess(pid = 99999): ChildProcess {
 	return partialFake<ChildProcess>({

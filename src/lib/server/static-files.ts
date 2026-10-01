@@ -1,4 +1,3 @@
-// ─── Static File Serving ─────────────────────────────────────────────────────
 // Extracted from http-router.ts — handles static asset serving with content-hash
 // cache control, SPA fallback, and directory traversal prevention.
 
@@ -10,13 +9,9 @@ import {
 	MIME_TYPES,
 } from "../domain/server/Services/static-file-handler.js";
 
-// ─── Cache Control ──────────────────────────────────────────────────────────
-
 // One source of truth — the hash pattern is subtle enough that a second copy
 // silently drifts, which is how every asset ended up uncacheable.
 export { getCacheControl };
-
-// ─── File Serving ───────────────────────────────────────────────────────────
 
 /** Serve a static file with SPA fallback. */
 export async function serveStaticFile(

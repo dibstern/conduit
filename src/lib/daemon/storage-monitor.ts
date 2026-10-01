@@ -1,10 +1,8 @@
-// ─── Storage Monitor ───────────────────────────────────────
 // Periodically checks available disk space and notifies via callbacks on
 // transitions between low/ok states. Used by the Daemon to warn about disk
 // space issues.
 
 import { statfs as nodeStatfs } from "node:fs/promises";
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface StorageMonitorOptions {
 	/** Path to check disk space for */
@@ -31,19 +29,13 @@ export type StorageMonitorEvents = {
 	disk_space_ok: [event: DiskSpaceOkEvent];
 };
 
-// ─── Defaults ────────────────────────────────────────────────────────────────
-
 const DEFAULT_THRESHOLD_BYTES = 100 * 1024 * 1024; // 100MB
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
-// ─── Default statfs wrapper ─────────────────────────────────────────────────
 
 async function defaultStatfs(path: string): Promise<{ available: number }> {
 	const stats = await nodeStatfs(path);
 	return { available: stats.bavail * stats.bsize };
 }
-
-// ─── StorageMonitor ─────────────────────────────────────────────────────────
 
 export class StorageMonitor {
 	private readonly monitorPath: string;
@@ -56,8 +48,6 @@ export class StorageMonitor {
 	private checking = false;
 	private pending = new Set<Promise<unknown>>();
 
-	// ─── Callbacks ─────────────────────────────────────────────────────────
-
 	onLowDiskSpace: ((event: LowDiskSpaceEvent) => void) | null = null;
 	onDiskSpaceOk: ((event: DiskSpaceOkEvent) => void) | null = null;
 
@@ -67,8 +57,6 @@ export class StorageMonitor {
 		this.intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
 		this.statfsFn = options._statfs ?? defaultStatfs;
 	}
-
-	// ─── Public API ──────────────────────────────────────────────────────────
 
 	/** Start periodic polling. First check runs immediately, then on interval. */
 	start(): void {
@@ -95,8 +83,6 @@ export class StorageMonitor {
 		await Promise.allSettled([...this.pending]);
 		this.pending.clear();
 	}
-
-	// ─── Private ─────────────────────────────────────────────────────────────
 
 	/** Track a promise for drain. */
 	private trackPromise(promise: Promise<unknown>): void {

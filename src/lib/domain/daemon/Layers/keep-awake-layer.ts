@@ -1,4 +1,3 @@
-// ─── KeepAwake Effect Layer ─────────────────────────────────────────────────
 // Pure Effect replacement for the KeepAwake class.
 // Platform detection: macOS -> "caffeinate -di", Linux -> "systemd-inhibit".
 // Idempotent activate/deactivate. Process cleanup via Fiber.interrupt on
@@ -9,14 +8,10 @@
 
 import { Context, Effect, Fiber, Layer, Ref } from "effect";
 
-// ─── Config ─────────────────────────────────────────────────────────────────
-
 interface KeepAwakeConfig {
 	command?: string;
 	args?: string[];
 }
-
-// ─── Service interface ──────────────────────────────────────────────────────
 
 interface KeepAwakeService {
 	activate: () => Effect.Effect<void>;
@@ -25,14 +20,10 @@ interface KeepAwakeService {
 	isSupported: () => Effect.Effect<boolean>;
 }
 
-// ─── Tag ────────────────────────────────────────────────────────────────────
-
 export class KeepAwakeTag extends Context.Tag("KeepAwake")<
 	KeepAwakeTag,
 	KeepAwakeService
 >() {}
-
-// ─── Platform detection ─────────────────────────────────────────────────────
 
 const detectPlatformCommand = (): {
 	command: string;
@@ -56,8 +47,6 @@ const detectPlatformCommand = (): {
 			return null;
 	}
 };
-
-// ─── Layer ──────────────────────────────────────────────────────────────────
 
 export const KeepAwakeLive = (config?: KeepAwakeConfig) =>
 	Layer.scoped(

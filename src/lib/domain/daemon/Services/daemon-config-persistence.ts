@@ -1,4 +1,3 @@
-// ─── Effect-based Config Persistence ──────────────────────────────────────────
 // Replaces the imperative config-persistence.ts with an Effect-based module.
 // Uses @effect/platform FileSystem for testability and atomic writes with
 // coalesced saves to avoid write contention under rapid state changes.
@@ -13,15 +12,11 @@ import type {
 } from "./daemon-state.js";
 import { DaemonStateTag, emptyDaemonState } from "./daemon-state.js";
 
-// ─── Tags ──────────────────────────────────────────────────────────────────────
-
 /** Path to the daemon.json config file on disk. */
 export class PersistencePathTag extends Context.Tag("PersistencePath")<
 	PersistencePathTag,
 	string
 >() {}
-
-// ─── Serialization ─────────────────────────────────────────────────────────────
 
 /** Shape of daemon state on disk (JSON-safe). */
 interface DaemonConfigOnDisk {
@@ -125,8 +120,6 @@ function deserializeConfig(raw: Record<string, unknown>): DaemonState {
 		: { ...state, instances: migrated.instances, projects: migrated.projects };
 }
 
-// ─── loadConfig ────────────────────────────────────────────────────────────────
-
 /**
  * Load daemon config from disk into a DaemonState.
  *
@@ -179,8 +172,6 @@ export const loadConfig: Effect.Effect<
 
 	return deserializeConfig(parsed);
 });
-
-// ─── persistConfig ─────────────────────────────────────────────────────────────
 
 /**
  * Atomic write helper: write to a temp file, then rename to target path.

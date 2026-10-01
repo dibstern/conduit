@@ -1,4 +1,3 @@
-// ─── handleDone — thinking block finalization safety net ─────────────────────
 // Verifies that handleDone finalizes any unclosed thinking blocks (done=false)
 // so they don't spin forever if thinking_stop is lost.
 
@@ -20,7 +19,6 @@ import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
 function msg<T extends RelayMessage["type"]>(data: {
 	type: T;
 	[k: string]: unknown;
@@ -28,9 +26,6 @@ function msg<T extends RelayMessage["type"]>(data: {
 	return data as Extract<RelayMessage, { type: T }>;
 }
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
-// ─── Per-session tiers for handler calls ────────────────────────────────────
 let ta: SessionActivity;
 let tm: SessionMessages;
 

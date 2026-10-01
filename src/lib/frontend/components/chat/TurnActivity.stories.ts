@@ -135,8 +135,6 @@ export const HandBack: Story = {
 	args: { turn: handBack, segment: handBackSegment, final: false },
 };
 
-// ─── Compaction ──────────────────────────────────────────────────────────────
-
 function compaction(
 	uuid: string,
 	at: ActivityPart | undefined,
@@ -204,8 +202,6 @@ export const CompactedTwice: Story = {
 	args: { turn: twice, segment: twiceSegment, final: true },
 	play: ({ canvasElement }) => expand(canvasElement),
 };
-
-// ─── Skills ──────────────────────────────────────────────────────────────────
 
 /** A turn with a Skill call spliced in before each named step, stamped where that step starts. */
 function withSkills(turn: Turn, skills: Record<number, string>): Turn {

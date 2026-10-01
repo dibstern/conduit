@@ -1,8 +1,5 @@
-// ─── Setup Utilities ─────────────────────────────────────────────────────────
 // Extracted from SetupPage.svelte — platform detection and push subscription
 // helpers used by the setup wizard.
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface PlatformInfo {
 	isIOS: boolean;
@@ -31,8 +28,6 @@ export interface BuildStepListOptions {
 	readonly lanMode: boolean;
 	readonly hasPushSub: boolean;
 }
-
-// ─── Platform detection ─────────────────────────────────────────────────────
 
 export function detectPlatform(): PlatformInfo {
 	if (typeof window === "undefined") {
@@ -74,8 +69,6 @@ export function detectPlatform(): PlatformInfo {
 	};
 }
 
-// ─── Push subscription detection ────────────────────────────────────────────
-
 export async function detectPushSubscription(): Promise<boolean> {
 	if (typeof window === "undefined") return false;
 	const isLocal =
@@ -94,8 +87,6 @@ export async function detectPushSubscription(): Promise<boolean> {
 		return false;
 	}
 }
-
-// ─── Step list builder ──────────────────────────────────────────────────────
 
 export function buildStepList(
 	platform: PlatformInfo,
@@ -121,7 +112,7 @@ export function buildStepList(
 	return newSteps;
 }
 
-// ─── Future step count (HTTP → HTTPS redirect) ─────────────────────────
+// Future step count (HTTP → HTTPS redirect)
 // When the setup wizard runs on the HTTP onboarding page (hasCert &&
 // !isHttps), some steps (like "push") won't appear because they require
 // HTTPS.  After the cert step redirects to HTTPS, buildStepList() will
@@ -144,8 +135,6 @@ export function countFutureHttpsSteps(
 	const httpSet = new Set(httpSteps);
 	return httpsSteps.filter((s) => s !== "done" && !httpSet.has(s)).length;
 }
-
-// ─── Progress pip class ─────────────────────────────────────────────────────
 
 export function pipClass(
 	i: number,

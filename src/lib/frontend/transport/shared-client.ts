@@ -1,4 +1,3 @@
-// ─── Shared WS-RPC Client ───────────────────────────────────────────────────
 // One RPC client pair per project, carried over exactly two WebSockets:
 //
 //   control — unary calls plus low-rate subscriptions (the shell)

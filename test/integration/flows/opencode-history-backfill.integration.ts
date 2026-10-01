@@ -1,4 +1,4 @@
-// ─── OpenCode history backfill (conduit-test-iea) ────────────────────────────
+// OpenCode history backfill (conduit-test-iea)
 // An OpenCode session Conduit first sights mid-conversation — started in the
 // TUI, or while the daemon was down — must still project its whole history:
 // the ingress backfills the provider's REST record on first sighting. These
@@ -502,7 +502,6 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		await mock.start();
 		const restPath = `/session/${SESSION_ID}/message`;
 
-		// ── First sighting: Conduit attaches mid-conversation ───────────────
 		mock.setExactResponse("GET", restPath, 200, [u1, a1, u2]);
 		stack = await startStack(mock, dbPath);
 		mock.emitTestEvent("session.created", {
@@ -559,7 +558,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			["msg_a2", undefined],
 		]);
 
-		// ── Restart: the turn finished and another began while Conduit was down
+		// Restart: the turn finished and another began while Conduit was down
 		await stack.stop();
 		stack = undefined;
 		const resumed = Date.now();

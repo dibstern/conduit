@@ -1,11 +1,8 @@
-// ─── PTY Upstream Connection ──────────────────────────────────────────────────
 // Connects a PTY session to the upstream OpenCode WebSocket endpoint.
 // Extracted from relay-stack.ts so it can be tested and understood independently.
 
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../types.js";
-
-// ─── Dependencies ────────────────────────────────────────────────────────────
 
 export interface PtyUpstreamDeps {
 	ptyManager: {
@@ -25,8 +22,6 @@ export interface PtyUpstreamDeps {
 	log: Logger;
 	WebSocketClass: typeof import("ws").WebSocket;
 }
-
-// ─── Connect PTY Upstream ────────────────────────────────────────────────────
 
 type RawData = import("ws").RawData;
 

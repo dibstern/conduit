@@ -710,7 +710,7 @@ describe("SSEStream", () => {
 	});
 });
 
-// ─── Reconnection ownership (n2x) ────────────────────────────────────────────
+// Reconnection ownership (n2x)
 
 describe("SSEStream reconnection", () => {
 	const streams: SSEStream[] = [];

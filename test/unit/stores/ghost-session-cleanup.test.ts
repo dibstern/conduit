@@ -3,7 +3,6 @@ import {
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
-// ─── Ghost Session Cleanup ────────────────────────────────────────────────────
 // Verifies that clearSessionChatState is wired to:
 // 1. session_deleted relay events
 // 2. shell snapshot omission and its chat cleanup
@@ -60,8 +59,6 @@ import {
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
@@ -80,8 +77,6 @@ afterEach(() => {
 	sessionState.currentId = null;
 	clearSessionState();
 });
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("clearSessionChatState wired to the shell feed", () => {
 	it("feed removal cleans up per-session chat state", () => {

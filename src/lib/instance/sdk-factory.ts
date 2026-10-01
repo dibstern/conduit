@@ -1,4 +1,4 @@
-// ─── SDK Factory (Effect-based) ─────────────────────────────────────────
+// SDK Factory (Effect-based)
 // Creates a configured OpencodeClient from @opencode-ai/sdk.
 // Wires up fetchWithRetry (Effect-based), auth headers (for both
 // REST and SSE), and returns {client, fetch, authHeaders} so GapEndpoints and

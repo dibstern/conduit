@@ -121,7 +121,7 @@ export function createProjectRelayLayers({
 	defaultCommandQueueLayer,
 }: ProjectRelayLayerInputs) {
 	const hasInstanceManagement = hasInstanceManagementConfig(config);
-	// ── Orchestration runtime layer (provider instance routing) ─────────────
+	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		onBackgroundTask: backgroundLiveness.record,
 		...(config.claudeSdk != null && {
@@ -132,7 +132,7 @@ export function createProjectRelayLayers({
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});
 
-	// ── Effect ManagedRuntime (Layer-based composition) ─────────────────────
+	// Effect ManagedRuntime (Layer-based composition)
 	// RelayStateLive provides all self-constructing Effect-native state Layers.
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
@@ -347,7 +347,6 @@ export function createProjectRelayLayers({
 		),
 	);
 
-	// ── Build ManagedRuntime with all wiring Layers ─────────────────────────
 	// Monitoring state is created before the runtime so lifecycle wiring and
 	// monitoring wiring share one view, while the poller manager itself remains
 	// runtime-owned by MessagePollerManagerLive.

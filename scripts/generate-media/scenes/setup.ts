@@ -1,4 +1,3 @@
-// ─── Setup Scene ─────────────────────────────────────────────────────────────
 // Generates GENERATE-SETUP.gif — Animated walkthrough of the setup wizard,
 // showing the cert step, then simulating HTTPS redirect and walking through
 // PWA, push, and done steps.

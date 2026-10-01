@@ -1,4 +1,4 @@
-// ─── Version Check Tests (Ticket 3.4) ──────────────────────────────────────────
+// Version Check Tests (Ticket 3.4)
 // Tests for VersionChecker: semver comparison, npm registry fetch, periodic
 // checking, event emission, error resilience, and property-based tests.
 
@@ -19,8 +19,6 @@ import {
 	NpmRegistryResponseError,
 	VersionChecker,
 } from "../../../src/lib/daemon/version-check.js";
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Create a mock fetch that returns a given version. */
 function mockFetchOk(version: string): typeof globalThis.fetch {
@@ -49,7 +47,7 @@ function mockFetchNetworkError(
 	});
 }
 
-// ─── isNewer() ─────────────────────────────────────────────────────────────────
+// isNewer()
 
 describe("Ticket 3.4 — isNewer()", () => {
 	it("returns false for equal versions", () => {
@@ -140,7 +138,7 @@ describe("Ticket 3.4 — isNewer()", () => {
 	});
 });
 
-// ─── fetchLatestVersion() ──────────────────────────────────────────────────────
+// fetchLatestVersion()
 
 describe("Ticket 3.4 — fetchLatestVersion()", () => {
 	it("returns version from registry response", async () => {
@@ -234,7 +232,7 @@ describe("Ticket 3.4 — fetchLatestVersion()", () => {
 	});
 });
 
-// ─── VersionChecker.check() ────────────────────────────────────────────────────
+// VersionChecker.check()
 
 describe("Ticket 3.4 — VersionChecker.check()", () => {
 	it("returns correct result shape when no update", async () => {
@@ -328,7 +326,7 @@ describe("Ticket 3.4 — VersionChecker.check()", () => {
 	});
 });
 
-// ─── VersionChecker.start() / stop() ──────────────────────────────────────────
+// VersionChecker.start() / stop()
 
 describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 	beforeEach(() => {
@@ -428,7 +426,7 @@ describe("Ticket 3.4 — VersionChecker.start() / stop()", () => {
 	});
 });
 
-// ─── enabled: false (--no-update) ──────────────────────────────────────────────
+// enabled: false (--no-update)
 
 describe("Ticket 3.4 — enabled: false (--no-update)", () => {
 	beforeEach(() => {
@@ -469,8 +467,6 @@ describe("Ticket 3.4 — enabled: false (--no-update)", () => {
 		expect(fetcher).not.toHaveBeenCalled();
 	});
 });
-
-// ─── Accessor methods ──────────────────────────────────────────────────────────
 
 describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	it("isUpdateAvailable() returns false before any check", () => {
@@ -520,7 +516,7 @@ describe("Ticket 3.4 — isUpdateAvailable() / getLatestVersion()", () => {
 	});
 });
 
-// ─── Error resilience (AC6) ───────────────────────────────────────────────────
+// Error resilience (AC6)
 
 describe("Ticket 3.4 — Error resilience (AC6)", () => {
 	beforeEach(() => {
@@ -655,8 +651,6 @@ describe("Ticket 3.4 — Error resilience (AC6)", () => {
 	});
 });
 
-// ─── Drain integration ────────────────────────────────────────────────────────
-
 describe("Ticket 3.4 — drain() integration", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -735,8 +729,6 @@ describe("Ticket 3.4 — drain() integration", () => {
 		expect(capturedSignal.aborted).toBe(true);
 	});
 });
-
-// ─── Property-based tests ──────────────────────────────────────────────────────
 
 describe("Ticket 3.4 — PBT: isNewer() properties", () => {
 	const semverArb = fc

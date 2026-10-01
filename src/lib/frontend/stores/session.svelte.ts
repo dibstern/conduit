@@ -1,4 +1,3 @@
-// ─── Session Store ───────────────────────────────────────────────────────────
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
@@ -54,7 +53,6 @@ import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { updateContextPercent } from "./ui.svelte.js";
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // Every session the server has told us about, keyed by id — one representation,
 // not a map plus two arrays kept in step by hand. The map itself belongs to the
 // subscription that fills it (ni8.5 T-9); this store is a view over it and
@@ -126,7 +124,6 @@ export function observeSessionActivity(event: RelayMessage): void {
 	}
 }
 
-// ─── Client-owned state ─────────────────────────────────────────────────────
 // What this tab is looking at. Applying server rows never touches it.
 
 const clientSession = $state({
@@ -223,7 +220,6 @@ export const sessionState = {
 	},
 };
 
-// ─── Session Creation State Machine ──────────────────────────────────────────
 // Guards the new-session flow with typed phases. Prevents double-clicks,
 // tracks in-flight creation for button state, and handles timeout.
 //
@@ -401,8 +397,6 @@ export function forgetSession(id: string): void {
 	// switch us to, so nothing else would clear it.
 	if (clientSession.currentId === id) clientSession.currentId = null;
 }
-
-// ─── Pure helpers ───────────────────────────────────────────────────────────
 
 /**
  * The row's attention tier. The server derives it in one place and sends it on
@@ -631,8 +625,6 @@ function getSessionDate(session: SessionInfo): Date {
 			: new Date(0);
 }
 
-// ─── Message handlers ───────────────────────────────────────────────────────
-
 export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
@@ -848,7 +840,6 @@ export function handleSessionForked(
 	};
 }
 
-// ─── Reading the session list ───────────────────────────────────────────────
 // Components should wrap these in $derived() for reactive caching.
 
 /** Find a session by id. */
@@ -860,7 +851,7 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 	);
 }
 
-// ─── Notification views (ni8.23) ────────────────────────────────────────────
+// Notification views (ni8.23)
 // Three facts the server derives onto the row: how many questions and
 // permissions are unanswered, and whether a message landed since the session was
 // last looked at. These are reads over the server-owned half — there is no
@@ -1004,8 +995,6 @@ export function groupSessionsByDate(
 
 	return groups;
 }
-
-// ─── Actions ────────────────────────────────────────────────────────────────
 
 /** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {

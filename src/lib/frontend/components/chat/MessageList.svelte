@@ -1,4 +1,3 @@
-<!-- ─── Message List ────────────────────────────────────────────────────────── -->
 <!-- Scrollable message container with auto-scroll and scroll-to-bottom button. -->
 <!-- Renders history messages, live chat messages, and inline permission/question cards. -->
 <!-- Preserves #messages ID for E2E. -->
@@ -40,8 +39,6 @@
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let { topClearance = 0 }: { topClearance?: number } = $props();
 	let sentinelEl: HTMLElement | undefined = $state();
-
-	// ─── Scroll controller ────────────────────────────────────────────────────
 
 	const scrollCtrl = createScrollController(
 		() => currentChat().loadLifecycle,
@@ -128,8 +125,6 @@
 		}
 	});
 
-	// ─── Scroll preservation for history prepend ────────────────────────────
-
 	// Flag to suppress auto-scroll during prepend — MUST be $state for $effect tracking
 	let awaitingPrepend = $state(false);
 	let prevScrollHeight = 0;
@@ -184,8 +179,6 @@
 		}
 	});
 
-	// ─── Rewind mode click delegation ──────────────────────────────────────────
-
 	function handleRewindClick(e: MouseEvent) {
 		if (!uiState.rewindActive) return;
 
@@ -199,8 +192,6 @@
 			selectRewindMessage(uuid);
 		}
 	}
-
-	// ─── Scroll button text ────────────────────────────────────────────────────
 
 	const scrollButtonText = $derived(
 		isProcessing() ? "↓ New activity" : "↓ Latest",

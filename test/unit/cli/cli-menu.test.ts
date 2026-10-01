@@ -1,4 +1,4 @@
-// ─── Main Menu Loop — Unit Tests (Ticket 8.10) ────────────────────────────────
+// Main Menu Loop — Unit Tests (Ticket 8.10)
 // Tests for showMainMenu, renderStatus, and the full menu interaction flow.
 // Uses mock stdin (EventEmitter), stdout, and exit from the prompts test pattern.
 
@@ -10,8 +10,6 @@ import {
 	renderStatus,
 	showMainMenu,
 } from "../../../src/lib/cli/cli-menu.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape sequences from a string. */
 function stripAnsi(s: string): string {
@@ -115,8 +113,6 @@ async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 		await tick();
 	}
 }
-
-// ─── renderStatus ─────────────────────────────────────────────────────────────
 
 describe("renderStatus", () => {
 	it("displays the version", () => {
@@ -255,8 +251,6 @@ describe("renderStatus", () => {
 	});
 });
 
-// ─── Menu rendering ──────────────────────────────────────────────────────────
-
 describe("menu rendering", () => {
 	it("shows the logo (clear screen)", async () => {
 		const io = createMockIO();
@@ -337,8 +331,6 @@ describe("menu rendering", () => {
 	});
 });
 
-// ─── Menu items ──────────────────────────────────────────────────────────────
-
 describe("menu items", () => {
 	it("shows all 5 menu items", async () => {
 		const io = createMockIO();
@@ -417,8 +409,6 @@ describe("menu items", () => {
 	});
 });
 
-// ─── Notifications ───────────────────────────────────────────────────────────
-
 describe("notifications", () => {
 	it("calls onSetupNotifications when selected", async () => {
 		const onSetupNotifications = vi.fn();
@@ -476,8 +466,6 @@ describe("notifications", () => {
 	});
 });
 
-// ─── Projects ────────────────────────────────────────────────────────────────
-
 describe("projects", () => {
 	it("calls onProjects when selected", async () => {
 		const onProjects = vi.fn();
@@ -533,8 +521,6 @@ describe("projects", () => {
 	});
 });
 
-// ─── Settings ────────────────────────────────────────────────────────────────
-
 describe("settings", () => {
 	it("calls onSettings when selected", async () => {
 		const onSettings = vi.fn();
@@ -589,8 +575,6 @@ describe("settings", () => {
 		expect(renderCount).toBeGreaterThanOrEqual(2);
 	});
 });
-
-// ─── Shutdown ────────────────────────────────────────────────────────────────
 
 describe("shutdown", () => {
 	it("shows confirmation prompt when shutdown is selected", async () => {
@@ -658,8 +642,6 @@ describe("shutdown", () => {
 	});
 });
 
-// ─── Keep alive & exit ───────────────────────────────────────────────────────
-
 describe("keep alive & exit", () => {
 	it("calls onKeepAliveExit when selected", async () => {
 		const onKeepAliveExit = vi.fn();
@@ -697,8 +679,6 @@ describe("keep alive & exit", () => {
 		expect(renderCount).toBe(1);
 	});
 });
-
-// ─── Hotkeys ─────────────────────────────────────────────────────────────────
 
 describe("hotkeys", () => {
 	it("'o' calls onOpenBrowser", async () => {
@@ -754,8 +734,6 @@ describe("hotkeys", () => {
 		expect(renderCount).toBeGreaterThanOrEqual(2);
 	});
 });
-
-// ─── Edge cases ──────────────────────────────────────────────────────────────
 
 describe("edge cases", () => {
 	it("Ctrl+C calls exit", async () => {

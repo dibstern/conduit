@@ -1,4 +1,3 @@
-// ─── Permission Mode Selector E2E Tests ─────────────────────────────────────
 // Tests the Ask/Edits/Full access approvals pill in the input area via WS mock.
 //
 // Regression coverage for: selecting "Full access" before any session is bound

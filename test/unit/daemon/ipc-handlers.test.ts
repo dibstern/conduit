@@ -23,7 +23,6 @@ import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
 } from "../../../src/lib/domain/daemon/Services/management-service.js";
-// ─── IPC Effect Handlers Tests ────────────────────────────────────────────────
 // Verify that Effect-returning IPC handlers correctly interact with services.
 
 import { describe, it } from "@effect/vitest";
@@ -67,8 +66,6 @@ import {
 	makeOverridesStateLive,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-
-// ─── Mock factories ──────────────────────────────────────────────────────────
 
 const makeMockProjectMgmt = () =>
 	Layer.succeed(ProjectMgmtTag, {
@@ -187,11 +184,7 @@ const makeTestLayersWithInstanceMgmt = (
 		}),
 	);
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 describe("IPC handlers", () => {
-	// ── handleAddProject ──────────────────────────────────────────────────
-
 	describe("handleAddProject", () => {
 		it.effect("adds project and returns slug", () =>
 			Effect.gen(function* () {
@@ -241,8 +234,6 @@ describe("IPC handlers", () => {
 		);
 	});
 
-	// ── handleRemoveProject ──────────────────────────────────────────────
-
 	describe("handleRemoveProject", () => {
 		it.effect("removes project by slug", () =>
 			Effect.gen(function* () {
@@ -283,8 +274,6 @@ describe("IPC handlers", () => {
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
-
-	// ── handleSetPin ─────────────────────────────────────────────────────
 
 	describe("handleSetPin", () => {
 		it.effect("clears both PIN refs before requesting persistence", () =>
@@ -335,8 +324,6 @@ describe("IPC handlers", () => {
 			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
 		);
 	});
-
-	// ── handleSetKeepAwake ───────────────────────────────────────────────
 
 	describe("handleSetKeepAwake", () => {
 		it.effect("enables keep awake and activates KeepAwakeTag", () =>
@@ -392,8 +379,6 @@ describe("IPC handlers", () => {
 		);
 	});
 
-	// ── handleShutdown ───────────────────────────────────────────────────
-
 	describe("handleShutdown", () => {
 		it.effect("sets shuttingDown and completes ShutdownSignal Deferred", () =>
 			Effect.gen(function* () {
@@ -416,8 +401,6 @@ describe("IPC handlers", () => {
 		);
 	});
 
-	// ── handleListProjects ───────────────────────────────────────────────
-
 	describe("handleListProjects", () => {
 		it.effect("returns projects from state", () =>
 			Effect.gen(function* () {
@@ -438,8 +421,6 @@ describe("IPC handlers", () => {
 		);
 	});
 
-	// ── handleGetStatus ──────────────────────────────────────────────────
-
 	describe("handleGetStatus", () => {
 		it.effect("returns daemon status", () =>
 			Effect.gen(function* () {
@@ -453,8 +434,6 @@ describe("IPC handlers", () => {
 			}).pipe(Effect.provide(makeTestLayers({ port: 3456 }))),
 		);
 	});
-
-	// ── handleSetProjectTitle ────────────────────────────────────────────
 
 	describe("handleSetProjectTitle", () => {
 		it.effect("updates project title", () =>
@@ -479,8 +458,6 @@ describe("IPC handlers", () => {
 		);
 	});
 
-	// ── handleSetKeepAwakeCommand ────────────────────────────────────────
-
 	describe("handleSetKeepAwakeCommand", () => {
 		it.effect("updates keep awake command in state", () =>
 			Effect.gen(function* () {
@@ -504,8 +481,6 @@ describe("IPC handlers", () => {
 		);
 	});
 
-	// ── handleSetAgent ───────────────────────────────────────────────────
-
 	describe("handleSetAgent", () => {
 		it.effect("sets agent via Effect override state using slug", () =>
 			Effect.gen(function* () {
@@ -522,8 +497,6 @@ describe("IPC handlers", () => {
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
-
-	// ── handleSetModel ───────────────────────────────────────────────────
 
 	describe("handleSetModel", () => {
 		it.effect("sets model via Effect override state using slug", () =>
@@ -544,8 +517,6 @@ describe("IPC handlers", () => {
 			}).pipe(Effect.provide(makeTestLayers())),
 		);
 	});
-
-	// ── handleRestartWithConfig ──────────────────────────────────────────
 
 	describe("handleRestartWithConfig", () => {
 		it.effect("sets shuttingDown and completes ShutdownSignal", () =>
@@ -585,8 +556,6 @@ describe("IPC handlers", () => {
 			}).pipe(Effect.provide(Layer.fresh(makeTestLayers()))),
 		);
 	});
-
-	// ── Instance handlers ────────────────────────────────────────────────
 
 	describe("handleInstanceList", () => {
 		it.effect("returns instances from InstanceMgmt", () =>

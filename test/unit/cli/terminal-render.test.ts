@@ -1,4 +1,4 @@
-// ─── Terminal Rendering Engine — Unit Tests (Ticket 8.0) ─────────────────────
+// Terminal Rendering Engine — Unit Tests (Ticket 8.0)
 // Tests for ANSI constants, gradient, symbols, clearUp, log, isBasicTerm,
 // formatStatusLine, and wrapColor.
 
@@ -15,8 +15,6 @@ import {
 	visibleLength,
 	wrapColor,
 } from "../../../src/lib/cli/terminal-render.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Capture everything written to a mock stdout. */
 function mockStdout(): { write(s: string): void; output: string } {
@@ -35,8 +33,6 @@ function stripAnsi(s: string): string {
 	const esc = String.fromCharCode(0x1b);
 	return s.replaceAll(new RegExp(`${esc}\\[[0-9;]*m`, "g"), "");
 }
-
-// ─── gradient: basic output ──────────────────────────────────────────────────
 
 describe("gradient — basic output", () => {
 	it("returns a string with the same visible characters (correct length)", () => {
@@ -74,8 +70,6 @@ describe("gradient — basic output", () => {
 	});
 });
 
-// ─── symbols ─────────────────────────────────────────────────────────────────
-
 describe("symbols", () => {
 	it("pointer contains cyan diamond (\u25C6)", () => {
 		expect(sym.pointer).toContain("\u25C6");
@@ -108,8 +102,6 @@ describe("symbols", () => {
 	});
 });
 
-// ─── clearUp ─────────────────────────────────────────────────────────────────
-
 describe("clearUp", () => {
 	it("writes nothing when n=0", () => {
 		const out = mockStdout();
@@ -131,8 +123,6 @@ describe("clearUp", () => {
 	});
 });
 
-// ─── log ─────────────────────────────────────────────────────────────────────
-
 describe("log", () => {
 	it("writes 2-space-indented text with newline", () => {
 		const out = mockStdout();
@@ -147,8 +137,6 @@ describe("log", () => {
 	});
 });
 
-// ─── isBasicTerm ─────────────────────────────────────────────────────────────
-
 describe("isBasicTerm", () => {
 	it("returns true when TERM_PROGRAM is Apple_Terminal", () => {
 		expect(isBasicTerm({ TERM_PROGRAM: "Apple_Terminal" })).toBe(true);
@@ -160,8 +148,6 @@ describe("isBasicTerm", () => {
 		expect(isBasicTerm({})).toBe(false);
 	});
 });
-
-// ─── gradient fallback ───────────────────────────────────────────────────────
 
 describe("gradient — basic terminal fallback", () => {
 	it("uses cyan ANSI code when isBasicTerm is true", () => {
@@ -180,8 +166,6 @@ describe("gradient — basic terminal fallback", () => {
 		expect(result).toBe(`${a.cyan}ABC${a.reset}`);
 	});
 });
-
-// ─── formatStatusLine ────────────────────────────────────────────────────────
 
 describe("formatStatusLine", () => {
 	it("joins items with a dimmed middle-dot separator", () => {
@@ -202,8 +186,6 @@ describe("formatStatusLine", () => {
 	});
 });
 
-// ─── wrapColor ───────────────────────────────────────────────────────────────
-
 describe("wrapColor", () => {
 	it("wraps text with the given color and a reset suffix", () => {
 		const result = wrapColor("error", a.red);
@@ -218,8 +200,6 @@ describe("wrapColor", () => {
 		}
 	});
 });
-
-// ─── gradient: ANSI awareness ────────────────────────────────────────────────
 
 describe("gradient — ANSI awareness", () => {
 	it("passes through embedded ANSI escape sequences unchanged", () => {
@@ -250,8 +230,6 @@ describe("gradient — ANSI awareness", () => {
 	});
 });
 
-// ─── visibleLength ───────────────────────────────────────────────────────────
-
 describe("visibleLength", () => {
 	it("returns length for plain text", () => {
 		expect(visibleLength("hello")).toBe(5);
@@ -273,8 +251,6 @@ describe("visibleLength", () => {
 		expect(visibleLength("\x1b[1m\x1b[0m")).toBe(0);
 	});
 });
-
-// ─── truncateToWidth ─────────────────────────────────────────────────────────
 
 describe("truncateToWidth", () => {
 	it("returns text unchanged when within width", () => {

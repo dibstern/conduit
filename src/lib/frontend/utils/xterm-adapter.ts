@@ -1,4 +1,3 @@
-// ─── xterm.js Adapter ────────────────────────────────────────────────────────
 // Wraps @xterm/xterm (npm) with FitAddon. Implements TerminalAdapter interface.
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -7,12 +6,9 @@ import "@xterm/xterm/css/xterm.css";
 import type { TerminalAdapter } from "../types.js";
 import { XTERM_THEMES } from "./xterm-themes.js";
 
-// ─── Default Terminal Palette ───────────────────────────────────────────────
 // Construction defaults to Conduit Dark; TerminalTab applies the resolved
 // Light/Dark palette immediately and whenever the mode resolution changes.
 export const ANSI_THEME: Record<string, string> = XTERM_THEMES.dark;
-
-// ─── Options ────────────────────────────────────────────────────────────────
 
 export interface XtermAdapterOptions {
 	theme?: Record<string, string>;
@@ -32,8 +28,6 @@ export const DEFAULT_XTERM_OPTIONS: Required<XtermAdapterOptions> = {
 	cursorStyle: "block",
 	scrollback: 5000,
 };
-
-// ─── XtermAdapter class ─────────────────────────────────────────────────────
 
 export class XtermAdapter implements TerminalAdapter {
 	private readonly terminal: Terminal;

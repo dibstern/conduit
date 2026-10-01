@@ -1,4 +1,4 @@
-// ─── ProjectRegistry Service (Effect) ────────────────────────────────────────
+// ProjectRegistry Service (Effect)
 // Dissolves the imperative ProjectRegistry class into Effect-native primitives:
 //   - Ref<HashMap<string, ProjectState>> for project entries
 //   - PubSub publish via DaemonEventBusTag for lifecycle events
@@ -38,8 +38,6 @@ const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 const formatRelayFailure = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
 
-// ─── Project state discriminated union ───────────────────────────────────────
-
 export interface ProjectRegistering {
 	readonly _tag: "Registering";
 	readonly project: StoredProject;
@@ -57,8 +55,6 @@ export interface ProjectError {
 }
 
 export type ProjectState = ProjectRegistering | ProjectReady | ProjectError;
-
-// ─── Error types ─────────────────────────────────────────────────────────────
 
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{
 	slug: string;
@@ -88,8 +84,6 @@ export class ProjectAlreadyReady extends Data.TaggedError(
 	}
 }
 
-// ─── State type ──────────────────────────────────────────────────────────────
-
 export type ProjectRegistryState = HashMap.HashMap<string, ProjectState>;
 
 const toStoredProject = (project: DaemonProject): StoredProject => ({
@@ -116,14 +110,10 @@ const makeInitialProjectState = (
 		),
 	);
 
-// ─── Context Tag ─────────────────────────────────────────────────────────────
-
 export class ProjectRegistryTag extends Context.Tag("ProjectRegistry")<
 	ProjectRegistryTag,
 	Ref.Ref<ProjectRegistryState>
 >() {}
-
-// ─── Pure query functions ────────────────────────────────────────────────────
 
 /** Get a project entry by slug. Returns Option. */
 export const getEntry = (slug: string) =>
@@ -223,8 +213,6 @@ export const size = Effect.gen(function* () {
 	const state = yield* Ref.get(ref);
 	return HashMap.size(state);
 }).pipe(Effect.withSpan("projectRegistry.size"));
-
-// ─── Mutation functions ──────────────────────────────────────────────────────
 
 /**
  * Register a project without starting a relay. Sets status to Registering.
@@ -532,8 +520,6 @@ export const removeAll = Effect.gen(function* () {
 	yield* Effect.logInfo(`Removed ${allSlugs.length} project(s)`);
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
 
-// ─── Additional operations ───────────────────────────────
-
 /**
  * Broadcast a message to all connected clients via DaemonEventBus.
  * Publishes a RelayBroadcast event that consumers (e.g., WS handlers)
@@ -623,8 +609,6 @@ export const isStarting = (slug: string) =>
 		Effect.map(Option.map((e) => e._tag === "Registering")),
 		Effect.map(Option.getOrElse(() => false)),
 	);
-
-// ─── Layer factory ───────────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing ProjectRegistryTag backed by a Ref<HashMap>.

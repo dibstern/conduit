@@ -1,4 +1,3 @@
-// ─── Mock OpenCode Server ────────────────────────────────────────────────────
 // Replays a recorded OpenCodeRecording as an HTTP + WebSocket server.
 // Complement to RecordingProxy: one captures, the other replays.
 
@@ -14,8 +13,6 @@ import type {
 	OpenCodeInteraction,
 	OpenCodeRecording,
 } from "../e2e/fixtures/recorded/types.js";
-
-// ─── Internal types ──────────────────────────────────────────────────────────
 
 /** SSE event from a recording. */
 interface SseEvent {
@@ -35,8 +32,6 @@ type PtyInteraction = Extract<
 	OpenCodeInteraction,
 	{ kind: "pty-open" | "pty-input" | "pty-output" | "pty-close" }
 >;
-
-// ─── Path normalization ──────────────────────────────────────────────────────
 
 const UUID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,8 +57,6 @@ function exactKey(method: string, path: string): string {
 function normalizedKey(method: string, path: string): string {
 	return `${method.toUpperCase()} ${normalizePath(path)}`;
 }
-
-// ─── MockOpenCodeServer ──────────────────────────────────────────────────────
 
 /** Structured log entry for debugging SSE delivery in E2E tests. */
 export interface MockDiagnosticEntry {
@@ -325,7 +318,6 @@ export class MockOpenCodeServer {
 		}
 	}
 
-	// ─── Session list fallback helpers ────────────────────────────────────
 	// These mutate the GET /session queue's fallback entry in place so that
 	// the standard queue-based response reflects create/delete/rename ops.
 
@@ -383,8 +375,6 @@ export class MockOpenCodeServer {
 		this.recordedPromptSessionIds = [];
 		this.buildQueues();
 	}
-
-	// ─── Queue building ──────────────────────────────────────────────────────
 
 	private buildQueues(): void {
 		const { interactions } = this.recording;
@@ -462,8 +452,6 @@ export class MockOpenCodeServer {
 		}
 	}
 
-	// ─── HTTP request handling ───────────────────────────────────────────────
-
 	private async handleRequest(
 		req: IncomingMessage,
 		res: ServerResponse,
@@ -488,7 +476,6 @@ export class MockOpenCodeServer {
 		const exact = exactKey(method, path);
 		const normalized = normalizedKey(method, path);
 
-		// ── Stateful PTY endpoints ──────────────────────────────────────────
 		const basePath = path.split("?")[0] ?? path;
 
 		if (method === "POST" && basePath === "/pty") {
@@ -521,7 +508,6 @@ export class MockOpenCodeServer {
 			return;
 		}
 
-		// ── Synthetic fallbacks for endpoints not in every recording ────────
 		// These endpoints are called by relay handlers but may not appear in
 		// the recorded interactions. Return empty arrays so the relay doesn't
 		// crash with 404 errors during integration tests.
@@ -567,7 +553,6 @@ export class MockOpenCodeServer {
 			}
 		}
 
-		// ── Stateful session endpoints ──────────────────────────────────────
 		// POST /session: use queue if available, otherwise generate dynamic session.
 		// Dynamic sessions are injected into the GET /session queue fallback so
 		// subsequent list requests include them without a separate intercept.
@@ -746,7 +731,6 @@ export class MockOpenCodeServer {
 			return;
 		}
 
-		// ── GET /session/status: filter out SSE-idle sessions ──────────────
 		// When SSE has emitted session.status:idle for a session, the status
 		// endpoint must agree — the real OpenCode server is consistent. Without
 		// this, the status poller consumes stale "busy" queue entries and
@@ -791,7 +775,6 @@ export class MockOpenCodeServer {
 			return;
 		}
 
-		// ── GET /session/{id}/message: serve SSE-accumulated messages ─────────
 		// After a prompt_async has been processed, SSE events accumulate message
 		// data in sseMessages. Serve these when the queue would return empty.
 		if (method === "GET" && /^\/session\/[^/]+\/message$/.test(basePath)) {
@@ -905,8 +888,6 @@ export class MockOpenCodeServer {
 			res.end(JSON.stringify(entry.responseBody));
 		}
 	}
-
-	// ─── SSE handling ────────────────────────────────────────────────────────
 
 	private handleSse(res: ServerResponse): void {
 		res.writeHead(200, {
@@ -1115,8 +1096,6 @@ export class MockOpenCodeServer {
 		}
 	}
 
-	// ─── PTY WebSocket handling ──────────────────────────────────────────────
-
 	private handleUpgrade(
 		req: IncomingMessage,
 		socket: import("node:stream").Duplex,
@@ -1221,8 +1200,6 @@ export class MockOpenCodeServer {
 			}
 		}
 	}
-
-	// ─── Cleanup helpers ─────────────────────────────────────────────────────
 
 	private cleanupSseClients(): void {
 		for (const interval of this.keepaliveIntervals) {

@@ -1,4 +1,3 @@
-// ─── Integration: Tool Lifecycle Through Pipeline ────────────────────────────
 // Verifies that tool SSE events (pending → running → completed) flow through
 // the relay pipeline and arrive at WebSocket clients in the correct order.
 // Also covers the history + SSE overlap scenario.

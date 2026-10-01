@@ -1,4 +1,3 @@
-// ─── Woken badge: kept until the session is opened ───────────────────────────
 // A snoozed session that wakes, because its time passed or it asked for an
 // approval or an answer, shows a Woke badge until the user opens it from the
 // sidebar, whether or not it has an unread dot. Hovering over or clicking its

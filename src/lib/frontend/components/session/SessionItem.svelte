@@ -1,4 +1,3 @@
-<!-- ─── SessionItem ─────────────────────────────────────────────────────────── -->
 <!-- Single session entry in the sidebar list. Shows title, context, status/time, -->
 <!-- the three-dot menu, and supports inline rename. -->
 
@@ -128,8 +127,6 @@
 	import { onDestroy } from "svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 
-	// ─── Props ──────────────────────────────────────────────────────────────────
-
 	let {
 		session,
 		projectLabel,
@@ -200,8 +197,6 @@
 	const CLICK_SUPPRESSION_MS = 450;
 	const NATIVE_CONTEXT_MENU_SUPPRESSION_MS = 1_000;
 
-	// ─── Local state ────────────────────────────────────────────────────────────
-
 	let localRenaming = $state(false);
 	let moreBtnEl: HTMLButtonElement | HTMLAnchorElement | undefined =
 		$state(undefined);
@@ -220,8 +215,6 @@
 
 	// Combined rename state: local (double-click) OR external (context menu)
 	const isRenaming = $derived(localRenaming || renamingProp);
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const displayTitle = $derived(session.title || "New Session");
 	const actions = $derived(getSessionActionState(session, now));
@@ -307,8 +300,6 @@
 				? " active bg-bg-alt text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
 	);
-
-	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function handleClick(e: MouseEvent) {
 		if (e.defaultPrevented) return;

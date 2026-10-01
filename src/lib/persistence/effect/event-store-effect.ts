@@ -1,4 +1,3 @@
-// ─── Effect-based Event Store ───���─────────────────────────────────────────
 // All database operations are Effect programs using @effect/sql template literal queries.
 
 import { SqlClient } from "@effect/sql";
@@ -11,18 +10,12 @@ import {
 	type StoredEventRow,
 } from "./stored-event-row.js";
 
-// ─── Error type ──────���───────────────────────────────────────────────────────
-
 export class EventStoreError extends Data.TaggedError("EventStoreError")<{
 	readonly operation: string;
 	readonly cause: unknown;
 }> {}
 
-// ─── Constants ────────────────────────────────────��──────────────────────────
-
 const DEFAULT_READ_LIMIT = 1000;
-
-// ─── Service interface ─────────────���─────────────────────────────────────────
 
 export interface EventStoreEffect {
 	readonly append: (
@@ -54,14 +47,10 @@ export interface EventStoreEffect {
 	) => Effect.Effect<number, EventStoreError | SqlError>;
 }
 
-// ─── Service Tag ─────────���──────────────────────��────────────────────────────
-
 export class EventStoreEffectTag extends Context.Tag("EventStoreEffect")<
 	EventStoreEffectTag,
 	EventStoreEffect
 >() {}
-
-// ─── Row conversion ───────��──────────────────────────────────────────────────
 
 const decodeEventStoreRow = (
 	row: StoredEventRow,
@@ -82,8 +71,6 @@ const validateCanonicalEvent = (
 				new EventStoreError({ operation: "validateCanonicalEvent", cause }),
 		),
 	);
-
-// ─── Service implementation ───��─────────────────────────���────────────────────
 
 export const makeEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;

@@ -1,4 +1,3 @@
-// ─── Event Classification ───────────────────────────────────────────────────
 // Shared pure functions for classifying relay event streams.
 // Used by frontend replay and relay event handling.
 //

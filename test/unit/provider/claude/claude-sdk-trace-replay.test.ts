@@ -1,4 +1,3 @@
-// ─── Captured-trace replay: the Provider Contract, pinned by real wire ──────
 // Every fixture under test/fixtures/claude-sdk-traces/ is REAL Claude Agent
 // SDK traffic captured via CONDUIT_CLAUDE_SDK_CAPTURE (see sdk-trace-capture.ts
 // and docs/adr/0002). Hand-written fixtures encode what we BELIEVE the SDK

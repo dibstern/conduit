@@ -1,4 +1,3 @@
-// ─── F2 Fix: status:idle Full Cleanup Tests ─────────────────────────────────
 // Verifies the F2 fix in handleStatus: when the server sends status:idle,
 // all streaming/processing state is cleaned up:
 // 1. In-flight message finalized via flushAndFinalizeAssistant
@@ -26,7 +25,6 @@ import {
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
-// ─── Per-session tiers for handler calls ────────────────────────────────────
 let ta: SessionActivity;
 let tm: SessionMessages;
 
@@ -46,8 +44,6 @@ afterEach(() => {
 function statusMsg(status: string) {
 	return { type: "status" as const, sessionId: "s1", status };
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("F2 fix: status:idle full cleanup", () => {
 	it("clears processing phase when idle arrives", () => {

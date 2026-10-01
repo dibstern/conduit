@@ -1,4 +1,3 @@
-// ─── Notification Utilities ──────────────────────────────────────────────────
 // Push subscription management and service worker registration.
 // Pure functions — integrates with service worker.
 

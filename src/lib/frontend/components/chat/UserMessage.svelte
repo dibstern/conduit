@@ -1,4 +1,3 @@
-<!-- ─── User Message ────────────────────────────────────────────────────────── -->
 <!-- Left-aligned user message card with pink glow. Preserves .msg-user class.
      Recognised `/skill` tokens render as the same pill the composer showed while
      typing; recognition is live (from the current command list), so the pill is

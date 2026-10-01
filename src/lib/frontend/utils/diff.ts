@@ -1,4 +1,3 @@
-// ─── Diff Algorithm ──────────────────────────────────────────────────────────
 // LCS-based diff with unified and split rendering.
 // Pure functions — no DOM or framework dependencies.
 

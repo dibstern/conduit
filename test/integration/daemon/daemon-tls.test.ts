@@ -1,4 +1,3 @@
-// ─── Tests: Daemon TLS Wiring ────────────────────────────────────────────────
 //
 // Tests cover:
 // 1. daemon-lifecycle.ts: startHttpServer creates HTTPS server when TLS certs provided
@@ -24,7 +23,7 @@ import { startHttpServer } from "../../../src/lib/daemon/daemon-lifecycle.js";
 
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
-// ─── Generate test certs (same pattern as server.pbt.test.ts) ────────────────
+// Generate test certs (same pattern as server.pbt.test.ts)
 
 let testKey: Buffer;
 let testCert: Buffer;
@@ -60,8 +59,6 @@ try {
 		"-----BEGIN CERTIFICATE-----\nfake-ca\n-----END CERTIFICATE-----\n",
 	);
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeTmpDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -140,8 +137,6 @@ function httpGet(
 	});
 }
 
-// ─── Test: daemon-lifecycle.ts — startHttpServer with TLS ────────────────────
-
 describe("startHttpServer TLS support", () => {
 	it.skipIf(!opensslAvailable)(
 		"creates HTTPS server when tls certs are provided in context",
@@ -217,8 +212,6 @@ describe("startHttpServer TLS support", () => {
 		},
 	);
 });
-
-// ─── Test: Daemon integration — TLS end-to-end ──────────────────────────────
 
 describe("Daemon TLS integration", () => {
 	let tmpDir: string;

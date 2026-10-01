@@ -2,7 +2,6 @@ import { cleanup, render } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── Mock child components ──────────────────────────────────────────────────
 // ChatLayout renders 18 child components. Mock them all with an empty Svelte
 // component so we can mount ChatLayout without pulling in the entire UI tree.
 
@@ -101,7 +100,6 @@ vi.mock(
 	emptyComponent,
 );
 
-// ─── Mock stores ────────────────────────────────────────────────────────────
 // Mock all stores EXCEPT router.svelte.ts (which must be real to test
 // reactive dependencies on routerState.path).
 
@@ -268,7 +266,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	})),
 }));
 
-// ─── Imports (after mocks) ──────────────────────────────────────────────────
+// Imports (after mocks)
 
 import ChatLayout from "../../../src/lib/frontend/components/layout/ChatLayout.svelte";
 import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -302,8 +300,6 @@ function attach(slug: string): void {
 	attachedProjectState.slug = slug;
 	wsLifecycleHarness.onAttachCallbacks[0]?.(slug);
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("ChatLayout WS lifecycle", () => {
 	beforeEach(() => {

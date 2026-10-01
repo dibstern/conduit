@@ -1,4 +1,3 @@
-// ─── Live Smoke Test ──────────────────────────────────────────────────────────
 // Validates the full relay pipeline end-to-end using a self-spawned
 // ephemeral OpenCode instance.  Unlike replay-based specs this test hits
 // the real OpenCode API, so it requires the `opencode` binary on $PATH

@@ -1,4 +1,3 @@
-// ─── SessionRegistryState Ref & Tag ─────────────────────────────────────────
 // Replaces the mutable Map<clientId, sessionId> on the imperative
 // SessionRegistry class with a single atomic Ref<HashMap<string, string>>.
 // All client-session tracking reads/writes through this Ref, giving
@@ -12,14 +11,10 @@
 
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 /** Tag for the mutable client→session HashMap Ref in the Effect Context. */
 export class SessionRegistryStateTag extends Context.Tag(
 	"SessionRegistryState",
 )<SessionRegistryStateTag, Ref.Ref<HashMap.HashMap<string, string>>>() {}
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing SessionRegistryStateTag backed by a Ref.
@@ -33,8 +28,6 @@ export const makeSessionRegistryStateLive = (
 		SessionRegistryStateTag,
 		Ref.make(initial ?? HashMap.empty<string, string>()),
 	);
-
-// ─── Pure functions ─────────────────────────────────────────────────────────
 
 /**
  * Set which session a client is viewing.

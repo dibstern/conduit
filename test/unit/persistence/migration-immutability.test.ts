@@ -1,4 +1,3 @@
-// ─── Migration Immutability Guard ────────────────────────────────────────────
 // Shipped migrations are applied exactly once per database and recorded in the
 // effect_sql_migrations bookkeeping table. Editing an already-shipped file only
 // changes what FRESH databases get — every existing database keeps the old

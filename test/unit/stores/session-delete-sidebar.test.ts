@@ -3,7 +3,6 @@ import {
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
-// ─── Sidebar removal on delete ────────────────────────────────────────────────
 // A deleted session must leave the sidebar in every UI state, including during
 // an active search. The search query keeps its results separate from live rows;
 // deletion prunes both the query and the current project's roots.

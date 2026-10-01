@@ -1,4 +1,3 @@
-// ─── Integration: Error Handling ──────────────────────────────────────────────
 // Verifies that the relay handles malformed, unknown, and invalid messages
 // gracefully without crashing the server or disconnecting the client.
 

@@ -1,4 +1,3 @@
-// ─── Terminal Store Tests ────────────────────────────────────────────────────
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	applyPtyListResponse,
@@ -22,7 +21,6 @@ import {
 } from "../../../src/lib/frontend/stores/terminal.svelte.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
 // Tests deliberately pass incomplete objects to verify defensive handling.
 function msg<T extends RelayMessage["type"]>(data: {
 	type: T;
@@ -30,8 +28,6 @@ function msg<T extends RelayMessage["type"]>(data: {
 }): Extract<RelayMessage, { type: T }> {
 	return data as Extract<RelayMessage, { type: T }>;
 }
-
-// ─── Helper to build pty_created messages matching server protocol ───────────
 
 function ptyCreatedMsg(
 	id: string,
@@ -50,8 +46,6 @@ function ptyCreatedMsg(
 	});
 }
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	destroyAll();
 	vi.useFakeTimers();
@@ -60,8 +54,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 });
-
-// ─── handlePtyCreated ───────────────────────────────────────────────────────
 
 describe("handlePtyCreated", () => {
 	it("adds a tab and sets it as active (server sends { pty: PtyInfo })", () => {
@@ -104,8 +96,6 @@ describe("handlePtyCreated", () => {
 	});
 });
 
-// ─── handlePtyOutput ────────────────────────────────────────────────────────
-
 describe("handlePtyOutput", () => {
 	it("appends data to scrollback buffer", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
@@ -145,8 +135,6 @@ describe("handlePtyOutput", () => {
 	});
 });
 
-// ─── onOutput subscription ──────────────────────────────────────────────────
-
 describe("onOutput", () => {
 	it("returns an unsubscribe function", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
@@ -170,8 +158,6 @@ describe("onOutput", () => {
 	});
 });
 
-// ─── handlePtyExited ────────────────────────────────────────────────────────
-
 describe("handlePtyExited", () => {
 	it("marks the tab as exited", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
@@ -185,8 +171,6 @@ describe("handlePtyExited", () => {
 		expect(terminalState.tabs.size).toBe(0);
 	});
 });
-
-// ─── handlePtyDeleted ───────────────────────────────────────────────────────
 
 describe("handlePtyDeleted", () => {
 	it("removes the tab", () => {
@@ -221,8 +205,6 @@ describe("handlePtyDeleted", () => {
 	});
 });
 
-// ─── handlePtyError ─────────────────────────────────────────────────────────
-
 describe("handlePtyError", () => {
 	it("clears pending create and shows server error message", () => {
 		beginCreateTab();
@@ -256,8 +238,6 @@ describe("handlePtyError", () => {
 	});
 });
 
-// ─── beginCreateTab ─────────────────────────────────────────────────────────
-
 describe("beginCreateTab", () => {
 	it("sets pending create state", () => {
 		expect(beginCreateTab()).toBe(true);
@@ -290,8 +270,6 @@ describe("beginCreateTab", () => {
 	});
 });
 
-// ─── switchTab ──────────────────────────────────────────────────────────────
-
 describe("switchTab", () => {
 	it("switches to an existing tab", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
@@ -307,8 +285,6 @@ describe("switchTab", () => {
 	});
 });
 
-// ─── renameTab ──────────────────────────────────────────────────────────────
-
 describe("renameTab", () => {
 	it("renames an existing tab", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1", "old"));
@@ -322,8 +298,6 @@ describe("renameTab", () => {
 		expect(terminalState.tabs.size).toBe(0);
 	});
 });
-
-// ─── getScrollback / getScrollbackSize ──────────────────────────────────────
 
 describe("getScrollback and getScrollbackSize", () => {
 	it("returns empty array for unknown pty", () => {
@@ -341,8 +315,6 @@ describe("getScrollback and getScrollbackSize", () => {
 	});
 });
 
-// ─── destroyAll ─────────────────────────────────────────────────────────────
-
 describe("destroyAll", () => {
 	it("clears all terminal state", () => {
 		handlePtyCreated(ptyCreatedMsg("pty1"));
@@ -354,8 +326,6 @@ describe("destroyAll", () => {
 		expect(getScrollback("pty1")).toEqual([]);
 	});
 });
-
-// ─── Tab number reuse ──────────────────────────────────────────────────────
 
 describe("tab number reuse", () => {
 	it("reuses lowest available number when a tab is closed", () => {
@@ -440,8 +410,6 @@ describe("tab number reuse", () => {
 		expect(terminalState.tabs.get("pty3")?.title).toBe("Terminal 1");
 	});
 });
-
-// ─── handlePtyList ──────────────────────────────────────────────────────────
 
 describe("handlePtyList", () => {
 	it("adds tabs from server PTY list", () => {
@@ -552,8 +520,6 @@ describe("handlePtyList", () => {
 	});
 });
 
-// ─── togglePanel ─────────────────────────────────────────────────────────────
-
 describe("togglePanel", () => {
 	it("opens the panel", () => {
 		expect(terminalState.panelOpen).toBe(false);
@@ -576,8 +542,6 @@ describe("togglePanel", () => {
 	});
 });
 
-// ─── openPanel / closePanel ──────────────────────────────────────────────────
-
 describe("openPanel / closePanel", () => {
 	it("openPanel sets panelOpen to true", () => {
 		openPanel();
@@ -590,8 +554,6 @@ describe("openPanel / closePanel", () => {
 		expect(terminalState.panelOpen).toBe(false);
 	});
 });
-
-// ─── The split ──────────────────────────────────────────────────────────────
 
 /** A pty_list row as the server sends it. */
 function ptyRow(id: string, status: "running" | "exited" = "running") {

@@ -1,4 +1,3 @@
-// ─── SW navigation listener + session navigation callback tests ─────────────
 // Tests initSWMessageListener(), onNavigateToSession(), and
 // clearNavigateToSession() from ws-notifications.ts.
 //
@@ -7,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── Module mocks (must be declared before importing ws-notifications) ──────
+// Module mocks (must be declared before importing ws-notifications)
 
 const getCurrentSlugMock = vi.fn(() => "test-project");
 const navigateMock = vi.fn();
@@ -41,8 +40,6 @@ vi.mock("../../../src/lib/notification-content.js", () => ({
 	notificationContent: vi.fn(() => null),
 }));
 
-// ─── navigator.serviceWorker mock ───────────────────────────────────────────
-
 let messageListeners: Array<(event: unknown) => void> = [];
 const addEventListenerMock = vi.fn(
 	(type: string, fn: (event: unknown) => void) => {
@@ -56,8 +53,6 @@ vi.stubGlobal("navigator", {
 	},
 });
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Simulate the SW posting a message to the client. */
 function postSWMessage(data: Record<string, unknown>): void {
 	for (const fn of messageListeners) {
@@ -67,8 +62,6 @@ function postSWMessage(data: Record<string, unknown>): void {
 
 type WSNotificationsModule =
 	typeof import("../../../src/lib/frontend/stores/ws-notifications.js");
-
-// ─── Setup / Teardown ───────────────────────────────────────────────────────
 
 beforeEach(() => {
 	vi.resetModules();
@@ -81,8 +74,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.restoreAllMocks();
 });
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("SW navigation listener", () => {
 	it("registers a message listener on navigator.serviceWorker", async () => {

@@ -1126,7 +1126,7 @@ type _ClaudeOptionsSchemaFitsSdkOwnedFields = AssertExtends<
 	>
 >;
 
-// ── Capability-probe initialization result (decode-with-warn boundary) ──
+// Capability-probe initialization result (decode-with-warn boundary)
 // The capabilities probe consumes query.initializationResult() to build the
 // model/command/agent catalogs. Unlike the streaming message boundary this is
 // best-effort — an empty catalog is survivable and must NOT fail-close the

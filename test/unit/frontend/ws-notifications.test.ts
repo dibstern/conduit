@@ -1,4 +1,3 @@
-// ─── ws-notifications — _pushActive initialization ──────────────────────────
 // Regression test: _pushActive must start as `false` on every page load,
 // regardless of persisted settings. The push subscription is not automatically
 // re-established — it requires the user to toggle it in NotifSettings, which
@@ -9,8 +8,6 @@
 // browser nor push desktop notifications fire.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-// ─── localStorage mock ──────────────────────────────────────────────────────
 
 function createLocalStorageMock(initial?: Record<string, string>) {
 	let store: Record<string, string> = { ...initial };
@@ -31,8 +28,6 @@ function createLocalStorageMock(initial?: Record<string, string>) {
 		key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
 	};
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("_pushActive initialization", () => {
 	beforeEach(() => {

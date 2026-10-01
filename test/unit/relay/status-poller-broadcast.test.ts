@@ -1,4 +1,3 @@
-// ─── Status Poller → Browser Processing Status ──────────────────────────────
 // Verifies that when the status poller detects a session transition (idle→busy
 // or busy→idle), the relay sends `{ type: "status", status: "processing" }`
 // and `{ type: "done" }` to browser clients viewing that session.
@@ -30,8 +29,6 @@ import {
 } from "../../../src/lib/relay/relay-stack.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
-
-// ── Mock OpenCode Server with controllable session status ────────────────────
 
 interface MockOpenCode {
 	server: Server;
@@ -219,8 +216,6 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 	};
 }
 
-// ── Harness ──────────────────────────────────────────────────────────────────
-
 interface TestHarness {
 	relay: ProjectRelay;
 	mock: MockOpenCode;
@@ -337,8 +332,6 @@ async function createTestHarness(): Promise<TestHarness> {
 		},
 	};
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("Status poller → browser processing/done transitions", () => {
 	let harness: TestHarness;

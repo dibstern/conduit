@@ -1,5 +1,4 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-// ─── Permission & Question Handlers ──────────────────────────────────────────
 //
 // Questions use a bridge-less design: the frontend receives the question's
 // `que_` ID via the `ask_user` WebSocket message and sends it back with the

@@ -1,4 +1,3 @@
-// ─── Project Registry ───────────────────────────────────────────────────────
 // Single source of truth for project lifecycle in the daemon. Replaces the
 // three independent data structures (projects, projectRelays, pendingRelaySlugs)
 // with a typed discriminated union.
@@ -6,7 +5,6 @@
 import { Data } from "effect";
 import type { ProjectRelay } from "../relay/relay-stack.js";
 import type { RelayMessage, StoredProject } from "../types.js";
-// ─── Discriminated union ────────────────────────────────────────────────────
 
 export interface ProjectRegistering {
 	readonly status: "registering";
@@ -26,8 +24,6 @@ export interface ProjectError {
 }
 
 export type ProjectEntry = ProjectRegistering | ProjectReady | ProjectError;
-
-// ─── Typed domain errors ───────────────────────────────────────────────────
 
 export class ProjectRegistryAlreadyRegistered extends Data.TaggedError(
 	"ProjectRegistryAlreadyRegistered",
@@ -137,8 +133,6 @@ export const projectRelayNotReady = (slug: string) =>
 		message: `Project "${slug}" is not ready`,
 	});
 
-// ─── Callbacks ──────────────────────────────────────────────────────────────
-
 /** Callback signatures for each ProjectRegistry event type. */
 export interface ProjectRegistryCallbacks {
 	project_added: (slug: string, project: StoredProject) => void;
@@ -147,8 +141,6 @@ export interface ProjectRegistryCallbacks {
 	project_updated: (slug: string, project: StoredProject) => void;
 	project_removed: (slug: string) => void;
 }
-
-// ─── Registry class ─────────────────────────────────────────────────────────
 
 export class ProjectRegistry {
 	private readonly entries = new Map<string, ProjectEntry>();
@@ -198,8 +190,6 @@ export class ProjectRegistry {
 			(cb as (...a: unknown[]) => void)(...args);
 		}
 	}
-
-	// ── Queries ──────────────────────────────────────────────────────────
 
 	get(slug: string): ProjectEntry | undefined {
 		const entry = this.entries.get(slug);
@@ -258,7 +248,7 @@ export class ProjectRegistry {
 		return this.entries.size;
 	}
 
-	// ── Cross-relay operations (D4) ─────────────────────────────────────
+	// Cross-relay operations (D4)
 
 	/** Broadcast a message to all connected browser clients across all ready relays. */
 	broadcastToAll(message: RelayMessage): void {
@@ -274,8 +264,6 @@ export class ProjectRegistry {
 	evictOldestSessions(_maxPerRelay: number): string[] {
 		return [];
 	}
-
-	// ── Lifecycle ────────────────────────────────────────────────────────
 
 	add(
 		project: StoredProject,
@@ -498,8 +486,6 @@ export class ProjectRegistry {
 		this.notify("project_updated", slug, updatedProject);
 	}
 
-	// ── WS upgrade helper ───────────────────────────────────────────────
-
 	waitForRelay(
 		slug: string,
 		timeoutMs = 10_000,
@@ -568,8 +554,6 @@ export class ProjectRegistry {
 		return promise;
 	}
 
-	// ── Teardown ────────────────────────────────────────────────────────
-
 	async stopAll(): Promise<void> {
 		const stops: Promise<void>[] = [];
 
@@ -594,8 +578,6 @@ export class ProjectRegistry {
 		await Promise.allSettled([...this.pending]);
 		this.pending.clear();
 	}
-
-	// ── Private helpers ─────────────────────────────────────────────────
 
 	private trackPromise(promise: Promise<unknown>): void {
 		this.pending.add(promise);

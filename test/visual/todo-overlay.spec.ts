@@ -1,10 +1,7 @@
-// ─── TodoOverlay / TodoHeader / TodoProgressBar / TodoItemRow Tests ──────────
 // Playwright tests that navigate to Storybook story iframes and assert
 // component behavior for the todo overlay and its sub-components.
 
 import { expect, test } from "@playwright/test";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const STORY_URL = (id: string) => `/iframe.html?id=${id}&viewMode=story`;
 
@@ -15,8 +12,6 @@ async function navigateToStory(
 	await page.goto(STORY_URL(storyId), { waitUntil: "domcontentloaded" });
 	await expect(page.locator(".todo-overlay")).toBeVisible();
 }
-
-// ─── TodoHeader ──────────────────────────────────────────────────────────────
 
 test.describe("TodoHeader", () => {
 	test("shows Tasks label", async ({ page }) => {
@@ -101,8 +96,6 @@ test.describe("TodoHeader", () => {
 	});
 });
 
-// ─── TodoProgressBar ─────────────────────────────────────────────────────────
-
 test.describe("TodoProgressBar", () => {
 	test("shows 0% width for all pending", async ({ page }) => {
 		await navigateToStory(page, "todo-todooverlay--all-pending");
@@ -124,8 +117,6 @@ test.describe("TodoProgressBar", () => {
 		await expect(fill).toHaveAttribute("style", /width: 100%/);
 	});
 });
-
-// ─── TodoItemRow ─────────────────────────────────────────────────────────────
 
 test.describe("TodoItemRow", () => {
 	test("renders all items with correct subjects", async ({ page }) => {

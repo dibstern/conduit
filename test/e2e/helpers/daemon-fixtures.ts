@@ -1,4 +1,3 @@
-// ─── Daemon Playwright Fixtures ──────────────────────────────────────────────
 // Custom test fixtures providing a real Daemon E2E harness to specs.
 // Each test gets a daemon. Keeping the fixture test-scoped lets Playwright mark
 // tests skipped when the optional live OpenCode dependency is unavailable.

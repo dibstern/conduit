@@ -1,11 +1,8 @@
-// ─── WebSocket Message Router ──────────────────────────────────
 // Pure logic for routing incoming WebSocket messages to correct handlers,
 // client tracking, broadcast targeting, and state snapshot building.
 // Deliberately IO-free: no actual WebSocket I/O — just routing decisions.
 
 import type { RelayMessage } from "../types.js";
-
-// ─── Message types from browser ──────────────────────────────────────────────
 
 export type IncomingMessageType = "pty_input";
 
@@ -26,8 +23,6 @@ export interface ErrorResult {
 	code: string;
 	message: string;
 }
-
-// ─── Message routing ─────────────────────────────────────────────────────────
 
 /**
  * Parse and validate an incoming WebSocket message.
@@ -81,8 +76,6 @@ export function isRouteError(
 	return "type" in result && (result as ErrorResult).type === "error";
 }
 
-// ─── Client tracking ─────────────────────────────────────────────────────────
-
 export interface ClientTracker {
 	addClient(clientId: string): number;
 	removeClient(clientId: string): number;
@@ -127,8 +120,6 @@ export function createClientTracker(): ClientTracker {
 		},
 	};
 }
-
-// ─── Client count message factory ────────────────────────────────────────────
 
 export function createClientCountMessage(count: number): RelayMessage {
 	return { type: "client_count", count };

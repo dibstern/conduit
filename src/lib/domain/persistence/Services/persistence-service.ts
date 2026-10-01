@@ -1,4 +1,3 @@
-// ─── Effect Persistence Service ──────────────────────────────────────────────
 // Thin wrapper around @effect/sql-sqlite-node providing schema migration,
 // health checking and transaction helpers for the relay event store.
 

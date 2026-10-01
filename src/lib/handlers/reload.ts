@@ -1,4 +1,3 @@
-// ─── Reload Handler ──────────────────────────────────────────────────────────
 // User-facing action: end the provider's session-level state so the next
 // prompt picks up newly-added skills/commands from disk. Also refreshes the
 // models and commands lists so the client's command palette stays current.

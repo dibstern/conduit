@@ -1,5 +1,3 @@
-// ─── Unit Tests: SessionRegistry ──────────────────────────────────────────────
-
 import { describe, expect, it } from "vitest";
 import { SessionRegistry } from "../../../src/lib/session/session-registry.js";
 

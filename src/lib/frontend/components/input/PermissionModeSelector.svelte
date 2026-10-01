@@ -1,4 +1,4 @@
-<!-- ─── Permission Mode (Approvals) Picker ───────────────────────────────── -->
+<!-- Permission Mode (Approvals) Picker -->
 <!-- Pill + dropdown for the session's approval mode.                         -->
 <!-- Amber tint when not "ask" so elevated permissions are visibly active.    -->
 
@@ -16,11 +16,7 @@
 	import type { SessionPermissionMode } from "../../types.js";
 	import { PERMISSION_MODES } from "../../permission-modes.js";
 
-	// ─── State ──────────────────────────────────────────────────────────────
-
 	let autoNormalizationProvider: string | null = null;
-
-	// ─── Derived ────────────────────────────────────────────────────────────
 
 	const currentMode = $derived(discoveryState.permissionMode);
 	const currentLabel = $derived(
@@ -38,8 +34,6 @@
 	const isElevated = $derived(
 		PERMISSION_MODES.find((m) => m.mode === currentMode)?.elevated === true,
 	);
-
-	// ─── Handlers ───────────────────────────────────────────────────────────
 
 	/** Always re-assert to the server, even when the pill already shows this
 	 *  mode. The server keeps the mode in memory only, so a daemon restart

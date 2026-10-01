@@ -1,4 +1,3 @@
-// ─── Daemon Smoke E2E Tests ──────────────────────────────────────────────────
 // Full integration tests using a real Daemon pointed at a real OpenCode server.
 // Verifies: SPA loading, WS connection, instance_list delivery, health auth,
 // and that the "No healthy OpenCode instances" banner does not appear.

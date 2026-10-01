@@ -1,4 +1,4 @@
-// ─── SSE Stream (Effect-based) ───────────────────────────────────────────────
+// SSE Stream (Effect-based)
 // SDK-backed SSE consumer using api.event.subscribe().
 // Internally powered by an Effect fiber running an explicit reconnect loop.
 // Conduit is the single retry owner: the SDK's internal SSE retry is disabled
@@ -9,8 +9,6 @@ import { Duration, Effect, Fiber } from "effect";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
 import { calculateBackoffDelay } from "./sse-backoff.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface SSEStreamOptions {
 	api: {
@@ -65,8 +63,6 @@ export interface SSEStreamLifecycle {
 export type SSEStreamPort = SSEStreamEvents &
 	SSEStreamHealth &
 	SSEStreamLifecycle;
-
-// ─── SSE Stream ──────────────────────────────────────────────────────────────
 
 export class SSEStream implements SSEStreamPort {
 	private readonly api: SSEStreamOptions["api"];
@@ -181,8 +177,6 @@ export class SSEStream implements SSEStreamPort {
 			this.awaitPendingPromisesEffect(),
 		);
 	}
-
-	// ─── Internal ──────────────────────────────────────────────────────────
 
 	private isStale(): boolean {
 		if (!this.connected) return false;

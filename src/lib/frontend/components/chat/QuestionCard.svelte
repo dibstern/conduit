@@ -1,4 +1,3 @@
-<!-- ─── Question Card ──────────────────────────────────────────────────────── -->
 <!-- Displays an interactive question form with radio/checkbox/custom input. -->
 <!-- Preserves .question-card class and [data-question-tool-id] for E2E. -->
 
@@ -33,7 +32,6 @@
 		synthetic?: boolean | undefined;
 	} = $props();
 
-	// ─── Local state ────────────────────────────────────────────────────────
 	let resolved = $state<"submitted" | "submitting" | "skipped" | null>(null);
 
 	/** Error message from the server when answer delivery fails. */
@@ -54,7 +52,6 @@
 	// For single-select: track which option is selected per question
 	let singleSelected = $state(new Map<number, string>());
 
-	// ─── Watch for server errors on this question ────────────────────────────
 	$effect(() => {
 		const err = permissionsState.questionErrors.get(request.toolId);
 		if (err) {
@@ -69,12 +66,8 @@
 		}
 	});
 
-	// ─── Derived ─────────────────────────────────────────────────────────────
-
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
 	const canSkip = $derived(request.providerId !== "claude");
-
-	// ─── Helpers ─────────────────────────────────────────────────────────────
 
 	function rebuildSelections() {
 		const next = new Map<number, string>();

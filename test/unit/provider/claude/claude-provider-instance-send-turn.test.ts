@@ -117,8 +117,6 @@ async function waitForAssertion(assertion: () => void): Promise<void> {
 	await vi.waitFor(assertion, { timeout: 500 });
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 describe("ClaudeProviderInstance.sendTurn()", () => {
 	let workspace: string;
 	let queryFactorySpy: ReturnType<typeof vi.fn>;
@@ -131,8 +129,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
 	});
-
-	// ── Test 1: First turn creates a new session ──────────────────────────
 
 	it("first turn creates a new session, calls query(), and resolves with TurnResult", async () => {
 		const resultMsg = makeSuccessResult();
@@ -353,8 +349,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(sink1.requestPermission).not.toHaveBeenCalled();
 		expect(sink2.requestPermission).toHaveBeenCalledTimes(1);
 	});
-
-	// ── Test 2: Subsequent turn enqueues into existing session ────────────
 
 	it("subsequent turn enqueues into existing session without creating new query()", async () => {
 		// First result resolves the first turn; second result resolves the second.
@@ -2059,8 +2053,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	// ── Test 3: Resume uses SDK resume option ─────────────────────────────
-
 	it("resume uses SDK resume option when providerState has resumeSessionId", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
@@ -2086,8 +2078,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			"prev-sdk-session-123",
 		);
 	});
-
-	// ── Test 4: Abort signal propagates to SDK ────────────────────────────
 
 	it("abort signal propagates to SDK options", async () => {
 		const resultMsg = makeSuccessResult();
@@ -2630,8 +2620,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 	});
 
-	// ── Test 5: Stream consumer translates all messages ───────────────────
-
 	it("stream consumer translates all messages through event sink", async () => {
 		const systemMsg = {
 			type: "system" as const,
@@ -2687,8 +2675,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(eventTypes).toContain("session.status");
 		expect(eventTypes).toContain("turn.completed");
 	});
-
-	// ── Test 6: Stream consumer handles errors ────────────────────────────
 
 	it("stream consumer handles errors and resolves with error status", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
@@ -2864,8 +2850,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(queryFactorySpy).not.toHaveBeenCalled();
 	});
 
-	// ── Test 6b: SDK error result yields TurnResult with error details ───────
-
 	it("SDK error result yields TurnResult with status error and error details", async () => {
 		const errorResult = makeErrorResult();
 		const mockQuery = createMockQuery([errorResult]);
@@ -2894,7 +2878,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.durationMs).toBe(500);
 	});
 
-	// ── Test 7: Concurrent sendTurn() for same session is serialized ──────
+	// Test 7: Concurrent sendTurn() for same session is serialized
 
 	it("concurrent sendTurn() for same session creates only one query()", async () => {
 		// Use a delayed query so both sendTurn() calls overlap
@@ -3021,7 +3005,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(second).toMatchObject({ _tag: "Left" });
 	});
 
-	// ── Test 8: sendTurn() without persistence (eventSink only) ───────────
+	// Test 8: sendTurn() without persistence (eventSink only)
 
 	it("sendTurn() works with eventSink as only required dep", async () => {
 		const resultMsg = makeSuccessResult();
@@ -3045,8 +3029,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(result.providerStateUpdates).toBeDefined();
 		expect(result.providerStateUpdates.length).toBeGreaterThan(0);
 	});
-
-	// ── Test 9: Stream ends without result message ────────────────────────
 
 	it("rejects when SDK stream ends without result message", async () => {
 		// Query that yields a non-result message then closes
@@ -3085,8 +3067,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		).rejects.toThrow("SDK stream ended without result");
 	});
 
-	// ── Test: canUseTool is wired to SDK options ──────────────────────────
-
 	it("passes canUseTool callback to SDK query options", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
@@ -3113,8 +3093,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(options["canUseTool"]).toBeDefined();
 		expect(typeof options["canUseTool"]).toBe("function");
 	});
-
-	// ── Group 1: Multi-Turn Stream Consumer ──────────────────────────────
 
 	it("second turn resolves with correct TurnResult (not first turn's)", async () => {
 		const result1 = makeSuccessResult({
@@ -3447,8 +3425,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
 	});
 
-	// ── Group 2: Stream Consumer Error Edge Cases ────────────────────────
-
 	it("translateError throwing does not prevent resolveErrorTurn", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
 		const gen = (async function* () {
@@ -3664,8 +3640,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			],
 		).toBe("sdk-resume-after-stop");
 	});
-
-	// ── Group 3: Stale resume cursor fallback ────────────────────────────
 
 	it("clears resumeSessionId when stream error matches 'Invalid session'", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding

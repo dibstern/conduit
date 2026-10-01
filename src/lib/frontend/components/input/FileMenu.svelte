@@ -1,4 +1,3 @@
-<!-- ─── File Menu ──────────────────────────────────────────────────────────── -->
 <!-- @-mention file autocomplete popup. Filters project files by fuzzy match, -->
 <!-- supports keyboard navigation (ArrowUp/Down, Enter, Escape) and mouse selection. -->
 
@@ -6,8 +5,6 @@
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
-
-	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
 		listboxId,
@@ -29,18 +26,12 @@
 		activeIndex?: number | undefined;
 	} = $props();
 
-	// ─── Derived ────────────────────────────────────────────────────────────────
-
 	const isVisible = $derived(visible && (entries.length > 0 || loading));
-
-	// ─── Reset active index when entries change ─────────────────────────────────
 
 	$effect(() => {
 		void entries.length;
 		activeIndex = 0;
 	});
-
-	// ─── Keyboard handling ──────────────────────────────────────────────────────
 
 	export function handleKeydown(e: KeyboardEvent): boolean {
 		if (!isVisible) return false;
@@ -85,8 +76,6 @@
 				return false;
 		}
 	}
-
-	// ─── Helpers ────────────────────────────────────────────────────────────────
 
 	function isDirectory(path: string): boolean {
 		return path.endsWith("/");

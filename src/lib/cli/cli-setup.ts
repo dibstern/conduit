@@ -1,4 +1,3 @@
-// ─── First-Run Setup Flow ───────────────────────────────────────
 // Interactive CLI setup wizard for conduit. Prompts for port, PIN,
 // keep-awake, and project restoration. Ported from claude-relay/bin/cli.js
 // lines 1109-1166 with OpenCode-specific adaptations.
@@ -21,8 +20,6 @@ import {
 import type { Writable } from "./terminal-render.js";
 import { a, isBasicTerm, log, sym } from "./terminal-render.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 export interface SetupResult {
 	port: number;
 	pin: string | null;
@@ -44,8 +41,6 @@ export interface SetupOptions {
 		lastUsed: number;
 	}>;
 }
-
-// ─── Default Helpers ─────────────────────────────────────────────────────────
 
 /** Default port-free check: try to bind and release. */
 async function defaultIsPortFree(port: number): Promise<boolean> {
@@ -80,8 +75,6 @@ function defaultGetRecentProjects(): Array<{
 		return [];
 	}
 }
-
-// ─── Logo ────────────────────────────────────────────────────────────────────
 
 /** Number of block-grid columns in the brand underline. */
 const GRID_COLS = 10;
@@ -184,8 +177,6 @@ export function printLogo(stdout: Writable): void {
 
 	stdout.write("\n");
 }
-
-// ─── Setup Flow ──────────────────────────────────────────────────────────────
 
 /**
  * Run the first-run setup wizard.
@@ -292,8 +283,6 @@ export async function runSetup(opts: SetupOptions): Promise<SetupResult> {
 
 	return { port, pin, keepAwake, restoredProjects };
 }
-
-// ─── Internal Helpers ────────────────────────────────────────────────────────
 
 /** Port prompt with validation and retry loop. */
 async function askPort(

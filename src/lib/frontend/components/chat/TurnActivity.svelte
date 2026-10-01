@@ -1,4 +1,3 @@
-<!-- ─── Turn Activity ───────────────────────────────────────────────────────── -->
 <!-- Everything the model did for one prompt, collapsed to two lines: a summary   -->
 <!-- sentence over a strip where each segment is a step (colour = kind of work,    -->
 <!-- width = how long it took), with the turn's bill on the strip's line.          -->

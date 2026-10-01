@@ -1,5 +1,4 @@
 import { InstanceMgmtTag } from "./management-service.js";
-// ─── IPC Effect Handlers ─────────────────────────────────────────────────────
 // Effect-returning handlers for each IPC command. Each handler:
 // 1. Receives the decoded tagged request
 // 2. Accesses services via `yield* Tag`
@@ -49,8 +48,6 @@ import {
 } from "./daemon-config-ref.js";
 import { DaemonStateTag } from "./daemon-state.js";
 
-// ─── Shared dependency types ─────────────────────────────────────────────────
-
 /** Dependencies needed for persistConfig calls. */
 type PersistDeps = ConfigPersistenceTag;
 
@@ -87,8 +84,6 @@ const tryInstanceMgmtPromise = <A>(
 		try: tryOperation,
 		catch: (cause) => failInstanceMgmtOperation(operation, cause),
 	});
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const applyRestartConfig = (
 	state: import("./daemon-state.js").DaemonState,
@@ -141,8 +136,6 @@ const applyRestartRuntimeConfig = (
 			: {}),
 	};
 };
-
-// ─── Project handlers ────────────────────────────────────────────────────────
 
 export const handleAddProject = (
 	request: AddProject,
@@ -221,8 +214,6 @@ export const handleSetProjectTitle = (
 		yield* requestConfigSave;
 		return { ok: true };
 	});
-
-// ─── State handlers ──────────────────────────────────────────────────────────
 
 export const handleSetPin = (
 	request: SetPin,
@@ -379,8 +370,6 @@ export const handleGetStatus = (
 			})),
 		};
 	});
-
-// ─── Instance handlers ──────────────────────────────────────────────────────
 
 export const handleInstanceList = (
 	_request: InstanceList,
@@ -551,8 +540,6 @@ export const handleInstanceUpdate = (
 		);
 	});
 
-// ─── Session override handlers ──────────────────────────────────────────────
-
 export const handleSetAgent = (
 	request: SetAgent,
 ): Effect.Effect<IPCResponse, never, OverridesStateTag> =>
@@ -573,8 +560,6 @@ export const handleSetModel = (
 		});
 		return { ok: true };
 	});
-
-// ─── Restart handler ─────────────────────────────────────────────────────────
 
 export const handleRestartWithConfig = (
 	request: RestartWithConfig,

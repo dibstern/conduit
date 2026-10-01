@@ -1,4 +1,3 @@
-// ─── Handler Tier Contract Tests ────────────────────────────────────────────
 // Verifies that each handler only touches its declared tier fields
 // (Activity or Messages). Catches silent tier leaks — e.g., a handler
 // that should only write Activity accidentally touching Messages.
@@ -24,8 +23,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
-
-// ─── Snapshot helpers ──────────────────────────────────────────────────────
 
 /** Shallow snapshot of a SessionActivity, converting Sets to plain arrays
  *  for stable equality comparison. */
@@ -60,7 +57,6 @@ function snapMessages(m: SessionMessages) {
 	};
 }
 
-// ─── Per-session tiers ─────────────────────────────────────────────────────
 let ta: SessionActivity;
 let tm: SessionMessages;
 
@@ -75,8 +71,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 });
-
-// ─── handleStatus ──────────────────────────────────────────────────────────
 
 describe("handleStatus — tier contract", () => {
 	it("should modify activity tier (phase → processing)", () => {
@@ -110,8 +104,6 @@ describe("handleStatus — tier contract", () => {
 	});
 });
 
-// ─── phaseToIdle ───────────────────────────────────────────────────────────
-
 describe("phaseToIdle — tier contract", () => {
 	it("should write phase to activity tier", () => {
 		phaseToProcessing(ta);
@@ -127,8 +119,6 @@ describe("phaseToIdle — tier contract", () => {
 	});
 });
 
-// ─── phaseToProcessing ─────────────────────────────────────────────────────
-
 describe("phaseToProcessing — tier contract", () => {
 	it("should write phase to activity tier", () => {
 		phaseToProcessing(ta);
@@ -143,8 +133,6 @@ describe("phaseToProcessing — tier contract", () => {
 	});
 });
 
-// ─── phaseToStreaming ──────────────────────────────────────────────────────
-
 describe("phaseToStreaming — tier contract", () => {
 	it("should write phase to activity tier", () => {
 		phaseToStreaming(ta);
@@ -158,8 +146,6 @@ describe("phaseToStreaming — tier contract", () => {
 		expect(after).toEqual(before);
 	});
 });
-
-// ─── advanceTurnIfNewMessage ───────────────────────────────────────────────
 
 describe("advanceTurnIfNewMessage — tier contract", () => {
 	it("should modify activity.seenMessageIds on first call with a new messageId", () => {
@@ -183,8 +169,6 @@ describe("advanceTurnIfNewMessage — tier contract", () => {
 		expect(snapMessages(tm)).toEqual(beforeMessages);
 	});
 });
-
-// ─── Cross-cutting: no unexpected tier field additions ─────────────────────
 
 describe("tier field completeness", () => {
 	it("snapActivity covers all SessionActivity keys from testActivity()", () => {

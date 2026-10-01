@@ -1,4 +1,3 @@
-// ─── AC1: SSE Event Shape Validation ──────────────────────────────────────
 // Validates that OpenCode's SSE events match our expected shapes.
 // Connects to both /global/event and /event streams.
 

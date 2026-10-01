@@ -1,4 +1,3 @@
-// ─── Integration: Discovery Endpoints Data Quality ──────────────────────────
 // Verifies that the data returned by discovery endpoints (agents, models,
 // commands, sessions, files) contains the expected fields and shapes.
 // Goes beyond "does it respond" to validate the actual data quality.

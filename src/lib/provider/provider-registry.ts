@@ -1,5 +1,4 @@
 // src/lib/provider/provider-registry.ts
-// ─── Provider Registry ─────────────────────────────────────────────────────
 // Maps provider IDs to scoped provider instances. The OrchestrationEngine uses
 // this to route commands to the correct provider instance.
 

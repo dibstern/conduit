@@ -1,4 +1,3 @@
-<!-- ─── Settings Panel ────────────────────────────────────────────────────── -->
 <!-- Modal settings panel with tabbed navigation. Uses the 68-mockup card   -->
 <!-- design. Tabs: Notifications, Appearance, Agents & Models, Claude,      -->
 <!-- Instances, Debug.                                                      -->

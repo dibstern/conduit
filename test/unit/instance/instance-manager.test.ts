@@ -1,4 +1,3 @@
-// ─── Tests: InstanceManager ──────────────────────────────────────────────────
 //
 // Tests cover:
 // T1: addInstance — creates instance, rejects duplicates, rejects max exceeded
@@ -23,8 +22,6 @@ import type {
 	OpenCodeInstance,
 } from "../../../src/lib/types.js";
 import { partialFake } from "../../helpers/partial-fake.js";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function managedConfig(
 	overrides: Partial<InstanceConfig> = {},
@@ -143,8 +140,6 @@ async function captureRejected(promise: Promise<unknown>): Promise<unknown> {
 	return undefined;
 }
 
-// ─── Constructor ──────────────────────────────────────────────────────────────
-
 describe("InstanceManager", () => {
 	describe("constructor", () => {
 		it("uses default maxInstances of 5", () => {
@@ -170,8 +165,6 @@ describe("InstanceManager", () => {
 			);
 		});
 	});
-
-	// ─── addInstance ────────────────────────────────────────────────────────
 
 	describe("addInstance", () => {
 		it("creates an instance with status 'stopped'", () => {
@@ -277,8 +270,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── getInstances / getInstance ─────────────────────────────────────────
-
 	describe("getInstances", () => {
 		it("returns empty array when no instances", () => {
 			const mgr = new InstanceManager();
@@ -310,8 +301,6 @@ describe("InstanceManager", () => {
 			expect(mgr.getInstance("nope")).toBeUndefined();
 		});
 	});
-
-	// ─── removeInstance ─────────────────────────────────────────────────────
 
 	describe("removeInstance", () => {
 		it("removes an existing instance", () => {
@@ -347,8 +336,6 @@ describe("InstanceManager", () => {
 			expect(mgr.getInstance("dev")).toBeDefined();
 		});
 	});
-
-	// ─── updateInstance ─────────────────────────────────────────────────────
 
 	describe("updateInstance", () => {
 		it("updates instance name", () => {
@@ -467,8 +454,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── getInstanceUrl ─────────────────────────────────────────────────────
-
 	describe("getInstanceUrl", () => {
 		it("returns http://localhost:{port} for managed instances", () => {
 			const mgr = new InstanceManager();
@@ -513,8 +498,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── stopInstance ───────────────────────────────────────────────────────
-
 	describe("stopInstance", () => {
 		it("sets status to 'stopped'", () => {
 			const mgr = new InstanceManager();
@@ -557,8 +540,6 @@ describe("InstanceManager", () => {
 			expect(inst.status).toBe("stopped");
 		});
 	});
-
-	// ─── stopAll ────────────────────────────────────────────────────────────
 
 	describe("stopAll", () => {
 		it("stops all non-stopped instances", () => {
@@ -656,8 +637,6 @@ describe("InstanceManager", () => {
 			vi.useRealTimers();
 		});
 	});
-
-	// ─── startInstance ──────────────────────────────────────────────────────
 
 	describe("startInstance", () => {
 		afterEach(() => {
@@ -793,8 +772,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── stopInstance with process ──────────────────────────────────────────
-
 	describe("stopInstance with process", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
@@ -846,8 +823,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── stopAll with processes ────────────────────────────────────────────
-
 	describe("stopAll with processes", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
@@ -885,8 +860,6 @@ describe("InstanceManager", () => {
 			expect(b.status).toBe("stopped");
 		});
 	});
-
-	// ─── Events ─────────────────────────────────────────────────────────────
 
 	describe("events", () => {
 		it("emits 'instance_added' on addInstance", () => {
@@ -970,8 +943,6 @@ describe("InstanceManager", () => {
 			expect(handler).not.toHaveBeenCalled();
 		});
 	});
-
-	// ─── Crash Recovery ────────────────────────────────────────────────────
 
 	describe("crash recovery", () => {
 		afterEach(() => {
@@ -1472,8 +1443,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── removeInstance with running process ─────────────────────────────
-
 	describe("removeInstance with running process", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
@@ -1548,8 +1517,6 @@ describe("InstanceManager", () => {
 			vi.useRealTimers();
 		});
 	});
-
-	// ─── startInstance edge cases ─────────────────────────────────────────
 
 	describe("startInstance edge cases", () => {
 		afterEach(() => {
@@ -1634,8 +1601,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── getExternalUrl ──────────────────────────────────────────────────
-
 	describe("getExternalUrl", () => {
 		it("returns URL for external instance", () => {
 			const mgr = new InstanceManager();
@@ -1650,7 +1615,7 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── Fix #4: Race — process exits during startInstance's async continuation ─
+	// Fix #4: Race — process exits during startInstance's async continuation
 
 	describe("fix #4: race guard after health check", () => {
 		afterEach(() => {
@@ -1837,8 +1802,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── Fix #5: Off-by-one in restart rate-limiting ─────────────────────────
-
 	describe("fix #5: >= maxRestartsPerWindow rate limit", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
@@ -1917,8 +1880,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── Fix #7: defaultSpawner wraps in Promise for 'spawn'/'error' events ──
-
 	describe("fix #7: defaultSpawner error handling", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
@@ -1955,8 +1916,6 @@ describe("InstanceManager", () => {
 			expect(spawnOk.pid).toBe(42000);
 		});
 	});
-
-	// ─── Fix #8: Health polling stops when status becomes "unhealthy" ─────────
 
 	describe("fix #8: health polling stops on unhealthy status", () => {
 		afterEach(() => {
@@ -2081,8 +2040,6 @@ describe("InstanceManager", () => {
 		});
 	});
 
-	// ─── Bug C-1: Health poll self-terminates when status is "starting" ──────
-
 	describe("Bug C-1: managed instance transitions from starting to healthy via polling", () => {
 		afterEach(() => {
 			vi.restoreAllMocks();
@@ -2163,8 +2120,6 @@ describe("InstanceManager", () => {
 			mgr.stopAll();
 		});
 	});
-
-	// ─── Health checker with auth-required OpenCode-compatible server ────────
 
 	describe("health checker with auth-required server", () => {
 		it("default health checker fails when server requires auth", async () => {
@@ -2256,8 +2211,6 @@ describe("InstanceManager", () => {
 			}
 		});
 	});
-
-	// ─── Bug C-2: Unmanaged instance never gets health-polled ────────────────
 
 	describe("Bug C-2: unmanaged instance health polling", () => {
 		afterEach(() => {

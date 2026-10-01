@@ -1,4 +1,3 @@
-// ─── Payload Schemas ────────────────────────────────────────────────────────
 // Effect Schema definitions for every message type in PayloadMap.
 // Used by dispatchMessageEffect (in index.ts) for runtime validation at the
 // WebSocket dispatch boundary.

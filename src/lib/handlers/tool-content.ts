@@ -1,4 +1,3 @@
-// ─── Tool Content Handler ────────────────────────────────────────────────────
 // Returns full (pre-truncation) tool result content from the SQLite tool_content table.
 
 import { Effect } from "effect";

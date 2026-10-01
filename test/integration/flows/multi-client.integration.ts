@@ -1,4 +1,3 @@
-// ─── Integration: Multi-Client ────────────────────────────────────────────────
 // Verifies that multiple WebSocket clients can connect simultaneously and
 // that broadcasts, state changes, and disconnect isolation work correctly.
 

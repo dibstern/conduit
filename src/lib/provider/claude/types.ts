@@ -19,7 +19,6 @@ import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
-// ─── SDK Type Re-exports ──────────────────────────────────────────────────
 // Imported from the real Claude Agent SDK and re-exported so that internal
 // modules can import from "./types.js" without depending on the SDK directly.
 
@@ -52,7 +51,6 @@ import type {
 	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
-// ─── Stream Event Type ──────────────────────────────────────────────────
 // BetaRawMessageStreamEvent is not directly exported by the SDK, but we
 // can extract it from SDKPartialAssistantMessage. This is a discriminated
 // union with type: 'message_start' | 'message_delta' | 'message_stop' |
@@ -64,7 +62,6 @@ export type StreamEvent =
 	| SDKPartialAssistantMessage["event"]
 	| { readonly type: "ping" };
 
-// ─── System Message Subtypes ────────────────────────────────────────────
 // Multiple SDK types share `type: 'system'` but differ in `subtype`.
 // When `translate()` switches on `message.type === 'system'`, TypeScript
 // narrows to this union. Further narrowing on `subtype` is done inside
@@ -73,8 +70,6 @@ export type SDKSystemLike = Extract<
 	import("@anthropic-ai/claude-agent-sdk").SDKMessage,
 	{ type: "system" }
 >;
-
-// ─── Resume Cursor ─────────────────────────────────────────────────────────
 
 /**
  * Stored in a session's `provider_state` under the `claude` namespace.
@@ -86,8 +81,6 @@ export interface ClaudeResumeCursor {
 	readonly lastAssistantUuid?: string;
 	readonly turnCount: number;
 }
-
-// ─── Pending Approval / Question ───────────────────────────────────────────
 
 /**
  * An in-flight `canUseTool` callback waiting for a user decision.
@@ -115,8 +108,6 @@ export interface PendingQuestion {
 	): Effect.Effect<void, ClaudeAdapterError>;
 	reject(error: Error): Effect.Effect<void, ClaudeAdapterError>;
 }
-
-// ─── Tool In Flight ────────────────────────────────────────────────────────
 
 /**
  * Tracks a tool_use content block while it streams so that tool.running
@@ -152,8 +143,6 @@ export interface ClaudeSubagentLivePoller {
 	sessionReady: boolean;
 	active: boolean;
 }
-
-// ─── Session Context ───────────────────────────────────────────────────────
 
 /**
  * Per-session Claude state keyed by conduit sessionId. The Effect-owned Claude

@@ -1,4 +1,4 @@
-// ─── Push Notification Tests (Ticket 4.6) ─────────────────────────────────────
+// Push Notification Tests (Ticket 4.6)
 // Tests for PushNotificationManager: VAPID key management, subscription
 // lifecycle, push delivery for permission/completion/error events.
 
@@ -28,8 +28,6 @@ import {
 	type WebPushModule,
 } from "../../../src/lib/server/push.js";
 
-// ─── Mock web-push module ───────────────────────────────────────────────────
-
 type SendNotificationFn = (
 	sub: PushSubscriptionData,
 	payload: string,
@@ -54,8 +52,6 @@ function createMockWebpush() {
 	return { mock, generateVAPIDKeys, sendNotification };
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function makeTmpDir(): string {
 	return mkdtempSync(join(tmpdir(), "push-test-"));
 }
@@ -72,8 +68,6 @@ function makeSub(
 	};
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
 describe("Ticket 4.6 — PushNotificationManager", () => {
 	let tmpDir: string;
 
@@ -86,8 +80,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			rmSync(tmpDir, { recursive: true, force: true });
 		} catch {}
 	});
-
-	// ─── VAPID key generation ────────────────────────────────────────────
 
 	describe("VAPID key generation", () => {
 		it("generates keys on first init", async () => {
@@ -156,8 +148,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── getPublicKey ─────────────────────────────────────────────────────
-
 	describe("getPublicKey()", () => {
 		it("returns null before init", () => {
 			const { mock } = createMockWebpush();
@@ -179,8 +169,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			expect(mgr.getPublicKey()).not.toBeNull();
 		});
 	});
-
-	// ─── Corrupted / partial vapid.json recovery ─────────────────────────
 
 	describe("Corrupted vapid.json recovery", () => {
 		it("regenerates keys when vapid.json contains invalid JSON", async () => {
@@ -227,8 +215,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			expect(result.publicKey).not.toBe("partial-only");
 		});
 	});
-
-	// ─── Subscription management ────────────────────────────────────────
 
 	describe("Subscription add/remove/count", () => {
 		it("starts with zero subscriptions", async () => {
@@ -318,7 +304,7 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── Push payload for permission events (AC4) ───────────────────────
+	// Push payload for permission events (AC4)
 
 	describe("Push payload for permission events (AC4)", () => {
 		it("sends permission payload with correct title and body", async () => {
@@ -349,7 +335,7 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── Push payload for completion events (AC5) ───────────────────────
+	// Push payload for completion events (AC5)
 
 	describe("Push payload for completion events (AC5)", () => {
 		it("sends completion payload with session info", async () => {
@@ -380,7 +366,7 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── Push payload for error events (AC6) ────────────────────────────
+	// Push payload for error events (AC6)
 
 	describe("Push payload for error events (AC6)", () => {
 		it("sends error payload with error summary", async () => {
@@ -410,8 +396,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			expect(sentPayload.body).toContain("429");
 		});
 	});
-
-	// ─── sendToAll iterates all subscriptions ───────────────────────────
 
 	describe("sendToAll iterates all subscriptions", () => {
 		it("sends to every subscribed client", async () => {
@@ -449,8 +433,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── sendTo specific client ─────────────────────────────────────────
-
 	describe("sendTo specific client", () => {
 		it("sends only to the specified client", async () => {
 			const { mock, sendNotification } = createMockWebpush();
@@ -484,8 +466,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 			expect(sendNotification).not.toHaveBeenCalled();
 		});
 	});
-
-	// ─── Invalid subscription removal ──────────────────────────────────
 
 	describe("Invalid subscription removal", () => {
 		it("removes subscription on 410 Gone", async () => {
@@ -587,8 +567,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── Error before init ─────────────────────────────────────────────
-
 	describe("Error handling", () => {
 		it("throws if sendToAll called before init", async () => {
 			const { mock } = createMockWebpush();
@@ -634,8 +612,6 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── VAPID details passed to web-push ──────────────────────────────
-
 	describe("VAPID details", () => {
 		it("passes vapidDetails to sendNotification", async () => {
 			const { mock, sendNotification } = createMockWebpush();
@@ -663,7 +639,7 @@ describe("Ticket 4.6 — PushNotificationManager", () => {
 		});
 	});
 
-	// ─── Subscription persistence (Ticket 8.22) ───────────────────────
+	// Subscription persistence (Ticket 8.22)
 
 	describe("Subscription persistence (Ticket 8.22)", () => {
 		it("saves and loads subscriptions across instances (round-trip)", async () => {

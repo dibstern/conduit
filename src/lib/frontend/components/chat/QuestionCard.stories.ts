@@ -2,8 +2,6 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import type { QuestionRequest } from "../../types.js";
 import QuestionCard from "./QuestionCard.svelte";
 
-// ─── Mock data ──────────────────────────────────────────────────────────────
-
 const mockSingleSelect: QuestionRequest = {
 	toolId: "q-001",
 	sessionId: "test-session",
@@ -93,8 +91,6 @@ const mockMultiQuestion: QuestionRequest = {
 	],
 };
 
-// ─── Meta ───────────────────────────────────────────────────────────────────
-
 const meta = {
 	title: "Chat/QuestionCard",
 	component: QuestionCard,
@@ -103,8 +99,6 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
-
-// ─── Stories ────────────────────────────────────────────────────────────────
 
 export const SingleSelect: Story = {
 	args: { request: mockSingleSelect },

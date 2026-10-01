@@ -1,4 +1,3 @@
-// ─── Tests: daemon-layers composition ─────────────────────────────────────────
 // Smoke tests verifying that the new DaemonState and RelayCache layers
 // compose correctly and provide their Tags.
 
@@ -17,8 +16,6 @@ import {
 	type Relay,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
-
-// ─── In-memory test FileSystem ────────────────────────────────────────────────
 
 const makeTestFileSystem = (files: Map<string, string> = new Map()) => {
 	const fs: FileSystem.FileSystem = FileSystem.makeNoop({
@@ -42,8 +39,6 @@ const makeTestFileSystem = (files: Map<string, string> = new Map()) => {
 
 	return Layer.succeed(FileSystem.FileSystem, fs);
 };
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("daemon-layers", () => {
 	it.effect("DaemonStateTag is available in composed layer", () =>

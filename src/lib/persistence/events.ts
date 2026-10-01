@@ -13,8 +13,6 @@ import {
 
 export * from "../contracts/stored-event.js";
 
-// ─── ID Generators ──────────────────────────────────────────────────────────
-
 export function createEventId(): EventId {
 	return Schema.decodeSync(EventId)(`evt_${randomUUID()}`);
 }
@@ -22,8 +20,6 @@ export function createEventId(): EventId {
 export function createCommandId(): CommandId {
 	return Schema.decodeSync(CommandId)(`cmd_${randomUUID()}`);
 }
-
-// ─── Typed Event Factory ────────────────────────────────────────────────────
 
 export function canonicalEvent<K extends CanonicalEventType>(
 	type: K,
@@ -46,8 +42,6 @@ export function canonicalEvent<K extends CanonicalEventType>(
 		createdAt: opts?.createdAt ?? Date.now(),
 	} as CanonicalEvent & { readonly type: K; readonly data: EventPayloadMap[K] };
 }
-
-// ─── Runtime Payload Validation ─────────────────────────────────────────────
 
 import { PersistenceError } from "./errors.js";
 

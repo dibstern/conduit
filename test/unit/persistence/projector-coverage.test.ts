@@ -1,4 +1,3 @@
-// ─── Projector Coverage ─────────────────────────────────────────────────────
 // A canonical event type that no projector claims is dispatched to nothing:
 // no write, no error, no log line, and the cursor advances anyway. That is how
 // session.compaction stayed unprojected for three months behind a green suite.

@@ -1,5 +1,3 @@
-// ─── Agent Handlers ──────────────────────────────────────────────────────────
-
 import { Effect } from "effect";
 import {
 	type ProviderInstanceId,

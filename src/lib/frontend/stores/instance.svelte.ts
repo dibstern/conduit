@@ -1,4 +1,3 @@
-// ─── Instance Store ─────────────────────────────────────────────────────────
 // Manages the list of OpenCode instances and their statuses.
 //
 // Two layers of state:
@@ -19,7 +18,6 @@ import type {
 	RelayMessage,
 } from "../types.js";
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // This store has no client half: every field is an instance row, a cached copy
 // of one, or the result of a probe the server answered.
 
@@ -36,8 +34,6 @@ export const instanceState = $state({
  * and ConnectOverlay re-renders when the cache is updated.
  */
 let cachedInstances: OpenCodeInstance[] = $state([]);
-
-// ─── Proxy detection state ──────────────────────────────────────────────────
 
 let proxyDetection: { found: boolean; port: number } | null = $state(null);
 
@@ -79,8 +75,6 @@ export function applyDetectProxyResponse(response: DetectProxyResponse): void {
 		port: response.port,
 	});
 }
-
-// ─── Scan state ─────────────────────────────────────────────────────────────
 
 interface ScanResult {
 	discovered: number[];
@@ -127,8 +121,6 @@ export function applyScanNowResponse(response: ScanNowResponse): void {
 		active: [...response.active],
 	});
 }
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handleInstanceList(
 	msg: Extract<RelayMessage, { type: "instance_list" }>,
@@ -189,8 +181,6 @@ export function handleInstanceStatus(
 	}
 }
 
-// ─── Getters ────────────────────────────────────────────────────────────────
-
 export function getInstanceById(id: string): OpenCodeInstance | undefined {
 	return instanceState.instances.find((i) => i.id === id);
 }
@@ -234,8 +224,6 @@ export function instanceStatusColor(
 			return "bg-zinc-500";
 	}
 }
-
-// ─── Reset ──────────────────────────────────────────────────────────────────
 
 export function clearInstanceState(): void {
 	instanceState.instances = [];

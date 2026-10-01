@@ -4,7 +4,6 @@ import {
 	seedRootSessions,
 	seedSessions,
 } from "./session-fixtures.js";
-// ─── Concurrent Session Dispatch Tests ──────────────────────────────────────
 // Verifies that interleaved per-session events for sessions A/B/C are routed
 // independently. Covers: live event buffering during replay, notification_event
 // non-routing, prod missing-sessionId drop, and unknown-session drop.
@@ -71,8 +70,6 @@ import type {
 	PermissionId,
 	RelayMessage,
 } from "../../../src/lib/shared-types.js";
-
-// ─── Setup / Teardown ───────────────────────────────────────────────────────
 
 beforeEach(() => {
 	clearMessages();

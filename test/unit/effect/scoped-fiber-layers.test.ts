@@ -1,4 +1,3 @@
-// ─── Scoped Fiber Layers Tests ──────────────────────────────────────────────
 // Tests for WebSocketRoutingLive, ProjectDiscoveryLive, SessionPrefetchLive.
 // Covers P0 gaps: API failure graceful degradation, dismissed paths,
 // duplicate detection, error-state reset, mock fetch session prefetch,
@@ -57,8 +56,6 @@ import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
 
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 
-// ─── Shared test layers ────────────────────────────────────────────────────
-
 const configRefLayer = DaemonConfigRefLive(
 	makeDaemonConfigFromOptions({ port: 2633 }),
 );
@@ -90,8 +87,6 @@ const registryLayer = makeProjectRegistryLive();
 const instanceLayer = makeInstanceManagerStateLive();
 const eventBusLayer = Layer.merge(DaemonEventBusLive, InstanceHealthCheckLive);
 const persistenceLayer = ConfigPersistenceNoopLive;
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
 
 const makeInstance = (
 	id: string,
@@ -132,8 +127,6 @@ const makeSeededInstanceLayer = (
 const makeSeededRegistryLayer = (entries: Array<[string, ProjectState]>) =>
 	Layer.effect(ProjectRegistryTag, Ref.make(HashMap.fromIterable(entries)));
 
-// ─── WebSocketRoutingLive ──────────────────────────────────────────────────
-
 describe("WebSocketRoutingLive", () => {
 	const wsLayer = WebSocketRoutingLive.pipe(
 		Layer.provide(makeDaemonRpcTestLayer()),
@@ -169,8 +162,6 @@ describe("WebSocketRoutingLive", () => {
 	);
 });
 
-// ─── ProjectDiscoveryLive ──────────────────────────────────────────────────
-
 describe("ProjectDiscoveryLive", () => {
 	const discoveryLayer = ProjectDiscoveryLive.pipe(
 		Layer.provide(configRefLayer),
@@ -187,7 +178,7 @@ describe("ProjectDiscoveryLive", () => {
 	);
 });
 
-// ─── discoverProjectsEffect (direct invocation) ────────────────────────────
+// discoverProjectsEffect (direct invocation)
 
 describe("discoverProjectsEffect", () => {
 	const directLayer = Layer.mergeAll(
@@ -287,7 +278,7 @@ describe("discoverProjectsEffect", () => {
 	);
 });
 
-// ─── prefetchSessionCounts (direct invocation) ─────────────────────────────
+// prefetchSessionCounts (direct invocation)
 
 describe("prefetchSessionCounts", () => {
 	afterEach(() => {
@@ -581,8 +572,6 @@ describe("prefetchSessionCounts", () => {
 	);
 });
 
-// ─── SessionPrefetchLive ───────────────────────────────────────────────────
-
 describe("SessionPrefetchLive", () => {
 	const prefetchLayer = SessionPrefetchLive.pipe(
 		Layer.provide(configRefLayer),
@@ -596,8 +585,6 @@ describe("SessionPrefetchLive", () => {
 		}).pipe(Effect.provide(Layer.fresh(prefetchLayer))),
 	);
 });
-
-// ─── Scoped fiber lifecycle ──────────────────────────────────────────────────
 
 describe("Scoped fiber lifecycle", () => {
 	it.effect("Effect.forkScoped fibers are interrupted when scope closes", () =>

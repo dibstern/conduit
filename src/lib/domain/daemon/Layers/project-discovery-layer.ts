@@ -1,4 +1,3 @@
-// ─── Project Discovery Layer ────────────────────────────────────────────────
 // Scoped Layer that discovers projects from OpenCode on startup.
 //
 // Forks a scoped fiber that:
@@ -27,8 +26,6 @@ import type { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import type { InstanceManagerStateTag } from "../Services/instance-manager-service.js";
 import { discoverProjectsEffect } from "../Services/project-discovery-service.js";
 import type { ProjectRegistryTag } from "../Services/project-registry-service.js";
-
-// ─── ProjectDiscoveryLive ──────────────────────────────────────────────────
 
 /**
  * Scoped Layer that forks project discovery as a background fiber.

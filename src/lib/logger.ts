@@ -155,8 +155,6 @@ function wrapPino(p: PinoInstance): Logger {
 	};
 }
 
-// ── Public API ──────────────────────────────────────────────────────
-
 /**
  * Set the minimum log level. Messages below this level are suppressed.
  * Recreates the root pino instance so all future loggers use the new level.

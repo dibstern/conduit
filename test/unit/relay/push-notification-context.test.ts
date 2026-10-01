@@ -1,4 +1,3 @@
-// ─── Push Notification Context & Session Navigation Tests ───────────────────
 // Tests for sendPushForEvent with the new PushEventContext parameter (slug and
 // sessionId forwarding to push payload) and resolveNotifications with the
 // sessionId parameter for cross-session notification payloads.
@@ -11,15 +10,11 @@ import { resolveNotifications } from "../../../src/lib/relay/notification-policy
 import { sendPushForEvent } from "../../../src/lib/relay/sse-wiring.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function createMockPushManager() {
 	return {
 		sendToAll: vi.fn().mockResolvedValue(undefined),
 	};
 }
-
-// ─── sendPushForEvent with context ───────────────────────────────────────────
 
 describe("sendPushForEvent with context", () => {
 	it("includes slug and sessionId from context in push payload", () => {
@@ -101,8 +96,6 @@ describe("sendPushForEvent with context", () => {
 		expect(payload).not.toHaveProperty("sessionId");
 	});
 });
-
-// ─── resolveNotifications with sessionId ─────────────────────────────────────
 
 describe("resolveNotifications with sessionId", () => {
 	it("includes sessionId in crossSessionPayload when route drops", () => {

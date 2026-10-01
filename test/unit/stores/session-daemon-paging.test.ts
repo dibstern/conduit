@@ -7,7 +7,7 @@ import {
 	seedRootSessions,
 	seedSessions,
 } from "./session-fixtures.js";
-// ─── Cross-project session paging and search (store level) ──────────────────
+// Cross-project session paging and search (store level)
 // These assert over the store's data, not over rendering: paging and ordering
 // are properties of the accumulator, and a DOM test would only be able to see
 // them through whatever the sidebar happens to group and sort today.

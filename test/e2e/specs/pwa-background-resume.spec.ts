@@ -1,4 +1,3 @@
-// ─── PWA Background / Resume ────────────────────────────────────────────────
 // iOS fires `pagehide` every time the standalone PWA is backgrounded, not just
 // on unload. These tests pin down what the app must survive across a
 // background → foreground cycle: it must keep handling relay messages, and it

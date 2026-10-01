@@ -1,4 +1,3 @@
-// ─── Permissions Store Tests ─────────────────────────────────────────────────
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	buildAnswerPayload,
@@ -34,7 +33,6 @@ import { seedSessionsWithFamily } from "./session-fixtures.js";
 /** Cast a plain string to PermissionId for test data. */
 const pid = (s: string) => s as PermissionId;
 
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
 // Tests deliberately pass incomplete objects to verify defensive handling.
 function msg<T extends RelayMessage["type"]>(data: {
 	type: T;
@@ -43,16 +41,12 @@ function msg<T extends RelayMessage["type"]>(data: {
 	return data as Extract<RelayMessage, { type: T }>;
 }
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	permissionsState.pendingPermissions = [];
 	permissionsState.pendingQuestions = [];
 	permissionsState.questionErrors = new Map();
 	clearSessionState();
 });
-
-// ─── Pure helper: buildAnswerPayload ────────────────────────────────────────
 
 describe("buildAnswerPayload", () => {
 	it("builds answer payload from selections", () => {
@@ -100,8 +94,6 @@ describe("buildAnswerPayload", () => {
 		expect(result).toEqual({ "0": "A" });
 	});
 });
-
-// ─── Pure helper: shouldAutoSubmit ──────────────────────────────────────────
 
 describe("shouldAutoSubmit", () => {
 	it("returns true when all questions have single option, no multiSelect, no custom", () => {
@@ -158,8 +150,6 @@ describe("shouldAutoSubmit", () => {
 	});
 });
 
-// ─── Pure helper: isValidSubmission ─────────────────────────────────────────
-
 describe("isValidSubmission", () => {
 	it("returns true when all questions have selections", () => {
 		const questions: AskUserQuestion[] = [
@@ -207,8 +197,6 @@ describe("isValidSubmission", () => {
 	});
 });
 
-// ─── Pure helper: formatQuestionHeader ──────────────────────────────────────
-
 describe("formatQuestionHeader", () => {
 	it("capitalizes first letter", () => {
 		expect(formatQuestionHeader("select an option")).toBe("Select an option");
@@ -222,8 +210,6 @@ describe("formatQuestionHeader", () => {
 		expect(formatQuestionHeader("Already")).toBe("Already");
 	});
 });
-
-// ─── handlePermissionRequest ────────────────────────────────────────────────
 
 describe("handlePermissionRequest", () => {
 	it("adds a permission request with toolInput", () => {
@@ -287,8 +273,6 @@ describe("handlePermissionRequest", () => {
 	});
 });
 
-// ─── handlePermissionResolved ───────────────────────────────────────────────
-
 describe("handlePermissionResolved", () => {
 	it("removes the resolved permission", () => {
 		handlePermissionRequest({
@@ -319,8 +303,6 @@ describe("handlePermissionResolved", () => {
 		expect(permissionsState.pendingPermissions).toHaveLength(1);
 	});
 });
-
-// ─── handleAskUser ──────────────────────────────────────────────────────────
 
 describe("handleAskUser", () => {
 	it("adds a question request", () => {
@@ -426,8 +408,6 @@ describe("handleAskUser", () => {
 	});
 });
 
-// ─── handleAskUserResolved ──────────────────────────────────────────────────
-
 describe("handleAskUserResolved", () => {
 	it("removes the resolved question", () => {
 		handleAskUser({
@@ -451,8 +431,6 @@ describe("handleAskUserResolved", () => {
 		expect(permissionsState.pendingQuestions).toHaveLength(0);
 	});
 });
-
-// ─── removePermission ───────────────────────────────────────────────────────
 
 describe("removePermission", () => {
 	it("removes by requestId", () => {
@@ -478,8 +456,6 @@ describe("removePermission", () => {
 	});
 });
 
-// ─── removeQuestion ─────────────────────────────────────────────────────────
-
 describe("removeQuestion", () => {
 	it("removes by toolId", () => {
 		handleAskUser({
@@ -499,8 +475,6 @@ describe("removeQuestion", () => {
 		expect(permissionsState.pendingQuestions).toHaveLength(0);
 	});
 });
-
-// ─── clearAll ───────────────────────────────────────────────────────────────
 
 describe("clearAll", () => {
 	it("clears all pending items", () => {
@@ -536,8 +510,6 @@ describe("clearAll", () => {
 	});
 });
 
-// ─── clearAllPermissions ────────────────────────────────────────────────────
-
 describe("clearAllPermissions", () => {
 	it("clears all pending items", () => {
 		handlePermissionRequest({
@@ -569,8 +541,6 @@ describe("clearAllPermissions", () => {
 		expect(permissionsState.questionErrors.size).toBe(0);
 	});
 });
-
-// ─── handleAskUserError ─────────────────────────────────────────────────────
 
 describe("handleAskUserError", () => {
 	it("stores error message keyed by toolId", () => {
@@ -613,8 +583,6 @@ describe("handleAskUserError", () => {
 		expect(permissionsState.questionErrors.get("t1")).toBe("second error");
 	});
 });
-
-// ─── getLocalPermissions ────────────────────────────────────────────────────
 
 describe("getLocalPermissions", () => {
 	it("returns only permissions matching the current session", () => {
@@ -662,8 +630,6 @@ describe("getLocalPermissions", () => {
 	});
 });
 
-// ─── getRemotePermissions ───────────────────────────────────────────────────
-
 describe("getRemotePermissions", () => {
 	it("returns only permissions NOT matching the current session", () => {
 		handlePermissionRequest({
@@ -709,8 +675,6 @@ describe("getRemotePermissions", () => {
 		expect(getRemotePermissions("sess-1")).toHaveLength(0);
 	});
 });
-
-// ─── Session switch re-derives ──────────────────────────────────────────────
 
 describe("session switch re-derives", () => {
 	it("same permission list, different session → different local/remote split", () => {
@@ -775,8 +739,6 @@ describe("pending prompts across a session switch", () => {
 		).toEqual(["t1"]);
 	});
 });
-
-// ─── getDescendantSessionIds ────────────────────────────────────────────────
 
 describe("getDescendantSessionIds", () => {
 	it("returns empty set when no sessions exist", () => {
@@ -843,8 +805,6 @@ describe("getDescendantSessionIds", () => {
 		expect(desc.has("parent")).toBe(false);
 	});
 });
-
-// ─── Subagent hierarchy: getLocalPermissions ────────────────────────────────
 
 describe("getLocalPermissions with subagent hierarchy", () => {
 	it("includes permissions from direct child (subagent) sessions", () => {
@@ -961,7 +921,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 	});
 });
 
-// ─── Unknown session (sessionId="") permissions ────────────────────────────
+// Unknown session (sessionId="") permissions
 // When the SSE event lacks sessionID, the relay stores sessionId: "".
 // These permissions need human attention and MUST be visible inline regardless
 // of which session the user is viewing.
@@ -1041,8 +1001,6 @@ describe("getRemotePermissions with unknown session (sessionId='')", () => {
 		expect(remotePermission.requestId).toBe("r-other");
 	});
 });
-
-// ─── Subagent hierarchy: getRemotePermissions ───────────────────────────────
 
 describe("getRemotePermissions with subagent hierarchy", () => {
 	it("excludes permissions from child (subagent) sessions", () => {

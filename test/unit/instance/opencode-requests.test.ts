@@ -1,5 +1,4 @@
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-// ─── OpenCode API Request/RequestResolver Tests ────────────────────────────
 // Tests for Effect Request types and RequestResolver implementations.
 //
 // Verifies:
@@ -24,8 +23,6 @@ import {
 	OpenCodeRequestError,
 } from "../../../src/lib/domain/provider/Services/opencode-requests.js";
 
-// ─── Test Data ─────────────────────────────────────────────────────────────
-
 const makeSession = (id: string, title: string) => ({
 	id,
 	projectID: "proj1",
@@ -41,8 +38,6 @@ const makeMessage = (id: string, sessionId: string, role: string) => ({
 	sessionID: sessionId,
 	parts: [{ id: `${id}-p1`, type: "text" }],
 });
-
-// ─── Mock API Factory ──────────────────────────────────────────────────────
 
 function makeMockApi(
 	overrides: {
@@ -102,8 +97,6 @@ function makeMockApiLayer(overrides?: Parameters<typeof makeMockApi>[0]) {
 	return Layer.succeed(OpenCodeAPITag, mock as any);
 }
 
-// ─── GetSessions Tests ─────────────────────────────────────────────────────
-
 describe("GetSessions", () => {
 	it.effect("returns session list via resolver", () =>
 		Effect.gen(function* () {
@@ -143,8 +136,6 @@ describe("GetSessions", () => {
 		}),
 	);
 });
-
-// ─── GetMessages Tests ──────────────────────────────────────────────────────
 
 describe("GetMessages", () => {
 	it.effect("returns messages for a session", () =>
@@ -186,8 +177,6 @@ describe("GetMessages", () => {
 	);
 });
 
-// ─── GetSessionStatuses Tests ───────────────────────────────────────────────
-
 describe("GetSessionStatuses", () => {
 	it.effect("returns status map for all sessions", () =>
 		Effect.gen(function* () {
@@ -225,8 +214,6 @@ describe("GetSessionStatuses", () => {
 		}),
 	);
 });
-
-// ─── GetSession Batched Resolver Tests ──────────────────────────────────────
 
 describe("GetSession (batched)", () => {
 	it.effect("resolves a single session by ID", () =>
@@ -288,8 +275,6 @@ describe("GetSession (batched)", () => {
 	);
 });
 
-// ─── Request Type Tests ─────────────────────────────────────────────────────
-
 describe("Request types", () => {
 	it("GetSessions has correct _tag", () => {
 		const req = new GetSessions({});
@@ -313,8 +298,6 @@ describe("Request types", () => {
 		expect(req.sessionId).toBe("s99");
 	});
 });
-
-// ─── OpenCodeRequestError Tests ─────────────────────────────────────────────
 
 describe("OpenCodeRequestError", () => {
 	it("has correct tag and fields", () => {

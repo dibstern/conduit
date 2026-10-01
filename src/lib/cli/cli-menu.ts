@@ -1,4 +1,3 @@
-// ─── Main Menu Loop ─────────────────────────────────────────────
 // Interactive CLI main menu for conduit. Displays daemon status and
 // provides menu navigation for notifications, projects, settings, shutdown,
 // and keep-alive exit. Ported from claude-relay/bin/cli.js lines 1361-1482.
@@ -9,8 +8,6 @@ import type { PromptOptions, SelectPromptOptions } from "./prompts.js";
 import { promptSelect, promptToggle } from "./prompts.js";
 import type { Writable } from "./terminal-render.js";
 import { a, formatStatusLine, log } from "./terminal-render.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Information about the running daemon for status display. */
 export interface DaemonInfo {
@@ -45,8 +42,6 @@ export interface MenuOptions extends PromptOptions {
 	onOpenBrowser?: () => void | Promise<void>;
 }
 
-// ─── Menu Choice Values ──────────────────────────────────────────────────────
-
 /** All possible menu choice values. */
 type MenuChoice =
 	| "notifications"
@@ -54,8 +49,6 @@ type MenuChoice =
 	| "settings"
 	| "shutdown"
 	| "exit";
-
-// ─── Status Rendering ────────────────────────────────────────────────────────
 
 /**
  * Render the daemon status section to stdout.
@@ -97,8 +90,6 @@ export function renderStatus(info: DaemonInfo, stdout: Writable): void {
 	log("", stdout);
 }
 
-// ─── Menu Items ──────────────────────────────────────────────────────────────
-
 /** Visible menu items for the main select prompt. */
 const MENU_ITEMS = [
 	{ label: "Setup notifications", value: "notifications" as const },
@@ -107,8 +98,6 @@ const MENU_ITEMS = [
 	{ label: "Shut down server", value: "shutdown" as const },
 	{ label: "Keep server alive & exit", value: "exit" as const },
 ];
-
-// ─── Main Menu ───────────────────────────────────────────────────────────────
 
 /**
  * Show the main menu loop.

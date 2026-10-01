@@ -1,5 +1,3 @@
-// ─── Recent Projects Tracking ──────────────────────────────────
-
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { RecentProject } from "../types.js";

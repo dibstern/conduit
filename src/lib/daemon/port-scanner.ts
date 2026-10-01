@@ -30,7 +30,6 @@ export class PortScanner {
 	private pending = new Set<Promise<unknown>>();
 	private drained = false;
 
-	// ─── Callbacks ─────────────────────────────────────────────────────────
 	onScan: ((result: ScanResult) => void) | null = null;
 
 	constructor(config: PortScannerConfig, probeFn: ProbeFn) {

@@ -1,4 +1,4 @@
-// ─── Settings Menu — Unit Tests (Ticket 8.12) ─────────────────────────────────
+// Settings Menu — Unit Tests (Ticket 8.12)
 // Tests for showSettingsMenu: detection status display, dynamic menu items,
 // PIN set/change/remove, keep-awake toggle, log viewing, notification setup,
 // and back navigation. Uses mock stdin/stdout/exit pattern from cli-menu tests.
@@ -10,8 +10,6 @@ import type {
 	SettingsMenuOptions,
 } from "../../../src/lib/cli/cli-settings.js";
 import { showSettingsMenu } from "../../../src/lib/cli/cli-settings.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape sequences from a string. */
 function stripAnsi(s: string): string {
@@ -120,8 +118,6 @@ async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 		await tick();
 	}
 }
-
-// ─── Settings header and status display ─────────────────────────────────────
 
 describe("settings header", () => {
 	it("renders Settings header", async () => {
@@ -320,8 +316,6 @@ describe("detection status: keep awake", () => {
 	});
 });
 
-// ─── Dynamic menu items ─────────────────────────────────────────────────────
-
 describe("menu items: PIN not set", () => {
 	it("shows Set PIN when no PIN", async () => {
 		const io = createMockIO();
@@ -361,8 +355,6 @@ describe("menu items: PIN set", () => {
 		await tick();
 	});
 });
-
-// ─── PIN set action ─────────────────────────────────────────────────────────
 
 describe("PIN set action", () => {
 	it.each([
@@ -421,8 +413,6 @@ describe("PIN set action", () => {
 	});
 });
 
-// ─── PIN remove action ──────────────────────────────────────────────────────
-
 describe("PIN remove action", () => {
 	it("prints a rejected removal without reporting success", async () => {
 		const io = createMockIO();
@@ -475,8 +465,6 @@ describe("PIN remove action", () => {
 		expect(io.text()).toContain("PIN removed");
 	});
 });
-
-// ─── Keep awake toggle ──────────────────────────────────────────────────────
 
 describe("keep awake toggle", () => {
 	it("calls setKeepAwake with toggled value", async () => {
@@ -592,8 +580,6 @@ describe("keep awake toggle", () => {
 		expect(setKeepAwake).toHaveBeenCalledTimes(2);
 		expect(setKeepAwake).toHaveBeenLastCalledWith(true);
 	});
-
-	// ─── Keep-awake custom command parsing edge cases ───────────────────────
 
 	it("parses command with multiple arguments", async () => {
 		const setKeepAwake = vi
@@ -844,8 +830,6 @@ describe("keep awake toggle", () => {
 	});
 });
 
-// ─── View logs ──────────────────────────────────────────────────────────────
-
 describe("view logs", () => {
 	it("shows last 30 lines of log file", async () => {
 		const lines = Array.from({ length: 40 }, (_, i) => `log line ${i + 1}`);
@@ -910,8 +894,6 @@ describe("view logs", () => {
 	});
 });
 
-// ─── Setup notifications ────────────────────────────────────────────────────
-
 describe("setup notifications", () => {
 	it("calls onSetupNotifications callback", async () => {
 		const onSetupNotifications = vi.fn();
@@ -939,8 +921,6 @@ describe("setup notifications", () => {
 		expect(onSetupNotifications).toHaveBeenCalledOnce();
 	});
 });
-
-// ─── Back navigation ────────────────────────────────────────────────────────
 
 describe("back navigation", () => {
 	it("calls onBack callback via Backspace", async () => {
@@ -1002,8 +982,6 @@ describe("back navigation", () => {
 		expect(onBack).toHaveBeenCalledOnce();
 	});
 });
-
-// ─── Re-render after action ─────────────────────────────────────────────────
 
 describe("re-render after action", () => {
 	it("re-renders settings menu after PIN change", async () => {

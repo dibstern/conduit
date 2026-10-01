@@ -1,4 +1,3 @@
-// ─── Relay Factory Layer ────────────────────────────────────────────────────
 // Effect-native factory for creating ProjectRelay instances.
 //
 // RelayFactoryTag — service that creates relays given a StoredProject + URL.
@@ -59,8 +58,6 @@ import {
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { VersionCheckerTag } from "./version-checker-layer.js";
 
-// ─── Error types ────────────────────────────────────────────────────────────
-
 export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
 	reason: string;
 	cause?: unknown;
@@ -70,8 +67,6 @@ export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
 		return `${this.reason}${inner}`;
 	}
 }
-
-// ─── HttpServerRefTag ───────────────────────────────────────────────────────
 
 /**
  * Ref holding the HTTP server instance. Starts as null because the server
@@ -92,8 +87,6 @@ export const HttpServerRefLive: Layer.Layer<HttpServerRefTag> = Layer.effect(
 	HttpServerRefTag,
 	Ref.make<http.Server | null>(null),
 );
-
-// ─── RelayFactory interface ─────────────────────────────────────────────────
 
 /**
  * Factory service for creating ProjectRelay instances from Effect Context.
@@ -120,14 +113,10 @@ export interface RelayFactoryProjectControls {
 	>;
 }
 
-// ─── RelayFactoryTag ────────────────────────────────────────────────────────
-
 export class RelayFactoryTag extends Context.Tag("RelayFactory")<
 	RelayFactoryTag,
 	RelayFactory
 >() {}
-
-// ─── RelayFactoryLive ───────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing RelayFactoryTag.

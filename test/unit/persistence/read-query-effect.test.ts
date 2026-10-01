@@ -1011,7 +1011,7 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 	);
 });
 
-// ─── The session list reads (ni8.5 T-1) ─────────────────────────────────────
+// The session list reads (ni8.5 T-1)
 // These two reads are the only producers of the single session type, so the
 // `sessions` projection reaches the wire and the browser already shaped for
 // them. Nothing downstream holds a row, which is why the bridge could go.

@@ -1,4 +1,3 @@
-<!-- ─── SessionList ─────────────────────────────────────────────────────────── -->
 <!-- Sidebar session list with scope and search, status grouping, and new session button. -->
 <!-- Reads from sessionState store and renders SessionItem components. -->
 
@@ -50,8 +49,6 @@
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
 
-	// ─── Local state ────────────────────────────────────────────────────────────
-
 	let localSearchValue = $state("");
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined = $state(
 		undefined,
@@ -77,8 +74,6 @@
 	let selectedSessionIds = $state<Set<string>>(new Set());
 	let bulkPending = $state(false);
 	let bulkSnoozeOpen = $state(false);
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const filtered = $derived(sessionList.groups.flatMap((group) => group.rows));
 	let feedStale = $state(false);
@@ -223,8 +218,6 @@
 		});
 		void ids;
 	});
-
-	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	// Searches every project the daemon knows about, not just this one, and pages
 	// the matches. The store drops responses for a superseded query, so the

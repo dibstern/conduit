@@ -1,4 +1,3 @@
-// ─── Tests: WS Router PTY Message Types ──────────────────────────────────────
 // Verifies that the remaining high-throughput PTY input data-plane message
 // stays on the WebSocket message router while terminal controls move to RPC.
 

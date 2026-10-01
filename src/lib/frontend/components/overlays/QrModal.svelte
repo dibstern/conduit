@@ -1,4 +1,3 @@
-<!-- ─── QR Modal ──────────────────────────────────────────────────────────── -->
 <!-- QR code sharing modal. Renders a QR code of the current page URL         -->
 <!-- (replacing localhost with LAN host when available). Click URL to copy.    -->
 <!-- Escape or backdrop click to close.                                       -->
@@ -10,19 +9,13 @@
   import Dialog from "../ui/Dialog.svelte";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 
-	// ─── Props ──────────────────────────────────────────────────────────────────
-
 	let {
 		visible = false,
 		onClose,
 	}: { visible: boolean; onClose?: () => void } = $props();
 
-	// ─── State ──────────────────────────────────────────────────────────────────
-
 	let copied = $state(false);
 	let copyTimer: ReturnType<typeof setTimeout> | null = null;
-
-	// ─── Share URL logic ────────────────────────────────────────────────────────
 
 	/** Network info fetched from /health when the modal opens. */
 	let networkHost = $state<string | null>(null);
@@ -78,8 +71,6 @@
 		}
 	});
 
-	// ─── Copy to clipboard ──────────────────────────────────────────────────────
-
 	async function copyUrl(): Promise<void> {
 		const url = getShareUrl();
 		if (!await copyToClipboard(url)) return;
@@ -91,8 +82,6 @@
 			copyTimer = null;
 		}, 1500);
 	}
-
-	// ─── Reset copied state when closing ────────────────────────────────────────
 
 	$effect(() => {
 		if (!visible) {

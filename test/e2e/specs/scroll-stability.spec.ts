@@ -1,4 +1,3 @@
-// ─── E2E Scroll Stability Tests ─────────────────────────────────────────────
 // Tests that scroll position remains stable on inactive sessions when
 // background reactive state changes occur (permission resolves, session
 // list updates, etc.). Regression test for mobile scroll snap-back bug.
@@ -25,8 +24,6 @@ import {
 } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
-
-// ─── Scroll helpers ─────────────────────────────────────────────────────────
 
 async function getScrollTop(page: Page): Promise<number> {
 	return page.evaluate(() => {
@@ -127,8 +124,6 @@ async function scrollUpIncrementally(
 		await waitForStableScroll(page);
 	}
 }
-
-// ─── Message generation ─────────────────────────────────────────────────────
 
 const RESPONSE_TEMPLATES = [
 	"Got it, I'll take a look at that file.",
@@ -258,13 +253,9 @@ function createInitMessages(turnCount: number): MockMessage[] {
 	];
 }
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const TURN_COUNT = 40;
 const SCROLL_UP_PX = 2000;
 const MAX_DRIFT_PX = 5;
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 test.describe("Scroll Stability — Mobile", () => {
 	test.describe.configure({ timeout: 45_000 });
@@ -298,7 +289,6 @@ test.describe("Scroll Stability — Mobile", () => {
 		const clientHeight = await getClientHeight(page);
 		expect(scrollHeight).toBeGreaterThan(clientHeight * 3);
 
-		// ─── Simulate the mobile race condition ──────────────────────────
 		// On real mobile browsers, viewport changes (address bar show/hide)
 		// and content-visibility layout shifts can cause the user to appear
 		// "near bottom" (within the detach threshold) even while they are
@@ -743,7 +733,6 @@ test.describe("Scroll Stability — Desktop", () => {
 	});
 });
 
-// ─── Session Switch & Lifecycle Tests ───────────────────────────────────────
 // Tests that cover session switching, infinite scroll, empty sessions, and
 // multi-turn streaming — the most common user interactions that exercise
 // the scroll controller's lifecycle state machine.
@@ -1085,7 +1074,6 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		});
 		await waitForInitialMessages(page);
 
-		// ── Turn 1: stream and complete ──
 		wsMock.sendMessage({ type: "status", status: "processing" });
 
 		for (let i = 0; i < 5; i++) {
@@ -1108,7 +1096,6 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		});
 		expect(dist).toBeLessThan(100);
 
-		// ── Turn 2: new user message then stream ──
 		wsMock.sendMessage({ type: "status", status: "processing" });
 		wsMock.sendMessage({
 			type: "user_message",

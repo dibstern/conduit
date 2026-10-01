@@ -1,7 +1,5 @@
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-// ─── Prompt Handlers ─────────────────────────────────────────────────────────
-
 import { Data, Effect } from "effect";
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
@@ -20,7 +18,6 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 
-// ─── Per-session input draft store ──────────────────────────────────────────
 // Stores the last input_sync text per session so that newly connecting clients
 // (e.g. opening on a different device) receive the current draft.
 

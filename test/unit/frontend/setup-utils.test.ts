@@ -1,4 +1,3 @@
-// ─── Setup Utilities — Unit Tests ─────────────────────────────────────────────
 // Tests buildStepList, countFutureHttpsSteps, pipClass, detectPlatform.
 
 import { describe, expect, test } from "vitest";
@@ -8,8 +7,6 @@ import {
 	type PlatformInfo,
 	pipClass,
 } from "../../../src/lib/frontend/utils/setup-utils.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function makePlatform(overrides: Partial<PlatformInfo> = {}): PlatformInfo {
 	return {
@@ -24,8 +21,6 @@ function makePlatform(overrides: Partial<PlatformInfo> = {}): PlatformInfo {
 		...overrides,
 	};
 }
-
-// ─── buildStepList ──────────────────────────────────────────────────────────
 
 describe("buildStepList", () => {
 	// Use isTailscale: true in tests that don't test the tailscale step,
@@ -107,8 +102,6 @@ describe("buildStepList", () => {
 	});
 });
 
-// ─── countFutureHttpsSteps ──────────────────────────────────────────────────
-
 describe("countFutureHttpsSteps", () => {
 	test("returns 0 when already on HTTPS", () => {
 		const count = countFutureHttpsSteps(
@@ -164,8 +157,6 @@ describe("countFutureHttpsSteps", () => {
 		expect(count).toBe(1);
 	});
 });
-
-// ─── pipClass ───────────────────────────────────────────────────────────────
 
 describe("pipClass", () => {
 	test("returns 'done' for steps before current", () => {

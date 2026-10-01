@@ -1,4 +1,3 @@
-<!-- ─── ProjectContextMenu ──────────────────────────────────────────────────── -->
 <!-- Project actions: Rename, Remove.                                        -->
 <!--                                                                         -->
 <!-- Anchored to the "..." button its consumer already owns, the same shape   -->
@@ -18,8 +17,6 @@
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
-
-	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
 		project,

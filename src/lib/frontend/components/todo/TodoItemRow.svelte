@@ -1,4 +1,3 @@
-<!-- ─── Todo Item Row ─────────────────────────────────────────────────────── -->
 <!-- Single todo item with status icon, subject text, and optional description. -->
 
 <script lang="ts">

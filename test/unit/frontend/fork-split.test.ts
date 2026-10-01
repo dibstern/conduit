@@ -41,8 +41,6 @@ function tool(
 	} as ChatMessage;
 }
 
-// ─── Timestamp-based splitting ──────────────────────────────────────────────
-
 describe("splitAtForkPoint — timestamp-based", () => {
 	it("uses message IDs to break timestamp ties even when the boundary is paginated out", () => {
 		const before = assistant("before", { messageId: "a", createdAt: 1000 });
@@ -118,8 +116,6 @@ describe("splitAtForkPoint — timestamp-based", () => {
 	});
 });
 
-// ─── ID-based fallback ──────────────────────────────────────────────────────
-
 describe("splitAtForkPoint — ID-based fallback", () => {
 	it("falls back to ID matching when forkPointTimestamp is undefined", () => {
 		const messages: ChatMessage[] = [
@@ -189,8 +185,6 @@ describe("splitAtForkPoint — ID-based fallback", () => {
 		expect(split.current).toEqual([]);
 	});
 });
-
-// ─── Timestamp takes priority ───────────────────────────────────────────────
 
 describe("splitAtForkPoint — timestamp priority", () => {
 	it("uses timestamp when both forkMessageId and forkPointTimestamp are provided", () => {

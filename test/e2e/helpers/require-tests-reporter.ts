@@ -1,4 +1,3 @@
-// ─── Require Tests Reporter ──────────────────────────────────────────────────
 // Fails a run in which no test actually executed. Playwright reports "passed"
 // when every test skipped (e.g. the daemon suite without a reachable OpenCode),
 // and a gate that checks only the exit code reads that as green. Registered in

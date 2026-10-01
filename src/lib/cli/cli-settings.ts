@@ -1,4 +1,3 @@
-// ─── Settings Menu ──────────────────────────────────────────────
 // Interactive CLI settings menu for conduit. Displays detection status
 // (Tailscale, mkcert, HTTPS, PIN, keep-awake) and provides actions for PIN
 // management, keep-awake toggle, log viewing, and notification setup.
@@ -11,8 +10,6 @@ import type { PromptOptions, SelectPromptOptions } from "./prompts.js";
 import { promptPin, promptSelect, promptText } from "./prompts.js";
 import type { Writable } from "./terminal-render.js";
 import { a, log, sym } from "./terminal-render.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Current settings state for status display. */
 export interface SettingsInfo {
@@ -55,8 +52,6 @@ export interface SettingsMenuOptions extends PromptOptions {
 	readFile?: (path: string) => string;
 }
 
-// ─── Settings Choice Values ─────────────────────────────────────────────────
-
 /** All possible settings menu choice values. */
 type SettingsChoice =
 	| "guide"
@@ -65,8 +60,6 @@ type SettingsChoice =
 	| "awake"
 	| "logs"
 	| "back";
-
-// ─── Status Rendering ───────────────────────────────────────────────────────
 
 /**
  * Render detection status lines for the settings menu.
@@ -101,8 +94,6 @@ export function renderSettingsStatus(
 	log(`${sym.bar}  Keep awake   ${awakeStatus}`, stdout);
 	log(sym.bar, stdout);
 }
-
-// ─── Settings Menu ──────────────────────────────────────────────────────────
 
 /**
  * Show the settings menu.
@@ -313,8 +304,6 @@ export async function showSettingsMenu(
 		);
 	});
 }
-
-// ─── Internal Helpers ───────────────────────────────────────────────────────
 
 /** Default file reader using node:fs. */
 function defaultReadFile(filePath: string): string {

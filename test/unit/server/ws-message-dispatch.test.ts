@@ -1,5 +1,4 @@
 import { seedSessions } from "../stores/session-fixtures.js";
-// ─── WS Message Dispatch Tests ───────────────────────────────────────────────
 // Gap 1: handleToolContentResponse — tool_content message updates chat state
 // Gap 2: handleConnectionStatus — connection_status → banner lifecycle
 //
@@ -16,7 +15,7 @@ import {
 	vi,
 } from "vitest";
 
-// ─── Hoisted mocks (run before imports) ─────────────────────────────────────
+// Hoisted mocks (run before imports)
 
 const { showBannerMock, removeBannerMock, showToastMock } = vi.hoisted(() => {
 	const showBannerMock = vi.fn();
@@ -96,9 +95,6 @@ import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-di
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
-// ─── Setup / Teardown ───────────────────────────────────────────────────────
-
-// ─── Per-session tiers for handler calls ────────────────────────────────────
 let _ta: SessionActivity;
 let tm: SessionMessages;
 
@@ -132,7 +128,7 @@ afterEach(() => {
 	inputSyncState.lastUpdated = 0;
 });
 
-// ─── Gap 1: handleToolContentResponse (AC5) ─────────────────────────────────
+// Gap 1: handleToolContentResponse (AC5)
 
 describe("handleToolContentResponse via handleMessage (AC5)", () => {
 	/** Helper: set up a tool message with truncated result */
@@ -295,7 +291,7 @@ describe("input_sync dispatch", () => {
 	});
 });
 
-// ─── Gap 2: connection_status → banner lifecycle (AC1/AC2) ──────────────────
+// Gap 2: connection_status → banner lifecycle (AC1/AC2)
 
 describe("handleConnectionStatus via handleMessage (AC1/AC2)", () => {
 	it("shows warning banner on disconnected status", () => {
@@ -406,8 +402,6 @@ describe("handleConnectionStatus via handleMessage (AC1/AC2)", () => {
 	});
 });
 
-// ─── Instance messages ──────────────────────────────────────────────────────
-
 describe("instance messages", () => {
 	it("instance_list is a valid RelayMessage type", () => {
 		const msg: import("../../../src/lib/shared-types.js").RelayMessage = {
@@ -466,8 +460,6 @@ describe("instance messages", () => {
 			expect(msg.type).toBe("instance_status");
 		}
 	});
-
-	// ─── Behavioral dispatch tests ────────────────────────────────────────────
 
 	it("receiving instance_list message populates instanceState via handleMessage", () => {
 		handleMessage({
@@ -536,8 +528,6 @@ describe("instance messages", () => {
 		expect(updatedPersonal.status).toBe("unhealthy");
 	});
 });
-
-// ─── Instance WS message contracts ──────────────────────────────────────────
 
 describe("instance WS message contracts", () => {
 	it("instance_list message matches store handler expectation", () => {

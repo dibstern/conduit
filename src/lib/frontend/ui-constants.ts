@@ -1,5 +1,3 @@
-// ─── Frontend UI Timing Constants ───────────────────────────────────────────
-
 /** How long to show copy-success feedback icon (ms). */
 export const COPY_FEEDBACK_MS = 1500;
 

@@ -1,4 +1,4 @@
-// ─── InstanceManager Service (Effect) ───────────────────────────────────────
+// InstanceManager Service (Effect)
 // Per-instance fibers + acquireRelease for health polling.
 // State lives in InstanceManagerStateTag (Ref<InstanceManagerState>);
 // health poll fibers are tracked in PollerFibersTag (FiberMap<string>).
@@ -53,13 +53,9 @@ import {
 	type SmartDefaultInstanceOptions,
 } from "./opencode-smart-default.js";
 
-// ─── Input type ───────────────────────────────────────────────────────────
-
 export interface AddInstanceInput extends InstanceConfig {
 	id: string;
 }
-
-// ─── Config ───────────────────────────────────────────────────────────────
 
 export interface InstanceManagerConfig {
 	maxInstances: number;
@@ -78,8 +74,6 @@ const DEFAULT_CONFIG: InstanceManagerConfig = {
 	maxRestartsPerWindow: 5,
 	restartWindowMs: 60_000,
 };
-
-// ─── State ────────────────────────────────────────────────────────────────
 
 export interface InstanceManagerState {
 	instances: HashMap.HashMap<string, OpenCodeInstance>;
@@ -176,8 +170,6 @@ const resolveInitialInstanceConfigs = (
 		? resolveSmartDefaultInstances(initialInstances, options)
 		: Effect.succeed(withConfiguredDefaultInstance(initialInstances, options));
 
-// ─── Context Tags ─────────────────────────────────────────────────────────
-
 /** Tag for the mutable InstanceManagerState Ref in the Effect Context. */
 export class InstanceManagerStateTag extends Context.Tag(
 	"InstanceManagerState",
@@ -188,8 +180,6 @@ export class PollerFibersTag extends Context.Tag("PollerFibers")<
 	PollerFibersTag,
 	FiberMap.FiberMap<string>
 >() {}
-
-// ─── Layer factory ────────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing both InstanceManagerStateTag and PollerFibersTag.
@@ -283,12 +273,8 @@ export function makeInstanceManagerStateFromDaemonStateLive(
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
 }
 
-// ─── Key prefix scheme for shared FiberMap ───────────────────────────────
-
 const pollerKey = (id: string) => `poller:${id}`;
 const restartKey = (id: string) => `restart:${id}`;
-
-// ─── Free functions ───────────────────────────────────────────────────────
 
 /**
  * Add an instance. Uses atomic Ref.modify to check capacity AND reserve
@@ -476,8 +462,6 @@ export const startInitialUnmanagedInstanceHealthPollers = Effect.gen(
 	},
 ).pipe(Effect.withSpan("instance.startInitialUnmanagedHealthPollers"));
 
-// ─── Health Polling ──────────────────────────────────────────────────────
-
 /**
  * Start periodic health polling for an instance.
  * Uses raw HTTP fetch to the instance port. Publishes status changes
@@ -662,8 +646,6 @@ export const startManagedOpenCodeServers = Effect.gen(function* () {
 	});
 }).pipe(Effect.withSpan("instance.startManagedOpenCodeServers"));
 
-// ─── Restart Scheduling ──────────────────────────────────────────────────
-
 /**
  * Schedule a restart for an unhealthy instance with exponential backoff.
  * Rate-limited by maxRestartsPerWindow. On exceed, marks instance
@@ -781,8 +763,6 @@ export const cancelInstanceFibers = (instanceId: string) =>
 		yield* FiberMap.remove(fibers, restartKey(instanceId));
 	});
 
-// ─── Missing methods for InstanceManagementDeps ─────────────────────────
-
 /**
  * Start an instance — update status to "starting" and begin health polling.
  * The actual process spawn is handled externally; this manages Effect-side state.
@@ -880,8 +860,6 @@ export const updateInstance = (
 export const persistConfig = Effect.gen(function* () {
 	yield* requestConfigSave;
 }).pipe(Effect.withSpan("instance.persistConfig"));
-
-// ─── URL helpers ────────────────────────────────────────────────────────
 
 /**
  * Get the external URL for an instance (using the daemon's public host).

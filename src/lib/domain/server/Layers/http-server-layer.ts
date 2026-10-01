@@ -1,4 +1,3 @@
-// ─── Effect HTTP Server Layer ────────────────────────────────────────────────
 // Replaces the raw `http.createServer` / `https.createServer` usage in
 // server.ts with a proper @effect/platform-node NodeHttpServer layer.
 //
@@ -26,7 +25,6 @@ import { DaemonEnvConfigTag } from "../../daemon/Services/daemon-config.js";
 import type { StaticDirTag } from "../Services/static-file-handler.js";
 import type { AuthManagerTag } from "./auth-middleware.js";
 
-// ─── HttpServerConfig Tag ──────────────────────────────────────────────────
 // A focused config slice for the HTTP server layer, decoupled from the
 // full DaemonEnvConfig for testability.
 
@@ -61,8 +59,6 @@ export const HttpServerConfigFromEnv: Layer.Layer<
 	})),
 );
 
-// ─── Server Factory ────────────────────────────────────────────────────────
-
 /**
  * Build the Node.js server factory function based on TLS config.
  * When TLS is enabled, reads cert/key from disk synchronously (they are
@@ -76,8 +72,6 @@ const makeServerFactory = (config: HttpServerConfig) => {
 	}
 	return () => createHttpServer();
 };
-
-// ─── HttpServerLive ────────────────────────────────────────────────────────
 
 /**
  * Layer that:

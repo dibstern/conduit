@@ -42,8 +42,6 @@ import {
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function makeProject(slug: string, dir?: string): StoredProject {
 	return {
 		slug,
@@ -93,8 +91,6 @@ const FailingRelayTestLayer = Layer.fresh(
 		ConfigPersistenceNoopLive,
 	),
 );
-
-// ─── Mutation: addWithoutRelay ───────────────────────────────────────────────
 
 describe("ProjectRegistry Effect - addWithoutRelay", () => {
 	it.scoped("registers a project in Registering state", () =>
@@ -150,8 +146,6 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 	);
 });
 
-// ─── Mutation: markReady ─────────────────────────────────────────────────────
-
 describe("ProjectRegistry Effect - markReady", () => {
 	it.scoped("transitions to Ready state", () =>
 		Effect.gen(function* () {
@@ -189,8 +183,6 @@ describe("ProjectRegistry Effect - markReady", () => {
 	);
 });
 
-// ─── Mutation: markError ─────────────────────────────────────────────────────
-
 describe("ProjectRegistry Effect - markError", () => {
 	it.scoped("transitions to Error state with error message", () =>
 		Effect.gen(function* () {
@@ -220,8 +212,6 @@ describe("ProjectRegistry Effect - markError", () => {
 		}).pipe(Effect.provide(TestLayer)),
 	);
 });
-
-// ─── Mutation: remove ────────────────────────────────────────────────────────
 
 describe("ProjectRegistry Effect - remove", () => {
 	it.scoped("removes a registered project", () =>
@@ -297,8 +287,6 @@ describe("ProjectRegistry Effect - remove", () => {
 	});
 });
 
-// ─── Mutation: updateProject ─────────────────────────────────────────────────
-
 describe("ProjectRegistry Effect - updateProject", () => {
 	it.scoped("updates project title", () =>
 		Effect.gen(function* () {
@@ -359,8 +347,6 @@ describe("ProjectRegistry Effect - updateProject", () => {
 	);
 });
 
-// ─── Mutation: touchLastUsed ─────────────────────────────────────────────────
-
 describe("ProjectRegistry Effect - touchLastUsed", () => {
 	it.scoped("bumps lastUsed timestamp", () =>
 		Effect.gen(function* () {
@@ -397,8 +383,6 @@ describe("ProjectRegistry Effect - touchLastUsed", () => {
 		}).pipe(Effect.provide(TestLayer)),
 	);
 });
-
-// ─── Queries ─────────────────────────────────────────────────────────────────
 
 describe("ProjectRegistry Effect - Queries", () => {
 	it.scoped("has() returns true for registered, false for unregistered", () =>
@@ -491,8 +475,6 @@ describe("ProjectRegistry Effect - Queries", () => {
 	);
 });
 
-// ─── startRelay ──────────────────────────────────────────────────────────────
-
 describe("ProjectRegistry Effect - startRelay", () => {
 	it.scoped(
 		"transitions Registering -> Ready on successful relay creation",
@@ -558,8 +540,6 @@ describe("ProjectRegistry Effect - startRelay", () => {
 		}).pipe(Effect.provide(TestLayer)),
 	);
 });
-
-// ─── removeAll ───────────────────────────────────────────────────────────────
 
 describe("ProjectRegistry Effect - removeAll", () => {
 	it.scoped("removes all projects, empties state", () =>
@@ -666,8 +646,6 @@ describe("ProjectRegistry Effect - removeAll", () => {
 			}),
 	);
 });
-
-// ─── Multi-step lifecycle ────────────────────────────────────────────────────
 
 describe("ProjectRegistry Effect - Multi-step lifecycle", () => {
 	it.scoped(

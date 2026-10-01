@@ -1,4 +1,3 @@
-// ─── StorageMonitor Effect Layer ────────────────────────────────────────────
 // Pure Effect replacement for the StorageMonitor class.
 // Periodically checks storage usage and evicts old events when above high-water mark.
 // Background fiber is fork-scoped — automatically interrupted on scope close.
@@ -8,8 +7,6 @@
 
 import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 
-// ─── Config ─────────────────────────────────────────────────────────────────
-
 export interface StorageMonitorConfig {
 	getStorageUsage: () => Effect.Effect<number>;
 	persistence: { evictOldEvents: () => Effect.Effect<void> };
@@ -17,21 +14,15 @@ export interface StorageMonitorConfig {
 	highWaterMark: number;
 }
 
-// ─── Service interface ──────────────────────────────────────────────────────
-
 interface StorageMonitorService {
 	getUsage: () => Effect.Effect<number>;
 	getLastCheck: () => Effect.Effect<number>;
 }
 
-// ─── Tag ────────────────────────────────────────────────────────────────────
-
 export class StorageMonitorTag extends Context.Tag("StorageMonitor")<
 	StorageMonitorTag,
 	StorageMonitorService
 >() {}
-
-// ─── Layer ──────────────────────────────────────────────────────────────────
 
 export const StorageMonitorLive = (config: StorageMonitorConfig) =>
 	Layer.scoped(

@@ -65,7 +65,6 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"question.resolved", // Same, or by the turn that answers a recovered question
 ] as const satisfies readonly CanonicalEventType[];
 
-// ─── Compile-time exhaustiveness check ──────────────────────────────────
 // All canonical event types MUST appear in exactly one of the two arrays.
 // If this type errors, a new CanonicalEventType was added without updating
 // this file. Fix: add the new type to either CLAUDE_PRODUCED_TYPES or

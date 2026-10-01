@@ -1,4 +1,3 @@
-// ─── Effect HTTP Router Tests ───────────────────────────────────────────────
 // Tests for the Effect-based HTTP router (effect-http-router.ts).
 // Uses HttpApp.toWebHandlerLayer to run route handlers against
 // the Web Fetch API Request/Response, avoiding a real HTTP server.
@@ -23,8 +22,6 @@ import {
 	type RouterProjectInfo,
 	SetupInfoProvider,
 } from "../../../src/lib/server/effect-http-router.js";
-
-// ─── Test Layers ────────────────────────────────────────────────────────────
 
 const testProjects: RouterProjectInfo[] = [
 	{
@@ -72,8 +69,6 @@ const baseRouterLayer = () =>
 		NodePath.layer,
 	);
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /**
  * Build a web handler from the Effect router with the given layers.
  * Returns { handler, dispose } where handler takes a Request → Promise<Response>.
@@ -90,7 +85,6 @@ async function jsonBody(response: Response): Promise<unknown> {
 	return response.json();
 }
 
-// ─── Handlers with cleanup ─────────────────────────────────────────────────
 // Track all handlers so they can be disposed after tests complete.
 
 const disposers: Array<() => Promise<void>> = [];
@@ -107,11 +101,7 @@ afterAll(async () => {
 	if (staticDir) await rm(staticDir, { recursive: true, force: true });
 });
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe("Effect HTTP Router", () => {
-	// ── Health ─────────────────────────────────────────────────────────────
-
 	describe("GET /health", () => {
 		it("returns default health response when no HealthProvider", async () => {
 			const handler = tracked(TestProjectsLayer);
@@ -147,8 +137,6 @@ describe("Effect HTTP Router", () => {
 		});
 	});
 
-	// ── Info ──────────────────────────────────────────────────────────────
-
 	describe("GET /info", () => {
 		it("returns version info", async () => {
 			const handler = tracked(TestProjectsLayer);
@@ -160,8 +148,6 @@ describe("Effect HTTP Router", () => {
 			expect(typeof body.version).toBe("string");
 		});
 	});
-
-	// ── Projects ─────────────────────────────────────────────────────────
 
 	describe("GET /api/projects", () => {
 		it("returns serialized project list with version", async () => {
@@ -189,8 +175,6 @@ describe("Effect HTTP Router", () => {
 		});
 	});
 
-	// ── Push VAPID key ───────────────────────────────────────────────────
-
 	describe("GET /api/push/vapid-key", () => {
 		it("returns VAPID public key when PushProvider present", async () => {
 			const handler = tracked(Layer.merge(TestProjectsLayer, TestPushLayer));
@@ -216,8 +200,6 @@ describe("Effect HTTP Router", () => {
 			expect(body.error.code).toBe("NOT_AVAILABLE");
 		});
 	});
-
-	// ── Push subscribe ───────────────────────────────────────────────────
 
 	describe("POST /api/push/subscribe", () => {
 		it("accepts valid subscription and returns ok", async () => {
@@ -271,8 +253,6 @@ describe("Effect HTTP Router", () => {
 		});
 	});
 
-	// ── CA certificate ───────────────────────────────────────────────────
-
 	describe("GET /ca/download", () => {
 		it("returns DER certificate when available", async () => {
 			const handler = tracked(Layer.merge(TestProjectsLayer, TestCaCertLayer));
@@ -303,8 +283,6 @@ describe("Effect HTTP Router", () => {
 		});
 	});
 
-	// ── CORS ─────────────────────────────────────────────────────────────
-
 	describe("CORS middleware", () => {
 		it("effectRouterWithCors adds CORS headers to responses", async () => {
 			const { handler, dispose } = HttpApp.toWebHandlerLayer(
@@ -327,8 +305,6 @@ describe("Effect HTTP Router", () => {
 			expect(response.headers.get("access-control-allow-origin")).toBe("*");
 		});
 	});
-
-	// ── 404 for unknown routes ───────────────────────────────────────────
 
 	describe("unknown routes", () => {
 		it("returns 404 for unregistered paths", async () => {

@@ -1,4 +1,4 @@
-// ─── E2E: Per-Tab Session Routing (Mock OpenCode) ────────────────────────────
+// E2E: Per-Tab Session Routing (Mock OpenCode)
 // Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
 // real WebSocket clients to verify SSE events route only to session viewers.
 //
@@ -23,7 +23,6 @@ import {
 } from "../../../src/lib/relay/relay-stack.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
-// ── Mock OpenCode Server ─────────────────────────────────────────────────────
 // Minimal HTTP server impersonating OpenCode's REST + SSE endpoints.
 // Sessions are stored in-memory; SSE events are injected via helper function.
 
@@ -220,8 +219,6 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 	};
 }
 
-// ── Test Harness ─────────────────────────────────────────────────────────────
-
 interface TestHarness {
 	relay: ProjectRelay;
 	mock: MockOpenCode;
@@ -312,8 +309,6 @@ async function createTestHarness(): Promise<TestHarness> {
 		},
 	};
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("E2E: Per-tab session routing with mock OpenCode", () => {
 	let harness: TestHarness;

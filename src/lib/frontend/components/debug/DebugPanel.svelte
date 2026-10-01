@@ -1,4 +1,3 @@
-<!-- ─── Debug Panel ──────────────────────────────────────────────────────────── -->
 <!-- Floating panel showing live WebSocket connection state and event history.    -->
 <!-- Terminal aesthetic: dark background, green monospace text, compact layout.   -->
 
@@ -44,13 +43,11 @@
 		setTimeout(() => { copyFlash = false; }, COPY_FLASH_DURATION_MS);
 	}
 
-	// ─── Props ──────────────────────────────────────────────────────────────
 	let {
 		visible = false,
 		onClose,
 	}: { visible: boolean; onClose?: () => void } = $props();
 
-	// ─── Reactive event list ────────────────────────────────────────────────
 	// Touch eventCount and verboseMessages to trigger reactivity.
 	const eventCount = $derived(wsDebugState.eventCount);
 	const verboseMessages = $derived(wsDebugState.verboseMessages);
@@ -64,7 +61,6 @@
 		events = getDebugEvents();
 	});
 
-	// ─── Live "time in state" counter ───────────────────────────────────────
 	let now = $state(Date.now());
 	$effect(() => {
 		if (!visible) return;
@@ -77,8 +73,6 @@
 	const timeInState = $derived(
 		Math.round((now - wsDebugState.lastTransitionTime) / 1000),
 	);
-
-	// ─── Helpers ────────────────────────────────────────────────────────────
 
 	/** Format timestamp as HH:MM:SS.mmm */
 	function fmtTime(time: number): string {
@@ -116,7 +110,6 @@
 		const id = (v: unknown) => typeof v === "string" ? v : "";
 
 		switch (properties["type"]) {
-			// ── Chat-visible: streaming ──────────────────────────────────────
 			case "delta":
 				return `${typeof properties["text"] === "string" ? `${properties["text"].length}ch` : ""}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "thinking_start":
@@ -125,7 +118,6 @@
 			case "thinking_delta":
 				return `${typeof properties["text"] === "string" ? `${properties["text"].length}ch` : ""}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 
-			// ── Chat-visible: tools ──────────────────────────────────────────
 			case "tool_start":
 				return `${properties["name"] ?? "?"} id=${id(properties["id"])}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "tool_executing":
@@ -135,7 +127,6 @@
 			case "tool_content":
 				return `id=${id(properties["toolId"])}`;
 
-			// ── Chat-visible: permissions / questions ────────────────────────
 			case "permission_request":
 				return `${properties["toolName"] ?? "?"} sess=${id(properties["sessionId"])} req=${id(properties["requestId"])}`;
 			case "permission_resolved":
@@ -146,7 +137,6 @@
 			case "ask_user_error":
 				return `tool=${id(properties["toolId"])}`;
 
-			// ── Chat-visible: session lifecycle ──────────────────────────────
 			case "result":
 				return `sess=${id(properties["sessionId"])} cost=$${typeof properties["cost"] === "number" ? properties["cost"].toFixed(4) : "?"}`;
 			case "done":
@@ -156,11 +146,9 @@
 			case "error":
 				return `[${properties["code"]}] ${properties["message"]}`;
 
-			// ── Session management ───────────────────────────────────────────
 			case "session_list":
 				return Array.isArray(properties["sessions"]) ? `${properties["sessions"].length} sessions` : "";
 
-			// ── Connection / infra ───────────────────────────────────────────
 			case "connection_status":
 				return String(properties["status"] ?? "");
 			case "notification_event":
@@ -168,7 +156,6 @@
 			case "client_count":
 				return `${properties["count"] ?? 0} clients`;
 
-			// ── Discovery / metadata ─────────────────────────────────────────
 			case "instance_list":
 				return Array.isArray(properties["instances"]) ? `${properties["instances"].length} instances` : "";
 			case "pty_list":
@@ -208,7 +195,6 @@
 		return "text-gray-300";
 	}
 
-	// ─── Auto-scroll to bottom ──────────────────────────────────────────────
 	let logEl: HTMLDivElement | undefined = $state(undefined);
 	$effect(() => {
 		void eventCount;
@@ -220,7 +206,6 @@
 		}
 	});
 
-	// ─── Dragging support ───────────────────────────────────────────────────
 	let isDragging = $state(false);
 	let dragOffset = $state({ x: 0, y: 0 });
 	let panelPos = $state({ x: -1, y: -1 }); // -1 = use CSS default
@@ -273,7 +258,7 @@
 		};
 	});
 
-	// ─── Resize support (top-left handle) ──────────────────────────────────
+	// Resize support (top-left handle)
 	let panelSize = $state({ width: 460, height: 320 });
 	let isResizing = $state(false);
 	let resizeStart = $state({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });

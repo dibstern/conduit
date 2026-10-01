@@ -1,4 +1,4 @@
-// ─── Shell Subscription (delta source #2) ────────────────────────────────────
+// Shell Subscription (delta source #2)
 // The concrete SubscriptionSource for the shell — the sidebar session list
 // (root session summaries: title, attention, status, recency).
 //
@@ -30,11 +30,7 @@ import type { SessionInfo } from "../../../shared-types.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
-
-// ─── Public entry point ──────────────────────────────────────────────────────
 
 /**
  * Subscribe to the shell (session-list) stream. Cold start and resume both emit

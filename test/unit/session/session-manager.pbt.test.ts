@@ -1,4 +1,4 @@
-// ─── Session Manager PBT Tests (Ticket 2.3) ──────────────────────────────────
+// Session Manager PBT Tests (Ticket 2.3)
 
 import * as fc from "fast-check";
 import { assert, describe, expect, it } from "vitest";
@@ -12,8 +12,6 @@ import type { RelayMessage } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 50;
-
-// ─── Mock OpenCodeClient ─────────────────────────────────────────────────────
 
 interface MockSession {
 	id: string;
@@ -104,8 +102,6 @@ function createMockClient(initial: MockSession[] = []): OpenCodeAPI & {
 	};
 }
 
-// ─── Arbitraries ─────────────────────────────────────────────────────────────
-
 const arbSessionTitle = fc.string({ minLength: 1, maxLength: 50 });
 
 const arbSession = fc.record({
@@ -123,8 +119,6 @@ const _arbMessage = (sessionId: string) =>
 		role: fc.constantFrom("user", "assistant"),
 		sessionID: fc.constant(sessionId),
 	});
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("Ticket 2.3 — Session Manager PBT", () => {
 	describe("P1: Initialize resumes most recent session or creates one (AC8)", () => {
@@ -816,8 +810,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 		});
 	});
 });
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function dedup(sessions: MockSession[]): MockSession[] {
 	const seen = new Set<string>();

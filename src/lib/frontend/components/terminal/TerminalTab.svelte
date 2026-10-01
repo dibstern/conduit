@@ -86,7 +86,6 @@
 		});
 		ro.observe(containerEl);
 
-		// ─── Touch scrolling ──────────────────────────────────────────────────
 		// Translate vertical swipe gestures into xterm scrollLines() calls
 		// so users can scroll the terminal scrollback on touch devices.
 		let touchStartY: number | null = null;

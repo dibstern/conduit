@@ -1,4 +1,4 @@
-// ─── State-Machine Model Test: Event Translator (Ticket 1.3) ────────────────
+// State-Machine Model Test: Event Translator (Ticket 1.3)
 //
 // Uses fc.commands() + fc.modelRun() to exercise the stateful translator's
 // part-tracking state machine under arbitrary interleavings of:
@@ -34,8 +34,6 @@ import type {
 const SEED = 42;
 const NUM_RUNS = 100;
 
-// ─── Model ──────────────────────────────────────────────────────────────────
-
 interface PartInfo {
 	type: PartType;
 	status?: ToolStatus;
@@ -48,8 +46,6 @@ interface ModelState {
 interface RealState {
 	translator: ReturnType<typeof createTranslator>;
 }
-
-// ─── Commands ───────────────────────────────────────────────────────────────
 
 class ReceiveToolPartCommand implements fc.Command<ModelState, RealState> {
 	constructor(
@@ -383,8 +379,6 @@ class RebuildFromHistoryCommand implements fc.Command<ModelState, RealState> {
 	}
 }
 
-// ─── Arbitraries ────────────────────────────────────────────────────────────
-
 const arbPartID = fc.oneof(
 	{ weight: 5, arbitrary: fc.uuid() },
 	{ weight: 3, arbitrary: fc.stringMatching(/^p[0-9]{1,6}$/) },
@@ -458,8 +452,6 @@ const allCommands = fc.commands(
 	],
 	{ maxCommands: 40 },
 );
-
-// ─── Test ───────────────────────────────────────────────────────────────────
 
 describe("Ticket 1.3 — Event Translator State Machine PBT", () => {
 	it("property: arbitrary command sequences maintain model/real seenParts consistency", () => {

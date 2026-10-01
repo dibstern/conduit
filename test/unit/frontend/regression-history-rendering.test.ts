@@ -1,4 +1,3 @@
-// ─── Regression: History Rendering of Multi-Part Messages ────────────────────
 // Reproduces: after switching back to a session, the assistant message content
 // is EMPTY — the HistoryView renders parts[0]?.text, but the first part of
 // an OpenCode assistant message is typically NOT the text response.
@@ -15,8 +14,6 @@ import {
 	type HistoryMessage,
 } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { PartType } from "../../../src/lib/shared-types.js";
-
-// ─── Realistic OpenCode message fixtures ────────────────────────────────────
 
 /** User message — always has a single text part */
 function userMsg(id: string, text: string): HistoryMessage {
@@ -36,8 +33,6 @@ function assistantMsg(
 ): HistoryMessage {
 	return { id, role: "assistant", parts };
 }
-
-// ─── Tests: the OLD parts[0]?.text approach ─────────────────────────────────
 
 describe("Regression: HistoryView rendering of multi-part assistant messages", () => {
 	it("parts[0]?.text is EMPTY when first part has no text field", () => {

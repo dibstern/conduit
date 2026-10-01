@@ -1,4 +1,3 @@
-// ─── PinoLoggerLive ─────────────────────────────────────────────────────────
 // Bridges Effect.log* (logInfo, logWarning, logError, etc.) to Pino.
 //
 // Effect.annotateLogs annotations are forwarded as Pino child logger bindings
@@ -82,7 +81,6 @@ export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 		}),
 	);
 
-// ─── Pre-built singleton for production use ─────────────────────────────────
 // Uses the existing Pino logger infrastructure with an "effect" tag.
 
 import { _getRawPinoChild } from "../../../logger.js";

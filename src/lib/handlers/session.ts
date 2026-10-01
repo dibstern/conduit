@@ -1,9 +1,7 @@
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-// ─── Session Handlers ────────────────────────────────────────────────────────
-
 import { Effect } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,

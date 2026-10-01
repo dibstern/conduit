@@ -1,4 +1,3 @@
-// ─── Daemon Smart Default E2E Tests ──────────────────────────────────────────
 // Full integration tests for the smart default instance detection.
 // Creates a daemon WITHOUT an explicit opencodeUrl — it must auto-detect
 // the default OpenCode instance via probeOpenCode().

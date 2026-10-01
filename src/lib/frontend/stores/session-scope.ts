@@ -1,4 +1,3 @@
-// ─── Session scope ──────────────────────────────────────────────────────────
 // The project the sidebar list is narrowed to, or null for every project. The
 // URL (`?p=<slug>`) holds the only copy. The chip, the `project:` token,
 // browser back and a refresh all read it from there, which is what stops the

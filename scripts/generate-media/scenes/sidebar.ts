@@ -1,4 +1,3 @@
-// ─── Sidebar Scene ───────────────────────────────────────────────────────────
 // Generates GENERATE-SIDEBAR.png — Desktop view showing the sidebar with a
 // populated session list and the main chat area.
 

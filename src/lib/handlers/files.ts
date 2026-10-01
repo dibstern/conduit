@@ -1,5 +1,3 @@
-// ─── File Browser Handlers ───────────────────────────────────────────────────
-
 import { Effect } from "effect";
 import ignore from "ignore";
 import {
@@ -7,8 +5,6 @@ import {
 	OpenCodeFileServiceTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-
-// ─── Gitignore Helpers ──────────────────────────────────────────────────────
 
 /** Directories we always skip (even if .gitignore is unavailable). */
 const ALWAYS_SKIP = new Set([".git", ".svn", ".hg"]);
@@ -32,8 +28,6 @@ const isIgnored = (
 	type === "directory"
 		? ig.ignores(path) || ig.ignores(`${path}/`)
 		: ig.ignores(path);
-
-// ─── Handlers ───────────────────────────────────────────────────────────────
 
 export const handleGetFileList = (
 	clientId: string,

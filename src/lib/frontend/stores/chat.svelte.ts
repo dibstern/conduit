@@ -1,4 +1,3 @@
-// ─── Chat Store ──────────────────────────────────────────────────────────────
 // Manages chat messages, streaming state, and processing.
 //
 // Two-tier per-session chat state. Handlers receive (activity, messages, event)
@@ -22,8 +21,6 @@ import { getBrowserClientId } from "./client-identity.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
-
-// ─── Two-Tier Per-Session Chat State ────────────────────────────────────────
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
@@ -68,7 +65,7 @@ export type SessionMessages = {
 // Composite read shape for the chat view. NEVER instantiated as storage.
 export type SessionChatState = SessionActivity & SessionMessages;
 
-// ── Factories (return plain POJOs — $state wrapping happens in getOrCreate*) ──
+// Factories (return plain POJOs — $state wrapping happens in getOrCreate*)
 
 export function createEmptySessionActivity(): SessionActivity {
 	return {
@@ -100,13 +97,9 @@ export function createEmptySessionMessages(): SessionMessages {
 	};
 }
 
-// ── ACTIVITY_KEYS — derived from factory return shape ──
-
 export const ACTIVITY_KEYS: ReadonlySet<keyof SessionActivity> = new Set(
 	Object.keys(createEmptySessionActivity()) as (keyof SessionActivity)[],
 );
-
-// ── composeChatState — read-only Proxy with full trap set ──
 
 export function composeChatState(
 	activity: SessionActivity,
@@ -143,7 +136,7 @@ export function composeChatState(
 	});
 }
 
-// ── Empty sentinels (frozen POJOs, NOT $state) ──
+// Empty sentinels (frozen POJOs, NOT $state)
 
 const EMPTY_ACTIVITY_RAW = createEmptySessionActivity();
 const EMPTY_MESSAGES_RAW = createEmptySessionMessages();
@@ -178,12 +171,8 @@ export const EMPTY_STATE: SessionChatState =
 			})
 		: EMPTY_STATE_RAW;
 
-// ── Per-session maps ──
-
 export const sessionActivity = new SvelteMap<string, SessionActivity>();
 export const sessionMessages = new SvelteMap<string, SessionMessages>();
-
-// ── Read API ──
 
 const _currentChat = $derived.by((): SessionChatState => {
 	const id = sessionState.currentId;
@@ -200,8 +189,6 @@ export function currentChat(): SessionChatState {
 export function getSessionPhase(id: string): ChatPhase {
 	return sessionActivity.get(id)?.phase ?? "idle";
 }
-
-// ── Write API ──
 
 export function getOrCreateSessionActivity(id: string): SessionActivity {
 	if (id === "") throw new Error("getOrCreateSessionActivity: empty sessionId");
@@ -252,7 +239,7 @@ export function clearSessionChatState(id: string): void {
 	if (lruIdx !== -1) lruOrder.splice(lruIdx, 1);
 }
 
-// ── LRU helpers (Tier 2 only) ──
+// LRU helpers (Tier 2 only)
 
 const TIER2_LRU_CAP = 20;
 const lruOrder: string[] = [];
@@ -285,8 +272,6 @@ function ensureLRUCap(): void {
 	}
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Type-safe search: narrows ChatMessage by discriminant, avoiding unsafe index casts. */
 export function findMessage<T extends ChatMessage["type"]>(
 	messages: ChatMessage[],
@@ -306,8 +291,6 @@ export function findMessage<T extends ChatMessage["type"]>(
 	}
 	return undefined;
 }
-
-// ─── State ──────────────────────────────────────────────────────────────────
 
 /** Valid chat pipeline phases. Single source of truth — the derived
  *  flags (isProcessing, isStreaming, isReplaying) derive from this value.
@@ -358,7 +341,6 @@ export const chatState: ChatMirror = Object.freeze({
 	},
 });
 
-// ─── Derived phase flags ────────────────────────────────────────────────────
 // Svelte 5 forbids exporting $derived directly from .svelte.ts modules.
 // We expose the derived values as exported functions that return the current
 // reactive value.  Call sites read them as `isProcessing()`.
@@ -403,7 +385,6 @@ export function isLoading(): boolean {
 	return _isLoading;
 }
 
-// ─── Phase Transitions ─────────────────────────────────────────────────────
 // Enforce valid combinations of processing/streaming/replaying.
 // All production code MUST use these instead of setting booleans directly.
 // Tests may still set booleans directly for arbitrary state setup.
@@ -451,7 +432,6 @@ export const historyState = $state({
 	loading: false,
 });
 
-// ─── Input Sync State ───────────────────────────────────────────────────────
 // Tracks the last input text received from another tab viewing the same session.
 
 export const inputSyncState = $state({
@@ -472,8 +452,6 @@ export function handleInputSyncReceived(msg: {
 	inputSyncState.lastFrom = msg.from ?? "";
 	inputSyncState.lastUpdated = Date.now();
 }
-
-// ─── Derived getters ────────────────────────────────────────────────────────
 
 /** Get the number of messages in current conversation. */
 export function getMessageCount(): number {
@@ -507,8 +485,6 @@ function applyToolUpdate(
 }
 
 // doneMessageIds: per-session only (activity.doneMessageIds). Module-level set removed in Task 6.
-
-// ─── Pure helpers ───────────────────────────────────────────────────────────
 
 /**
  * Walk messages backward, find the last one matching `type` and `predicate`,
@@ -578,8 +554,6 @@ export function setMessages(
 	messages.messages = msgs;
 }
 
-// ─── Turn boundary detection ────────────────────────────────────────────────
-
 /** Detect a turn boundary when a new messageId is seen.
  *
  *  Called from `dispatchChatEvent` for every event that carries a
@@ -617,7 +591,6 @@ export function advanceTurnIfNewMessage(
 		return;
 	}
 
-	// ── First event of a genuinely new message ─────────────────────────
 	activity.seenMessageIds.add(messageId);
 	const previousTurnAlreadyEnded =
 		activity.endedGeneration === activity.turnGeneration;
@@ -656,8 +629,6 @@ export function advanceTurnIfNewMessage(
 
 	activity.currentMessageId = messageId;
 }
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handleThinkingStop(
 	_activity: SessionActivity,
@@ -894,7 +865,6 @@ export function handleStatus(
 			applyTerminalTurn(activity, messages);
 		}
 
-		// 3. Clear in-flight state
 		activity.currentMessageId = null;
 		messages.currentAssistantText = "";
 		activity.thinkingStartTime = 0;
@@ -903,7 +873,6 @@ export function handleStatus(
 	}
 }
 
-// ─── Scroll request flag ────────────────────────────────────────────────────
 // One-shot flag consumed by the MessageList content-change $effect.
 // Used when content is added that MUST trigger auto-scroll even though the
 // session phase has already transitioned to idle (e.g. error messages call
@@ -985,8 +954,6 @@ export function handleCompaction(
 		}
 	}
 }
-
-// ─── Actions ────────────────────────────────────────────────────────────────
 
 // Keep per-origin FIFO entries even when a provisional bubble is removed.
 const pendingUserMessages = new WeakMap<SessionMessages, Map<string, string>>();

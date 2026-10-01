@@ -1,4 +1,4 @@
-// ─── PIN Hashing Tests (Ticket 8.4) ──────────────────────────────────────────
+// PIN Hashing Tests (Ticket 8.4)
 
 import { describe, expect, it } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";

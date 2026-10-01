@@ -1,4 +1,3 @@
-<!-- ─── Paste Preview ──────────────────────────────────────────────────────── -->
 <!-- Horizontal row of image thumbnails for images pasted/dropped into input. -->
 <!-- Purely client-side display — no WS messages sent. -->
 <!-- Preserves #image-preview wrapper and .paste-thumb / .paste-chip classes. -->

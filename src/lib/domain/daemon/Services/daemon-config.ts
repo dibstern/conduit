@@ -1,4 +1,3 @@
-// ─── DaemonEnvConfig: Effect.Config-based env parsing ─────────────────────────
 // Replaces the static ENV object in env.ts with a type-safe, testable Layer.
 // Consumers `yield* DaemonEnvConfigTag` to access parsed environment values.
 // Tests override via `ConfigProvider.fromMap` — no process.env mutation needed.
@@ -12,8 +11,6 @@ import {
 	type Option,
 	type Redacted,
 } from "effect";
-
-// ─── Service interface ──────────────────────────────────────────────────────
 
 export interface DaemonEnvConfig {
 	readonly host: string;
@@ -30,20 +27,14 @@ export interface DaemonEnvConfig {
 	readonly tlsKeyPath: string | undefined;
 }
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 export class DaemonEnvConfigTag extends Context.Tag("DaemonEnvConfig")<
 	DaemonEnvConfigTag,
 	DaemonEnvConfig
 >() {}
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Extract the value from a Config.option result, returning undefined for None. */
 const optionToUndefined = <A>(o: Option.Option<A>): A | undefined =>
 	o._tag === "Some" ? o.value : undefined;
-
-// ─── Live Layer ─────────────────────────────────────────────────────────────
 
 export const DaemonEnvConfigLive: Layer.Layer<
 	DaemonEnvConfigTag,

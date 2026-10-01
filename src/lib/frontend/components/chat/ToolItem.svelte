@@ -1,4 +1,3 @@
-<!-- ─── Tool Item ───────────────────────────────────────────────────────────── -->
 <!-- Thin dispatcher that routes tool messages to the appropriate sub-component. -->
 <!-- Preserves .tool-item class and data-tool-id for E2E. -->
 

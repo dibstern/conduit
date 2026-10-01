@@ -24,8 +24,6 @@ const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
 	{ name: "help", description: "Show help" },
 ];
 
-// ─── Fallback model catalog ────────────────────────────────────────────────
-
 // Used only when the SDK capability probe fails or returns no models.
 const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 	{
@@ -48,7 +46,7 @@ const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 	},
 ];
 
-// ─── Frontmatter parser (minimal) ──────────────────────────────────────────
+// Frontmatter parser (minimal)
 
 function parseFrontmatter(contents: string): Record<string, string> {
 	if (!contents.startsWith("---\n")) return {};
@@ -65,8 +63,6 @@ function parseFrontmatter(contents: string): Record<string, string> {
 	}
 	return out;
 }
-
-// ─── Directory scanners ────────────────────────────────────────────────────
 
 function safeReaddir(path: string): string[] {
 	try {

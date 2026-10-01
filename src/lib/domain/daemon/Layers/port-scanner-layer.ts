@@ -1,4 +1,3 @@
-// ─── PortScanner Effect Layer ───────────────────────────────────────────────
 // Pure Effect replacement for the PortScanner class.
 // Periodically scans a port range and tracks which ports are alive.
 // A port must fail `removalThreshold` consecutive times before being removed
@@ -14,8 +13,6 @@
 // Consumer migration.
 
 import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
-
-// ─── Config ─────────────────────────────────────────────────────────────────
 
 export interface PortScannerConfig {
 	probeFn: (port: number) => Effect.Effect<boolean>;
@@ -35,28 +32,20 @@ export interface PortScanResult {
 	readonly active: number[];
 }
 
-// ─── Service interface ──────────────────────────────────────────────────────
-
 interface PortScannerService {
 	getKnownPorts: () => Effect.Effect<Set<number>>;
 	scanNow: () => Effect.Effect<PortScanResult>;
 }
-
-// ─── Tag ────────────────────────────────────────────────────────────────────
 
 export class PortScannerTag extends Context.Tag("PortScanner")<
 	PortScannerTag,
 	PortScannerService
 >() {}
 
-// ─── Internal state ─────────────────────────────────────────────────────────
-
 interface ScanState {
 	knownPorts: Set<number>;
 	failureCounts: Map<number, number>;
 }
-
-// ─── Layer ──────────────────────────────────────────────────────────────────
 
 export const PortScannerLive = (config: PortScannerConfig) =>
 	Layer.scoped(

@@ -1,4 +1,3 @@
-// ─── Notifications Setup Wizard ─────────────────────────────────
 // Interactive CLI wizard for configuring push notifications and remote access.
 // Two-toggle flow → conditional Tailscale/HTTPS/QR sections. Ported from
 // claude-relay/bin/cli.js lines 1684-1851 (showSetupGuide).
@@ -8,8 +7,6 @@ import type { PromptOptions, SelectPromptOptions } from "./prompts.js";
 import { promptSelect, promptToggle } from "./prompts.js";
 import { a, log, sym } from "./terminal-render.js";
 import * as tls from "./tls.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface NotificationWizardOptions extends PromptOptions {
 	/** Callback: return to previous menu */
@@ -35,8 +32,6 @@ export interface NotificationWizardOptions extends PromptOptions {
 	/** Generate QR code art from URL (optional). */
 	generateQR?: (url: string) => string;
 }
-
-// ─── showNotificationWizard ──────────────────────────────────────────────────
 
 /**
  * Run the notifications setup wizard.
@@ -126,8 +121,6 @@ export async function showNotificationWizard(
 		await renderHttps();
 	}
 
-	// ─── Tailscale Section ────────────────────────────────────────────────
-
 	async function renderTailscale(): Promise<void> {
 		const tsIP = detectTailscaleIP();
 
@@ -191,8 +184,6 @@ export async function showNotificationWizard(
 			}
 		}
 	}
-
-	// ─── HTTPS Section ────────────────────────────────────────────────────
 
 	async function renderHttps(): Promise<void> {
 		if (!wantPush) {
@@ -258,8 +249,6 @@ export async function showNotificationWizard(
 			}
 		}
 	}
-
-	// ─── Setup QR Section ─────────────────────────────────────────────────
 
 	async function showSetupQR(): Promise<void> {
 		const tsIP = detectTailscaleIP();

@@ -1,4 +1,4 @@
-// ─── Interactive Prompt Components — Unit Tests (Ticket 8.1) ─────────────────
+// Interactive Prompt Components — Unit Tests (Ticket 8.1)
 // Tests for promptToggle, promptPin, promptText, promptSelect, and
 // promptMultiSelect. Uses mock stdin (EventEmitter), stdout, and exit.
 
@@ -20,8 +20,6 @@ import {
 	promptToggle,
 } from "../../../src/lib/cli/prompts.js";
 import { a } from "../../../src/lib/cli/terminal-render.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape sequences from a string. */
 function stripAnsi(s: string): string {
@@ -111,8 +109,6 @@ function countClearUpLines(output: string[], afterIndex: number): number {
 	const pattern = new RegExp(`${esc}\\[1A${esc}\\[2K`, "g");
 	return (tail.match(pattern) || []).length;
 }
-
-// ─── promptToggle ────────────────────────────────────────────────────────────
 
 describe("promptToggle", () => {
 	it("renders title in output", () => {
@@ -318,8 +314,6 @@ describe("promptToggle", () => {
 		expect(redrawOutput).toContain(`${esc}[1B`); // move down
 	});
 });
-
-// ─── promptPin ───────────────────────────────────────────────────────────────
 
 describe("promptPin", () => {
 	it("renders title and description", () => {
@@ -550,8 +544,6 @@ describe("promptPin", () => {
 		expect(countClearUpLines(io.output, beforeCancel)).toBe(4);
 	});
 });
-
-// ─── promptText ──────────────────────────────────────────────────────────────
 
 describe("promptText", () => {
 	it("renders title and key hints", () => {
@@ -895,8 +887,6 @@ describe("promptText", () => {
 	});
 });
 
-// ─── promptSelect ────────────────────────────────────────────────────────────
-
 describe("promptSelect", () => {
 	const items: SelectItem[] = [
 		{ label: "Option A", value: "a" },
@@ -1232,8 +1222,6 @@ describe("promptSelect", () => {
 		expect(countClearUpLines(io.output, beforeBack)).toBe(5);
 	});
 });
-
-// ─── promptMultiSelect ───────────────────────────────────────────────────────
 
 describe("promptMultiSelect", () => {
 	const items: MultiSelectItem[] = [

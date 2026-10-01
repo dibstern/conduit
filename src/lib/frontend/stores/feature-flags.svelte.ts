@@ -1,4 +1,3 @@
-// ─── Feature Flags ──────────────────────────────────────────────────────────
 // Typed, extensible feature flag system with URL, localStorage, and UI activation.
 // URL: ?feats=debug,foo (comma-separated, validated, persisted to localStorage)
 // localStorage: key "feature-flags" (JSON array of flag names)
@@ -12,13 +11,9 @@ const VALID_FLAGS: readonly FeatureFlag[] = ["debug"] as const;
 
 const STORAGE_KEY = "feature-flags";
 
-// ─── State ──────────────────────────────────────────────────────────────────
-
 export const featureFlags = $state({
 	debug: false,
 });
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Parse ?feats=debug,foo URL param. Returns only valid FeatureFlag values. */
 export function parseFeatsParam(value: string): FeatureFlag[] {
@@ -60,8 +55,6 @@ function applyFlags(flags: FeatureFlag[]): void {
 		featureFlags[flag] = flags.includes(flag);
 	}
 }
-
-// ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
  * Initialize feature flags from URL params and localStorage.

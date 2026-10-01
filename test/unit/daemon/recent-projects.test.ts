@@ -1,4 +1,3 @@
-// ─── Recent Projects — Regression Tests ──────────────────────────────────────
 // Tests for isValidProjectPath, deserializeRecent path validation, and
 // filterExistingProjects. These would fail before the commit that added
 // path validation and the filterExistingProjects function.
@@ -21,8 +20,6 @@ const mockedExistsSync = vi.mocked(existsSync);
 afterEach(() => {
 	vi.restoreAllMocks();
 });
-
-// ─── isValidProjectPath ──────────────────────────────────────────────────────
 
 describe("isValidProjectPath", () => {
 	it("returns true for absolute path", () => {
@@ -53,8 +50,6 @@ describe("isValidProjectPath", () => {
 		expect(isValidProjectPath("/home/my project")).toBe(true);
 	});
 });
-
-// ─── deserializeRecent — path validation ─────────────────────────────────────
 
 describe("deserializeRecent — path validation", () => {
 	it("rejects entries with empty directory", () => {
@@ -91,8 +86,6 @@ describe("deserializeRecent — path validation", () => {
 		expect(project.directory).toBe("/home/user/proj");
 	});
 });
-
-// ─── filterExistingProjects ──────────────────────────────────────────────────
 
 describe("filterExistingProjects", () => {
 	it("returns only projects whose directories exist", () => {

@@ -1,4 +1,3 @@
-// ─── Svelte File Icons — Unit Tests ──────────────────────────────────────────
 // Tests isBinaryFile, isHiddenEntry, shouldCollapseByDefault.
 
 import { describe, expect, test } from "vitest";
@@ -7,8 +6,6 @@ import {
 	isHiddenEntry,
 	shouldCollapseByDefault,
 } from "../../../src/lib/frontend/utils/file-icons.js";
-
-// ─── isBinaryFile ────────────────────────────────────────────────────────────
 
 describe("isBinaryFile", () => {
 	describe("image formats", () => {
@@ -208,8 +205,6 @@ describe("isBinaryFile", () => {
 	});
 });
 
-// ─── isHiddenEntry ───────────────────────────────────────────────────────────
-
 describe("isHiddenEntry", () => {
 	test("returns true for dotfiles", () => {
 		expect(isHiddenEntry(".gitignore")).toBe(true);
@@ -247,8 +242,6 @@ describe("isHiddenEntry", () => {
 		expect(isHiddenEntry("")).toBe(false);
 	});
 });
-
-// ─── shouldCollapseByDefault ─────────────────────────────────────────────────
 
 describe("shouldCollapseByDefault", () => {
 	test("collapses node_modules", () => {

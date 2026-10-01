@@ -1,4 +1,3 @@
-// ─── The legacy chat mirror is frozen ───────────────────────────────────────
 // `chatState` is a read-only view of the current session's slot
 // (sessionActivity / sessionMessages). It has no storage of its own, nothing
 // writes it, and it cannot be written. See ni8.5 §13 / conduit-test-ni8.5.17.

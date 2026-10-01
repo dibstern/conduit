@@ -17,8 +17,6 @@ import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-in
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 
-// ─── Collecting EventSink ──────────────────────────────────────────────────
-
 function createCollectingEventSink(): EventSink & {
 	readonly events: ProviderRuntimeEvent[];
 } {
@@ -35,8 +33,6 @@ function createCollectingEventSink(): EventSink & {
 		resolveQuestion: () => Effect.void,
 	};
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 	it(
@@ -64,13 +60,11 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 				}),
 			);
 
-			// ── TurnResult assertions ──────────────────────────────────────
 			expect(result.status).toBe("completed");
 			expect(result.tokens.input).toBeGreaterThan(0);
 			expect(result.tokens.output).toBeGreaterThan(0);
 			expect(result.cost).toBeLessThan(0.5);
 
-			// ── Canonical event assertions ──────────────────────────────────
 			const eventTypes = sink.events.map((e) => e.type);
 
 			// Must include a turn.completed event

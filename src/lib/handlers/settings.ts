@@ -1,5 +1,3 @@
-// ─── Settings Handlers ───────────────────────────────────────────────────────
-
 import { Effect } from "effect";
 import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
 import {

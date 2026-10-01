@@ -1,4 +1,3 @@
-// ─── Server row → Indicator E2E Tests ──────────────────────────────
 // Two pipelines meet in the sidebar and this spec covers both.
 //
 // The row's status word is server-derived: the relay computes one attention
@@ -21,8 +20,6 @@ import {
 	type WsMockControl,
 	type WsMockOptions,
 } from "../helpers/ws-mock.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 
@@ -149,7 +146,6 @@ async function openChat(page: Page, baseURL: string | undefined) {
 	return control;
 }
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
 /** A shell snapshot carrying the notification facts the server derived per row. */
 function shellSnapshotWith(
 	counts: Record<

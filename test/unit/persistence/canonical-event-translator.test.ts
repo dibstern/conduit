@@ -22,8 +22,6 @@ describe("CanonicalEventTranslator", () => {
 		translator = new CanonicalEventTranslator();
 	});
 
-	// ─── message.created ─────────────────────────────────────────────────────
-
 	describe("message.created", () => {
 		it("translates to canonical message.created for assistant role", () => {
 			const event = makeSSEEvent("message.created", {
@@ -71,7 +69,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.part.delta (text) ───────────────────────────────────────────
+	// message.part.delta (text)
 
 	describe("message.part.delta (text)", () => {
 		it("translates text delta to canonical text.delta", () => {
@@ -94,7 +92,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.part.delta (reasoning) ──────────────────────────────────────
+	// message.part.delta (reasoning)
 
 	describe("message.part.delta (reasoning)", () => {
 		it("translates reasoning delta to thinking.delta when part is tracked as reasoning", () => {
@@ -141,7 +139,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.part.updated (tool pending) ─────────────────────────────────
+	// message.part.updated (tool pending)
 
 	describe("message.part.updated (tool pending)", () => {
 		it("translates tool pending to tool.started", () => {
@@ -172,7 +170,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.part.updated (tool running) ─────────────────────────────────
+	// message.part.updated (tool running)
 
 	describe("message.part.updated (tool running)", () => {
 		it("translates tool running to tool.running when part was already seen", () => {
@@ -241,7 +239,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.part.updated (tool completed) ───────────────────────────────
+	// message.part.updated (tool completed)
 
 	describe("message.part.updated (tool completed)", () => {
 		it("translates tool completed to tool.completed", () => {
@@ -423,7 +421,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.part.updated (reasoning first seen) ─────────────────────────
+	// message.part.updated (reasoning first seen)
 
 	describe("message.part.updated (reasoning)", () => {
 		it("emits thinking.start on first encounter", () => {
@@ -509,8 +507,6 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── message.updated -> turn.completed ────────────────────────────────────
-
 	describe("message.updated", () => {
 		it("translates assistant message.updated to turn.completed", () => {
 			const event = makeSSEEvent("message.updated", {
@@ -578,8 +574,6 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── session.status ──────────────────────────────────────────────────────
-
 	describe("session.status", () => {
 		it("translates idle status", () => {
 			const event = makeSSEEvent("session.status", {
@@ -628,8 +622,6 @@ describe("CanonicalEventTranslator", () => {
 			expect(result).toBeNull();
 		});
 	});
-
-	// ─── session.error -> turn.error ──────────────────────────────────────────
 
 	describe("session.error", () => {
 		it("translates to turn.error", () => {
@@ -685,8 +677,6 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── permission.asked ────────────────────────────────────────────────────
-
 	describe("permission.asked", () => {
 		it("translates to canonical permission.asked", () => {
 			const event = makeSSEEvent("permission.asked", {
@@ -711,8 +701,6 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── permission.replied -> permission.resolved ────────────────────────────
-
 	describe("permission.replied", () => {
 		it("translates to canonical permission.resolved", () => {
 			const event = makeSSEEvent("permission.replied", {
@@ -730,8 +718,6 @@ describe("CanonicalEventTranslator", () => {
 			});
 		});
 	});
-
-	// ─── question.asked ──────────────────────────────────────────────────────
 
 	describe("question.asked", () => {
 		it("translates to canonical question.asked", () => {
@@ -758,8 +744,6 @@ describe("CanonicalEventTranslator", () => {
 			expect(data.questions).toHaveLength(1);
 		});
 	});
-
-	// ─── session.updated -> session.renamed ───────────────────────────────────
 
 	describe("session.updated", () => {
 		it("translates to session.renamed when title is present", () => {
@@ -788,8 +772,6 @@ describe("CanonicalEventTranslator", () => {
 			expect(result).toBeNull();
 		});
 	});
-
-	// ─── PTY / file events -> null ────────────────────────────────────────────
 
 	describe("non-persisted events", () => {
 		it("returns null for pty.created", () => {
@@ -820,8 +802,6 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── No sessionId -> null ─────────────────────────────────────────────────
-
 	describe("missing sessionId", () => {
 		it("returns null when sessionId is undefined", () => {
 			const event = makeSSEEvent("message.created", {
@@ -841,7 +821,7 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── reset() ─────────────────────────────────────────────────────────────
+	// reset()
 
 	describe("reset()", () => {
 		it("clears all tracked parts when called without sessionId", () => {
@@ -890,8 +870,6 @@ describe("CanonicalEventTranslator", () => {
 		});
 	});
 
-	// ─── Tool name mapping ───────────────────────────────────────────────────
-
 	describe("tool name mapping", () => {
 		it("maps known tool names to display names", () => {
 			const event = makeSSEEvent("message.part.updated", {
@@ -935,8 +913,6 @@ describe("CanonicalEventTranslator", () => {
 			});
 		});
 	});
-
-	// ─── Event envelope fields ───────────────────────────────────────────────
 
 	describe("event envelope", () => {
 		it("includes required envelope fields on every emitted event", () => {

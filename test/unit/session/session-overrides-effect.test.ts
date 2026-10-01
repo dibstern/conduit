@@ -1,4 +1,3 @@
-// ─── Session Overrides Effect Tests ─────────────────────────────────────────
 // Tests for the Effect-native SessionOverrides replacement using
 // Ref<OverridesState> + Fiber timeout management.
 
@@ -49,8 +48,6 @@ import {
 const TIMEOUT_MS = 120_000;
 
 describe("SessionOverrides Effect", () => {
-	// ─── Per-Session Model ──────────────────────────────────────────────────
-
 	it.effect("setModel stores model and marks userSelected", () =>
 		Effect.gen(function* () {
 			yield* setModel("sess-1", {
@@ -138,8 +135,6 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	// ─── Per-Session Agent ──────────────────────────────────────────────────
-
 	it.effect("setAgent/getAgent stores and retrieves agent", () =>
 		Effect.gen(function* () {
 			yield* setAgent("sess-1", "code");
@@ -199,8 +194,6 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	// ─── Per-Session Variant ────────────────────────────────────────────────
-
 	it.effect("setVariant/getVariant with fallback to defaultVariant", () =>
 		Effect.gen(function* () {
 			yield* setDefaultVariant("low");
@@ -230,8 +223,6 @@ describe("SessionOverrides Effect", () => {
 			expect(yield* getVariant("sess-1")).toBe("");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
-
-	// ─── Per-Session Permission Mode ────────────────────────────────────────
 
 	it.effect('getPermissionMode defaults to "ask" for an unknown session', () =>
 		Effect.gen(function* () {
@@ -297,8 +288,6 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	// ─── Per-Session Context Window ─────────────────────────────────────────
-
 	it.effect(
 		"setContextWindow/getContextWindow with fallback to defaultContextWindow",
 		() =>
@@ -353,8 +342,6 @@ describe("SessionOverrides Effect", () => {
 			expect(yield* getContextWindow("sess-1")).toBe("");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
-
-	// ─── Clear Session ──────────────────────────────────────────────────────
 
 	it.scoped("clearSession removes all overrides and interrupts timeout", () =>
 		Effect.gen(function* () {
@@ -418,8 +405,6 @@ describe("SessionOverrides Effect", () => {
 			expect((yield* getModel("sess-2"))?.modelID).toBe("gpt-5");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
-
-	// ─── Processing Timeout ─────────────────────────────────────────────────
 
 	vitestIt(
 		"processing timeout runs in the managed overrides layer scope",
@@ -593,8 +578,6 @@ describe("SessionOverrides Effect", () => {
 			expect(cb2Called.value).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
-
-	// ─── Layer isolation ────────────────────────────────────────────────────
 
 	it.effect("Layer.fresh provides isolated state per test", () =>
 		Effect.gen(function* () {

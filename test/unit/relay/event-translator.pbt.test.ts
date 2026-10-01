@@ -1,4 +1,4 @@
-// ─── Property-Based Tests: Event Translator (Ticket 1.3) ────────────────────
+// Property-Based Tests: Event Translator (Ticket 1.3)
 //
 // Properties tested:
 // P1: mapToolName is idempotent for known tools and identity for unknown
@@ -69,8 +69,6 @@ const SEED = 42;
 const NUM_RUNS = 300;
 
 describe("Ticket 1.3 — Event Translator PBT", () => {
-	// ─── P1: mapToolName idempotence ──────────────────────────────────────
-
 	describe("P1: mapToolName is idempotent for known and identity for unknown (AC3)", () => {
 		it("property: known tools always map to their PascalCase equivalent", () => {
 			const TOOL_MAP: Record<string, string> = {
@@ -108,8 +106,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P2: PascalCase output ────────────────────────────────────────────
-
 	describe("P2: All known tool mappings start with uppercase (AC3)", () => {
 		it("property: mapped known tools have uppercase first letter", () => {
 			fc.assert(
@@ -123,8 +119,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P3: translatePartDelta safety ────────────────────────────────────
 
 	describe("P3: translatePartDelta never throws (AC1, AC6)", () => {
 		it("property: returns delta, thinking_delta, or null", () => {
@@ -153,8 +147,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P4: Tool lifecycle ───────────────────────────────────────────────
 
 	describe("P4: Tool lifecycle status → correct message type (AC2)", () => {
 		// translateToolPartUpdated may return a single message, an array
@@ -298,8 +290,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── Metadata forwarding in tool_executing ───────────────────────────
-
 	describe("tool_executing forwards metadata from part state", () => {
 		function asArray(
 			result: ReturnType<typeof translateToolPartUpdated>,
@@ -376,8 +366,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P5: Reasoning lifecycle ──────────────────────────────────────────
-
 	describe("P5: Reasoning lifecycle (AC6)", () => {
 		it("property: new reasoning part → thinking_start", () => {
 			fc.assert(
@@ -429,8 +417,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P6: Unknown events → null ────────────────────────────────────────
-
 	describe("P6: Unknown event types produce ok: false (AC13)", () => {
 		it("property: unknown events never throw and return ok: false", () => {
 			fc.assert(
@@ -443,8 +429,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P7: Session status mapping ───────────────────────────────────────
 
 	describe("P7: Session status mapping (AC8)", () => {
 		it("property: busy → null, retry → error, idle → done", () => {
@@ -479,8 +463,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P8: Permission event translation ─────────────────────────────────
 
 	describe("P8: Permission event translation preserves fields (AC4)", () => {
 		it("property: permission_request has requestId, toolName, toolInput, sessionId", () => {
@@ -532,8 +514,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P9: Question field mapping ───────────────────────────────────────
-
 	describe("P9: Question event maps 'multiple' → 'multiSelect' (AC5)", () => {
 		it("property: question.asked → ask_user with multiSelect field", () => {
 			fc.assert(
@@ -570,8 +550,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P10: Stateful translator — part tracking ─────────────────────────
 
 	describe("P10: Stateful translator tracks parts, no duplicate starts (AC14, AC15)", () => {
 		it("property: same part ID seen twice never emits tool_start twice", () => {
@@ -710,8 +688,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P11: message.updated for assistant only ──────────────────────────
-
 	describe("P11: message.updated only emits result for assistant messages (AC7)", () => {
 		it("property: user role messages produce null, assistant produce result", () => {
 			fc.assert(
@@ -747,8 +723,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P12: Part removal clears state ───────────────────────────────────
 
 	describe("P12: Part removal clears tracking state (AC10)", () => {
 		it("property: after part.removed, part is no longer tracked", () => {
@@ -787,8 +761,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			);
 		});
 	});
-
-	// ─── P13: translatePtyEvent ────────────────────────────────────────────
 
 	describe("P13: translatePtyEvent handles all pty event types", () => {
 		it("pty.created returns pty_created message with correct fields (info nested)", () => {
@@ -950,8 +922,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P14: translateFileEvent ───────────────────────────────────────────
-
 	describe("P14: translateFileEvent handles file event types", () => {
 		it("file.edited returns file_changed with changeType 'edited'", () => {
 			const event: OpenCodeEvent = {
@@ -1036,8 +1006,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	// ─── P15: translateMessageRemoved ──────────────────────────────────────
-
 	describe("P15: translateMessageRemoved handles messageID presence/absence", () => {
 		it("returns message_removed with valid messageID", () => {
 			const event: OpenCodeEvent = {
@@ -1118,8 +1086,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			expect(result.ok).toBe(false);
 		});
 	});
-
-	// ── P16: FIFO eviction cap on seenParts ─────────────────────────────────
 
 	describe("P16: seenParts FIFO eviction", () => {
 		it("evicts oldest entries when exceeding 10,000 cap", () => {
@@ -1207,8 +1173,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			expect(seenParts.has("part-100")).toBe(true);
 		});
 	});
-
-	// ── Per-session scoping ─────────────────────────────────────────────────
 
 	describe("Per-session scoping", () => {
 		it("reset(sessionId) only clears that session's parts", () => {
@@ -1366,8 +1330,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 			expect(translator.getSeenParts("ses-B")?.has("part-b")).toBe(true);
 		});
 	});
-
-	// ── Deterministic seenParts-based delta classification ──────────────────
 
 	describe("seenParts-based delta classification", () => {
 		it("routes delta to thinking_delta when part is registered as reasoning", () => {

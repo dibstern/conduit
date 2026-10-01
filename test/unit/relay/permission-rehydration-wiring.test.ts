@@ -1,4 +1,3 @@
-// ─── Permission Rehydration Wiring ───────────────────────────────────────────
 // Verifies that createProjectRelay wires listPendingPermissions into the SSE
 // consumer, so pending permissions are rehydrated from the OpenCode API on
 // SSE connect. Uses a mock OpenCode server — no real OpenCode required.
@@ -27,7 +26,6 @@ import {
 } from "../../../src/lib/relay/relay-stack.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
-// ── Mock OpenCode Server ─────────────────────────────────────────────────────
 // Returns one pending permission from GET /permission.
 
 interface MockOpenCode {
@@ -156,7 +154,6 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			return;
 		}
 
-		// ── THE KEY ENDPOINT ────────────────────────────────────────────────
 		// Pending permissions — returns one permission to rehydrate
 		if (url.pathname === "/permission" && req.method === "GET") {
 			res.end(
@@ -195,8 +192,6 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		},
 	};
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("Permission rehydration wiring in createProjectRelay", () => {
 	let mock: MockOpenCode;

@@ -1,4 +1,3 @@
-// ─── OpenCode Runtime Ingress Must Not Publish To Relay ─────────────────────
 // The OpenCode runtime ingress persists provider events and signals committed
 // events to SessionEventBus. The legacy SSE translator (sse-wiring.ts) is the
 // sole live-delivery path to the browser for OpenCode. If the ingress also

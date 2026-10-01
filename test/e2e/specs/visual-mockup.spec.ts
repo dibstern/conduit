@@ -1,4 +1,3 @@
-// ─── Visual Mockup Comparison Tests ──────────────────────────────────────────
 // Compares screenshots of the static mockup.html against the live app driven
 // into the same state via canned WebSocket messages.
 //
@@ -34,8 +33,6 @@ import {
 	waitForIcons,
 } from "../helpers/visual-helpers.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 
@@ -207,8 +204,6 @@ async function gotoLiveAndDrive(page: Page, baseURL: string | undefined) {
 	await normalizeDynamicContent(page);
 }
 
-// ─── Debug: save screenshots and diff for inspection ─────────────────────────
-
 const DEBUG_DIR = path.resolve(import.meta.dirname, "../../../test-debug");
 
 function saveDebugImage(name: string, buffer: Buffer): void {
@@ -216,7 +211,6 @@ function saveDebugImage(name: string, buffer: Buffer): void {
 	fs.writeFileSync(path.join(DEBUG_DIR, name), buffer);
 }
 
-// ─── Design Convergence: Mockup vs Live ──────────────────────────────────────
 // Compares mockup screenshots against the live app. Fails if any region has
 // differing pixels. All regions are compared in a single test to avoid
 // re-driving app state.
@@ -304,7 +298,6 @@ test.describe("Visual: Mockup vs Live @visual", () => {
 	});
 });
 
-// ─── Visual Regression: Lock live UI state ──────────────────────────────────
 // Uses Playwright's toHaveScreenshot() to detect regressions.
 // First run with --update-snapshots generates goldens; subsequent runs compare.
 // All snapshots taken in a single test to avoid re-driving app state.

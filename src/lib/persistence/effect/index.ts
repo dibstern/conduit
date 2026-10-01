@@ -1,4 +1,3 @@
-// ──��� Effect Persistence Barrel ──────────────────────────────────────────────
 // Re-exports all Effect-based persistence services.
 
 export {

@@ -1,4 +1,3 @@
-// ─── Session Management Layer ───────────────────────────────────
 // Manages the mapping between OpenCode sessions and the relay's representation.
 // OpenCode (SQLite) is always the source of truth — the relay never duplicates
 // storage. This layer proxies session CRUD and maintains in-memory active state.
@@ -13,8 +12,6 @@ import { toSessionInfoList } from "./session-info-list.js";
 
 /** Fetch enough sessions to initialize the complete local session count. */
 const INITIAL_SESSION_LIST_LIMIT = 10_000;
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface SessionManagerOptions {
 	client: OpenCodeAPI;
@@ -48,8 +45,6 @@ export interface HistoryPage {
 	/** Total messages in the session (if known) */
 	total?: number;
 }
-
-// ─── Session Manager ─────────────────────────────────────────────────────────
 
 export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly client: OpenCodeAPI;
@@ -86,8 +81,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.directory = options.directory;
 		this.getStatuses = options.getStatuses ?? null;
 	}
-
-	// ─── Queries ──────────────────────────────────────────────────────────
 
 	/**
 	 * Session count from the most recent unfiltered listSessions() call.
@@ -181,8 +174,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		preRenderHistoryMessages(page.messages);
 		return page;
 	}
-
-	// ─── Mutations ────────────────────────────────────────────────────────
 
 	/** Create a new session */
 	async createSession(
@@ -345,8 +336,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		});
 		send({ type: "session_list", sessions: roots, roots: true });
 	}
-
-	// ─── Internal ──────────────────────────────────────────────────────────
 
 	private async broadcastSessionList(): Promise<void> {
 		const roots = await this.listSessions({ roots: true });

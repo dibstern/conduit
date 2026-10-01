@@ -1,4 +1,3 @@
-// ─── SessionManagerState Ref & Tag ──────────────────────────────────────────
 // Replaces the mutable Map fields on the imperative SessionManager class
 // with a single atomic Ref<SessionManagerState>. All session subsystems
 // read/write through this Ref, giving fiber-safe atomic snapshots.
@@ -8,8 +7,6 @@
 //   makeSessionManagerStateLive(initial?) → Layer providing the Tag
 
 import { Context, HashMap, Layer, Ref } from "effect";
-
-// ─── SessionManagerState ────────────────────────────────────────────────────
 
 /**
  * Immutable state snapshot for session management.
@@ -25,8 +22,6 @@ export interface SessionManagerState {
 	lastKnownSessionCount: number;
 }
 
-// ─── Factory ────────────────────────────────────────────────────────────────
-
 /** Create an empty SessionManagerState with all empty HashMaps. */
 export const emptySessionManagerState = (): SessionManagerState => ({
 	cachedParentMap: HashMap.empty(),
@@ -34,15 +29,11 @@ export const emptySessionManagerState = (): SessionManagerState => ({
 	lastKnownSessionCount: 0,
 });
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 /** Tag for the mutable SessionManagerState Ref in the Effect Context. */
 export class SessionManagerStateTag extends Context.Tag("SessionManagerState")<
 	SessionManagerStateTag,
 	Ref.Ref<SessionManagerState>
 >() {}
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing SessionManagerStateTag backed by a Ref.

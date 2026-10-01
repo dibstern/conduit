@@ -1,4 +1,3 @@
-// ─── Handler Signatures Tests ────────────────────────────────────────────────
 // Asserts the adapter generic preserves type narrowing; routes through
 // getOrCreateSessionSlot(currentId).
 

@@ -1,4 +1,3 @@
-// ─── Effect Projectors + Event Store Tests ──────────────────────────────────
 // Tests the @effect/sql migration of projectors, event-store, cursor repo,
 // and projection runner using file-backed SQLite via @effect/sql-sqlite-node.
 
@@ -59,8 +58,6 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
-
-// ─── Test helpers ───────────────────────────────────────────────────────────
 
 const FIXED_TS = 1_000_000_000_000;
 
@@ -350,8 +347,6 @@ function makePermissionResolved(
 	);
 }
 
-// ─── Test layer: SQLite with fresh schema ───────────────────────────────────
-
 function makeTestSqliteLayer() {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-projectors-effect-"));
 	const filename = join(dir, "events.db");
@@ -571,8 +566,6 @@ function insertRawEventRow(opts: {
 			)`;
 	});
 }
-
-// ─── Event Store Tests ──────────────────────────────────────────────────────
 
 describe("EventStoreEffect", () => {
 	it("appends an event and returns it with sequence and streamVersion", () =>
@@ -1127,8 +1120,6 @@ describe("EventStoreEffect", () => {
 		));
 });
 
-// ─── Projector Cursor Tests ─────────────────────────────────────────────────
-
 describe("ProjectorCursorEffect", () => {
 	it("get returns undefined for unknown projectors", () =>
 		runTest(
@@ -1218,8 +1209,6 @@ describe("ProjectorCursorEffect", () => {
 			}),
 		));
 });
-
-// ─── Session Projector Tests ────────────────────────────────────────────────
 
 describe("Effect Session Projector (via ProjectionRunner)", () => {
 	it("captures the boundary on creation and preserves it across provider refreshes and parent message deletion", () =>
@@ -1653,8 +1642,6 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 		));
 });
 
-// ─── Message Projector Tests ────────────────────────────────────────────────
-
 describe("automatic settlement session projection", () => {
 	it("projects toggle, automatic settlement, and un-settle with replay timestamps", () =>
 		runTest(
@@ -1949,8 +1936,6 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 			}),
 		));
 });
-
-// ─── Turn Projector Tests ───────────────────────────────────────────────────
 
 describe("Effect Turn Projector (via ProjectionRunner)", () => {
 	// The persisted state after each recorded event, in fixture order. Only the
@@ -2439,8 +2424,6 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 		));
 });
 
-// ─── Approval Projector Tests ───────────────────────────────────────────────
-
 describe("Effect Approval Projector (via ProjectionRunner)", () => {
 	it("permission.asked inserts a pending approval", () =>
 		runTest(
@@ -2497,8 +2480,6 @@ describe("Effect Approval Projector (via ProjectionRunner)", () => {
 			}),
 		));
 });
-
-// ──��� ProjectionRunner Tests ─────────────────────────────────────────────────
 
 describe("ProjectionRunnerEffect", () => {
 	it("records and logs a skipped replay failure", async () => {
@@ -3595,8 +3576,6 @@ describe("ProjectionRunnerEffect", () => {
 		expect(outcome.title).toBe("Test Session");
 	});
 });
-
-// ─── Provider Projector Tests ───────────────────────────────────────────────
 
 describe("Effect Provider Projector (via ProjectionRunner)", () => {
 	it("session.created inserts initial provider binding", () =>

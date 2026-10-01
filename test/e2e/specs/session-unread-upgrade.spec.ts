@@ -1,4 +1,3 @@
-// ─── Session unread: upgrading a database from main's read state ─────────────
 // Main kept read state as timestamps (read_at, marked_unread_at); this branch
 // keeps turn-end positions (seen_version against last_turn_end_version). Each
 // case builds a session, rewrites the stopped relay's event store into main's

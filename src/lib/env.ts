@@ -1,4 +1,3 @@
-// ─── Centralized Environment Configuration ──────────────────────────────────
 // Single source of truth for all environment variables read by the relay.
 // Import from here instead of reading process.env directly.
 
@@ -7,16 +6,12 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import type { LogFormat, LogLevel } from "./logger.js";
 
-// ─── Config Directory ───────────────────────────────────────────────────────
-
 /** Base config directory. Respects CONDUIT_CONFIG_DIR or XDG_CONFIG_HOME if set. */
 export const DEFAULT_CONFIG_DIR: string =
 	process.env["CONDUIT_CONFIG_DIR"] ??
 	(process.env["XDG_CONFIG_HOME"]
 		? join(process.env["XDG_CONFIG_HOME"], "conduit")
 		: join(homedir(), ".conduit"));
-
-// ─── Defaults ───────────────────────────────────────────────────────────────
 
 export const DEFAULT_PORT = 2633;
 export const DEFAULT_OC_PORT = 4096;
@@ -32,7 +27,6 @@ export interface TraceEnvConfig {
 	readonly batchWindowMs: number;
 }
 
-// ─── Daemon IPC Environment Variables ───────────────────────────────────────
 // These are set by the parent process (via daemon-spawn.ts) and read by the
 // child daemon process (via cli-core.ts). They are an internal IPC mechanism,
 // not user-facing configuration.
@@ -99,7 +93,6 @@ export const resolveTraceConfig = (
 	};
 };
 
-// ─── User-Facing Environment Variables ──────────────────────────────────────
 // Read at process startup. Override via CLI flags or environment.
 
 export const ENV = {

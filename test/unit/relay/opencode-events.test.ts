@@ -1,4 +1,4 @@
-// ─── Type Guard Tests (Ticket 7) ──────────────────────────────────────────────
+// Type Guard Tests (Ticket 7)
 // Verifies that type guard functions correctly narrow OpenCode SSE events.
 
 import { describe, expect, it } from "vitest";
@@ -25,8 +25,6 @@ import {
 	isSessionStatusEvent,
 	isTodoUpdatedEvent,
 } from "../../../src/lib/relay/opencode-events.js";
-
-// ─── isPartDeltaEvent ────────────────────────────────────────────────────────
 
 describe("isPartDeltaEvent", () => {
 	it("returns true for valid part delta", () => {
@@ -96,8 +94,6 @@ describe("isPartDeltaEvent", () => {
 	});
 });
 
-// ─── isPartUpdatedEvent ──────────────────────────────────────────────────────
-
 describe("isPartUpdatedEvent", () => {
 	it("returns true for valid part updated with tool part", () => {
 		expect(
@@ -156,8 +152,6 @@ describe("isPartUpdatedEvent", () => {
 	});
 });
 
-// ─── isPartRemovedEvent ──────────────────────────────────────────────────────
-
 describe("isPartRemovedEvent", () => {
 	it("returns true for valid part removed", () => {
 		expect(
@@ -196,8 +190,6 @@ describe("isPartRemovedEvent", () => {
 	});
 });
 
-// ─── isSessionStatusEvent ────────────────────────────────────────────────────
-
 describe("isSessionStatusEvent", () => {
 	it("returns true for valid session status", () => {
 		expect(
@@ -226,8 +218,6 @@ describe("isSessionStatusEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── isSessionErrorEvent ─────────────────────────────────────────────────────
 
 describe("isSessionErrorEvent", () => {
 	it("returns true for valid session error", () => {
@@ -259,8 +249,6 @@ describe("isSessionErrorEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── isPermissionAskedEvent ──────────────────────────────────────────────────
 
 describe("isPermissionAskedEvent", () => {
 	it("returns true for valid permission asked", () => {
@@ -305,8 +293,6 @@ describe("isPermissionAskedEvent", () => {
 	});
 });
 
-// ─── isPermissionRepliedEvent ────────────────────────────────────────────────
-
 describe("isPermissionRepliedEvent", () => {
 	it("returns true for valid permission replied", () => {
 		expect(
@@ -339,8 +325,6 @@ describe("isPermissionRepliedEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── isQuestionAskedEvent ────────────────────────────────────────────────────
 
 describe("isQuestionAskedEvent", () => {
 	it("returns true for valid question asked", () => {
@@ -394,8 +378,6 @@ describe("isQuestionAskedEvent", () => {
 	});
 });
 
-// ─── isMessageCreatedEvent ───────────────────────────────────────────────────
-
 describe("isMessageCreatedEvent", () => {
 	it("returns true for valid message created", () => {
 		expect(
@@ -424,8 +406,6 @@ describe("isMessageCreatedEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── isMessageUpdatedEvent ───────────────────────────────────────────────────
 
 describe("isMessageUpdatedEvent", () => {
 	it("returns true for valid message updated with info", () => {
@@ -461,8 +441,6 @@ describe("isMessageUpdatedEvent", () => {
 	});
 });
 
-// ─── isMessageRemovedEvent ───────────────────────────────────────────────────
-
 describe("isMessageRemovedEvent", () => {
 	it("returns true for valid message removed", () => {
 		expect(
@@ -491,8 +469,6 @@ describe("isMessageRemovedEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── PTY Events ──────────────────────────────────────────────────────────────
 
 describe("isPtyEvent", () => {
 	it("returns true for pty.created", () => {
@@ -578,8 +554,6 @@ describe("isPtyDeletedEvent", () => {
 	});
 });
 
-// ─── File Events ─────────────────────────────────────────────────────────────
-
 describe("isFileEvent", () => {
 	it("returns true for file.edited", () => {
 		expect(
@@ -618,8 +592,6 @@ describe("isFileEvent", () => {
 	});
 });
 
-// ─── Installation Update ─────────────────────────────────────────────────────
-
 describe("isInstallationUpdateEvent", () => {
 	it("returns true for valid update event", () => {
 		expect(
@@ -648,8 +620,6 @@ describe("isInstallationUpdateEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── Todo Updated ────────────────────────────────────────────────────────────
 
 describe("isTodoUpdatedEvent", () => {
 	it("returns true for valid todo updated", () => {
@@ -681,8 +651,6 @@ describe("isTodoUpdatedEvent", () => {
 		).toBe(false);
 	});
 });
-
-// ─── Session ID extraction helpers ───────────────────────────────────────────
 
 describe("hasSessionID", () => {
 	it("returns true when sessionID is present", () => {

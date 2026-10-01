@@ -1,4 +1,3 @@
-// ─── Media State Fixtures ─────────────────────────────────────────────────────
 // Type-safe WebSocket mock messages for all 5 README media scenes.
 //
 // Each export corresponds to a scene module (Tasks 3–6) and provides the
@@ -11,8 +10,6 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import type { MockMessage } from "../../../test/e2e/fixtures/mockup-state.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Compile-time validation wrapper — ensures all messages satisfy RelayMessage. */
 type ShellSnapshot = {
 	type: "shell_snapshot";
@@ -24,7 +21,7 @@ function msgs(...messages: (RelayMessage | ShellSnapshot)[]): MockMessage[] {
 	return messages as MockMessage[];
 }
 
-// ─── Shared (not exported) ──────────────────────────────────────────────────
+// Shared (not exported)
 
 const modelList: RelayMessage = {
 	type: "model_list",
@@ -69,8 +66,6 @@ const projectList: RelayMessage = {
 	],
 	current: "myapp",
 };
-
-// ─── Main UI Scene ──────────────────────────────────────────────────────────
 
 export const mainUiInit: MockMessage[] = msgs(
 	{ type: "session_switched", id: "sess-media-001" },
@@ -206,8 +201,6 @@ export const mainUiTurn1: MockMessage[] = msgs(
 	{ type: "status", status: "idle" },
 );
 
-// ─── Approval Scene ─────────────────────────────────────────────────────────
-
 export const approvalInit: MockMessage[] = msgs(
 	{ type: "session_switched", id: "sess-media-approval" },
 	{ type: "status", status: "idle" },
@@ -245,16 +238,12 @@ export const approvalPermission: MockMessage = {
 	always: ["npm run *"],
 } satisfies RelayMessage as MockMessage;
 
-// ─── Setup Scene ────────────────────────────────────────────────────────────
-
 export const setupInfo = {
 	httpsUrl: "https://192.168.1.42:2634",
 	httpUrl: "http://192.168.1.42:2633",
 	hasCert: true,
 	lanMode: false,
 };
-
-// ─── Split Scene ────────────────────────────────────────────────────────────
 
 export const splitInit: MockMessage[] = msgs(
 	{ type: "session_switched", id: "sess-media-split" },
@@ -284,7 +273,6 @@ export const splitInit: MockMessage[] = msgs(
 	projectList,
 );
 
-// ─── Approval Turn 2 Start ──────────────────────────────────────────────────
 // Partial second turn: processing + thinking, sent before the permission card.
 
 export const approvalTurn2Start: MockMessage[] = msgs(
@@ -296,8 +284,6 @@ export const approvalTurn2Start: MockMessage[] = msgs(
 	},
 	{ type: "thinking_stop" },
 );
-
-// ─── Sidebar Scene ──────────────────────────────────────────────────────────
 
 const now = Date.now();
 
@@ -369,8 +355,6 @@ export const sidebarInit: MockMessage[] = msgs(
 	agentList,
 	projectList,
 );
-
-// ─── Split Scene ────────────────────────────────────────────────────────────
 
 export const splitResponse: MockMessage[] = msgs(
 	// Thinking

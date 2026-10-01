@@ -1,4 +1,3 @@
-// ─── VersionChecker Effect Layer ────────────────────────────────────────────
 // Pure Effect replacement for the VersionChecker class.
 // Periodically checks for newer versions and broadcasts update notifications.
 // Background fiber is fork-scoped — automatically interrupted on scope close.
@@ -7,8 +6,6 @@
 // Consumer migration.
 
 import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
-
-// ─── Config ─────────────────────────────────────────────────────────────────
 
 export interface VersionCheckerConfig {
 	getCurrentVersion: () => string;
@@ -21,21 +18,15 @@ export interface VersionCheckerConfig {
 	checkInterval: Duration.DurationInput;
 }
 
-// ─── Service interface ──────────────────────────────────────────────────────
-
 interface VersionCheckerService {
 	getLatestKnown: () => Effect.Effect<string | null>;
 	getCurrentVersion: () => Effect.Effect<string>;
 }
 
-// ─── Tag ────────────────────────────────────────────────────────────────────
-
 export class VersionCheckerTag extends Context.Tag("VersionChecker")<
 	VersionCheckerTag,
 	VersionCheckerService
 >() {}
-
-// ─── Semver comparison ──────────────────────────────────────────────────────
 
 /**
  * Returns true if `latest` is a newer semver than `current`.
@@ -52,8 +43,6 @@ const isNewerVersion = (current: string, latest: string): boolean => {
 	}
 	return false;
 };
-
-// ─── Layer ──────────────────────────────────────────────────────────────────
 
 export const VersionCheckerLive = (config: VersionCheckerConfig) =>
 	Layer.scoped(

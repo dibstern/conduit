@@ -1,4 +1,3 @@
-// ─── End-to-end: subagent turn → sidebar processing dot ─────────────────────
 // The translator-level regression test (regression-subagent-activity.test.ts)
 // proves the right ProviderRuntimeEvents come out. This one carries a real
 // captured subagent turn all the way to the surface the user complained about:
@@ -50,8 +49,6 @@ const TRACE = join(
 	"../../../fixtures/claude-sdk-traces/subagent-task-turn.jsonl",
 );
 
-// ─── Stage 1: SDK messages → ProviderRuntimeEvents ──────────────────────────
-
 function makeCtx(): ClaudeSessionContext {
 	return {
 		sessionId: SESSION_ID,
@@ -100,8 +97,6 @@ async function runtimeEvents(): Promise<ProviderRuntimeEvent[]> {
 	}
 	return events;
 }
-
-// ─── Stage 2: persistence layer ─────────────────────────────────────────────
 
 function makeTestLayer() {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-subagent-activity-"));

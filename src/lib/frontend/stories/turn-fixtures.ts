@@ -1,4 +1,3 @@
-// ─── Turn Fixtures ────────────────────────────────────────────────────────────
 // A fake session for the Storybook stories: a tool-less turn, a long finished
 // turn (narration, reads, edits, a failing then passing test run, a subagent),
 // and a turn still in flight. Stamps are relative to load so live turns tick.
@@ -97,7 +96,6 @@ function result(
 const REPO = "/Users/dev/src/acme-api";
 
 export const turnFixtureMessages: ChatMessage[] = [
-	// ── Turn 0: quick answer, no tools ──────────────────────────────────────
 	user("What's the refresh token TTL supposed to be?"),
 	say(
 		"One hour — `docs/auth.md` §3 says refresh tokens live for 60 minutes and access tokens for 15.",
@@ -111,7 +109,6 @@ export const turnFixtureMessages: ChatMessage[] = [
 		cacheWrite: 0,
 	}),
 
-	// ── Turn 1: long, finished ──────────────────────────────────────────────
 	user(
 		"Refresh tokens are expiring after 15 minutes in prod but the spec says an hour. Find out why, fix it, and add a regression test.",
 	),
@@ -238,7 +235,6 @@ export const turnFixtureMessages: ChatMessage[] = [
 		cacheWrite: 3_100,
 	}),
 
-	// ── Turn 2: in flight ───────────────────────────────────────────────────
 	user("Now do the same audit for access tokens."),
 	thought(
 		"Same shape of problem. Start where access tokens are minted and check whether ACCESS_TTL_SECONDS is actually read.",

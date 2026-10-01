@@ -1,4 +1,3 @@
-// ─── Playwright Config: Daemon E2E Tests ─────────────────────────────────────
 // Tests that require a real Daemon + real OpenCode instance.
 // No vite preview — the Daemon serves the built frontend from dist/frontend/.
 //

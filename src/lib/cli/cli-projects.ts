@@ -1,4 +1,3 @@
-// ─── Projects Submenu ──────────────────────────────────────────
 // Interactive CLI projects submenu for conduit. Displays project list
 // with status, handles add/remove/title operations, and project detail view.
 // Ported from claude-relay/bin/cli.js lines 1487-1679.
@@ -9,8 +8,6 @@ import { printLogo } from "./cli-setup.js";
 import type { PromptOptions, SelectPromptOptions } from "./prompts.js";
 import { promptSelect, promptText } from "./prompts.js";
 import { a, log, sym } from "./terminal-render.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Status information for a single project. */
 export interface ProjectStatus {
@@ -45,16 +42,12 @@ export interface ProjectsMenuOptions extends PromptOptions {
 	fs?: { statSync(p: string): { isDirectory(): boolean } };
 }
 
-// ─── Status Icon ─────────────────────────────────────────────────────────────
-
 /** Get the status icon for a project. */
 export function getStatusIcon(project: ProjectStatus): string {
 	if (project.isProcessing) return "\u26A1";
 	if (project.clients > 0) return "\uD83D\uDFE2";
 	return "\u23F8";
 }
-
-// ─── Projects Menu ───────────────────────────────────────────────────────────
 
 /**
  * Show the projects submenu.
@@ -178,8 +171,6 @@ export async function showProjectsMenu(
 	});
 }
 
-// ─── Add Other ───────────────────────────────────────────────────────────────
-
 /** Handle the "Add project..." flow with directory prompt and validation. */
 async function handleAddOther(
 	opts: ProjectsMenuOptions,
@@ -261,8 +252,6 @@ async function handleAddOther(
 		);
 	});
 }
-
-// ─── Project Detail ──────────────────────────────────────────────────────────
 
 /**
  * Show the project detail submenu.
@@ -374,8 +363,6 @@ export async function showProjectDetail(
 		);
 	});
 }
-
-// ─── Set Title ───────────────────────────────────────────────────────────────
 
 /** Handle the set/change title flow. */
 async function handleSetTitle(

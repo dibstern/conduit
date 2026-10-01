@@ -1,4 +1,3 @@
-// ─── Playwright Config: Notification Session Navigation Tests ────────────────
 // Tests notification click → session navigation pipeline via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 

@@ -1,4 +1,3 @@
-// ─── Workaround: OpenCode config.json write bug ─────────────────────────────
 //
 // OpenCode's Config.update() hardcodes "config.json" as the write target
 // instead of respecting the project's existing config file (opencode.jsonc or

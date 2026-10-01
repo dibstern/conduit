@@ -1,4 +1,3 @@
-// ─── WebSocket Message Dispatch ──────────────────────────────────────────────
 // Extracted from ws.svelte.ts — centralized message routing and event replay.
 // Pure dispatch table: routes incoming RelayMessage to the appropriate store.
 //
@@ -113,7 +112,6 @@ import { wsSend } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
-// ─── Per-session event routing ─────────────────────────────────────────────
 // Runtime Set of per-session event types for the isPerSessionEvent guard.
 // Mirrors the PerSessionEventType TS union in shared-types.ts.
 
@@ -170,7 +168,6 @@ function isDev(): boolean {
  * construction — it routes through handleMessage's global dispatch instead.
  */
 function routePerSession(event: PerSessionEvent): void {
-	// ── Dev-mode assertion on missing/empty sessionId ───────────────────
 	if (typeof event.sessionId !== "string" || event.sessionId.length === 0) {
 		if (isDev())
 			throw new Error(`routePerSession: missing sessionId on ${event.type}`);
@@ -178,7 +175,6 @@ function routePerSession(event: PerSessionEvent): void {
 		return;
 	}
 
-	// ── Permission and question state ──────────────────────────────────
 	// Lives outside chat slots and accepts sessions not yet in membership
 	// (a new child's first question). Never allocate a slot here:
 	// resolutions are broadcast to every client, and a slot per unrelated
@@ -203,7 +199,6 @@ function routePerSession(event: PerSessionEvent): void {
 			return;
 	}
 
-	// ── Unknown-session guard ──────────────────────────────────────────
 	// The shell feed can announce a row after a background event. Dropping the
 	// event is safe: opening that session loads fresh history after membership.
 	if (!isRoutable(event.sessionId)) {
@@ -271,8 +266,6 @@ function routePerSession(event: PerSessionEvent): void {
 	}
 }
 
-// ─── Centralized message dispatch ───────────────────────────────────────────
-
 /**
  * Route an incoming WebSocket message to the appropriate store handler.
  * Replaces the vanilla handler registry pattern.
@@ -287,7 +280,6 @@ export function handleMessage(msg: RelayMessage): void {
 		for (const listener of projectAttachedListeners) listener(msg.slug);
 		return;
 	}
-	// ── Two-tier routing: per-session events vs global events ────────────
 	// Per-session events are routed by event.sessionId to the correct
 	// session slot. notification_event is excluded by construction
 	// (PerSessionEventType union does not include it).
@@ -301,9 +293,7 @@ export function handleMessage(msg: RelayMessage): void {
 		}
 	}
 
-	// ── Global events + globally-coordinated per-session events ──────────
 	switch (msg.type) {
-		// ─── Sessions ────────────────────────────────────────────────────
 		case "session_family": {
 			handleSessionFamily(msg);
 			break;
@@ -344,7 +334,6 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 
-		// ─── Terminal / PTY ──────────────────────────────────────────────
 		case "pty_list":
 			handlePtyList(msg);
 			break;
@@ -361,7 +350,6 @@ export function handleMessage(msg: RelayMessage): void {
 			handlePtyDeleted(msg);
 			break;
 
-		// ─── Discovery ───────────────────────────────────────────────────
 		case "agent_list":
 			handleAgentList(msg);
 			break;
@@ -402,10 +390,8 @@ export function handleMessage(msg: RelayMessage): void {
 			handleCommandList(msg);
 			break;
 
-		// ─── Permissions & Questions ─────────────────────────────────────
 		// Now routed through routePerSession (per-session events).
 
-		// ─── UI ──────────────────────────────────────────────────────────
 		case "client_count":
 			setClientCount(msg.count ?? 0);
 			break;
@@ -425,7 +411,6 @@ export function handleMessage(msg: RelayMessage): void {
 			handleInputSyncReceived(msg);
 			break;
 
-		// ─── Plan Mode ───────────────────────────────────────────────────
 		case "plan_enter":
 		case "plan_exit":
 		case "plan_content":
@@ -433,18 +418,17 @@ export function handleMessage(msg: RelayMessage): void {
 			for (const fn of planModeListeners) fn(msg);
 			break;
 
-		// ─── File Tree (@ autocomplete) ──────────────────────────────────
+		// File Tree (@ autocomplete)
 		case "file_tree":
 			handleFileTree(msg as { type: "file_tree"; entries: unknown });
 			break;
 
-		// ─── File Browser ────────────────────────────────────────────────
 		case "file_list":
 		case "file_content":
 			for (const fn of fileBrowserListeners) fn(msg);
 			break;
 
-		// ─── File Changes (routed to both browser and history) ──────────
+		// File Changes (routed to both browser and history)
 		case "file_changed":
 			for (const fn of fileBrowserListeners) fn(msg);
 			for (const fn of fileHistoryListeners) fn(msg);
@@ -453,7 +437,6 @@ export function handleMessage(msg: RelayMessage): void {
 			for (const fn of fileHistoryListeners) fn(msg);
 			break;
 
-		// ─── Project ─────────────────────────────────────────────────────
 		case "project_list":
 			handleProjectList(msg);
 			for (const fn of projectListeners) fn(msg);
@@ -462,15 +445,12 @@ export function handleMessage(msg: RelayMessage): void {
 			void refreshSessionList();
 			break;
 
-		// ─── Todo ────────────────────────────────────────────────────────
 		case "todo_state":
 			handleTodoState(msg);
 			break;
 
-		// ─── Provider session reload / Part / Message removal ──────────────
 		// Now routed through routePerSession (per-session events).
 
-		// ─── Instances ───────────────────────────────────────────────────
 		case "instance_list":
 			handleInstanceList(msg);
 			break;
@@ -488,7 +468,6 @@ export function handleMessage(msg: RelayMessage): void {
 			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
 			break;
 
-		// ─── Cross-session notifications ─────────────────────────────────
 		// Broadcast by the server when a notification-worthy event (done,
 		// error) is dropped because the user is viewing a different session.
 		// Trigger sound/browser notifications without updating chat state.
@@ -544,7 +523,7 @@ export function handleMessage(msg: RelayMessage): void {
 	}
 }
 
-// ─── Auxiliary handlers (only called from handleMessage) ────────────────────
+// Auxiliary handlers (only called from handleMessage)
 
 /** Tool content: replace truncated result with full content. */
 function handleToolContentResponse(

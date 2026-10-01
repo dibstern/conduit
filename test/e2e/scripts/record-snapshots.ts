@@ -1,4 +1,3 @@
-// ─── Snapshot Recording Script ────────────────────────────────────────────────
 // Spawns an ephemeral OpenCode instance, creates a RelayStack pointed at it,
 // connects WS clients for each scenario, records all server→client messages,
 // and saves them as JSON fixture files for replay-based E2E tests.
@@ -70,8 +69,6 @@ interface RecordingWebSocket extends WebSocket {
 
 type RecordingRpcClient = RpcClient.FromGroup<typeof WsRpcGroup, unknown>;
 
-// ─── Recording Post-Processing ──────────────────────────────────────────────
-
 /**
  * Strip the /provider response down to only connected providers with a limited
  * number of models each. The full response is ~3 MB with 102 providers and
@@ -105,8 +102,6 @@ function trimProviderResponse(interactions: OpenCodeInteraction[]): void {
 	}
 }
 
-// ─── Configuration ───────────────────────────────────────────────────────────
-
 const FIXTURES_DIR = path.resolve(import.meta.dirname, "../fixtures/recorded");
 
 /** Per-prompt timeout in ms. */
@@ -117,8 +112,6 @@ const INIT_SETTLE_MS = 2_000;
 
 /** Extra wait after idle before closing to catch any trailing messages. */
 const POST_IDLE_MS = 500;
-
-// ─── Scenario Definitions ────────────────────────────────────────────────────
 
 interface ScenarioDefinition {
 	/** Output filename (without .json) */
@@ -233,8 +226,6 @@ const SCENARIOS: ScenarioDefinition[] = [
 			"What words did I ask you to remember? Reply with just the words.",
 	},
 ];
-
-// ─── WS Helpers ──────────────────────────────────────────────────────────────
 
 /** Connect a WebSocket to the relay and return it once open. */
 function connectWs(relayPort: number): Promise<RecordingWebSocket> {
@@ -480,8 +471,6 @@ async function requestForkSession(ws: RecordingWebSocket): Promise<string> {
 	ws.activeSessionId = response.sessionId;
 	return response.sessionId;
 }
-
-// ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
 	// Default to free OpenCode Zen model to avoid burning paid API quota.

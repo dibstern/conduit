@@ -1,4 +1,3 @@
-<!-- ─── Context Bar ─────────────────────────────────────────────────────────── -->
 <!-- Mini context usage percentage bar displayed above the input area. -->
 
 <script lang="ts">

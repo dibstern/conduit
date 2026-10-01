@@ -1,4 +1,3 @@
-// ─── Effect Service Tags ────────────────────────────────────────────────────
 // Context.Tag definitions for every service in HandlerDeps.
 // Type-level foundation for Effect dependency injection — no runtime wiring.
 //
@@ -33,8 +32,6 @@ import type {
 } from "../../../types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
-
-// ─── Shape interfaces for inline/structural types ──────────────────────────
 
 export type { WebSocketHandlerShape };
 
@@ -79,7 +76,6 @@ export type ConnectPtyUpstreamShape = (
  * on a structural interface, not the implementation.
  */
 export interface SessionManagerShape {
-	// ── Queries ────────────────────────────────────────────────────────
 	listSessions(options?: {
 		statuses?: Record<string, SessionStatus>;
 		roots?: boolean;
@@ -98,7 +94,6 @@ export interface SessionManagerShape {
 	getSessionParentMap(): Map<string, string>;
 	getLastMessageAtMap(): ReadonlyMap<string, number>;
 
-	// ── Mutations ──────────────────────────────────────────────────────
 	createSession(
 		title?: string,
 		opts?: { silent?: boolean },
@@ -109,16 +104,13 @@ export interface SessionManagerShape {
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	addToParentMap(childId: string, parentId: string): void;
 
-	// ── Pending questions ──────────────────────────────────────────────
-
-	// ── Broadcasts ─────────────────────────────────────────────────────
 	sendSessionLists(
 		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
 		options?: { statuses?: Record<string, SessionStatus> | undefined },
 	): Promise<void>;
 }
 
-// ─── Core Tags (always present) ────────────────────────────────────────────
+// Core Tags (always present)
 
 export type OpenCodeFileEntry = Awaited<
 	ReturnType<OpenCodeAPI["file"]["list"]>
@@ -277,14 +269,11 @@ export class TranslatorTag extends Context.Tag("Translator")<
 	Translator
 >() {}
 
-// ─── Per-request Tags ──────────────────────────────────────────────────────
-
 export class ClientIdTag extends Context.Tag("ClientId")<
 	ClientIdTag,
 	string
 >() {}
 
-// ─── Compile-time exhaustiveness check ─────────────────────────────────────
 // This type alias maps every required+optional HandlerDeps field to its
 // corresponding Tag's service type. A type error here means a field was
 // added to HandlerDeps without a matching Tag.
@@ -330,7 +319,6 @@ declare const _check: _ExhaustiveCheck;
 
 export { RateLimiterTag } from "../Layers/rate-limiter-layer.js";
 export { PollerManagerStateTag } from "./message-poller.js";
-// ─── Effect-native Tag re-exports ─────────────────────────────────
 export { SessionManagerStateTag } from "./session-manager-state.js";
 export { OverridesStateTag } from "./session-overrides-state.js";
 export { SessionRegistryStateTag } from "./session-registry-state.js";

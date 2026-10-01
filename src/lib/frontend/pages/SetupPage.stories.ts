@@ -2,8 +2,6 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { within } from "storybook/test";
 import SetupPage from "./SetupPage.svelte";
 
-// ─── Meta ───────────────────────────────────────────────────────────────────
-
 const meta = {
 	title: "Pages/SetupPage",
 	component: SetupPage,
@@ -31,8 +29,6 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// ─── Shared setup info ──────────────────────────────────────────────────────
-
 // There is deliberately NO "Tailscale step" story here. buildStepList() only
 // includes the "tailscale" step when
 // `!platform.isTailscale && !isLocal && !lanMode`, and Storybook serves from
@@ -42,8 +38,6 @@ type Story = StoryObj<typeof meta>;
 // baseline was byte-identical to CertificateStep's. The step's own UI is covered
 // six ways over in Setup/StepTailscale; what is not covered is the wizard chrome
 // around it, which is a known and accepted gap.
-
-// ─── Stories ────────────────────────────────────────────────────────────────
 
 /** Certificate step (has cert, not on HTTPS). */
 export const CertificateStep: Story = {

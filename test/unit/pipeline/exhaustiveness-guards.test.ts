@@ -5,8 +5,6 @@ import {
 } from "../../helpers/persistence-factories.js";
 
 describe("Exhaustiveness guards", () => {
-	// ─── DB constraint guard ─────────────────────────────────────────────
-
 	describe("DB schema accepts provider message part types", () => {
 		let harness: TestHarness;
 
@@ -79,8 +77,6 @@ describe("Exhaustiveness guards", () => {
 			}
 		});
 	});
-
-	// ─── EventPayloadMap key snapshot ────────────────────────────────────
 
 	describe("EventPayloadMap key snapshot", () => {
 		it("snapshot of all canonical event types — breaks when new types added", async () => {

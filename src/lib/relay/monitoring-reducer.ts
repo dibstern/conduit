@@ -224,8 +224,6 @@ export function evaluateSession(
 	}
 }
 
-// ── Batch evaluation ────────────────────────────────────────────────────
-
 export function initialMonitoringState(): MonitoringState {
 	return { sessions: new Map() };
 }

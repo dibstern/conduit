@@ -1,4 +1,3 @@
-// ─── Subagent Session E2E Tests ──────────────────────────────────────────
 // Tests roots-only sidebar lists and
 // navigation between parent and child sessions.
 //
@@ -18,8 +17,6 @@ import {
 } from "../helpers/ws-mock.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
-
-// ─── Load snapshot fixture ──────────────────────────────────────────────
 
 const snapshotPath = resolve(
 	import.meta.dirname ?? __dirname,
@@ -52,8 +49,6 @@ const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8")) as {
 		total: number;
 	};
 };
-
-// ─── Build mock messages from snapshot ───────────────────────────────────
 
 const allSessions = [
 	snapshot.parentSession,
@@ -152,8 +147,6 @@ const parentSwitchMessages: MockMessage[] = [
 	familyMsg,
 ];
 
-// ─── Helper ─────────────────────────────────────────────────────────────
-
 async function waitForChatReady(page: import("@playwright/test").Page) {
 	// Wait for the input to be visible and connect overlay to be gone
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
@@ -162,8 +155,6 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 		.first()
 		.waitFor({ state: "visible" });
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────
 
 test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {

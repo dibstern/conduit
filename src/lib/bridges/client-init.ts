@@ -1,4 +1,3 @@
-// ─── Client Init ────────────────────────────────────────────────
 // Handles the initial handshake when a browser client connects via WebSocket.
 // Sends session info, model info,
 // agent list, provider/model list, and PTY replay to the new client.
@@ -38,8 +37,6 @@ import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { findContextWindowOptions } from "../shared-types.js";
 import type { OpenCodeInstance, ProviderInfo } from "../types.js";
-
-// ─── Dependencies ────────────────────────────────────────────────────────────
 
 function toConfiguredOpenCodeProviders(
 	providerResult: OpenCodeProviderList,

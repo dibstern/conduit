@@ -1,10 +1,8 @@
-// ─── Keep-Awake Management ─────────────────────────────────────
 // Prevents the host machine from sleeping during long-running agent tasks.
 // Uses `caffeinate` on macOS, `systemd-inhibit` on Linux, or a user-configured command.
 
 import type { ChildProcess } from "node:child_process";
 import { spawn as defaultSpawn, execFileSync } from "node:child_process";
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface KeepAwakeOptions {
 	enabled?: boolean;
@@ -25,8 +23,6 @@ export type KeepAwakeEvents = {
 	unsupported: [{ platform: string }];
 };
 
-// ─── Defaults ────────────────────────────────────────────────────────────────
-
 const DEFAULT_COMMAND = "caffeinate";
 const DEFAULT_ARGS = ["-di"];
 const COMMAND_DISCOVERY_TIMEOUT_MS = 2_000;
@@ -40,8 +36,6 @@ const LINUX_ARGS = [
 	"infinity",
 ];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function defaultWhichSync(cmd: string): string | null {
 	try {
 		const result = execFileSync("which", [cmd], {
@@ -53,8 +47,6 @@ function defaultWhichSync(cmd: string): string | null {
 		return null;
 	}
 }
-
-// ─── KeepAwake ───────────────────────────────────────────────────────────────
 
 /** @internal Exported for testing only */
 export { defaultWhichSync as _defaultWhichSync };
@@ -76,7 +68,6 @@ export class KeepAwake {
 	private child: ChildProcess | null = null;
 	private active = false;
 
-	// ─── Callbacks ─────────────────────────────────────────────────────────
 	onActivated: (() => void) | null = null;
 	onDeactivated: (() => void) | null = null;
 	onError: ((data: { error: Error }) => void) | null = null;
@@ -92,12 +83,10 @@ export class KeepAwake {
 		this.whichSync = options?._whichSync ?? defaultWhichSync;
 	}
 
-	// ─── Private ─────────────────────────────────────────────────────────────
-
 	private resolveCommand(): { command: string; args: string[] } | null {
 		if (this.resolvedCommand !== undefined) return this.resolvedCommand;
 
-		// 1. User-configured command (non-empty) takes priority
+		// User-configured command takes priority over auto-detect.
 		if (this.configCommand != null) {
 			this.resolvedCommand = {
 				command: this.configCommand,
@@ -106,7 +95,6 @@ export class KeepAwake {
 			return this.resolvedCommand;
 		}
 
-		// 2. Auto-detect: macOS → caffeinate
 		if (this.platform === "darwin") {
 			this.resolvedCommand = {
 				command: DEFAULT_COMMAND,
@@ -115,7 +103,6 @@ export class KeepAwake {
 			return this.resolvedCommand;
 		}
 
-		// 3. Auto-detect: Linux → systemd-inhibit (if found)
 		if (this.platform === "linux") {
 			const path = this.whichSync(LINUX_COMMAND);
 			if (path) {
@@ -127,12 +114,9 @@ export class KeepAwake {
 			}
 		}
 
-		// 4. No tool found
 		this.resolvedCommand = null;
 		return null;
 	}
-
-	// ─── Public API ──────────────────────────────────────────────────────────
 
 	/** Start keeping awake (spawns platform-appropriate command) */
 	activate(): void {

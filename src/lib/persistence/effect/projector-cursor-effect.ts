@@ -1,18 +1,13 @@
-// ─── Effect-based Projector Cursor Repository ──────────────────────────────
 // Per-projector sequence cursors, stored in projector_cursors via @effect/sql.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
 
-// ─── Error type ─────────────────────────────────────────────────────────────
-
 export class CursorError extends Data.TaggedError("CursorError")<{
 	readonly operation: string;
 	readonly cause: unknown;
 }> {}
-
-// ─── Domain types ───────────────────────────────────────────────────────────
 
 export interface ProjectorCursor {
 	readonly projectorName: string;
@@ -25,8 +20,6 @@ interface CursorRow {
 	readonly last_applied_seq: number;
 	readonly updated_at: number;
 }
-
-// ─── Service interface ──────────────────────────────────────────────────────
 
 export interface ProjectorCursorEffect {
 	readonly get: (
@@ -46,13 +39,9 @@ export interface ProjectorCursorEffect {
 	readonly minCursor: () => Effect.Effect<number, CursorError | SqlError>;
 }
 
-// ─── Service Tag ────────────────────────────────────���───────────────────────
-
 export class ProjectorCursorEffectTag extends Context.Tag(
 	"ProjectorCursorEffect",
 )<ProjectorCursorEffectTag, ProjectorCursorEffect>() {}
-
-// ─── Row conversion ─────────────────────────────────────────────────────────
 
 function rowToCursor(row: CursorRow): ProjectorCursor {
 	return {
@@ -61,8 +50,6 @@ function rowToCursor(row: CursorRow): ProjectorCursor {
 		updatedAt: row.updated_at,
 	};
 }
-
-// ─── Service implementation ─────────────────────────────────────────────────
 
 export const makeProjectorCursorEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;

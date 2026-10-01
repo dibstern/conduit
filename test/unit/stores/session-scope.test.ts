@@ -1,4 +1,3 @@
-// ─── Session Scope Tests ─────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { partialFake } from "../../helpers/partial-fake.js";
 

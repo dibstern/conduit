@@ -1,4 +1,3 @@
-// ─── Svelte Format Utilities — Unit Tests ────────────────────────────────────
 // Tests escapeHtml, formatFileSize, formatTimeAgo, formatClockTime,
 // generateUuid.
 
@@ -28,8 +27,6 @@ describe("formatSnoozeTime", () => {
 		expect(formatSnoozeTime(null, now)).toBe("No timer");
 	});
 });
-
-// ─── escapeHtml ──────────────────────────────────────────────────────────────
 
 describe("escapeHtml", () => {
 	test("escapes ampersands", () => {
@@ -70,8 +67,6 @@ describe("escapeHtml", () => {
 		expect(escapeHtml("it's fine")).toBe("it's fine");
 	});
 });
-
-// ─── formatFileSize ──────────────────────────────────────────────────────────
 
 describe("formatFileSize", () => {
 	test("formats 0 bytes", () => {
@@ -115,8 +110,6 @@ describe("formatFileSize", () => {
 		expect(formatFileSize(500)).toBe("500 B");
 	});
 });
-
-// ─── formatTimeAgo ───────────────────────────────────────────────────────────
 
 describe("formatTimeAgo", () => {
 	const now = new Date("2026-02-25T12:00:00Z");
@@ -189,8 +182,6 @@ describe("formatTimeAgo", () => {
 	});
 });
 
-// ─── formatClockTime ─────────────────────────────────────────────────────────
-
 describe("formatClockTime", () => {
 	test("renders the hour and minute of the given instant", () => {
 		const at = new Date(2026, 0, 1, 14, 32, 7).getTime();
@@ -207,8 +198,6 @@ describe("formatClockTime", () => {
 		expect(formatClockTime(0)).not.toBe("");
 	});
 });
-
-// ─── generateUuid ────────────────────────────────────────────────────────────
 
 describe("generateUuid", () => {
 	test("returns a non-empty string", () => {

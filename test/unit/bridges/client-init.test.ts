@@ -55,7 +55,6 @@ import { partialFake } from "../../helpers/partial-fake.js";
 /** Cast a plain string to PermissionId for test data. */
 const pid = (s: string) => s as PermissionId;
 
-// ─── Test-specific defaults ─────────────────────────────────────────────────
 // The shared factory provides minimal defaults. These helpers set the richer
 // mock return values that this test file's assertions depend on.
 
@@ -474,8 +473,6 @@ describe("handleClientConnectedEffect — session selection", () => {
 	});
 });
 
-// ─── Model info ──────────────────────────────────────────────────────────────
-
 describe("handleClientConnectedEffect — model info", () => {
 	it("loads session and provider models through the Effect model service", async () => {
 		const deps = applyTestDefaults(makeClientInitEffectLayer());
@@ -613,8 +610,6 @@ describe("handleClientConnectedEffect — model info", () => {
 	});
 });
 
-// ─── Viewed families ────────────────────────────────────────────────────────
-
 describe("handleClientConnectedEffect — viewed families", () => {
 	it("pushes viewed families before marking the client bootstrapped", async () => {
 		const deps = makeClientInitEffectLayer();
@@ -667,8 +662,6 @@ describe("handleClientConnectedEffect — viewed families", () => {
 		expect(errorOrder).toBeLessThan(bootstrapOrder);
 	});
 });
-
-// ─── Agent list ──────────────────────────────────────────────────────────────
 
 describe("handleClientConnectedEffect — agent list", () => {
 	it("sends agent_list filtering internal agents", async () => {
@@ -747,7 +740,7 @@ describe("handleClientConnectedEffect — agent list", () => {
 	});
 });
 
-// ─── Model list (providers) ──────────────────────────────────────────────────
+// Model list (providers)
 
 describe("handleClientConnectedEffect — model list", () => {
 	it("sends model_list with only configured providers", async () => {
@@ -1065,8 +1058,6 @@ describe("handleClientConnectedEffect — model list", () => {
 	});
 });
 
-// ─── Config-seeded defaultModel priority ────────────────────────────────────
-
 describe("handleClientConnectedEffect — defaultModel priority", () => {
 	it("prefers defaultModel over provider-level default", async () => {
 		const deps = applyTestDefaults(makeClientInitEffectLayer());
@@ -1128,8 +1119,6 @@ describe("handleClientConnectedEffect — defaultModel priority", () => {
 	});
 });
 
-// ─── PTY replay ──────────────────────────────────────────────────────────────
-
 describe("handleClientConnectedEffect — PTY replay", () => {
 	it("replays terminal state through the terminal replay port", async () => {
 		const deps = makeClientInitEffectLayer();
@@ -1139,8 +1128,6 @@ describe("handleClientConnectedEffect — PTY replay", () => {
 		expect(deps.terminal.replay).toHaveBeenCalledWith("client-1");
 	});
 });
-
-// ─── No active session ───────────────────────────────────────────────────────
 
 describe("handleClientConnectedEffect — no active session", () => {
 	it("skips session info and model info when no active session", async () => {
@@ -1164,8 +1151,6 @@ describe("handleClientConnectedEffect — no active session", () => {
 		);
 	});
 });
-
-// ─── Pending permissions replay ──────────────────────────────────────────────
 
 describe("handleClientConnectedEffect — pending permissions", () => {
 	it("sends pending permission requests to reconnecting client", async () => {
@@ -1248,8 +1233,6 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 		});
 	});
 });
-
-// ─── Pending questions replay ────────────────────────────────────────────────
 
 describe("handleClientConnectedEffect — pending questions", () => {
 	it("replays grandchild questions after publishing the reconnect family", async () => {
@@ -1488,8 +1471,6 @@ describe("handleClientConnectedEffect — pending questions", () => {
 	});
 });
 
-// ─── Error resilience ────────────────────────────────────────────────────────
-
 describe("handleClientConnectedEffect — error resilience", () => {
 	it("continues sending remaining data when getSession fails", async () => {
 		const deps = makeClientInitEffectLayer();
@@ -1544,7 +1525,6 @@ describe("handleClientConnectedEffect — error resilience", () => {
 	});
 });
 
-// ─── Pending interaction integration ─────────────────────────────────────────
 // Permissions are replayed from the Effect-owned pending interaction port.
 // Questions are replayed first from the same port, then from the OpenCode REST
 // API with field mapping (`multiple` → `multiSelect`).
@@ -1677,8 +1657,6 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 		expect((perm1Msg[1] as { toolName: string }).toolName).toBe("shell_exec");
 	});
 });
-
-// ─── API-based permission fetch on connect ───────────────────────────────────
 
 describe("handleClientConnectedEffect — API permission rehydration", () => {
 	it("fetches permissions from API and sends them to connecting client", async () => {
@@ -1919,8 +1897,6 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 	});
 });
 
-// ─── Processing status on connect ────────────────────────────────────────────
-
 describe("handleClientConnectedEffect — processing status on connect", () => {
 	it("sends status 'processing' when active session is busy", async () => {
 		const deps = makeClientInitEffectLayer();
@@ -1982,8 +1958,6 @@ describe("handleClientConnectedEffect — processing status on connect", () => {
 		});
 	});
 });
-
-// ─── Instance list on connect ─────────────────────────────────────────────────
 
 describe("handleClientConnectedEffect — instance list", () => {
 	it("sends instance_list when getInstances is provided", async () => {

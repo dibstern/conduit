@@ -1,4 +1,4 @@
-// ─── Tests: Daemon Auto-Start (probe-and-convert) ───────────────────────────
+// Tests: Daemon Auto-Start (probe-and-convert)
 // Tests the behavior where the daemon probes an unmanaged "opencode" instance
 // and converts it to managed when OpenCode is not reachable.
 

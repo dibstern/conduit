@@ -1,4 +1,3 @@
-<!-- ─── Sidebar ─────────────────────────────────────────────────────────────── -->
 <!-- Left sidebar with session actions and session list. -->
 <!-- Desktop: collapsible via toggle. Phone: full-screen list route. -->
 
@@ -33,12 +32,10 @@
 	// True while this sidebar is the phone's full-screen session list.
 	let { listScreen = false }: { listScreen?: boolean } = $props();
 
-	// ─── Local state ──────────────────────────────────────────────────────────
 	let projectsOpen = $state(false);
 	let listMenuOpen = $state(false);
 	let projectContextMenuOpen = $state(false);
 
-	// ─── Handlers ──────────────────────────────────────────────────────────────
 	function toggleProjectsPanel() {
 		projectsOpen = !projectsOpen;
 	}

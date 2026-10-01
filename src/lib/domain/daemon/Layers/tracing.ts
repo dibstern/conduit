@@ -1,4 +1,3 @@
-// ─── OpenTelemetry Tracing Layer ────────────────────────────────────────────
 // Configurable Layer that wires Effect.withSpan annotations to OpenTelemetry
 // span exporters. Without this Layer, all Effect.withSpan calls are inert.
 //
@@ -28,8 +27,6 @@ import {
 	makeTraceSink,
 } from "../Services/local-trace-artifact.js";
 
-// ─── Public configuration ───────────────────────────────────────────────────
-
 export interface TracingConfig {
 	/** Master switch — when false the returned Layer is a no-op. */
 	readonly enabled: boolean;
@@ -49,8 +46,6 @@ export interface DaemonTracingConfig extends TraceEnvConfig {
 	/** Optional span processors to inject (e.g. InMemorySpanExporter for tests). */
 	readonly spanProcessors?: readonly SpanProcessor[] | undefined;
 }
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 /**
  * Build a tracing Layer from the given config.

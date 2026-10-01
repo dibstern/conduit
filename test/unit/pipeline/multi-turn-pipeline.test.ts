@@ -46,7 +46,6 @@ describe("Multi-turn conversation pipeline", () => {
 	}
 
 	it("user→assistant(thinking)→user→assistant(thinking) — full pipeline", async () => {
-		// ─── Turn 1: User message ─────────────────────────────
 		await project(
 			makeStored(
 				"message.created",
@@ -56,7 +55,6 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		// ─── Turn 1: Assistant response with thinking ─────────
 		await project(
 			makeStored(
 				"message.created",
@@ -128,7 +126,6 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		// ─── Turn 2: User message ─────────────────────────────
 		await project(
 			makeStored(
 				"message.created",
@@ -138,7 +135,6 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		// ─── Turn 2: Assistant response with thinking ─────────
 		await project(
 			makeStored(
 				"message.created",
@@ -210,7 +206,6 @@ describe("Multi-turn conversation pipeline", () => {
 			),
 		);
 
-		// ─── Verify pipeline output ──────────────────────────
 		const chat = await readPipeline();
 
 		const userMessages = chat.filter((m) => m.type === "user");

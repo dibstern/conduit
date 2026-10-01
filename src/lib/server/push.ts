@@ -1,4 +1,3 @@
-// ─── Push Notifications ──────────────────────────────────────────
 // Server-side push notification delivery using the web-push library.
 // Manages VAPID keys, browser subscriptions, and sending notifications.
 
@@ -85,7 +84,7 @@ const defaultWebpush: WebPushModule = {
 // https://firebase.google.com/docs/cloud-messaging/scale-fcm#timeouts
 const PUSH_SEND_TIMEOUT_MS = 10_000;
 
-// ─── web-push type shims (no @types/web-push available) ──────────────────────
+// web-push type shims (no @types/web-push available)
 
 /** Minimal interface matching web-push API surface */
 export interface WebPushModule {
@@ -115,8 +114,6 @@ export interface PushSubscriptionData {
 		auth?: string;
 	};
 }
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface PushManagerOptions {
 	/** VAPID subject, e.g. "mailto:admin@example.com" */
@@ -198,8 +195,6 @@ export class PushVapidKeysNotInitializedError extends Data.TaggedError(
 	}
 }
 
-// ─── PushNotificationManager ─────────────────────────────────────────────────
-
 export class PushNotificationManager implements PushNotificationSender {
 	private readonly vapidSubject: string;
 	private readonly configDir: string;
@@ -213,8 +208,6 @@ export class PushNotificationManager implements PushNotificationSender {
 		this.webpush = options?._webpush ?? defaultWebpush;
 	}
 
-	// ─── Init: generate or load VAPID keys, restore subscriptions ──────
-
 	/** Generate or load VAPID keys, restore persisted subscriptions. Returns public key for frontend. */
 	async init(): Promise<{ publicKey: string }> {
 		this.vapidKeys = this.loadOrCreateVapidKeys();
@@ -227,8 +220,6 @@ export class PushNotificationManager implements PushNotificationSender {
 	getPublicKey(): string | null {
 		return this.vapidKeys?.publicKey ?? null;
 	}
-
-	// ─── Subscription management ────────────────────────────────────────
 
 	/** Register a push subscription from a browser. */
 	addSubscription(clientId: string, subscription: PushSubscriptionData): void {
@@ -251,8 +242,6 @@ export class PushNotificationManager implements PushNotificationSender {
 	getSubscriptionIds(): readonly string[] {
 		return [...this.subscriptions.keys()];
 	}
-
-	// ─── Push delivery ──────────────────────────────────────────────────
 
 	private async sendNotification(
 		subscription: PushSubscriptionData,
@@ -365,8 +354,6 @@ export class PushNotificationManager implements PushNotificationSender {
 		}
 	}
 
-	// ─── Subscription persistence ───────────────────────────────────────
-
 	/** Save current subscriptions to push-subs.json with the VAPID public key. */
 	private saveSubscriptions(): void {
 		if (!this.vapidKeys) return;
@@ -448,8 +435,6 @@ export class PushNotificationManager implements PushNotificationSender {
 			this.saveSubscriptions();
 		}
 	}
-
-	// ─── VAPID key management ──────────────────────────────────────────
 
 	private loadOrCreateVapidKeys(): {
 		publicKey: string;

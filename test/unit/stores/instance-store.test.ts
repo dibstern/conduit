@@ -1,4 +1,3 @@
-// ─── Instance Store Tests ────────────────────────────────────────────────────
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyInstanceListResponse,
@@ -15,8 +14,6 @@ import type {
 	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
 
-// ─── Helper ─────────────────────────────────────────────────────────────────
-
 function makeInstance(
 	overrides: Partial<OpenCodeInstance> & { id: string },
 ): OpenCodeInstance {
@@ -31,13 +28,9 @@ function makeInstance(
 	};
 }
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	clearInstanceState();
 });
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Instance Store", () => {
 	it("initializes with empty state", () => {

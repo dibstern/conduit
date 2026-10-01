@@ -1,4 +1,3 @@
-// ─── Notification Content ────────────────────────────────────────────────────
 // Single source of truth for notification title/body/tag per event type.
 // Used by both server-side push (sse-wiring.ts) and browser Notification API
 // (ws-notifications.ts) so the copy stays consistent.

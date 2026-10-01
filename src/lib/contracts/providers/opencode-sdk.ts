@@ -910,7 +910,6 @@ const OpenCodeInstallationUpdateAvailableEventSchema = Schema.Struct({
 	),
 });
 
-// ── Full OpenCode 1.17.18 event catalog ──────────────────────────────────
 // Documentation-modeled from the live server /doc. Most of these events are
 // not consumed by conduit today; they are modeled so the available event
 // data surface is explicit and discoverable.

@@ -1,5 +1,3 @@
-// ─── Model Handlers ──────────────────────────────────────────────────────────
-
 import { type Cause, Data, Effect } from "effect";
 import {
 	defaultInstanceIdForDriver,
@@ -166,7 +164,6 @@ const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 		return !row || row.provider === "opencode";
 	});
 
-// ─── Bedrock geo-routing grouping ────────────────────────────────────────────
 // OpenCode's amazon-bedrock catalog lists each model once per inference-profile
 // scope (bare id, us., eu., apac., global.). Collapse them into one entry with
 // routingOptions (value = full model id). Global is the default: it is the only

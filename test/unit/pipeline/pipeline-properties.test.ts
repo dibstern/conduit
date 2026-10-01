@@ -18,8 +18,6 @@ const NUM_RUNS = 100;
 // conduit-test-997y
 vi.setConfig({ testTimeout: 30_000 });
 
-// ─── Arbitraries ────────────────────────────────────────────────────────────
-
 type Block =
 	| { type: "thinking"; partId: string; deltas: string[] }
 	| { type: "text"; partId: string; deltas: string[] };
@@ -55,8 +53,6 @@ const eventSequenceArb = fc.array(fc.oneof(thinkingBlockArb, textBlockArb), {
 	minLength: 1,
 	maxLength: 8,
 });
-
-// ─── Shared helpers ─────────────────────────────────────────────────────────
 
 async function projectBlocks(
 	harness: EffectProjectionHarness,
@@ -154,8 +150,6 @@ async function readPipeline(
 	const { messages } = messageRowsToHistory(rows, { pageSize: 50 });
 	return historyToChatMessages(messages);
 }
-
-// ─── Property tests ─────────────────────────────────────────────────────────
 
 describe("Pipeline property-based tests", () => {
 	it("PBT: all thinking blocks have done=true after full pipeline", async () => {
@@ -344,8 +338,6 @@ describe("Pipeline property-based tests", () => {
 		}
 	});
 });
-
-// ─── Invalid sequence arbitraries ────────────────────────────────────
 
 /** Shuffle an array randomly */
 function shuffle<T>(arr: T[], rng: () => number): T[] {
@@ -764,7 +756,6 @@ describe("Pipeline PBT — invalid/corrupted event sequences", () => {
 	});
 });
 
-// ─── PBT Regression Cases ───────────────────────────────────────────────────
 // When a PBT fails, add the shrunk counterexample here as a deterministic
 // regression test. This ensures past failures remain covered even when the
 // random seed produces different sequences.

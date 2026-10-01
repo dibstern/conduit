@@ -1,5 +1,3 @@
-// ─── Payload Type Map ────────────────────────────────────────────────────────
-
 /**
  * Type map for all incoming WebSocket message payloads.
  * Each key corresponds to an IncomingMessageType, and the value

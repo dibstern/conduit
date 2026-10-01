@@ -1,4 +1,3 @@
-// ─── Daemon E2E Harness ──────────────────────────────────────────────────────
 // Starts a real foreground daemon pointed at a real OpenCode
 // instance. Unlike E2EHarness (which wraps RelayStack), this provides the
 // full daemon experience: project routing, instance management, health
@@ -130,8 +129,6 @@ export async function createDaemonHarness(
 		},
 	};
 }
-
-// ─── Internal ────────────────────────────────────────────────────────────────
 
 /** Poll daemon instances until at least one is healthy. */
 async function waitForHealthy(

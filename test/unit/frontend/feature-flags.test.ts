@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── localStorage mock (must be set before module import) ───────────────────
+// localStorage mock (must be set before module import)
 const storage = new Map<string, string>();
 const localStorageMock = {
 	getItem: vi.fn((key: string) => storage.get(key) ?? null),

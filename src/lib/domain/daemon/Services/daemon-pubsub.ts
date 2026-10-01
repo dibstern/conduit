@@ -1,4 +1,3 @@
-// ─── Daemon PubSub Event Bus ────────────────────────────────────────────────
 // Sliding PubSub for broadcasting daemon-level events to subscribers.
 // Oldest events are dropped if a consumer falls behind (capacity 256).
 
@@ -43,8 +42,6 @@ export const DaemonEventBusLive = Layer.effect(
 	PubSub.sliding<DaemonEvent>({ capacity: DAEMON_EVENT_BUFFER_CAPACITY }),
 );
 
-// ─── Publisher Helpers ──────────────────────────────────────────────────────
-
 const publish = (event: DaemonEvent) =>
 	DaemonEventBusTag.pipe(Effect.flatMap((bus) => PubSub.publish(bus, event)));
 
@@ -82,8 +79,6 @@ export const publishRelayBroadcast = (message: unknown) =>
 	publish(DaemonEvent.RelayBroadcast({ message }));
 
 export const publishConfigChanged = publish(DaemonEvent.ConfigChanged());
-
-// ─── Subscriber ─────────────────────────────────────────────────────────────
 
 export const subscribeToDaemonEvents: Effect.Effect<
 	Queue.Dequeue<DaemonEvent>,

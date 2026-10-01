@@ -1,4 +1,3 @@
-// ─── OpenCodeAPI Adapter ───────────────────────────────────────────
 // Unified namespaced API wrapping the @opencode-ai/sdk client and gap endpoints.
 // Callers use `api.session.list()` instead of `client.session.list({ ... })`.
 //
@@ -227,7 +226,6 @@ export class OpenCodeAPI {
 	}
 }
 
-// ─── Helper to cast SDK RequestResult to SdkResult ──────────────────────────
 // The SDK's RequestResult uses complex conditional types; this helper performs
 // a single cast point so namespace methods stay clean.
 
@@ -235,7 +233,6 @@ function call<T>(promise: Promise<unknown>): SdkResult<T> {
 	return promise as SdkResult<T>;
 }
 
-// ─── Message Flattening Helpers ──────────────────────────────────────────────
 // The SDK returns messages as `{ info: Message, parts: Part[] }`.
 // Callers expect flat messages with `.id`, `.role`, `.parts` at the top level.
 // These helpers handle both nested and already-flat shapes gracefully.
@@ -260,8 +257,6 @@ function flattenMessages(data: any): Message[] {
 	const arr = Array.isArray(data) ? data : [];
 	return arr.map(flattenMessage);
 }
-
-// ─── Session Namespace ───────────────────────────────────────────────────────
 
 class SessionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
@@ -529,8 +524,6 @@ class SessionNamespace {
 	}
 }
 
-// ─── Permission Namespace ────────────────────────────────────────────────────
-
 class PermissionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
@@ -565,8 +558,6 @@ class PermissionNamespace {
 	}
 }
 
-// ─── Question Namespace ──────────────────────────────────────────────────────
-
 class QuestionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
@@ -588,8 +579,6 @@ class QuestionNamespace {
 	}
 }
 
-// ─── Config Namespace ────────────────────────────────────────────────────────
-
 class ConfigNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
@@ -606,8 +595,6 @@ class ConfigNamespace {
 		);
 	}
 }
-
-// ─── Provider Namespace ──────────────────────────────────────────────────────
 
 class ProviderNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
@@ -646,8 +633,6 @@ class ProviderNamespace {
 		};
 	}
 }
-
-// ─── PTY Namespace ───────────────────────────────────────────────────────────
 
 class PtyNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
@@ -690,8 +675,6 @@ class PtyNamespace {
 		);
 	}
 }
-
-// ─── File Namespace ──────────────────────────────────────────────────────────
 
 class FileNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
@@ -738,8 +721,6 @@ class FileNamespace {
 	}
 }
 
-// ─── Find Namespace ──────────────────────────────────────────────────────────
-
 class FindNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
@@ -773,8 +754,6 @@ class FindNamespace {
 		);
 	}
 }
-
-// ─── App Namespace ───────────────────────────────────────────────────────────
 
 class AppNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
@@ -853,8 +832,6 @@ class AppNamespace {
 		);
 	}
 }
-
-// ─── Event Namespace ─────────────────────────────────────────────────────────
 
 class EventNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}

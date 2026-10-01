@@ -1,4 +1,4 @@
-// ─── Metamorphic Tests: Event Translator (Ticket 1.3) ───────────────────────
+// Metamorphic Tests: Event Translator (Ticket 1.3)
 //
 // Metamorphic properties test relationships between different inputs/executions
 // rather than checking absolute outputs. This catches subtle ordering bugs,
@@ -27,8 +27,6 @@ import type { OpenCodeEvent } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 200;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function collectResults(events: OpenCodeEvent[]): TranslateResult[] {
 	const translator = createTranslator();
@@ -74,8 +72,6 @@ function makeDeltaEvent(partID: string, text: string): OpenCodeEvent {
 	};
 }
 
-// ─── M1: Determinism ────────────────────────────────────────────────────────
-
 describe("Ticket 1.3 — Event Translator Metamorphic PBT", () => {
 	describe("M1: Two fresh translators produce identical results (determinism)", () => {
 		it("property: same event sequence → same output sequence", () => {
@@ -111,8 +107,6 @@ describe("Ticket 1.3 — Event Translator Metamorphic PBT", () => {
 			);
 		});
 	});
-
-	// ─── M2: Independent events commute ─────────────────────────────────────
 
 	describe("M2: Independent events for different partIDs commute", () => {
 		it("property: two independent tool_start events — either order yields same seenParts size", () => {
@@ -156,8 +150,6 @@ describe("Ticket 1.3 — Event Translator Metamorphic PBT", () => {
 		});
 	});
 
-	// ─── M3: Reset + replay = fresh run ───────────────────────────────────
-
 	describe("M3: Reset then replay produces identical output to fresh translator", () => {
 		it("property: translate(events), reset, translate(events) === fresh translate(events)", () => {
 			const arbEvents = fc.array(
@@ -189,8 +181,6 @@ describe("Ticket 1.3 — Event Translator Metamorphic PBT", () => {
 			);
 		});
 	});
-
-	// ─── M4: Unknown events are transparent ───────────────────────────────
 
 	describe("M4: Interleaving unknown events doesn't affect known event outputs", () => {
 		it("property: known events produce same output with or without unknown events interleaved", () => {
@@ -249,8 +239,6 @@ describe("Ticket 1.3 — Event Translator Metamorphic PBT", () => {
 			);
 		});
 	});
-
-	// ─── M5: mapToolName stability ────────────────────────────────────────
 
 	describe("M5: mapToolName(mapToolName(x)) is stable for non-self-referential mappings", () => {
 		it("property: applying mapToolName twice is safe (no known key maps to another known key)", () => {

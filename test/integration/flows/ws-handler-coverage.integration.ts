@@ -1,4 +1,3 @@
-// ─── Integration: WebSocket Handler Coverage ────────────────────────────────
 // Verifies Bug B: all 23 WebSocket message types from ws-router.ts have
 // handlers in the relay stack. None should be silently dropped.
 
@@ -18,8 +17,6 @@ describe("Integration: WS Handler Coverage", () => {
 	afterAll(async () => {
 		if (harness) await harness.stop();
 	});
-
-	// ── Discovery endpoints ──────────────────────────────────────────────────
 
 	it("GetAgents RPC returns agents", async () => {
 		const client = await harness.connectWsClient();
@@ -63,8 +60,6 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	// ── Session management ──────────────────────────────────────────────────
-
 	it("CreateSession RPC creates and switches to new session", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -74,8 +69,6 @@ describe("Integration: WS Handler Coverage", () => {
 		expect(msg["id"]).toBeTruthy();
 		await client.close();
 	});
-
-	// ── Agent/model switching ───────────────────────────────────────────────
 
 	it("SwitchAgent RPC does not error", async () => {
 		const client = await harness.connectWsClient();
@@ -106,8 +99,6 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	// ── File browser ────────────────────────────────────────────────────────
-
 	it("GetFileList RPC returns file entries", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -119,8 +110,6 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	// ── Todo ────────────────────────────────────────────────────────────────
-
 	it("GetTodo RPC returns todo state", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -130,8 +119,6 @@ describe("Integration: WS Handler Coverage", () => {
 		expect(Array.isArray(result.items)).toBe(true);
 		await client.close();
 	});
-
-	// ── Input sync ──────────────────────────────────────────────────────────
 
 	it("input_sync broadcasts to clients", async () => {
 		const client1 = await harness.connectWsClient();

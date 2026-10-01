@@ -1,4 +1,3 @@
-// ─── Integration: Claude Provider Instance Full Lifecycle ──────────────────────────────
 // End-to-end lifecycle tests that exercise the full ClaudeProviderInstance flow with a
 // mock SDK query factory. These verify that the provider instance, event translator,
 // and permission bridge work together correctly.
@@ -100,8 +99,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
 	});
-
-	// ── Test 1: Full turn lifecycle ─────────────────────────────────────────
 
 	it("full turn: system init → assistant → text deltas → tool_use → tool_result → result", async () => {
 		// Build a realistic SDK message sequence that exercises the full
@@ -212,14 +209,12 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
-		// ── Verify TurnResult ──────────────────────────────────────────
 		expect(result.status).toBe("completed");
 		expect(result.cost).toBe(0.03);
 		expect(result.tokens.input).toBe(200);
 		expect(result.tokens.output).toBe(100);
 		expect(result.durationMs).toBe(2000);
 
-		// ── Verify event sequence ──────────────────────────────────────
 		const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 			.calls as Array<[CanonicalEvent]>;
 		const eventTypes = pushCalls.map((call) => call[0].type);
@@ -270,7 +265,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		);
 		expect(turnCompleted.length).toBe(1);
 
-		// ── Verify ordering: text.delta before tool before turn end ──
 		const firstTextDeltaIdx = eventTypes.indexOf("text.delta");
 		const firstToolStartIdx = eventTypes.findIndex(
 			(t, i) =>
@@ -292,8 +286,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		).toEqual(["idle"]);
 		expect(statuses[0]?.i).toBeGreaterThan(turnCompletedIdx);
 	});
-
-	// ── Test 2: Permission flow round-trip ──────────────────────────────────
 
 	it("permission flow: tool_use → canUseTool → requestPermission → allow → tool_result → result", async () => {
 		// This test exercises the permission bridge integration. The provider instance's
@@ -477,17 +469,14 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		// Wait for the turn to complete
 		const result = await turnPromise;
 
-		// ── Verify turn completed successfully ─────────────────────────
 		expect(result.status).toBe("completed");
 
-		// ── Verify requestPermission was called ────────────────────────
 		expect(sink.requestPermission).toHaveBeenCalledTimes(1);
 		const permCall = (sink.requestPermission as ReturnType<typeof vi.fn>).mock
 			.calls[0]?.[0] as Record<string, unknown>;
 		expect(permCall["toolName"]).toBe("Bash");
 		expect(permCall["sessionId"]).toBe("session-integ-perm");
 
-		// ── Verify event sequence includes tool events ─────────────────
 		const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 			.calls as Array<[CanonicalEvent]>;
 		const eventTypes = pushCalls.map((c) => c[0].type);

@@ -1,4 +1,3 @@
-// ─── Integration: Message Lifecycle ──────────────────────────────────────────
 // Full end-to-end lifecycle test against a mock OpenCode server.
 // Verifies the complete message flow:
 //   send → status:processing → delta(s) → done(code:0) → idle

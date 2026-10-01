@@ -1,4 +1,3 @@
-// ─── Relay Event Sink ────────────────────────────────────────────────────────
 // Translates provider-emitted ProviderRuntimeEvents into Conduit domain events,
 // persists them when configured, then pushes RelayMessages to WebSocket clients.
 // Used for the in-process Claude SDK path where there is no SSE stream to
@@ -42,8 +41,6 @@ import type {
 } from "./types.js";
 
 const log = createLogger("relay-event-sink");
-
-// ─── Deps ───────────────────────────────────────────────────────────────────
 
 export interface EffectRelayEventSinkPersist {
 	readonly persistEvent: (
@@ -124,8 +121,6 @@ export interface RelayEventSinkDeps {
 }
 
 export type RelayEventSink = EventSink;
-
-// ─── Factory ────────────────────────────────────────────────────────────────
 
 export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	const { sessionId, send, clearTimeout, resetTimeout, persist } = deps;

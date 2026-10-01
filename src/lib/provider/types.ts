@@ -1,5 +1,4 @@
 // src/lib/provider/types.ts
-// ─── Provider Instance Types ────────────────────────────────────────────────
 // Core interface and supporting types for provider execution instances.
 // Instances are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Instances turn prompts into event streams.
@@ -12,8 +11,6 @@ import type {
 } from "../shared-types.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 import type { EventSinkError } from "./event-sink-errors.js";
-
-// ─── Permission / Question Decisions ────────────────────────────────────────
 
 export type PermissionDecision = "once" | "always" | "reject";
 
@@ -47,8 +44,6 @@ export interface QuestionRequest {
 		custom?: boolean;
 	}>;
 }
-
-// ─── Event Sink ─────────────────────────────────────────────────────────────
 
 /**
  * EventSink is the provider instance's write interface to conduit's event store.
@@ -90,8 +85,6 @@ export interface EventSink {
 	noteActivity?(): void;
 }
 
-// ─── Turn Types ─────────────────────────────────────────────────────────────
-
 export type TurnStatus = "completed" | "error" | "interrupted" | "cancelled";
 
 export interface TurnTokens {
@@ -130,8 +123,6 @@ export interface TurnResult {
 	readonly providerStateUpdates: readonly ProviderStateUpdate[];
 }
 
-// ─── Model Types ────────────────────────────────────────────────────────────
-
 export interface ModelSelection {
 	readonly providerId: string;
 	readonly modelId: string;
@@ -161,8 +152,6 @@ export interface ModelInfo {
 	readonly contextWindowOptions?: readonly ContextWindowOption[];
 }
 
-// ─── History ────────────────────────────────────────────────────────────────
-
 export interface HistoryMessage {
 	readonly id?: string;
 	readonly role: "user" | "assistant";
@@ -173,8 +162,6 @@ export interface HistoryMessage {
 	readonly cost?: number;
 	readonly time?: unknown;
 }
-
-// ─── Send Turn Input ────────────────────────────────────────────────────────
 
 export interface SendTurnInput {
 	readonly sessionId: string;
@@ -199,8 +186,6 @@ export interface SendTurnInput {
 	readonly agent?: string;
 }
 
-// ─── Command Discovery ─────────────────────────────────────────────────────
-
 export type CommandSource =
 	| "builtin"
 	| "user-command"
@@ -223,8 +208,6 @@ export interface ProviderAgentInfo {
 	readonly model?: string;
 }
 
-// ─── Provider Capabilities ──────────────────────────────────────────────────
-
 export interface ProviderCapabilities {
 	readonly models: readonly ModelInfo[];
 	readonly supportsTools: boolean;
@@ -237,8 +220,6 @@ export interface ProviderCapabilities {
 	readonly commands: readonly CommandInfo[];
 	readonly agents?: readonly ProviderAgentInfo[];
 }
-
-// ─── Provider Instance Interface ────────────────────────────────────────────
 
 /**
  * ProviderInstance -- the 7-method contract for provider execution.

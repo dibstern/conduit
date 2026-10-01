@@ -12,8 +12,6 @@ import {
 } from "../../../src/lib/relay/event-pipeline.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
-// ─── truncateIfNeeded ────────────────────────────────────────────────────────
-
 describe("truncateIfNeeded", () => {
 	it("passes through non-tool_result messages unchanged", () => {
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
@@ -55,8 +53,6 @@ describe("truncateIfNeeded", () => {
 	});
 });
 
-// ─── resolveRoute ────────────────────────────────────────────────────────────
-
 describe("resolveRoute", () => {
 	it("returns send when viewers exist", () => {
 		const result = resolveRoute("delta", "ses_abc", ["client1"]);
@@ -81,8 +77,6 @@ describe("resolveRoute", () => {
 		expect(result).toEqual({ action: "drop", reason: "no session ID" });
 	});
 });
-
-// ─── shouldCache ─────────────────────────────────────────────────────────────
 
 describe("shouldCache", () => {
 	it("returns true for chat event types", () => {
@@ -123,8 +117,6 @@ describe("shouldCache", () => {
 	});
 });
 
-// ─── resolveTimeout ──────────────────────────────────────────────────────────
-
 describe("resolveTimeout", () => {
 	it("returns clear for done events with sessionId", () => {
 		expect(resolveTimeout("done", "ses_abc")).toBe("clear");
@@ -146,7 +138,7 @@ describe("resolveTimeout", () => {
 	});
 });
 
-// ─── processEvent (composed pipeline) ────────────────────────────────────────
+// processEvent (composed pipeline)
 
 describe("processEvent (composed pipeline)", () => {
 	it("composes all decisions for a normal message with viewers", () => {
@@ -225,8 +217,6 @@ describe("processEvent (composed pipeline)", () => {
 		expect(result.source).toBe("status-poller");
 	});
 });
-
-// ─── applyPipelineResult ─────────────────────────────────────────────────────
 
 function makeDeps(): PipelineDeps & {
 	processingTimeouts: {

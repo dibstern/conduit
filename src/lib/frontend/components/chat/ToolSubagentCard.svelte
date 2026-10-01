@@ -1,4 +1,3 @@
-<!-- ─── Tool Subagent Card ────────────────────────────────────────────────── -->
 <!-- Renders Task/subagent tool calls with agent info and session navigation. -->
 
 <script lang="ts">
@@ -78,8 +77,6 @@
 			switchToSession(subagentSessionId);
 		}
 	}
-
-	// ─── Status display ─────────────────────────────────────────────────────
 
 	const statusIconName = $derived.by(() => {
 		switch (message.status) {

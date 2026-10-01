@@ -1,4 +1,3 @@
-// ─── Layer Wiring Tests ─────────────────────────────────────────────────────
 // Verify that makeDaemonLive correctly composes all Layers and that each
 // service Tag is resolvable. These tests catch wiring bugs: if a Layer is
 // missing, in the wrong tier, or has unsatisfied dependencies, the build
@@ -57,8 +56,6 @@ import {
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
-// ─── Mock DaemonLiveOptions ─────────────────────────────────────────────────
-
 const makeMockOptions = (): DaemonLiveOptions => {
 	return {
 		configDir: "/tmp/test-daemon-wiring",
@@ -116,12 +113,8 @@ const waitForTraceRecord = (
 		catch: (cause) => cause,
 	});
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe("makeDaemonLive wiring", () => {
 	const makeDaemonLayer = () => Layer.fresh(makeDaemonLive(makeMockOptions()));
-
-	// ── Tier 0: Foundation Tags ───────────────────────────────────────────
 
 	it.scoped("provides DaemonEventBusTag (Tier 0)", () =>
 		Effect.gen(function* () {
@@ -223,8 +216,6 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 	});
 
-	// ── Tier 1: Service Tags ─────────────────────────────────────────────
-
 	it.scoped(
 		"provides AuthManagerTag with reactive pinHash from DaemonConfigRef (Tier 1)",
 		() =>
@@ -248,8 +239,6 @@ describe("makeDaemonLive wiring", () => {
 			expect(tls.caRootPath).toBeNull();
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
-
-	// ── Tier 2: Registry Tags ────────────────────────────────────────────
 
 	it.scoped("provides ProjectRegistryTag (Tier 2)", () =>
 		Effect.gen(function* () {
@@ -343,8 +332,6 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	// ── Tier 4: Background Service Tags ──────────────────────────────────
-
 	it.scoped("provides KeepAwakeTag with activate/deactivate (Tier 4)", () =>
 		Effect.gen(function* () {
 			const keepAwake = yield* KeepAwakeTag;
@@ -373,8 +360,6 @@ describe("makeDaemonLive wiring", () => {
 			expect(typeof usage).toBe("number");
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
-
-	// ── Cross-tier wiring: DaemonEventBus is shared ──────────────────────
 
 	it.scoped("DaemonEventBus is shared across all tiers", () =>
 		Effect.gen(function* () {
@@ -592,8 +577,6 @@ describe("makeDaemonLive wiring", () => {
 			}),
 	);
 
-	// ── Cross-tier wiring: AuthManager reads DaemonConfigRef reactively ──
-
 	it.scoped(
 		"AuthManager reactive wiring: pinHash update in Tier 0 visible in Tier 1",
 		() =>
@@ -617,8 +600,6 @@ describe("makeDaemonLive wiring", () => {
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	// ── Cross-tier wiring: KeepAwake activate/deactivate lifecycle ────────
-
 	it.scoped(
 		"KeepAwake activate/deactivate lifecycle works through Layer (Tier 4)",
 		() =>
@@ -638,8 +619,6 @@ describe("makeDaemonLive wiring", () => {
 				expect(activeAfterDeactivate).toBe(false);
 			}).pipe(Effect.provide(makeDaemonLayer())),
 	);
-
-	// ── Cross-tier wiring: CrashCounter records and resets ───────────────
 
 	it.scoped("CrashCounter record/reset lifecycle (Tier 0)", () =>
 		Effect.gen(function* () {

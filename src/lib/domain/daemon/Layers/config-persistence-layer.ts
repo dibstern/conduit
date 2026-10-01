@@ -1,4 +1,3 @@
-// ─── ConfigPersistenceLive ──────────────────────────────────────────────────
 // Coalesces explicit config save requests and writes daemon.json snapshots to
 // disk using a debounced fiber plus a final scope-close flush. Replaces the
 // imperative persistConfig() / flushConfigSave() closures in daemon-main.ts.
@@ -122,8 +121,6 @@ export const ConfigSnapshotFromEffectStateLive = Layer.effect(
 	}),
 );
 
-// ─── ConfigWriter service ──────────────────────────────────────────────────
-
 export interface ConfigWriter {
 	readonly write: (config: DaemonConfig) => Effect.Effect<void, Error>;
 }
@@ -199,8 +196,6 @@ export const makeConfigWriterLive = (configDir: string) =>
 	});
 
 const CONFIG_PERSISTENCE_RETRY_DELAY = Duration.millis(500);
-
-// ─── Layer ─────────────────────────────────────────────────────────────────
 
 export const ConfigPersistenceLive = Layer.scoped(
 	ConfigPersistenceTag,

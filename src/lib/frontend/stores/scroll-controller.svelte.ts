@@ -1,4 +1,3 @@
-// ─── Scroll Controller ───────────────────────────────────────────────────────
 // State machine for chat scroll behavior. Derives scroll state from the chat
 // store's LoadLifecycle signal and user input events.
 

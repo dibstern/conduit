@@ -1,4 +1,3 @@
-// ─── Terminal Store ──────────────────────────────────────────────────────────
 // Terminal tabs, PTY state, scrollback buffers.
 // Uses callback pattern for high-throughput PTY output (not reactive).
 
@@ -7,19 +6,15 @@ import type { PtyListResponse } from "../transport/ws-rpc.js";
 import type { Immutable, RelayMessage, TabEntry } from "../types.js";
 import { STATUS_MESSAGE_MS } from "../ui-constants.js";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const SCROLLBACK_MAX_BYTES = 50 * 1024; // 50 KB per tab
 const DEFAULT_MAX_TABS = 10;
 const PENDING_CREATE_TIMEOUT_MS = 15_000;
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // The PTYs the server has told us about, keyed by id. The `handlePty*`
 // functions below are the only writers.
 
 const serverPtys = new SvelteMap<string, { ptyId: string; exited: boolean }>();
 
-// ─── Client-owned state ─────────────────────────────────────────────────────
 // Which terminal this browser tab is looking at, and what it calls each one.
 // The server does send a PTY title — the command it ran — but the label in the
 // tab strip has always been ours: "Terminal N", minted on first sight and
@@ -64,7 +59,7 @@ export const terminalState = {
 	},
 };
 
-// ─── Non-reactive state (high-throughput PTY data) ──────────────────────────
+// Non-reactive state (high-throughput PTY data)
 
 const scrollbackBuffers = new Map<string, string[]>();
 const outputListeners = new Map<string, Set<(data: string) => void>>();
@@ -102,7 +97,6 @@ function forgetPty(ptyId: string): void {
 	outputListeners.delete(ptyId);
 }
 
-// ─── Derived getters ────────────────────────────────────────────────────────
 // Components should wrap in $derived() for reactive caching.
 
 /** Get the number of open terminal tabs. */
@@ -124,7 +118,7 @@ export function getTabList(): readonly Immutable<TabEntry>[] {
 	}));
 }
 
-// ─── Output subscription (callback pattern) ─────────────────────────────────
+// Output subscription (callback pattern)
 
 /**
  * Subscribe to output for a specific PTY. Returns an unsubscribe function.
@@ -155,8 +149,6 @@ export function onOutput(
 export function getScrollback(ptyId: string): readonly string[] {
 	return scrollbackBuffers.get(ptyId) ?? [];
 }
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 /** Handle pty_list — sync frontend tabs with server's existing PTYs. */
 export function handlePtyList(
@@ -323,8 +315,6 @@ export function handlePtyError(
 		clientTerminal.statusMessage = null;
 	}, STATUS_MESSAGE_MS);
 }
-
-// ─── Actions ────────────────────────────────────────────────────────────────
 
 export function beginCreateTab(): boolean {
 	if (!getCanCreateTab()) return false;

@@ -1,4 +1,3 @@
-// ─── Error Utility Functions ────────────────────────────────────────────────
 // Extracted from errors.ts — pure utility functions used across the codebase.
 
 const SENSITIVE_KEYS = new Set([

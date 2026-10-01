@@ -1,4 +1,3 @@
-// ─── Fork Session E2E Tests ──────────────────────────────────────────────────
 // Tests fork-point rendering: collapsible prior context, fork divider,
 // SubagentBackBar hidden for user forks.
 //
@@ -118,14 +117,12 @@ async function setupForkSession(
 	await installWsCapture(page);
 	await app.goto(relayUrl);
 
-	// ── Turn 1: Remember alpha ──
 	await app.sendMessage(
 		"Remember the word 'alpha'. Reply with only: ok, remembered.",
 	);
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
 
-	// ── Turn 2: Remember beta ──
 	await app.sendMessage(
 		"Now remember 'beta' too. Reply with only: ok, remembered.",
 	);
@@ -136,7 +133,7 @@ async function setupForkSession(
 	const currentPath = new URL(page.url()).pathname;
 	const originId = await getCapturedBrowserClientId(page);
 
-	// ── Fork: whole-session fork (no messageId) ──
+	// Fork: whole-session fork (no messageId)
 	const forkedSessionId = await forkSessionViaRpc(relayUrl, originId);
 	await page.evaluate((sessionId) => {
 		const route = new URL(window.location.href);
@@ -154,7 +151,6 @@ async function setupForkSession(
 		{ timeout: 15_000 },
 	);
 
-	// ── Turn 3: Send message in forked session ──
 	// This triggers SSE events that add at least a user_message to the chat.
 	// Combined with forkMessageId on the session, the fork UI renders.
 	await app.sendMessage(

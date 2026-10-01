@@ -1,4 +1,3 @@
-// ─── Shared Types ───────────────────────────────────────────────────────────
 // Canonical type definitions for conduit, derived from ticket specs.
 
 import type { Logger } from "./logger.js";
@@ -47,7 +46,6 @@ export type {
 } from "./shared-types.js";
 export { tagWithSessionId } from "./shared-types.js";
 
-// ─── SSE Event Types ────────────────────────────────────────────────────────
 // Re-export SSEEvent as OpenCodeEvent for backward compatibility.
 // SSEEvent = SDK Event union + gap events (see relay/opencode-events.ts).
 // New code should import SSEEvent directly from relay/opencode-events.ts.
@@ -82,15 +80,11 @@ export interface PartDelta {
 	delta: string;
 }
 
-// ─── Server-only types ──────────────────────────────────────────────────────
-
 export interface ModelEntry {
 	id: string;
 	name: string;
 	provider: string;
 }
-
-// ─── IPC Protocol ───────────────────────────────────────────────────────────
 
 export interface IPCResponse {
 	ok: boolean;
@@ -106,8 +100,6 @@ export interface IPCResponse {
 	instance?: unknown;
 	[key: string]: unknown;
 }
-
-// ─── Permission types ───────────────────────────────────────────────────────
 
 export type FrontendDecision = "allow" | "deny" | "allow_always";
 export type OpenCodeDecision = "once" | "always" | "reject";
@@ -125,16 +117,12 @@ export interface PendingPermission {
 	timestamp: number;
 }
 
-// ─── Connection health ──────────────────────────────────────────────────────
-
 export interface ConnectionHealth {
 	readonly connected: boolean;
 	readonly lastEventAt: number | null;
 	readonly reconnectCount: number;
 	readonly stale: boolean;
 }
-
-// ─── Project info ───────────────────────────────────────────────────────────
 
 export interface StoredProject {
 	readonly slug: string;
@@ -144,8 +132,6 @@ export interface StoredProject {
 	readonly instanceId?: string;
 }
 
-// ─── Recent project entry ───────────────────────────────────────────────────
-
 export interface RecentProject {
 	directory: string;
 	slug: string;
@@ -153,15 +139,11 @@ export interface RecentProject {
 	lastUsed: number;
 }
 
-// ─── File content result ────────────────────────────────────────────────────
-
 export interface FileContentResult {
 	content: string;
 	binary?: boolean;
 	path: string;
 }
-
-// ─── Per-Project Relay Config ────────────────────────────────────────────────
 
 /** Config for creating a per-project relay that receives attached sockets. */
 export interface ProjectRelayConfig {

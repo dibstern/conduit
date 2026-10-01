@@ -1,4 +1,3 @@
-// ─── E2E Sidebar Layout Tests ────────────────────────────────────────────────
 // Tests responsive sidebar behavior across viewports:
 // - Desktop: sidebar visible, collapse/expand toggle
 // - Mobile: session list and session are separate routes

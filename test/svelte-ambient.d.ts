@@ -1,4 +1,3 @@
-// ─── Svelte 5 Rune Ambient Types ─────────────────────────────────────────────
 // These declarations let tsc understand $state/$derived/$effect in .svelte.ts
 // files when type-checking test files that import them.
 // The actual runtime transformation is handled by the Svelte Vite plugin.

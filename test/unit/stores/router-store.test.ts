@@ -1,4 +1,3 @@
-// ─── Router Store Tests ──────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -53,8 +52,6 @@ const {
 	attachedProjectState,
 } = await import("../../../src/lib/frontend/stores/router.svelte.js");
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	routerState.path = "/";
 	routerState.search = "";
@@ -68,8 +65,6 @@ beforeEach(() => {
 	replaceStateSpy.mockClear();
 	backSpy.mockClear();
 });
-
-// ─── navigate ───────────────────────────────────────────────────────────────
 
 describe("navigate", () => {
 	it("updates path and calls pushState", () => {
@@ -203,8 +198,6 @@ describe("navigate", () => {
 	});
 });
 
-// ─── replaceRoute ───────────────────────────────────────────────────────────
-
 describe("replaceRoute", () => {
 	it("updates path and calls replaceState", () => {
 		replaceRoute("/setup");
@@ -218,8 +211,6 @@ describe("replaceRoute", () => {
 		expect(replaceStateSpy).not.toHaveBeenCalled();
 	});
 });
-
-// ─── routerState.path direct manipulation ───────────────────────────────────
 
 describe("routerState", () => {
 	it("can be set directly", () => {
@@ -249,8 +240,6 @@ describe("popstate", () => {
 		expect(getCurrentSlug()).toBe("other");
 	});
 });
-
-// ─── getCurrentRoute / getCurrentSlug ─────────────────────────────────────
 
 describe("getCurrentRoute", () => {
 	it.each([
@@ -383,7 +372,7 @@ describe("getSessionHref", () => {
 	});
 });
 
-// ─── Transition log (dev-mode route debugging) ─────────────────────────────
+// Transition log (dev-mode route debugging)
 // Records {from, to, timestamp} on every navigate/replaceRoute call so
 // developers can trace "how did I end up on this page?" in dev tools.
 

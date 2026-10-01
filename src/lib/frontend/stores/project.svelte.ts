@@ -1,4 +1,3 @@
-// ─── Project Store ──────────────────────────────────────────────────────────
 // Manages the list of registered projects and the current project slug.
 
 import type {
@@ -12,7 +11,6 @@ import {
 	replaceRoute,
 } from "./router.svelte.js";
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // This store has no client half: the project list and the current slug both
 // come from `project_list`, and `handleProjectList` below is the only writer.
 
@@ -20,8 +18,6 @@ export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	currentSlug: null as string | null,
 });
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handleProjectList(
 	msg: Extract<RelayMessage, { type: "project_list" }>,

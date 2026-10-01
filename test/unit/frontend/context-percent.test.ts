@@ -1,4 +1,3 @@
-// ─── Context usage bar — percent computation regressions ─────────────────────
 // Bug: fable-family models got no limit from the capability probe, so the
 // context bar never rendered; the [1m] context-window override was ignored;
 // and history replay never restored contextPercent after a reload.

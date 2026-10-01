@@ -1,15 +1,10 @@
-// ─── WebSocket Listener Registries ───────────────────────────────────────────
 // Extracted from ws.svelte.ts — component-level message subscriptions.
 // Some messages are best handled by the component that renders them,
 // rather than stored globally. Components subscribe via these registries.
 
 import type { RelayMessage } from "../types.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 export type MessageListener = (msg: RelayMessage) => void;
-
-// ─── Listener sets ──────────────────────────────────────────────────────────
 
 export const planModeListeners = new Set<MessageListener>();
 export const fileBrowserListeners = new Set<MessageListener>();
@@ -22,8 +17,6 @@ export function onProjectAttached(fn: (slug: string) => void): () => void {
 	projectAttachedListeners.add(fn);
 	return () => projectAttachedListeners.delete(fn);
 }
-
-// ─── Subscription functions ─────────────────────────────────────────────────
 
 /** Subscribe to plan mode messages. Returns unsubscribe function. */
 export function onPlanMode(fn: MessageListener): () => void {

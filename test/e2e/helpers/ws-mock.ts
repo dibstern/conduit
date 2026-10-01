@@ -1,4 +1,3 @@
-// ─── WebSocket Mock Helper ────────────────────────────────────────────────────
 // Intercepts the frontend's WebSocket connection using Playwright's
 // page.routeWebSocket() and injects canned messages for visual testing.
 // No real relay or OpenCode server needed.

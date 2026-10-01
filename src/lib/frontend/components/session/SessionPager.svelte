@@ -1,4 +1,3 @@
-<!-- ─── Session Pager ───────────────────────────────────────────────────────── -->
 <!-- Headless component: owns the IntersectionObserver for infinite scroll down -->
 <!-- in the session sidebar. Mirrors chat/HistoryLoader.svelte, which does the  -->
 <!-- same job for scroll-up in the transcript.                                  -->

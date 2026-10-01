@@ -1,4 +1,4 @@
-// ─── The ding, delivered (ni8.23, decision 3.1 = F) ──────────────────────────
+// The ding, delivered (ni8.23, decision 3.1 = F)
 // The ding goes out through push, which means the service worker decides how it
 // is heard. An OS notification for a session you are staring at is noise, so the
 // SW offers the alert to a focused tab first — but only an explicit ack counts.
@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── ws-notifications module mocks (hoisted) ────────────────────────────────
+// ws-notifications module mocks (hoisted)
 
 const playDoneSoundMock = vi.fn();
 const readyDoneSoundMock = vi.fn().mockResolvedValue(undefined);
@@ -31,8 +31,6 @@ vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 vi.mock("../../../src/lib/notification-content.js", () => ({
 	notificationContent: vi.fn(() => null),
 }));
-
-// ─── Service worker half ────────────────────────────────────────────────────
 
 type EventHandler = (...args: never[]) => unknown;
 
@@ -332,8 +330,6 @@ describe("SW push: in-app ding vs OS notification", () => {
 		expect(showNotification).not.toHaveBeenCalled();
 	});
 });
-
-// ─── Page half ──────────────────────────────────────────────────────────────
 
 describe("page: answering the service worker's offer", () => {
 	/** Deliver an in_app_alert to the page listener and read its answer. */

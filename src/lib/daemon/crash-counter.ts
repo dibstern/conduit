@@ -1,4 +1,3 @@
-// ─── Crash Counter ──────────────────────────────────────────────────────────
 // Tracks crash timestamps within a sliding window to detect restart loops.
 // Extracted from daemon.ts for isolated testability.
 

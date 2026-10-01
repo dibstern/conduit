@@ -35,8 +35,6 @@ import {
 	stopHealthPoller,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 
-// ─── Test Helpers ────────────────────────────────────────────────────────────
-
 const testConfig = {
 	maxInstances: 10,
 	healthPollIntervalMs: 5000,
@@ -61,8 +59,6 @@ const mkInstance = (
 	port,
 	managed,
 });
-
-// ─── Health Polling ──────────────────────────────────────────────────────────
 
 describe("InstanceManager health polling", () => {
 	it.scoped("startHealthPoller registers a fiber in FiberMap", () =>
@@ -158,8 +154,6 @@ describe("InstanceManager health polling", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });
-
-// ─── Restart Scheduling ──────────────────────────────────────────────────────
 
 describe("InstanceManager restart scheduling", () => {
 	it.scoped("scheduleRestart registers a restart fiber", () =>

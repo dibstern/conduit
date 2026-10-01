@@ -1,4 +1,3 @@
-// ─── Handler Types ───────────────────────────────────────────────────────────
 // Shared types used by all handler modules.
 
 import type {

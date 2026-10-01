@@ -1,5 +1,5 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-// ─── Session Lifecycle Wiring (G4) ───────────────────────────────────────────
+// Session Lifecycle Wiring (G4)
 // Subscribes to DaemonEventBus lifecycle and relay broadcast events.
 
 import { Data, Effect, FiberMap, Layer, Ref, Stream } from "effect";
@@ -72,7 +72,6 @@ const isSessionGenerationCurrent = (
 		Effect.map((generations) => generations.get(sessionId) === generation),
 	);
 
-// ─── Effect Layer ───────────────────────────────────────────────────────────
 // Subscribes to DaemonEventBus PubSub for session lifecycle events.
 //
 // Two independent subscriber fibers:
@@ -117,7 +116,7 @@ export const makeSessionLifecycleWiringLive = (
 			const { translator, sseTracker, getMonitoringState, setMonitoringState } =
 				deps;
 
-			// ── Broadcast fiber (fast path) ────────────────────────────────────
+			// Broadcast fiber (fast path)
 			yield* Effect.forkScoped(
 				Stream.fromPubSub(bus).pipe(
 					Stream.runForEach((event) =>
@@ -130,7 +129,7 @@ export const makeSessionLifecycleWiringLive = (
 				),
 			);
 
-			// ── Lifecycle fiber (sequential processing) ────────────────────────
+			// Lifecycle fiber (sequential processing)
 			yield* Effect.forkScoped(
 				Stream.fromPubSub(bus).pipe(
 					Stream.runForEach((event) => {
@@ -194,8 +193,6 @@ export const makeSessionLifecycleWiringLive = (
 			);
 		}),
 	);
-
-// ─── Event Handlers ─────────────────────────────────────────────────────────
 
 export const handleSessionCreated = (
 	sessionId: string,

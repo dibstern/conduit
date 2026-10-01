@@ -1,4 +1,4 @@
-// ─── Integration: Terminal (PTY) ─────────────────────────────────────────────
+// Integration: Terminal (PTY)
 // Tests PTY operations against a mock OpenCode server.
 // Verifies shell I/O, multi-client broadcast, multi-terminal isolation,
 // resize, close/cleanup, and edge cases.
@@ -10,8 +10,6 @@ import {
 } from "../helpers/relay-harness.js";
 import type { ReceivedMessage } from "../helpers/test-ws-client.js";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 /** Collect all pty_output data for a given ptyId from received messages */
 function collectOutput(messages: ReceivedMessage[], ptyId: string): string {
 	return messages
@@ -19,8 +17,6 @@ function collectOutput(messages: ReceivedMessage[], ptyId: string): string {
 		.map((m) => String(m["data"]))
 		.join("");
 }
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("Integration: Terminal (PTY)", () => {
 	let harness: RelayHarness;
@@ -32,8 +28,6 @@ describe("Integration: Terminal (PTY)", () => {
 	afterAll(async () => {
 		if (harness) await harness.stop();
 	});
-
-	// ── PTY creation ──────────────────────────────────────────────────────
 
 	it("CreatePty RPC returns pty_created with a valid id", async () => {
 		const client = await harness.connectWsClient();
@@ -52,8 +46,6 @@ describe("Integration: Terminal (PTY)", () => {
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		await client.close();
 	}, 15_000);
-
-	// ── Multi-client ──────────────────────────────────────────────────────
 
 	it("two clients both receive pty_output from same PTY", async () => {
 		const client1 = await harness.connectWsClient();
@@ -171,8 +163,6 @@ describe("Integration: Terminal (PTY)", () => {
 		await client2.close();
 	}, 25_000);
 
-	// ── Close + cleanup ───────────────────────────────────────────────────
-
 	it("ClosePty RPC returns pty_deleted with correct id", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -188,8 +178,6 @@ describe("Integration: Terminal (PTY)", () => {
 
 		await client.close();
 	}, 15_000);
-
-	// ── Edge cases ────────────────────────────────────────────────────────
 
 	it("pty_input to nonexistent PTY ID does not crash", async () => {
 		const client = await harness.connectWsClient();
@@ -242,8 +230,6 @@ describe("Integration: Terminal (PTY)", () => {
 		await client.close();
 	}, 20_000);
 
-	// ── PTY list on connect ──────────────────────────────────────────────
-
 	it("ListPtys RPC returns existing PTYs after creation", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -269,8 +255,6 @@ describe("Integration: Terminal (PTY)", () => {
 		await client.waitFor("pty_deleted", { timeout: 5_000 });
 		await client.close();
 	}, 20_000);
-
-	// ── No strange characters in output ──────────────────────────────────
 
 	it("new PTY output does not contain cursor metadata characters", async () => {
 		const client = await harness.connectWsClient();

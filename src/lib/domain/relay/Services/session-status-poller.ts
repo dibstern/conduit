@@ -1,4 +1,3 @@
-// ─── SessionStatusPoller — Effect-native ────────────────────────────────────
 // Effect-idiomatic session status reconciliation poller.
 //
 // Full replacement for the imperative SessionStatusPoller class.
@@ -24,8 +23,6 @@ import {
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { busySessionIds } from "../../../session-busy.js";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
 const STATUS_CORRECTION_CONCURRENCY = 8;
@@ -38,8 +35,6 @@ const STATUS_RECONCILIATION_MAX_RETRIES = 5;
  * on an open question or permission are exempt: silence there is the user's.
  */
 const SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
-
-// ─── Domain types ──────────────────────────────────────────────────────────
 
 /** Status correction needed: DB and API disagree. */
 export interface StatusCorrection {
@@ -59,8 +54,6 @@ export interface SessionStatusInfo {
 	id: string;
 	status: string;
 }
-
-// ─── PollerState ────────────────────────────────────────────────────────────
 
 export interface PollerState {
 	/** Last known source statuses — the primary read value. */
@@ -82,8 +75,6 @@ export const PollerState = {
 	}),
 };
 
-// ─── Context Tags ─────────────────────────────────────────────────────────
-
 export class PollerStateTag extends Context.Tag("PollerState")<
 	PollerStateTag,
 	Ref.Ref<PollerState>
@@ -93,8 +84,6 @@ export class PollerPubSubTag extends Context.Tag("PollerPubSub")<
 	PollerPubSubTag,
 	PubSub.PubSub<PollerChangedEvent>
 >() {}
-
-// ─── Layer factories ──────────────────────────────────────────────────────
 
 export const makePollerStateLive = (
 	initial?: Partial<PollerState>,
@@ -112,13 +101,9 @@ export const makePollerPubSubLive = (): Layer.Layer<PollerPubSubTag> =>
 		}),
 	);
 
-// ─── Errors ───────────────────────────────────────────────────────────────
-
 export class PollerError extends Data.TaggedError("PollerError")<{
 	readonly cause: string;
 }> {}
-
-// ─── Status reading operations ──────────────────────────────────────────
 
 /** Get the most recently polled source statuses. */
 export const getCurrentStatuses = Effect.gen(function* () {
@@ -147,8 +132,6 @@ export const isProcessing = (
 			),
 		).has(sessionId);
 	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
-
-// ─── Status diff ────────────────────────────────────────────────────────
 
 /**
  * Compute corrections needed: DB statuses that disagree with API statuses.
@@ -197,8 +180,6 @@ const hasChanged = (
 	return false;
 };
 
-// ─── Reconcile ─────────────────────────────────────────────────────────────
-
 /**
  * Single reconciliation pass: fetch DB + API statuses, diff, apply corrections,
  * then update the Ref with the latest API statuses.
@@ -231,7 +212,7 @@ export const reconcile = (
 		});
 	}).pipe(Effect.withSpan("statusPoller.reconcile"));
 
-// ─── Poll (full cycle) ─────────────────────────────────────────────────────
+// Poll (full cycle)
 
 /** Dependencies for a poll cycle. */
 export interface PollDeps<E = unknown, R = never> {
@@ -332,8 +313,6 @@ export const poll = <E, R>(deps: PollDeps<E, R>) =>
 		Effect.withSpan("statusPoller.poll"),
 	);
 
-// ─── Reconciliation helpers ────────────────────────────────────────────────
-
 export interface ReconciliationDeps {
 	readonly getRestStatuses: () => Effect.Effect<
 		Record<string, SessionStatus>,
@@ -418,8 +397,6 @@ export const reconcileNow = (deps: ReconciliationDeps) =>
 		Effect.withSpan("statusPoller.reconcileNow"),
 	);
 
-// ─── Reconciliation loop ──────────────────────────────────────────────────
-
 /**
  * Start a long-running reconciliation loop as a scoped fiber.
  *
@@ -447,7 +424,6 @@ export const startReconciliationLoop = <E, R>(
 		Effect.forkScoped,
 	);
 
-// ─── Service Surface ────────────────────────────────────────────────────────
 // The production status poller exposes Effect programs. Synchronous reads at
 // process boundaries should use an explicit relay read model/snapshot, not a
 // runtime bridge into the poller Ref.

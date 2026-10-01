@@ -1,4 +1,3 @@
-// ─── Integration: Shutdown Path ──────────────────────────────────────────────
 // Verifies that Effect Layer teardown (scope closure) runs finalizers in
 // reverse order and interrupts background fibers before state is cleaned up.
 

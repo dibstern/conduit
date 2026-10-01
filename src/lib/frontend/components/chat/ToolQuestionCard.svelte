@@ -1,4 +1,3 @@
-<!-- ─── Tool Question Card ────────────────────────────────────────────────── -->
 <!-- Renders AskUserQuestion tool calls: interactive QuestionCard when active, -->
 <!-- read-only summary when completed/historical. -->
 
@@ -16,7 +15,6 @@
 		message: ToolMessage;
 	} = $props();
 
-	// ─── Question detection ─────────────────────────────────────────────────
 	// The question tool name is "AskUserQuestion" (mapped from "question").
 	// When the question is active, render the interactive QuestionCard inline.
 	// When completed/historical, show a read-only summary.
@@ -128,8 +126,6 @@
 	const questionAnswer = $derived(
 		message.result && message.result !== '""' ? message.result : null,
 	);
-
-	// ─── Status display ─────────────────────────────────────────────────────
 
 	// An interrupted turn (Stop, or a message sent instead of answering) completes
 	// the tool with no result, so "completed" alone does not mean answered.

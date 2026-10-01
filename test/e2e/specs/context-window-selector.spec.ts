@@ -1,4 +1,3 @@
-// ─── Context Window Selector E2E Tests ──────────────────────────────────────
 // Tests the Claude context-window dropdown on the model selector.
 
 import { expect, test } from "@playwright/test";

@@ -21,8 +21,6 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 
-// ─── Tag key uniqueness ────────────────────────────────────────────────────
-
 const ALL_TAGS = [
 	OpenCodeAPITag,
 	OpenCodeSettingsServiceTag,
@@ -57,8 +55,6 @@ describe("Service Tags", () => {
 		// Bridge classes are no longer Effect services; count only active Tags.
 		expect(ALL_TAGS.length).toBe(13);
 	});
-
-	// ── Core Tags ────────────────────────────────────────────────────────────
 
 	it("OpenCodeAPI tag has correct key", () => {
 		expect(OpenCodeAPITag.key).toBe("OpenCodeAPI");
@@ -100,8 +96,6 @@ describe("Service Tags", () => {
 		expect(OrchestrationEngineTag.key).toBe("OrchestrationEngine");
 	});
 
-	// ── Daemon-only Tags ─────────────────────────────────────────────────────
-
 	it("InstanceMgmt tag has correct key", () => {
 		expect(InstanceMgmtTag.key).toBe("InstanceMgmt");
 	});
@@ -110,13 +104,9 @@ describe("Service Tags", () => {
 		expect(ProjectMgmtTag.key).toBe("ProjectMgmt");
 	});
 
-	// ── Per-request Tags ─────────────────────────────────────────────────────
-
 	it("ClientId tag has correct key", () => {
 		expect(ClientIdTag.key).toBe("ClientId");
 	});
-
-	// ── Effect integration ───────────────────────────────────────────────────
 
 	it.effect("Tag resolves from a provided Context", () =>
 		Effect.gen(function* () {

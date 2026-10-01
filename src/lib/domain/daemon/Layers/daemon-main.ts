@@ -4,7 +4,6 @@ import type {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
 } from "../Services/management-service.js";
-// ─── Daemon Main — Effect Entry Point ────────────────────────────────────────
 // Top-level Effect program that replaces the Daemon class's start() method.
 // Creates a Layer that runs the startup sequence, forks background tasks
 // under supervision, and keeps alive until interrupted (SIGINT/SIGTERM).
@@ -40,7 +39,6 @@ import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js"
 export { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 export { OpenCodeUnavailableError };
 
-// ─── SupervisorTag ───────────────────────────────────────────────────────
 // Context.Tag for the daemon-wide Supervisor.track instance.
 // Allows any fiber in the daemon scope to query tracked fiber diagnostics.
 
@@ -59,7 +57,6 @@ export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
 	Supervisor.track,
 );
 
-// ─── DaemonDeps type ──────────────────────────────────────────────────────
 // Minimal: lists only the Tags used by the current startup sequence.
 // Do not import Tags for background tasks that are still stubs.
 
@@ -69,20 +66,14 @@ export type DaemonDeps =
 	| InstanceMgmtTag
 	| ProjectMgmtTag;
 
-// ─── Retry schedule ───────────────────────────────────────────────────────
-
 /** Exponential backoff with 3 retries for startup. */
 export const startupRetry = Schedule.exponential("1 second").pipe(
 	Schedule.intersect(Schedule.recurs(3)),
 );
 
-// ── sessionPrefetch — STUB ──
 // export const sessionPrefetch: Effect.Effect<void, never, ...> = ...
 
-// ── pushInit — STUB ──
 // export const pushInit: Effect.Effect<void, never, ...> = ...
-
-// ─── makeDaemonProgramLayer ───────────────────────────────────────────────
 
 /**
  * Takes a Layer providing all DaemonDeps and returns a Layer<never> that:

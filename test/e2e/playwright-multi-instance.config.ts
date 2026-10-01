@@ -1,4 +1,3 @@
-// ─── Playwright Config: Multi-Instance Tests ────────────────────────────────
 // Tests all multi-instance UI features via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 

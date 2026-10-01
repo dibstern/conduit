@@ -1,5 +1,3 @@
-// ─── Server-Side Constants ──────────────────────────────────────────────────
-
 /** Default port for the OpenCode server. */
 export const DEFAULT_OPENCODE_PORT = 4096;
 

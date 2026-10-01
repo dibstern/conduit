@@ -1,4 +1,3 @@
-// ─── Regression: activity indicators must survive a subagent wait ───────────
 // The composer bounce bar and the sidebar processing dot are both driven by
 // the parent session's projected status. The Claude SDK's main chain goes
 // assistant-silent for the whole time it is blocked on a Task subagent; the

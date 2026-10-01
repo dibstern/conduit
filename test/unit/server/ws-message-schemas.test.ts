@@ -1,5 +1,4 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: decoded union members need `as any` to access variant-specific fields in tests
-// ─── WebSocket Incoming Message Schema Tests ─────────────────────────────────
 // Tests for Effect Schema validation of ALL incoming WebSocket message types.
 // The IncomingWsMessage union schema validates the full message (type + payload),
 // unlike PayloadSchemas which only validate the payload after type extraction.
@@ -13,7 +12,7 @@ import {
 	IncomingWsMessage,
 } from "../../../src/lib/contracts/ws-message-schemas.js";
 
-// ─── Decode helper (Effect-based) ──────────────────────────────────────────
+// Decode helper (Effect-based)
 
 describe("decodeWsMessage", () => {
 	it.effect("decodes pty_input with ptyId and data", () =>
@@ -26,7 +25,7 @@ describe("decodeWsMessage", () => {
 	);
 });
 
-// ─── Schema rejection tests (synchronous Either-based) ──────────────────────
+// Schema rejection tests (synchronous Either-based)
 
 describe("IncomingWsMessage schema rejections", () => {
 	it("rejects unknown message type", () => {
@@ -84,8 +83,6 @@ describe("IncomingWsMessage schema rejections", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 });
-
-// ─── Exhaustiveness: every IncomingMessageType has a schema ──────────────────
 
 describe("IncomingWsMessage coverage", () => {
 	// Incoming message types from ws-router.ts (the source of truth).

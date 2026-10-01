@@ -1,5 +1,4 @@
 import { OpenCodeAPITag } from "./opencode-api-service.js";
-// ─── OpenCode API Request/RequestResolver ───────────────────────────────────
 // Effect Request types and RequestResolver implementations for OpenCode API
 // calls, enabling automatic batching of concurrent requests.
 //
@@ -31,8 +30,6 @@ import type {
 	SessionStatus,
 } from "../../../contracts/providers/opencode-sdk.js";
 
-// ─── Error Type ────────────────────────────────────────────────────────────
-
 export class OpenCodeRequestError extends Data.TaggedError(
 	"OpenCodeRequestError",
 )<{
@@ -40,7 +37,6 @@ export class OpenCodeRequestError extends Data.TaggedError(
 	readonly cause: unknown;
 }> {}
 
-// ─── Message shape returned by GetMessages ─────────────────────────────────
 // Matches the flat message shape from OpenCodeAPI.session.messages()
 
 interface FlatMessage {
@@ -52,8 +48,6 @@ interface FlatMessage {
 		readonly type: string;
 	}>;
 }
-
-// ─── Request Types ─────────────────────────────────────────────────────────
 
 /** Fetch the session list. Returns Array<SessionDetail>. */
 export class GetSessions extends Request.TaggedClass("GetSessions")<
@@ -81,15 +75,11 @@ export class GetSession extends Request.TaggedClass("GetSession")<
 	{ readonly sessionId: string }
 > {}
 
-// ─── Union type for all requests ───────────────────────────────────────────
-
 export type OpenCodeRequest =
 	| GetSessions
 	| GetMessages
 	| GetSessionStatuses
 	| GetSession;
-
-// ─── Individual Resolvers ──────────────────────────────────────────────────
 
 /** Resolver for GetSessions — calls session.list() */
 export const GetSessionsResolver = RequestResolver.fromEffect(
@@ -129,8 +119,6 @@ export const GetSessionStatusesResolver = RequestResolver.fromEffect(
 			});
 		}).pipe(Effect.withSpan("opencode.request.GetSessionStatuses")),
 );
-
-// ─── Batched Resolver ──────────────────────────────────────────────────────
 
 /**
  * Batched resolver for GetSession — when multiple fibers concurrently request
@@ -191,7 +179,6 @@ export const GetSessionBatchedResolver = RequestResolver.makeBatched(
 		),
 );
 
-// ─── Convenience functions ─────────────────────────────────────────────────
 // These use RequestResolver.contextFromEffect to lift the context-dependent
 // resolvers into Effect values that Effect.request accepts.
 

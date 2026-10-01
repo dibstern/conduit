@@ -1,4 +1,3 @@
-// ─── Subagent Fixture Capture ─────────────────────────────────────────────
 // Captures real OpenCode session data for subagent E2E tests.
 // Connects to a running OpenCode instance, finds a parent/child session pair,
 // normalizes the data (stable IDs/timestamps), and writes a fixture JSON file
@@ -24,7 +23,7 @@ import {
 } from "../../contract/helpers/server-connection.js";
 import { getSessionMessages } from "../../contract/helpers/session-helpers.js";
 
-// ─── Types (mirrors OpenCode REST shapes) ────────────────────────────────
+// Types (mirrors OpenCode REST shapes)
 
 interface OpenCodeSession {
 	id: string;
@@ -62,8 +61,6 @@ interface OpenCodePart {
 	};
 	[key: string]: unknown;
 }
-
-// ─── Normalization ───────────────────────────────────────────────────────
 
 const BASE_TS = 1710000000000; // stable base timestamp
 const TS_STEP = 1000; // 1 second between events
@@ -174,8 +171,6 @@ function normalizePart(
 	return part;
 }
 
-// ─── Snapshot structure ──────────────────────────────────────────────────
-
 interface SubagentSnapshot {
 	parentSession: {
 		id: string;
@@ -203,8 +198,6 @@ interface SubagentSnapshot {
 		total: number;
 	};
 }
-
-// ─── Main ────────────────────────────────────────────────────────────────
 
 const SNAPSHOT_PATH = resolve(
 	import.meta.dirname ?? __dirname,

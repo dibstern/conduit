@@ -17,7 +17,6 @@ export type ClaudeSettingsResolutionStatus =
 	| "error"
 	| "unavailable";
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // What the relay says this project's Claude settings are. The `apply*`,
 // `handle*` and resolution functions below are the only writers.
 
@@ -28,7 +27,6 @@ const serverClaudeSettings = $state({
 	resolutionStatus: "idle" as ClaudeSettingsResolutionStatus,
 });
 
-// ─── Client-owned state ─────────────────────────────────────────────────────
 // The panel shows a toggle's new position the moment it is clicked, before the
 // relay has confirmed the write: `pendingOverrides` is that unconfirmed value,
 // and reads fall through to the server's when it is null. `editedKeys` is the

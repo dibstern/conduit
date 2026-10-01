@@ -1,4 +1,4 @@
-// ─── Tests: CLI Interface (Ticket 3.3) ──────────────────────────────────────
+// Tests: CLI Interface (Ticket 3.3)
 //
 // Tests cover:
 // T1: parseArgs — all flags parsed correctly, defaults, --help, unknown flags (AC1-AC8)
@@ -38,8 +38,6 @@ import type { IPCResponse } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
-
-// ─── Test Helpers ────────────────────────────────────────────────────────────
 
 /** Captured state from mock CLI */
 interface MockCLIState {
@@ -92,8 +90,6 @@ function createMockCLI(
 
 	return opts;
 }
-
-// ─── T1: parseArgs ──────────────────────────────────────────────────────────
 
 describe("Ticket 3.3 — CLI Interface", () => {
 	describe("T1: parseArgs — all flags parsed correctly (AC1-AC8)", () => {
@@ -280,8 +276,6 @@ describe("Ticket 3.3 — CLI Interface", () => {
 	});
 });
 
-// ─── Internal Daemon Child ───────────────────────────────────────────────
-
 describe("internal --daemon child", () => {
 	it("starts through the injectable daemon child starter", async () => {
 		const previousEnv = Object.fromEntries(
@@ -339,8 +333,6 @@ describe("internal --daemon child", () => {
 		}
 	});
 });
-
-// ─── T2: Default invocation ───────────────────────────────────────────
 
 describe("T2: Default invocation — auto-start, register, display (AC1)", () => {
 	it("starts daemon if not running, registers cwd, shows URL + QR", async () => {
@@ -473,8 +465,6 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 	});
 });
 
-// ─── T3: --status ─────────────────────────────────────────────────────
-
 describe("T3: --status — sends get_status, formats output (AC2)", () => {
 	it("displays status when daemon is running", async () => {
 		const cli = createMockCLI({
@@ -524,8 +514,6 @@ describe("T3: --status — sends get_status, formats output (AC2)", () => {
 	});
 });
 
-// ─── T4: --stop ───────────────────────────────────────────────────────
-
 describe("T4: --stop — sends shutdown (AC3)", () => {
 	it("sends shutdown command and displays confirmation", async () => {
 		const cli = createMockCLI({
@@ -557,8 +545,6 @@ describe("T4: --stop — sends shutdown (AC3)", () => {
 		expect(cli.state.exitCode).toBe(1);
 	});
 });
-
-// ─── T5: --pin ────────────────────────────────────────────────────────
 
 describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
 	it.each([
@@ -630,7 +616,7 @@ describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
 	});
 });
 
-// ─── Daemon-not-running error (shared across all commands) ──────────
+// Daemon-not-running error (shared across all commands)
 
 it.each([
 	["--status"],
@@ -649,8 +635,6 @@ it.each([
 	expect(cli.state.errors).toContain("not running");
 	expect(cli.state.exitCode).toBe(1);
 });
-
-// ─── T6: --add/--remove/--list/--title ────────────────────────────────
 
 describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	describe("--add", () => {
@@ -906,8 +890,6 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	});
 });
 
-// ─── T7: --port/--oc-port passed through ──────────────────────────────
-
 describe("T7: --port/--oc-port passed through (AC6)", () => {
 	it("custom port is used in URL", async () => {
 		const cli = createMockCLI({
@@ -943,8 +925,6 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 		expect(spawnPort).toBe(4000);
 	});
 });
-
-// ─── T8: Error handling ───────────────────────────────────────────────
 
 describe("T8: Error handling (AC8)", () => {
 	it("handles EADDRINUSE when spawning daemon", async () => {
@@ -1013,7 +993,6 @@ describe("T8: Error handling (AC8)", () => {
 	});
 });
 
-// ─── T9/T10: getNetworkAddress + QR generation ───────────────────────
 // Network address injection and QR code injection are already tested in T2
 // (default invocation). Only the real getNetworkAddress return type needs
 // a standalone test since T2 uses a mock.
@@ -1032,8 +1011,6 @@ describe("T9/T10: getNetworkAddress and generateQR", () => {
 		expect(result.length).toBeGreaterThan(0);
 	});
 });
-
-// ─── T11: sendIpcRequest ──────────────────────────────────────────────
 
 describe("T11: sendIpcRequest", () => {
 	it("sendIpcRequest rejects for non-existent socket path", async () => {
@@ -1166,8 +1143,6 @@ describe("T11: sendIpcRequest", () => {
 	});
 });
 
-// ─── --help ───────────────────────────────────────────────────────────
-
 describe("--help shows usage information", () => {
 	it("displays all flags in help text", async () => {
 		const cli = createMockCLI();
@@ -1209,7 +1184,7 @@ describe("--help shows usage information", () => {
 	});
 });
 
-// ─── T12: New flags (Ticket 8.15) ─────────────────────────────────
+// T12: New flags (Ticket 8.15)
 
 describe("T12: parseArgs — new flags -y, --no-https, --dangerously-skip-permissions", () => {
 	it.each([
@@ -1250,8 +1225,6 @@ describe("T12: parseArgs — new flags -y, --no-https, --dangerously-skip-permis
 	});
 });
 
-// ─── T13: --dangerously-skip-permissions requires --pin ──────────
-
 describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () => {
 	it("errors when --dangerously-skip-permissions used without --pin", async () => {
 		const cli = createMockCLI();
@@ -1281,7 +1254,7 @@ describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () 
 	});
 });
 
-// ─── T14: Interactive mode (Ticket 8.15) ─────────────────────────
+// T14: Interactive mode (Ticket 8.15)
 
 describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)", () => {
 	it("enters interactive mode when showInteractiveMenu is injected", async () => {
@@ -1441,8 +1414,6 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 		expect(capturedCtx.stdin).toBe(mockStdin);
 	});
 });
-
-// ─── T16: Instance subcommands ─────────────────────────────────────
 
 describe("instance subcommands", () => {
 	it.each([
@@ -1715,9 +1686,6 @@ describe("instance subcommands", () => {
 	});
 });
 
-// ─── T17: --log-level parsing ──────────────────────────────────────
-
-// ─── T17-T20: Value-accepting flags ────────────────────────────────
 // These test the distinct branching in parseArgs for flags that accept
 // a value (valid value, invalid value, missing value).
 
@@ -1799,8 +1767,6 @@ describe("T17-T20: --log-level, --log-format, --host, --restart-daemon", () => {
 	});
 });
 
-// ─── T21: HELP_TEXT ↔ parseArgs cross-check ───────────────────────
-
 describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => {
 	// Canonical list of all flags handled by the parseArgs switch statement.
 	// When you add a new flag to parseArgs, add it here too — that's the
@@ -1851,8 +1817,6 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		"-h": "--help",
 	};
 
-	// ── Forward: every parsed flag appears in HELP_TEXT ──────────
-
 	for (const flag of PARSED_FLAGS) {
 		if (INTERNAL_FLAGS.has(flag)) continue;
 
@@ -1869,8 +1833,6 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		}
 	}
 
-	// ── Reverse: every --flag in HELP_TEXT is handled by parseArgs ──
-
 	it("every --flag in HELP_TEXT is in the parsed flags list", () => {
 		// Extract all --flag tokens from HELP_TEXT
 		const helpFlags = new Set(
@@ -1886,8 +1848,6 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 			).toBe(true);
 		}
 	});
-
-	// ── Internal flags are NOT in HELP_TEXT ─────────────────────
 
 	for (const flag of INTERNAL_FLAGS) {
 		it(`HELP_TEXT does not expose internal flag ${flag}`, () => {

@@ -1,4 +1,4 @@
-// ─── Property-Based Tests: SSE Reconnection & Backoff (Ticket 1.2) ───────────
+// Property-Based Tests: SSE Reconnection & Backoff (Ticket 1.2)
 //
 // Properties tested:
 // P1: Backoff delay is always in [baseDelay, maxDelay] (AC3)
@@ -15,8 +15,6 @@ import {
 
 const SEED = 42;
 const NUM_RUNS = 300;
-
-// ─── Generators ─────────────────────────────────────────────────────────────
 
 const arbBackoffConfig: fc.Arbitrary<BackoffConfig> = fc
 	.record({
@@ -36,8 +34,6 @@ const arbBackoffConfig: fc.Arbitrary<BackoffConfig> = fc
 	}));
 
 describe("Ticket 1.2 — SSE Reconnection & Backoff PBT", () => {
-	// ─── P1: Backoff delay bounds ──────────────────────────────────────────
-
 	describe("P1: Backoff delay is always in [baseDelay, maxDelay] (AC3)", () => {
 		it("property: delay is bounded", () => {
 			fc.assert(
@@ -69,8 +65,6 @@ describe("Ticket 1.2 — SSE Reconnection & Backoff PBT", () => {
 		});
 	});
 
-	// ─── P2: Monotonic non-decreasing ──────────────────────────────────────
-
 	describe("P2: Backoff delay is monotonically non-decreasing (AC3)", () => {
 		it("property: delay(n) <= delay(n+1)", () => {
 			fc.assert(
@@ -88,8 +82,6 @@ describe("Ticket 1.2 — SSE Reconnection & Backoff PBT", () => {
 		});
 	});
 
-	// ─── P3: Reaches maxDelay eventually ───────────────────────────────────
-
 	describe("P3: Backoff reaches maxDelay eventually (AC3)", () => {
 		it("property: sufficiently large attempt -> maxDelay", () => {
 			fc.assert(
@@ -106,8 +98,6 @@ describe("Ticket 1.2 — SSE Reconnection & Backoff PBT", () => {
 			);
 		});
 	});
-
-	// ─── P7: Default config matches spec ──────────────────────────────────
 
 	describe("P7: Default config matches spec: 1s, 2s, 4s, 8s, max 30s (AC3)", () => {
 		it("first 6 delays match spec exactly", () => {

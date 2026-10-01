@@ -1,11 +1,8 @@
-// ─── Frontend Logger ─────────────────────────────────────────────────────────
 // Lightweight browser-side logger matching the backend Logger interface shape.
 // Maps levels to console.* methods; debug/verbose only emit when the "debug"
 // feature flag is active (?feats=debug / Settings toggle / Ctrl+Shift+D).
 
 import { featureFlags } from "../stores/feature-flags.svelte.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 /**
  * Browser-side logger interface.
@@ -25,8 +22,6 @@ export interface FrontendLoggerOptions {
 	/** Called after console.error(); use for DEV-only invariant throws. */
 	onError?: (...args: unknown[]) => void;
 }
-
-// ─── Factory ────────────────────────────────────────────────────────────────
 
 /** Create a tagged browser logger. Child loggers chain tags: `[ws:parse]`. */
 export function createFrontendLogger(
@@ -58,8 +53,6 @@ export function createFrontendLogger(
 		},
 	};
 }
-
-// ─── Silent Logger ──────────────────────────────────────────────────────────
 
 const noop = () => {};
 

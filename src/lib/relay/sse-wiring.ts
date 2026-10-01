@@ -1,4 +1,3 @@
-// ─── SSE Event Wiring ────────────────────────────────────────────────────────
 // Extracted from relay-stack.ts: the pipeline that takes SSE events from
 // OpenCode, translates them, filters by session, records to cache, broadcasts
 // to browser clients, and sends push notifications.
@@ -50,7 +49,6 @@ import type { SSEStreamEvents } from "./sse-stream.js";
 // consumer "event" handler). Returns Either<OpenCodeEvent, ParseError>.
 const decodeOpenCodeEvent = Schema.decodeUnknownEither(OpenCodeEventSchema);
 
-// ─── Session ID extraction ────────────────────────────────────────────────────
 // OpenCode SSE events store sessionID in different locations by event type:
 //   - Top-level: message.part.delta, session.status, message.part.removed, etc.
 //   - Nested in part: message.part.updated → properties.part.sessionID
@@ -59,22 +57,17 @@ const decodeOpenCodeEvent = Schema.decodeUnknownEither(OpenCodeEventSchema);
 
 export function extractSessionId(event: SSEEvent): string | undefined {
 	const props = event.properties;
-	// 1. Top-level sessionID (most common)
 	if (hasSessionID(props)) {
 		return props.sessionID;
 	}
-	// 2. Nested in part (message.part.updated)
 	if (hasPartWithSessionID(props)) {
 		return props.part.sessionID;
 	}
-	// 3. Nested in info (message.updated, session.updated)
 	if (hasInfoWithSessionID(props)) {
 		return props.info.sessionID ?? props.info.id;
 	}
 	return undefined;
 }
-
-// ─── SSE Wiring Dependencies ─────────────────────────────────────────────────
 
 export interface SSEWiringDeps {
 	translator: Translator;
@@ -131,7 +124,6 @@ export interface SSEWiringDeps {
 	};
 }
 
-// ─── Push notification helper ────────────────────────────────────────────────
 // Extracted so both handleSSEEventEffect (SSE path) and relay-stack.ts (status/message
 // poller paths) can fire push notifications for done/error events. Without this,
 // push notifications are only sent when the translator produces done/error —
@@ -749,8 +741,6 @@ const handleSSEEventAfterPendingEffect = (
 		}
 	});
 
-// ─── Handle a single SSE event ───────────────────────────────────────────────
-
 export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
@@ -1037,8 +1027,6 @@ function wireSSEConsumerWithCallbacks(
 		callbacks.handleEvent(event as SSEEvent);
 	});
 }
-
-// ─── Wire all SSE consumer event listeners ───────────────────────────────────
 
 export const wireSSEConsumerEffect = (
 	deps: SSEWiringDeps,

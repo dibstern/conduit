@@ -1,4 +1,4 @@
-// ─── The ding, wired (ni8.23, loop 4b) ──────────────────────────────────────
+// The ding, wired (ni8.23, loop 4b)
 // `sendPushForEventEffect` is the only push path the live relay uses. These
 // tests pin the two halves of the guarantee at the seam where real events
 // arrive: the same alert observed twice pushes once, and a push that never
@@ -599,7 +599,7 @@ it("is reachable from the tag, so the relay can hand it in", async () => {
 	expect(seen).toBe(true);
 });
 
-// ─── Through the real adapter (ni8.23 delta 1, P1-4) ────────────────────────
+// Through the real adapter (ni8.23 delta 1, P1-4)
 // The mock above can be told to reject. The shipped adapter never did: it caught
 // every per-device error and resolved, so a 503 and a delivered push were the
 // same value. The ledger wrote a claim either way, and the alert was gone.

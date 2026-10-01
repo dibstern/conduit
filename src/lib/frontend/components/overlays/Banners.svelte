@@ -1,4 +1,3 @@
-<!-- ─── Banners ───────────────────────────────────────────────────────────── -->
 <!-- Banner bar at top of chat area, driven by uiState.banners.              -->
 <!-- Supports update (green), onboarding (orange), skip-permissions (red),  -->
 <!-- warning (amber/yellow).                                                -->
@@ -20,7 +19,6 @@
 	} = $props();
 	const visibleBanners = $derived(banners ?? uiState.banners);
 
-	// ─── Instance health check ─────────────────────────────────────────────────
 	// Show the warning banner only when ALL instances are "unhealthy" — meaning
 	// they should be running but aren't responding to health checks.
 	// "stopped" (intentionally off) and "starting" (booting up) are normal
@@ -46,8 +44,6 @@
 	function handleManageInstances() {
 		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
 	}
-
-	// ─── Variant styling ────────────────────────────────────────────────────────
 
 	function getVariantClasses(variant: BannerConfig["variant"]): string {
 		switch (variant) {

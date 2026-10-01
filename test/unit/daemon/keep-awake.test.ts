@@ -1,4 +1,4 @@
-// ─── Unit Tests: Keep-Awake Management (Ticket 3.5) ─────────────────────────
+// Unit Tests: Keep-Awake Management (Ticket 3.5)
 //
 // Tests:
 // T1:  Constructor defaults (enabled, not active)
@@ -34,8 +34,6 @@ import {
 const SEED = 42;
 const NUM_RUNS = 30;
 
-// ─── Mock helpers ────────────────────────────────────────────────────────────
-
 /** Create a mock ChildProcess (EventEmitter with kill) */
 function createMockChild(): ChildProcess & EventEmitter {
 	const child = new EventEmitter() as ChildProcess & EventEmitter;
@@ -54,11 +52,7 @@ function createMockSpawn(child: ChildProcess & EventEmitter) {
 	) as unknown as typeof import("node:child_process").spawn;
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 describe("Ticket 3.5 — Keep-Awake Management", () => {
-	// ─── T1: Constructor defaults ────────────────────────────────────────
-
 	describe("T1: Constructor defaults", () => {
 		it("defaults to enabled", () => {
 			const ka = new KeepAwake({ _platform: "darwin" });
@@ -87,7 +81,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T2: activate() on macOS spawns caffeinate ───────────────────────
+	// T2: activate() on macOS spawns caffeinate
 
 	describe("T2: activate() on macOS spawns caffeinate with -di flags (AC1)", () => {
 		it("spawns caffeinate with correct args", () => {
@@ -130,7 +124,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T3: activate() emits activated event ────────────────────────────
+	// T3: activate() emits activated event
 
 	describe("T3: activate() emits activated event (AC1)", () => {
 		it("emits activated on successful spawn", () => {
@@ -151,7 +145,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T4: deactivate() kills process, emits deactivated ──────────────
+	// T4: deactivate() kills process, emits deactivated
 
 	describe("T4: deactivate() kills process, emits deactivated (AC2)", () => {
 		it("kills the child process group via process.kill(-pid)", () => {
@@ -192,7 +186,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T5: isActive() tracks state correctly ──────────────────────────
+	// T5: isActive() tracks state correctly
 
 	describe("T5: isActive() tracks state correctly", () => {
 		it("false before activate", () => {
@@ -228,7 +222,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T6: setEnabled(false) deactivates if active ────────────────────
+	// T6: setEnabled(false) deactivates if active
 
 	describe("T6: setEnabled(false) deactivates if active (AC3)", () => {
 		it("deactivates when disabling while active", () => {
@@ -266,7 +260,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T7: setEnabled(true) auto-activates ────────────────────────────
+	// T7: setEnabled(true) auto-activates
 
 	describe("T7: setEnabled(true) auto-activates on supported platform", () => {
 		it("enables and activates on macOS", () => {
@@ -324,8 +318,6 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T8: Non-macOS emits unsupported ─────────────────────────────────
-
 	describe("T8: Non-macOS: activate() emits unsupported, isActive() false (AC4)", () => {
 		it("emits unsupported on linux when no tool found", () => {
 			const mockSpawn =
@@ -375,8 +367,6 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T9: Idempotent: double activate ─────────────────────────────────
-
 	describe("T9: Idempotent: double activate doesn't spawn twice (AC5)", () => {
 		it("only spawns once on double activate", () => {
 			const child = createMockChild();
@@ -412,8 +402,6 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			expect(events).toHaveLength(1);
 		});
 	});
-
-	// ─── T10: Idempotent: double deactivate ──────────────────────────────
 
 	describe("T10: Idempotent: double deactivate is safe (AC5)", () => {
 		it("does not throw on double deactivate", () => {
@@ -455,8 +443,6 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			expect(() => ka.deactivate()).not.toThrow();
 		});
 	});
-
-	// ─── T11: Process exit handler ───────────────────────────────────────
 
 	describe("T11: Process exit handler: unexpected exit emits error, resets state (AC6)", () => {
 		it("emits error on unexpected caffeinate exit", () => {
@@ -576,7 +562,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T12: isSupported() ──────────────────────────────────────────────
+	// T12: isSupported()
 
 	describe("T12: isSupported() returns true on darwin, delegates to resolveCommand", () => {
 		it("returns true on darwin", () => {
@@ -609,7 +595,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T13: Disabled: activate() is no-op ──────────────────────────────
+	// T13: Disabled: activate() is no-op
 
 	describe("T13: Disabled: activate() is no-op when not enabled", () => {
 		it("does not spawn when disabled", () => {
@@ -656,8 +642,6 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			expect(events).toHaveLength(0);
 		});
 	});
-
-	// ─── T14: PBT: enabled/disabled state machine consistency ────────────
 
 	describe("T14: PBT: enabled/disabled state machine consistency", () => {
 		it("property: isActive is never true when isEnabled is false", () => {
@@ -746,7 +730,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T15: activate() when spawn throws synchronously ─────────────────
+	// T15: activate() when spawn throws synchronously
 
 	describe("T15: activate() when spawn throws synchronously", () => {
 		it("emits error event and state remains inactive", () => {
@@ -771,8 +755,6 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 			expect(ka.isActive()).toBe(false);
 		});
 	});
-
-	// ─── T16: Cross-platform tool resolution ────────────────────────────
 
 	describe("T16: Cross-platform tool resolution", () => {
 		it("uses config command/args when provided (any platform)", () => {
@@ -972,7 +954,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T17: Process group kill (integration) ──────────────────────────
+	// T17: Process group kill (integration)
 
 	describe("T17: Process group kill (integration)", () => {
 		it("deactivate() kills a real detached child process", async () => {
@@ -1000,7 +982,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T18: defaultWhichSync (integration) ────────────────────────────
+	// T18: defaultWhichSync (integration)
 
 	describe("T18: defaultWhichSync (integration)", () => {
 		it("finds an existing command", () => {
@@ -1021,7 +1003,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T19: activate() spawn error handling ───────────────────────────
+	// T19: activate() spawn error handling
 
 	describe("T19: activate() spawn error handling", () => {
 		it("emits error and deactivates when spawn returns ENOENT", () => {
@@ -1075,7 +1057,7 @@ describe("Ticket 3.5 — Keep-Awake Management", () => {
 		});
 	});
 
-	// ─── T20: drain() kills the child process ───────────────────────────
+	// T20: drain() kills the child process
 
 	describe("T20: drain() kills the child process", () => {
 		it("deactivates and drains when active", async () => {

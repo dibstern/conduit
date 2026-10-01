@@ -1,4 +1,3 @@
-// ─── E2E Chat Tests ──────────────────────────────────────────────────────────
 // Tests the core chat flow: send message, receive response, markdown
 // rendering, code blocks, and stop button.
 // Uses real relay backed by MockOpenCodeServer replaying recorded HTTP

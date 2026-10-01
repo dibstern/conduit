@@ -1,4 +1,3 @@
-// ─── Discovery Store ─────────────────────────────────────────────────────────
 // Agents, models, providers, and commands.
 
 import type {
@@ -89,7 +88,6 @@ const providersFromGetModelsResponse = (
 		})),
 	}));
 
-// ─── Provider instances ─────────────────────────────────────────────────────
 // The composer's harness picker selects a provider *instance*. Default
 // instances are derived from the discovered providers: the "claude" provider
 // belongs to the Claude driver's default instance; every other provider
@@ -128,9 +126,6 @@ export function instanceIdForProviderId(
 	return providerId === "claude" ? "claude" : "opencode";
 }
 
-// ─── State ──────────────────────────────────────────────────────────────────
-
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // What the server has told us: the catalogue of providers, models, agents and
 // commands, the project's defaults, and the configuration the current session
 // is actually running with. Only the `handle*` and `apply*` functions in this
@@ -162,7 +157,6 @@ const serverDiscovery = $state({
 	hiddenAgents: [] as string[],
 });
 
-// ─── Client-owned state ─────────────────────────────────────────────────────
 // This tab's own state. No server message writes it.
 //
 // `choice` is what the user has clicked but the server has not confirmed yet.
@@ -281,7 +275,6 @@ export const discoveryState = {
 	},
 };
 
-// ─── Derived getters ────────────────────────────────────────────────────────
 // Components should wrap in $derived() for reactive caching.
 
 /** Get the currently active agent. */
@@ -352,8 +345,6 @@ export function getVisibleProviderGroups(): readonly Immutable<ProviderGroup>[] 
  *  OpenCode), named instances after. */
 export function getAvailableInstances(): InstanceOption[] {
 	const byId = new Map<string, InstanceOption>();
-	// 1. Discovered providers — default drivers, plus named instances that
-	//    already surface models.
 	for (const provider of discoveryState.providers) {
 		const driver = instanceIdForProviderId(provider.id);
 		const id = provider.instanceId ?? driver;
@@ -366,9 +357,6 @@ export function getAvailableInstances(): InstanceOption[] {
 			});
 		}
 	}
-	// 2. Configured instances (from instance_list) — selectable even without
-	//    discovered models. Merge live status onto matching entries; add any
-	//    that discovery did not surface, using the configured display name.
 	for (const inst of instanceState.instances) {
 		const driver: "claude" | "opencode" =
 			inst.driver === "claude" ? "claude" : "opencode";
@@ -456,8 +444,6 @@ export function selectInstance(instanceId: string): void {
 	}
 }
 
-// ─── Pure helpers ───────────────────────────────────────────────────────────
-
 /** Format agent label for display. */
 export function formatAgentLabel(agent: Immutable<AgentInfo>): string {
 	return agent.name || agent.id;
@@ -521,8 +507,6 @@ export function extractSlashQuery(
 
 	return { query, start: slashStart, end: cursorPos };
 }
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handleAgentList(
 	msg: Extract<RelayMessage, { type: "agent_list" }>,
@@ -657,8 +641,6 @@ export function handleDefaultModelInfo(
 	choice.defaultProviderId = null;
 }
 
-// ─── Actions ────────────────────────────────────────────────────────────────
-
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
 	return discoveryState.availableVariants;
@@ -674,8 +656,6 @@ export function getActiveContextWindowOptions(): readonly Immutable<ContextWindo
 	return discoveryState.availableContextWindowOptions;
 }
 
-// ─── Variant handler ────────────────────────────────────────────────────────
-
 export function handleVariantInfo(
 	msg: Extract<RelayMessage, { type: "variant_info" }>,
 ): void {
@@ -683,8 +663,6 @@ export function handleVariantInfo(
 	serverDiscovery.availableVariants = [...(msg.variants ?? [])];
 	choice.variant = null;
 }
-
-// ─── Context-window handler ─────────────────────────────────────────────────
 
 export function handleContextWindowInfo(
 	msg: Extract<RelayMessage, { type: "context_window_info" }>,
@@ -694,16 +672,12 @@ export function handleContextWindowInfo(
 	choice.contextWindow = null;
 }
 
-// ─── Permission-mode handler ────────────────────────────────────────────────
-
 export function handlePermissionModeInfo(
 	msg: Extract<RelayMessage, { type: "permission_mode_info" }>,
 ): void {
 	serverDiscovery.permissionMode = msg.mode;
 	choice.permissionMode = null;
 }
-
-// ─── Visibility handler ─────────────────────────────────────────────────────
 
 export function handleVisibilityInfo(
 	msg: Extract<RelayMessage, { type: "visibility_info" }>,
@@ -742,7 +716,6 @@ export function flushPendingPermissionMode(
 	void send({ projectSlug, sessionId, mode }).catch(undo);
 }
 
-// ─── Choosing ahead of the server ───────────────────────────────────────────
 // A picker writes the user's click here, sends the RPC, and applies the
 // response. Each `choose*` hands back the undo for *that* click; call it when
 // the server refuses. No component keeps a `previous…` variable any more: the
@@ -840,7 +813,6 @@ export function chooseHiddenEntries(entries: {
 	return undoAll(undos);
 }
 
-// ─── Applying RPC responses ─────────────────────────────────────────────────
 // The other half of a `choose*`: the server's answer, which lands in the
 // server half and clears the click it confirms.
 

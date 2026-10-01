@@ -1,4 +1,3 @@
-// ─── Effect Projection Test Harness ─────────────────────────────────────────
 // Drives the projection path the daemon actually runs: a provider runtime event
 // goes through ProviderRuntimeIngestion, which translates it to canonical form,
 // appends it to the event store and hands it to the Effect projection runner.

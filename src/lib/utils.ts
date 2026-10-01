@@ -1,4 +1,3 @@
-// ─── Shared Utilities ────────────────────────────────────────────────────────
 // Pure utility functions used across multiple groups.
 
 /**

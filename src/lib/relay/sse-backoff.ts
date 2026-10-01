@@ -1,8 +1,5 @@
-// ─── SSE Reconnection & Backoff ────────────────────────────────
 // Pure logic for exponential backoff calculation.
 // Deliberately IO-free.
-
-// ─── Exponential backoff ─────────────────────────────────────────────────────
 
 export interface BackoffConfig {
 	baseDelay: number; // Initial delay in ms (default: 1000)

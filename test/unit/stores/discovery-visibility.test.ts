@@ -1,4 +1,3 @@
-// ─── Discovery Visibility Filtering Tests ────────────────────────────────────
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
@@ -14,8 +13,6 @@ import type {
 	AgentInfo,
 	ProviderInfo,
 } from "../../../src/lib/frontend/types.js";
-
-// ─── Fixtures ───────────────────────────────────────────────────────────────
 
 const agents: AgentInfo[] = [
 	{ id: "build", name: "Build" },
@@ -41,13 +38,9 @@ const providerB: ProviderInfo = {
 	],
 };
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	clearDiscoveryState();
 });
-
-// ─── Visibility filtering ───────────────────────────────────────────────────
 
 describe("visibility filtering", () => {
 	// getVisibleAgents()
@@ -202,8 +195,6 @@ describe("visibility filtering", () => {
 		expect(discoveryState.hiddenAgents).toEqual(["opencode/plan"]);
 	});
 });
-
-// ─── Undoing a hide that the server refused ─────────────────────────────────
 
 describe("an undo of a visibility change", () => {
 	beforeEach(() => {

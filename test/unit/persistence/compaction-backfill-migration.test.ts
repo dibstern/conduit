@@ -1,4 +1,3 @@
-// ─── Compaction Backfill ────────────────────────────────────────────────────
 // Every completed compaction stored before the projector claimed the event type
 // is recoverable from its payload. Migration 0013 reconstructs those rows; this
 // pins its shape against the projector's and its behaviour on a second run.

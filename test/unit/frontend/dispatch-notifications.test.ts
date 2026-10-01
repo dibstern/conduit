@@ -1,5 +1,4 @@
 import { seedSessions } from "../stores/session-fixtures.js";
-// ─── handleMessage → triggerNotifications wiring ─────────────────────────────
 // Verifies that handleMessage() calls triggerNotifications() for exactly the
 // four notification-worthy message types: done, error, permission_request,
 // ask_user. This test catches wiring bugs where the triggerNotifications call
@@ -7,8 +6,6 @@ import { seedSessions } from "../stores/session-fixtures.js";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
-
-// ─── Hoisted mocks ──────────────────────────────────────────────────────────
 
 const { triggerNotificationsMock } = vi.hoisted(() => {
 	const triggerNotificationsMock = vi.fn();
@@ -81,8 +78,6 @@ import {
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
-// ─── Setup / Teardown ───────────────────────────────────────────────────────
-
 beforeEach(() => {
 	sessionState.currentId = "test-session";
 	// Register sessions used in test events so routePerSession's
@@ -98,8 +93,6 @@ beforeEach(() => {
 afterEach(() => {
 	clearMessages();
 });
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("handleMessage calls triggerNotifications for notification-worthy types", () => {
 	it("calls triggerNotifications for 'done' messages", () => {

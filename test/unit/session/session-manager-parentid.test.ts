@@ -1,4 +1,4 @@
-// ─── Session Manager parentID propagation (ticket 5.3) ──────────────────────
+// Session Manager parentID propagation (ticket 5.3)
 import { assert, describe, expect, it, vi } from "vitest";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";

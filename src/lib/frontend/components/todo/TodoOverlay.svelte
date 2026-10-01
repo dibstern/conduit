@@ -1,4 +1,3 @@
-<!-- ─── Todo Overlay ──────────────────────────────────────────────────────── -->
 <!-- Sticky overlay showing TodoWrite task items with progress tracking. -->
 <!-- Collapsible header, animated progress bar, auto-hides after all complete. -->
 <!-- Preserves #todo-sticky wrapper ID for E2E compatibility. -->
@@ -9,17 +8,11 @@
 	import TodoProgressBar from "./TodoProgressBar.svelte";
 	import TodoItemRow from "./TodoItemRow.svelte";
 
-	// ─── Props ──────────────────────────────────────────────────────────────────
-
 	let { items }: { items: TodoItem[] } = $props();
-
-	// ─── State ──────────────────────────────────────────────────────────────────
 
 	let collapsed = $state(false);
 	let fading = $state(false);
 	let hidden = $state(false);
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const progress: TodoProgress = $derived.by(() => {
 		const total = items.length;
@@ -39,8 +32,6 @@
 	);
 
 	const isHidden = $derived(items.length === 0 || hidden);
-
-	// ─── Auto-hide after all items completed ────────────────────────────────────
 
 	let fadeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -71,13 +62,11 @@
 		};
 	});
 
-	// ─── Handlers ───────────────────────────────────────────────────────────────
-
 	function toggleCollapse(): void {
 		collapsed = !collapsed;
 	}
 
-	// ─── External collapse event (e.g. mobile terminal maximize) ───────────────
+	// External collapse event (e.g. mobile terminal maximize)
 
 	$effect(() => {
 		function onTodoCollapse() {

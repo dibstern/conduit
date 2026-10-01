@@ -127,8 +127,6 @@ import type {
 const log = createLogger("claude-provider-runtime");
 type EffortLevel = NonNullable<SDKOptions["effort"]>;
 
-// ─── Provider Runtime Config ───────────────────────────────────────────────
-
 export interface ClaudeProviderInstanceDeps {
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
@@ -208,8 +206,6 @@ export const ClaudeProviderRuntimeLive = (
 ): Layer.Layer<ClaudeProviderRuntimeTag, never, Scope.Scope> =>
 	Layer.scoped(ClaudeProviderRuntimeTag, makeClaudeProviderRuntime(deps));
 
-// ─── ClaudeProviderRuntime ─────────────────────────────────────────────────
-
 export class ClaudeProviderRuntime {
 	readonly providerId = "claude";
 
@@ -278,7 +274,6 @@ export class ClaudeProviderRuntime {
 	 * has to clear the field rather than store an undefined in it, or the drift
 	 * check would compare against a value nobody stands behind.
 	 */
-	// ─── sendTurn ─────────────────────────────────────────────────────────
 
 	sendTurnEffect(
 		input: SendTurnInput,
@@ -367,8 +362,6 @@ export class ClaudeProviderRuntime {
 		});
 	}
 
-	// ─── createSessionAndSendTurn ─────────────────────────────────────────
-
 	private createSessionAndSendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
@@ -404,12 +397,10 @@ export class ClaudeProviderRuntime {
 
 			let promptQueue: PromptQueueController | undefined;
 			const setup = Effect.gen(this, function* () {
-				// 1. Create prompt queue.
 				const queue = yield* makeEffectPromptQueue();
 				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
 				promptQueue = queue;
 
-				// 2. Build initial user message and enqueue.
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
@@ -417,7 +408,6 @@ export class ClaudeProviderRuntime {
 				});
 				yield* queue.enqueue(userMessage);
 
-				// 3. Build query options.
 				const abortController = new AbortController();
 				// Wire the input's abort signal to our abort controller.
 				if (input.abortSignal) {
@@ -475,7 +465,7 @@ export class ClaudeProviderRuntime {
 					stopped: false,
 				};
 
-				// 5. Build SDK options — canUseTool resolves the complete context lazily.
+				// canUseTool resolves the complete session context lazily.
 				const options = yield* Effect.try({
 					try: () =>
 						validateOptionsJsonShape({
@@ -512,7 +502,6 @@ export class ClaudeProviderRuntime {
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 
-				// 6. Call query factory, then construct the complete session context.
 				const query = yield* Effect.try({
 					try: () =>
 						this.queryFactory({
@@ -524,10 +513,8 @@ export class ClaudeProviderRuntime {
 				});
 				ctx = { ...context, query };
 
-				// 7. Store session.
 				yield* setSession(this.stateRef, sessionId, ctx);
 
-				// 8. Start background stream consumer.
 				const translator = makeClaudeTranslationService({
 					getSink: (ctx) => ctx.eventSink,
 					...(this.deps.onBackgroundTask
@@ -570,8 +557,6 @@ export class ClaudeProviderRuntime {
 			);
 		});
 	}
-
-	// ─── enqueueTurn ──────────────────────────────────────────────────────
 
 	/**
 	 * Push the settings the user picked onto the live query. `setModel` and the
@@ -865,8 +850,6 @@ export class ClaudeProviderRuntime {
 		});
 	}
 
-	// ─── runStreamConsumer ────────────────────────────────────────────────
-
 	private runStreamConsumerEffect(
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
@@ -1070,8 +1053,6 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
-	// ─── interruptTurn ────────────────────────────────────────────────────
-
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
@@ -1104,8 +1085,6 @@ export class ClaudeProviderRuntime {
 		});
 	}
 
-	// ─── cleanupSession ──────────────────────────────────────────────────
-
 	/**
 	 * Shared cleanup for a single session — used by both interruptTurn()
 	 * and shutdown(). Completes in-flight tools except questions on disposal,
@@ -1124,7 +1103,6 @@ export class ClaudeProviderRuntime {
 			stopSubagentPollers(ctx);
 			yield* this.interruptSubagentFinalizersForSession(ctx.sessionId);
 
-			// 1. Complete in-flight tools as failed via EventSink.
 			for (const [, tool] of ctx.inFlightTools) {
 				if (recoverQuestions && tool.toolName === "AskUserQuestion") continue;
 				const event = claudeRuntimeEvent("tool.completed", ctx.sessionId, {
@@ -1139,13 +1117,11 @@ export class ClaudeProviderRuntime {
 			}
 			ctx.inFlightTools.clear();
 
-			// 2. Resolve pending approvals with deny.
 			for (const pending of ctx.pendingApprovals.values()) {
 				yield* pending.resolve("reject").pipe(Effect.ignore);
 			}
 			ctx.pendingApprovals.clear();
 
-			// 3. Reject pending questions.
 			for (const pending of ctx.pendingQuestions.values()) {
 				yield* pending.reject(new Error(reason)).pipe(Effect.ignore);
 			}
@@ -1165,7 +1141,7 @@ export class ClaudeProviderRuntime {
 				);
 			}
 
-			// 4. Persist terminal turn state. The SDK's post-interrupt `result`
+			// Persist terminal turn state. The SDK's post-interrupt `result`
 			// message is never translated (stream finalizers bail once
 			// `stopped` is set), so without this the turn row stays 'running'
 			// and the session stays 'busy' forever — the UI keeps showing the
@@ -1193,10 +1169,8 @@ export class ClaudeProviderRuntime {
 
 			ctx.turnInFlight = false;
 
-			// 5. Close prompt queue.
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
-			// 6. Interrupt SDK query.
 			yield* Effect.tryPromise({
 				try: () => ctx.query.interrupt(),
 				catch: (cause) =>
@@ -1206,8 +1180,6 @@ export class ClaudeProviderRuntime {
 			(ctx as { stopped: boolean }).stopped = true;
 		});
 	}
-
-	// ─── resolvePermission ────────────────────────────────────────────────
 
 	resolvePermissionEffect(
 		sessionId: string,
@@ -1229,8 +1201,6 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
-	// ─── resolveQuestion ──────────────────────────────────────────────────
-
 	resolveQuestionEffect(
 		sessionId: string,
 		requestId: string,
@@ -1250,8 +1220,6 @@ export class ClaudeProviderRuntime {
 			}),
 		);
 	}
-
-	// ─── disposeSession / endSession / shutdown ──────────────────────────
 
 	/**
 	 * Terminal disposal of a single session: cleanup + reject pending turn
@@ -1334,8 +1302,6 @@ export class ClaudeProviderRuntime {
 			yield* FiberMap.clear(this.subagentFinalizationFibers);
 		});
 	}
-
-	// ─── Internal: permission bridge access ──────────────────────────────
 
 	/**
 	 * Set the permission bridge. Called during session setup (sendTurn).

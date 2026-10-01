@@ -1,4 +1,3 @@
-// ─── Canonical Event Translator ─────────────────────────────────────
 // Maps OpenCode SSE events → canonical persistence events.
 // Stateful: tracks part lifecycle (tool pending → running → completed,
 // reasoning start → end) per session.
@@ -24,16 +23,12 @@ import {
 	type SessionStatusValue,
 } from "./events.js";
 
-// ─── Part Tracking ───────────────────────────────────────────────────────────
-
 interface TrackedPart {
 	type: string; // "text" | "tool" | "reasoning" | "file"
 	status?: string | undefined; // ToolStatus for tool parts
 	thinkingStarted?: boolean | undefined; // Whether thinking.start has been emitted
 	toolInputEmpty?: boolean | undefined; // Tool parts only: input delivered downstream so far was empty (args stream late, e.g. skill)
 }
-
-// ─── Translator ──────────────────────────────────────────────────────────────
 
 export class CanonicalEventTranslator {
 	/**
@@ -55,57 +50,47 @@ export class CanonicalEventTranslator {
 	): CanonicalEvent[] | null {
 		if (!sessionId) return null;
 
-		// ── message.created ──────────────────────────────────────────────
 		if (isMessageCreatedEvent(event)) {
 			return this.translateMessageCreated(event, sessionId);
 		}
 
-		// ── message.part.delta ───────────────────────────────────────────
 		if (isPartDeltaEvent(event)) {
 			return this.translatePartDelta(event, sessionId);
 		}
 
-		// ── message.part.updated ─────────────────────────────────────────
 		if (isPartUpdatedEvent(event)) {
 			return this.translatePartUpdated(event, sessionId);
 		}
 
-		// ── message.updated ──────────────────────────────────────────────
 		if (isMessageUpdatedEvent(event)) {
 			return this.translateMessageUpdated(event, sessionId);
 		}
 
-		// ── session.status ───────────────────────────────────────────────
 		if (isSessionStatusEvent(event)) {
 			return this.translateSessionStatus(event, sessionId);
 		}
 
-		// ── session.error ────────────────────────────────────────────────
 		if (isSessionErrorEvent(event)) {
 			return this.translateSessionError(event, sessionId);
 		}
 
-		// ── permission.asked ─────────────────────────────────────────────
 		if (isPermissionAskedEvent(event)) {
 			return this.translatePermissionAsked(event, sessionId);
 		}
 
-		// ── permission.replied ───────────────────────────────────────────
 		if (isPermissionRepliedEvent(event)) {
 			return this.translatePermissionReplied(event, sessionId);
 		}
 
-		// ── question.asked ───────────────────────────────────────────────
 		if (isQuestionAskedEvent(event)) {
 			return this.translateQuestionAsked(event, sessionId);
 		}
 
-		// ── session.updated (title change) ───────────────────────────────
+		// session.updated (title change)
 		if (event.type === "session.updated") {
 			return this.translateSessionUpdated(event, sessionId);
 		}
 
-		// ── PTY, file, and other non-persisted events → null ─────────────
 		return null;
 	}
 
@@ -128,8 +113,6 @@ export class CanonicalEventTranslator {
 		return this.sessions.get(sessionId);
 	}
 
-	// ─── Private helpers ─────────────────────────────────────────────────────
-
 	private getOrCreateParts(sessionId: string): Map<string, TrackedPart> {
 		let parts = this.sessions.get(sessionId);
 		if (!parts) {
@@ -138,8 +121,6 @@ export class CanonicalEventTranslator {
 		}
 		return parts;
 	}
-
-	// ─── message.created ─────────────────────────────────────────────────────
 
 	private translateMessageCreated(
 		event: SSEEvent,
@@ -163,8 +144,6 @@ export class CanonicalEventTranslator {
 			}),
 		];
 	}
-
-	// ─── message.part.delta ──────────────────────────────────────────────────
 
 	private translatePartDelta(
 		event: SSEEvent,
@@ -203,8 +182,6 @@ export class CanonicalEventTranslator {
 		return null;
 	}
 
-	// ─── message.part.updated ────────────────────────────────────────────────
-
 	private translatePartUpdated(
 		event: SSEEvent,
 		sessionId: string,
@@ -228,7 +205,6 @@ export class CanonicalEventTranslator {
 			toolInputEmpty: existing?.toolInputEmpty,
 		});
 
-		// ── Reasoning lifecycle ──────────────────────────────────────────
 		if (rawPart.type === "reasoning") {
 			const results: CanonicalEvent[] = [];
 
@@ -260,7 +236,6 @@ export class CanonicalEventTranslator {
 			return results.length > 0 ? results : null;
 		}
 
-		// ── Tool lifecycle ───────────────────────────────────────────────
 		if (rawPart.type === "tool") {
 			const status = rawPart.state?.status;
 			const toolName = mapToolName(rawPart.tool ?? "");
@@ -386,8 +361,6 @@ export class CanonicalEventTranslator {
 		return null;
 	}
 
-	// ─── message.updated ─────────────────────────────────────────────────────
-
 	private translateMessageUpdated(
 		event: SSEEvent,
 		sessionId: string,
@@ -436,8 +409,6 @@ export class CanonicalEventTranslator {
 		return [canonicalEvent("turn.completed", sessionId, payload)];
 	}
 
-	// ─── session.status ──────────────────────────────────────────────────────
-
 	private translateSessionStatus(
 		event: SSEEvent,
 		sessionId: string,
@@ -464,8 +435,6 @@ export class CanonicalEventTranslator {
 		];
 	}
 
-	// ─── session.error ───────────────────────────────────────────────────────
-
 	private translateSessionError(
 		event: SSEEvent,
 		sessionId: string,
@@ -483,8 +452,6 @@ export class CanonicalEventTranslator {
 			}),
 		];
 	}
-
-	// ─── permission.asked ────────────────────────────────────────────────────
 
 	private translatePermissionAsked(
 		event: SSEEvent,
@@ -506,8 +473,6 @@ export class CanonicalEventTranslator {
 		];
 	}
 
-	// ─── permission.replied ──────────────────────────────────────────────────
-
 	private translatePermissionReplied(
 		event: SSEEvent,
 		sessionId: string,
@@ -525,8 +490,6 @@ export class CanonicalEventTranslator {
 		];
 	}
 
-	// ─── question.asked ──────────────────────────────────────────────────────
-
 	private translateQuestionAsked(
 		event: SSEEvent,
 		sessionId: string,
@@ -542,8 +505,6 @@ export class CanonicalEventTranslator {
 			}),
 		];
 	}
-
-	// ─── session.updated ─────────────────────────────────────────────────────
 
 	private translateSessionUpdated(
 		event: SSEEvent,

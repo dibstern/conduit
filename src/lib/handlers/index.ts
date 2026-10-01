@@ -1,12 +1,5 @@
-// ─── Message Handlers ────────────────────────────────────────────────────────
 // Re-exports all handler functions and builds the EFFECT_MESSAGE_HANDLERS
 // dispatch table. This module replaces the monolithic message-handlers.ts.
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export type { PayloadMap } from "./payloads.js";
-
-// ─── Handler modules ─────────────────────────────────────────────────────────
 
 export { filterAgents, handleGetAgents } from "./agent.js";
 export { handleSwitchContextWindow } from "./context-window.js";
@@ -19,6 +12,7 @@ export {
 	switchModelForSession,
 	switchVariantForSession,
 } from "./model.js";
+export type { PayloadMap } from "./payloads.js";
 export {
 	clearSessionInputDraft,
 	getSessionInputDraft,
@@ -42,7 +36,6 @@ export {
 export { handlePtyInput } from "./terminal.js";
 export { handleGetToolContent } from "./tool-content.js";
 
-// ─── Effect-based Dispatch ──────────────────────────────────────────────────
 // Schema-validate the raw payload, then route to the matching Effect handler.
 
 import { Effect, Schema } from "effect";

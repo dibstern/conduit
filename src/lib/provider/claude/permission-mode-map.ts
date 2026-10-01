@@ -1,5 +1,4 @@
 // src/lib/provider/claude/permission-mode-map.ts
-// ─── Permission mode mapping ────────────────────────────────────────────────
 // Conduit's session permission modes correspond 1:1 to the Claude Agent SDK's
 // six. Conduit keeps its own spellings for the two that predate the mapping
 // ("ask", "full") so persisted rows and the UI stay valid without a migration;

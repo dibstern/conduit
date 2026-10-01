@@ -25,8 +25,6 @@ import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
 
-// ─── Test Helpers ─────────────────────────────────────────────────────────
-
 /** Extract event data as a plain object for assertion access. */
 function dataOf(
 	event: ProviderRuntimeEvent | undefined,
@@ -207,8 +205,6 @@ function plannedRuntimeEventsForClaudeSdkFixture(
 	];
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────
-
 describe("ClaudeEventTranslator", () => {
 	let sink: ReturnType<typeof makeStubSink>;
 	let translator: ClaudeEventTranslator;
@@ -236,7 +232,7 @@ describe("ClaudeEventTranslator", () => {
 		});
 	});
 
-	// ─── 1. system (subtype init) ────────────────────────────────────────
+	// 1. system (subtype init)
 
 	it("emits matching model evidence before idle without changing the requested model", async () => {
 		ctx.currentModel = "sonnet";
@@ -366,7 +362,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	// ─── 2. system (subtype status) ──────────────────────────────────────
+	// 2. system (subtype status)
 
 	it("translates system/status to session.status", async () => {
 		await runTranslate(translator, ctx, {
@@ -400,7 +396,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(dataOf(statusEvent)["status"]).toBe("idle");
 	});
 
-	// ─── 3. system (subtype task_progress) ───────────────────────────────
+	// 3. system (subtype task_progress)
 
 	it("does not translate system/task_progress to main turn completion", async () => {
 		await runTranslate(translator, ctx, {
@@ -1036,7 +1032,7 @@ describe("ClaudeEventTranslator", () => {
 		}
 	});
 
-	// ─── 3b. system (subtype api_retry) ──────────────────────────────────
+	// 3b. system (subtype api_retry)
 
 	it("translates system/api_retry to session.status:retry with detail metadata", async () => {
 		await runTranslate(translator, ctx, {
@@ -1064,7 +1060,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(meta["correlationId"]).toMatch(/next in 2\.2s/);
 	});
 
-	// ─── 3b-compaction. system (compact_boundary / status compaction) ────
+	// 3b-compaction. system (compact_boundary / status compaction)
 
 	it("translates system/compact_boundary to session.compaction:completed with token deltas", async () => {
 		await runTranslate(translator, ctx, {
@@ -1124,7 +1120,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events.some((e) => e.type === "session.status")).toBe(false);
 	});
 
-	// ─── 3c. stream_event (message_start) emits session.status: busy ─────
+	// 3c. stream_event (message_start) emits session.status: busy
 
 	it("emits session.status busy after message.created on message_start", async () => {
 		await runTranslate(
@@ -1171,7 +1167,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	// ─── 4. stream_event (content_block_start: text) ─────────────────────
+	// 4. stream_event (content_block_start: text)
 
 	it("registers text block in inFlightTools without emitting tool.started", async () => {
 		await runTranslate(
@@ -1191,7 +1187,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.get(0)?.toolName).toBe("__text");
 	});
 
-	// ─── 5. stream_event (content_block_start: thinking) ─────────────────
+	// 5. stream_event (content_block_start: thinking)
 
 	it("translates content_block_start thinking to thinking.start", async () => {
 		await runTranslate(
@@ -1217,7 +1213,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.get(0)?.toolName).toBe("__thinking");
 	});
 
-	// ─── 6. stream_event (content_block_start: tool_use) ─────────────────
+	// 6. stream_event (content_block_start: tool_use)
 
 	it("translates content_block_start tool_use to tool.started at block stop", async () => {
 		await runTranslate(
@@ -1319,7 +1315,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(JSON.stringify(decoded)).not.toContain("session_id");
 	});
 
-	// ─── 7. stream_event (content_block_delta: text_delta) ───────────────
+	// 7. stream_event (content_block_delta: text_delta)
 
 	it("translates text_delta to text.delta", async () => {
 		// Seed a text block so the translator has an in-flight tool
@@ -1351,7 +1347,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["partId"]).toBeDefined();
 	});
 
-	// ─── 8. stream_event (content_block_delta: thinking_delta) ───────────
+	// 8. stream_event (content_block_delta: thinking_delta)
 
 	it("translates thinking_delta to thinking.delta", async () => {
 		// Seed a thinking block
@@ -1383,7 +1379,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["partId"]).toBeDefined();
 	});
 
-	// ─── 9. stream_event (content_block_delta: input_json_delta) ─────────
+	// 9. stream_event (content_block_delta: input_json_delta)
 
 	it("buffers input_json_delta — no tool.running or tool.input_updated until block stop", async () => {
 		// Seed a tool_use block
@@ -1437,7 +1433,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["input"]).toEqual({ tool: "Bash", command: "ls" });
 	});
 
-	// ─── 10. stream_event (content_block_stop) ───────────────────────────
+	// 10. stream_event (content_block_stop)
 
 	it("clears text blocks on content_block_stop without emitting tool events", async () => {
 		// The tool.completed this used to emit carried the text part's own
@@ -1563,8 +1559,6 @@ describe("ClaudeEventTranslator", () => {
 		expect(ctx.inFlightTools.has(0)).toBe(true);
 	});
 
-	// ─── 11. assistant ───────────────────────────────────────────────────
-
 	it("translates assistant message and captures uuid on context", async () => {
 		await runTranslate(translator, ctx, {
 			type: "assistant",
@@ -1593,7 +1587,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(dataOf(textDelta)["text"]).toBe("Hello");
 	});
 
-	// ─── 12. user (tool_result) ──────────────────────────────────────────
+	// 12. user (tool_result)
 
 	it("translates user tool_result to tool.completed for in-flight tool", async () => {
 		// Seed an in-flight tool
@@ -1714,7 +1708,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(completedIdx).toBeGreaterThan(runningIdx);
 	});
 
-	// ─── 13. result (success) ────────────────────────────────────────────
+	// 13. result (success)
 
 	it("translates result/success to turn.completed with tokens, cost, duration", async () => {
 		// Set assistant uuid so messageId is populated
@@ -1822,7 +1816,6 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["contextWindow"]).toBe(1_000_000);
 	});
 
-	// ─── 13a-2. result tokens use the LAST request's usage, not the turn sum ──
 	// Regression: SDK result.usage is cumulative across every API request in
 	// the turn — cache_read re-counts the whole prompt per tool round, so a
 	// long turn reports millions of tokens and the context bar showed >5000%.
@@ -1925,7 +1918,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(dataOf(turnCompleted)["cost"]).toBeCloseTo(1.5);
 	});
 
-	// ─── 13b. result (success, no streaming, text in result field) ──────────
+	// 13b. result (success, no streaming, text in result field)
 	// Regression: short responses and slash-command dispatch (e.g. "/usage")
 	// bypass the stream_event/assistant path entirely. The SDK returns a
 	// single result message with the full text in `result.result`. Before
@@ -2001,7 +1994,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(textDeltas).toHaveLength(0);
 	});
 
-	// ─── 14. result (error) ──────────────────────────────────────────────
+	// 14. result (error)
 
 	it("translates result/error to turn.error", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-2";
@@ -2064,7 +2057,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["error"]).toContain("maximum number of turns");
 	});
 
-	// ─── 15. result (interrupted) ────────────────────────────────────────
+	// 15. result (interrupted)
 
 	it("translates result with interrupt error to turn.interrupted", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-3";
@@ -2123,8 +2116,6 @@ describe("ClaudeEventTranslator", () => {
 		const interrupted = sink.events.find((e) => e.type === "turn.interrupted");
 		expect(interrupted).toBeDefined();
 	});
-
-	// ─── 16. Unknown message types silently ignored ──────────────────────
 
 	it("silently ignores SDKStatusMessage (type: 'system', subtype: 'status' via top-level 'status' type)", async () => {
 		// SDKStatusMessage has type: 'system' / subtype: 'status' in reality,
@@ -2269,8 +2260,6 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	// ─── Additional behavioral tests ─────────────────────────────────────
-
 	it("captures session_id on context from any message with session_id", async () => {
 		expect(ctx.resumeSessionId).toBeUndefined();
 
@@ -2412,8 +2401,6 @@ describe("ClaudeEventTranslator", () => {
 		const data = dataOf(started);
 		expect(data["toolName"]).toBe("mcp_database_query");
 	});
-
-	// ─── Gap tests: edge cases ──────────────────────────────────────────
 
 	it("text.delta with empty string is skipped", async () => {
 		// Seed a text block so the translator has an in-flight tool
@@ -2576,7 +2563,6 @@ describe("ClaudeEventTranslator", () => {
 		}
 	});
 
-	// ─── Regression: multi-step turn must not clump text into one part ───
 	// A single agentic turn spans multiple SDK assistant messages (one per
 	// tool round). Each round's stream restarts content_block index at 0, but
 	// the translator pins currentAssistantMessageId to the first round's id.
@@ -2585,7 +2571,6 @@ describe("ClaudeEventTranslator", () => {
 	// before any tool — so all narration renders clumped ahead of every tool
 	// call (both live and on reload). Post-tool text MUST get a distinct partId.
 	it("assigns distinct partIds to text before and after a tool across SDK message rounds", async () => {
-		// ── Round 1: text, then a tool ──
 		await runTranslate(
 			translator,
 			ctx,
@@ -2637,7 +2622,6 @@ describe("ClaudeEventTranslator", () => {
 			makeStreamEvent({ type: "content_block_stop", index: 1 }),
 		);
 
-		// ── Round 2: a NEW SDK message, content_block index restarts at 0 ──
 		await runTranslate(
 			translator,
 			ctx,

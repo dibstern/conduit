@@ -1,4 +1,3 @@
-// ─── Regression: subagent Task must survive the parent turn's `done` ─────────
 // A subagent tool completes via its own notification and can outlive the
 // parent turn. `done` used to force-complete every running tool, flipping the
 // still-running Task to "Done"; finalizeAll now skips subagent tools.

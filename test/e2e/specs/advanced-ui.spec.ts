@@ -1,4 +1,3 @@
-// ─── E2E Advanced UI Tests ───────────────────────────────────────────────────
 // Tests Phase 8 Wave 3-4 UI features: split diff view, rewind timeline,
 // file history panel, paste chips, mermaid expand, plan mode.
 // Uses real relay backed by MockOpenCodeServer.

@@ -1,4 +1,3 @@
-<!-- ─── File Viewer ───────────────────────────────────────────────────────────── -->
 <!-- File preview in the desktop Files pane or a full-screen phone overlay. -->
 
 <script lang="ts">
@@ -30,8 +29,6 @@
 		paneTitle?: Snippet | undefined;
 		paneActions?: Snippet | undefined;
 	} = $props();
-
-	// ─── Font size state ──────────────────────────────────────────────────────
 
 	const FONT_SIZE_MIN = 6;
 	const FONT_SIZE_MAX = 24;
@@ -70,8 +67,6 @@
 		}
 	}
 
-	// ─── State ─────────────────────────────────────────────────────────────────
-
 	let filePath = $state<string | null>(null);
 	let content = $state<string | null>(null);
 	let binary = $state(false);
@@ -106,8 +101,6 @@
 			});
 	});
 
-	// ─── Derived ───────────────────────────────────────────────────────────────
-
 	const fileExt = $derived(filePath?.split(".").pop()?.toLowerCase() ?? "");
 	const fileName = $derived(filePath?.split("/").pop() ?? "");
 
@@ -119,7 +112,7 @@
 		return nums.join("\n");
 	});
 
-	// ─── Language mapping (ported from claude-relay) ───────────────────────────
+	// Language mapping (ported from claude-relay)
 
 	function mapExtToLanguage(ext: string): string | undefined {
 		const map: Record<string, string> = {
@@ -134,8 +127,6 @@
 		};
 		return map[ext];
 	}
-
-	// ─── Syntax highlighting effect ────────────────────────────────────────────
 
 	$effect(() => {
 		if (content && codeEl && !binary) {
@@ -159,8 +150,6 @@
 		regionEl?.focus({ preventScroll: true });
 	});
 
-	// ─── WS subscription ──────────────────────────────────────────────────────
-
 	$effect(() => {
 		if (!visible) return;
 		const unsub = onFileBrowser((msg: RelayMessage) => {
@@ -178,8 +167,6 @@
 		return unsub;
 	});
 
-	// ─── ESC to close ──────────────────────────────────────────────────────────
-
 	$effect(() => {
 		if (!visible) return;
 		function onKey(e: KeyboardEvent) {
@@ -191,8 +178,6 @@
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
 	});
-
-	// ─── Handlers ──────────────────────────────────────────────────────────────
 
 	async function handleCopy() {
 		if (!content) return;

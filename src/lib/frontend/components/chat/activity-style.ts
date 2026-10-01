@@ -1,4 +1,3 @@
-// ─── Activity Style ───────────────────────────────────────────────────────────
 // Icon and colour per activity part. Drives both the strip segments and the
 // rows in the expanded log, so a colour always means the same kind of work.
 

@@ -1,5 +1,4 @@
 // src/lib/provider/opencode-provider-instance.ts
-// ─── OpenCode Provider Instance ─────────────────────────────────────────────
 // Wraps the existing OpenCodeClient REST API behind the ProviderInstance
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
@@ -43,8 +42,6 @@ function sendFailedTurnResult(message: string): TurnResult {
 	};
 }
 
-// ─── Options ────────────────────────────────────────────────────────────────
-
 export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
@@ -60,8 +57,6 @@ export interface OpenCodeProviderInstanceOptions {
 		sessionId: string,
 	) => Effect.Effect<OpenCodeAPI | undefined, Error>;
 }
-
-// ─── OpenCodeProviderInstance ──────────────────────────────────────────────
 
 export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
@@ -109,8 +104,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			cause,
 		});
 	}
-
-	// ─── discover ─────────────────────────────────────────────────────────
 
 	discoverEffect(): Effect.Effect<
 		ProviderCapabilities,
@@ -163,8 +156,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			commands: [...commands, ...skills],
 		};
 	}
-
-	// ─── sendTurn ─────────────────────────────────────────────────────────
 
 	sendTurnEffect(
 		input: SendTurnInput,
@@ -291,8 +282,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		}
 	}
 
-	// ─── interruptTurn ────────────────────────────────────────────────────
-
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
@@ -307,8 +296,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			Effect.asVoid,
 		);
 	}
-
-	// ─── resolvePermission ────────────────────────────────────────────────
 
 	resolvePermissionEffect(
 		sessionId: string,
@@ -328,8 +315,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			Effect.asVoid,
 		);
 	}
-
-	// ─── resolveQuestion ──────────────────────────────────────────────────
 
 	resolveQuestionEffect(
 		sessionId: string,
@@ -353,8 +338,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		);
 	}
 
-	// ─── endSession ──────────────────────────────────────────────────────
-
 	endSessionEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
@@ -375,8 +358,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			);
 		}
 	}
-
-	// ─── shutdown ────────────────────────────────────────────────────────
 
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.sync(() => {

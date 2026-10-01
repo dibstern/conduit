@@ -1,4 +1,3 @@
-// ─── Test WebSocket Client ───────────────────────────────────────────────────
 // Connects to the relay's WebSocket endpoint and provides typed helpers for
 // sending messages, waiting for specific response types, and inspecting
 // everything received. Used by integration tests.

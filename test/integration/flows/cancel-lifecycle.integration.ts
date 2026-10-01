@@ -1,4 +1,3 @@
-// ─── Integration: Cancel / Abort Lifecycle ───────────────────────────────────
 // Tests the cancel/abort flow against a mock OpenCode server.
 // Verifies: send → processing → cancel → abort called → done → can send again
 

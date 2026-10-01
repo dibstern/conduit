@@ -1,5 +1,4 @@
 import { InstanceMgmtTag, ProjectMgmtTag } from "./management-service.js";
-// ─── Daemon Startup Effect Functions ─────────────────────────────────────────
 // Effect-based startup sequence for the daemon. Handles crash counting,
 // instance rehydration, instance probing, smart default detection, and
 // auto-start. Each step uses error isolation — expected tagged errors are
@@ -19,8 +18,6 @@ import {
 import type { InstanceConfig } from "../../../shared-types.js";
 
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
-
-// ─── Errors ────────────────────────────────────────────────────────────────
 
 /** Fatal error when crash limit is exceeded — the only error that stops startup. */
 export class CrashLimitExceeded extends Data.TaggedError("CrashLimitExceeded")<{
@@ -71,8 +68,6 @@ const isExpectedLegacyInstanceManagerError = (cause: unknown): boolean => {
 const formatInstanceManagerCause = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
 
-// ─── CrashCounter service ──────────────────────────────────────────────────
-
 /** Interface for crash counting — tracks consecutive crashes to detect boot loops. */
 export interface CrashCounter {
 	record(): Effect.Effect<{ count: number; shouldAbort: boolean }>;
@@ -111,8 +106,6 @@ export const CrashCounterLive: Layer.Layer<CrashCounterTag> = Layer.effect(
 	}),
 );
 
-// ─── recordCrashCounter ────────────────────────────────────────────────────
-
 /**
  * Record a crash and return whether the daemon should abort.
  * Calls `counter.record()` and returns the `shouldAbort` boolean.
@@ -126,8 +119,6 @@ export const recordCrashCounter: Effect.Effect<
 	const { shouldAbort } = yield* counter.record();
 	return shouldAbort;
 }).pipe(Effect.withSpan("recordCrashCounter"));
-
-// ─── rehydrateInstances ────────────────────────────────────────────────────
 
 /**
  * Rehydrate instances from persisted DaemonState.
@@ -189,8 +180,6 @@ export const rehydrateInstances: Effect.Effect<
 	Effect.withSpan("rehydrateInstances"),
 );
 
-// ─── probeAndConvert ───────────────────────────────────────────────────────
-
 /**
  * Probe unmanaged instances and convert unreachable ones to managed.
  * Requires HttpClient from @effect/platform.
@@ -207,8 +196,6 @@ export const probeAndConvert: Effect.Effect<
 	yield* Effect.logDebug("probeAndConvert: not yet wired (needs HttpClient)");
 }).pipe(Effect.withSpan("probeAndConvert"));
 
-// ─── detectSmartDefault ────────────────────────────────────────────────────
-
 /**
  * Probe localhost:4096 for a running OpenCode instance.
  * Requires HttpClient from @effect/platform.
@@ -220,8 +207,6 @@ export const detectSmartDefault: Effect.Effect<void> = Effect.gen(function* () {
 		"detectSmartDefault: not yet wired (needs HttpClient)",
 	);
 }).pipe(Effect.withSpan("detectSmartDefault"));
-
-// ─── autoStartManagedDefault ───────────────────────────────────────────────
 
 /**
  * Auto-start stopped managed instances.
@@ -280,8 +265,6 @@ export const projectDiscovery: Effect.Effect<void, never, ProjectMgmtTag> =
 		Effect.annotateLogs("task", "projectDiscovery"),
 		Effect.withSpan("projectDiscovery"),
 	);
-
-// ─── runStartupSequence ────────────────────────────────────────────────────
 
 /**
  * Orchestrator Effect that runs the full startup sequence.

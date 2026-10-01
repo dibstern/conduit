@@ -1,4 +1,4 @@
-// ─── Tests: Config Persistence Module (Ticket 8.3) ──────────────────────────
+// Tests: Config Persistence Module (Ticket 8.3)
 
 import {
 	existsSync,
@@ -27,8 +27,6 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 import { deserializeRecent } from "../../../src/lib/daemon/recent-projects.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 let tempDir: string;
 
 function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
@@ -54,16 +52,12 @@ afterEach(() => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ─── getConfigDir ───────────────────────────────────────────────────────────
-
 describe("getConfigDir", () => {
 	it("returns a path ending in conduit", () => {
 		const dir = getConfigDir();
 		expect(dir).toMatch(/conduit$/);
 	});
 });
-
-// ─── loadDaemonConfig ───────────────────────────────────────────────────────
 
 describe("loadDaemonConfig", () => {
 	it("defaults legacy configs to three days and preserves Never", async () => {
@@ -128,8 +122,6 @@ describe("loadDaemonConfig", () => {
 	});
 });
 
-// ─── saveDaemonConfig ───────────────────────────────────────────────────────
-
 describe("saveDaemonConfig", () => {
 	it("writes valid JSON that can be loaded back", async () => {
 		const config = makeSampleConfig({ pid: 42, debug: true });
@@ -190,8 +182,6 @@ describe("saveDaemonConfig", () => {
 	});
 });
 
-// ─── clearDaemonConfig ──────────────────────────────────────────────────────
-
 describe("clearDaemonConfig", () => {
 	it("removes daemon.json, relay.sock, and daemon.pid", () => {
 		mkdirSync(tempDir, { recursive: true });
@@ -211,8 +201,6 @@ describe("clearDaemonConfig", () => {
 		expect(() => clearDaemonConfig(tempDir)).not.toThrow();
 	});
 });
-
-// ─── CrashInfo ──────────────────────────────────────────────────────────────
 
 describe("CrashInfo", () => {
 	it("writeCrashInfo + readCrashInfo round-trip", () => {
@@ -244,8 +232,6 @@ describe("CrashInfo", () => {
 		expect(readCrashInfo(tempDir)).toBeNull();
 	});
 });
-
-// ─── syncRecentProjects ─────────────────────────────────────────────────────
 
 describe("syncRecentProjects", () => {
 	it("merges new projects with existing", () => {
@@ -384,8 +370,6 @@ describe("syncRecentProjects", () => {
 	});
 });
 
-// ─── DaemonConfig with instances ────────────────────────────────────────────
-
 describe("DaemonConfig with instances", () => {
 	it("saves and loads config with instances array", async () => {
 		const config: DaemonConfig = {
@@ -464,8 +448,6 @@ describe("DaemonConfig with instances", () => {
 		expect(project.instanceId).toBe("personal");
 	});
 });
-
-// ─── DaemonConfig with keepAwakeCommand/keepAwakeArgs ───────────────────────
 
 describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
 	it("round-trips keepAwakeCommand and keepAwakeArgs through save/load", async () => {

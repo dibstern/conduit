@@ -1,4 +1,4 @@
-// ─── Daemon Health Watcher — Unit Tests (Ticket 8.13) ────────────────────────
+// Daemon Health Watcher — Unit Tests (Ticket 8.13)
 // Tests for DaemonWatcher: polling, crash detection, restart logic, backoff.
 // Uses vi.useFakeTimers() to control intervals and injectable mock connect/readCrashInfo.
 
@@ -18,8 +18,6 @@ import {
 	type WatcherOptions,
 } from "../../../src/lib/cli/cli-watcher.js";
 import type { CrashInfo } from "../../../src/lib/daemon/config-persistence.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Create a mock socket that emits connect on next tick. */
 function createSuccessSocket() {
@@ -140,8 +138,6 @@ async function flushMicrotasks(): Promise<void> {
 		queueMicrotask(resolve);
 	});
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
 	vi.useFakeTimers();

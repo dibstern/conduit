@@ -1,4 +1,3 @@
-<!-- ─── Connect Overlay ───────────────────────────────────────────────────── -->
 <!-- OpenCode "O" mark animation overlay shown during WebSocket connection.    -->
 
 <script lang="ts">
@@ -17,12 +16,8 @@
 	import ConduitLogo from '../ui/ConduitLogo.svelte';
 	import Button from '../ui/Button.svelte';
 
-	// ─── State ──────────────────────────────────────────────────────────────────
-
 	let fadeOut = $state(false);
 	let displayNone = $state(false);
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const connected = $derived(getIsConnected());
 	const relayStatus = $derived(wsState.relayStatus);
@@ -97,7 +92,6 @@
 		cachedProviderId === "claude" ? "Claude" : instanceName,
 	);
 
-	// ─── Status display text ────────────────────────────────────────────────────
 	// Keep reconnect copy generic; instance/provider names remain available for
 	// action buttons and connecting state.
 
@@ -115,8 +109,6 @@
 		return wsState.statusText;
 	});
 
-	// ─── Reset on disconnect ────────────────────────────────────────────────────
-
 	$effect(() => {
 		if (!connected) {
 			fadeOut = false;
@@ -124,7 +116,6 @@
 		}
 	});
 
-	// ─── Hide animation when connected ──────────────────────────────────────────
 	$effect(() => {
 		if (!connected) return;
 
@@ -136,10 +127,8 @@
 		return () => clearTimeout(hideTimer);
 	});
 
-	// ─── Computed visibility ────────────────────────────────────────────────────
 	const isHidden = $derived(connected && displayNone);
 
-	// ─── Instance action handlers ──────────────────────────────────────────────
 	function handleStartInstance() {
 		const projectSlug = projectState.currentSlug;
 		if (cachedInstanceId && projectSlug) {

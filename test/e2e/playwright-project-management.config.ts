@@ -1,4 +1,3 @@
-// ─── Playwright Config: Project Management Tests ─────────────────────────────
 // Tests directory autocomplete, project rename, and project delete flows.
 // Uses WS mock — no real OpenCode or relay needed.
 

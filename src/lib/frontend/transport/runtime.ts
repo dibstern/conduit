@@ -1,4 +1,3 @@
-// ─── Effect Frontend Runtime ────────────────────────────────────────────────
 // Long-lived ManagedRuntime singleton for the frontend. Individual WebSocket
 // connections are managed as fibers within the runtime. On reconnect, only
 // the stream fiber is interrupted — the runtime and its service graph persist.

@@ -1,5 +1,3 @@
-// ─── Tests: DaemonConfig Schema & ServerConfigLive Layer ─────────────────────
-
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -17,8 +15,6 @@ import {
 	DaemonConfigTag,
 	ServerConfigLive,
 } from "../../../src/lib/daemon/config-persistence.js";
-
-// ─── Schema validation tests ───────────────────────────────────────────────
 
 describe("DaemonConfigSchema", () => {
 	it("validates a minimal config", () => {
@@ -159,8 +155,6 @@ describe("DaemonConfigSchema", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 });
-
-// ─── ServerConfigLive Layer tests ──────────────────────────────────────────
 
 describe("ServerConfigLive", () => {
 	let tempDir: string;

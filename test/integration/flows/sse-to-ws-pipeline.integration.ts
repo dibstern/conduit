@@ -1,4 +1,3 @@
-// ─── Integration: SSE to WS Pipeline ─────────────────────────────────────────
 // Verifies that SSE events from OpenCode flow through the relay and arrive at
 // WebSocket clients. Sends prompts and observes the full event pipeline:
 // SSE -> translator -> WebSocket broadcast.

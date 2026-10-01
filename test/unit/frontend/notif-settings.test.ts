@@ -1,4 +1,3 @@
-// ─── Notification Settings — Unit Tests ──────────────────────────────────────
 // Tests getNotifSettings / saveNotifSettings localStorage round-trip.
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -6,8 +5,6 @@ import {
 	getNotifSettings,
 	saveNotifSettings,
 } from "../../../src/lib/frontend/utils/notif-settings.js";
-
-// ─── localStorage mock ───────────────────────────────────────────────────────
 
 const localStorageMock = (() => {
 	let store: Record<string, string> = {};
@@ -35,8 +32,6 @@ beforeEach(() => {
 	localStorageMock.setItem.mockClear();
 	vi.stubGlobal("localStorage", localStorageMock);
 });
-
-// ─── getNotifSettings ────────────────────────────────────────────────────────
 
 describe("getNotifSettings", () => {
 	test("returns defaults when localStorage is empty", () => {
@@ -106,8 +101,6 @@ describe("getNotifSettings", () => {
 		expect(localStorageMock.getItem).toHaveBeenCalledWith("notif-settings");
 	});
 });
-
-// ─── saveNotifSettings ───────────────────────────────────────────────────────
 
 describe("saveNotifSettings", () => {
 	test("stores settings to localStorage", () => {

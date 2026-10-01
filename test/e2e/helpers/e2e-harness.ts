@@ -1,4 +1,3 @@
-// ─── E2E Harness ─────────────────────────────────────────────────────────────
 // Two harness modes:
 //
 // 1. createE2EHarness()    — real relay + real OpenCode (live E2E tests)
@@ -39,8 +38,6 @@ const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 // Only switch model if BOTH env vars are explicitly set — otherwise use OpenCode's default
 const E2E_MODEL = process.env["E2E_MODEL"] ?? "";
 const E2E_PROVIDER = process.env["E2E_PROVIDER"] ?? "";
-
-// ─── Live Harness ────────────────────────────────────────────────────────────
 
 export interface E2EHarness {
 	stack: RelayStack;
@@ -118,8 +115,6 @@ export async function createE2EHarness(opts?: {
 		},
 	};
 }
-
-// ─── Replay Harness ──────────────────────────────────────────────────────────
 
 export interface ReplayHarness {
 	stack: RelayStack;

@@ -8,7 +8,7 @@ import {
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
-// ─── Effect Handler Tests (Batch 1) ─────────────────────────────────────────
+// Effect Handler Tests (Batch 1)
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
 // Layer. Each test provides minimal mock services via Layer.succeed, runs
@@ -170,8 +170,6 @@ import {
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
-// ─── Mock factories ────────────────────────────────────────────────────────
-
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
 ): WebSocketHandlerShape {
@@ -317,8 +315,6 @@ function mockConfig(
 	});
 }
 
-// ─── Agent handler tests ───────────────────────────────────────────────────
-
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 const persistentHandlerPersistence = Layer.merge(
 	makePersistenceEffectLayer(":memory:"),
@@ -360,8 +356,6 @@ describe("handleGetAgents", () => {
 		},
 	);
 });
-
-// ─── Settings handler tests ────────────────────────────────────────────────
 
 describe("handleGetCommands", () => {
 	it.effect("fetches commands and sends to client", () => {
@@ -450,8 +444,6 @@ describe("handleGetProjects", () => {
 	);
 });
 
-// ─── File handler tests ────────────────────────────────────────────────────
-
 describe("handleGetFileContent", () => {
 	it.effect("reads file content and sends to client", () => {
 		const ws = mockWsHandler();
@@ -535,8 +527,6 @@ describe("handleGetFileList", () => {
 	});
 });
 
-// ─── Reload handler tests ──────────────────────────────────────────────────
-
 describe("reloadProviderSessionForClient", () => {
 	it.effect("reloads provider session and refreshes models/commands", () => {
 		const ws = mockWsHandler({
@@ -594,8 +584,6 @@ describe("reloadProviderSessionForClient", () => {
 		);
 	});
 });
-
-// ─── Model handler tests ──────────────────────────────────────────────────
 
 describe("sendModelsStateToClient", () => {
 	it.effect("fetches providers and sends model_list to client", () => {
@@ -1374,8 +1362,6 @@ describe("handleSwitchContextWindow", () => {
 // Batch 2 tests — permissions, session, prompt, terminal, instance, tool-content
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Additional mock factories for batch 2 ────────────────────────────────
-
 function mockSessionManager(
 	overrides?: Partial<SessionManagerShape>,
 ): SessionManagerShape {
@@ -1532,8 +1518,6 @@ function makeSessionLifecycleLayer(options?: {
 		makeOverridesStateLive(),
 	);
 }
-
-// ─── Tool Content handler tests ───────────────────────────────────────────
 
 describe("handleGetToolContent", () => {
 	it.effect(
@@ -1883,8 +1867,6 @@ describe("handleForkSession", () => {
 	);
 });
 
-// ─── Terminal handler tests ───────────────────────────────────────────────
-
 describe("handlePtyInput", () => {
 	it.effect("sends input through terminal service", () => {
 		const terminal = mockTerminalService();
@@ -1915,8 +1897,6 @@ describe("handlePtyInput", () => {
 		);
 	});
 });
-
-// ─── Permissions handler tests ────────────────────────────────────────────
 
 describe("setDefaultPermissionModeForRelay", () => {
 	it.effect(
@@ -3395,8 +3375,6 @@ describe("loadMoreHistoryForSession", () => {
 	});
 	}
 });
-
-// ─── Prompt handler tests ─────────────────────────────────────────────────
 
 describe("sendMessageToSession", () => {
 	for (const [settled, snoozed] of [

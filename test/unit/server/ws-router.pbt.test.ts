@@ -1,4 +1,4 @@
-// ─── Property-Based Tests: WebSocket Message Router (Ticket 2.2) ─────────────
+// Property-Based Tests: WebSocket Message Router (Ticket 2.2)
 //
 // Properties tested:
 // P1: routeMessage dispatches known types to correct handler (AC3)
@@ -31,8 +31,6 @@ import { edgeCaseString, idString } from "../../helpers/arbitraries.js";
 
 const SEED = 42;
 const NUM_RUNS = 300;
-
-// ─── Generators ─────────────────────────────────────────────────────────────
 
 const validMessageTypes: IncomingMessageType[] = ["pty_input"];
 
@@ -79,8 +77,6 @@ const arbClientId = fc.oneof(
 );
 
 describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
-	// ─── P1: Valid message routing ──────────────────────────────────────────
-
 	describe("P1: routeMessage dispatches known types to correct handler (AC3)", () => {
 		it("property: valid type → handler matches type", () => {
 			fc.assert(
@@ -108,8 +104,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 		});
 	});
 
-	// ─── P2: Unknown type → error ──────────────────────────────────────────
-
 	describe("P2: routeMessage returns error for unknown types (AC7)", () => {
 		it("property: invalid type → error result with UNKNOWN_MESSAGE_TYPE", () => {
 			fc.assert(
@@ -126,8 +120,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			);
 		});
 	});
-
-	// ─── P3: parseIncomingMessage robustness ────────────────────────────────
 
 	describe("P3: parseIncomingMessage never throws on arbitrary input (AC7)", () => {
 		it("property: arbitrary strings never throw", () => {
@@ -182,8 +174,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			);
 		});
 	});
-
-	// ─── P4: Client count tracking ──────────────────────────────────────────
 
 	describe("P4: Client count tracks connects/disconnects (AC4)", () => {
 		it("property: add N unique clients → count is N", () => {
@@ -248,8 +238,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 		});
 	});
 
-	// ─── P5: Broadcast target exclusion ─────────────────────────────────────
-
 	describe("P5: Broadcast targets exclude sender (AC2)", () => {
 		it("property: sender is never in broadcast targets", () => {
 			fc.assert(
@@ -312,8 +300,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 		});
 	});
 
-	// ─── P6: Idempotent adds ────────────────────────────────────────────────
-
 	describe("P6: Client tracker is idempotent for duplicate adds (AC1)", () => {
 		it("property: adding same client twice → count stays 1", () => {
 			fc.assert(
@@ -328,8 +314,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			);
 		});
 	});
-
-	// ─── P9: parse + route roundtrip ────────────────────────────────────────
 
 	describe("P9: parseIncomingMessage + routeMessage roundtrip (AC3)", () => {
 		it("property: serialize→parse→route works for valid messages", () => {
@@ -352,8 +336,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 		});
 	});
 
-	// ─── P10: createClientCountMessage shape ────────────────────────────────
-
 	describe("P10: createClientCountMessage always returns valid shape", () => {
 		it("property: count is preserved exactly", () => {
 			fc.assert(
@@ -366,8 +348,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			);
 		});
 	});
-
-	// ─── P11: Test generator drift guard ────────────────────────────────────
 
 	describe("P11: Test validMessageTypes matches production VALID_MESSAGE_TYPES exactly", () => {
 		it("test generator covers all production message types (no drift)", () => {
@@ -424,8 +404,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 			}
 		});
 	});
-
-	// ─── P12: parseIncomingMessage with no type field ───────────────────────
 
 	describe("P12: parseIncomingMessage returns null for valid JSON without type field", () => {
 		it("returns null for JSON object with no type field", () => {

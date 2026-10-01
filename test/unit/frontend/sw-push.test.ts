@@ -1,4 +1,3 @@
-// ─── Service Worker Push Handler Tests ───────────────────────────────────────
 // Tests the push event handler in sw.ts: notification display, tag assignment,
 // requireInteraction behavior, and (critically) that NO visibility suppression
 // occurs — push notifications always show regardless of client visibility.
@@ -19,7 +18,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── ServiceWorkerGlobalScope simulation ────────────────────────────────────
 // sw.ts calls self.addEventListener("push", ...) at module level.
 // We capture the listener by stubbing self before importing.
 
@@ -80,8 +78,6 @@ function getShowNotificationSpy(): ReturnType<typeof vi.fn> {
 	return s?.registration?.showNotification ?? showNotificationMock;
 }
 
-// ─── Setup ──────────────────────────────────────────────────────────────────
-
 beforeEach(async () => {
 	vi.resetModules();
 	pushListener = null;
@@ -128,14 +124,12 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe("SW push handler", () => {
 	it("registers a push event listener", async () => {
 		expect(pushListener).toBeTypeOf("function");
 	});
 
-	// ─── Core: always shows notification (no visibility suppression) ────
+	// Core: always shows notification (no visibility suppression)
 
 	it("shows notification for 'done' event", async () => {
 		const event = createPushEvent({
@@ -192,7 +186,6 @@ describe("SW push handler", () => {
 		});
 	});
 
-	// ─── Regression: NO visibility suppression ─────────────────────────
 	// This is the critical Bug #3 regression test. The old code suppressed
 	// "done" notifications when any client was visible. The fix removes
 	// this check entirely — the SW always shows notifications.
@@ -223,8 +216,6 @@ describe("SW push handler", () => {
 		expect(getShowNotificationSpy()).toHaveBeenCalledOnce();
 	});
 
-	// ─── Silent test push ──────────────────────────────────────────────
-
 	it("does NOT show notification for type=test (silent validation)", async () => {
 		const event = createPushEvent({ type: "test" });
 
@@ -235,8 +226,6 @@ describe("SW push handler", () => {
 		expect(event.waitUntil).not.toHaveBeenCalled();
 	});
 
-	// ─── Bad data handling ─────────────────────────────────────────────
-
 	it("silently returns on invalid JSON data", async () => {
 		const event = createPushEventWithBadData();
 
@@ -245,8 +234,6 @@ describe("SW push handler", () => {
 		const spy = getShowNotificationSpy();
 		expect(spy).not.toHaveBeenCalled();
 	});
-
-	// ─── Fallback title ────────────────────────────────────────────────
 
 	it("uses fallback title when payload has no title", async () => {
 		const event = createPushEvent({ type: "done", body: "Done!" });
@@ -259,8 +246,6 @@ describe("SW push handler", () => {
 			expect.objectContaining({ body: "Done!" }),
 		);
 	});
-
-	// ─── Tag assignment ────────────────────────────────────────────────
 
 	it("uses payload tag for done events when provided", async () => {
 		const event = createPushEvent({
@@ -305,8 +290,6 @@ describe("SW push handler", () => {
 		);
 	});
 
-	// ─── waitUntil ─────────────────────────────────────────────────────
-
 	it("passes showNotification promise to event.waitUntil", async () => {
 		const event = createPushEvent({
 			type: "done",
@@ -317,8 +300,6 @@ describe("SW push handler", () => {
 
 		expect(event.waitUntil).toHaveBeenCalledOnce();
 	});
-
-	// ─── showNotification failure is caught ────────────────────────────
 
 	it("catches showNotification errors without throwing", async () => {
 		showNotificationMock.mockRejectedValue(new Error("notification failed"));

@@ -1,4 +1,3 @@
-// ─── Empty State Frozen Tests ────────────────────────────────────────────────
 // Asserts EMPTY_STATE mutations throw; EMPTY_MESSAGES.toolRegistry method
 // calls throw (methods stubbed with throwing stubs).
 

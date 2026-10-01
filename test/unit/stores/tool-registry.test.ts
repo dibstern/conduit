@@ -1,4 +1,3 @@
-// ─── Tool Registry Tests ─────────────────────────────────────────────────────
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createToolRegistry,
@@ -6,8 +5,6 @@ import {
 } from "../../../src/lib/frontend/stores/tool-registry.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import type { FrontendLogger } from "../../../src/lib/frontend/utils/logger.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 let seq = 0;
 const testUuid = () => `uuid-${++seq}`;
@@ -38,8 +35,6 @@ beforeEach(() => {
 	log = createMockLogger();
 	registry = createToolRegistry({ log, uuidFn: testUuid });
 });
-
-// ─── Forward Transitions ────────────────────────────────────────────────────
 
 describe("forward transitions", () => {
 	it("start() creates a pending tool", () => {
@@ -105,8 +100,6 @@ describe("forward transitions", () => {
 		expect(result.tool.fullContentLength).toBe(10000);
 	});
 });
-
-// ─── Backward Transitions Rejected ──────────────────────────────────────────
 
 describe("backward transitions rejected", () => {
 	it("silently rejects completed -> running (expected history+SSE overlap)", () => {
@@ -193,8 +186,6 @@ describe("backward transitions rejected", () => {
 	});
 });
 
-// ─── Orphan Events ──────────────────────────────────────────────────────────
-
 describe("orphan events", () => {
 	it("executing unknown ID returns reject", () => {
 		const result = registry.executing("unknown-1");
@@ -206,8 +197,6 @@ describe("orphan events", () => {
 		expect(result.action).toBe("reject");
 	});
 });
-
-// ─── Dedup ──────────────────────────────────────────────────────────────────
 
 describe("dedup", () => {
 	it("duplicate start() returns duplicate action and retains existing entry", () => {
@@ -222,8 +211,6 @@ describe("dedup", () => {
 		expect(execResult.tool.uuid).toBe("uuid-1"); // original UUID retained
 	});
 });
-
-// ─── finalizeAll ────────────────────────────────────────────────────────────
 
 describe("finalizeAll", () => {
 	it("forces pending to completed", () => {
@@ -341,8 +328,6 @@ describe("finalizeAll", () => {
 	});
 });
 
-// ─── clear ──────────────────────────────────────────────────────────────────
-
 describe("clear", () => {
 	it("resets all state", () => {
 		registry.start("call-1", "Read");
@@ -353,8 +338,6 @@ describe("clear", () => {
 		expect(registry.getUuid("call-2")).toBeUndefined();
 	});
 });
-
-// ─── remove ─────────────────────────────────────────────────────────────────
 
 describe("remove", () => {
 	it("removes a single entry", () => {
@@ -367,8 +350,6 @@ describe("remove", () => {
 	});
 });
 
-// ─── getUuid ────────────────────────────────────────────────────────────────
-
 describe("getUuid", () => {
 	it("returns uuid for known tool", () => {
 		registry.start("call-1", "Read");
@@ -379,8 +360,6 @@ describe("getUuid", () => {
 		expect(registry.getUuid("nonexistent")).toBeUndefined();
 	});
 });
-
-// ─── Diagnostics ────────────────────────────────────────────────────────────
 
 describe("diagnostics", () => {
 	it("does not error on completed -> running (expected overlap)", () => {
@@ -409,8 +388,6 @@ describe("diagnostics", () => {
 	});
 });
 
-// ─── Metadata ───────────────────────────────────────────────────────────────
-
 describe("metadata", () => {
 	it("executing stores metadata", () => {
 		registry.start("call-1", "Task");
@@ -431,8 +408,6 @@ describe("metadata", () => {
 		expect(result.tool.messageId).toBe("msg-42");
 	});
 });
-
-// ─── updateMetadata ────────────────────────────────────────────────────────
 
 describe("updateMetadata", () => {
 	it("merges metadata on a running tool", () => {
@@ -486,8 +461,6 @@ describe("updateMetadata", () => {
 		expect(result.action).toBe("reject");
 	});
 });
-
-// ─── uuidFn ─────────────────────────────────────────────────────────────────
 
 describe("uuidFn", () => {
 	it("custom uuidFn produces deterministic UUIDs", () => {

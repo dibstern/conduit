@@ -1,9 +1,5 @@
-// ─── PIN Authentication & Rate Limiting ───────────────────
-
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Data, Effect } from "effect";
-
-// ─── Effect Error Types ───────────────────────────────────────────────────────
 
 export class AuthenticationError extends Data.TaggedError(
 	"AuthenticationError",
@@ -11,8 +7,6 @@ export class AuthenticationError extends Data.TaggedError(
 	reason: "invalid_pin" | "locked_out" | "no_pin_set";
 	retryAfter?: number;
 }> {}
-
-// ─── Effect-based Functions ───────────────────────────────────────────────────
 
 /**
  * Hash a PIN with domain-specific prefix, wrapped in Effect.sync.

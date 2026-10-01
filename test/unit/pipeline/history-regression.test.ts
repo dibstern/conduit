@@ -12,8 +12,6 @@ import {
 } from "../../helpers/persistence-factories.js";
 
 describe("History conversion regression", () => {
-	// ─── Part type regression guard ─────────────────────────────────────
-
 	describe("part type regression guard", () => {
 		/**
 		 * Constructs a minimal HistoryMessage with the given parts.
@@ -88,8 +86,6 @@ describe("History conversion regression", () => {
 		});
 	});
 
-	// ─── Duration calculation ───────────────────────────────────────────
-
 	describe("duration calculation", () => {
 		function makeThinkingMsg(partTime?: {
 			start?: number;
@@ -157,8 +153,6 @@ describe("History conversion regression", () => {
 		});
 	});
 
-	// ─── Pagination guard ───────────────────────────────────────────────
-
 	describe("pagination guard", () => {
 		it("message with multiple parts stays intact at pageSize=1", async () => {
 			// Future-proofing guard: getSessionMessagesWithParts() currently
@@ -188,7 +182,7 @@ describe("History conversion regression", () => {
 		});
 	});
 
-	// ─── Pre-existing data round-trip (migration safety) ─────────────────
+	// Pre-existing data round-trip (migration safety)
 
 	describe("pre-existing data round-trip", () => {
 		it("pre-existing type='thinking' rows in SQLite round-trip after Task 0 fix", async () => {
@@ -272,8 +266,6 @@ describe("History conversion regression", () => {
 			}
 		});
 	});
-
-	// ─── Unknown part type runtime behavior ──────────────────────────────
 
 	describe("unknown part type — runtime drop behavior", () => {
 		function makeHistoryMessage(

@@ -1,4 +1,3 @@
-// ─── Shared Event Pipeline ───────────────────────────────────────────────────
 // Pure functions for event processing. Each function does one thing and returns
 // data — no side effects. The caller composes them and executes side effects.
 
@@ -11,8 +10,6 @@ import {
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../shared-types.js";
 import { truncateToolResult as truncateToolResultImpl } from "./truncate-content.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export type RouteDecision =
 	| { action: "send"; sessionId: string }
@@ -34,8 +31,6 @@ export interface PipelineResult {
 	timeout: "clear" | "reset" | "none";
 	source: EventSource;
 }
-
-// ─── Pure functions ──────────────────────────────────────────────────────────
 
 /** Truncate tool_result messages over threshold. Other types pass through. */
 export function truncateIfNeeded(msg: RelayMessage): TruncateResult {
@@ -82,7 +77,6 @@ const PERSISTED_TYPES: ReadonlySet<RelayMessage["type"]> = new Set(
 	PERSISTED_EVENT_TYPES,
 );
 
-// ─── Compile-time assertion: PERSISTED_EVENT_TYPES ⊆ RelayMessage["type"] ───
 type _AssertPersistedSubset =
 	(typeof PERSISTED_EVENT_TYPES)[number] extends RelayMessage["type"]
 		? true
@@ -135,8 +129,6 @@ export function resolveTimeout(
 	if (msgType === "ask_user") return "clear";
 	return "reset";
 }
-
-// ─── Side-effect application ─────────────────────────────────────────────────
 
 /** Dependencies for applying pipeline side effects. */
 export interface ProcessingTimeoutsPort {
@@ -220,7 +212,7 @@ export function applyPipelineResultEffect(
 	});
 }
 
-// ─── Composed pipeline (convenience, still side-effect free) ─────────────────
+// Composed pipeline (convenience, still side-effect free)
 
 /**
  * Process a relay event through the pipeline. Returns all decisions as data.

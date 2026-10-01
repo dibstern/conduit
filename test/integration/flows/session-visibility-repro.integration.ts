@@ -1,4 +1,3 @@
-// ─── Integration: Session Visibility Repros ─────────────────────────────────
 // Reproduces two reported bugs at the relay-harness seam:
 //
 //  Bug A ("two tabs, one empty"): a fresh client opening a session with

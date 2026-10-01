@@ -1,4 +1,4 @@
-// ─── State-Machine Model Test: WebSocket Message Router (Ticket 2.2) ─────────
+// State-Machine Model Test: WebSocket Message Router (Ticket 2.2)
 //
 // Uses fc.commands() + fc.modelRun() to exercise arbitrary interleavings of:
 //   - AddClient (new WS connection)
@@ -29,8 +29,6 @@ import {
 const SEED = 42;
 const NUM_RUNS = 100;
 
-// ─── Model ──────────────────────────────────────────────────────────────────
-
 interface ModelState {
 	clients: Set<string>;
 }
@@ -38,8 +36,6 @@ interface ModelState {
 interface RealState {
 	tracker: ClientTracker;
 }
-
-// ─── Commands ───────────────────────────────────────────────────────────────
 
 class AddClientCommand implements fc.Command<ModelState, RealState> {
 	constructor(readonly clientId: string) {}
@@ -385,8 +381,6 @@ class RouteInvalidCommand implements fc.Command<ModelState, RealState> {
 	}
 }
 
-// ─── Arbitraries ────────────────────────────────────────────────────────────
-
 const arbClientId = fc.oneof(
 	{ weight: 5, arbitrary: fc.uuid() },
 	{ weight: 3, arbitrary: fc.stringMatching(/^client-[0-9]{1,5}$/) },
@@ -448,8 +442,6 @@ const allCommands = fc.commands(
 	],
 	{ maxCommands: 50 },
 );
-
-// ─── Test ───────────────────────────────────────────────────────────────────
 
 describe("Ticket 2.2 — WebSocket Router State Machine PBT", () => {
 	it("property: arbitrary command sequences maintain model/real client set consistency", () => {

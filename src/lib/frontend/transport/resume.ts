@@ -1,4 +1,3 @@
-// ─── Client-side resume ─────────────────────────────────────────────────────
 // `RpcClient` reconnects the transport and replays nothing, so a dropped socket
 // leaves every subscription on it dead. Someone has to re-issue. That someone is
 // this module — once, for every stream subscription, never a consumer (ni8.5 §9).

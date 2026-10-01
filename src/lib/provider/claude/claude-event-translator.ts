@@ -55,7 +55,6 @@ import type {
 const PROVIDER = "claude" as const;
 const defaultLog = createLogger("claude-event-translator");
 
-// ─── Typed event construction helper ───────────────────────────────────────
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
 
@@ -77,8 +76,6 @@ function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 		...(metadata ? { metadata } : {}),
 	};
 }
-
-// ─── Tool classification ───────────────────────────────────────────────────
 
 type CanonicalItemType =
 	| "assistant_message"
@@ -236,8 +233,6 @@ function taskCompletionResult(
 	}
 	return null;
 }
-
-// ─── Translator ────────────────────────────────────────────────────────────
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
@@ -451,8 +446,6 @@ export class ClaudeEventTranslator {
 			}),
 		);
 	}
-
-	// ─── System ──────────────────────────────────────────────────────────
 
 	private translateSystem(
 		ctx: ClaudeSessionContext,
@@ -1007,8 +1000,6 @@ export class ClaudeEventTranslator {
 		}
 	}
 
-	// ─── Stream Events ───────────────────────────────────────────────────
-
 	private translateStreamEvent(
 		ctx: ClaudeSessionContext,
 		message: SDKPartialAssistantMessage,
@@ -1034,8 +1025,6 @@ export class ClaudeEventTranslator {
 				return Effect.void;
 		}
 	}
-
-	// ─── Message Start ──────────────────────────────────────────────────
 
 	private handleMessageStart(
 		ctx: ClaudeSessionContext,
@@ -1283,8 +1272,6 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	// ─── Assistant Snapshot ──────────────────────────────────────────────
-
 	private translateAssistantSnapshot(
 		ctx: ClaudeSessionContext,
 		message: SDKAssistantMessage,
@@ -1401,8 +1388,6 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	// ─── User Tool Results ──────────────────────────────────────────────
-
 	private translateUserToolResults(
 		ctx: ClaudeSessionContext,
 		message: SDKUserMessage,
@@ -1454,8 +1439,6 @@ export class ClaudeEventTranslator {
 			}
 		});
 	}
-
-	// ─── Result ──────────────────────────────────────────────────────────
 
 	private translateResult(
 		ctx: ClaudeSessionContext,
@@ -1592,8 +1575,6 @@ export class ClaudeEventTranslator {
 		});
 	}
 
-	// ─── Flush Pending Tools ────────────────────────────────────────────
-
 	/** Flush any pendingStart tools (e.g. on stream interruption).
 	 *  Emits tool.started + tool.completed for each buffered tool. */
 	flushPendingTools(
@@ -1643,8 +1624,6 @@ export class ClaudeEventTranslator {
 			}
 		});
 	}
-
-	// ─── Push Helper ─────────────────────────────────────────────────────
 
 	private collectWrites(
 		work: () => Effect.Effect<void, EventSinkError>,

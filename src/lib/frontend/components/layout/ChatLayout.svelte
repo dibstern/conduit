@@ -1,4 +1,3 @@
-<!-- ─── Chat Layout ─────────────────────────────────────────────────────────── -->
 <!-- Session list and chat: Sidebar + SessionBar + Messages + Input. -->
 <!-- Wires all feature/overlay components into the layout hierarchy. -->
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
@@ -70,8 +69,6 @@
 	} from "../../utils/attention.js";
 	import DeepSearch from "../session/DeepSearch.svelte";
 
-	// ─── Local state ──────────────────────────────────────────────────────────
-
 	let qrVisible = $state(false);
 	let settingsVisible = $state(false);
 	let settingsInitialTab = $state("notifications");
@@ -82,8 +79,6 @@
 		onApprove?: () => void;
 		onReject?: () => void;
 	}>({ mode: null, content: "" });
-
-	// ─── Terminal resize state ─────────────────────────────────────────────
 
 	const TERMINAL_MIN_HEIGHT = 100;
 	const TERMINAL_MAX_RATIO = 0.7; // 70% of parent height
@@ -148,8 +143,6 @@
 		}
 		wasPhoneListScreen = active;
 	});
-
-	// ─── Sidebar resize state ─────────────────────────────────────────────
 
 	let isSidebarResizing = $state(false);
 	const CHAT_MIN_WIDTH = 360;
@@ -340,17 +333,13 @@
 		document.addEventListener("touchend", onEnd);
 	}
 
-	// ─── Todo items (from reactive todo store, updated by SSE + tool results) ──
+	// Todo items (from reactive todo store, updated by SSE + tool results)
 
 	const todoItems = $derived(todoState.items);
-
-	// ─── Handlers ──────────────────────────────────────────────────────────────
 
 	function handleQrClose() {
 		qrVisible = false;
 	}
-
-	// ─── Lifecycle: WebSocket connection ───────────────────────────────────────
 
 	let requestedProject: string | null = null;
 	onMount(() => {
@@ -491,7 +480,6 @@
 		return () => { cancelled = true; };
 	});
 
-	// ─── Effect runtime disposal on page unload ──────────────────────────────
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only
 	// on unload, and `persisted` is how the two are told apart. Disposing on a
 	// background left the app mute on return: the message fiber was gone but the
@@ -501,8 +489,6 @@
 			if (!event.persisted) void disposeRuntime();
 		});
 	}
-
-	// ─── Plan mode subscription ───────────────────────────────────────────────
 
 	$effect(() => {
 		const unsub = onPlanMode((msg: RelayMessage) => {
@@ -550,7 +536,7 @@
 	});
 
 
-	// ─── Visual viewport tracking (keyboard avoidance when terminal is open) ──
+	// Visual viewport tracking (keyboard avoidance when terminal is open)
 	// CSS dvh does NOT account for the virtual keyboard. We listen to the
 	// visualViewport API and constrain #app height so the terminal stays above
 	// the keyboard and xterm.js refits via its ResizeObserver.
@@ -571,7 +557,7 @@
 		return () => vv.removeEventListener("resize", onViewportResize);
 	});
 
-	// ─── QR modal event bridge (SessionBar dispatches "qr:show") ─────────────
+	// QR modal event bridge (SessionBar dispatches "qr:show")
 
 	$effect(() => {
 		function onQrShow() {
@@ -581,7 +567,7 @@
 		return () => window.removeEventListener("qr:show", onQrShow);
 	});
 
-	// ─── Settings panel event bridge (SessionBar dispatches "settings:open") ──
+	// Settings panel event bridge (SessionBar dispatches "settings:open")
 
 	$effect(() => {
 		function onSettingsOpen(e: Event) {
@@ -593,12 +579,11 @@
 		return () => window.removeEventListener("settings:open", onSettingsOpen);
 	});
 
-	// ─── Feature flag initialization ────────────────────────────────────────────
 	$effect(() => {
 		initFeatureFlags();
 	});
 
-	// ─── Debug keyboard shortcut (Ctrl/Cmd+Shift+D) ────────────────────────────
+	// Debug keyboard shortcut (Ctrl/Cmd+Shift+D)
 	$effect(() => {
 		function handleDebugShortcut(e: KeyboardEvent) {
 			if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "D") {
@@ -627,14 +612,13 @@
 		observeOpenSession(sessionState.currentId ? findSession(sessionState.currentId) : undefined);
 	});
 
-	// ─── Show debug panel when feature flag enabled ────────────────────────────
 	$effect(() => {
 		if (featureFlags.debug) {
 			debugPanelVisible = true;
 		}
 	});
 
-	// ─── Debug panel toggle event (from SessionBar menu) ───────────────────────
+	// Debug panel toggle event (from SessionBar menu)
 	$effect(() => {
 		function onDebugToggle() {
 			debugPanelVisible = !debugPanelVisible;

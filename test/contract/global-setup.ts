@@ -1,4 +1,3 @@
-// ─── Contract Test Global Setup ────────────────────────────────────────────
 // Spawns an ephemeral OpenCode instance on a random port so contract tests
 // never hit the user's live instance at :4096.
 

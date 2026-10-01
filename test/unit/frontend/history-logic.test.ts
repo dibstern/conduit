@@ -1,4 +1,3 @@
-// ─── Svelte History Logic — Unit Tests ───────────────────────────────────────
 // Tests groupIntoTurns, findPageBoundary, historyToChatMessages, applyHistoryQueuedFlag.
 
 import { assert, describe, expect, test } from "vitest";
@@ -9,8 +8,6 @@ import {
 	groupIntoTurns,
 	historyToChatMessages,
 } from "../../../src/lib/frontend/utils/history-logic.js";
-
-// ─── Helper factories ────────────────────────────────────────────────────────
 
 function makeMsg(role: "user" | "assistant", id: string): HistoryMessage {
 	return { id, role };
@@ -23,8 +20,6 @@ function userMsg(id: string): HistoryMessage {
 function assistantMsg(id: string): HistoryMessage {
 	return makeMsg("assistant", id);
 }
-
-// ─── groupIntoTurns ──────────────────────────────────────────────────────────
 
 describe("groupIntoTurns", () => {
 	test("returns empty array for empty messages", () => {
@@ -157,8 +152,6 @@ describe("groupIntoTurns", () => {
 	});
 });
 
-// ─── findPageBoundary ────────────────────────────────────────────────────────
-
 describe("findPageBoundary", () => {
 	test("returns 0 for targetCount 0", () => {
 		const msgs = [userMsg("u1"), assistantMsg("a1")];
@@ -229,8 +222,6 @@ describe("findPageBoundary", () => {
 // shouldLoadMore and getOldestMessageId tests removed — functions deleted
 // as dead code after the unified rendering migration (HistoryView removed).
 
-// ─── OpenCode normalized format ─────────────────────────────────────────────
-
 describe("groupIntoTurns with OpenCode normalized messages", () => {
 	test("works with full normalized message format (role + parts + time)", () => {
 		const msgs: HistoryMessage[] = [
@@ -292,8 +283,6 @@ describe("groupIntoTurns with OpenCode normalized messages", () => {
 		expect(secondTurn.assistant?.parts?.[0]?.text).toBe("6");
 	});
 });
-
-// ─── Tool status mapping ─────────────────────────────────────────────────────
 
 describe("historyToChatMessages — tool status mapping", () => {
 	test("Task tools preserve running status from REST API", () => {
@@ -448,7 +437,7 @@ describe("historyToChatMessages — tool status mapping", () => {
 	});
 });
 
-// ─── messageId propagation (fork-split dependency) ───────────────────────────
+// messageId propagation (fork-split dependency)
 
 describe("historyToChatMessages — messageId propagation", () => {
 	test("preserves the provider user id across rehydration", () => {
@@ -519,8 +508,6 @@ describe("historyToChatMessages — messageId propagation", () => {
 		);
 	});
 });
-
-// ─── createdAt propagation ───────────────────────────────────────────────────
 
 describe("historyToChatMessages — createdAt propagation", () => {
 	test("user messages carry time.created as createdAt", () => {

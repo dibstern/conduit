@@ -1,4 +1,3 @@
-// ─── historyToChatMessages — Unit Tests ──────────────────────────────────────
 // Tests conversion from OpenCode REST API message format (HistoryMessage[])
 // to ChatMessage[] used by live message rendering components.
 //
@@ -10,8 +9,6 @@ import {
 	historyToChatMessages,
 } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { PartType } from "../../../src/lib/shared-types.js";
-
-// ─── Helper factories ────────────────────────────────────────────────────────
 
 function userMsg(id: string, text: string): HistoryMessage {
 	return {
@@ -42,8 +39,6 @@ function assistantMsg(
 		...meta,
 	};
 }
-
-// ─── User messages ──────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: user messages", () => {
 	it("carries per-turn model execution onto the user transcript message", () => {
@@ -107,8 +102,6 @@ describe("historyToChatMessages: user messages", () => {
 	});
 });
 
-// ─── Assistant text messages ────────────────────────────────────────────────
-
 describe("historyToChatMessages: assistant text", () => {
 	it("converts a simple text part to AssistantMessage", () => {
 		const messages = [
@@ -156,8 +149,6 @@ describe("historyToChatMessages: assistant text", () => {
 		});
 	});
 });
-
-// ─── Thinking blocks ────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: thinking blocks", () => {
 	it("converts a reasoning part to ThinkingMessage", () => {
@@ -210,8 +201,6 @@ describe("historyToChatMessages: thinking blocks", () => {
 		});
 	});
 });
-
-// ─── Tool calls ─────────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: tool calls", () => {
 	it("converts a completed tool part to ToolMessage", () => {
@@ -372,8 +361,6 @@ describe("historyToChatMessages: tool calls", () => {
 	});
 });
 
-// ─── Result bars ────────────────────────────────────────────────────────────
-
 describe("historyToChatMessages: result bars", () => {
 	it("generates a ResultMessage from assistant message metadata", () => {
 		const messages = [
@@ -413,8 +400,6 @@ describe("historyToChatMessages: result bars", () => {
 		expect(resultMsgs).toHaveLength(0);
 	});
 });
-
-// ─── Part ordering ──────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: part ordering", () => {
 	it("preserves the order: thinking → text → tool → text → result", () => {
@@ -474,8 +459,6 @@ describe("historyToChatMessages: part ordering", () => {
 	});
 });
 
-// ─── Multi-turn conversation ────────────────────────────────────────────────
-
 describe("historyToChatMessages: multi-turn conversation", () => {
 	it("converts a full multi-turn conversation", () => {
 		const messages: HistoryMessage[] = [
@@ -518,8 +501,6 @@ describe("historyToChatMessages: multi-turn conversation", () => {
 		]);
 	});
 });
-
-// ─── Edge cases ─────────────────────────────────────────────────────────────
 
 describe("historyToChatMessages: edge cases", () => {
 	it("returns empty array for empty input", () => {
@@ -645,8 +626,6 @@ describe("historyToChatMessages: edge cases", () => {
 	});
 });
 
-// ─── Compaction dividers ────────────────────────────────────────────────────
-
 describe("historyToChatMessages: compaction dividers", () => {
 	it("renders a persisted compaction part as a completed compaction carrying its sizes and stamp", () => {
 		const messages: HistoryMessage[] = [
@@ -696,7 +675,7 @@ describe("historyToChatMessages: compaction dividers", () => {
 	});
 });
 
-// ─── applyHistoryQueuedFlag (REMOVED) ───────────────────────────────────────
+// applyHistoryQueuedFlag (REMOVED)
 // Tests removed along with the function — it wrote the old mutable `queued`
 // boolean which was replaced by the immutable `sentDuringEpoch` pattern.
 // See turn-epoch-queued-pipeline.test.ts for the current queued visual tests.

@@ -1,4 +1,3 @@
-// ─── Notification Settings ───────────────────────────────────────────────────
 // Shared reader/writer for the notification toggle preferences stored in
 // localStorage. Used by both NotifSettings.svelte (UI) and ws.svelte.ts
 // (trigger logic) so neither needs to import the other.

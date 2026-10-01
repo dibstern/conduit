@@ -1,4 +1,3 @@
-// ─── Chat Store Tests ────────────────────────────────────────────────────────
 import {
 	afterEach,
 	assert,
@@ -42,11 +41,9 @@ import type {
 } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
-// ─── Per-session tiers for handler calls ────────────────────────────────────
 let ta: SessionActivity;
 let tm: SessionMessages;
 
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
 // Tests deliberately pass incomplete objects to verify defensive handling.
 function msg<T extends RelayMessage["type"]>(data: {
 	type: T;
@@ -54,8 +51,6 @@ function msg<T extends RelayMessage["type"]>(data: {
 }): Extract<RelayMessage, { type: T }> {
 	return data as Extract<RelayMessage, { type: T }>;
 }
-
-// ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
@@ -69,8 +64,6 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-// ─── Retained tool lifecycle ────────────────────────────────────────────────
-
 describe("tool lifecycle", () => {
 	it("silently ignores executing for unknown tool id (expected overlap)", () => {
 		handleToolExecuting(
@@ -81,8 +74,6 @@ describe("tool lifecycle", () => {
 		expect(chatState.messages).toHaveLength(0);
 	});
 });
-
-// ─── Projected context usage ────────────────────────────────────────────────
 
 describe("projected context usage", () => {
 	it("restores the context usage percentage from a persisted result window", () => {
@@ -103,8 +94,6 @@ describe("projected context usage", () => {
 		expect(tm.contextPercent).toBe(33);
 	});
 });
-
-// ─── handleError ────────────────────────────────────────────────────────────
 
 describe("handleError", () => {
 	it("adds an info system message for RETRY code", () => {
@@ -176,8 +165,6 @@ describe("handleError", () => {
 		}
 	});
 });
-
-// ─── addUserMessage / addSystemMessage ──────────────────────────────────────
 
 describe("addUserMessage", () => {
 	it("adds a user message", () => {
@@ -275,8 +262,6 @@ describe("handleCompaction", () => {
 	});
 });
 
-// ─── Queued User Messages ──────────────────────────────────────────────────
-
 describe("queued user message (sentDuringEpoch)", () => {
 	it("addUserMessage sets sentDuringEpoch when sent while processing", () => {
 		addUserMessage(ta, tm, "hello", undefined, true);
@@ -302,8 +287,6 @@ describe("queued user message (sentDuringEpoch)", () => {
 		expect(isStreaming()).toBe(false);
 	});
 });
-
-// ─── prependMessages ────────────────────────────────────────────────────────
 
 describe("prependMessages", () => {
 	beforeEach(() => {
@@ -335,8 +318,6 @@ describe("prependMessages", () => {
 		expect(chatState.messages).toHaveLength(1);
 	});
 });
-
-// ─── historyState ───────────────────────────────────────────────────────────
 
 describe("historyState", () => {
 	beforeEach(() => {

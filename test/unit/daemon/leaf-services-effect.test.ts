@@ -1,4 +1,3 @@
-// ─── Leaf Service Effect Layers ─────────────────────────────────────────────
 // Tests for Effect-native layer replacements of daemon leaf services.
 
 import { describe, it } from "@effect/vitest";

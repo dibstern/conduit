@@ -1,4 +1,3 @@
-<!-- ─── Step: Certificate ─────────────────────────────────────────────────── -->
 <!-- Setup step for installing HTTPS certificate.                            -->
 
 <script lang="ts">

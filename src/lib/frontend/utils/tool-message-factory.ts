@@ -1,4 +1,3 @@
-// ─── Tool Message Factory ────────────────────────────────────────────────────
 // Single factory for constructing ToolMessage objects.
 // Used by both history-logic.ts (REST history) and tool-registry.ts (SSE lifecycle).
 // Eliminates duplicated construction logic across the two call sites.

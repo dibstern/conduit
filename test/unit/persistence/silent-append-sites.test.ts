@@ -517,8 +517,6 @@ it("persistClaudeSubagent announces the subagent session it writes messages to",
 	});
 });
 
-// ─── Reported gaps ──────────────────────────────────────────────────────────
-
 it("REPORTED GAP: the provider cleanup receipt reaches no projector at all", () => {
 	// session-manager-service.ts appends session.provider_cleanup_failed with no
 	// projection step, and no projector claims the type — so the receipt is

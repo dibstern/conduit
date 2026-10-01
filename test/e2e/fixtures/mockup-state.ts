@@ -1,4 +1,3 @@
-// ─── Mockup State Fixture ─────────────────────────────────────────────────────
 // Canned WebSocket messages that reproduce the exact state shown in mockup.html.
 //
 // The mockup shows:
@@ -17,8 +16,6 @@ export interface MockMessage {
 	type: string;
 	[key: string]: unknown;
 }
-
-// ─── Initial connection state ─────────────────────────────────────────────────
 
 export const initMessages: MockMessage[] = [
 	{
@@ -128,7 +125,6 @@ export const initMessages: MockMessage[] = [
 	},
 ];
 
-// ─── Harness / instance-picker fixtures ──────────────────────────────────────
 // The composer's instance-rail model picker needs both drivers discoverable:
 // the "claude" provider belongs to the Claude driver's default instance, the
 // "anthropic" catalog to the OpenCode driver's default instance.
@@ -200,8 +196,6 @@ export const unboundInitMessages: MockMessage[] = [
 	dualDriverModelList,
 	openCodeAgentList,
 ];
-
-// ─── Model-execution drift fixtures ─────────────────────────────────────────
 
 interface ModelExecutionFixture {
 	requestedModel?: string;
@@ -359,7 +353,7 @@ export const openCodeBoundSessionMessages: MockMessage[] = [
 	openCodeAgentList,
 ];
 
-// ─── Turn 1 response (completed) ─────────────────────────────────────────────
+// Turn 1 response (completed)
 // Sent after user message: "Help me implement a WebSocket handler for the relay server"
 
 export const turn1Messages: MockMessage[] = [
@@ -454,7 +448,7 @@ export const turn1Messages: MockMessage[] = [
 	{ type: "status", status: "idle" },
 ];
 
-// ─── Turn 2 response (in-progress) ──────────────────────────────────────────
+// Turn 2 response (in-progress)
 // Sent after user message: "Now add model selection support"
 // Note: This turn is intentionally left incomplete (no done/idle) to show
 // active thinking and a running tool.
@@ -495,13 +489,10 @@ export const turn2Messages: MockMessage[] = [
 	// Intentionally NO tool_result — this tool stays in "running" state
 ];
 
-// ─── User message texts ─────────────────────────────────────────────────────
-
 export const userMessage1 =
 	"Help me implement a WebSocket handler for the relay server";
 export const userMessage2 = "Now add model selection support";
 
-// ─── Multi-Instance Fixtures ─────────────────────────────────────────────────
 // Canned messages for testing multi-instance UI features.
 
 /** Two instances: "personal" (healthy) and "work" (unhealthy) */
@@ -719,8 +710,6 @@ export const singleInstanceInitMessages: MockMessage[] = [
 	singleInstanceProjectList,
 ];
 
-// ─── Variant / thinking-level test fixtures ──────────────────────────────────
-
 /** Model list with variants (thinking levels) on one model. */
 export const variantModelList: MockMessage = {
 	type: "model_list",
@@ -846,8 +835,6 @@ export const noVariantInitMessages: MockMessage[] = [
 	},
 	variantProjectList,
 ];
-
-// ─── Context-window selector test fixtures ──────────────────────────────────
 
 /** Model list with Claude context-window options on one Sonnet model. */
 export const contextWindowModelList: MockMessage = {

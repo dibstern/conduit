@@ -1,4 +1,3 @@
-// ─── Approval Scene ──────────────────────────────────────────────────────────
 // Generates GENERATE-APPROVAL.png — iPhone showing a permission request card
 // for a Bash command that needs user approval, after some chat context.
 

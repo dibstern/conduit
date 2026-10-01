@@ -1,4 +1,3 @@
-<!-- ─── App Root ────────────────────────────────────────────────────────────── -->
 <!-- Root component with client-side routing. Renders the appropriate page -->
 <!-- based on the current URL path. -->
 

@@ -1,4 +1,3 @@
-// ─── File Tree Store Tests ───────────────────────────────────────────────────
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	buildMentionInsertion,
@@ -8,15 +7,11 @@ import {
 	handleFileTree,
 } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	fileTreeState.entries = [];
 	fileTreeState.loading = false;
 	fileTreeState.loaded = false;
 });
-
-// ─── extractAtQuery ─────────────────────────────────────────────────────────
 
 describe("extractAtQuery", () => {
 	it("extracts query after @ at start of text", () => {
@@ -61,8 +56,6 @@ describe("extractAtQuery", () => {
 		expect(result).toEqual({ query: "file", start: 9, end: 14 });
 	});
 });
-
-// ─── filterFiles ────────────────────────────────────────────────────────────
 
 describe("filterFiles", () => {
 	const entries = [
@@ -113,8 +106,6 @@ describe("filterFiles", () => {
 	});
 });
 
-// ─── handleFileTree ─────────────────────────────────────────────────────────
-
 describe("handleFileTree", () => {
 	it("populates entries and sets loaded", () => {
 		handleFileTree({
@@ -131,8 +122,6 @@ describe("handleFileTree", () => {
 		expect(fileTreeState.entries).toHaveLength(0);
 	});
 });
-
-// ─── buildMentionInsertion ──────────────────────────────────────────────────
 
 describe("buildMentionInsertion", () => {
 	it("closes the mention with a trailing space for a file", () => {

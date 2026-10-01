@@ -1,4 +1,3 @@
-// ─── Session Command Seam ───────────────────────────────────────────────────
 // One pipeline for every session mutation: append the canonical event, project
 // it strictly, then sync upstream best-effort.
 //
@@ -45,8 +44,6 @@ export class SessionCommandError extends Data.TaggedError(
 	readonly message?: string;
 }> {}
 
-// ─── Commands ───────────────────────────────────────────────────────────────
-
 /**
  * A session mutation, typed as the canonical event it becomes. Indexing
  * `EventPayloadMap` is what makes the parity gap unrepresentable: a mutation
@@ -72,8 +69,6 @@ export type SessionCommand = {
 		readonly data: EventPayloadMap[K];
 	};
 }[SessionCommandType];
-
-// ─── Upstream sync adapters ─────────────────────────────────────────────────
 
 /**
  * Upstream sync varies for a real reason: OpenCode keeps its own session
@@ -152,8 +147,6 @@ export const isClaudeSessionRow = (
 	row.provider === CLAUDE_SDK_PROVIDER_ID ||
 	resolveProviderRoutingDriver(loadDaemonConfig(configDir), row.provider) ===
 		CLAUDE_PROVIDER_ID;
-
-// ─── The seam ───────────────────────────────────────────────────────────────
 
 /**
  * Apply a session mutation: append, project, sync.
@@ -252,8 +245,6 @@ export const applySessionCommand = (
 			attributes: { sessionId: command.data.sessionId, type: command.type },
 		}),
 	);
-
-// ─── Creation ───────────────────────────────────────────────────────────────
 
 export const normalizeSessionTitle = (title?: string): string => {
 	const trimmed = title?.trim();

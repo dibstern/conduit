@@ -1,5 +1,4 @@
 import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
-// ─── AttentionBanner Merge Logic Test ──────────────────────────────────────────
 // Verifies that AttentionBanner correctly merges two data sources:
 // 1. Local pending permissions (from permissions store)
 // 2. The server-derived per-session counts carried on the session row
@@ -12,8 +11,6 @@ import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// ─── Mock RPC transport ─────────────────────────────────────────────────────
 
 const wsSendSpy = vi.fn();
 const viewSessionRpcSpy = vi.hoisted(() =>
@@ -39,7 +36,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	})),
 }));
 
-// ─── Imports (after mocks) ──────────────────────────────────────────────────
+// Imports (after mocks)
 
 import AttentionBanner from "../../../src/lib/frontend/components/permissions/AttentionBanner.svelte";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
@@ -53,8 +50,6 @@ import {
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Create a minimal permission request for the given session. */
 function makePerm(id: string, sessionId: string) {
@@ -94,8 +89,6 @@ async function renderBanner() {
 	await tick();
 	return result;
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("AttentionBanner merge logic", () => {
 	beforeEach(() => {

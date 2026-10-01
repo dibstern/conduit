@@ -1,4 +1,3 @@
-// ─── Question Flow E2E Tests ─────────────────────────────────────────────────
 // Tests the full question/answer lifecycle via WS mock:
 //   1. Agent asks a question → QuestionCard appears
 //   2. User selects an option and submits
@@ -13,8 +12,6 @@ import { initMessages, type MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 type Page = import("@playwright/test").Page;
 type QuestionFlowControl = WsMockControl & { rpc: RpcMockControl };
 
@@ -28,8 +25,6 @@ async function waitForChatReady(page: Page): Promise<void> {
 		timeout: 10_000,
 	});
 }
-
-// ─── Question messages ──────────────────────────────────────────────────────
 
 /** Messages that simulate the agent asking a question */
 const questionResponseMessages: MockMessage[] = [
@@ -100,8 +95,6 @@ const postAnswerMessages: MockMessage[] = [
 	{ type: "done", code: 0 },
 	{ type: "status", status: "idle" },
 ];
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 test.describe("Question/Answer Flow", () => {
 	async function setupQuestionFlow(

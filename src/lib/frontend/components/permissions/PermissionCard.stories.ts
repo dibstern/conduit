@@ -2,8 +2,6 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import type { PermissionId, PermissionRequest } from "../../types.js";
 import PermissionCard from "./PermissionCard.svelte";
 
-// ─── Mock data ──────────────────────────────────────────────────────────────
-
 const mockPermissionPending: PermissionRequest = {
 	requestId: "perm-001" as PermissionId,
 	toolName: "bash",
@@ -33,8 +31,6 @@ const mockPermissionEditFile: PermissionRequest = {
 	sessionId: "",
 };
 
-// ─── Meta ───────────────────────────────────────────────────────────────────
-
 const meta = {
 	title: "Chat/PermissionCard",
 	component: PermissionCard,
@@ -43,8 +39,6 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
-
-// ─── Stories ────────────────────────────────────────────────────────────────
 
 export const Pending: Story = {
 	args: { request: mockPermissionPending },

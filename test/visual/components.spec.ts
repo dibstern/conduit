@@ -1,4 +1,3 @@
-// ─── Storybook Visual Regression ─────────────────────────────────────────────
 // Auto-discovers ALL stories from the built Storybook index.json and takes
 // a screenshot of each. Uses Playwright's toHaveScreenshot() for golden-file
 // comparison with a configurable diff threshold.
@@ -16,8 +15,6 @@ import {
 	freezeAnimations,
 	waitForFonts,
 } from "../e2e/helpers/visual-helpers.js";
-
-// ─── Story Discovery ─────────────────────────────────────────────────────────
 
 interface StoryEntry {
 	id: string;
@@ -127,8 +124,6 @@ function loadStories(): StoryEntry[] {
 		data.entries ?? data.stories ?? {};
 	return Object.values(entries).filter((e) => e.type === "story");
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
  * Freeze the page's wall clock so a story cannot bake the capture time into its
@@ -394,8 +389,6 @@ async function assertStoryRenderSucceeded(
 		throw new Error(`Story "${storyId}" ${detail}`);
 	}
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 let stories: StoryEntry[];
 try {

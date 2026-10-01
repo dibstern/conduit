@@ -1,4 +1,3 @@
-// ─── Markdown Rendering ──────────────────────────────────────────────────────
 // Renders markdown to sanitized HTML using marked + DOMPurify (npm packages).
 // highlight.js and mermaid are handled post-render by components.
 

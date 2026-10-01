@@ -5,7 +5,6 @@ import {
 } from "../../transport/ws-rpc-client.js";
 import { formatFileSize } from "../../utils/format.js";
 
-// ─── Image resize ───────────────────────────────────────────────────────────
 // Anthropic's API enforces a 5 MB limit on the base64 string (not the decoded
 // bytes). A 3.75 MB raw image already exceeds this after base64 encoding.
 // Phone photos routinely hit this, so we auto-resize on the client.

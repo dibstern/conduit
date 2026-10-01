@@ -1,4 +1,3 @@
-// ─── E2E Claude Replay Lane ──────────────────────────────────────────────────
 // Claude sessions whose SDK turns replay committed Claude SDK traces through
 // the runtime's injected queryFactory (see helpers/claude-trace-replayer.ts).
 // The replay fixture fails the test unless exactly the planned turns are sent.

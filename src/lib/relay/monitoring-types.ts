@@ -1,7 +1,6 @@
 // src/lib/relay/monitoring-types.ts
 import type { SessionStatus } from "../instance/sdk-types.js";
 
-// ── Session monitoring phases ────────────────────────────────────────────
 export type SessionMonitorPhase =
 	| { readonly phase: "idle" }
 	| { readonly phase: "busy-grace"; readonly busySince: number }
@@ -21,14 +20,12 @@ export type SessionMonitorPhase =
 			readonly cappedAt: number;
 	  };
 
-// ── SSE coverage ────────────────────────────────────────────────────────
 export type SSECoverage =
 	| { readonly kind: "active"; readonly lastEventAt: number }
 	| { readonly kind: "stale"; readonly lastEventAt: number }
 	| { readonly kind: "never-seen" }
 	| { readonly kind: "disconnected" };
 
-// ── Evaluation context ──────────────────────────────────────────────────
 export interface SessionEvalContext {
 	readonly now: number;
 	readonly status: SessionStatus;
@@ -38,7 +35,7 @@ export interface SessionEvalContext {
 	readonly hasViewers: boolean;
 }
 
-// ── Effect reasons (const-derived) ──────────────────────────────────────
+// Effect reasons (const-derived)
 export const POLLER_START_REASONS = [
 	"sse-disconnected",
 	"sse-stale",
@@ -54,8 +51,6 @@ export const POLLER_STOP_REASONS = [
 	"session-deleted",
 ] as const;
 export type PollerStopReason = (typeof POLLER_STOP_REASONS)[number];
-
-// ── Effects ─────────────────────────────────────────────────────────────
 
 export type MonitoringEffect =
 	| {
@@ -76,12 +71,10 @@ export type MonitoringEffect =
 			readonly busySince: number;
 	  };
 
-// ── Global state ────────────────────────────────────────────────────────
 export interface MonitoringState {
 	readonly sessions: ReadonlyMap<string, SessionMonitorPhase>;
 }
 
-// ── Configuration ───────────────────────────────────────────────────────
 export interface PollerGatingConfig {
 	readonly sseActiveThresholdMs: number;
 	readonly sseGracePeriodMs: number;

@@ -1,4 +1,4 @@
-// ─── Session Slot Eviction (LRU Cap) ─────────────────────────────────────────
+// Session Slot Eviction (LRU Cap)
 // Verifies that Tier 2 (SessionMessages) is LRU-capped:
 // - When the cap is exceeded, the least-recently-used session's messages are evicted.
 // - The current session is never evicted.
@@ -49,8 +49,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	// Clear all per-session state
 	sessionActivity.clear();
@@ -65,8 +63,6 @@ afterEach(() => {
 	_resetLRU();
 	sessionState.currentId = null;
 });
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Tier 2 LRU cap", () => {
 	it("evicts oldest session when exceeding LRU cap", () => {

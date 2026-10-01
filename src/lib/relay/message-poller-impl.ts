@@ -1,4 +1,4 @@
-// ─── Message Poller Implementation (Internal) ───────────────────────────────
+// Message Poller Implementation (Internal)
 // Imperative polling classes that wrap the pure diff/synthesize functions.
 // Only imported by relay-stack.ts (composition root). All other modules use
 // structural interfaces (PollerManagerLike) instead of concrete classes.
@@ -17,8 +17,6 @@ import {
 	type MessageSnapshot,
 } from "./message-poller.js";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
 /** Polling interval when actively polling messages. */
 const POLL_INTERVAL_MS = 750;
 
@@ -31,8 +29,6 @@ const SSE_SILENCE_THRESHOLD_MS = 2000;
  * The poller can be restarted by calling startPolling() again.
  */
 const IDLE_TIMEOUT_MS = 5000;
-
-// ─── MessagePoller Types ────────────────────────────────────────────────────
 
 export interface MessagePollerOptions {
 	resolveOrigin?: Parameters<typeof diffAndSynthesize>[2];
@@ -51,8 +47,6 @@ export interface MessagePollerOptions {
 
 /** Callback signature for the "events" broadcast event. */
 export type MessagePollerEventsCallback = (messages: RelayMessage[]) => void;
-
-// ─── MessagePoller ──────────────────────────────────────────────────────────
 
 export class MessagePoller {
 	private readonly client: Pick<OpenCodeAPI, "session">;
@@ -110,8 +104,6 @@ export class MessagePoller {
 	removeAllListeners(): void {
 		this.eventsCallbacks.length = 0;
 	}
-
-	// ─── Public API ────────────────────────────────────────────────────────
 
 	/**
 	 * Start polling messages for a session.
@@ -215,8 +207,6 @@ export class MessagePoller {
 		}
 	}
 
-	// ─── Internal ──────────────────────────────────────────────────────────
-
 	private async poll(): Promise<void> {
 		if (this.polling) {
 			this.log.verbose(`poll skipped — previous poll still running`);
@@ -254,7 +244,7 @@ export class MessagePoller {
 		try {
 			const messages = await this.client.session.messages(sessionId);
 
-			// ── Seed on first poll (no seed provided at startPolling) ──
+			// Seed on first poll (no seed provided at startPolling)
 			// Build a baseline snapshot from REST instead of synthesizing
 			// events. Without this, the first poll with an empty snapshot
 			// would re-emit the entire history as duplicate events.
@@ -267,7 +257,6 @@ export class MessagePoller {
 				return; // Skip this cycle — snapshot is now current
 			}
 
-			// ── Reseed after SSE silence ─────────────────────────────────
 			// When SSE was active (needsReseed=true) but has now gone silent,
 			// reseed the snapshot from the REST API before diffing. This
 			// prevents the poller from re-synthesizing content that SSE
@@ -307,8 +296,6 @@ export class MessagePoller {
 		this.pendingPromises.clear();
 	}
 
-	// ─── Diff + Synthesis ──────────────────────────────────────────────────
-
 	private doDiffAndSynthesize(
 		sessionId: string,
 		messages: Message[],
@@ -330,8 +317,6 @@ export class MessagePoller {
 	}
 }
 
-// ─── MessagePollerManager Types ─────────────────────────────────────────────
-
 /** Callback signature for the "events" broadcast event. */
 export type PollerManagerEventsCallback = (
 	messages: RelayMessage[],
@@ -346,8 +331,6 @@ export interface MessagePollerManagerOptions {
 	/** External viewer check — delegates to SessionRegistry */
 	hasViewers?: (sessionId: string) => boolean;
 }
-
-// ─── MessagePollerManager ───────────────────────────────────────────────────
 
 export class MessagePollerManager {
 	private readonly pollers: Map<string, MessagePoller> = new Map();
@@ -375,14 +358,10 @@ export class MessagePollerManager {
 		this.eventsCallbacks.push(callback);
 	}
 
-	// ─── Viewer tracking ──────────────────────────────────────────────────
-
 	/** Check if any browser client is viewing the given session. */
 	hasViewers(sessionId: string): boolean {
 		return this._hasViewers?.(sessionId) ?? false;
 	}
-
-	// ─── Polling lifecycle ────────────────────────────────────────────────
 
 	/**
 	 * Start polling messages for a session.

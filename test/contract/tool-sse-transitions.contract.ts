@@ -1,4 +1,3 @@
-// ─── Tool SSE Transition Validation ───────────────────────────────────────
 // Observes REAL tool lifecycle transitions via SSE from a live OpenCode
 // instance. Sends a prompt that triggers tool use, then validates that
 // the SSE event stream delivers the expected state transitions in order.
@@ -44,8 +43,6 @@ function skipIfNoServer() {
 	return false;
 }
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 interface ToolPartEvent {
 	callID: string;
 	tool: string;
@@ -60,8 +57,6 @@ interface SSEEvent {
 	type: string;
 	properties: Record<string, unknown>;
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Extract tool part events from a raw SSE event stream for a specific session. */
 function extractToolPartEvents(
@@ -132,8 +127,6 @@ function validateTransitionSequence(statuses: ToolStatus[]): {
 	}
 	return { valid: violations.length === 0, violations };
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Tool SSE Transition Validation (live)", () => {
 	it("SSE event stream is accessible", async () => {

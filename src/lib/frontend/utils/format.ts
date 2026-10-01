@@ -1,4 +1,3 @@
-// ─── Formatting Utilities ────────────────────────────────────────────────────
 // Pure functions for text formatting. No DOM or framework dependencies.
 
 /** Escape HTML entities to prevent XSS. */

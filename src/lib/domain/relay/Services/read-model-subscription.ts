@@ -1,4 +1,4 @@
-// ─── Read-Model Subscription (Effect) ────────────────────────────────────────
+// Read-Model Subscription (Effect)
 // Generic base+live orchestration for read-model subscriptions.
 //
 // stream – turns a SubscriptionSource plus the read-model advance signal into
@@ -24,8 +24,6 @@ import { Effect, Ref, type Schema, Stream } from "effect";
 import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import type { EnvelopeSchema } from "../../../contracts/ws-rpc.js";
 import type { SessionEventBus } from "./session-event-bus.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 /**
  * What a subscriber receives: a base (cold start, and any resume a source
@@ -107,8 +105,6 @@ export interface SubscriptionSource<T, E = never> {
 	 */
 	readonly resume: "catchUp" | "rebase";
 }
-
-// ─── Orchestrator ────────────────────────────────────────────────────────────
 
 const deltaEnvelopes = <T>(
 	rows: readonly VersionedRow<T>[],

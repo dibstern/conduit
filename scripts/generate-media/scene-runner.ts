@@ -1,4 +1,3 @@
-// ─── Scene Runner ─────────────────────────────────────────────────────────────
 // Playwright lifecycle, phase execution, assertions, debug collection,
 // video capture, and screenshot helpers for media generation.
 
@@ -18,8 +17,6 @@ const MEDIA_DIR = process.env["MEDIA_DIR"] || path.join(PROJECT_ROOT, "media");
 const DEBUG_DIR = path.join(MEDIA_DIR, "_debug");
 const PREVIEW_PORT = 4173;
 const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}`;
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface SceneConfig {
 	name: string;
@@ -58,8 +55,6 @@ export interface SceneDefinition {
 	config: SceneConfig;
 	run: SceneFn;
 }
-
-// ─── Build & Preview ────────────────────────────────────────────────────────
 
 /** Build the frontend (vite build). */
 export function buildFrontend(): void {
@@ -157,8 +152,6 @@ export async function startPreview(): Promise<ChildProcess> {
 	return proc;
 }
 
-// ─── Scene Execution ────────────────────────────────────────────────────────
-
 /** Run all scenes sequentially with phase logging and debug collection. */
 export async function runScenes(scenes: SceneDefinition[]): Promise<void> {
 	mkdirSync(MEDIA_DIR, { recursive: true });
@@ -188,7 +181,6 @@ export async function runScenes(scenes: SceneDefinition[]): Promise<void> {
 		const context = await browser.newContext(contextOptions);
 		const page = await context.newPage();
 
-		// ── Debug collection ──────────────────────────────────────────────
 		const consoleLogs: string[] = [];
 		page.on("console", (msg) => {
 			if (msg.type() === "error" || msg.type() === "warning") {
@@ -199,7 +191,6 @@ export async function runScenes(scenes: SceneDefinition[]): Promise<void> {
 			consoleLogs.push(`[pageerror] ${err.message}`);
 		});
 
-		// ── Phase runner ──────────────────────────────────────────────────
 		const phase = async (
 			name: string,
 			fn: () => Promise<void>,
@@ -317,8 +308,6 @@ export async function runScenes(scenes: SceneDefinition[]): Promise<void> {
 		process.exitCode = 1;
 	}
 }
-
-// ─── GIF Conversion ─────────────────────────────────────────────────────────
 
 /** Convert WebM video to GIF using ffmpeg. Throws with stderr on failure. */
 async function convertToGif(

@@ -1,4 +1,3 @@
-// ─── E2E: Unified Message Rendering ──────────────────────────────────────────
 // Validates that the unified rendering path works correctly in a real browser:
 // - No duplicate messages after session load + prompt
 // - "Beginning of session" marker appears
@@ -12,7 +11,6 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-// ─── No Duplication ──────────────────────────────────────────────────────────
 // The original bug: events cache replay + IntersectionObserver race caused the
 // entire conversation to render twice. These tests verify each message appears
 // exactly once in the DOM.
@@ -88,8 +86,6 @@ test.describe("Unified Rendering: No Duplication", () => {
 	});
 });
 
-// ─── Beginning of Session Marker ─────────────────────────────────────────────
-
 test.describe("Unified Rendering: Session Markers", () => {
 	test.describe.configure({ timeout: 30_000 });
 	test.use({ recording: "chat-simple" });
@@ -128,7 +124,6 @@ test.describe("Unified Rendering: Session Markers", () => {
 	});
 });
 
-// ─── Markdown Rendering Quality ──────────────────────────────────────────────
 // Unit tests use a mock DOMPurify. These E2E tests exercise the real rendering
 // pipeline in a real browser with real DOMPurify.
 
@@ -188,7 +183,6 @@ test.describe("Unified Rendering: Markdown", () => {
 	});
 });
 
-// ─── Scroll Behavior ─────────────────────────────────────────────────────────
 // Verifies the scroll-to-bottom button appears when scrolled up and works when
 // clicked. Uses chat-code-block recording which produces tall code blocks, and
 // a 400px viewport height to guarantee content overflows (simulates split-screen
@@ -256,7 +250,6 @@ test.describe("Unified Rendering: Scroll", () => {
 	});
 });
 
-// ─── Paginated History ───────────────────────────────────────────────────────
 // Uses a recording with 26 multi-turn prompts (52 messages), exceeding the
 // default 50-message page size. The server returns hasMore:true on the first
 // REST history page, enabling pagination via the IntersectionObserver.
@@ -280,7 +273,6 @@ test.describe("Unified Rendering: Paginated History", () => {
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
 		test.skip(!isDesktop, "Unified rendering tests run on desktop only");
 
-		// ── Force REST fallback with paginated mock responses ──
 		// The SSE consumer caches all events in memory. Stop it, then clear
 		// the events cache so client-init falls through to REST history.
 		// Inject pre-built paginated message responses into the mock so the

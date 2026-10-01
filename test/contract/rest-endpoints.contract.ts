@@ -1,4 +1,3 @@
-// ─── AC2: REST Endpoint Shape Validation ──────────────────────────────────
 // Validates that OpenCode's REST API responses match our expected shapes.
 // Tests shape (typeof, hasProperty), not content (specific values).
 
@@ -44,8 +43,6 @@ function skipIfNoServer() {
 }
 
 describe("AC2 — REST Endpoint Shape Validation", () => {
-	// ─── Health ─────────────────────────────────────────────────────────────
-
 	describe("GET /global/health", () => {
 		it("returns { healthy: boolean, version: string }", async () => {
 			if (skipIfNoServer()) return;
@@ -55,8 +52,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 			expect(health["healthy"]).toBe(true);
 		});
 	});
-
-	// ─── Path ───────────────────────────────────────────────────────────────
 
 	describe("GET /path", () => {
 		it("returns path info with home, worktree, directory", async () => {
@@ -70,8 +65,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 			expect(typeof path["config"]).toBe("string");
 		});
 	});
-
-	// ─── Sessions ───────────────────────────────────────────────────────────
 
 	describe("GET /session", () => {
 		it("returns an array of session objects", async () => {
@@ -174,8 +167,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 		});
 	});
 
-	// ─── Discovery Endpoints ────────────────────────────────────────────────
-
 	describe("GET /agent", () => {
 		it("returns an array of agent objects", async () => {
 			if (skipIfNoServer()) return;
@@ -253,7 +244,7 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 		});
 	});
 
-	// ─── Permission & Question (empty state) ────────────────────────────────
+	// Permission & Question (empty state)
 
 	describe("GET /permission", () => {
 		it("returns an array (empty when no pending permissions)", async () => {
@@ -271,8 +262,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 		});
 	});
 
-	// ─── Config ─────────────────────────────────────────────────────────────
-
 	describe("GET /config", () => {
 		it("returns config object with expected top-level keys", async () => {
 			if (skipIfNoServer()) return;
@@ -284,8 +273,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 			}
 		});
 	});
-
-	// ─── OpenAPI spec ───────────────────────────────────────────────────────
 
 	describe("GET /doc", () => {
 		it("returns a valid OpenAPI 3.1 specification", async () => {
@@ -299,8 +286,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 			expect(doc["info"]).toBeDefined();
 		});
 	});
-
-	// ─── Project ────────────────────────────────────────────────────────────
 
 	describe("GET /project", () => {
 		it("returns an array of project objects", async () => {
@@ -321,8 +306,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 		});
 	});
 
-	// ─── PTY ────────────────────────────────────────────────────────────────
-
 	describe("GET /pty", () => {
 		it("returns an array of PTY objects", async () => {
 			if (skipIfNoServer()) return;
@@ -330,8 +313,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 			expect(Array.isArray(ptys)).toBe(true);
 		});
 	});
-
-	// ─── VCS ────────────────────────────────────────────────────────────────
 
 	describe("GET /vcs", () => {
 		it("returns VCS info object", async () => {
@@ -341,8 +322,6 @@ describe("AC2 — REST Endpoint Shape Validation", () => {
 			expect(vcs).not.toBeNull();
 		});
 	});
-
-	// ─── Session status ─────────────────────────────────────────────────────
 
 	describe("GET /session/status", () => {
 		it("returns session status object", async () => {

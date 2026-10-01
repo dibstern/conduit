@@ -116,8 +116,6 @@ function dispatch(
 	return Effect.runPromise(engine.dispatchEffect(command));
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function makeStubInstance(providerId: string): ProviderInstance & {
 	sendTurnEffect: ReturnType<typeof vi.fn>;
 	interruptTurnEffect: ReturnType<typeof vi.fn>;
@@ -720,7 +718,6 @@ describe("OrchestrationEngine", () => {
 		});
 	});
 
-	// ─── Claude provider instance integration ─────────────────────────────────────────
 	// These tests use a real ClaudeProviderInstance with an injected queryFactory
 	// to verify the full dispatch path:
 	// OrchestrationEngine.dispatchEffect(SendTurnCommand) → ClaudeProviderInstance.sendTurnEffect()

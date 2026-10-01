@@ -1,4 +1,3 @@
-// ─── Contract: Every PerSessionEvent variant carries sessionId ──────────────
 // Exercises each emission site and asserts sessionId presence on emitted events.
 // Server Task 1: sessionId was added to every per-session RelayMessage variant.
 
@@ -14,8 +13,6 @@ import type {
 import { tagWithSessionId } from "../../../src/lib/shared-types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
 import { runSSEEvent } from "../../helpers/sse-effect-harness.js";
-
-// ─── Type-level: PerSessionEvent is not never ──────────────────────────────
 
 describe("PerSessionEvent type discriminator", () => {
 	it("PerSessionEvent is a non-empty union (Extract resolves to concrete types)", () => {
@@ -65,8 +62,6 @@ describe("PerSessionEvent type discriminator", () => {
 	});
 });
 
-// ─── Emission site: SSE wiring — tagWithSessionId after translation ────────
-
 describe("SSE wiring tags events with sessionId", () => {
 	it("translated SSE events carry sessionId after tagging", async () => {
 		const sent: RelayMessage[] = [];
@@ -103,7 +98,7 @@ describe("SSE wiring tags events with sessionId", () => {
 	});
 });
 
-// ─── Emission site: relay-event-sink — push() attaches sessionId ───────────
+// Emission site: relay-event-sink — push() attaches sessionId
 
 describe("RelayEventSink push() attaches sessionId", () => {
 	it("push() tags events with the sink sessionId", async () => {
@@ -167,8 +162,6 @@ describe("RelayEventSink push() attaches sessionId", () => {
 	});
 });
 
-// ─── Emission site: message-poller — synthesized events have sessionId ─────
-
 describe("message-poller synthesized events have sessionId", () => {
 	it("tagWithSessionId applies sessionId to untagged events", () => {
 		const untagged: UntaggedRelayMessage = { type: "user_message", text: "hi" };
@@ -194,8 +187,6 @@ describe("message-poller synthesized events have sessionId", () => {
 	});
 });
 
-// ─── Emission site: prompt handler — user_message has sessionId ────────────
-
 describe("prompt handler emits user_message with sessionId", () => {
 	it("user_message event includes correct sessionId", () => {
 		// The prompt handler constructs user_message events with sessionId directly:
@@ -208,8 +199,6 @@ describe("prompt handler emits user_message with sessionId", () => {
 		expect(msg.sessionId).toBe("ses_prompt");
 	});
 });
-
-// ─── Emission site: tool-content handler — tool_content has sessionId ──────
 
 describe("tool-content handler emits tool_content with sessionId", () => {
 	it("tool_content event includes sessionId", () => {

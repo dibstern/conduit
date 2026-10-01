@@ -1,4 +1,3 @@
-<!-- ─── Dialog ───────────────────────────────────────────────────────────────── -->
 <!-- Native <dialog> promoted to the browser's top layer via showModal().        -->
 <!--                                                                            -->
 <!-- The top layer paints above every stacking context on the page, so modals    -->

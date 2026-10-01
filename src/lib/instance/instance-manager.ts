@@ -1,4 +1,3 @@
-// ─── Instance Manager ────────────────────────────────────────────────────────
 // Manages OpenCode instance CRUD, URL resolution, lifecycle events,
 // process spawning, and health checks.
 
@@ -13,8 +12,6 @@ import {
 	instanceNotFound,
 	invalidInstanceUrl,
 } from "./instance-errors.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export type InstanceSpawner = (
 	port: number,
@@ -34,8 +31,6 @@ export interface InstanceManagerCallbacks {
 	instance_error: (payload: { id: string; error: string }) => void;
 }
 
-// ─── Configuration ──────────────────────────────────────────────────────────
-
 export interface InstanceManagerOptions {
 	/** Maximum number of instances allowed. Default: 5. */
 	maxInstances?: number;
@@ -47,15 +42,11 @@ export interface InstanceManagerOptions {
 	healthPollIntervalMs?: number;
 }
 
-// ─── InstanceManager ────────────────────────────────────────────────────────
-
 export class InstanceManager {
 	private readonly maxInstances: number;
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;
 	private readonly healthPollIntervalMs: number;
-
-	// ─── Private state ──────────────────────────────────────────────────
 
 	private readonly instances = new Map<string, OpenCodeInstance>();
 	/** External URLs for unmanaged instances (keeps OpenCodeInstance clean). */
@@ -116,8 +107,6 @@ export class InstanceManager {
 		}
 	}
 
-	// ─── Dependency injection ────────────────────────────────────────────
-
 	/** Inject a custom spawner (for testing). */
 	setSpawner(spawner: InstanceSpawner): void {
 		this.spawner = spawner;
@@ -127,8 +116,6 @@ export class InstanceManager {
 	setHealthChecker(checker: InstanceHealthChecker): void {
 		this.healthChecker = checker;
 	}
-
-	// ─── CRUD ─────────────────────────────────────────────────────────────
 
 	/**
 	 * Register a new instance with status "stopped".
@@ -255,8 +242,6 @@ export class InstanceManager {
 		return instance;
 	}
 
-	// ─── URL Resolution ─────────────────────────────────────────────────────
-
 	/**
 	 * Returns the URL for an instance.
 	 * - External instances with a custom URL return that URL.
@@ -276,8 +261,6 @@ export class InstanceManager {
 
 		return `http://localhost:${instance.port}`;
 	}
-
-	// ─── Lifecycle ──────────────────────────────────────────────────────────
 
 	/**
 	 * Start a managed instance: spawn its process and begin health polling.
@@ -444,7 +427,7 @@ export class InstanceManager {
 		this.pendingPromises.clear();
 	}
 
-	// ─── Health polling (private) ───────────────────────────────────────────
+	// Health polling (private)
 
 	/** Start periodic health polling for an instance (every 5s). */
 	private startHealthPolling(id: string): void {
@@ -520,7 +503,7 @@ export class InstanceManager {
 		return this.externalUrls.get(id);
 	}
 
-	// ─── Crash recovery (private) ──────────────────────────────────────────
+	// Crash recovery (private)
 
 	/**
 	 * Called when a spawned process exits. Handles:
@@ -604,7 +587,7 @@ export class InstanceManager {
 		this.pendingRestarts.set(id, timer);
 	}
 
-	// ─── Default spawner / health checker (private) ─────────────────────────
+	// Default spawner / health checker (private)
 
 	/** Default spawner: runs `opencode serve --port {port}` with merged env. */
 	private defaultSpawner(

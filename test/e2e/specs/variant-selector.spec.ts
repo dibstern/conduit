@@ -1,4 +1,3 @@
-// ─── Variant Selector E2E Tests ──────────────────────────────────────────────
 // Tests the thinking-level variant dropdown on the model selector.
 //
 // Uses WS mock — no real OpenCode or relay needed.
@@ -11,8 +10,6 @@ import {
 } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
@@ -95,8 +92,6 @@ async function setupWithoutVariants(
 	return control;
 }
 
-// ─── Group 1: Variant Badge Visibility ──────────────────────────────────────
-
 test.describe("Variant badge visibility", () => {
 	test("shows variant badge when model has variants", async ({
 		page,
@@ -120,8 +115,6 @@ test.describe("Variant badge visibility", () => {
 		await expect(badge).not.toBeVisible();
 	});
 });
-
-// ─── Group 2: Variant Dropdown ──────────────────────────────────────────────
 
 test.describe("Variant dropdown", () => {
 	test("opens dropdown on badge click", async ({ page, baseURL }) => {
@@ -193,8 +186,6 @@ test.describe("Variant dropdown", () => {
 	});
 });
 
-// ─── Group 3: Variant Selection Updates UI ──────────────────────────────────
-
 test.describe("Variant selection updates UI", () => {
 	test("selecting a variant updates the badge label", async ({
 		page,
@@ -229,8 +220,6 @@ test.describe("Variant selection updates UI", () => {
 		await expect(badge).toContainText("default");
 	});
 });
-
-// ─── Group 4: Variant Selection Sends Correct RPC Request ───────────────────
 
 test.describe("Variant selection sends RPC request", () => {
 	test("selecting a variant sends SwitchVariant request", async ({
@@ -287,8 +276,6 @@ test.describe("Variant selection sends RPC request", () => {
 	});
 });
 
-// ─── Group 5: Server-Pushed Variant Updates ─────────────────────────────────
-
 test.describe("Server-pushed variant updates", () => {
 	test("variant_info from server updates the badge", async ({
 		page,
@@ -309,8 +296,6 @@ test.describe("Server-pushed variant updates", () => {
 		await expect(badge).toContainText("medium");
 	});
 });
-
-// ─── Group 6: Ctrl+T Keyboard Shortcut ──────────────────────────────────────
 
 test.describe("Ctrl+T keyboard shortcut", () => {
 	test("Ctrl+T cycles through variants", async ({ page, baseURL }) => {

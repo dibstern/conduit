@@ -1,4 +1,3 @@
-// ─── extractDisplayText Tests ────────────────────────────────────────────────
 import { describe, expect, it } from "vitest";
 import { extractDisplayText } from "../../../src/lib/frontend/utils/format.js";
 

@@ -1,11 +1,10 @@
-// ─── Frontend Effect Boundary Tests ─────────────────────────────────────────
 // Tests for lazy Schema validation of daemon→client WebSocket messages at the
 // frontend boundary. Uses RelayMessageSchema from shared-types.ts.
 
 import { describe, expect, it } from "vitest";
 
 describe("Frontend Effect boundary", () => {
-	// ── Known message types (daemon → client) ──────────────────────────────
+	// Known message types (daemon → client)
 	it("validates a delta message", async () => {
 		const { validateIncomingMessage } = await import(
 			"../../../src/lib/frontend/effect-boundary.js"
@@ -55,7 +54,7 @@ describe("Frontend Effect boundary", () => {
 		expect(result).toHaveProperty("is_error", false);
 	});
 
-	// ── Unknown / future message types (graceful degradation) ──────────────
+	// Unknown / future message types (graceful degradation)
 	it("passes through unknown message types (degraded)", async () => {
 		const { validateIncomingMessage } = await import(
 			"../../../src/lib/frontend/effect-boundary.js"
@@ -93,7 +92,6 @@ describe("Frontend Effect boundary", () => {
 		).rejects.toBeInstanceOf(ProtocolDecodeError);
 	});
 
-	// ── Decoder caching ────────────────────────────────────────────────────
 	it("caches the decoder across calls", async () => {
 		const { validateIncomingMessage } = await import(
 			"../../../src/lib/frontend/effect-boundary.js"

@@ -1,4 +1,4 @@
-// ─── Property-Based Tests: Error Handling Foundation (Ticket 0.5) ────────────
+// Property-Based Tests: Error Handling Foundation (Ticket 0.5)
 //
 // Properties tested:
 // P1: Error hierarchy — all errors are instanceof Error with _tag discriminant
@@ -32,8 +32,6 @@ import { edgeCaseString } from "../helpers/arbitraries.js";
 
 const SEED = 42;
 const NUM_RUNS = 200;
-
-// ─── Generator: arbitrary RelayError ────────────────────────────────────────
 
 const ALL_ERROR_CODES: ErrorCode[] = [
 	"AUTH_REQUIRED",
@@ -91,7 +89,7 @@ const arbRelayError = fc
 			new RelayError(message, { code, statusCode, context }),
 	);
 
-// ─── Generators: subclass errors (Schema.TaggedError) ──────────────────────
+// Generators: subclass errors (Schema.TaggedError)
 
 const errorSubclasses = [
 	{ Class: OpenCodeConnectionError, expectedTag: "OpenCodeConnectionError" },
@@ -100,8 +98,6 @@ const errorSubclasses = [
 	{ Class: AuthenticationError, expectedTag: "AuthenticationError" },
 	{ Class: ConfigurationError, expectedTag: "ConfigurationError" },
 ] as const;
-
-// ─── P1: Error hierarchy ──────────────────────────────────────────────────
 
 describe("Ticket 0.5 — Error Handling PBT", () => {
 	describe("P1: Error hierarchy (AC1)", () => {
@@ -151,8 +147,6 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 		});
 	});
 
-	// ─── P2: toJSON shape ───────────────────────────────────────────────────
-
 	describe("P2: toJSON always produces valid HTTP error shape (AC2)", () => {
 		it("property: toJSON returns { error: { code, message } }", () => {
 			fc.assert(
@@ -184,8 +178,6 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 		});
 	});
 
-	// ─── P3: toWebSocket shape ────────────────────────────────────────────
-
 	describe("P3: toWebSocket always produces valid WS error message (AC2)", () => {
 		it("property: toWebSocket returns { type: 'error', code, message }", () => {
 			fc.assert(
@@ -199,8 +191,6 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 			);
 		});
 	});
-
-	// ─── P4: Sensitive data redaction ─────────────────────────────────────
 
 	describe("P4: Sensitive data is always redacted in logs (AC2)", () => {
 		const sensitiveKeys = [
@@ -278,8 +268,6 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 		});
 	});
 
-	// ─── P5: wrapError preserves cause chain ──────────────────────────────
-
 	describe("P5: wrapError preserves cause chain (AC4)", () => {
 		it("property: wrapped error has original as cause", () => {
 			fc.assert(
@@ -314,8 +302,6 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 			);
 		});
 	});
-
-	// ─── P6: Error _tag is always non-empty ────────────────────────────────
 
 	describe("P6: Error _tag is always a non-empty string (AC1)", () => {
 		it("property: all Schema.TaggedError subclass _tags are non-empty", () => {

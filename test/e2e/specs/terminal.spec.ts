@@ -1,4 +1,3 @@
-// ─── E2E: Terminal Panel ─────────────────────────────────────────────────────
 // Tests the terminal panel UI with real xterm.js rendering and local PTYs.
 // The replay fixture mocks OpenCode, but terminal tabs run the worker's shell.
 

@@ -1,4 +1,3 @@
-<!-- ─── Context Window Picker ─────────────────────────────────────────────── -->
 <!-- Claude context-window badge + dropdown. -->
 
 <script lang="ts">

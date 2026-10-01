@@ -1,4 +1,4 @@
-// ─── Notification → Session Navigation (Replay E2E) ─────────────────────────
+// Notification → Session Navigation (Replay E2E)
 // Full-pipeline test: real relay + MockOpenCodeServer (no WS mock).
 //
 // Proves the complete path:

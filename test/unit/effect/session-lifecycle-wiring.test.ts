@@ -49,8 +49,6 @@ import {
 	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
 
-// ── Test Helpers ────────────────────────────────────────────────────────────
-
 const waitForAssertion = (assertion: () => void) =>
 	Effect.promise(() => vi.waitFor(assertion));
 
@@ -223,7 +221,6 @@ function mockPino() {
 	return { root, child };
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
 //
 // AUDIT FIX (AP-1): Use `it.live` (not `it.scoped`) because subscriber fibers
 // use real async REST calls wrapped in Effect.tryPromise. TestClock freezes

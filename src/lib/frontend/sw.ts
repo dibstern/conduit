@@ -1,5 +1,4 @@
 /// <reference lib="webworker" />
-// ─── Service Worker ──────────────────────────────────────────────────────────
 // Handles push events to show notifications and manages notification clicks
 // to focus/open the relay. Only successful alert receipts are cached;
 // application assets still require a live server connection.
@@ -11,13 +10,9 @@ declare const self: ServiceWorkerGlobalScope;
 const ALERT_RECEIPT_CACHE = "conduit-alert-receipts-v1";
 const activeDeliveries = new Map<string, Promise<void>>();
 
-// ─── Install: activate immediately ───────────────────────────────────────
-
 self.addEventListener("install", () => {
 	self.skipWaiting();
 });
-
-// ─── Activate: claim clients ─────────────────────────────────────────────
 
 self.addEventListener("activate", (event: ExtendableEvent) => {
 	// Clean up any caches left by earlier versions of the SW
@@ -34,8 +29,6 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
 			.then(() => self.clients.claim()),
 	);
 });
-
-// ─── Push: show notification ─────────────────────────────────────────────
 
 interface PushPayload {
 	alertId?: string;
@@ -184,8 +177,6 @@ async function dingInFocusedTab(data: PushPayload): Promise<boolean> {
 		}
 	});
 }
-
-// ─── Notification click: focus or open relay ─────────────────────────────
 
 /** Post a navigate_to_session message to a client. Swallows errors
  *  (client may have closed between matchAll and postMessage). */

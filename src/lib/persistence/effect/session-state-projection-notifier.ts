@@ -1,4 +1,4 @@
-// ─── Session State Projection Notifier (port) ───────────────────────────────
+// Session State Projection Notifier (port)
 // Declared here, next to the projection runner that calls it, and implemented
 // in the relay -- the only layer that knows about sockets. Defining it the
 // other way round would point a dependency arrow from persistence at the relay,

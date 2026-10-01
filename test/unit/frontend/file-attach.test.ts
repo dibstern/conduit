@@ -1,11 +1,8 @@
-// ─── File Attach Utility Tests ───────────────────────────────────────────────
 import { describe, expect, it } from "vitest";
 import {
 	buildAttachedMessage,
 	parseAtReferences,
 } from "../../../src/lib/frontend/utils/file-attach.js";
-
-// ─── parseAtReferences ──────────────────────────────────────────────────────
 
 describe("parseAtReferences", () => {
 	it("returns empty array for text without @ references", () => {
@@ -37,8 +34,6 @@ describe("parseAtReferences", () => {
 		expect(parseAtReferences("contact user@example.com")).toEqual([]);
 	});
 });
-
-// ─── buildAttachedMessage ───────────────────────────────────────────────────
 
 describe("buildAttachedMessage", () => {
 	it("returns original text when no attachments", () => {

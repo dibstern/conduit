@@ -1,4 +1,3 @@
-// ─── OpenCode Runtime Ingress Integration Test ──────────────────────────────
 // Verifies that SSE events flow through both the Effect relay pipeline and the
 // Effect OpenCode runtime ingress wiring.
 

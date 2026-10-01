@@ -1,4 +1,3 @@
-// ─── File Icon Utilities ─────────────────────────────────────────────────────
 // File type classification and icon helpers.
 // file-icons-js is loaded via CDN; this wraps the global API.
 

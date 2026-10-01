@@ -1,4 +1,3 @@
-// ─── Session Chat State Reactivity Tests ─────────────────────────────────────
 // Mutates getOrCreateSessionActivity(id).phase; asserts a $derived(currentChat().phase)
 // observer re-runs. Validates that SvelteMap + $state proxy reactivity propagates
 // through the composeChatState Proxy.

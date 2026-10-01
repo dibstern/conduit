@@ -1,4 +1,3 @@
-// ─── Split Scene ─────────────────────────────────────────────────────────────
 // Generates GENERATE-SPLIT.gif — Side-by-side Conduit + dummy site showing
 // a user prompt, streamed response, and live site update.
 
@@ -24,7 +23,6 @@ export const splitScene: SceneDefinition = {
 	},
 
 	async run({ page, context, previewUrl, phase, assert, hold }) {
-		// ── Phase 1: Read fixtures and set up route interceptors ─────────
 		let compositionHtml: string;
 		let dummySiteV1: string;
 		let dummySiteV2: string;
@@ -66,7 +64,7 @@ export const splitScene: SceneDefinition = {
 			);
 		});
 
-		// ── Phase 2: Set up WS mock on context (not page!) ──────────────
+		// Phase 2: Set up WS mock on context (not page!)
 		await phase("setup-ws-mock", async () => {
 			const shellSnapshot = splitInit.find(
 				(message) => message.type === "shell_snapshot",
@@ -130,14 +128,12 @@ export const splitScene: SceneDefinition = {
 			});
 		});
 
-		// ── Phase 3: Navigate to composition page ───────────────────────
 		await phase("navigate-composition", async () => {
 			await page.goto(`${previewUrl}/composition.html`, {
 				waitUntil: "domcontentloaded",
 			});
 		});
 
-		// ── Phase 4: Load iframes ───────────────────────────────────────
 		await phase("load-iframes", async () => {
 			await page.evaluate(
 				([conduitUrl, siteUrl]) => {
@@ -157,7 +153,6 @@ export const splitScene: SceneDefinition = {
 			);
 		});
 
-		// ── Assert: Iframes loaded ──────────────────────────────────────
 		await assert("iframes-loaded", async () => {
 			await page
 				.frameLocator("#conduit-frame")
@@ -170,10 +165,8 @@ export const splitScene: SceneDefinition = {
 				.waitFor({ state: "visible", timeout: 5000 });
 		});
 
-		// ── Hold: Show initial state ────────────────────────────────────
 		await hold(2000, "initial-state");
 
-		// ── Phase 7: Type message ───────────────────────────────────────
 		await phase("type-message", async () => {
 			const textarea = page.frameLocator("#conduit-frame").locator("textarea");
 			await textarea.click();
@@ -183,19 +176,15 @@ export const splitScene: SceneDefinition = {
 			);
 		});
 
-		// ── Hold: Before send ───────────────────────────────────────────
 		await hold(500, "before-send");
 
-		// ── Phase 9: Send message ───────────────────────────────────────
 		await phase("send-message", async () => {
 			const textarea = page.frameLocator("#conduit-frame").locator("textarea");
 			await textarea.press("Enter");
 		});
 
-		// ── Hold: Response streaming ────────────────────────────────────
 		await hold(3000, "response-streaming");
 
-		// ── Phase 11: Swap to v2 ────────────────────────────────────────
 		await phase("swap-to-v2", async () => {
 			await page.evaluate((url) => {
 				const siteFrame = document.getElementById(
@@ -205,7 +194,6 @@ export const splitScene: SceneDefinition = {
 			}, `${previewUrl}/dummy-site-v2.html`);
 		});
 
-		// ── Assert: Hero section visible ────────────────────────────────
 		await assert("hero-section-visible", async () => {
 			await page
 				.frameLocator("#site-frame")
@@ -214,7 +202,6 @@ export const splitScene: SceneDefinition = {
 				.waitFor({ state: "visible", timeout: 5000 });
 		});
 
-		// ── Hold: Final result ──────────────────────────────────────────
 		await hold(3000, "final-result");
 	},
 };

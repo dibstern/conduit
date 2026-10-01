@@ -1,4 +1,3 @@
-// ─── Shared Arbitraries for Property-Based Testing ──────────────────────────
 // Intentionally biased toward edge cases: empty, singleton, max-size, unicode,
 // path traversal, long inputs, invalid shapes, duplicates, ordering permutations.
 // Uses fc.oneof with { weight, arbitrary } syntax (fast-check v4).
@@ -17,8 +16,6 @@ import type {
 	RecentProject,
 	ToolStatus,
 } from "../../src/lib/types.js";
-
-// ─── Primitive generators ───────────────────────────────────────────────────
 
 /** Strings biased toward edge cases */
 export const edgeCaseString = fc.oneof(
@@ -58,8 +55,6 @@ export const edgeInt = fc.oneof(
 
 /** Timestamps (epoch ms) */
 export const timestamp = fc.integer({ min: 0, max: 2_000_000_000_000 });
-
-// ─── Domain-specific generators ─────────────────────────────────────────────
 
 /** All valid part types */
 export const partType: fc.Arbitrary<PartType> = fc.constantFrom(
@@ -144,8 +139,6 @@ export const invalidDecision = fc.oneof(
 		),
 	},
 );
-
-// ─── SSE Event generators ───────────────────────────────────────────────────
 
 /** Generate a message.part.delta event */
 export const partDeltaEvent = fc
@@ -324,8 +317,6 @@ export const unknownEvent = fc
 		);
 	}) as fc.Arbitrary<SSEEvent>;
 
-// ─── IPC generators ─────────────────────────────────────────────────────────
-
 /** Valid wire requests, decoded through the same schema as the daemon. */
 export const validIpcRequest: fc.Arbitrary<IpcTaggedRequest> = fc
 	.oneof(
@@ -443,8 +434,6 @@ export const invalidJSON = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant('{"no_cmd": true}') },
 );
 
-// ─── Auth generators ────────────────────────────────────────────────────────
-
 /** Valid PINs (4-8 digits) */
 export const validPin = fc.stringMatching(/^\d{4,8}$/);
 
@@ -465,8 +454,6 @@ export const ipAddress = fc.oneof(
 	{ weight: 2, arbitrary: fc.constantFrom("127.0.0.1", "::1", "192.168.1.1") },
 	{ weight: 1, arbitrary: fc.constant("0.0.0.0") },
 );
-
-// ─── Recent Projects generators ─────────────────────────────────────────────
 
 /** A recent project entry */
 export const recentProject: fc.Arbitrary<RecentProject> = fc
@@ -506,8 +493,6 @@ export const recentProjectList = fc.array(recentProject, {
 	maxLength: 30,
 });
 
-// ─── Path traversal generators ──────────────────────────────────────────────
-
 /** Strings that look like path traversal attempts */
 export const pathTraversal = fc.oneof(
 	{ weight: 3, arbitrary: fc.constant("../../../etc/passwd") },
@@ -517,8 +502,6 @@ export const pathTraversal = fc.oneof(
 	{ weight: 1, arbitrary: fc.constant("..%2F..%2F..%2Fetc%2Fpasswd") },
 	{ weight: 1, arbitrary: fc.constant("\x00/etc/passwd") },
 );
-
-// ─── Directory path generators ──────────────────────────────────────────────
 
 /** Realistic directory paths */
 export const directoryPath = fc.oneof(

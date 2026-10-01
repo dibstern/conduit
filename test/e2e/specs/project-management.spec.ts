@@ -1,4 +1,3 @@
-// ─── Project Management E2E Tests ────────────────────────────────────────────
 // Tests directory autocomplete in the "+Add project" form, and the project
 // context menu (rename, delete) in the ProjectManagerPanel.
 //
@@ -10,16 +9,10 @@ import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 type Page = import("@playwright/test").Page;
 type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const PROJECT_URL = "/?p=myapp";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Wait for the list route and WebSocket connection on every viewport. */
 async function waitForChatReady(page: Page): Promise<void> {
@@ -271,8 +264,6 @@ test("adds a project through the projects panel", async ({ page, baseURL }) => {
 	);
 });
 
-// ─── Group 1: Directory Autocomplete ────────────────────────────────────────
-
 test.describe("Directory Autocomplete", () => {
 	test("shows directory suggestions when typing a path", async ({
 		page,
@@ -493,8 +484,6 @@ test.describe("Directory Autocomplete", () => {
 	});
 });
 
-// ─── Group 2: Project Context Menu ──────────────────────────────────────────
-
 test.describe("Project Context Menu", () => {
 	test("shows ... button on project items", async ({ page, baseURL }) => {
 		await setupWithProjectManagement(page, baseURL);
@@ -545,8 +534,6 @@ test.describe("Project Context Menu", () => {
 		await expect(renameBtn).not.toBeVisible();
 	});
 });
-
-// ─── Group 3: Project Rename ────────────────────────────────────────────────
 
 test.describe("Project Rename", () => {
 	test("rename shows inline input with current title", async ({
@@ -642,8 +629,6 @@ test.describe("Project Rename", () => {
 		).toContainText("My Library", { timeout: 5_000 });
 	});
 });
-
-// ─── Group 4: Project Delete ────────────────────────────────────────────────
 
 test.describe("Project Delete", () => {
 	test("Remove shows confirmation modal", async ({ page, baseURL }) => {

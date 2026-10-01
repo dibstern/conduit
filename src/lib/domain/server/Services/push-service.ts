@@ -1,4 +1,3 @@
-// ─── Push Notification Service ──────────────────────────────────────────────
 // Bounded-concurrency broadcast with per-send failure isolation.
 // Uses Ref<Map> for subscription tracking — native Map is a documented
 // exception here since values are iterated for broadcast fan-out.

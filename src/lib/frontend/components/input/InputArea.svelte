@@ -1,4 +1,3 @@
-<!-- ─── Input Area ──────────────────────────────────────────────────────────── -->
 <!-- Auto-expanding textarea with send/stop button, attach menu, agent/model pills. -->
 <!-- Command menu triggered by "/" prefix. -->
 
@@ -49,8 +48,6 @@
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 
-	// ─── State ─────────────────────────────────────────────────────────────────
-
 	let inputText = $state("");
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let pendingImages = $state<PendingImage[]>([]);
@@ -68,7 +65,6 @@
 		"Ask anything. / to use skills, @ to mention files",
 	);
 
-	// ─── Per-session input drafts ─────────────────────────────────────────────
 	// Each session keeps its own unsent input text. Switching sessions saves the
 	// current draft and restores the target session's draft (or empty string).
 
@@ -96,7 +92,7 @@
 		});
 	});
 
-	// ─── Input sync (cross-tab) ───────────────────────────────────────────────
+	// Input sync (cross-tab)
 
 	/** Track which sync we last applied to avoid re-applying our own. */
 	let lastSyncApplied = 0;
@@ -120,8 +116,6 @@
 	/** Timer for debounced outgoing input sync. */
 	let inputSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// ─── Command menu state ────────────────────────────────────────────────────
-
 	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(slashQuery !== null);
 	const commandQuery = $derived(slashQuery?.query ?? "");
@@ -132,8 +126,6 @@
 
 	/** Names of known slash commands/skills, for inline recognition in the composer. */
 	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
-
-	// ─── File menu state ──────────────────────────────────────────────────────
 
 	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
 	const fileMenuVisible = $derived(
@@ -180,8 +172,6 @@
 		return "";
 	});
 
-	// ─── Derived ───────────────────────────────────────────────────────────────
-
 	// Pasting a log dump means the composer holds far more text than it can show.
 	// Past this size the highlight mirror stops earning its keep: it would lay the
 	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
@@ -212,7 +202,6 @@
 			: null;
 	});
 
-	// ─── Mobile detection ─────────────────────────────────────────────────────
 	// On mobile, Enter inserts a newline (default textarea behavior) and the
 	// user taps the Send button. On desktop, Enter sends the message.
 
@@ -222,8 +211,6 @@
 			(navigator.maxTouchPoints > 0 && window.innerWidth < 768)
 		);
 	}
-
-	// ─── Handlers ──────────────────────────────────────────────────────────────
 
 	function syncInputDraft(text: string) {
 		const sessionId = sessionState.currentId;
@@ -440,8 +427,6 @@
 		fileInput.click();
 	}
 
-	// ─── Image attach helpers ──────────────────────────────────────────────────
-
 	/** Read selected files from a file input, auto-resizing if they exceed the API limit. */
 	function processSelectedFiles(files: FileList | null) {
 		if (!files || files.length === 0) return;
@@ -472,8 +457,6 @@
 	function removePendingImage(id: string) {
 		pendingImages = pendingImages.filter((img) => img.id !== id);
 	}
-
-	// ─── Command menu handlers ─────────────────────────────────────────────────
 
 	function handleCommandSelect(command: string) {
 		// Replace the slash query region with the selected command text (e.g. "/skill ").
@@ -511,8 +494,6 @@
 		}
 	}
 
-	// ─── File menu handlers ───────────────────────────────────────────────────
-
 	function handleFileSelect(path: string) {
 		if (!atQuery || !textareaEl) return;
 
@@ -541,8 +522,6 @@
 			inputText = before + after;
 		}
 	}
-
-	// ─── Lifecycle ─────────────────────────────────────────────────────────────
 
 	// Navigate to parent session on ESC — works regardless of focus
 	$effect(() => {

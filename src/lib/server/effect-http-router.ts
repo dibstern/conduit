@@ -1,4 +1,3 @@
-// ─── Effect HTTP Router ─────────────────────────────────────────────────────
 // Effect-based HTTP router using @effect/platform. This is the production HTTP
 // route graph for both daemon and relay server modes; Node's request callback
 // only delegates into the handler built from this router.
@@ -42,7 +41,7 @@ import type {
 } from "../shared-types.js";
 import { getVersion } from "../version.js";
 
-// ─── Service Tags (dependency injection) ────────────────────────────────────
+// Service Tags (dependency injection)
 // Each tag represents a capability the router needs. Concrete implementations
 // are provided via Effect Layers when the router is wired into the server.
 
@@ -111,8 +110,6 @@ export class ProjectApiDelegateProvider extends Context.Tag(
 	}
 >() {}
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function serializeProject(p: RouterProjectInfo): DashboardProjectResponse {
 	return {
 		slug: p.slug,
@@ -140,8 +137,6 @@ function jsonError(
 	);
 }
 
-// ─── Request body schemas ───────────────────────────────────────────────────
-
 const PushSubscribeBody = Schema.Struct({
 	subscription: Schema.Struct({
 		endpoint: Schema.String,
@@ -157,8 +152,6 @@ const PushSubscribeBody = Schema.Struct({
 const PushUnsubscribeBody = Schema.Struct({
 	endpoint: Schema.String,
 });
-
-// ─── Route handlers ─────────────────────────────────────────────────────────
 
 /** GET /health, GET /api/status */
 const healthHandler = Effect.gen(function* () {
@@ -374,8 +367,6 @@ const staticCatchAllHandler = Effect.gen(function* () {
 	const pathname = new URL(req.url, `http://${host}`).pathname;
 	return yield* serveStaticFile(pathname);
 });
-
-// ─── Router ─────────────────────────────────────────────────────────────────
 
 /**
  * Effect-based HTTP router with all JSON API routes.

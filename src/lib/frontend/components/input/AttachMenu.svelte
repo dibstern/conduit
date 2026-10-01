@@ -1,4 +1,3 @@
-<!-- ─── Attach Menu ─────────────────────────────────────────────────────────── -->
 <!-- Attach button with a camera/photos dropdown.                             -->
 <!--                                                                         -->
 <!-- What this replaced: a Surface toggled by a     -->

@@ -1,4 +1,3 @@
-<!-- ─── Attention Banner ───────────────────────────────────────────── -->
 <!-- Cross-session attention banner for permissions and questions in OTHER    -->
 <!-- sessions. Shows session count + clickable session titles. Fixed top-right.-->
 <!-- Dismiss button hides until new remote items arrive.                       -->

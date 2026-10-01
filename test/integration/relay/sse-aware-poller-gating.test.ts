@@ -1,4 +1,3 @@
-// ─── SSE-Aware Poller Gating Integration Test ───────────────────────────────
 // Comprehensive verification of the monitoring reducer end-to-end (18 scenarios):
 //
 // Group 1 (1-4): SSE coverage and grace period
@@ -39,7 +38,6 @@ import {
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
-// ── Accelerated timing constants ────────────────────────────────────────────
 // Production values: grace=3000ms, staleness=5000ms, statusPoll=500ms, msgPoll=750ms
 // Test values: ~10x faster to avoid multi-minute test runs.
 
@@ -48,8 +46,6 @@ const TEST_STALENESS_MS = 500;
 const TEST_STATUS_POLL_MS = 100;
 const TEST_MSG_POLL_MS = 150;
 const TEST_SSE_INJECT_INTERVAL = 80; // production: 400ms
-
-// ── Mock OpenCode Server with request counting ──────────────────────────────
 
 interface SessionDef {
 	id: string;
@@ -232,8 +228,6 @@ async function createMockOpenCode(
 		},
 	};
 }
-
-// ── Test harness ────────────────────────────────────────────────────────────
 
 interface TestHarness {
 	relay: ProjectRelay;
@@ -444,10 +438,6 @@ async function resetForNextTest(
 	harness.mock.resetMessageRequestCounts();
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
-
-// ─── Group 1: SSE coverage and grace period ────────────────────────────────
-
 describe("Group 1: SSE coverage and grace period", () => {
 	let harness: TestHarness;
 
@@ -607,8 +597,6 @@ describe("Group 1: SSE coverage and grace period", () => {
 	}, 5_000);
 });
 
-// ─── Group 2: SSE dynamics ─────────────────────────────────────────────────
-
 describe("Group 2: SSE dynamics", () => {
 	let harness: TestHarness;
 
@@ -739,8 +727,6 @@ describe("Group 2: SSE dynamics", () => {
 		await client.close();
 	}, 5_000);
 });
-
-// ─── Group 3: Idle transitions ─────────────────────────────────────────────
 
 describe("Group 3: Idle transitions", () => {
 	let harness: TestHarness;
@@ -873,8 +859,6 @@ describe("Group 3: Idle transitions", () => {
 	}, 5_000);
 });
 
-// ─── Group 4: Cross-session and lifecycle ──────────────────────────────────
-
 describe("Group 4: Cross-session and lifecycle", () => {
 	let harness: TestHarness;
 
@@ -968,8 +952,6 @@ describe("Group 4: Cross-session and lifecycle", () => {
 		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
 	}, 5_000);
 });
-
-// ─── Group 5: Notifications ────────────────────────────────────────────────
 
 describe("Group 5: Notifications", () => {
 	let harness: TestHarness;
@@ -1087,8 +1069,6 @@ describe("Group 5: Notifications", () => {
 		await client.close();
 	}, 10_000);
 });
-
-// ─── Group 6: Retry status and cycling ─────────────────────────────────────
 
 describe("Group 6: Retry status and cycling", () => {
 	let harness: TestHarness;

@@ -1,17 +1,12 @@
-// ─── UI Store ────────────────────────────────────────────────────────────────
 // Global UI state: sidebar, modals, toasts, scroll, rewind, plan mode, banners.
 
 import type { BannerConfig, PanelId, Toast, ToastVariant } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Safe localStorage.getItem that returns null in non-browser environments. */
 function safeGetItem(key: string): string | null {
@@ -24,7 +19,6 @@ function safeGetItem(key: string): string | null {
 export const SIDEBAR_DEFAULT_WIDTH = 300;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
-// ─── State ──────────────────────────────────────────────────────────────────
 
 export const uiState = $state({
 	// Sidebar
@@ -78,7 +72,6 @@ export const uiState = $state({
 	fileViewerPath: null as string | null,
 });
 
-// ─── Derived getters ────────────────────────────────────────────────────────
 // Components should wrap in $derived() for reactive caching.
 
 /** Get the context bar color class based on usage percentage. */
@@ -88,8 +81,6 @@ export function getContextColor(): string {
 	if (uiState.contextPercent > 0) return "ctx-green";
 	return "";
 }
-
-// ─── Sidebar actions ────────────────────────────────────────────────────────
 
 export function collapseSidebar(): void {
 	uiState.sidebarCollapsed = true;
@@ -140,8 +131,6 @@ export function setSnoozedShelfOpen(open: boolean): void {
 	}
 }
 
-// ─── Toast actions ──────────────────────────────────────────────────────────
-
 export function showToast(
 	message: string,
 	options?: {
@@ -169,8 +158,6 @@ export function dismissToast(id: string): void {
 	uiState.toasts = uiState.toasts.filter((t) => t.id !== id);
 }
 
-// ─── Confirm dialog ─────────────────────────────────────────────────────────
-
 /**
  * Show a confirm dialog. Returns a promise that resolves to true (confirm)
  * or false (cancel).
@@ -197,8 +184,6 @@ export function resolveConfirm(result: boolean): void {
 	}
 }
 
-// ─── Info panel actions ─────────────────────────────────────────────────────
-
 export function openPanel(id: PanelId): void {
 	uiState.openPanels = new Set([...uiState.openPanels, id]);
 }
@@ -221,8 +206,6 @@ export function togglePanel(id: PanelId): void {
 	}
 }
 
-// ─── Banner actions ─────────────────────────────────────────────────────────
-
 export function showBanner(config: BannerConfig): void {
 	// Don't duplicate
 	if (uiState.banners.some((b) => b.id === config.id)) return;
@@ -232,8 +215,6 @@ export function showBanner(config: BannerConfig): void {
 export function removeBanner(id: string): void {
 	uiState.banners = uiState.banners.filter((b) => b.id !== id);
 }
-
-// ─── Rewind actions ─────────────────────────────────────────────────────────
 
 export function enterRewindMode(): void {
 	uiState.rewindActive = true;
@@ -248,8 +229,6 @@ export function exitRewindMode(): void {
 export function selectRewindMessage(uuid: string | null): void {
 	uiState.rewindSelectedUuid = uuid;
 }
-
-// ─── Plan mode actions ──────────────────────────────────────────────────────
 
 export function enterPlanMode(): void {
 	uiState.planMode = true;
@@ -272,8 +251,6 @@ export function setPlanApproval(
 	uiState.planApproval = { onApprove, onReject };
 }
 
-// ─── Lightbox actions ───────────────────────────────────────────────────────
-
 export function openLightbox(src: string): void {
 	uiState.lightboxSrc = src;
 }
@@ -281,8 +258,6 @@ export function openLightbox(src: string): void {
 export function closeLightbox(): void {
 	uiState.lightboxSrc = null;
 }
-
-// ─── File viewer actions ────────────────────────────────────────────────────
 
 export function openFileViewer(path: string): void {
 	uiState.fileViewerOpen = true;
@@ -294,13 +269,9 @@ export function closeFileViewer(): void {
 	uiState.fileViewerPath = null;
 }
 
-// ─── Context usage ──────────────────────────────────────────────────────────
-
 export function updateContextPercent(percent: number): void {
 	uiState.contextPercent = Math.max(0, Math.min(100, percent));
 }
-
-// ─── Client count ───────────────────────────────────────────────────────────
 
 export function setClientCount(count: number): void {
 	uiState.clientCount = count;

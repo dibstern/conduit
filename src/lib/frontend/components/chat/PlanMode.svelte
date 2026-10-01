@@ -1,4 +1,3 @@
-<!-- ─── Plan Mode ──────────────────────────────────────────────────────────── -->
 <!-- Plan mode banners, collapsible content card with markdown, and approval     -->
 <!-- buttons. Supports four modes: enter, exit, content, approval.              -->
 <!-- Preserves .plan-banner, .plan-card, .plan-approval classes for E2E/CSS.    -->
@@ -21,19 +20,15 @@
 		onReject?: (() => void) | undefined;
 	} = $props();
 
-	// ─── Local state ─────────────────────────────────────────────────────────
 	let collapsed = $state(false);
 	let copyIcon = $state<"copy" | "check">("copy");
 	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// ─── Derived ─────────────────────────────────────────────────────────────
 	const renderedHtml = $derived(content ? renderMarkdown(content) : "");
 
 	const cardClass = $derived(
 		collapsed ? "plan-card collapsed" : "plan-card",
 	);
-
-	// ─── Handlers ────────────────────────────────────────────────────────────
 
 	function handleCopy() {
 		if (!content) return;

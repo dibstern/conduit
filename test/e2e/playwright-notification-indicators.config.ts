@@ -1,4 +1,3 @@
-// ─── Playwright Config: Notification Indicator Tests ─────────────────────────
 // Tests server-derived session rows → sidebar dots + AttentionBanner via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 

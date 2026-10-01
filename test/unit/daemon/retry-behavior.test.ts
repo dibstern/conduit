@@ -1,4 +1,3 @@
-// ─── Retry Schedule Behavior Tests ───────────────────────────────────────────
 // Verifies that Effect retry schedules with TestClock produce the expected
 // number of attempts with correct exponential backoff timing.
 

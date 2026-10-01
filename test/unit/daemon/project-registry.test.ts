@@ -46,8 +46,6 @@ function deferredRelayFactoryNoAbort() {
 	};
 }
 
-// ─── Lifecycle basics ───────────────────────────────────────────────────────
-
 describe("ProjectRegistry — Lifecycle basics", () => {
 	it("add() sets status to 'registering', emits project_added", () => {
 		const reg = new ProjectRegistry();
@@ -233,8 +231,6 @@ describe("ProjectRegistry — Lifecycle basics", () => {
 	});
 });
 
-// ─── Queries ────────────────────────────────────────────────────────────────
-
 describe("ProjectRegistry — Queries", () => {
 	it("getRelay() returns relay only for 'ready' entries, undefined otherwise", async () => {
 		const reg = new ProjectRegistry();
@@ -348,8 +344,6 @@ describe("ProjectRegistry — Queries", () => {
 		expect(slugs).toEqual(["alpha", "beta", "gamma"]);
 	});
 });
-
-// ─── waitForRelay ───────────────────────────────────────────────────────────
 
 describe("ProjectRegistry — waitForRelay", () => {
 	it("already ready → resolves immediately", async () => {
@@ -468,8 +462,6 @@ describe("ProjectRegistry — waitForRelay", () => {
 	});
 });
 
-// ─── Concurrency ────────────────────────────────────────────────────────────
-
 describe("ProjectRegistry — Concurrency", () => {
 	it("add() for existing slug throws", () => {
 		const reg = new ProjectRegistry();
@@ -522,8 +514,6 @@ describe("ProjectRegistry — Concurrency", () => {
 		expect(reg.getRelay("alpha")).toBe(newRelay);
 	});
 });
-
-// ─── Edge cases ─────────────────────────────────────────────────────────────
 
 describe("ProjectRegistry — Edge cases", () => {
 	it("stopAll() stops all ready relays, aborts all registering, empties map", async () => {
@@ -610,8 +600,6 @@ describe("ProjectRegistry — Edge cases", () => {
 		expect(reg.has("beta")).toBe(false);
 	});
 });
-
-// ─── Negative paths ─────────────────────────────────────────────────────────
 
 describe("ProjectRegistry — Negative paths", () => {
 	it("addWithoutRelay() for duplicate slug throws", () => {
@@ -713,7 +701,7 @@ describe("ProjectRegistry — Negative paths", () => {
 	});
 });
 
-// ─── Cross-relay operations (D4) ────────────────────────────────────────────
+// Cross-relay operations (D4)
 
 describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 	it("broadcastToAll() sends to all ready relays' wsHandler", async () => {
@@ -776,7 +764,7 @@ describe("ProjectRegistry — Cross-relay operations (D4)", () => {
 	});
 });
 
-// ─── Property-based invariants (Layer 2) ────────────────────────────────────
+// Property-based invariants (Layer 2)
 
 describe("ProjectRegistry — Property-based invariants", () => {
 	/** Flush microtasks so immediateRelayFactory promises resolve */
@@ -929,7 +917,7 @@ describe("ProjectRegistry — Property-based invariants", () => {
 	});
 });
 
-// ─── Stateful model tests (Layer 3) ─────────────────────────────────────────
+// Stateful model tests (Layer 3)
 
 describe("ProjectRegistry — Stateful model tests", () => {
 	/** Flush microtasks so immediateRelayFactory promises resolve */

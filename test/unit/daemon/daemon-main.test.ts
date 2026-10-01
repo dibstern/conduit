@@ -7,7 +7,6 @@ import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cac
 import type { Logger } from "../../../src/lib/logger.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
-// ─── Daemon Main Tests ──────────────────────────────────────────────────────
 // TDD tests for daemon-main.ts: the top-level Effect entry point that replaces
 // the Daemon class's start() method. Tests exercise runStartupSequence
 // composition and background task supervision, NOT makeDaemonProgramLayer
@@ -32,8 +31,6 @@ import {
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-
-// ─── Mock helpers ──────────────────────────────────────────────────────────
 
 function makeMockCrashCounter(overrides?: {
 	record?: CrashCounter["record"];
@@ -121,8 +118,6 @@ function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
 		),
 	);
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe("daemon-main", () => {
 	describe("resolveDefaultStaticDir", () => {

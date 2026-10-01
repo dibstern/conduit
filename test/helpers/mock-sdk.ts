@@ -11,8 +11,6 @@ import type {
 } from "../../src/lib/provider/claude/types.js";
 import type { EventSink, SendTurnInput } from "../../src/lib/provider/types.js";
 
-// ─── createMockQuery ────────────────────────────────────────────────────────
-
 /**
  * Build a mock `Query` (the async-iterable + methods object returned by the
  * SDK's `query()` function) that yields the supplied messages and then closes.
@@ -50,8 +48,6 @@ export function createMockQuery(messages: SDKMessage[]): Query {
 	}) as unknown as Query;
 }
 
-// ─── createMockEventSink ────────────────────────────────────────────────────
-
 /** Create a stub EventSink whose methods are `vi.fn()` spies. */
 export function createMockEventSink(): EventSink {
 	return {
@@ -64,8 +60,6 @@ export function createMockEventSink(): EventSink {
 		resolveQuestion: vi.fn(() => Effect.void),
 	};
 }
-
-// ─── SDK result factories ───────────────────────────────────────────────────
 
 /** Create a successful SDK result message with sensible defaults. */
 export function makeSuccessResult(
@@ -122,8 +116,6 @@ export function makeErrorResult(
 		...overrides,
 	} as SDKResultMessage;
 }
-
-// ─── SendTurnInput factory ──────────────────────────────────────────────────
 
 /** Create a base `SendTurnInput` with sensible defaults. */
 export function makeBaseSendTurnInput(

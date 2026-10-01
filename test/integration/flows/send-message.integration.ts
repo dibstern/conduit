@@ -1,4 +1,3 @@
-// ─── Integration: Send Message ───────────────────────────────────────────────
 // Verifies Bug A: the relay sends the correct body format to OpenCode's
 // prompt_async endpoint. If this test passes, messages actually work.
 

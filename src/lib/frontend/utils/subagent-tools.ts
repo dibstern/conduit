@@ -1,4 +1,3 @@
-// ─── Subagent Tool Identity ──────────────────────────────────────────────────
 // Task/Agent tools spawn child subagent sessions and have a lifecycle
 // independent of the parent turn: they complete via their own
 // task_notification → tool.completed and may still be running after the parent

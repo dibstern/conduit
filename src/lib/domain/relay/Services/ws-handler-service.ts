@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-// ─── WsHandlerState — Effect-native WebSocket handler service ───────────────
 // Replaces the imperative WebSocketHandler class's mutable Maps/Sets with
 // a single atomic Ref<HashMap<string, ClientState>> and pure Effect functions.
 //
@@ -21,8 +20,6 @@ import { randomUUID } from "node:crypto";
 
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import type { RelayMessage } from "../../../shared-types.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 /**
  * Minimal WebSocket interface — abstracts the `ws` library's WebSocket type
@@ -70,15 +67,11 @@ export interface ClientState {
 	lastFamily?: string;
 }
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 /** Tag for the mutable client→ClientState HashMap Ref in the Effect Context. */
 export class WsHandlerStateTag extends Context.Tag("WsHandlerState")<
 	WsHandlerStateTag,
 	Ref.Ref<HashMap.HashMap<string, ClientState>>
 >() {}
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing WsHandlerStateTag backed by a Ref.
@@ -92,8 +85,6 @@ export const makeWsHandlerStateLive = (
 		WsHandlerStateTag,
 		Ref.make(initial ?? HashMap.empty<string, ClientState>()),
 	);
-
-// ─── Pure functions ─────────────────────────────────────────────────────────
 
 /**
  * Register a new client connection.

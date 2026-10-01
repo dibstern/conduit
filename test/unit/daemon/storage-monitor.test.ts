@@ -1,4 +1,4 @@
-// ─── Unit Tests: StorageMonitor (Ticket 6.2 AC8) ────────────────────────────
+// Unit Tests: StorageMonitor (Ticket 6.2 AC8)
 //
 // Tests:
 // T1:  Emits `low_disk_space` when available space drops below threshold
@@ -15,8 +15,6 @@ import type {
 	LowDiskSpaceEvent,
 } from "../../../src/lib/daemon/storage-monitor.js";
 import { StorageMonitor } from "../../../src/lib/daemon/storage-monitor.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Create an injectable _statfs that returns the given available bytes */
 function mockStatfs(availableBytes: number) {
@@ -48,11 +46,7 @@ function mockStatfsControlled(sequence: number[]) {
 	return { fn, next };
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 describe("Ticket 6.2 AC8 — StorageMonitor", () => {
-	// ─── T1: Emits low_disk_space when below threshold ──────────────────
-
 	describe("T1: Emits low_disk_space when available space drops below threshold", () => {
 		it("emits low_disk_space on first check when below threshold", async () => {
 			const threshold = 100 * 1024 * 1024; // 100MB
@@ -101,8 +95,6 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			expect(event.availableBytes).toBe(0);
 		});
 	});
-
-	// ─── T2: Does NOT emit when space is above threshold ────────────────
 
 	describe("T2: Does NOT emit when space is above threshold", () => {
 		it("no events emitted when space is plentiful", async () => {
@@ -155,8 +147,6 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 		});
 	});
 
-	// ─── T3: Emits disk_space_ok when space recovers ────────────────────
-
 	describe("T3: Emits disk_space_ok when space recovers", () => {
 		it("emits disk_space_ok after low_disk_space then recovery", async () => {
 			const threshold = 100 * 1024 * 1024;
@@ -197,7 +187,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 		});
 	});
 
-	// ─── T4: Does NOT emit disk_space_ok on first check if above threshold ─
+	// T4: Does NOT emit disk_space_ok on first check if above threshold
 
 	describe("T4: Does NOT emit disk_space_ok on first check if space is above threshold", () => {
 		it("no disk_space_ok when first check is above threshold", async () => {
@@ -221,8 +211,6 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			expect(okEvents).toHaveLength(0);
 		});
 	});
-
-	// ─── T5: Does NOT re-emit low_disk_space on consecutive low checks ──
 
 	describe("T5: Does NOT re-emit low_disk_space on consecutive low checks (transition only)", () => {
 		it("emits low_disk_space only once across multiple consecutive low checks", async () => {
@@ -310,7 +298,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 		});
 	});
 
-	// ─── T6: stop() is idempotent ───────────────────────────────────────
+	// T6: stop() is idempotent
 
 	describe("T6: stop() is idempotent (calling stop twice doesn't throw)", () => {
 		it("does not throw on double stop", () => {
@@ -335,8 +323,6 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			expect(() => monitor.stop()).not.toThrow();
 		});
 	});
-
-	// ─── T7: Custom threshold works ─────────────────────────────────────
 
 	describe("T7: Custom threshold works", () => {
 		it("uses custom threshold for low_disk_space detection", async () => {
@@ -413,7 +399,7 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 		});
 	});
 
-	// ─── T8: After drain(), interval no longer fires ────────────────────
+	// T8: After drain(), interval no longer fires
 
 	describe("T8: After drain(), interval no longer fires", () => {
 		it("does not call check after drain()", async () => {

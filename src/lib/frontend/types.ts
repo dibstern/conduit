@@ -1,8 +1,6 @@
-// ─── Shared TypeScript Types ──────────────────────────────────────────────────
 // All types used across Svelte stores and components.
 // Single source of truth — import from here, not from vanilla modules.
 
-// ─── Re-exports from shared-types ────────────────────────────────────────────
 // These types are shared between server and frontend. Re-exported so
 // frontend code can import everything from "./types.js".
 // Types also used locally in this file are imported separately.
@@ -55,8 +53,6 @@ export type {
 	UsageInfo,
 } from "../shared-types.js";
 
-// ─── Server-owned reads ──────────────────────────────────────────────────────
-
 /**
  * A value the server owns, seen from the outside: read-only all the way down.
  *
@@ -78,19 +74,15 @@ export type Immutable<T> = T extends (...args: never[]) => unknown
 					? { readonly [K in keyof T]: Immutable<T[K]> }
 					: T;
 
-// ─── Derived type aliases ────────────────────────────────────────────────────
-
 /** Cost breakdown for a model (derived from shared ModelInfo). */
 export type ModelCost = NonNullable<ModelInfo["cost"]>;
 
-// ─── File Browser Types (frontend extensions) ────────────────────────────────
+// File Browser Types (frontend extensions)
 
 /** FileEntry with recursive children — for tree views that embed child nodes. */
 export interface FileTreeEntry extends FileEntry {
 	children?: FileTreeEntry[];
 }
-
-// ─── Chat Message Types ──────────────────────────────────────────────────────
 
 export type ChatMessage = (
 	| UserMessage
@@ -211,7 +203,7 @@ export interface SystemMessage {
 	createdAt?: number;
 }
 
-// ─── Session Types (frontend-only) ──────────────────────────────────────────
+// Session Types (frontend-only)
 
 export interface DateGroups {
 	today: Immutable<SessionInfo>[];
@@ -230,8 +222,6 @@ export interface AttentionGroups {
 	doneUnread: SessionInfo[];
 	idle: SessionInfo[];
 }
-
-// ─── Terminal Types ──────────────────────────────────────────────────────────
 
 export interface TerminalAdapter {
 	mount(container: HTMLElement): void;
@@ -254,21 +244,17 @@ export interface TabEntry {
 	exited: boolean;
 }
 
-// ─── Discovery Types (frontend-only) ────────────────────────────────────────
+// Discovery Types (frontend-only)
 
 export interface ProviderGroup {
 	provider: ProviderInfo;
 	models: ModelInfo[];
 }
 
-// ─── File Browser Types ──────────────────────────────────────────────────────
-
 export interface BreadcrumbSegment {
 	label: string;
 	path: string;
 }
-
-// ─── Permission Types ────────────────────────────────────────────────────────
 
 export interface PermissionRequest {
 	requestId: PermissionId;
@@ -283,8 +269,6 @@ export interface PermissionRequest {
 	permissionDescription?: string;
 }
 
-// ─── Question Types ──────────────────────────────────────────────────────────
-
 export interface QuestionRequest {
 	toolId: string;
 	/** Which session owns this question. */
@@ -298,16 +282,12 @@ export interface QuestionRequest {
 	questions: AskUserQuestion[];
 }
 
-// ─── History Types ───────────────────────────────────────────────────────────
-
 // HistoryMessage and HistoryMessagePart are re-exported from shared-types.ts above.
 
 export interface Turn {
 	user?: HistoryMessage;
 	assistant?: HistoryMessage;
 }
-
-// ─── Toast Types ─────────────────────────────────────────────────────────────
 
 export type ToastVariant = "default" | "warn" | "error";
 
@@ -318,8 +298,6 @@ export interface Toast {
 	duration: number;
 	action?: { label: string; run: () => void };
 }
-
-// ─── Banner Types ────────────────────────────────────────────────────────────
 
 export type BannerVariant =
 	| "update"
@@ -336,8 +314,6 @@ export interface BannerConfig {
 	link?: string;
 	action?: { label: string; run: () => void };
 }
-
-// ─── Info Panel Types ────────────────────────────────────────────────────────
 
 export type PanelId = "usage-panel" | "status-panel" | "context-panel";
 
@@ -369,23 +345,19 @@ export interface ContextData {
 	turns?: number;
 }
 
-// ─── Notification Types ──────────────────────────────────────────────────────
-
 export interface NotifSettings {
 	push: boolean;
 	browser: boolean;
 	sound: boolean;
 }
 
-// ─── Todo Types (frontend-only) ──────────────────────────────────────────────
+// Todo Types (frontend-only)
 
 export interface TodoProgress {
 	completed: number;
 	total: number;
 	percentage: number;
 }
-
-// ─── Diff Types ──────────────────────────────────────────────────────────────
 
 export interface DiffOp {
 	type: "add" | "remove" | "equal";
@@ -402,15 +374,9 @@ export interface SplitRow {
 	newLine: string | null;
 }
 
-// ─── File History Types ──────────────────────────────────────────────────────
-
 // FileVersion is re-exported from shared-types.ts above.
 
-// ─── Project Types ───────────────────────────────────────────────────────────
-
 // ProjectInfo is re-exported from shared-types.ts above.
-
-// ─── Paste Types ─────────────────────────────────────────────────────────────
 
 export interface PendingImage {
 	id: string;
@@ -419,14 +385,10 @@ export interface PendingImage {
 	size: number;
 }
 
-// ─── Plan Mode Types ─────────────────────────────────────────────────────────
-
 export interface PlanApproval {
 	onApprove: () => void;
 	onReject: () => void;
 }
-
-// ─── Connection Status ───────────────────────────────────────────────────────
 
 export type ConnectionStatus =
 	| "connected"

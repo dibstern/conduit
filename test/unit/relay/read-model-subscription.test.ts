@@ -596,7 +596,6 @@ describe("ReadModelSubscription", () => {
 		),
 	);
 
-	// ─── The reviewer's two probes ───────────────────────────────────────────
 	// Both turn on the same interleaving: a commit lands after an advance has
 	// been delivered but before the query that advance triggered runs. A
 	// watermark taken from that query's own counter jumps past advances still

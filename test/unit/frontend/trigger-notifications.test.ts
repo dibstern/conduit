@@ -1,4 +1,3 @@
-// ─── triggerNotifications behavior tests ─────────────────────────────────────
 // Tests the actual notification firing logic which previously had ZERO coverage.
 // Exercises: document.hidden gating, sound playback, browser Notification API,
 // push suppression, notificationContent integration, and NOTIF_TYPES matching.
@@ -10,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
-// ─── Hoisted mocks (run before imports) ─────────────────────────────────────
+// Hoisted mocks (run before imports)
 
 const { playDoneSoundMock, readyDoneSoundMock, getNotifSettingsMock } =
 	vi.hoisted(() => {
@@ -30,7 +29,7 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 	saveNotifSettings: vi.fn(),
 }));
 
-// ─── localStorage mock (needed by ws-notifications module init) ─────────────
+// localStorage mock (needed by ws-notifications module init)
 
 function createLocalStorageMock(initial?: Record<string, string>) {
 	let store: Record<string, string> = { ...initial };
@@ -51,8 +50,6 @@ function createLocalStorageMock(initial?: Record<string, string>) {
 		key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
 	};
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("triggerNotifications", () => {
 	// Track Notification constructor calls
@@ -116,8 +113,6 @@ describe("triggerNotifications", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 	});
-
-	// ─── Core behavior: fires for notification-worthy types ─────────────
 
 	it("a new tab delivers after the previous tab vanishes during audio preparation", async () => {
 		getNotifSettingsMock.mockReturnValue({
@@ -290,8 +285,6 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances[0]?.title).toBe("Question from Agent");
 	});
 
-	// ─── Gating: non-notification types are ignored ─────────────────────
-
 	it("does NOT fire for non-notification types (delta, status, etc.)", async () => {
 		const mod = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
@@ -315,8 +308,6 @@ describe("triggerNotifications", () => {
 		expect(playDoneSoundMock).not.toHaveBeenCalled();
 	});
 
-	// ─── Tab visibility: notifications fire regardless ──────────────────
-
 	it("plays one in-app sound when tab is visible", async () => {
 		vi.stubGlobal("document", { hidden: false });
 		getNotifSettingsMock.mockReturnValue({
@@ -339,8 +330,6 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances).toHaveLength(0);
 		expect(playDoneSoundMock).toHaveBeenCalledOnce();
 	});
-
-	// ─── Sound ──────────────────────────────────────────────────────────
 
 	it("plays sound when settings.sound is true", async () => {
 		getNotifSettingsMock.mockReturnValue({
@@ -383,8 +372,6 @@ describe("triggerNotifications", () => {
 
 		expect(playDoneSoundMock).not.toHaveBeenCalled();
 	});
-
-	// ─── Push suppression ───────────────────────────────────────────────
 
 	it("suppresses browser notification when push is active", async () => {
 		getNotifSettingsMock.mockReturnValue({
@@ -434,8 +421,6 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances).toHaveLength(1);
 	});
 
-	// ─── Browser setting disabled ───────────────────────────────────────
-
 	it("does NOT fire browser notification when settings.browser is false", async () => {
 		getNotifSettingsMock.mockReturnValue({
 			push: false,
@@ -457,8 +442,6 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances).toHaveLength(0);
 	});
 
-	// ─── Notification.permission not granted ────────────────────────────
-
 	it("does NOT fire browser notification when Notification.permission is denied", async () => {
 		Object.defineProperty(Notification, "permission", {
 			value: "denied",
@@ -479,8 +462,6 @@ describe("triggerNotifications", () => {
 
 		expect(notificationInstances).toHaveLength(0);
 	});
-
-	// ─── Push owns the ding when it is active ───────────────────────────
 
 	it("leaves the ding to push when push is active (ni8.23)", async () => {
 		getNotifSettingsMock.mockReturnValue({

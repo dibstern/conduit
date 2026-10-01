@@ -1,4 +1,4 @@
-// ─── Relay Cache (ScopedRef + HashMap) ──────────────────────────────────────
+// Relay Cache (ScopedRef + HashMap)
 // Manages WebSocket relay instances per project slug. Each slug gets at most
 // one active relay. Uses ScopedRef for lifecycle (relay.stop() on invalidate
 // or layer shutdown) and HashMap for structural sharing inside the Ref.
@@ -32,8 +32,6 @@ import type { ConnectionHealth } from "../../../types.js";
 import type { SessionManagerError } from "../../relay/Services/session-manager-error.js";
 import type { RelayFactoryError } from "../Layers/relay-factory-layer.js";
 import type { ProjectNotFound } from "./project-registry-service.js";
-
-// ─── Relay interface ────────────────────────────────────────────────────────
 
 /** A running relay instance for a project slug. */
 export interface RelayStatusSnapshot {
@@ -83,8 +81,6 @@ export class RelayCreationInvalidatedError extends Data.TaggedError(
 	}
 }
 
-// ─── RelayFactory ───────────────────────────────────────────────────────────
-
 /** Factory function that creates a Relay for the given slug. */
 export type RelayFactory = (
 	slug: string,
@@ -100,8 +96,6 @@ type RelayCacheError =
 	| PersistenceEffectError
 	| RelayCreationInvalidatedError;
 
-// ─── RelayCache interface ───────────────────────────────────────────────────
-
 /** Cache that stores and manages relay instances per slug. */
 export interface RelayCache {
 	/** Get or create a relay for the given slug. */
@@ -112,14 +106,10 @@ export interface RelayCache {
 	invalidate: (slug: string) => Effect.Effect<void>;
 }
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 export class RelayCacheTag extends Context.Tag("RelayCache")<
 	RelayCacheTag,
 	RelayCache
 >() {}
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 interface CacheEntry {
 	readonly scopedRef: ScopedRef.ScopedRef<Relay | null>;

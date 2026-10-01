@@ -65,7 +65,6 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
-// ─── Real-stack harness ──────────────────────────────────────────────────────
 const getSessionMessages = vi.spyOn(
 	defaultClaudeSessionForkSdk,
 	"readTranscript",

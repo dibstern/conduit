@@ -1,4 +1,3 @@
-<!-- ─── History Loader ─────────────────────────────────────────────────────── -->
 <!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
 <!-- Pages older projected rows through the transcript module. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->

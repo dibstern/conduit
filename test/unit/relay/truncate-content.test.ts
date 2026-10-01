@@ -1,4 +1,3 @@
-// ─── truncateContent / truncateToolResult Unit Tests ─────────────────────────
 // Tests for the content truncation utility used with large tool results.
 // Verifies: threshold behavior, edge cases, tool_result message truncation.
 
@@ -9,8 +8,6 @@ import {
 	truncateToolResult,
 } from "../../../src/lib/relay/truncate-content.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
-
-// ─── truncateContent ────────────────────────────────────────────────────────
 
 describe("truncateContent", () => {
 	it("returns content unchanged when under threshold", () => {
@@ -67,8 +64,6 @@ describe("truncateContent", () => {
 		expect(TRUNCATION_THRESHOLD).toBe(50_000);
 	});
 });
-
-// ─── truncateToolResult ─────────────────────────────────────────────────────
 
 describe("truncateToolResult", () => {
 	it("truncates large tool_result content and returns full content", () => {

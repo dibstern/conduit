@@ -1,5 +1,4 @@
 import { seedSessions } from "../stores/session-fixtures.js";
-// ─── Scan In-Flight State ───────────────────────────────────────────────────
 // Verifies that the scanInFlight flag is properly managed across all outcomes:
 // success (scan_result), error (INSTANCE_ERROR), and state reset.
 

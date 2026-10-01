@@ -1702,7 +1702,7 @@ describe("MessageProjector", () => {
 		});
 	});
 
-	// ─── (Perf-Fix-1) sort_order tests ──────────────────────────────────
+	// (Perf-Fix-1) sort_order tests
 
 	describe("sort_order assignment", () => {
 		it("assigns incrementing sort_order to new parts", async () => {

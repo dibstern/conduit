@@ -1,4 +1,3 @@
-// ─── AC5: OpenAPI Spec Snapshot Comparison ────────────────────────────────
 // Validates that the committed OpenAPI snapshot is internally consistent and
 // that the live /doc endpoint remains a valid OpenAPI document.
 //

@@ -1,4 +1,3 @@
-// ─── Playwright Config: Live Smoke Tests ──────────────────────────────────────
 // Runs the live smoke test that spawns an ephemeral OpenCode instance.
 // Much longer timeouts since we're waiting for real API responses.
 // NO webServer block — the test manages its own relay via createE2EHarness.

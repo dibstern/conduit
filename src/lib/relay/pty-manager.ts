@@ -1,4 +1,3 @@
-// ─── PTY Manager ──────────────────────────────────────────────────────────────
 // Encapsulates PTY session lifecycle: registration, scrollback buffering,
 // input forwarding, and cleanup. Extracted from relay-stack.ts so PTY state
 // management is isolated and independently testable.

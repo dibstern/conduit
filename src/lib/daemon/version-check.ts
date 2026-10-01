@@ -1,17 +1,12 @@
-// ─── Version Check ────────────────────────────────────────────────
 // Periodically checks npm for newer versions and notifies via callbacks.
 
 import { Data } from "effect";
 
 import { getVersion } from "../version.js";
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
-
 const DEFAULT_PACKAGE_NAME = "conduit-code";
 const DEFAULT_CHECK_INTERVAL = 14_400_000; // 4 hours
 const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
 
 export interface VersionCheckOptions {
 	/** npm package name (default: "conduit-code") */
@@ -59,8 +54,6 @@ export class NpmRegistryInvalidResponseError extends Data.TaggedError(
 		return `npm registry returned no version field for ${this.packageName}`;
 	}
 }
-
-// ─── Semver comparison ─────────────────────────────────────────────────────────
 
 /**
  * Returns true if `latest` is a newer semver than `current`.
@@ -174,8 +167,6 @@ function comparePrereleases(a: string, b: string): number {
 	return 0;
 }
 
-// ─── Registry fetch ────────────────────────────────────────────────────────────
-
 /**
  * Fetch the latest version of a package from the npm registry.
  * Throws on network errors or unexpected responses.
@@ -210,8 +201,6 @@ export async function fetchLatestVersion(
 	return data.version;
 }
 
-// ─── VersionChecker ────────────────────────────────────────────────────────────
-
 export class VersionChecker {
 	private readonly packageName: string;
 	private readonly currentVersion: string;
@@ -225,8 +214,6 @@ export class VersionChecker {
 	private updateAvailable = false;
 	private abortController = new AbortController();
 	private pending = new Set<Promise<unknown>>();
-
-	// ─── Callbacks ─────────────────────────────────────────────────────────
 
 	onUpdateAvailable:
 		| ((data: { current: string; latest: string }) => void)
@@ -307,8 +294,6 @@ export class VersionChecker {
 		await Promise.allSettled([...this.pending]);
 		this.pending.clear();
 	}
-
-	// ─── Internal ──────────────────────────────────────────────────────────
 
 	/** Run a check, catching errors and reporting via callback. Tracked for drain. */
 	private runCheck(): void {

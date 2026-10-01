@@ -1,5 +1,3 @@
-// ─── Question / Ask-User Mapping ─────────────────────────────────────────────
-
 import type { AskUserQuestion } from "../types.js";
 
 /**

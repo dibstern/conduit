@@ -1,4 +1,3 @@
-// ─── Tool Category ────────────────────────────────────────────────────────────
 // What kind of work a tool does. Drives the colour of each activity strip
 // segment and the icon on its row, so a colour always means the same thing.
 

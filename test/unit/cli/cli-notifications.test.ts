@@ -1,4 +1,4 @@
-// ─── Notifications Setup Wizard — Unit Tests (Ticket 8.14) ─────────────────────
+// Notifications Setup Wizard — Unit Tests (Ticket 8.14)
 // Tests for showNotificationWizard: two-toggle flow, Tailscale, HTTPS, QR sections.
 // Uses mock stdin (EventEmitter), stdout, and exit from the prompts test pattern.
 
@@ -8,8 +8,6 @@ import {
 	type NotificationWizardOptions,
 	showNotificationWizard,
 } from "../../../src/lib/cli/cli-notifications.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape sequences from a string. */
 function stripAnsi(s: string): string {
@@ -103,8 +101,6 @@ async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	}
 }
 
-// ─── Header & Toggles ────────────────────────────────────────────────────────
-
 describe("header and toggles", () => {
 	it("shows 'Setup Notifications' header", async () => {
 		const io = createMockIO();
@@ -149,8 +145,6 @@ describe("header and toggles", () => {
 	});
 });
 
-// ─── Neither selected ─────────────────────────────────────────────────────────
-
 describe("neither selected", () => {
 	it("shows 'All set!' message when neither toggle is selected", async () => {
 		const onBack = vi.fn();
@@ -177,8 +171,6 @@ describe("neither selected", () => {
 		expect(onBack).toHaveBeenCalled();
 	});
 });
-
-// ─── Tailscale Section ────────────────────────────────────────────────────────
 
 describe("tailscale section", () => {
 	it("shows Tailscale section when wantRemote is selected", async () => {
@@ -318,8 +310,6 @@ describe("tailscale section", () => {
 		expect(onBack).toHaveBeenCalled();
 	});
 });
-
-// ─── HTTPS Section ────────────────────────────────────────────────────────────
 
 describe("HTTPS section", () => {
 	it("shows HTTPS section when wantPush is selected", async () => {
@@ -489,8 +479,6 @@ describe("HTTPS section", () => {
 		await tick();
 	});
 });
-
-// ─── Setup QR Section ─────────────────────────────────────────────────────────
 
 describe("setup QR section", () => {
 	it("displays URL", async () => {

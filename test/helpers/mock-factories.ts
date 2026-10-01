@@ -118,8 +118,6 @@ import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";
 
-// ─── Sub-component factories ────────────────────────────────────────────────
-
 function createMockWsHandlerFull(): HandlerDeps["wsHandler"] {
 	return {
 		broadcast: vi.fn(),
@@ -294,8 +292,6 @@ function createMockTranslator(): SSEWiringDeps["translator"] {
 	} as SSEWiringDeps["translator"];
 }
 
-// ─── Top-level factories ────────────────────────────────────────────────────
-
 export function createMockHandlerDeps(
 	overrides?: Partial<HandlerDeps>,
 ): HandlerDeps {
@@ -339,8 +335,6 @@ export function createMockSSEWiringDeps(
 		...overrides,
 	};
 }
-
-// ─── ProjectRelay mock factory ──────────────────────────────────────────────
 
 export function createMockProjectRelay(
 	overrides?: Partial<ProjectRelay>,
@@ -415,8 +409,6 @@ export function createMockProjectRelay(
 	};
 }
 
-// ─── Relay factory helpers for ProjectRegistry tests ────────────────────────
-
 /** Factory that resolves immediately with a mock relay */
 export function immediateRelayFactory(
 	relay?: ProjectRelay,
@@ -484,7 +476,6 @@ export function deferredRelayFactory(): DeferredRelay {
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Effect mock service factories ─────────────────────────────────────────
 // Each returns a minimal mock that satisfies its service Tag's type.
 
 /** Create a mock OpenCodeAPI for Effect tests. */
@@ -836,8 +827,6 @@ export function makeMockConfig(
 	} as unknown as ProjectRelayConfig;
 }
 
-// ─── Effect Layer composers ────────────────────────────────────────────────
-
 /**
  * Options for building the handler-level test Layer.
  * Every field is optional — defaults are used for omitted fields.
@@ -1100,7 +1089,6 @@ export function makeTestHandlerLayer(
 	);
 }
 
-// ─── State-layer test helpers ──────────────────────────────────────────────
 // Convenience wrappers around the Effect state Layer factories from
 // src/lib/domain/. They provide zero-config defaults suitable for tests.
 

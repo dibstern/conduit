@@ -1,4 +1,4 @@
-// ─── Projects Submenu — Unit Tests (Ticket 8.11) ──────────────────────────────
+// Projects Submenu — Unit Tests (Ticket 8.11)
 // Tests for showProjectsMenu, showProjectDetail, and getStatusIcon.
 // Uses mock stdin (EventEmitter), stdout, and exit from the prompts test pattern.
 
@@ -11,8 +11,6 @@ import {
 	showProjectDetail,
 	showProjectsMenu,
 } from "../../../src/lib/cli/cli-projects.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape sequences from a string. */
 function stripAnsi(s: string): string {
@@ -125,8 +123,6 @@ function defaultOpts(
 	};
 }
 
-// ─── getStatusIcon ────────────────────────────────────────────────────────────
-
 describe("getStatusIcon", () => {
 	it("returns lightning bolt for processing projects", () => {
 		const proj = makeProject({ isProcessing: true });
@@ -143,8 +139,6 @@ describe("getStatusIcon", () => {
 		expect(getStatusIcon(proj)).toBe("\u23F8");
 	});
 });
-
-// ─── showProjectsMenu — Rendering ────────────────────────────────────────────
 
 describe("showProjectsMenu rendering", () => {
 	it("renders project list with status icons", async () => {
@@ -315,8 +309,6 @@ describe("showProjectsMenu rendering", () => {
 		await tick();
 	});
 });
-
-// ─── showProjectsMenu — Actions ──────────────────────────────────────────────
 
 describe("showProjectsMenu actions", () => {
 	it("add_cwd calls addProject with cwd", async () => {
@@ -552,8 +544,6 @@ describe("showProjectsMenu actions", () => {
 		expect(text).toContain("my-proj");
 	});
 });
-
-// ─── showProjectDetail ───────────────────────────────────────────────────────
 
 describe("showProjectDetail", () => {
 	it("displays project info (name, slug, path)", async () => {

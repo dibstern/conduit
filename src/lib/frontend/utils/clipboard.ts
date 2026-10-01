@@ -1,4 +1,3 @@
-// ─── Clipboard Utility ───────────────────────────────────────────────────────
 // Copy text to clipboard with fallback for older browsers.
 
 /**

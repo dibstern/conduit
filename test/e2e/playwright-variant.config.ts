@@ -1,4 +1,3 @@
-// ─── Playwright Config: Variant Selector Tests ──────────────────────────────
 // Tests variant/thinking-level dropdown UI via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 

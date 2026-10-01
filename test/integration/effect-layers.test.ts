@@ -1,4 +1,3 @@
-// ─── Integration: Full Layer Composition ─────────────────────────────────────
 // Verifies that all Effect-native state modules compose into a single Layer
 // and key services work end-to-end.
 
@@ -50,8 +49,6 @@ import {
 	PollerStateTag,
 } from "../../src/lib/domain/relay/Services/session-status-poller.js";
 
-// ─── Composed Layer ──────────────────────────────────────────────────────────
-
 /** All Effect-native state layers + mock Tags for imperative services. */
 const composedLayer = Layer.mergeAll(
 	makeDaemonStateLive(),
@@ -72,8 +69,6 @@ const composedLayer = Layer.mergeAll(
 	DaemonEventBusLive,
 	makeOverridesStateLive(),
 );
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("Integration: Full Layer Composition", () => {
 	it.scoped("all Tags resolve from composed Layer", () =>

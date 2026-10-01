@@ -1,4 +1,3 @@
-// ─── Tests: Onboarding HTTP Server ──────────────────────────────────────────
 //
 // Tests cover:
 // 1. GET /ca/download returns CA PEM with correct headers
@@ -22,8 +21,6 @@ import {
 	closeOnboardingServer,
 	startOnboardingServer,
 } from "../../../src/lib/daemon/daemon-lifecycle.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeTmpDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -83,8 +80,6 @@ function httpGet(
 		req.end();
 	});
 }
-
-// ─── Test suite ──────────────────────────────────────────────────────────────
 
 describe("startOnboardingServer", () => {
 	let tmpDir: string;

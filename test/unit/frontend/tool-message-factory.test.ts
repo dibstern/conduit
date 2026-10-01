@@ -1,4 +1,3 @@
-// ─── Tool Message Factory — Unit Tests ───────────────────────────────────────
 // Tests the createToolMessage factory that centralizes ToolMessage construction.
 // Used by both history-logic.ts (REST history) and tool-registry.ts (SSE lifecycle).
 

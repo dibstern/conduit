@@ -1,4 +1,3 @@
-// ─── AC4: Question Flow Shape Validation ──────────────────────────────────
 // Validates question endpoint shapes and the question lifecycle.
 // Similar to permissions — actual question triggering requires an agent asking,
 // so we validate API shapes and empty-state behavior.

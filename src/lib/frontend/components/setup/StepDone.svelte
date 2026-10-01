@@ -1,4 +1,3 @@
-<!-- ─── Step: Done ────────────────────────────────────────────────────────── -->
 <!-- Final setup step showing success message.                                -->
 
 <script lang="ts">

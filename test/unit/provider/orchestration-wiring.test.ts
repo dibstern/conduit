@@ -253,8 +253,6 @@ describe("Orchestration wiring", () => {
 		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);
 	});
 
-	// ─── wireSSEToInstance ────────────────────────────────────────────────
-
 	describe("wireSSEToInstance", () => {
 		it("calls notifyTurnCompleted when session.status idle event arrives", async () => {
 			const client = makeStubClient();

@@ -1,11 +1,8 @@
-// ─── File Tree Store ─────────────────────────────────────────────────────────
 // Background-preloaded paths for @ autocomplete and file browser position.
 // Pure filtering functions + reactive state.
 
 import type { GetFileTreeResponse } from "../transport/ws-rpc.js";
 import type { FileEntry } from "../types.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface AtQuery {
 	query: string;
@@ -13,7 +10,6 @@ export interface AtQuery {
 	end: number;
 }
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // This store has no client half: entries come from `file_list`, and the two
 // flags track the request that is fetching them. The @-mention query the user
 // is typing lives in the component, not here.
@@ -30,8 +26,6 @@ export const fileTreeState = $state({
 	browserExpandedPaths: new Set<string>(),
 	browserScrollTop: 0,
 });
-
-// ─── Pure helpers ───────────────────────────────────────────────────────────
 
 /**
  * Extract @ query from input text at cursor position.
@@ -107,8 +101,6 @@ export function filterFiles(entries: string[], query: string): string[] {
 	return matches.slice(0, 20).map((m) => m.entry);
 }
 
-// ─── Message handlers ───────────────────────────────────────────────────────
-
 export function handleFileTree(msg: {
 	type: "file_tree";
 	entries: unknown;
@@ -123,8 +115,6 @@ export function handleFileTree(msg: {
 export function applyGetFileTreeResponse(response: GetFileTreeResponse): void {
 	handleFileTree({ type: "file_tree", entries: response.entries });
 }
-
-// ─── Actions ────────────────────────────────────────────────────────────────
 
 export function requestFileTree(): void {
 	fileTreeState.loading = true;

@@ -1,5 +1,3 @@
-// ─── Context Window Handlers ────────────────────────────────────────────────
-
 import { Effect } from "effect";
 import {
 	LoggerTag,

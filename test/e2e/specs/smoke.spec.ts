@@ -1,4 +1,3 @@
-// ─── E2E Smoke Test ──────────────────────────────────────────────────────────
 // Structural smoke test proving the UI renders correctly with a real relay
 // backed by MockOpenCodeServer. No real OpenCode needed.
 

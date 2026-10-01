@@ -1,4 +1,3 @@
-<!-- ─── Command Menu ──────────────────────────────────────────────────────── -->
 <!-- Slash-command autocomplete popup. Filters commands by prefix match, supports -->
 <!-- keyboard navigation (ArrowUp/Down, Enter, Escape) and mouse selection. -->
 <!-- Preserves #command-menu wrapper ID for E2E compatibility. -->
@@ -7,8 +6,6 @@
 	import type { CommandInfo } from "../../types.js";
 	import { filterCommands } from "../../stores/discovery.svelte.js";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
-
-	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
 		listboxId,
@@ -28,8 +25,6 @@
 		activeIndex?: number | undefined;
 	} = $props();
 
-	// ─── Derived ────────────────────────────────────────────────────────────────
-
 	const filtered = $derived(
 		[...filterCommands(commands, query)].sort((a, b) =>
 			a.name.localeCompare(b.name),
@@ -38,15 +33,11 @@
 
 	const isVisible = $derived(visible && filtered.length > 0);
 
-	// ─── Reset active index when filtered list changes ──────────────────────────
-
 	$effect(() => {
 		// Depend on filtered.length to reset on filter change
 		void filtered.length;
 		activeIndex = 0;
 	});
-
-	// ─── Keyboard handling ──────────────────────────────────────────────────────
 
 	export function handleKeydown(e: KeyboardEvent): boolean {
 		if (!isVisible) return false;
@@ -91,8 +82,6 @@
 				return false;
 		}
 	}
-
-	// ─── Helpers ────────────────────────────────────────────────────────────────
 
 	function selectCommand(cmd: CommandInfo): void {
 		onSelect(`/${cmd.name} `);

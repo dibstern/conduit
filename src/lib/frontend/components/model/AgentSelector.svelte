@@ -1,4 +1,3 @@
-<!-- ─── Agent Selector ──────────────────────────────────────────────────────── -->
 <!-- Provider-scoped dropdown picker for switching agents. -->
 
 <script lang="ts">
@@ -20,8 +19,6 @@
 	import { switchAgentRpc } from "../../transport/ws-rpc-client.js";
 	import type { AgentInfo } from "../../types.js";
 
-	// ─── State ──────────────────────────────────────────────────────────────────
-
 	let dropdownOpen = $state(false);
 	let triggerEl: HTMLButtonElement | undefined = $state();
 	let portalEl: HTMLDivElement | undefined = $state();
@@ -33,8 +30,6 @@
 	const MIN_WIDTH = 224;
 	const MAX_HEIGHT = 360;
 	const MIN_HEIGHT = 96;
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	/** Visible agents — global hide-list applied (server filters subagents). */
 	const visibleAgents = $derived(getVisibleAgents());
@@ -54,8 +49,6 @@
 		if (effectiveAgent) return displayLabel(effectiveAgent);
 		return "Agent";
 	});
-
-	// ─── Helpers ────────────────────────────────────────────────────────────────
 
 	/** Capitalize agent name if all lowercase. */
 	function displayLabel(agent: AgentInfo): string {
@@ -167,8 +160,6 @@
 		highlightedRow()?.scrollIntoView?.({ block: "nearest" });
 	}
 
-	// ─── Handlers ───────────────────────────────────────────────────────────────
-
 	async function open() {
 		const activeIndex = visibleAgents.findIndex((agent) => isActive(agent));
 		highlightedIndex = activeIndex >= 0 ? activeIndex : 0;
@@ -240,8 +231,6 @@
 		if (portalEl?.contains(target)) return;
 		close();
 	}
-
-	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 	$effect(() => {
 		if (!dropdownOpen) return;

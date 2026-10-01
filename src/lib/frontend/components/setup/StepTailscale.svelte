@@ -1,4 +1,3 @@
-<!-- ─── Step: Tailscale ───────────────────────────────────────────────────── -->
 <!-- Setup step for connecting via Tailscale VPN.                            -->
 
 <script lang="ts">

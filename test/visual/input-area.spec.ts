@@ -1,10 +1,7 @@
-// ─── InputArea / AttachMenu / ContextBar Interaction Tests ───────────────────
 // Playwright tests that navigate to Storybook story iframes and assert
 // component behavior for the input area, attach menu, and context bar.
 
 import { expect, test } from "@playwright/test";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const STORY_URL = (id: string) => `/iframe.html?id=${id}&viewMode=story`;
 
@@ -15,8 +12,6 @@ async function navigateToStory(
 	await page.goto(STORY_URL(storyId), { waitUntil: "domcontentloaded" });
 	await expect(page.locator("#input")).toBeVisible();
 }
-
-// ─── InputArea ───────────────────────────────────────────────────────────────
 
 test.describe("InputArea", () => {
 	test("renders textarea with placeholder", async ({ page }) => {
@@ -54,8 +49,6 @@ test.describe("InputArea", () => {
 		await expect(agentSelector).toBeAttached();
 	});
 });
-
-// ─── AttachMenu ──────────────────────────────────────────────────────────────
 
 test.describe("AttachMenu", () => {
 	test("attach button is visible", async ({ page }) => {
@@ -103,8 +96,6 @@ test.describe("AttachMenu", () => {
 		await expect(attachMenu).toBeHidden();
 	});
 });
-
-// ─── ContextBar ──────────────────────────────────────────────────────────────
 
 test.describe("ContextBar", () => {
 	test("not visible when context is 0%", async ({ page }) => {

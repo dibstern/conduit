@@ -1,5 +1,4 @@
 // src/lib/persistence/session-history-adapter.ts
-// ─── Session History Adapter ────────────────────────────────────────────────
 // Converts SQLite MessageWithParts[] → HistoryMessage[] for transcript consumers.
 // Pure conversion with no I/O.
 

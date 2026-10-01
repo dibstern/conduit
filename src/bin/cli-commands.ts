@@ -1,4 +1,3 @@
-// ─── CLI Commands ───────────────────────────────────────────────────────────
 // Individual CLI command implementations: interactive menu, main menu launcher.
 
 import { spawn as cpSpawn } from "node:child_process";
@@ -27,8 +26,6 @@ import { formatErrorDetail } from "../lib/errors.js";
 import { getVersion } from "../lib/version.js";
 
 import type { InteractiveContext } from "./cli-core.js";
-
-// ─── Default Interactive Menu ────────────────────────────────────────────────
 
 /**
  * The default interactive menu flow.
@@ -103,8 +100,6 @@ export async function defaultInteractiveMenu(
 	}
 }
 
-// ─── Open URL ───────────────────────────────────────────────────────────────
-
 /**
  * Open a URL in the system default browser.
  * Uses platform-appropriate command: open (macOS), xdg-open (Linux), cmd (Windows).
@@ -125,8 +120,6 @@ function openUrl(url: string): void {
 		// Silently ignore errors (e.g., no browser available)
 	}
 }
-
-// ─── Launch Main Menu ───────────────────────────────────────────────────────
 
 /**
  * Launch the interactive main menu with all callbacks wired.

@@ -1,4 +1,3 @@
-// ─── Playwright Config: Subagent Session Tests ───────────────────────────
 // Tests subagent session toggle and navigation via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 

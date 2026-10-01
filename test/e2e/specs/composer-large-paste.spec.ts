@@ -1,4 +1,3 @@
-// ─── Composer Large Paste ───────────────────────────────────────────────────
 // Regression coverage for: pasting a log dump into the composer froze the tab.
 // Two costs scaled with the draft, both on the input event's critical path —
 // the old auto-resize read `scrollHeight`, forcing a synchronous layout of the whole

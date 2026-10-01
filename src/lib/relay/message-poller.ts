@@ -1,4 +1,3 @@
-// ─── Message Poller Synthesis ───────────────────────────────────────────────
 // Diff/synthesize logic for converting REST message snapshots into relay
 // events. These functions compare current messages against previous state and
 // emit synthetic RelayMessages (delta, tool_start, tool_executing, tool_result,
@@ -13,8 +12,6 @@ import {
 	mapToolName,
 	openCodeTurnTotals,
 } from "./event-translator.js";
-
-// ─── Part Snapshot ───────────────────────────────────────────────────────────
 
 export interface PartSnapshot {
 	type: string;
@@ -43,8 +40,6 @@ export interface MessageSnapshot {
 	/** Whether we already emitted a result event for this message */
 	emittedResult: boolean;
 }
-
-// ─── Extracted Pure Functions ────────────────────────────────────────────────
 
 /**
  * Synthesize delta events for text and reasoning parts.

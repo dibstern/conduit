@@ -1,4 +1,4 @@
-// ─── Daemon Lifecycle (extracted from Daemon) ────────────────────────────────
+// Daemon Lifecycle (extracted from Daemon)
 // Standalone functions for HTTP and IPC server lifecycle management,
 // parameterized by a DaemonLifecycleContext so they can be tested and
 // composed independently.
@@ -31,8 +31,6 @@ import type { SetupInfoResponse } from "../shared-types.js";
 import type { IPCResponse } from "../types.js";
 import { serializeResponse } from "./ipc-protocol.js";
 import { removeSocketFile } from "./pid-manager.js";
-
-// ─── Constants ──────────────────────────────────────────────────────────────
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const log = createLogger("daemon");
@@ -79,7 +77,6 @@ export interface IpcPostResponseActions {
 	readonly scheduleShutdown: () => void;
 }
 
-// ─── Context interface ──────────────────────────────────────────────────────
 // Mutable context so lifecycle functions can store server references back.
 
 export interface DaemonLifecycleContext {
@@ -107,8 +104,6 @@ export interface HttpServerStartConfig {
 	tls?: { key: Buffer; cert: Buffer };
 }
 
-// ─── HTTP Server ────────────────────────────────────────────────────────────
-
 /** Create and start the HTTP(S) server, storing it in ctx.httpServer. */
 export function startHttpServer(
 	ctx: DaemonLifecycleContext,
@@ -133,7 +128,6 @@ export function startHttpServer(
 		};
 
 		if (config.tls) {
-			// ─── TLS mode: protocol detection ─────────────────────────────
 			// A net.Server listens on the port. Each connection's first byte
 			// is peeked: 0x16 (TLS ClientHello) → HTTPS server, otherwise →
 			// plain HTTP redirect to https://.
@@ -185,7 +179,6 @@ export function startHttpServer(
 				},
 			}) as unknown as HttpServer;
 		} else {
-			// ─── Plain HTTP mode ──────────────────────────────────────────
 			ctx.httpServer = createServer(handler);
 			ctx.upgradeServer = null;
 		}
@@ -261,7 +254,7 @@ export function closeHttpServer(ctx: DaemonLifecycleContext): Promise<void> {
 	});
 }
 
-// ─── Onboarding Server (HTTP-only, port+1) ─────────────────────────────────
+// Onboarding Server (HTTP-only, port+1)
 
 export interface OnboardingServerDeps {
 	caRootPath: string | null;
@@ -317,7 +310,6 @@ export function startOnboardingServer(
 					const pathname = url.pathname;
 
 					try {
-						// ─── /ca/download ───────────────────────────────────
 						// Serve DER-encoded .cer with application/x-x509-ca-cert
 						// for reliable iOS profile installation. Falls back to PEM.
 						if (pathname === "/ca/download" && req.method === "GET") {
@@ -355,13 +347,11 @@ export function startOnboardingServer(
 							return;
 						}
 
-						// ─── /setup ─────────────────────────────────────────
 						if (pathname === "/setup" && req.method === "GET") {
 							await serveStaticFile(deps.staticDir, res, "index.html");
 							return;
 						}
 
-						// ─── /api/setup-info ────────────────────────────────
 						if (pathname === "/api/setup-info" && req.method === "GET") {
 							const lanMode = url.searchParams.get("mode") === "lan";
 							const host = req.headers.host ?? `localhost:${actualPort}`;
@@ -383,7 +373,7 @@ export function startOnboardingServer(
 							return;
 						}
 
-						// ─── Static assets (JS, CSS, etc. for SPA) ─────────
+						// Static assets (JS, CSS, etc. for SPA)
 						const filePath = pathname.startsWith("/")
 							? pathname.slice(1)
 							: pathname;
@@ -394,7 +384,6 @@ export function startOnboardingServer(
 							return;
 						}
 
-						// ─── Catch-all: 302 redirect to HTTPS /setup ───────
 						const redirectHost = req.headers.host ?? `localhost:${actualPort}`;
 						const redirectHostBase = redirectHost.replace(/:\d+$/, "");
 						res.writeHead(302, {
@@ -461,8 +450,6 @@ export function closeOnboardingServer(
 		});
 	});
 }
-
-// ─── IPC Server ─────────────────────────────────────────────────────────────
 
 /** Create and start the IPC (Unix socket) server with command routing. */
 export function startIPCServer(

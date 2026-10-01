@@ -1,4 +1,3 @@
-// ─── Frontend Logger Tests ───────────────────────────────────────────────────
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { featureFlags } from "../../../src/lib/frontend/stores/feature-flags.svelte.js";
 import {
@@ -6,8 +5,6 @@ import {
 	createSilentFrontendLogger,
 	type FrontendLogger,
 } from "../../../src/lib/frontend/utils/logger.js";
-
-// ─── Spies ──────────────────────────────────────────────────────────────────
 
 let debugSpy: ReturnType<typeof vi.spyOn>;
 let infoSpy: ReturnType<typeof vi.spyOn>;
@@ -25,8 +22,6 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	featureFlags.debug = false;
 });
-
-// ─── createFrontendLogger ───────────────────────────────────────────────────
 
 describe("createFrontendLogger", () => {
 	it("prefixes all messages with [tag]", () => {
@@ -93,7 +88,7 @@ describe("createFrontendLogger", () => {
 	});
 });
 
-// ─── child() ────────────────────────────────────────────────────────────────
+// child()
 
 describe("child()", () => {
 	it("chains tags with colon separator", () => {
@@ -112,8 +107,6 @@ describe("child()", () => {
 		expect(infoSpy).toHaveBeenCalledWith("[relay:sse:event]", "received");
 	});
 });
-
-// ─── createSilentFrontendLogger ─────────────────────────────────────────────
 
 describe("createSilentFrontendLogger", () => {
 	it("does not call any console methods", () => {
@@ -139,8 +132,6 @@ describe("createSilentFrontendLogger", () => {
 		expect(warnSpy).not.toHaveBeenCalled();
 	});
 });
-
-// ─── onError hook ───────────────────────────────────────────────────────────
 
 describe("onError hook", () => {
 	it("calls onError after console.error", () => {
@@ -182,8 +173,6 @@ describe("onError hook", () => {
 		expect(onError).toHaveBeenCalledWith("boom");
 	});
 });
-
-// ─── Interface Compatibility ────────────────────────────────────────────────
 
 describe("interface compatibility", () => {
 	it("has the same method names as backend Logger", () => {

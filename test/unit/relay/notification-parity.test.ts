@@ -1,4 +1,3 @@
-// ─── Notification Parity Contract Test ───────────────────────────────────────
 // Validates that resolveNotifications() produces correct results for all key
 // notification scenarios. Acts as a contract that both SSE wiring and message
 // poller paths rely on for consistent notification behavior.
@@ -8,8 +7,6 @@ import type { RouteDecision } from "../../../src/lib/relay/event-pipeline.js";
 import { resolveNotifications } from "../../../src/lib/relay/notification-policy.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 const routeSend = (sessionId: string): RouteDecision => ({
 	action: "send",
 	sessionId,
@@ -18,8 +15,6 @@ const routeDrop = (reason: string): RouteDecision => ({
 	action: "drop",
 	reason,
 });
-
-// ─── Parity Scenarios ────────────────────────────────────────────────────────
 
 describe("notification parity contract", () => {
 	it("root done with viewers → push yes, cross-session no", () => {

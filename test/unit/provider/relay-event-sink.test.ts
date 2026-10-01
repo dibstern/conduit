@@ -15,8 +15,6 @@ import type { MissingPendingInteractions } from "../../../src/lib/provider/error
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
 	data: EventPayloadMap[T],
@@ -34,8 +32,6 @@ function makeEvent<T extends ProviderRuntimeEventType>(
 		createdAt: Date.now(),
 	};
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("createRelayEventSink — translation", () => {
 	it("maps text.delta → delta RelayMessage", async () => {

@@ -1,4 +1,4 @@
-// ─── Unit Tests: TLS Certificate Management (Ticket 8.2) ────────────────────
+// Unit Tests: TLS Certificate Management (Ticket 8.2)
 //
 // Tests:
 // isRoutableIP (8 tests):
@@ -60,8 +60,6 @@ import {
 	isRoutableIP,
 } from "../../../src/lib/cli/tls.js";
 
-// ─── Mock helpers ────────────────────────────────────────────────────────────
-
 type NetworkInterfaces = NodeJS.Dict<os.NetworkInterfaceInfo[]>;
 
 function mockNetworkInterfaces(
@@ -97,11 +95,7 @@ function createMockFs(files: Record<string, string | Buffer> = {}) {
 	};
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 describe("Ticket 8.2 — TLS Certificate Management", () => {
-	// ─── isRoutableIP ────────────────────────────────────────────────────
-
 	describe("isRoutableIP", () => {
 		it("T1: returns true for 10.0.0.1 (Class A private)", () => {
 			expect(isRoutableIP("10.0.0.1")).toBe(true);
@@ -135,8 +129,6 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 			expect(isRoutableIP("100.128.0.1")).toBe(false);
 		});
 	});
-
-	// ─── getAllIPs ────────────────────────────────────────────────────────
 
 	describe("getAllIPs", () => {
 		it("T9: returns routable IPs from mock interfaces", () => {
@@ -177,8 +169,6 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 		});
 	});
 
-	// ─── getTailscaleIP ──────────────────────────────────────────────────
-
 	describe("getTailscaleIP", () => {
 		it("T13: prefers tailscale0 interface", () => {
 			const ni = mockNetworkInterfaces({
@@ -213,8 +203,6 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 		});
 	});
 
-	// ─── hasTailscale ────────────────────────────────────────────────────
-
 	describe("hasTailscale", () => {
 		it("T17: returns true when Tailscale IP found", () => {
 			const ni = mockNetworkInterfaces({
@@ -239,8 +227,6 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 		});
 	});
 
-	// ─── hasMkcert ───────────────────────────────────────────────────────
-
 	describe("hasMkcert", () => {
 		it("T20: returns true when mkcert succeeds", async () => {
 			const exec = vi.fn(() => "/home/user/.local/share/mkcert\n");
@@ -261,8 +247,6 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 		});
 	});
 
-	// ─── getMkcertCaRoot ─────────────────────────────────────────────────
-
 	describe("getMkcertCaRoot", () => {
 		it("T23: returns trimmed path", async () => {
 			const exec = vi.fn(() => "  /home/user/.local/share/mkcert  \n");
@@ -278,8 +262,6 @@ describe("Ticket 8.2 — TLS Certificate Management", () => {
 			expect(await getMkcertCaRoot({ exec })).toBeNull();
 		});
 	});
-
-	// ─── ensureCerts ─────────────────────────────────────────────────────
 
 	describe("ensureCerts", () => {
 		it("T25: returns null when mkcert not available and no certs on disk", async () => {

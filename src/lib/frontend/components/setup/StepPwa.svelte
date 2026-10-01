@@ -1,4 +1,3 @@
-<!-- ─── Step: PWA ─────────────────────────────────────────────────────────── -->
 <!-- Setup step for adding the app to the home screen.                       -->
 
 <script lang="ts">

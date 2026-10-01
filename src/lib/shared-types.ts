@@ -1,4 +1,3 @@
-// ─── Shared Types ───────────────────────────────────────────────────────────
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
@@ -10,8 +9,6 @@ import type { PartType, ToolStatus } from "./instance/sdk-types.js";
 export type { PartType, ToolStatus };
 
 import { Schema } from "effect";
-
-// ─── Branded identifiers ────────────────────────────────────────────────────
 
 /**
  * Branded type for request/response correlation IDs.
@@ -29,8 +26,6 @@ export type RequestId = typeof RequestId.Type;
  */
 export const PermissionId = Schema.String.pipe(Schema.brand("PermissionId"));
 export type PermissionId = typeof PermissionId.Type;
-
-// ─── Provider Permission Updates ───────────────────────────────────────────
 
 export const ProviderPermissionUpdateDestinationSchema = Schema.Literal(
 	"userSettings",
@@ -111,8 +106,6 @@ export const ProviderPermissionUpdateSchema = Schema.Union(
 export type ProviderPermissionUpdate =
 	typeof ProviderPermissionUpdateSchema.Type;
 
-// ─── Todo / Progress ────────────────────────────────────────────────────────
-
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 export interface TodoItem {
@@ -121,8 +114,6 @@ export interface TodoItem {
 	description?: string | undefined;
 	status: TodoStatus;
 }
-
-// ─── Tool Names ──────────────────────────────────────────────────────────────
 
 /** Canonical PascalCase tool names used by the frontend after mapping from OpenCode's lowercase names. */
 export type ToolName =
@@ -140,8 +131,6 @@ export type ToolName =
 	| "Task"
 	| "LSP"
 	| "Skill";
-
-// ─── Agent / Model / Command info ───────────────────────────────────────────
 
 export interface AgentInfo {
 	id: string;
@@ -204,16 +193,12 @@ export interface CommandInfo {
 	args?: string;
 }
 
-// ─── File Browser ───────────────────────────────────────────────────────────
-
 export interface FileEntry {
 	name: string;
 	type: "file" | "directory";
 	size?: number | undefined;
 	modified?: number | undefined;
 }
-
-// ─── Session ────────────────────────────────────────────────────────────────
 
 /** The `sessions` projection's lifecycle status, as the row stores it. */
 export const SessionStatusSchema = Schema.Literal(
@@ -333,8 +318,6 @@ export interface DaemonSessionQueryResult {
 	readonly nextCursor: DaemonSessionCursor | null;
 }
 
-// ─── Ask User / Questions ───────────────────────────────────────────────────
-
 export interface AskUserQuestion {
 	question: string;
 	header: string;
@@ -343,8 +326,6 @@ export interface AskUserQuestion {
 	custom?: boolean;
 }
 
-// ─── Usage ──────────────────────────────────────────────────────────────────
-
 export interface UsageInfo {
 	input: number;
 	output: number;
@@ -352,8 +333,6 @@ export interface UsageInfo {
 	cache_creation: number;
 	context_window?: number | undefined;
 }
-
-// ─── PTY / Terminal ─────────────────────────────────────────────────────────
 
 export type PtyStatus = "running" | "exited";
 
@@ -366,7 +345,6 @@ export interface PtyInfo {
 	pid: number;
 }
 
-// ─── History Types ──────────────────────────────────────────────────────────
 // These are relay-specific history types for paged transcript RPC responses.
 // They represent a loose superset of the SDK's Part and Message
 // types with relay-specific extensions (renderedHtml, index signatures).
@@ -453,8 +431,6 @@ export interface HistoryMessage {
 	[key: string]: unknown;
 }
 
-// ─── Project Types ──────────────────────────────────────────────────────────
-
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
@@ -464,8 +440,6 @@ export interface ProjectInfo {
 	clientCount?: number;
 	instanceId?: string;
 }
-
-// ─── File History Types ─────────────────────────────────────────────────────
 
 /** A file version from file history */
 export interface FileVersion {
@@ -479,7 +453,6 @@ export interface FileVersion {
 	[key: string]: unknown;
 }
 
-// ─── Relay WebSocket message schemas ────────────────────────────────────────
 // Schema definitions for each RelayMessage variant. Built with @effect/schema
 // to provide runtime validation and type derivation.
 
@@ -632,7 +605,6 @@ const OpenCodeInstanceSchema = Schema.Struct({
 
 // -- Individual message variant schemas --
 
-// ── Streaming ──────────────────────────────────────────────────────────
 const DeltaSchema = Schema.Struct({
 	type: Schema.Literal("delta"),
 	sessionId: Schema.String,
@@ -660,7 +632,6 @@ const ThinkingStopSchema = Schema.Struct({
 	messageId: Schema.optional(Schema.String),
 });
 
-// ── Tools ──────────────────────────────────────────────────────────────
 const ToolStartSchema = Schema.Struct({
 	type: Schema.Literal("tool_start"),
 	sessionId: Schema.String,
@@ -702,7 +673,6 @@ const ToolContentSchema = Schema.Struct({
 	content: Schema.String,
 });
 
-// ── Permissions / Questions ────────────────────────────────────────────
 const PermissionRequestSchema = Schema.Struct({
 	type: Schema.Literal("permission_request"),
 	sessionId: Schema.String,
@@ -748,7 +718,6 @@ const AskUserErrorSchema = Schema.Struct({
 	message: Schema.String,
 });
 
-// ── Session lifecycle ──────────────────────────────────────────────────
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
 	usage: UsageInfoSchema,
@@ -805,7 +774,6 @@ const SessionForkedSchema = Schema.Struct({
 	parentTitle: Schema.String,
 });
 
-// ── Model / Agent / Commands ───────────────────────────────────────────
 const ModelInfoMsgSchema = Schema.Struct({
 	type: Schema.Literal("model_info"),
 	sessionId: Schema.optional(Schema.String),
@@ -855,7 +823,6 @@ const CommandListSchema = Schema.Struct({
 	commands: Schema.Array(CommandInfoSchema),
 });
 
-// ── Projects ───────────────────────────────────────────────────────────
 const ProjectListSchema = Schema.Struct({
 	type: Schema.Literal("project_list"),
 	projects: Schema.Array(ProjectInfoSchema),
@@ -871,7 +838,6 @@ const ProjectAttachedSchema = Schema.Struct({
 	slug: Schema.String,
 });
 
-// ── File browser ───────────────────────────────────────────────────────
 const FileListSchema = Schema.Struct({
 	type: Schema.Literal("file_list"),
 	path: Schema.String,
@@ -896,7 +862,6 @@ const FileChangedSchema = Schema.Struct({
 	changeType: Schema.Literal("edited", "external"),
 });
 
-// ── Part lifecycle ─────────────────────────────────────────────────────
 const PartRemovedSchema = Schema.Struct({
 	type: Schema.Literal("part_removed"),
 	sessionId: Schema.String,
@@ -910,7 +875,6 @@ const MessageRemovedSchema = Schema.Struct({
 	messageId: Schema.String,
 });
 
-// ── PTY / Terminal ─────────────────────────────────────────────────────
 const PtyCreatedSchema = Schema.Struct({
 	type: Schema.Literal("pty_created"),
 	pty: PtyInfoSchema,
@@ -938,19 +902,16 @@ const PtyListSchema = Schema.Struct({
 	ptys: Schema.Array(PtyInfoSchema),
 });
 
-// ── Todo ────────────────────────────────────────────────────────────────
 const TodoStateSchema = Schema.Struct({
 	type: Schema.Literal("todo_state"),
 	items: Schema.Array(TodoItemSchema),
 });
 
-// ── Connection status ────────────────────────────────────────────────
 const ConnectionStatusSchema = Schema.Struct({
 	type: Schema.Literal("connection_status"),
 	status: Schema.Literal("disconnected", "reconnecting", "connected"),
 });
 
-// ── Plan mode ────────────────────────────────────────────────────────
 const PlanEnterSchema = Schema.Struct({
 	type: Schema.Literal("plan_enter"),
 });
@@ -968,7 +929,6 @@ const PlanApprovalSchema = Schema.Struct({
 	type: Schema.Literal("plan_approval"),
 });
 
-// ── Banners ────────────────────────────────────────────────────────────
 const SkipPermissionsSchema = Schema.Struct({
 	type: Schema.Literal("skip_permissions"),
 });
@@ -984,14 +944,12 @@ const BannerSchema = Schema.Struct({
 	}),
 });
 
-// ── File history / Rewind ────────────────────────────────────────────
 const FileHistoryResultSchema = Schema.Struct({
 	type: Schema.Literal("file_history_result"),
 	path: Schema.String,
 	versions: Schema.Array(FileVersionSchema),
 });
 
-// ── Cache / Replay ────────────────────────────────────────────────────
 const UserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user_message"),
 	sessionId: Schema.String,
@@ -1000,13 +958,11 @@ const UserMessageSchema = Schema.Struct({
 	originId: Schema.optional(Schema.String),
 });
 
-// ── Session deletion ──────────────────────────────────────────────────
 const SessionDeletedSchema = Schema.Struct({
 	type: Schema.Literal("session_deleted"),
 	sessionId: Schema.String,
 });
 
-// ── Misc ────────────────────────────────────────────────────────────────
 const ErrorSchema = Schema.Struct({
 	type: Schema.Literal("error"),
 	alertId: Schema.optional(Schema.String),
@@ -1057,7 +1013,6 @@ const UpdateAvailableSchema = Schema.Struct({
 	version: Schema.optional(Schema.String),
 });
 
-// ── Instance Management ──────────────────────────────────────────────
 const InstanceListSchema = Schema.Struct({
 	type: Schema.Literal("instance_list"),
 	instances: Schema.Array(OpenCodeInstanceSchema),
@@ -1079,13 +1034,11 @@ const InstanceUpdateSchema = Schema.Struct({
 	port: Schema.optional(Schema.Number),
 });
 
-// ── Provider session reload ─────────────────────────────────────────
 const ProviderSessionReloadedSchema = Schema.Struct({
 	type: Schema.Literal("provider_session_reloaded"),
 	sessionId: Schema.String,
 });
 
-// ── Variant / thinking level ────────────────────────────────────────
 const VariantInfoSchema = Schema.Struct({
 	type: Schema.Literal("variant_info"),
 	variant: Schema.optional(Schema.String),
@@ -1116,7 +1069,6 @@ const ScanResultSchema = Schema.Struct({
 	active: Schema.Array(Schema.Number),
 });
 
-// ── Cross-session notifications ──────────────────────────────────────
 const NotificationEventSchema = Schema.Struct({
 	type: Schema.Literal("notification_event"),
 	alertId: Schema.optional(Schema.String),
@@ -1229,7 +1181,6 @@ export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 	RELAY_MESSAGE_TYPES,
 );
 
-// ─── Per-session / Global event discriminators ────────────────────────────
 // These types let code distinguish per-session events (which always carry
 // sessionId) from global events (which never do).
 
@@ -1268,7 +1219,7 @@ export type GlobalRelayEvent = Exclude<
 	{ type: PerSessionEventType }
 >;
 
-// ─── Untagged events (translator output before sessionId tagging) ──────────
+// Untagged events (translator output before sessionId tagging)
 // The SSE translator and message poller produce events without sessionId.
 // These are tagged with sessionId at emission sites before broadcast.
 
@@ -1307,8 +1258,6 @@ export function tagWithSessionId(
 	return { ...msg, sessionId } as RelayMessage;
 }
 
-// ─── Instance Types ─────────────────────────────────────────────────────────
-
 export type InstanceStatus = "starting" | "healthy" | "unhealthy" | "stopped";
 
 export interface OpenCodeInstance {
@@ -1340,7 +1289,6 @@ export interface InstanceConfig {
 	url?: string;
 }
 
-// ─── Typed API Responses ────────────────────────────────────────────────────
 // Every HTTP JSON endpoint uses one of these types with `satisfies` at the
 // JSON.stringify call site.  This prevents serialization bugs where fields
 // are silently dropped.
@@ -1353,8 +1301,6 @@ export interface ApiError {
 	};
 }
 
-// ─── Auth ──────────────────────────────────────────────────────────────────
-
 export interface AuthStatusResponse {
 	hasPin: boolean;
 	authenticated: boolean;
@@ -1365,8 +1311,6 @@ export type AuthResponse =
 	| { ok: false; locked: true; retryAfter: number }
 	| { ok: false; attemptsLeft: number };
 
-// ─── Setup ─────────────────────────────────────────────────────────────────
-
 export interface SetupInfoResponse {
 	httpsUrl: string;
 	httpUrl: string;
@@ -1374,21 +1318,15 @@ export interface SetupInfoResponse {
 	lanMode: boolean;
 }
 
-// ─── Health ────────────────────────────────────────────────────────────────
-
 export interface HealthResponse {
 	ok: boolean;
 	projects: number;
 	uptime: number;
 }
 
-// ─── Info ──────────────────────────────────────────────────────────────────
-
 export interface InfoResponse {
 	version: string;
 }
-
-// ─── Projects ──────────────────────────────────────────────────────────────
 
 export interface DashboardProjectResponse {
 	slug: string;
@@ -1406,14 +1344,10 @@ export interface ProjectsListResponse {
 	version: string;
 }
 
-// ─── Project Status ────────────────────────────────────────────────────────
-
 export interface ProjectStatusResponse {
 	status: "registering" | "ready" | "error";
 	error?: string;
 }
-
-// ─── Push ──────────────────────────────────────────────────────────────────
 
 export interface VapidKeyResponse {
 	publicKey: string;

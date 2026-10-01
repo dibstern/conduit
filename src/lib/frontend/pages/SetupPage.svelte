@@ -1,4 +1,3 @@
-<!-- ─── Setup Page ────────────────────────────────────────────────────────── -->
 <!-- Multi-step setup wizard: Tailscale, Certificate, PWA, Push, Done.       -->
 <!-- Ported from setupPageHtml() in pages.ts to a Svelte 5 component.        -->
 <!-- Step components extracted into components/setup/ for modularity.         -->
@@ -24,14 +23,12 @@
 	import StepPush from "../components/setup/StepPush.svelte";
 	import StepDone from "../components/setup/StepDone.svelte";
 
-	// ─── Props ──────────────────────────────────────────────────────────────
 	let {
 		initialSetupInfo,
 	}: {
 		initialSetupInfo?: SetupInfo;
 	} = $props();
 
-	// ─── Core state ────────────────────────────────────────────────────────
 	let httpsUrl = $state("");
 	let httpUrl = $state("");
 	let hasCert = $state(false);
@@ -53,7 +50,6 @@
 	let currentStepIdx = $state(0);
 	let currentStep = $derived(steps[currentStepIdx] ?? "done");
 
-	// ─── Step-specific state ───────────────────────────────────────────────
 	let tsStatus: StatusVariant = $state("pending");
 	let tsMessage = $state("Checking connection...");
 	let certStatus: StatusVariant = $state("pending");
@@ -64,7 +60,6 @@
 	let pushNeedsHttps = $state(false);
 	let pushBusy = $state(false);
 
-	// ─── Derived: step display info ────────────────────────────────────────
 	let stepOffset = $state(0);
 	let futureStepCount = $state(0);
 	let totalDisplaySteps = $derived(
@@ -72,20 +67,17 @@
 	);
 	let currentDisplayIdx = $derived(currentStepIdx + stepOffset);
 
-	// ─── Tailscale URL hint ────────────────────────────────────────────────
 	let tailscaleUrlHint = $derived.by(() => {
 		if (httpsUrl.includes("100.")) return `Your relay: ${httpsUrl}`;
 		if (httpUrl.includes("100.")) return `Your relay: ${httpUrl}`;
 		return "";
 	});
 
-	// ─── Done link href ────────────────────────────────────────────────────
 	let doneLinkHref = $derived.by(() => {
 		if (platform.isStandalone || platform.isHttps) return "/";
 		return httpsUrl || "/";
 	});
 
-	// ─── Build step list and set initial status ────────────────────────────
 	function initSteps(hasPushSub: boolean): void {
 		const isLocal =
 			typeof window !== "undefined" &&
@@ -156,7 +148,6 @@
 		loading = false;
 	}
 
-	// ─── Navigation helpers ────────────────────────────────────────────────
 	function nextStep(): void {
 		// After cert step on HTTP, redirect to HTTPS for remaining steps.
 		// Pass completed step count so the HTTPS page continues the numbering.
@@ -181,7 +172,6 @@
 		navigate(doneLinkHref);
 	}
 
-	// ─── HTTPS check ──────────────────────────────────────────────────────
 	async function checkHttps(): Promise<void> {
 		certStatus = "pending";
 		certMessage = "Checking HTTPS connection...";
@@ -203,7 +193,6 @@
 		}
 	}
 
-	// ─── Push notification enable ─────────────────────────────────────────
 	async function enablePush(): Promise<void> {
 		pushBusy = true;
 		pushMessage = "";
@@ -247,7 +236,6 @@
 		}
 	}
 
-	// ─── Init ──────────────────────────────────────────────────────────────
 	onMount(async () => {
 		platform = detectPlatform();
 
@@ -309,7 +297,6 @@
 				</div>
 			{/if}
 
-			<!-- ─── Steps ──────────────────────────────────────────────── -->
 			{#if currentStep === "tailscale"}
 				<StepTailscale
 					totalSteps={totalDisplaySteps}

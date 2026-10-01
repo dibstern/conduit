@@ -1,4 +1,3 @@
-// ─── Shared OpenCode Test Utilities ──────────────────────────────────────────
 // Helper functions shared between integration and E2E test harnesses.
 
 import { Socket } from "@effect/platform";

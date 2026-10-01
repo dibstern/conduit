@@ -1,4 +1,3 @@
-// ─── TLS Certificate Loading Layer ──────────────────────────────────────────
 // Converts the imperative TLS cert loading block (daemon-main.ts) to an
 // Effect Layer. Loads certs via `ensureCerts`, updates DaemonConfigRefTag
 // on success/failure, and exposes loaded certs through TlsCertTag.
@@ -14,8 +13,6 @@ import {
 	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 
-// ─── Service interface ─────────────────────────────────────────────────────
-
 export interface TlsCertService {
 	readonly certs: TlsCerts | null;
 	readonly caRootPath: string | null;
@@ -23,20 +20,16 @@ export interface TlsCertService {
 	readonly caCertPem: Buffer | null;
 }
 
-// ─── Context Tags ──────────────────────────────────────────────────────────
-
 export class TlsCertTag extends Context.Tag("TlsCert")<
 	TlsCertTag,
 	TlsCertService
 >() {}
 
-// ─── Error type ────────────────────────────────────────────────────────────
-
 export class TlsCertLoadError extends Data.TaggedError("TlsCertLoadError")<{
 	cause: unknown;
 }> {}
 
-// ─── EnsureCerts DI tag (AP-R2-6) ──────────────────────────────────────────
+// EnsureCerts DI tag (AP-R2-6)
 
 export interface EnsureCertsService {
 	ensureCerts: (opts: {
@@ -49,8 +42,6 @@ export class EnsureCertsTag extends Context.Tag("EnsureCerts")<
 	EnsureCertsService
 >() {}
 
-// ─── Production EnsureCerts layer ──────────────────────────────────────────
-
 export const EnsureCertsLive = Layer.succeed(EnsureCertsTag, {
 	ensureCerts: (opts) =>
 		Effect.tryPromise({
@@ -59,7 +50,7 @@ export const EnsureCertsLive = Layer.succeed(EnsureCertsTag, {
 		}),
 });
 
-// ─── Null result (reused in multiple branches) ─────────────────────────────
+// Null result (reused in multiple branches)
 
 const nullResult: TlsCertService = {
 	certs: null,
@@ -67,8 +58,6 @@ const nullResult: TlsCertService = {
 	caCertDer: null,
 	caCertPem: null,
 };
-
-// ─── TlsCertLive Layer factory ─────────────────────────────────────────────
 
 export const TlsCertLive = (configDir: string) =>
 	Layer.effect(

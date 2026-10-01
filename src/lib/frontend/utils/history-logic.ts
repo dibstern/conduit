@@ -1,4 +1,3 @@
-// ─── History Pure Logic ──────────────────────────────────────────────────────
 // Pure functions with no DOM or framework dependencies.
 // Extracted for unit testing without a browser environment.
 
@@ -110,8 +109,6 @@ export function getAssistantText(msg: HistoryMessage | undefined): string {
 // shouldLoadMore() and getOldestMessageId() were removed — dead code after
 // the unified rendering migration. HistoryLoader.svelte inlines the guard
 // logic and ws-dispatch tracks messageCount for the pagination offset.
-
-// ─── History → ChatMessage Conversion ───────────────────────────────────────
 
 /** Tool names that should preserve their live status in history.
  *  Question tools may still be awaiting a user response even when loaded
@@ -393,7 +390,7 @@ export function historyToChatMessages(
 	});
 }
 
-// ─── History Queued Flag (REMOVED) ──────────────────────────────────────────
+// History Queued Flag (REMOVED)
 // `applyHistoryQueuedFlag` was removed: it wrote the old mutable `queued`
 // boolean which no longer exists on UserMessage (replaced by the immutable
 // `sentDuringEpoch` + derived-state pattern). The queued visual is now

@@ -1,4 +1,3 @@
-<!-- ─── DiffView ────────────────────────────────────────────────────────────── -->
 <!-- Renders a side-by-side or unified diff between two text inputs.            -->
 <!-- Computes diff ops using the LCS-based diff utility and renders with        -->
 <!-- proper line numbers, markers, and color-coded styling.                     -->
@@ -8,8 +7,6 @@
 	import { escapeHtml } from "../../utils/format.js";
 	import type { DiffOp, SplitRow } from "../../types.js";
 	import Tabs from "../ui/Tabs.svelte";
-
-	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
 		oldText,
@@ -21,19 +18,13 @@
 		filename?: string;
 	} = $props();
 
-	// ─── Local state ────────────────────────────────────────────────────────────
-
 	let viewMode = $state<"unified" | "split">("unified");
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const ops = $derived(computeDiff(oldText.split("\n"), newText.split("\n")));
 
 	const splitRows = $derived(buildSplitRows(ops));
 
 	const stats = $derived(diffStats(oldText, newText));
-
-	// ─── Helpers ────────────────────────────────────────────────────────────────
 
 	function lineClass(type: DiffOp["type"]): string {
 		switch (type) {

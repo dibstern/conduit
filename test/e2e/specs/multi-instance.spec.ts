@@ -1,4 +1,3 @@
-// ─── Multi-Instance E2E Tests ────────────────────────────────────────────────
 // Tests all multi-instance UI features defined in the multi-instance plan.
 //
 // Groups 1-14: Implemented features (all passing)
@@ -18,8 +17,6 @@ import {
 } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
@@ -224,7 +221,7 @@ async function openProjectsPanel(page: Page): Promise<void> {
 	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
 }
 
-// ─── Group 1: ProjectManagerPanel Instance Grouping (IMPLEMENTED) ──────────────
+// Group 1: ProjectManagerPanel Instance Grouping (IMPLEMENTED)
 
 test.describe("ProjectManagerPanel: Instance Grouping", () => {
 	test("groups projects by instance when multiple instances exist", async ({
@@ -299,7 +296,7 @@ test.describe("ProjectManagerPanel: Instance Grouping", () => {
 	});
 });
 
-// ─── Group 2: Header Instance Badge (IMPLEMENTED) ──────────────────────────
+// Group 2: Header Instance Badge (IMPLEMENTED)
 
 test.describe("Header: Instance Badge", () => {
 	test("shows instance badge when multiple instances exist", async ({
@@ -354,7 +351,7 @@ test.describe("Header: Instance Badge", () => {
 	});
 });
 
-// ─── Group 3: ConnectOverlay Instance Name (PARTIALLY IMPLEMENTED) ──────────
+// Group 3: ConnectOverlay Instance Name (PARTIALLY IMPLEMENTED)
 // The overlay shows `Connecting to ${instanceName}...` only when statusText is
 // empty (initial connection). After disconnect, statusText is "Disconnected" and
 // the generic reconnecting copy is displayed.
@@ -390,7 +387,7 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 	});
 });
 
-// ─── Group 4: Instance Store Reactivity (IMPLEMENTED) ───────────────────────
+// Group 4: Instance Store Reactivity (IMPLEMENTED)
 
 test.describe("Instance Store: Reactivity", () => {
 	test("instance_list message populates UI", async ({ page, baseURL }) => {
@@ -455,7 +452,7 @@ test.describe("Instance Store: Reactivity", () => {
 	});
 });
 
-// ─── Group 5: Status Color Mapping (IMPLEMENTED) ───────────────────────────
+// Group 5: Status Color Mapping (IMPLEMENTED)
 
 test.describe("Status Color Mapping", () => {
 	test("each status maps to correct color", async ({ page, baseURL }) => {
@@ -485,8 +482,6 @@ test.describe("Status Color Mapping", () => {
 		await expect(workDot).toHaveClass(/bg-zinc-500/);
 	});
 });
-
-// ─── Group 6: Instance Selector Dropdown ─────────────────────────────────
 
 test.describe("Instance Selector Dropdown", () => {
 	test("clicking header badge opens instance selector dropdown", async ({
@@ -532,8 +527,6 @@ test.describe("Instance Selector Dropdown", () => {
 		await expect(manageLink).toBeVisible();
 	});
 });
-
-// ─── Group 7: Instance Management Settings Panel ─────────────────────────
 
 test.describe("Instance Management Settings", () => {
 	test("gear icon opens settings with Instances tab", async ({
@@ -720,8 +713,6 @@ test.describe("Instance Management Settings", () => {
 	});
 });
 
-// ─── Group 8: ConnectOverlay Instance Actions ────────────────────────────
-
 test.describe("ConnectOverlay: Instance Actions", () => {
 	test("'Start Instance' button when instance is down", async ({
 		page,
@@ -756,8 +747,6 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 	});
 });
 
-// ─── Group 9: Project-Instance Binding UI ────────────────────────────────
-
 test.describe("Project-Instance Binding", () => {
 	test("add project form includes instance selector", async ({
 		page,
@@ -786,8 +775,6 @@ test.describe("Project-Instance Binding", () => {
 		await expect(instanceSelect).toContainText("Personal");
 	});
 });
-
-// ─── Group 10: Session List Instance Status ─────────────────────────────────
 
 test.describe("Session List: Instance Status Banner", () => {
 	test("banner when no healthy instances", async ({ page, baseURL }) => {
@@ -926,8 +913,6 @@ test.describe("Session List: Instance Status Banner", () => {
 	});
 });
 
-// ─── Group 11: Add Project with Instance Binding ────────────────────────────
-
 test.describe("Add Project: Instance Binding", () => {
 	test("AddProject RPC includes selected instanceId", async ({
 		page,
@@ -959,8 +944,6 @@ test.describe("Add Project: Instance Binding", () => {
 		});
 	});
 });
-
-// ─── Group 12: Instance Selector Rebinds Current Project ────────────────────
 
 test.describe("Instance Selector: Rebind Project", () => {
 	test("clicking instance in dropdown sends SetProjectInstance RPC and updates badge", async ({
@@ -1020,8 +1003,6 @@ test.describe("Instance Selector: Rebind Project", () => {
 	});
 });
 
-// ─── Group 13: Instance Status Updates in Settings ──────────────────────────
-
 test.describe("Settings: Instance Status Updates", () => {
 	test("instance_status message updates status color in settings panel", async ({
 		page,
@@ -1064,11 +1045,8 @@ test.describe("Settings: Instance Status Updates", () => {
 	});
 });
 
-// ─── Group 14: Real Daemon Smoke ─────────────────────────────────────────────
 // Moved to daemon-smoke.spec.ts — uses the DaemonHarness fixture instead of
 // inline Daemon setup. Run via: pnpm test:daemon
-
-// ─── Group 15: Auto-Discovery & Getting Started Panel ────────────────────────
 
 test.describe("Auto-Discovery: Getting Started Panel", () => {
 	test("Getting Started panel shows when no instances exist", async ({

@@ -1,4 +1,3 @@
-// ─── M4 Backend Additions Tests ──────────────────────────────────────────────
 // Tests for Phase 0B: new types, client methods, router types, todo extraction.
 
 import { assert, describe, expect, it } from "vitest";
@@ -15,8 +14,6 @@ import type {
 	TodoItem,
 	TodoStatus,
 } from "../../../src/lib/types.js";
-
-// ─── ws-router: new message types ───────────────────────────────────────────
 
 describe("ws-router — retired M4 browser commands", () => {
 	it("rejects question_reject after the RPC cutover", () => {
@@ -39,8 +36,6 @@ describe("ws-router — retired M4 browser commands", () => {
 		expect(isRouteError(result)).toBe(true);
 	});
 });
-
-// ─── types: interface shape checks ──────────────────────────────────────────
 
 describe("types — M4 interfaces", () => {
 	it("TodoItem has required fields", () => {

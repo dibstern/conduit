@@ -1,4 +1,3 @@
-<!-- ─── Info Panels ───────────────────────────────────────────────────────── -->
 <!-- Floating info panels (Usage, Status, Context) toggled from the header.  -->
 <!-- Positioned absolute top-right, stacked vertically with gap.             -->
 <!-- Data is passed as props; panel visibility is driven by uiState.openPanels. -->
@@ -9,8 +8,6 @@
 	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
-	// ─── Props ──────────────────────────────────────────────────────────────────
-
 	let {
 		usageData,
 		statusData,
@@ -20,8 +17,6 @@
 		statusData?: StatusData;
 		contextData?: ContextData;
 	} = $props();
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const showUsage = $derived(uiState.openPanels.has("usage-panel"));
 	const showStatus = $derived(uiState.openPanels.has("status-panel"));
@@ -40,8 +35,6 @@
 		if (contextPercent >= 50) return "bg-warning";
 		return "bg-brand-b";
 	});
-
-	// ─── Formatting helpers ─────────────────────────────────────────────────────
 
 	function formatCost(cost: number | undefined): string {
 		if (cost === undefined || cost === null) return "--";

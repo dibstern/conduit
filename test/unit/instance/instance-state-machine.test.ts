@@ -1,4 +1,3 @@
-// ─── State Machine Transition Tests ──────────────────────────────────────────
 // Comprehensive coverage of every InstanceStatus transition, focusing on
 // transitions not already covered by instance-manager.test.ts.
 //
@@ -12,8 +11,6 @@ import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { InstanceConfig } from "../../../src/lib/types.js";
 import { partialFake } from "../../helpers/partial-fake.js";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function managedConfig(
 	overrides: Partial<InstanceConfig> = {},
@@ -55,15 +52,11 @@ function createExitCapturingSpawner(pid = 99999) {
 	return { spawner, proc, getExitCb: () => exitCb };
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 describe("Instance state machine transitions", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		vi.useRealTimers();
 	});
-
-	// ── #4: starting → health check fails → stays starting, poll starts ──
 
 	it("starting → initial health check fails → stays 'starting', poll begins", async () => {
 		const mgr = new InstanceManager({
@@ -84,7 +77,7 @@ describe("Instance state machine transitions", () => {
 		expect(t4.status).toBe("starting");
 	});
 
-	// ── #6: starting → process exits (code=0) → stopped ──
+	// #6: starting → process exits (code=0) → stopped
 
 	it("starting → process exits code=0 → stopped", async () => {
 		vi.useFakeTimers();
@@ -125,8 +118,6 @@ describe("Instance state machine transitions", () => {
 		mgr.stopAll();
 	});
 
-	// ── #7: starting → stopInstance → stopped ──
-
 	it("starting → stopInstance → stopped", async () => {
 		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
@@ -157,8 +148,6 @@ describe("Instance state machine transitions", () => {
 		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
 		expect(events).toContain("stopped");
 	});
-
-	// ── #9: healthy → health poll fails → unhealthy ──
 
 	it("healthy → health poll fails → unhealthy", async () => {
 		vi.useFakeTimers();
@@ -196,7 +185,7 @@ describe("Instance state machine transitions", () => {
 		mgr.stopAll();
 	});
 
-	// ── #11: healthy → process exits (code=0) → stopped ──
+	// #11: healthy → process exits (code=0) → stopped
 
 	it("healthy → process exits code=0 → stopped", async () => {
 		vi.useFakeTimers();
@@ -236,8 +225,6 @@ describe("Instance state machine transitions", () => {
 		mgr.stopAll();
 	});
 
-	// ── #14: unhealthy → stopInstance → stopped ──
-
 	it("unhealthy → stopInstance → stopped", async () => {
 		const mgr = new InstanceManager({
 			healthPollIntervalMs: 999_999,
@@ -265,8 +252,6 @@ describe("Instance state machine transitions", () => {
 		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
 		expect(events).toContain("stopped");
 	});
-
-	// ── #16: unhealthy → startInstance → kills old, starting ──
 
 	it("unhealthy → startInstance → kills old process, transitions to starting then healthy", async () => {
 		const mgr = new InstanceManager({
@@ -309,7 +294,7 @@ describe("Instance state machine transitions", () => {
 		expect(events).toContain("healthy");
 	});
 
-	// ── #17: stopped → startInstance (second time) → starting ──
+	// #17: stopped → startInstance (second time) → starting
 
 	it("stopped → startInstance (second time after stop) → starting → healthy", async () => {
 		const mgr = new InstanceManager({
@@ -352,7 +337,7 @@ describe("Instance state machine transitions", () => {
 		mgr.stopAll();
 	});
 
-	// ── #19: starting → startInstance again → returns early (no double spawn) ──
+	// #19: starting → startInstance again → returns early (no double spawn)
 
 	it("starting → startInstance again → returns early", async () => {
 		const mgr = new InstanceManager({
@@ -383,8 +368,6 @@ describe("Instance state machine transitions", () => {
 
 		mgr.stopAll();
 	});
-
-	// ── #20: healthy → startInstance again → returns early ──
 
 	it("healthy → startInstance again → returns early (no re-spawn)", async () => {
 		const mgr = new InstanceManager({

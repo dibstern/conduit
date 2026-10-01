@@ -32,8 +32,6 @@ describe("IPC Command Schema validation", () => {
 		).toBe(true);
 	});
 
-	// ─── Basic decode tests ────────────────────────────────────────────────
-
 	it("decodes add_project command", () => {
 		const raw = { _tag: "AddProject", directory: "/home/user/project" };
 		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(raw);
@@ -58,8 +56,6 @@ describe("IPC Command Schema validation", () => {
 		);
 		expect(Either.isRight(result)).toBe(true);
 	});
-
-	// ─── No-field commands ─────────────────────────────────────────────────
 
 	it("decodes get_status command", () => {
 		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
@@ -106,8 +102,6 @@ describe("IPC Command Schema validation", () => {
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
-
-	// ─── Commands with fields ──────────────────────────────────────────────
 
 	it("decodes remove_project with slug", () => {
 		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({
@@ -231,8 +225,6 @@ describe("IPC Command Schema validation", () => {
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
-
-	// ─── Instance commands ─────────────────────────────────────────────────
 
 	it("decodes instance_add managed with port", () => {
 		const result = Schema.decodeUnknownEither(IpcTaggedRequestSchema)({

@@ -1,7 +1,4 @@
-// ─── Router Store ────────────────────────────────────────────────────────────
 // Routes: /auth, /setup, / (session list), /s/:sessionId.
-
-// ─── Route types ────────────────────────────────────────────────────────────
 
 export type Route =
 	| { page: "auth" }
@@ -15,8 +12,6 @@ export interface RouteTransition {
 }
 
 const MAX_TRANSITION_LOG = 50;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Split a path into its pathname and raw search string, discarding the hash. */
 function splitPath(path: string): { pathname: string; search: string } {
@@ -57,7 +52,7 @@ function carryScope(pathname: string, search: string): string {
 	return carried.size ? `?${carried}` : "";
 }
 
-// ─── Transition log (dev-mode route debugging) ─────────────────────────────
+// Transition log (dev-mode route debugging)
 // Records {from, to, timestamp} for each route change so developers can
 // trace "how did I end up on this page?" in the browser console.
 
@@ -80,8 +75,6 @@ export function clearTransitionLog(): void {
 	transitionLog.length = 0;
 }
 
-// ─── State ──────────────────────────────────────────────────────────────────
-
 export const routerState = $state({
 	path: typeof window !== "undefined" ? window.location.pathname : "/",
 	search: typeof window !== "undefined" ? window.location.search : "",
@@ -93,7 +86,6 @@ export const attachedProjectState = $state({
 	slug: null as string | null,
 });
 
-// ─── Derived getters ────────────────────────────────────────────────────────
 // These compute from routerState.path on each call.
 // Components should wrap in $derived() for reactive caching:
 //   const route = $derived(getCurrentRoute());
@@ -180,8 +172,6 @@ export function previousHistoryEntryIsSessionList(): boolean {
 	);
 }
 
-// ─── Actions ────────────────────────────────────────────────────────────────
-
 /** Shared transition logic for navigate/replaceRoute. */
 function applyRoute(
 	path: string,
@@ -215,8 +205,6 @@ export function navigate(path: string): void {
 export function replaceRoute(path: string): void {
 	applyRoute(path, "replaceState");
 }
-
-// ─── Browser history listener ───────────────────────────────────────────────
 
 if (typeof window !== "undefined") {
 	window.addEventListener("popstate", () => {

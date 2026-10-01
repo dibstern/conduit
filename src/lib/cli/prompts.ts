@@ -1,4 +1,3 @@
-// ─── Interactive Prompt Components ──────────────────────────────
 // Five reusable interactive terminal prompt primitives: toggle, PIN, text,
 // select, and multi-select. Ported from claude-relay/bin/cli.js lines 544-1013.
 // Each prompt accepts injectable stdin/stdout/exit for testability.
@@ -15,8 +14,6 @@ import {
 	truncateToWidth,
 	type Writable,
 } from "./terminal-render.js";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Injectable I/O streams for all prompts. */
 export interface PromptOptions {
@@ -60,8 +57,6 @@ export interface SelectPromptOptions extends PromptOptions {
 	/** Initial selection index (default 0). */
 	defaultIndex?: number;
 }
-
-// ─── promptToggle ────────────────────────────────────────────────────────────
 
 /**
  * Yes/No toggle prompt.
@@ -139,8 +134,6 @@ export function promptToggle(
 
 	stdin.on("data", onToggle);
 }
-
-// ─── promptPin ───────────────────────────────────────────────────────────────
 
 /**
  * Masked PIN entry prompt.
@@ -237,8 +230,6 @@ export function promptPin(
 
 	stdin.on("data", onPin);
 }
-
-// ─── promptText ──────────────────────────────────────────────────────────────
 
 /**
  * Text input prompt with placeholder and Tab directory completion.
@@ -469,8 +460,6 @@ export function promptText(
 	stdin.on("data", onText);
 }
 
-// ─── promptSelect ────────────────────────────────────────────────────────────
-
 /**
  * Single-choice select menu.
  * Arrow keys (up/down) to navigate, Enter to select.
@@ -630,8 +619,6 @@ export function promptSelect<T = string>(
 
 	stdin.on("data", onSelect);
 }
-
-// ─── promptMultiSelect ───────────────────────────────────────────────────────
 
 /**
  * Multi-choice select menu.

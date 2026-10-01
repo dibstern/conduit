@@ -1,4 +1,3 @@
-// ─── Tests: TranslateResult discriminated union ─────────────────────────────
 // Verifies that createTranslator().translate() returns TranslateResult
 // (ok: true with messages array, or ok: false with reason string)
 // instead of the old RelayMessage | RelayMessage[] | null.

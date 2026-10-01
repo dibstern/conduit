@@ -1,4 +1,3 @@
-<!-- ─── File Tree Node ────────────────────────────────────────────────────────── -->
 <!-- Recursive tree node for file browser. Directories expand on click and -->
 <!-- fetch children lazily via getChildren callback. -->
 

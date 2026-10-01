@@ -1,4 +1,3 @@
-<!-- ─── Step Header ───────────────────────────────────────────────────────── -->
 <!-- Reusable step counter + title + description used by each setup step.    -->
 
 <script lang="ts">

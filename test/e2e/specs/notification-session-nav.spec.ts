@@ -1,4 +1,3 @@
-// ─── Notification → Session Navigation E2E Tests ─────────────────────────────
 // Verifies that when a notification_event arrives via WebSocket with a
 // sessionId, the frontend can navigate to that session.
 //
@@ -17,8 +16,6 @@ import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type Page = import("@playwright/test").Page;
 
@@ -98,8 +95,6 @@ async function waitForChatReady(page: Page): Promise<void> {
 		timeout: 10_000,
 	});
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 test.describe("Notification → Session Navigation", () => {
 	test("notification_event is dispatched to triggerNotifications via WS", async ({

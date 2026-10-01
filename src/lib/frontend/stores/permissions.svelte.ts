@@ -1,4 +1,3 @@
-// ─── Permissions Store ───────────────────────────────────────────────────────
 // Pending permission requests and user questions.
 
 import type {
@@ -12,7 +11,6 @@ import { sessionState } from "./session.svelte.js";
 
 const log = createFrontendLogger("permissions");
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // This store has no client half: every entry is a request the server is waiting
 // on. Which option the user has highlighted lives in the card component until
 // it is submitted.
@@ -24,7 +22,6 @@ export const permissionsState = $state({
 	questionErrors: new Map<string, string>(),
 });
 
-// ─── Derived getters ────────────────────────────────────────────────────────
 // Components should wrap in $derived() for reactive caching.
 
 /** Get the total number of pending items requiring user attention. */
@@ -109,8 +106,6 @@ export function getRemotePermissions(
 	);
 }
 
-// ─── Pure helpers ───────────────────────────────────────────────────────────
-
 /** Build the answer payload for a question response.
  *  Keys are numeric string indices ("0", "1", ...) — NOT the question text.
  */
@@ -151,8 +146,6 @@ export function formatQuestionHeader(header: string): string {
 	if (!header) return "";
 	return header.charAt(0).toUpperCase() + header.slice(1);
 }
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 export function handlePermissionRequest(
 	msg: Extract<RelayMessage, { type: "permission_request" }>,
@@ -268,8 +261,6 @@ export function handleAskUserError(
 	// Store the error keyed by toolId so components can react
 	permissionsState.questionErrors.set(toolId, message);
 }
-
-// ─── Actions ────────────────────────────────────────────────────────────────
 
 /** Remove a permission request (after responding). */
 export function removePermission(requestId: string): void {

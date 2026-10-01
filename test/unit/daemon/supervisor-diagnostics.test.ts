@@ -1,4 +1,3 @@
-// ─── Supervisor.track Diagnostics Tests ─────────────────────────────────────
 // Verifies that Supervisor.track can monitor forked fiber exits and status.
 // These are pure Effect tests — no daemon dependencies required.
 

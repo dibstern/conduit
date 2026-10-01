@@ -101,8 +101,6 @@ describe("MessageProjector resilience", () => {
 		return historyToChatMessages(messages);
 	}
 
-	// ─── Session lifecycle ───────────────────────────────────────────────
-
 	describe("session lifecycle", () => {
 		it("duplicate session.created does not overwrite a renamed title", async () => {
 			const sessionId = "ses-title-owner";
@@ -215,8 +213,6 @@ describe("MessageProjector resilience", () => {
 			expect(chat).toHaveLength(0);
 		});
 	});
-
-	// ─── Out-of-order events ────────────────────────────────────────────
 
 	describe("out-of-order events", () => {
 		it("thinking.delta before thinking.start — part created with correct text", async () => {
@@ -343,8 +339,6 @@ describe("MessageProjector resilience", () => {
 			expect(assistant).toBeDefined();
 		});
 	});
-
-	// ─── Duplicate event delivery ───────────────────────────────────────
 
 	describe("duplicate event delivery", () => {
 		it("KNOWN RISK: duplicate thinking.delta in normal mode doubles text", async () => {
@@ -657,8 +651,6 @@ describe("MessageProjector resilience", () => {
 			expect(assistant).toBeDefined();
 		});
 	});
-
-	// ─── Edge cases ─────────────────────────────────────────────────────
 
 	describe("edge cases", () => {
 		it("empty thinking block — start + end, no delta", async () => {
@@ -987,8 +979,6 @@ describe("MessageProjector resilience", () => {
 		});
 	});
 
-	// ─── Multi-part turns ───────────────────────────────────────────────
-
 	describe("multi-part turns", () => {
 		it("multiple thinking blocks in one message — all survive pipeline", async () => {
 			await project(
@@ -1286,8 +1276,6 @@ describe("MessageProjector resilience", () => {
 		});
 	});
 
-	// ─── Error recovery ─────────────────────────────────────────────────
-
 	describe("error recovery", () => {
 		it("partial failure — thinking.start committed, delta rejected, state still valid", async () => {
 			await project(
@@ -1346,8 +1334,6 @@ describe("MessageProjector resilience", () => {
 			expect(thinking.done).toBe(true);
 		});
 	});
-
-	// ─── Session isolation ──────────────────────────────────────────────
 
 	describe("session isolation", () => {
 		it("events from session A never appear in session B pipeline", async () => {
@@ -1522,8 +1508,6 @@ describe("MessageProjector resilience", () => {
 			// Either way, pipeline should not crash
 		});
 	});
-
-	// ─── Malformed / adversarial payloads ────────────────────────────────
 
 	describe("malformed and adversarial payloads", () => {
 		it("thinking.delta with empty string text — concatenates to empty", async () => {
@@ -1804,8 +1788,6 @@ describe("MessageProjector resilience", () => {
 		});
 	});
 
-	// ─── Unicode and encoding stress ─────────────────────────────────────
-
 	describe("unicode and encoding stress", () => {
 		async function projectThinkingWithText(
 			msgId: string,
@@ -2029,8 +2011,6 @@ describe("MessageProjector resilience", () => {
 			expect(thinking.text).toBe("思考🧠完了");
 		});
 	});
-
-	// ─── Orphan event edges ──────────────────────────────────────────────
 
 	describe("orphan event edges", () => {
 		it("thinking.end with no thinking.start or thinking.delta — no crash", async () => {

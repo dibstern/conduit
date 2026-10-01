@@ -1,4 +1,3 @@
-// ─── Snapshot/stream dedupe regressions ─────────────────────────────────────
 // Replays the captured incident from .conduit/events.db (session ses_dd151774,
 // 2026-07-15): with includePartialMessages the SDK emits per-block assistant
 // snapshot messages whose content-array index does NOT match the wire
@@ -266,7 +265,6 @@ describe("assistant snapshot vs stream dedupe", () => {
 		expect([...partsA.values()]).toEqual([TEXT]);
 	});
 
-	// ── conduit-test-r5xu ───────────────────────────────────────────────
 	// A MessageDisplay hook (the message-timestamps plugin) rewrites assistant
 	// text before it reaches the SDK consumer, PREPENDING a "[HH:MM:SS]"
 	// marker. Reconciliation matches on a bidirectional prefix, which a

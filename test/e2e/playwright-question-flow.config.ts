@@ -1,4 +1,3 @@
-// ─── Playwright Config: Question Flow Tests ──────────────────────────────────
 // Tests question/answer UI flow via WS mock.
 // No real OpenCode or relay needed — serves built frontend via Vite preview.
 

@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── localStorage mock (needed by feature-flags module) ─────────────────────
+// localStorage mock (needed by feature-flags module)
 const storage = new Map<string, string>();
 beforeAll(() => {
 	vi.stubGlobal("localStorage", {

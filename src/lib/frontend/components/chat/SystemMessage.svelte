@@ -1,4 +1,3 @@
-<!-- ─── System Message ──────────────────────────────────────────────────────── -->
 <!-- Displays system info/error messages with left-border accent. -->
 
 <script lang="ts">

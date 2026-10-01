@@ -1,4 +1,3 @@
-<!-- ─── Step: Push Notifications ──────────────────────────────────────────── -->
 <!-- Setup step for enabling push notifications.                              -->
 
 <script lang="ts">

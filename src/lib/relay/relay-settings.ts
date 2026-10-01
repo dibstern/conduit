@@ -1,4 +1,3 @@
-// ─── Relay Settings Persistence ──────────────────────────────────────────────
 // Load/save relay-specific settings from ~/.conduit/settings.jsonc.
 // Separate from OpenCode's own config — the relay has its own settings file.
 
@@ -13,8 +12,6 @@ import {
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 export interface RelaySettings {
 	defaultModel?: string;
 	defaultPermissionMode?: SessionPermissionMode;
@@ -27,11 +24,7 @@ export interface RelaySettings {
 	claudeSettings?: ClaudeSettingsOverrides;
 }
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const SETTINGS_FILE = "settings.jsonc";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function resolveDir(configDir?: string): string {
 	return configDir ?? DEFAULT_CONFIG_DIR;
@@ -41,8 +34,6 @@ function resolveDir(configDir?: string): string {
 function stripComments(text: string): string {
 	return text.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
-
-// ─── Public API ─────────────────────────────────────────────────────────────
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 

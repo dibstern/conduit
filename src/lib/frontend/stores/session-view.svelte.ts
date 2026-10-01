@@ -1,4 +1,3 @@
-// ─── Session View Store ─────────────────────────────────────────────────────
 // State the session's own chrome needs but the transcript owns. Kept in one
 // place so the bar and the message list cannot disagree.
 

@@ -1,4 +1,3 @@
-// ─── Client-side Rate Limit Tests ────────────────────────────────────────────
 // Tests for the client-side message queue in ws.svelte.ts.
 // Verifies: immediate sends under limit, queuing at limit, drain timer,
 // queue replacement, and non-message bypass.
@@ -13,7 +12,7 @@ import {
 	vi,
 } from "vitest";
 
-// ─── Hoisted mocks (run before imports) ─────────────────────────────────────
+// Hoisted mocks (run before imports)
 const { showToastMock, sentMessages } = vi.hoisted(() => {
 	const showToastMock = vi.fn();
 	const sentMessages: string[] = [];
@@ -67,7 +66,6 @@ const { showToastMock, sentMessages } = vi.hoisted(() => {
 	return { showToastMock, sentMessages, MockWebSocket };
 });
 
-// ─── Mock ui.svelte.js to capture showToast calls ───────────────────────────
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastMock,
 	showBanner: vi.fn(),
@@ -82,8 +80,6 @@ import {
 	rateLimitChatSend,
 	wsSend,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Parsed version of the last sent message. */
 function lastSent(): Record<string, unknown> | undefined {
@@ -121,7 +117,6 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-// ─── Helper to establish the WS connection ──────────────────────────────────
 // connect() creates a MockWebSocket but we need to fire "open" on it.
 // Since we can't directly access _ws, we verify sends work by checking sentMessages.
 
@@ -130,11 +125,7 @@ afterEach(() => {
 // simple, let's just verify the flow by testing wsSend directly — if _ws is set
 // and readyState is OPEN (default in our mock), rawSend works.
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe("wsSend client-side rate limiting", () => {
-	// ─── Non-message types bypass rate limiting ─────────────────────────────
-
 	describe("non-message types", () => {
 		it("sends control messages immediately without rate limiting", () => {
 			for (let i = 0; i < 10; i++) {
@@ -150,8 +141,6 @@ describe("wsSend client-side rate limiting", () => {
 			expect(sentMessages).toHaveLength(1);
 		});
 	});
-
-	// ─── Under limit — immediate send ───────────────────────────────────────
 
 	describe("under rate limit", () => {
 		it("sends up to MAX_MESSAGES immediately", () => {
@@ -170,8 +159,6 @@ describe("wsSend client-side rate limiting", () => {
 			expect(sentMessages).toHaveLength(2);
 		});
 	});
-
-	// ─── At limit — queuing ─────────────────────────────────────────────────
 
 	describe("at rate limit", () => {
 		function fillLimit(): void {
@@ -248,8 +235,6 @@ describe("wsSend client-side rate limiting", () => {
 		});
 	});
 
-	// ─── Sliding window ─────────────────────────────────────────────────────
-
 	describe("sliding window behavior", () => {
 		it("allows a new message once the oldest expires", () => {
 			// Send 5 at t=0
@@ -282,7 +267,6 @@ describe("wsSend client-side rate limiting", () => {
 		});
 	});
 
-	// ─── Gap 4: Message order preservation ──────────────────────────────────
 	// AC7 requires messages to be processed in order. Previous tests proved
 	// queuing works but did not assert the full send order.
 
@@ -349,8 +333,6 @@ describe("wsSend client-side rate limiting", () => {
 			expect(chatTexts).toEqual(["chat-1", "chat-2", "chat-3"]);
 		});
 	});
-
-	// ─── Reset ──────────────────────────────────────────────────────────────
 
 	describe("_resetRateLimit", () => {
 		it("clears all rate-limit state", () => {

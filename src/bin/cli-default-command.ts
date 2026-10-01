@@ -26,7 +26,6 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	// ─── Default invocation ─────────────────────────────────────────────
 	const stdin = options?.stdin ?? process.stdin;
 
 	// Determine if interactive mode should be used:
@@ -53,8 +52,7 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	// ─── Non-interactive default (legacy behavior) ──────────────────────
-	// 1. Ensure daemon is running
+	// Non-interactive default (legacy behavior)
 	let running = await checkDaemon();
 	if (!running) {
 		try {
@@ -79,7 +77,6 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		}
 	}
 
-	// 2. Register current directory as a project
 	const registerResponse = await ipcSend(
 		new AddProject({
 			directory: cwd,
@@ -89,7 +86,6 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		? (registerResponse.slug as string)
 		: undefined;
 
-	// 3. Build URL (check daemon TLS status for correct scheme)
 	const statusResponse = await ipcSend(new GetStatus({}));
 	const scheme = statusResponse["tlsEnabled"] === true ? "https" : "http";
 	// 3b. Build URLs with Tailscale priority (consistent with interactive path)
@@ -99,7 +95,6 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 	const url = `${scheme}://${primaryIP}:${args.port}`;
 	const tlsActive = statusResponse["tlsEnabled"] === true;
 
-	// 4. Show QR code with optional setup caption
 	if (primaryIP !== "localhost") {
 		const qrUrl = tlsActive
 			? `http://${primaryIP}:${args.port + 1}/setup`
@@ -117,7 +112,6 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		}
 	}
 
-	// 5. Display connection info
 	stdout.write("\n");
 	stdout.write("conduit\n");
 	stdout.write(`  URL: ${url}\n`);
@@ -129,7 +123,6 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		stdout.write(`  Project: ${slug} (${cwd})\n`);
 	}
 
-	// 6. Show PIN info
 	stdout.write("Tip: Set a PIN for security: conduit --pin <4-8 digits>\n");
 	stdout.write("\n");
 }

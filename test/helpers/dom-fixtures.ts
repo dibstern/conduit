@@ -1,4 +1,3 @@
-// ─── Shared DOM Fixtures for Frontend Tests ──────────────────────────────────
 // Provides reusable DOM HTML and mock constructors for removing internal mocks.
 
 import { vi } from "vitest";

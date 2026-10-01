@@ -25,11 +25,7 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	// ─── Props ────────────────────────────────────────────────────────────────
-
 	let { onTabBarTouchStart }: { onTabBarTouchStart?: (e: TouchEvent) => void } = $props();
-
-	// ─── Reactive derived state ────────────────────────────────────────────────
 
 	const tabs = $derived(getTabList());
 	const canCreate = $derived(getCanCreateTab());
@@ -37,14 +33,10 @@
 	const statusMessage = $derived(terminalState.statusMessage);
 	const panelOpen = $derived(terminalState.panelOpen);
 
-	// ─── Rename state ──────────────────────────────────────────────────────────
-
 	let renamingPtyId: string | null = $state(null);
 	let renameValue: string = $state("");
 	let renameInputEl = $state<HTMLInputElement>();
 	let tabListEl: HTMLDivElement | null = $state(null);
-
-	// ─── Font size state ──────────────────────────────────────────────────────
 
 	const FONT_SIZE_MIN = 6;
 	const FONT_SIZE_MAX = 24;
@@ -95,8 +87,6 @@
 			}).catch(() => undefined);
 		}
 	}
-
-	// ─── Actions ───────────────────────────────────────────────────────────────
 
 	function handleNewTab() {
 		const projectSlug = getCurrentSlug();
@@ -163,8 +153,6 @@
 	function handleClosePanel() {
 		closePanel();
 	}
-
-	// ─── Double-click rename ───────────────────────────────────────────────────
 
 	function startRename(ptyId: string, currentTitle: string) {
 		renamingPtyId = ptyId;

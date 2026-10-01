@@ -6,7 +6,6 @@ import {
 	applySessionUpsert,
 	seedSearchResults,
 } from "./session-fixtures.js";
-// ─── Session store invariants ────────────────────────────────────────────────
 // The session store is split in two: a server-owned map of `SessionInfo` rows
 // written only by the `applySession*` functions, and a client-owned block
 // holding this tab's selection and search. These tests hold that line.
@@ -70,8 +69,6 @@ beforeEach(() => {
 	clearSessionState();
 });
 
-// ─── Loop 1: no invented rows ───────────────────────────────────────────────
-
 describe("the server half holds only rows the server sent", () => {
 	it("does not synthesize a row for a selected session whose list has not caught up", () => {
 		sessionState.currentId = "ses_child";
@@ -104,8 +101,6 @@ describe("the server half holds only rows the server sent", () => {
 		expect(sessionState.currentParentId).toBe("ses_parent");
 	});
 });
-
-// ─── Loop 2: one representation ─────────────────────────────────────────────
 
 describe("the server half is one representation", () => {
 	it("shows a rename delivered by a new root snapshot", () => {
@@ -151,8 +146,6 @@ describe("the server half is one representation", () => {
 	});
 });
 
-// ─── Loop 3: recency ────────────────────────────────────────────────────────
-
 describe("sidebar order", () => {
 	it("moves a session to the top when the server reports it as newer", () => {
 		applySessionSnapshot(
@@ -184,8 +177,6 @@ describe("sidebar order", () => {
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b", "a"]);
 	});
 });
-
-// ─── Loop 4: the wire schema is the store's invariant ───────────────────────
 
 describe("every mutation path leaves the server half wire-valid", () => {
 	const ROWS: SessionInfo[] = [
@@ -267,8 +258,6 @@ describe("every mutation path leaves the server half wire-valid", () => {
 	});
 });
 
-// ─── The client half survives server writes ─────────────────────────────────
-
 describe("applying server rows never touches the client half", () => {
 	it("keeps the selection and the search query", () => {
 		sessionState.currentId = "root";
@@ -285,8 +274,6 @@ describe("applying server rows never touches the client half", () => {
 		expect(sessionState.searchQuery).toBe("roo");
 	});
 });
-
-// ─── A deleted session is not "the session being viewed" ────────────────────
 
 describe("deleting the session being viewed", () => {
 	it("does not let a later event rebuild the chat state deletion threw away", async () => {
@@ -326,8 +313,6 @@ describe("deleting the session being viewed", () => {
 		}
 	});
 });
-
-// ─── Characterization: the session being viewed is always routable ──────────
 
 describe("event routing for the session being viewed", () => {
 	it("routes events for the selected session before its row arrives", async () => {

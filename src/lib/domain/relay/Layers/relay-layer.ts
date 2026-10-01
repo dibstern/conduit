@@ -1,4 +1,3 @@
-// ─── Relay State Layer ──────────────────────────────────────────────────────
 // Composes all Effect-native state Layers into a single merged Layer.
 // These provide the state Tags that Effect handler functions use.
 //

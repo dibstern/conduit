@@ -1,4 +1,3 @@
-// ─── Server Connection Helper ──────────────────────────────────────────────
 // Connects to a running OpenCode instance for contract testing.
 // Skips tests gracefully if the server is not available.
 

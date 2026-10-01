@@ -1,5 +1,5 @@
 import { seedSessions } from "./session-fixtures.js";
-// ─── The Legacy Badge Path Is Unreachable (ni8.23) ───────────────────────────
+// The Legacy Badge Path Is Unreachable (ni8.23)
 // The badge used to be client state: a reducer fed by `notification_event`
 // broadcasts, plus a per-tab set of "sessions I have looked at". Both are gone —
 // what a session is waiting on, and whether it has been looked at, are derived

@@ -1,4 +1,3 @@
-// ─── Push Notifications for Done/Error Events ───────────────────────────────
 // Regression tests proving that push notifications are sent for "done" and
 // "error" events regardless of which code path produces them.
 //
@@ -17,15 +16,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { sendPushForEvent } from "../../../src/lib/relay/sse-wiring.js";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function createMockPushManager() {
 	return {
 		sendToAll: vi.fn().mockResolvedValue(undefined),
 	};
 }
-
-// ─── sendPushForEvent ────────────────────────────────────────────────────────
 
 describe("sendPushForEvent", () => {
 	it("sends push notification for done events", () => {

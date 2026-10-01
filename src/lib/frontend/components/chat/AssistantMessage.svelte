@@ -1,4 +1,3 @@
-<!-- ─── Assistant Message ────────────────────────────────────────────────────── -->
 <!-- Renders assistant markdown with streaming support, code blocks with -->
 <!-- language headers + copy buttons, mermaid diagrams, and copy-on-click. -->
 <!-- Preserves .msg-assistant class for E2E. -->
@@ -38,7 +37,6 @@
 	let { message, forkMessageId }: { message: AssistantMessage; forkMessageId?: string | undefined } = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
 
-	// ─── Copy-on-click state machine ───────────────────────────────────────────
 	type CopyState = "idle" | "primed" | "done";
 	let copyState: CopyState = $state("idle");
 	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,7 +51,7 @@
 		return "Copy message";
 	});
 
-	// ─── Mermaid init (once globally) ──────────────────────────────────────────
+	// Mermaid init (once globally)
 
 	function initializeMermaid(mermaid: Mermaid): void {
 		const styles = getComputedStyle(document.documentElement);
@@ -129,8 +127,6 @@
 		});
 	});
 
-	// ─── Post-render: code block headers + syntax highlighting ─────────────────
-
 	// Track table scroll shadow cleanup so we can tear down listeners/observers
 	// before re-attaching on the next render, and on component destroy.
 	let tableScrollCleanup: (() => void) | null = null;
@@ -185,8 +181,6 @@
 		return undefined;
 	});
 
-	// ─── Code block headers ────────────────────────────────────────────────────
-
 	function addCodeBlockHeaders(container: HTMLElement): void {
 		const pres = container.querySelectorAll("pre");
 		for (const pre of pres) {
@@ -233,8 +227,6 @@
 		}
 	}
 
-	// ─── Syntax highlighting ───────────────────────────────────────────────────
-
 	function highlightCodeBlocks(container: HTMLElement): void {
 		const blocks = container.querySelectorAll(
 			"pre code:not(.hljs):not(.language-mermaid)",
@@ -244,8 +236,6 @@
 			hljs.highlightElement(block as HTMLElement);
 		}
 	}
-
-	// ─── Mermaid diagrams ──────────────────────────────────────────────────────
 
 	async function renderMermaidBlocks(container: HTMLElement): Promise<void> {
 		const blocks = container.querySelectorAll("code.language-mermaid");
@@ -280,8 +270,6 @@
 			}
 		}
 	}
-
-	// ─── Copy-on-click handlers ────────────────────────────────────────────────
 
 	function handleClick(e: MouseEvent) {
 		if (!message.finalized) return;
@@ -338,8 +326,6 @@
 		}
 	}
 
-	// ─── Fork handler ─────────────────────────────────────────────────────────
-
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation(); // Don't trigger the copy click handler
 		if (forkMessageId) {
@@ -354,8 +340,6 @@
 				.catch(() => showToast("Failed to fork session", { variant: "error" }));
 		}
 	}
-
-	// ─── Hint text ─────────────────────────────────────────────────────────────
 
 	const hintText = $derived.by(() => {
 		switch (copyState) {
@@ -381,8 +365,6 @@
 		if (copyState === "done") return "bg-success/[0.06]";
 		return "";
 	});
-
-	// ─── Cleanup ───────────────────────────────────────────────────────────────
 
 	onDestroy(() => {
 		if (copyResetTimer) clearTimeout(copyResetTimer);

@@ -1,4 +1,3 @@
-// ─── Tests: Prompt Error Diagnostics ──────────────────────────────────────────
 // Verifies that 400 errors from OpenCode's prompt_async endpoint surface
 // actionable details (Zod validation errors) to both console and browser.
 

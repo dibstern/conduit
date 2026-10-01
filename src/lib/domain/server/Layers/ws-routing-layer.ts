@@ -1,4 +1,3 @@
-// ─── WebSocket Routing Layer ────────────────────────────────────────────────
 // Scoped Layer that owns daemon WebSocket upgrade routing.
 
 import { randomBytes } from "node:crypto";
@@ -208,8 +207,6 @@ const handleFailure = (error: WebSocketUpgradeError, socket: net.Socket) =>
 		});
 		yield* destroySocket(socket);
 	});
-
-// ─── WebSocketRoutingLive ──────────────────────────────────────────────────
 
 /**
  * Scoped Layer that attaches the WebSocket upgrade handler to the HTTP server.

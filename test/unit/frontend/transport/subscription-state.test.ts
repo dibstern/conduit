@@ -1,4 +1,3 @@
-// ─── The applier ─────────────────────────────────────────────────────────────
 // `reduce` is the one place a subscription's map changes. It is a pure function
 // over the envelope union, so these tests are just values in and values out —
 // no store, no Svelte, no socket. That purity is what lets ni8.5 T-14 drive

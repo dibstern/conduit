@@ -1,4 +1,4 @@
-// ─── Regression: message.updated must handle properties.info (not just properties.message) ───
+// Regression: message.updated must handle properties.info (not just properties.message)
 // Root cause: OpenCode sends message data under "info" key in message.updated events,
 // but translateMessageUpdated only checked "message". This meant usage/cost data never
 // reached the browser.

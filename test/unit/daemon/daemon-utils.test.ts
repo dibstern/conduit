@@ -1,4 +1,3 @@
-// ─── Tests: Daemon Utility Functions ─────────────────────────────────────────
 // Unit tests for probeOpenCode and findFreePort.
 // probeOpenCode tests use local mock HTTP servers (no external dependencies).
 // findFreePort tests allocate real OS ports.

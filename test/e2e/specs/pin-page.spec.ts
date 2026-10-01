@@ -1,4 +1,3 @@
-// ─── E2E PIN Page Tests ──────────────────────────────────────────────────────
 // Tests the PIN login page behavior: verifies no-PIN behavior when PIN is
 // not configured. Uses real relay backed by MockOpenCodeServer.
 

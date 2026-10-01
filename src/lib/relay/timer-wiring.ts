@@ -1,4 +1,4 @@
-// ─── Timer Wiring (G5) ───────────────────────────────────────────────────────
+// Timer Wiring (G5)
 // Permission timeout checks as a scoped Effect Layer.
 // Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
 //
@@ -8,8 +8,6 @@ import { Duration, Effect, Layer, Schedule } from "effect";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import type { PermissionId } from "../shared-types.js";
-
-// ─── Effect Layer ───────────────────────────────────────────────────────────
 
 /**
  * Scoped Layer that checks for timed-out permissions every 30 seconds

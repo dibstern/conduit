@@ -1,4 +1,3 @@
-// ─── DaemonState Ref & Tag ───────────────────────────────────────────────────
 // Replaces ~47 mutable fields on the Daemon class with a single atomic
 // Ref<DaemonState>. All daemon subsystems read/write through this Ref,
 // giving us fiber-safe atomic snapshots for free.
@@ -11,8 +10,6 @@ import { Context, Effect, Layer, Ref } from "effect";
 
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
-
-// ─── Supporting interfaces ──────────────────────────────────────────────────
 
 /** Project entry stored in daemon config. */
 export interface DaemonProject {
@@ -37,8 +34,6 @@ export interface DaemonInstanceConfig {
 	configDir?: string;
 }
 
-// ─── DaemonState ────────────────────────────────────────────────────────────
-
 /**
  * Observable + persisted subset of the Daemon class fields.
  *
@@ -47,7 +42,7 @@ export interface DaemonInstanceConfig {
  * Internal coordination fields manage save coalescing.
  */
 export interface DaemonState {
-	// ── Persisted fields (mirror DaemonConfig) ──
+	// Persisted fields (mirror DaemonConfig)
 	pid: number;
 	port: number;
 	host: string;
@@ -64,7 +59,6 @@ export interface DaemonState {
 	instances: DaemonInstanceConfig[];
 	dismissedPaths: Set<string>;
 
-	// ── Runtime-observable ──
 	clientCount: number;
 	shuttingDown: boolean;
 	startTime: number;
@@ -74,12 +68,9 @@ export interface DaemonState {
 	pidPath: string;
 	staticDir?: string;
 
-	// ── Internal coordination ──
 	pendingSave: boolean;
 	needsResave: boolean;
 }
-
-// ─── Factory ────────────────────────────────────────────────────────────────
 
 /** Sensible defaults for a fresh daemon with no config. */
 export function emptyDaemonState(): DaemonState {
@@ -113,15 +104,11 @@ export function emptyDaemonState(): DaemonState {
 	};
 }
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 /** Tag for the mutable DaemonState Ref in the Effect Context. */
 export class DaemonStateTag extends Context.Tag("DaemonState")<
 	DaemonStateTag,
 	Ref.Ref<DaemonState>
 >() {}
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 /**
  * Create a Layer providing DaemonStateTag backed by a Ref.

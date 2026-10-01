@@ -1,4 +1,3 @@
-// ─── Session Registry ────────────────────────────────────────────────────────
 // Single source of truth for client→session associations.
 // Replaces the scattered tracking across ws-handler.clientSessions,
 // pollerManager.viewerCounts, and relay-stack viewer management.

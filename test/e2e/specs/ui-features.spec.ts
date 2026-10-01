@@ -1,4 +1,3 @@
-// ─── E2E UI Features Tests ───────────────────────────────────────────────────
 // Tests standalone UI features: connection overlay, input area, attach popup,
 // todo overlay.
 // Uses real relay backed by MockOpenCodeServer.

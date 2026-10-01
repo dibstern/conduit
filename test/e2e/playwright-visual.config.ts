@@ -1,4 +1,3 @@
-// ─── Playwright Config: Visual Tests ─────────────────────────────────────────
 // Separate config for visual comparison tests (@visual).
 // No real OpenCode or relay needed — serves built frontend via Vite preview,
 // and WebSocket is mocked via page.routeWebSocket().

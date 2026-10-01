@@ -73,8 +73,6 @@ describe("Instance types", () => {
 		expect(project.instanceId).toBeUndefined();
 	});
 
-	// ─── Behavioral tests ─────────────────────────────────────────────────────
-
 	it("addInstance with all required fields returns correct values at runtime", () => {
 		const manager = new InstanceManager();
 		const config: InstanceConfig = {

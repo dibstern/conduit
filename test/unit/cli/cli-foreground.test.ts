@@ -1,11 +1,9 @@
-// ─── Tests: --foreground handler in run() ────────────────────────────────────
+// Tests: --foreground handler in run()
 //
 // The --foreground handler uses an injectable daemon starter facade so the
 // handler logic can be tested without starting real HTTP/IPC servers.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// ─── Mock foreground daemon starter ─────────────────────────────────────────
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in the factory
 const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
@@ -55,8 +53,6 @@ vi.mock("../../../src/lib/env.js", async (importOriginal) => {
 // Import AFTER vi.mock (vitest hoists the mock)
 import { run } from "../../../src/bin/cli-core.js";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function createMockIO(cwd = "/test/project") {
 	const output: string[] = [];
 	const errors: string[] = [];
@@ -84,8 +80,6 @@ function createMockIO(cwd = "/test/project") {
 		getNetworkAddress: () => "192.168.1.100",
 	};
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("--foreground handler", () => {
 	beforeEach(() => {

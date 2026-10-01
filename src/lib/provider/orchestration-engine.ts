@@ -1,5 +1,4 @@
 // src/lib/provider/orchestration-engine.ts
-// ─── Orchestration Engine ───────────────────────────────────────────────────
 // Central command processor for the provider instance layer (CQRS core loop).
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
@@ -63,8 +62,6 @@ class CommandPayloadSerializationFailed extends Data.TaggedError(
 	}
 }
 
-// ─── Command Types ──────────────────────────────────────────────────────────
-
 export interface SendTurnCommand {
 	readonly type: "send_turn";
 	readonly commandId: string;
@@ -121,14 +118,10 @@ export type OrchestrationCommand =
 // biome-ignore lint/suspicious/noConfusingVoidType: void is needed in the command result union.
 export type OrchestrationResult = TurnResult | ProviderCapabilities | void;
 
-// ─── Session Binding ────────────────────────────────────────────────────────
-
 export interface SessionBinding {
 	readonly sessionId: string;
 	readonly providerId: string;
 }
-
-// ─── Engine Options ─────────────────────────────────────────────────────────
 
 /**
  * Durable command store wiring. When supplied, the engine treats durable
@@ -209,8 +202,6 @@ const ORPHANED_TURN_RESULT: TurnResult = {
 			"Provider command was committed but never executed (orphaned by an earlier crash); not re-executing per crash policy.",
 	},
 };
-
-// ─── OrchestrationEngine ────────────────────────────────────────────────────
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
@@ -343,8 +334,6 @@ export class OrchestrationEngine {
 			}
 		});
 	}
-
-	// ─── Command Handlers ─────────────────────────────────────────────────
 
 	private handleSendTurnEffect(
 		command: SendTurnCommand,
@@ -756,8 +745,6 @@ export class OrchestrationEngine {
 		});
 	}
 
-	// ─── Session Binding Management ───────────────────────────────────────
-
 	/** Bind a session to a provider. */
 	bindSession(sessionId: string, providerId: string): void {
 		this.sessionBindingReadModel.bindSession(sessionId, providerId);
@@ -801,8 +788,6 @@ export class OrchestrationEngine {
 			});
 		});
 	}
-
-	// ─── Internal ─────────────────────────────────────────────────────────
 
 	private getProviderInstanceEffect(
 		providerId: string,

@@ -1,5 +1,3 @@
-// ─── Tests: Effect-based Auth Functions ───────────────────────────────────────
-
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit } from "effect";
 import { expect } from "vitest";
@@ -12,8 +10,6 @@ import {
 	validateCookieEffect,
 	verifyPinEffect,
 } from "../../src/lib/auth.js";
-
-// ─── hashPinEffect ──────────────────────────────────────────────────────────
 
 describe("hashPinEffect", () => {
 	it.effect("produces the same hash as the imperative hashPin", () =>
@@ -36,8 +32,6 @@ describe("hashPinEffect", () => {
 	);
 });
 
-// ─── verifyPinEffect ────────────────────────────────────────────────────────
-
 describe("verifyPinEffect", () => {
 	it.effect("returns true for a matching pin", () =>
 		Effect.gen(function* () {
@@ -55,8 +49,6 @@ describe("verifyPinEffect", () => {
 		}),
 	);
 });
-
-// ─── authenticateEffect ─────────────────────────────────────────────────────
 
 describe("authenticateEffect", () => {
 	const makeManager = () => {
@@ -158,8 +150,6 @@ describe("authenticateEffect", () => {
 	);
 });
 
-// ─── validateCookieEffect ───────────────────────────────────────────────────
-
 describe("validateCookieEffect", () => {
 	it.effect("returns true for a valid cookie", () =>
 		Effect.gen(function* () {
@@ -183,8 +173,6 @@ describe("validateCookieEffect", () => {
 		}),
 	);
 });
-
-// ─── AuthenticationError ────────────────────────────────────────────────────
 
 describe("AuthenticationError", () => {
 	it("has the correct _tag", () => {

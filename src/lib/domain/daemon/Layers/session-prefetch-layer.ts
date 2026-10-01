@@ -1,4 +1,3 @@
-// ─── Session Prefetch Layer ─────────────────────────────────────────────────
 // Scoped Layer that prefetches session counts for registered projects.
 //
 // Forks a scoped fiber that:
@@ -29,8 +28,6 @@ import {
 	type InstanceManagerStateTag,
 } from "../Services/instance-manager-service.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
-
-// ─── prefetchSessionCounts ─────────────────────────────────────────────────
 
 /**
  * Effect program that prefetches session counts for all registered projects
@@ -134,8 +131,6 @@ export const prefetchSessionCounts: Effect.Effect<
 	Effect.annotateLogs("task", "sessionPrefetch"),
 	Effect.withSpan("prefetchSessionCounts"),
 );
-
-// ─── SessionPrefetchLive ───────────────────────────────────────────────────
 
 /**
  * Scoped Layer that forks session count prefetching as a background fiber.

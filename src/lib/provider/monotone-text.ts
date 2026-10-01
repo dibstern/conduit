@@ -1,4 +1,3 @@
-// ─── Monotone Text ──────────────────────────────────────────────────────────
 // The one place text is allowed to leave a translator.
 //
 // Both Provider Runtimes describe a growing piece of assistant text twice: as

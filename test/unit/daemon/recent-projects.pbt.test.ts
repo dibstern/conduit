@@ -1,4 +1,4 @@
-// ─── Property-Based Tests: Recent Projects (Ticket 3.6) ────────────────────
+// Property-Based Tests: Recent Projects (Ticket 3.6)
 //
 // Properties tested:
 // P1: addRecent always keeps list ≤ MAX_RECENT_PROJECTS (AC3)
@@ -29,8 +29,6 @@ const SEED = 42;
 const NUM_RUNS = 300;
 
 describe("Ticket 3.6 — Recent Projects PBT", () => {
-	// ─── P1: List size invariant ──────────────────────────────────────────
-
 	describe("P1: addRecent never exceeds MAX_RECENT_PROJECTS (AC3)", () => {
 		it("property: after any number of adds, list.length ≤ 20", () => {
 			fc.assert(
@@ -63,8 +61,6 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 			);
 		});
 	});
-
-	// ─── P2: Dedup and move to front ─────────────────────────────────────
 
 	describe("P2: addRecent deduplicates by directory (AC1)", () => {
 		it("property: adding same directory twice → only one entry, latest timestamp", () => {
@@ -99,8 +95,6 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 		});
 	});
 
-	// ─── P3: Sorted order ────────────────────────────────────────────────
-
 	describe("P3: getRecent returns sorted by lastUsed descending (AC2)", () => {
 		it("property: result is sorted descending by lastUsed", () => {
 			fc.assert(
@@ -128,8 +122,6 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 			);
 		});
 	});
-
-	// ─── P4: Prune invariant ──────────────────────────────────────────────
 
 	describe("P4: pruneRecent never exceeds maxSize (AC3)", () => {
 		it("property: pruneRecent(list, n) always returns ≤ n items", () => {
@@ -170,8 +162,6 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 		});
 	});
 
-	// ─── P5: Serialize/deserialize roundtrip ──────────────────────────────
-
 	describe("P5: serialize→deserialize roundtrip (AC2)", () => {
 		it("property: roundtrip preserves all entries", () => {
 			fc.assert(
@@ -198,8 +188,6 @@ describe("Ticket 3.6 — Recent Projects PBT", () => {
 			);
 		});
 	});
-
-	// ─── P6: Corrupt JSON handling ────────────────────────────────────────
 
 	describe("P6: deserializeRecent handles corrupt input (safety)", () => {
 		it("property: arbitrary strings never throw, return empty array", () => {

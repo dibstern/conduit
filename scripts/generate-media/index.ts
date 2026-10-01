@@ -1,4 +1,3 @@
-// ─── README Media Generator ──────────────────────────────────────────────────
 // Generates all media assets referenced in README.md.
 //
 // Usage:
@@ -20,7 +19,6 @@ import {
 	startPreview,
 } from "./scene-runner.js";
 
-// ── Scene imports ────────────────────────────────────────────────────────────
 // These files don't exist yet (Tasks 3–6). Loaded dynamically so the entry
 // point can at least parse when scenes haven't been created.
 

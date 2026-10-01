@@ -1,4 +1,3 @@
-// ─── Version Utility ─────────────────────────────────────────────────────────
 // Single source of truth for the package version. Reads from package.json once
 // and caches the result. Avoids hardcoded version strings scattered across files.
 

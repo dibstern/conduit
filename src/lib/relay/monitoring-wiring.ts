@@ -1,4 +1,4 @@
-// ─── Monitoring Wiring (G2) ──────────────────────────────────────────────────
+// Monitoring Wiring (G2)
 // Constructs PipelineDeps, EffectDeps, monitoring reducer state, SSE tracker,
 // poller gating config, and wires the statusPoller "changed" handler.
 //
@@ -64,8 +64,6 @@ interface MonitoringWsHandlerLike {
 	broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
 }
 
-// ─── Deps interface ──────────────────────────────────────────────────────────
-
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
 	pushViewerFamilies(): Promise<void>;
@@ -115,8 +113,6 @@ export interface MonitoringWiringDeps {
 	pipelineLog: Logger;
 	state?: MonitoringWiringStateAccess;
 }
-
-// ─── Return type ─────────────────────────────────────────────────────────────
 
 export interface MonitoringWiringStateAccess {
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
@@ -389,8 +385,6 @@ const executeMonitoringEffectsEffect = (
 		}
 	});
 
-// ─── Wiring function ─────────────────────────────────────────────────────────
-
 export function wireMonitoring(
 	deps: MonitoringWiringDeps,
 ): MonitoringWiringResult {
@@ -409,7 +403,6 @@ export function wireMonitoring(
 		state = createMonitoringWiringState(),
 	} = deps;
 
-	// ── Monitoring reducer state ──────────────────────────────────────────────
 	const { sseTracker, getMonitoringState, setMonitoringState } = state;
 	let monitoringActive = true;
 	const pollerGatingCfg: PollerGatingConfig = {
@@ -417,20 +410,19 @@ export function wireMonitoring(
 		...config.pollerGatingConfig,
 	};
 
-	// ── Done dedup tracking ──────────────────────────────────────────────────
 	// Tracks sessions that received a "done" via SSE or message poller in the
 	// current busy cycle. processAndApplyDone consumes (check + delete) entries
 	// to avoid synthesizing a duplicate "done" when SSE already delivered one.
 	const doneDeliveredByPrimary = new Set<string>();
 
-	// ── Shared pipeline deps (used by status poller + message poller) ──────
+	// Shared pipeline deps (used by status poller + message poller)
 	const pipelineDeps: PipelineDeps = {
 		processingTimeouts,
 		wsHandler,
 		log: pipelineLog,
 	};
 
-	// ── Effect executor deps (used by monitoring reducer effects) ─────────
+	// Effect executor deps (used by monitoring reducer effects)
 	const effectDeps: EffectDeps = {
 		startPoller: (sessionId) => {
 			if (!monitoringActive) return;
@@ -498,12 +490,10 @@ export function wireMonitoring(
 		log: statusLog,
 	};
 
-	// ── Session status poller wiring ────────────────────────────────────────
-
 	statusPoller.on("changed", async (statuses, statusesChanged) => {
 		if (!monitoringActive) return;
 
-		// ── Session list broadcast (only when statuses actually changed) ────
+		// Session list broadcast (only when statuses actually changed)
 		if (statusesChanged) {
 			try {
 				await sessionService.pushViewerFamilies();

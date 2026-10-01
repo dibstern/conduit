@@ -1,4 +1,3 @@
-// ─── Svelte Diff Utilities — Unit Tests ──────────────────────────────────────
 // Tests computeDiff, renderUnifiedDiff, renderSplitDiff, buildSplitRows, diffStats.
 
 import { assert, describe, expect, test } from "vitest";
@@ -10,8 +9,6 @@ import {
 	renderSplitDiff,
 	renderUnifiedDiff,
 } from "../../../src/lib/frontend/utils/diff.js";
-
-// ─── computeDiff ─────────────────────────────────────────────────────────────
 
 describe("computeDiff", () => {
 	test("returns empty array for two empty arrays", () => {
@@ -115,8 +112,6 @@ describe("computeDiff", () => {
 	});
 });
 
-// ─── renderUnifiedDiff ───────────────────────────────────────────────────────
-
 describe("renderUnifiedDiff", () => {
 	test("returns HTML string wrapping a diff viewer", () => {
 		const html = renderUnifiedDiff("a", "a");
@@ -170,8 +165,6 @@ describe("renderUnifiedDiff", () => {
 		expect(html).toContain("diff-equal");
 	});
 });
-
-// ─── buildSplitRows ──────────────────────────────────────────────────────────
 
 describe("buildSplitRows", () => {
 	test("returns empty array for empty ops", () => {
@@ -309,8 +302,6 @@ describe("buildSplitRows", () => {
 	});
 });
 
-// ─── renderSplitDiff ─────────────────────────────────────────────────────────
-
 describe("renderSplitDiff", () => {
 	test("returns HTML with split-view wrapper and table", () => {
 		const html = renderSplitDiff("a", "a");
@@ -364,8 +355,6 @@ describe("renderSplitDiff", () => {
 		expect(html).toContain("diff-ln-new");
 	});
 });
-
-// ─── diffStats ───────────────────────────────────────────────────────────────
 
 describe("diffStats", () => {
 	test("returns zero for identical texts", () => {

@@ -1,5 +1,5 @@
 import { seedSessions } from "./session-fixtures.js";
-// ─── Notification views over the server's session rows (ni8.23) ──────────────
+// Notification views over the server's session rows (ni8.23)
 // The badge used to be a reducer the browser drove from a stream of events: it
 // counted questions up and down, remembered which sessions had been looked at,
 // and hoped the two ended up agreeing with the server. They are now three facts

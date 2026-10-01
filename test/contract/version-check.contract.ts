@@ -1,4 +1,3 @@
-// ─── AC7: Version Pinning Validation ──────────────────────────────────────
 // Verifies that the running OpenCode server matches the pinned version.
 
 import { beforeAll, describe, expect, it } from "vitest";

@@ -1,4 +1,3 @@
-// ─── protocol_version → version banner wiring ────────────────────────────────
 // The daemon sends protocol_version on connect. Older daemons need a restart;
 // older pages need a reload. No message within the grace window still marks
 // a daemon predating the handshake (conduit-test-l12).
@@ -7,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 
-// ─── Hoisted mocks (WebSocket/window needed by the ws.svelte.ts import chain) ─
+// Hoisted mocks (WebSocket/window needed by the ws.svelte.ts import chain)
 
 const { showBannerMock, removeBannerMock } = vi.hoisted(() => {
 	const showBannerMock = vi.fn();
@@ -60,8 +59,6 @@ import {
 	disarmProtocolVersionCheck,
 	handleMessage,
 } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 const protocolVersionMsg = (version: number): RelayMessage => ({
 	type: "protocol_version",

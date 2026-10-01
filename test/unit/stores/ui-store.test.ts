@@ -1,4 +1,3 @@
-// ─── UI Store Tests ──────────────────────────────────────────────────────────
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Must mock localStorage BEFORE the store module is loaded.
@@ -53,8 +52,6 @@ import {
 } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type { BannerConfig } from "../../../src/lib/frontend/types.js";
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	// Reset UI state
 	uiState.sidebarCollapsed = false;
@@ -75,8 +72,6 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	vi.useFakeTimers();
 });
-
-// ─── Sidebar actions ────────────────────────────────────────────────────────
 
 describe("settled shelf preference", () => {
 	it("starts collapsed with no saved preference", async () => {
@@ -184,8 +179,6 @@ describe("toggleSidebar", () => {
 	});
 });
 
-// ─── Toast actions ──────────────────────────────────────────────────────────
-
 describe("showToast", () => {
 	it("adds a toast with default options", () => {
 		showToast("Hello");
@@ -228,8 +221,6 @@ describe("dismissToast", () => {
 	});
 });
 
-// ─── Confirm dialog ─────────────────────────────────────────────────────────
-
 describe("confirm", () => {
 	it("sets confirmDialog state", () => {
 		confirm("Are you sure?");
@@ -265,8 +256,6 @@ describe("resolveConfirm", () => {
 	});
 });
 
-// ─── Panel actions ──────────────────────────────────────────────────────────
-
 describe("openPanel", () => {
 	it("adds panel to openPanels set", () => {
 		openPanel("usage-panel");
@@ -294,8 +283,6 @@ describe("togglePanel", () => {
 		expect(uiState.openPanels.has("status-panel")).toBe(false);
 	});
 });
-
-// ─── Banner actions ─────────────────────────────────────────────────────────
 
 describe("showBanner", () => {
 	it("adds a banner", () => {
@@ -348,8 +335,6 @@ describe("removeBanner", () => {
 	});
 });
 
-// ─── Rewind mode ────────────────────────────────────────────────────────────
-
 describe("enterRewindMode", () => {
 	it("activates rewind mode and clears selected uuid", () => {
 		enterRewindMode();
@@ -366,8 +351,6 @@ describe("exitRewindMode", () => {
 		expect(uiState.rewindSelectedUuid).toBeNull();
 	});
 });
-
-// ─── Plan mode ──────────────────────────────────────────────────────────────
 
 describe("enterPlanMode", () => {
 	it("activates plan mode", () => {

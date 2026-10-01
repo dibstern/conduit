@@ -1,11 +1,8 @@
-// ─── Sound Notification — Unit Tests ─────────────────────────────────────────
 // Tests playDoneSound via Web Audio API mocks.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // We import playDoneSound lazily so each test gets a fresh module state.
-
-// ─── AudioContext mock ───────────────────────────────────────────────────────
 
 function createMockAudioContext() {
 	const osc = {

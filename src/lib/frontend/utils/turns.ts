@@ -1,4 +1,3 @@
-// ─── Turns — Utility Functions ────────────────────────────────────────────────
 // A turn is one user prompt, everything the model did in response, and its
 // reply segments. The transcript renders one collapsed activity line per segment
 // (summary sentence + duration strip), expandable to the log.
@@ -62,8 +61,6 @@ export interface Turn {
 	notices: SystemMessage[];
 	live: boolean;
 }
-
-// ─── Segmentation ────────────────────────────────────────────────────────────
 
 /** AskUserQuestion or ExitPlanMode: the model stops and waits for the user. */
 export function isHandBack(tool: ToolMessage): boolean {
@@ -176,8 +173,6 @@ export function forkMessageIdAtReply(
 	}
 	return undefined;
 }
-
-// ─── Labels ──────────────────────────────────────────────────────────────────
 
 const VERBS: Record<string, [past: string, present: string]> = {
 	Read: ["Read", "Reading"],
@@ -368,8 +363,6 @@ export function isSoloTool(tool: ToolMessage): boolean {
 	return tool.name === "Skill" || isSubagentToolName(tool.name);
 }
 
-// ─── Stats ───────────────────────────────────────────────────────────────────
-
 /** Counts behind the collapsed summary sentence. Files are counted uniquely. */
 export interface TurnStats {
 	tools: number;
@@ -476,8 +469,6 @@ export function countsPhrase(s: TurnStats): string {
 	if (s.thinking > 0) return plural(s.thinking, "thought");
 	return s.skills > 0 || s.compactions > 0 ? "" : "no tools";
 }
-
-// ─── Timing ──────────────────────────────────────────────────────────────────
 
 export function fmtDuration(ms: number): string {
 	// Fast tools really do finish in single-digit milliseconds. Rendering those
@@ -701,8 +692,6 @@ export function skillChapters(
 		};
 	});
 }
-
-// ─── Economics ───────────────────────────────────────────────────────────────
 
 export interface TurnEconomics {
 	duration?: number;

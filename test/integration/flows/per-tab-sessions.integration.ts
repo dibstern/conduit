@@ -1,4 +1,3 @@
-// ─── Integration: Per-Tab Sessions ────────────────────────────────────────────
 // Verifies that each WebSocket client (browser tab) can independently view
 // different sessions. Tests the per-tab session routing introduced by the
 // ViewSession / setClientSession / sendToSession system.
@@ -23,8 +22,6 @@ describe("Integration: Per-Tab Sessions", () => {
 	beforeEach(() => {
 		harness.mock.resetQueues();
 	});
-
-	// ── Independent Session Viewing ──────────────────────────────────────────
 
 	it("two clients can view different sessions independently", async () => {
 		const client1 = await harness.connectWsClient();
@@ -72,8 +69,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client.close();
 	});
 
-	// ── New Session Only Switches Requester ──────────────────────────────────
-
 	it("new session only switches the requesting client", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
@@ -99,8 +94,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client1.close();
 		await client2.close();
 	});
-
-	// ── Viewed Family Updates ────────────────────────────────────────────────
 
 	it("family updates reach clients viewing the renamed session", async () => {
 		const client1 = await harness.connectWsClient();
@@ -145,8 +138,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client1.close();
 		await client2.close();
 	});
-
-	// ── Input Sync Scoped to Same Session ────────────────────────────────────
 
 	it("input_sync reaches clients viewing the same session", async () => {
 		const client1 = await harness.connectWsClient();
@@ -215,8 +206,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client1.close();
 		await client2.close();
 	});
-
-	// ── Model Switch Per-Session ─────────────────────────────────────────────
 
 	it("model switch broadcasts model_info to clients on the same session", async () => {
 		const client1 = await harness.connectWsClient();

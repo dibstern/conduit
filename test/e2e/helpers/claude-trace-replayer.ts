@@ -1,4 +1,4 @@
-// ─── Claude SDK trace replayer (E2E Claude lane) ─────────────────────────────
+// Claude SDK trace replayer (E2E Claude lane)
 // Plays committed Claude Agent SDK traces (test/fixtures/claude-sdk-traces,
 // real captured wire traffic — see docs/adr/0002) through the Claude runtime's
 // injected queryFactory, one planned trace per sent turn. Failure modes are

@@ -1,4 +1,3 @@
-<!-- ─── File Tree Panel ─────────────────────────────────────────────────────── -->
 <!-- File browser shared by the desktop pane and phone session view. -->
 <!-- Owns WS subscriptions for file_list/file_content. -->
 
@@ -20,8 +19,6 @@
 
 	let { onClose, pane = false, paneTitle, paneActions }: { onClose?: () => void; pane?: boolean; paneTitle?: Snippet | undefined; paneActions?: Snippet | undefined } = $props();
 
-	// ─── State ─────────────────────────────────────────────────────────────────
-
 	let loading = $state(false);
 	let fileTreeEl: HTMLDivElement | undefined = $state(undefined);
 	// Restore the saved scroll once per mount; tracking browserScrollTop here
@@ -29,8 +26,6 @@
 	$effect(() => {
 		if (fileTreeEl) fileTreeEl.scrollTop = untrack(() => fileTreeState.browserScrollTop);
 	});
-
-	// ─── Breadcrumbs ────────────────────────────────────────────────────────────
 
 	const breadcrumbs = $derived.by((): BreadcrumbSegment[] => {
 		if (fileTreeState.browserPath === ".") return [{ label: "/", path: "." }];
@@ -43,8 +38,6 @@
 		}
 		return segments;
 	});
-
-	// ─── Directory loading ──────────────────────────────────────────────────────
 
 	function loadDirectory(path: string) {
 		const cachedEntries = fileTreeState.browserCache.get(path);
@@ -128,8 +121,6 @@
 		if (onClose) onClose();
 		else setFilesOpen(false);
 	}
-
-	// ─── WS message subscription ───────────────────────────────────────────────
 
 	$effect(() => {
 		const unsub = onFileBrowser((msg: RelayMessage) => {

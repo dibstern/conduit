@@ -1,4 +1,3 @@
-// ─── CLI Core ──────────────────────────────────────────────────
 // Command router and main entry point. The thin entry point (cli.ts) calls
 // run() with process.argv. Command handlers and utilities live in sibling modules.
 
@@ -36,7 +35,7 @@ import {
 	sendIpcRequest,
 } from "./cli-utils.js";
 
-// ─── Re-exports (preserve public API) ──────────────────────────────────────
+// Re-exports (preserve public API)
 
 export type { ParsedArgs } from "./cli-utils.js";
 export {
@@ -45,8 +44,6 @@ export {
 	parseArgs,
 	sendIpcRequest,
 } from "./cli-utils.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface CLIOptions {
 	cwd?: string;
@@ -84,8 +81,6 @@ export interface InteractiveContext {
 	getAddr: () => string | null;
 	generateQR: (url: string) => string;
 }
-
-// ─── Main Run ───────────────────────────────────────────────────────────────
 
 export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	const args = parseArgs(argv);

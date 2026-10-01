@@ -1,4 +1,3 @@
-// ─── Session Chat State Shape Tests ──────────────────────────────────────────
 // Asserts the union of ACTIVITY_KEYS and Object.keys(createEmptySessionMessages())
 // exactly equals keyof SessionChatState. Catches drift when a field is added to
 // only one tier.

@@ -30,8 +30,6 @@ function seedSessions(rows: readonly Row[]): void {
 	applySessionChange({ _tag: "synchronized" });
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function setupState(opts: {
 	currentId?: string;
 	permissions?: Array<{
@@ -66,8 +64,6 @@ function setupState(opts: {
 	});
 }
 
-// ─── Meta ───────────────────────────────────────────────────────────────────
-
 const meta = {
 	title: "Overlays/AttentionBanner",
 	component: NotificationStack,
@@ -84,8 +80,6 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
-
-// ─── Stories ────────────────────────────────────────────────────────────────
 
 export const SinglePermission: Story = {
 	beforeEach: () => {

@@ -16,8 +16,6 @@ import {
 	AuthManagerTag,
 } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
-// ─── AuthManagerFromConfigLive tests ─────────────────────────────────────────
-
 describe("AuthManagerLive from DaemonConfigRef", () => {
 	const withPin: DaemonRuntimeConfig = {
 		port: 2633,
@@ -134,8 +132,6 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 	);
 });
 
-// ─── CrashCounterLive tests ─────────────────────────────────────────────────
-
 describe("CrashCounterLive", () => {
 	it.effect("records crashes and returns count", () =>
 		Effect.gen(function* () {
@@ -170,8 +166,6 @@ describe("CrashCounterLive", () => {
 		}).pipe(Effect.provide(Layer.fresh(CrashCounterLive))),
 	);
 });
-
-// ─── AuthManager concurrent pinHash tests ──────────────────────────────────
 
 describe("AuthManager concurrent pinHash safety", () => {
 	const noPin: DaemonRuntimeConfig = {

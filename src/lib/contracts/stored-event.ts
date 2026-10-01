@@ -1,14 +1,10 @@
 import { Schema } from "effect";
 
-// ─── Branded ID Types ───────────────────────────────────────────────────────
-
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
 export type EventId = typeof EventId.Type;
 
 export const CommandId = Schema.String.pipe(Schema.brand("CommandId"));
 export type CommandId = typeof CommandId.Type;
-
-// ─── Constrained String Unions ──────────────────────────────────────────────
 
 export const PROVIDER_TYPES = ["opencode", "claude"] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
@@ -33,8 +29,6 @@ export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
 
 export const MESSAGE_ROLES = ["user", "assistant"] as const;
 export type MessageRole = (typeof MESSAGE_ROLES)[number];
-
-// ─── Canonical Event Types ──────────────────────────────────────────────────
 
 export const CANONICAL_EVENT_TYPES = [
 	"message.created",
@@ -79,8 +73,6 @@ export const CANONICAL_EVENT_TYPES = [
 ] as const;
 
 export type CanonicalEventType = (typeof CANONICAL_EVENT_TYPES)[number];
-
-// ─── Event Payloads ─────────────────────────────────────────────────────────
 
 export interface MessageCreatedPayload {
 	readonly messageId: string;
@@ -173,7 +165,6 @@ export interface FileAttachedPayload {
 	readonly url: string;
 }
 
-// ─── Canonical Tool Input ───────────────────────────────────────────────────
 // Provider-agnostic tool input shape. Each adapter's normalizeToolInput()
 // maps raw provider casing (snake_case, camelCase) into this canonical form.
 // Unknown tools collapse to { tool: "Unknown" } — never lost, always renderable.
@@ -438,8 +429,6 @@ export interface EventPayloadMap {
 	"question.resolved": QuestionResolvedPayload;
 }
 
-// ─── Event Metadata ─────────────────────────────────────────────────────────
-
 export interface EventMetadata {
 	readonly commandId?: string;
 	readonly causationEventId?: string;
@@ -468,8 +457,6 @@ export interface EventMetadata {
 	readonly schemaVersion?: number;
 }
 
-// ─── Event Envelopes ────────────────────────────────────────────────────────
-
 export type CanonicalEvent = {
 	[K in CanonicalEventType]: {
 		readonly eventId: string;
@@ -486,8 +473,6 @@ export type StoredEvent = CanonicalEvent & {
 	readonly sequence: number;
 	readonly streamVersion: number;
 };
-
-// ─── Event Metadata Schema ─────────────────────────────────────────────────
 
 export const EventMetadataSchema = Schema.Struct({
 	commandId: Schema.optionalWith(Schema.String, { exact: true }),
@@ -518,8 +503,6 @@ export const EventMetadataSchema = Schema.Struct({
 	sseBatchSize: Schema.optionalWith(Schema.Number, { exact: true }),
 	schemaVersion: Schema.optionalWith(Schema.Number, { exact: true }),
 });
-
-// ─── Payload Schemas ───────────────────────────────────────────────────────
 
 const MessageRoleSchema = Schema.Literal("user", "assistant");
 const SessionStatusSchema = Schema.Literal("idle", "busy", "retry", "error");
@@ -875,8 +858,6 @@ const QuestionResolvedPayloadSchema = Schema.Struct({
 	answers: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 });
 
-// ─── Per-event-type Envelope Schemas ───────────────────────────────────────
-
 function eventEnvelope<
 	T extends CanonicalEventType,
 	S extends Schema.Schema.Any,
@@ -1049,7 +1030,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// ─── Canonical Event Schema (Union of all 36 event types) ──────────────────
+// Canonical Event Schema (Union of all 36 event types)
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -1092,8 +1073,6 @@ export const CanonicalEventSchema = Schema.Union(
 	QuestionAskedEventSchema,
 	QuestionResolvedEventSchema,
 );
-
-// ─── Stored Event Schema ───────────────────────────────────────────────────
 
 export const StoredEventSchema = Schema.extend(
 	CanonicalEventSchema,

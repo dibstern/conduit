@@ -1,18 +1,14 @@
-// ─── Todo Store ──────────────────────────────────────────────────────────────
 // Manages todo items from both SSE `todo_state` events and `TodoWrite` tool results.
 // Provides reactive state for the TodoOverlay component.
 
 import type { RelayMessage, TodoItem } from "../types.js";
 
-// ─── Server-owned state ─────────────────────────────────────────────────────
 // This store has no client half: the todo list is whatever the last
 // `todo_state` (or TodoWrite tool result) said it was.
 
 export const todoState = $state({
 	items: [] as TodoItem[],
 });
-
-// ─── Message handlers ───────────────────────────────────────────────────────
 
 /** Handle `todo_state` messages from SSE `todo.updated` events. */
 export function handleTodoState(
@@ -52,8 +48,6 @@ export function updateTodosFromToolResult(jsonString: string): void {
 		// Ignore parse errors — don't clear existing todos
 	}
 }
-
-// ─── Actions ────────────────────────────────────────────────────────────────
 
 /** Clear todo state (for project/session switch). */
 export function clearTodoState(): void {

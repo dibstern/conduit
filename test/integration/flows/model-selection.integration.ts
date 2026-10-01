@@ -1,4 +1,3 @@
-// ─── Integration: Model Selection ────────────────────────────────────────────
 // Tests model/provider behavior against a mock OpenCode server.
 // Verifies:
 //   - Only configured providers appear in model_list

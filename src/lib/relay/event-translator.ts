@@ -1,4 +1,3 @@
-// ─── Event Translator ──────────────────────────────────────────
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
@@ -34,7 +33,6 @@ import {
 	sessionErrorText,
 } from "./opencode-events.js";
 
-// ─── Compile-time exhaustiveness assertion ──────────────────────────────────
 // If a new event type is added to KnownOpenCodeEvent but not handled here,
 // _MissingTypes will be non-never and this file will fail to compile.
 
@@ -68,8 +66,6 @@ type _AssertAllHandled = _MissingTypes extends never
 	: { error: "Unhandled event type(s)"; types: _MissingTypes };
 const _exhaustiveCheck: _AssertAllHandled = true;
 
-// ─── Tool name mapping ──────────────────────────────────────────────────────
-
 /** Maximum number of tracked parts before FIFO eviction kicks in. */
 const SEEN_PARTS_MAX = 10_000;
 /** Number of oldest entries to evict when the cap is reached. */
@@ -96,8 +92,6 @@ const TOOL_NAME_MAP: Record<string, ToolName> = {
 export function mapToolName(name: string): string {
 	return TOOL_NAME_MAP[name] ?? name;
 }
-
-// ─── Individual translators ─────────────────────────────────────────────────
 
 /** Translate message.part.delta → delta or thinking_delta */
 export function translatePartDelta(
@@ -615,8 +609,6 @@ export function translateFileEvent(
 	return null;
 }
 
-// ─── TranslateResult discriminated union ────────────────────────────────────
-
 export type TranslateResult =
 	| { ok: true; messages: UntaggedRelayMessage[] }
 	| { ok: false; reason: string };
@@ -634,8 +626,6 @@ function wrapResult(
 	if (!result) return { ok: false, reason: fallbackReason };
 	return { ok: true, messages: Array.isArray(result) ? result : [result] };
 }
-
-// ─── Stateful translator ────────────────────────────────────────────────────
 
 export interface Translator {
 	translate(event: SSEEvent, context?: TranslateContext): TranslateResult;

@@ -1,4 +1,3 @@
-// ─── Main UI Scene ───────────────────────────────────────────────────────────
 // Generates GENERATE-MAIN-UI.png — iPhone chat with a completed conversation
 // showing tool calls and assistant response.
 

@@ -1,4 +1,3 @@
-// ─── Error Handling Foundation ─────────────────────────────
 //
 // Schema.TaggedError-based error hierarchy for the relay layer.
 // Each subclass is a Schema.TaggedError with _tag set to the class name.
@@ -12,7 +11,7 @@ import type { RelayMessage } from "./shared-types.js";
 // Re-export utility functions for backward compatibility
 export { formatErrorDetail, redactSensitive } from "./errors-utils.js";
 
-// ─── Error Codes (AC3) ──────────────────────────────────────────────────────
+// Error Codes (AC3)
 // Standard error codes for common failure scenarios. Extensible — add new
 // codes as needed, but prefer reusing existing ones for consistency.
 
@@ -56,8 +55,6 @@ export type ErrorCode =
 	| "WEBSOCKET_ERROR"
 	| "CONFIG_INVALID";
 
-// ─── Shared Schema fields for TaggedError subclasses ────────────────────────
-
 const RelayErrorFields = {
 	message: Schema.String,
 	userVisible: Schema.optionalWith(Schema.Boolean, { default: () => false }),
@@ -67,8 +64,6 @@ const RelayErrorFields = {
 	),
 	cause: Schema.optionalWith(Schema.Unknown, { default: () => undefined }),
 };
-
-// ─── Mixin: shared serialization methods for TaggedError subclasses ─────────
 
 /** Helper to build context details for serialization */
 function contextDetails(
@@ -172,8 +167,6 @@ function withTaggedRelayErrorMethods(
 	return TaggedRelayErrorWithMethods;
 }
 
-// ─── Schema.TaggedError subclasses ──────────────────────────────────────────
-
 export class OpenCodeConnectionError extends withTaggedRelayErrorMethods(
 	Schema.TaggedError<OpenCodeConnectionError>()("OpenCodeConnectionError", {
 		...RelayErrorFields,
@@ -266,7 +259,6 @@ export class ConfigurationError extends withTaggedRelayErrorMethods(
 	}
 }
 
-// ─── RelayError base class ──────────────────────────────────────────────────
 // Kept as a plain Error subclass for generic error codes used throughout the
 // codebase (e.g. NO_SESSION, INVALID_REQUEST, SEND_FAILED). Unlike the
 // Schema.TaggedError subclasses above, this class supports arbitrary ErrorCode
@@ -379,7 +371,6 @@ export class RelayError extends Error {
 	}
 }
 
-// ─── AnyRelayError union type ───────────────────────────────────────────────
 // Union of all relay error types (Schema.TaggedError subclasses + generic RelayError).
 // Used as return type for fromCaught/wrapError utilities.
 
@@ -391,8 +382,6 @@ export type AnyRelayError =
 	| WebSocketError
 	| AuthenticationError
 	| ConfigurationError;
-
-// ─── Standalone fromCaught ──────────────────────────────────────────────────
 
 /** Map well-known infrastructure codes to their Schema.TaggedError subclass */
 const CODE_TO_CLASS: Record<
@@ -443,8 +432,6 @@ export function fromCaught(
 		...(cause != null && { cause }),
 	});
 }
-
-// ─── wrapError utility ──────────────────────────────────────────────────────
 
 /** Wrap a low-level error in a relay error subclass, preserving the cause chain */
 export function wrapError<

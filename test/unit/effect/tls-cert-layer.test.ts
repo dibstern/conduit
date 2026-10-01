@@ -14,8 +14,6 @@ import {
 	type DaemonRuntimeConfig,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 const baseConfig: DaemonRuntimeConfig = {
 	port: 2633,
 	host: "127.0.0.1",
@@ -71,8 +69,6 @@ const makeTestLayer = (
 		Layer.provide(ensureCertsLayer),
 	);
 };
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("TlsCertLive", () => {
 	// (a) TLS disabled - null certs, no ensureCerts call

@@ -1,5 +1,3 @@
-// ─── Question Mapping Unit Tests ────────────────────────────────────────────
-
 import { describe, expect, it } from "vitest";
 import { mapQuestionFields } from "../../../src/lib/bridges/question-bridge.js";
 

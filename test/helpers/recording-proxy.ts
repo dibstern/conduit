@@ -1,4 +1,3 @@
-// ─── Recording Proxy ─────────────────────────────────────────────────────────
 // A transparent HTTP proxy that forwards requests to a real OpenCode instance
 // and captures every interaction for later replay.
 
@@ -94,8 +93,6 @@ export class RecordingProxy {
 		this.interactions = [];
 		this.lastEventTime = undefined;
 	}
-
-	// ─── Private: HTTP request handling ──────────────────────────────────────
 
 	private async handleRequest(
 		req: IncomingMessage,
@@ -286,8 +283,6 @@ export class RecordingProxy {
 		}
 	}
 
-	// ─── Private: WebSocket upgrade handling ─────────────────────────────────
-
 	private handleUpgrade(
 		req: IncomingMessage,
 		socket: import("node:stream").Duplex,
@@ -449,8 +444,6 @@ export class RecordingProxy {
 			});
 		});
 	}
-
-	// ─── Private: Utilities ──────────────────────────────────────────────────
 
 	private readBody(req: IncomingMessage): Promise<string | undefined> {
 		return new Promise((resolve) => {

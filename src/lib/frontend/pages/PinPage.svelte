@@ -1,4 +1,3 @@
-<!-- ─── PinPage ──────────────────────────────────────────────────────────────── -->
 <!-- PIN entry page for authentication. Centered card on dark background with -->
 <!-- 6-digit input, auto-submit, and lockout handling. -->
 
@@ -8,8 +7,6 @@
 	import { navigate } from "../stores/router.svelte.js";
 
 	const LOW_PIN_ATTEMPT_WARNING_THRESHOLD = 3;
-
-	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
 		initialError = "",
@@ -21,7 +18,6 @@
 		initialDisabled?: boolean;
 	} = $props();
 
-	// ─── State ──────────────────────────────────────────────────────────────────
 	// Props are used as seed values only; the component owns the mutable state.
 
 	let pin = $state("");
@@ -29,13 +25,9 @@
 	let disabled = $state(initialDisabled);
 	let inputEl: HTMLInputElement | undefined = $state(undefined);
 
-	// ─── Focus on mount ─────────────────────────────────────────────────────────
-
 	onMount(() => {
 		inputEl?.focus();
 	});
-
-	// ─── Submit logic ───────────────────────────────────────────────────────────
 
 	async function submitPin() {
 		if (pin.length < 4) {
@@ -82,11 +74,7 @@
 		}
 	}
 
-	// ─── Derived ───────────────────────────────────────────────────────────────
-
 	let showButton = $derived(pin.length >= 4);
-
-	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === "Enter") {

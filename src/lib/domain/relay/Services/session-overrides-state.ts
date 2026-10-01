@@ -1,4 +1,4 @@
-// ─── Session Overrides State (Effect) ──────────────────────────────────────
+// Session Overrides State (Effect)
 // Effect-native replacement for the imperative SessionOverrides class.
 // Uses Ref<OverridesState> for atomic state and FiberMap for timeout management.
 //
@@ -20,8 +20,6 @@ import {
 	Ref,
 } from "effect";
 import type { SessionPermissionMode } from "../../../shared-types.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface ModelOverride {
 	providerID: string;
@@ -52,14 +50,10 @@ export interface OverridesState {
 export const PROCESSING_TIMEOUT_DURATION =
 	"2 minutes" satisfies Duration.DurationInput;
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 export class OverridesStateTag extends Context.Tag("OverridesState")<
 	OverridesStateTag,
 	Ref.Ref<OverridesState>
 >() {}
-
-// ─── Layer factory ──────────────────────────────────────────────────────────
 
 export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
 	Layer.scoped(
@@ -77,8 +71,6 @@ export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
 			});
 		}),
 	);
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Get or create a session entry. Pure — returns a new Map when creating. */
 const getOrCreate = (
@@ -145,8 +137,6 @@ const makeProcessingTimeoutEffect = (
 	Effect.sleep(duration).pipe(
 		Effect.andThen(completeProcessingTimeout(ref, sessionId, token, onTimeout)),
 	);
-
-// ─── Default Model / Variant ────────────────────────────────────────────────
 
 /** Set the global default model. */
 export const setDefaultModel = (model: ModelOverride) =>
@@ -226,8 +216,6 @@ export const getDefaultContextWindow = () =>
 		return state.defaultContextWindow;
 	});
 
-// ─── Per-Session Model ──────────────────────────────────────────────────────
-
 /** Set model for a session AND mark as user-selected. */
 export const setModel = (sessionId: string, model: ModelOverride) =>
 	Effect.gen(function* () {
@@ -268,8 +256,6 @@ export const isModelUserSelected = (sessionId: string) =>
 		return state.sessions.get(sessionId)?.modelUserSelected ?? false;
 	});
 
-// ─── Per-Session Agent ──────────────────────────────────────────────────────
-
 /** Set the agent override for a session. */
 export const setAgent = (sessionId: string, agent: string) =>
 	Effect.gen(function* () {
@@ -304,8 +290,6 @@ export const clearAgent = (sessionId: string) =>
 		});
 	});
 
-// ─── Per-Session Variant ────────────────────────────────────────────────────
-
 /** Set the variant (thinking level) for a session. Empty string clears. */
 export const setVariant = (sessionId: string, variant: string) =>
 	Effect.gen(function* () {
@@ -325,8 +309,6 @@ export const getVariant = (sessionId: string) =>
 		const state = yield* Ref.get(ref);
 		return state.sessions.get(sessionId)?.variant ?? state.defaultVariant;
 	});
-
-// ─── Per-Session Permission Mode ────────────────────────────────────────────
 
 /** Set the approval mode for a session. */
 export const setPermissionMode = (
@@ -359,8 +341,6 @@ export const getPermissionMode = (
 		);
 	});
 
-// ─── Per-Session Context Window ─────────────────────────────────────────────
-
 /** Set the context window for a session. Empty string clears. */
 export const setContextWindow = (sessionId: string, contextWindow: string) =>
 	Effect.gen(function* () {
@@ -383,8 +363,6 @@ export const getContextWindow = (sessionId: string) =>
 		);
 	});
 
-// ─── Clear Session ──────────────────────────────────────────────────────────
-
 /**
  * Clear all overrides for a specific session (model, agent, variant,
  * context window, timer).
@@ -403,8 +381,6 @@ export const clearSession = (sessionId: string) =>
 		});
 		yield* FiberMap.remove(timeoutFibers, sessionId);
 	});
-
-// ─── Processing Timeout ─────────────────────────────────────────────────────
 
 /**
  * Start a processing timeout for a session.
@@ -517,8 +493,6 @@ export const hasActiveProcessingTimeout = (sessionId: string) =>
 		const state = yield* Ref.get(ref);
 		return state.sessions.get(sessionId)?.processingTimeoutToken !== undefined;
 	});
-
-// ─── Debug / Test ───────────────────────────────────────────────────────────
 
 /** Get raw session state (for tests). */
 export const getOverrides = (sessionId: string) =>

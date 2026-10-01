@@ -1,4 +1,3 @@
-// ─── E2E Permission Tests ────────────────────────────────────────────────────
 // Tests the permission approval flow: permission cards appear when the agent
 // needs to use tools, and the user can Allow/Deny.
 // Uses the advanced-diff recording which triggers external_directory permissions.

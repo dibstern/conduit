@@ -1,4 +1,3 @@
-// ─── Playwright Config: Recorded Replay Tests ────────────────────────────────
 // Tests UI against recorded HTTP-level OpenCode snapshots (replay mode).
 // No real OpenCode needed — each test starts a real relay backed by
 // MockOpenCodeServer serving the built frontend from dist/frontend/.

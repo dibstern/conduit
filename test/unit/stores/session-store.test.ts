@@ -1,4 +1,3 @@
-// ─── Session Store Tests ─────────────────────────────────────────────────────
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
@@ -62,8 +61,6 @@ import {
 	seedSessions,
 } from "./session-fixtures.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function makeSession(
 	overrides: Partial<SessionInfo> & { id: string },
 ): SessionInfo {
@@ -96,8 +93,6 @@ function daysAgoAt(ref: Date, days: number, hour: number): Date {
 	d.setHours(hour, 0, 0, 0);
 	return d;
 }
-
-// ─── Reset state before each test ───────────────────────────────────────────
 
 beforeEach(() => {
 	clearSessionState();
@@ -408,7 +403,7 @@ describe("switchToSession", () => {
 	});
 });
 
-// ─── groupSessionsByDate (pure function) ────────────────────────────────────
+// groupSessionsByDate (pure function)
 
 describe("groupSessionsByDate", () => {
 	// Use a reference "now" at noon local time to avoid edge cases
@@ -609,8 +604,6 @@ describe("attention placement and daemon rows", () => {
 	});
 });
 
-// ─── setSearchQuery ─────────────────────────────────────────────────────────
-
 describe("setSearchQuery", () => {
 	it("updates searchQuery state", () => {
 		setSearchQuery("hello");
@@ -624,8 +617,6 @@ describe("setSearchQuery", () => {
 	});
 });
 
-// ─── setCurrentSession ──────────────────────────────────────────────────────
-
 describe("setCurrentSession", () => {
 	it("sets currentId", () => {
 		setCurrentSession("sess-1");
@@ -638,8 +629,6 @@ describe("setCurrentSession", () => {
 		expect(sessionState.currentId).toBeNull();
 	});
 });
-
-// ─── Root subscription view ──────────────────────────────────────────────────
 
 describe("getFilteredSessions root view", () => {
 	it("shows roots while the family view contains descendants", () => {
@@ -682,8 +671,6 @@ describe("getFilteredSessions root view", () => {
 		expect(sessionState.sessions.has("b")).toBe(false);
 	});
 });
-
-// ─── SessionCreationStatus state machine ────────────────────────────────────
 
 describe("SessionCreationStatus state machine", () => {
 	beforeEach(() => {
@@ -742,7 +729,7 @@ describe("SessionCreationStatus state machine", () => {
 		expect(sessionCreation.value.phase).toBe("idle");
 	});
 
-	// ─── Edge cases (no-ops) ────────────────────────────────────────────
+	// Edge cases (no-ops)
 
 	it("completeNewSession is a no-op when phase is idle", () => {
 		completeNewSession("any-id");
@@ -786,7 +773,7 @@ describe("SessionCreationStatus state machine", () => {
 		expect(sessionCreation.value.phase).toBe("idle");
 	});
 
-	// ─── Timeout (store-level, using exported constants) ────────────────
+	// Timeout (store-level, using exported constants)
 
 	it("auto-fails after timeout", () => {
 		vi.useFakeTimers();
@@ -821,7 +808,7 @@ describe("SessionCreationStatus state machine", () => {
 		vi.useRealTimers();
 	});
 
-	// ─── clearSessionState integration (project switch safety) ──────────
+	// clearSessionState integration (project switch safety)
 
 	it("clearSessionState resets creation state (project switch cancels in-flight creation)", () => {
 		vi.useFakeTimers();
@@ -840,7 +827,7 @@ describe("SessionCreationStatus state machine", () => {
 	});
 });
 
-// ─── sendNewSession (centralized guard + send) ──────────────────────────────
+// sendNewSession (centralized guard + send)
 
 describe("sendNewSession", () => {
 	let sent: CreateSessionRpcInput[];
@@ -933,7 +920,7 @@ describe("sendNewSession", () => {
 		expect(sent).toHaveLength(0);
 	});
 
-	// ─── Component guard lifecycle (mirrors Sidebar/SessionList) ────────
+	// Component guard lifecycle (mirrors Sidebar/SessionList)
 
 	it("mirrors Sidebar button guard: disabled when creating, re-enabled after complete", () => {
 		// First click — succeeds, button should be disabled

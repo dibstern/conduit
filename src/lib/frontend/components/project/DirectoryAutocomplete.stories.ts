@@ -127,7 +127,6 @@ export const DrillDownInteraction: Story = {
 			await expect(input).toHaveAttribute("aria-expanded", "false");
 			await expect(input).not.toHaveAttribute("aria-controls");
 
-			// ── Level one ────────────────────────────────────────────────────────
 			await userEvent.click(input);
 			await userEvent.type(input, "/src");
 			const listbox = await canvas.findByRole("listbox", {
@@ -168,7 +167,6 @@ export const DrillDownInteraction: Story = {
 				expect(listbox.contains(options[1] as HTMLElement)).toBe(true);
 			});
 
-			// ── Tab drills into the directory; it does not commit ────────────────
 			await userEvent.keyboard("{Tab}");
 			await waitFor(() => {
 				expect(canvas.getAllByRole("option")).toHaveLength(2);
@@ -185,7 +183,6 @@ export const DrillDownInteraction: Story = {
 					.map((option) => option.textContent?.trim()),
 			).toEqual(["/src/routes/api/", "/src/routes/app/"]);
 
-			// ── Enter commits the level-two path and closes ──────────────────────
 			await userEvent.keyboard("{ArrowDown}");
 			await userEvent.keyboard("{Enter}");
 			await expect(input).toHaveValue("/src/routes/app/");
@@ -194,12 +191,10 @@ export const DrillDownInteraction: Story = {
 				canvas.queryByRole("listbox", { name: LISTBOX_NAME }),
 			).toBeNull();
 
-			// ── Enter while closed submits exactly once ──────────────────────────
 			await expect(canvas.getByTestId("submit-count")).toHaveTextContent("0");
 			await userEvent.keyboard("{Enter}");
 			await expect(canvas.getByTestId("submit-count")).toHaveTextContent("1");
 
-			// ── Escape: consumed while open, bubbles while closed ────────────────
 			await userEvent.clear(input);
 			await userEvent.type(input, "/src");
 			await canvas.findByRole("listbox", { name: LISTBOX_NAME });
@@ -216,7 +211,6 @@ export const DrillDownInteraction: Story = {
 				"1",
 			);
 
-			// ── Blur keeps the surface alive through its grace window ────────────
 			await userEvent.clear(input);
 			await userEvent.type(input, "/src");
 			await canvas.findByRole("listbox", { name: LISTBOX_NAME });

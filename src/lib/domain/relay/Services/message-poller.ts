@@ -1,5 +1,5 @@
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
-// ─── Effect-based Message Poller (fiber-per-session) ────────────────────────
+// Effect-based Message Poller (fiber-per-session)
 // Uses FiberMap instead of manual Map<string, Fiber> + manual interrupt loops.
 // FiberMap auto-interrupts on scope close, provides run() for fork-and-register.
 //
@@ -9,8 +9,6 @@ import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js"
 
 import { Context, Duration, Effect, FiberMap, Layer, Schedule } from "effect";
 
-// ─── State Tag ──────────────────────────────────────────────────────────────
-
 export class PollerManagerStateTag extends Context.Tag("PollerManagerState")<
 	PollerManagerStateTag,
 	FiberMap.FiberMap<string>
@@ -19,8 +17,6 @@ export class PollerManagerStateTag extends Context.Tag("PollerManagerState")<
 export const makePollerManagerStateLive =
 	(): Layer.Layer<PollerManagerStateTag> =>
 		Layer.scoped(PollerManagerStateTag, FiberMap.make<string>());
-
-// ─── Internal: per-session poll loop ────────────────────────────────────────
 
 const pollSession = (sessionId: string, interval: Duration.DurationInput) =>
 	Effect.gen(function* () {
@@ -43,8 +39,6 @@ const pollSession = (sessionId: string, interval: Duration.DurationInput) =>
 			Effect.interruptible,
 		);
 	});
-
-// ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
  * Start polling for a session. If a poller is already running for this

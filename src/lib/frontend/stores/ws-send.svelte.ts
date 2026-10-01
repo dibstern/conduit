@@ -1,10 +1,8 @@
-// ─── WebSocket Send Logic ────────────────────────────────────────────────────
 // Extracted from ws.svelte.ts — rate limiting and send helpers.
 // The parent module provides the WebSocket reference via setWsGetter().
 
 import { showToast } from "./ui.svelte.js";
 
-// ─── WebSocket reference ────────────────────────────────────────────────────
 // The parent module (ws.svelte.ts) owns the WebSocket lifecycle and provides
 // a getter so this module can send without owning the connection.
 
@@ -15,7 +13,6 @@ export function setWsGetter(getter: () => WebSocket | null): void {
 	_getWs = getter;
 }
 
-// ─── Client-side rate limiting ──────────────────────────────────────────────
 // Mirrors server-side limits to prevent RATE_LIMITED errors.
 
 const MAX_MESSAGES = 5;
@@ -90,8 +87,6 @@ function scheduleDrain(): void {
 		send();
 	}, delay);
 }
-
-// ─── Core send function ─────────────────────────────────────────────────────
 
 /**
  * Send a JSON message over the WebSocket.

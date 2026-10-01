@@ -1,4 +1,3 @@
-// ─── E2E Session Management Tests ────────────────────────────────────────────
 // Tests session CRUD via the sidebar: create, switch, search.
 // Uses real relay backed by MockOpenCodeServer.
 

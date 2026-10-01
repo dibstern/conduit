@@ -1,9 +1,6 @@
-// ─── Terminal Rendering Engine ──────────────────────────────────
 // Pure-function terminal rendering primitives for CLI output. ANSI escape
 // sequences, gradient text, symbolic indicators, and status line formatting.
 // Ported from claude-relay/bin/cli.js lines 200-245.
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Writable stream interface for injectable stdout. */
 export interface Writable {
@@ -16,8 +13,6 @@ export interface GradientOptions {
 	isBasicTerm?: boolean;
 }
 
-// ─── ANSI Constants ──────────────────────────────────────────────────────────
-
 /** ANSI escape sequences for common terminal styling. */
 export const a = {
 	reset: "\x1b[0m",
@@ -29,8 +24,6 @@ export const a = {
 	red: "\x1b[31m",
 } as const;
 
-// ─── Terminal Detection ──────────────────────────────────────────────────────
-
 /**
  * Check if the terminal is a "basic" terminal that doesn't support 24-bit
  * color (e.g. Apple Terminal). Accepts an injectable env for testing.
@@ -41,8 +34,6 @@ export function isBasicTerm(
 	return env["TERM_PROGRAM"] === "Apple_Terminal";
 }
 
-// ─── ANSI Regex ──────────────────────────────────────────────────────────────
-
 /** ESC character as a string constant (avoids control-char-in-regex lint). */
 const ESC = "\x1b";
 const ESC_CODE = 0x1b;
@@ -52,8 +43,6 @@ const ANSI_SGR_RE = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
 
 /** Matches an SGR sequence at the start of a string. */
 const ANSI_SGR_START_RE = new RegExp(`^${ESC}\\[[0-9;]*m`);
-
-// ─── Width Utilities ─────────────────────────────────────────────────────────
 
 /**
  * Count the number of visible (non-ANSI-escape) characters in a string.
@@ -101,8 +90,6 @@ export function truncateToWidth(text: string, maxWidth: number): string {
 
 	return `${text.slice(0, i)}\u2026${a.reset}`;
 }
-
-// ─── Gradient ────────────────────────────────────────────────────────────────
 
 /**
  * Render text with a cyan-to-blue gradient using 24-bit ANSI color.
@@ -163,8 +150,6 @@ export function gradient(text: string, opts?: GradientOptions): string {
 	return out + a.reset;
 }
 
-// ─── Symbols ─────────────────────────────────────────────────────────────────
-
 /** Pre-styled Unicode symbols for terminal output. */
 export const sym = {
 	/** Cyan diamond — active/in-progress indicator */
@@ -178,8 +163,6 @@ export const sym = {
 	/** Yellow triangle — warning indicator */
 	warn: `${a.yellow}\u25B2${a.reset}`,
 } as const;
-
-// ─── Output Helpers ──────────────────────────────────────────────────────────
 
 /**
  * Clear N previous terminal lines by writing move-up + erase sequences.
@@ -197,8 +180,6 @@ export function clearUp(n: number, stdout: Writable = process.stdout): void {
 export function log(s: string, stdout: Writable = process.stdout): void {
 	stdout.write(`  ${s}\n`);
 }
-
-// ─── Formatting ──────────────────────────────────────────────────────────────
 
 /**
  * Join status items with a dimmed ` · ` separator.

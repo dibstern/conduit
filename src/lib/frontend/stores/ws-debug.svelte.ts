@@ -1,11 +1,8 @@
-// ─── WebSocket Debug Store ──────────────────────────────────────────────────
 // Ring buffer of timestamped WS lifecycle events for diagnostics.
 // Always records events. When featureFlags.debug is true, also logs to console.
 // Access from browser console: window.__wsDebug()
 
 import { featureFlags } from "./feature-flags.svelte.js";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface WsDebugEvent {
 	time: number;
@@ -26,11 +23,7 @@ export interface WsDebugSnapshot {
 	events: WsDebugEvent[];
 }
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 const MAX_EVENTS = 300;
-
-// ─── State ──────────────────────────────────────────────────────────────────
 
 let _events: WsDebugEvent[] = [];
 let _lastTransitionTime = Date.now();
@@ -45,8 +38,6 @@ export const wsDebugState = $state({
 	/** When true, log every ws:message instead of 1-per-100. */
 	verboseMessages: false,
 });
-
-// ─── Core ───────────────────────────────────────────────────────────────────
 
 /** State transition events that reset the time-in-state counter. */
 const TRANSITION_EVENTS = new Set([
@@ -182,7 +173,6 @@ export function clearDebugLog(): void {
 	wsDebugState.eventCount = 0;
 }
 
-// ─── Global debug function ──────────────────────────────────────────────────
 // Always available in browser console, even when debug UI is off.
 
 if (typeof window !== "undefined") {

@@ -1,4 +1,3 @@
-// ─── Feed supervision ───────────────────────────────────────────────────────
 // `resumeStream` keeps a subscription alive across transport drops and hands
 // everything else to its consumer: a server refusal (`WsRpcError`), a clean
 // end, a defect. This is where those land, once, for every feed — the shell and

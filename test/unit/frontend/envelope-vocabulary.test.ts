@@ -1,4 +1,3 @@
-// ─── Envelope vocabulary stops at the transport ──────────────────────────────
 // A component may know that there are sessions and that one of them is the one
 // on screen. It may not know that the server said so with a `snapshot` at a
 // `sequence`, or that a row left by `remove` rather than by `upsert`. Those are

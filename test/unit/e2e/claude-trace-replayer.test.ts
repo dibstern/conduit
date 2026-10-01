@@ -1,4 +1,3 @@
-// ─── Claude trace replayer: failure list ────────────────────────────────────
 // The E2E Claude lane replays committed SDK traces through the runtime's
 // injected queryFactory. A replay that silently drifts from its plan is worse
 // than none, so every mode below must fail LOUDLY:

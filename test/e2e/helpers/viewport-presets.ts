@@ -1,4 +1,3 @@
-// ─── Viewport Presets ────────────────────────────────────────────────────────
 // 5 viewport definitions matching the Playwright config projects.
 
 export const VIEWPORTS = {

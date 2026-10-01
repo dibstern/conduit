@@ -1,4 +1,3 @@
-// ─── Compose Chat State Proxy Tests ──────────────────────────────────────────
 // Asserts Proxy trap behavior: (a) get routes to the correct tier;
 // (b) ownKeys iteration works; (c) `in` operator returns correct results;
 // (d) set throws.

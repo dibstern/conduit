@@ -1,4 +1,3 @@
-// ─── Visibility Handlers ─────────────────────────────────────────────────────
 // Global hide-lists for the agent/model dropdowns. Persisted in relay settings.
 
 import { Data, Effect } from "effect";

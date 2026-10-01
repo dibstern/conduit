@@ -1,4 +1,3 @@
-// ─── RateLimiter Effect Layer ───────────────────────────────────────────────
 // Sliding window token bucket. Uses HashMap for per-IP buckets.
 // Background cleanup fiber evicts stale entries every 60s.
 

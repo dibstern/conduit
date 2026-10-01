@@ -1,4 +1,3 @@
-// ─── OpenCode Runtime Ingress Projection Integration Test ───────────────────
 // End-to-end: SSE event → EffectOpenCodeRuntimeIngress →
 // ProviderRuntimeIngestion → append → project → verify read model tables.
 

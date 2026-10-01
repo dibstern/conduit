@@ -1,4 +1,3 @@
-// ─── Daemon Lifecycle Layers ────────────────────────────────────────────────
 // Scoped layers for daemon process lifecycle: signal handling, error handling,
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
@@ -244,7 +243,7 @@ export const ProcessErrorHandlerLayer = Layer.scopedDiscard(
 	}),
 );
 
-// ─── Leaf Service Layers (Effect-native) ─────────────────────────────────────
+// Leaf Service Layers (Effect-native)
 // These delegate to the pure Effect Layer factories defined in the *-layer.ts
 // modules. The old imperative-class bridge layers have been removed.
 
@@ -280,8 +279,6 @@ export const makeStorageMonitorLive = (
 export const makePortScannerLive = (
 	config: Parameters<typeof PortScannerLive>[0],
 ) => PortScannerLive(config);
-
-// ─── Cross-service Wiring ─────────────────────────────────────────────────
 
 /**
  * Central daemon event subscriptions. Business services expose direct methods;
@@ -321,8 +318,6 @@ const ManagedOpenCodeServersLive: Layer.Layer<
 	never,
 	DaemonEventBusTag | InstanceHealthCheckTag | InstanceManagerStateTag
 > = Layer.scopedDiscard(startManagedOpenCodeServers);
-
-// ─── DaemonState & RelayCache Layers ──────────────────────────────────────
 
 /**
  * DaemonState layer — loads config from disk, seeds Ref.
@@ -491,8 +486,6 @@ export const makeRelayCacheLayer: Layer.Layer<
 		return relayCacheService;
 	}),
 );
-
-// ─── Server Lifecycle Layers ──────────────────────────────────────────────
 
 /**
  * HTTP(S) server layer — starts the HTTP (or TLS protocol-detection) server
@@ -685,8 +678,6 @@ export const makePidFileLive = (
 		}),
 	);
 
-// ─── Composed DaemonLive Layer ──────────────────────────────────────────────
-
 /**
  * Options for composing the full DaemonLive layer.
  *
@@ -744,7 +735,7 @@ export interface DaemonLiveOptions {
 export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const { configDir, pidPath, socketPath } = options;
 
-	// ── Tier 0: Foundation (no inter-dependencies) ─────────────────────────
+	// Tier 0: Foundation (no inter-dependencies)
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
@@ -766,7 +757,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		makeConfigWriterLive(configDir),
 	);
 
-	// ── Tier 1: Services needing foundation ────────────────────────────────
 	// These Layers depend on Tags from Tier 0 (primarily DaemonConfigRefTag).
 	// Layer.provideMerge makes Tier 0 Tags available AND passes them through.
 	//
@@ -799,7 +789,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		portScannerLayer,
 	).pipe(Layer.provideMerge(services));
 
-	// ── Tier 2: Registries + state containers ──────────────────────────────
 	// State containers and factories. ProjectRegistryLive and
 	// InstanceManagerStateLive have no construction deps but are logically
 	// grouped here. RelayFactoryLive needs DaemonConfigRefTag (from Tier 0,
@@ -878,7 +867,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withDaemonHandle),
 	);
 
-	// ── Tier 3: Servers (imperative lifecycle) ───────────────────────────
+	// Tier 3: Servers (imperative lifecycle)
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.staticDir);
 	const httpAndIpc = Layer.mergeAll(
 		HttpServerLive,
@@ -894,7 +883,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	const withDaemonWiring = DaemonWiringLive.pipe(Layer.provideMerge(servers));
 
-	// ── Tier 4: Background services (optional) ────────────────────────────
+	// Tier 4: Background services (optional)
 	// When a config is not provided, a no-op stub Layer provides the Tag
 	// so the service is always resolvable. This avoids type erasure and
 	// ensures wiring tests can verify all Tags without any casts.
@@ -913,7 +902,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		DaemonWsRpcHandlersLive,
 	).pipe(Layer.provideMerge(withBackground));
 
-	// ── Tier 5: Scoped fiber Layers (need registries + config) ────────────
+	// Tier 5: Scoped fiber Layers (need registries + config)
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(

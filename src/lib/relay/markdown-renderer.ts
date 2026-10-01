@@ -1,4 +1,3 @@
-// ─── Server-Side Markdown Rendering ──────────────────────────────────────────
 // Renders markdown to sanitized HTML on the server so clients don't have to.
 // Uses the same marked config as the frontend for visual parity.
 // Does NOT run hljs (CPU-intensive) — that's handled lazily on the client.

@@ -10,8 +10,6 @@
 	}
 }
 
-/* ─── Design Tokens ─────────────────────────────────────────────────────────── */
-
 @theme {
 	/* === BRAND COLORS ===
 	   Change these two values to rebrand the entire app.
@@ -152,7 +150,7 @@
 		SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
 		monospace;
 
-	/* ── Font Size Scale (overrides Tailwind defaults) ──── */
+	/* Font Size Scale (overrides Tailwind defaults) */
 	--text-xs: 10px;
 	--text-xs--line-height: 1.4;
 
@@ -171,7 +169,7 @@
 	--text-2xl: 24px;
 	--text-2xl--line-height: 1.2;
 
-	/* ── Z-Index Layers (theme-invariant) ────────────────
+	/* Z-Index Layers (theme-invariant)
 	   Referenced as z-[var(--z-name)] (Tailwind v4 has no z-index theme namespace).
 	   Listed in paint order, lowest first. Never write a bare z-index number;
 	   centralizing the order keeps panes and portaled surfaces consistent.
@@ -195,7 +193,7 @@
 	--z-top: 1000;
 	--z-debug: 9999;
 
-	/* ── Elevation / Shadows ──────────────────────────────
+	/* Elevation / Shadows
 	   Compose with var(--shadow-rgb), redeclared per theme. */
 	--shadow-menu: 0 -4px 16px rgba(var(--shadow-rgb), 0.3);
 	--shadow-menu-lg: 0 -4px 24px rgba(var(--shadow-rgb), 0.4);
@@ -203,7 +201,7 @@
 	--shadow-modal: 0 8px 32px rgba(var(--shadow-rgb), 0.4);
 	--shadow-dropdown: 0 8px 32px rgba(var(--shadow-rgb), 0.3);
 
-	/* ── Radius ───────────────────────────────────────────
+	/* Radius
 	   Panel/card corner used across setup + settings surfaces. */
 	--radius-panel: 10px;
 }
@@ -385,8 +383,6 @@
 	}
 }
 
-/* ─── Base ──────────────────────────────────────────────────────────────────── */
-
 @layer base {
 	/* The house focus ring as a floor, not a rollout.
 	   Component migration aimed to hand components the ring as they moved onto
@@ -474,11 +470,7 @@
 	}
 }
 
-/* ─── Custom Variants ──────────────────────────────────────────────────────── */
-
 @custom-variant touch (@media (hover: none));
-
-/* ─── Custom Animation Utilities ───────────────────────────────────────────── */
 
 @utility animate-todo-spin {
 	animation: spin 0.8s linear infinite;
@@ -488,21 +480,15 @@
 	animation: bounce-bar 1.5s ease-in-out infinite;
 }
 
-/* ─── Connection Overlay ────────────────────────────────────────────── */
-
 .connect-overlay.hidden {
 	display: none;
 }
-
-/* ─── Modal System ──────────────────────────────────────────────────── */
 
 /* showModal() makes the page inert but does not stop it scrolling behind the
    dialog, which on mobile reads as the modal drifting off-screen. */
 body:has(dialog:modal) {
 	overflow: hidden;
 }
-
-/* ─── Sidebar ──────────────────────────────────────────────────────────────── */
 
 /* Sidebar width driven by --sidebar-w custom property (set inline by Sidebar.svelte) */
 #sidebar {
@@ -521,7 +507,7 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── Session bar (design bar 20) ──────────────────────────────────────────── */
+/* Session bar (design bar 20) */
 
 /* On phones, the grid moves the title beside the back control in the island.
    The <h1> stays mounted throughout. Identity appears before the title on
@@ -702,8 +688,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Compact route layout ─────────────────────────────────────────────────── */
-
 #compact-top-edge {
 	display: none;
 }
@@ -742,8 +726,6 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── Animations ────────────────────────────────────────────────────────────── */
-
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
@@ -773,7 +755,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Session title marquee on hover ────────────────────────────────────────── */
 /* The .session-item-title clips overflow. On hover, the inner span scrolls left
    in a continuous loop so long titles are fully readable. */
 /* Applied by SessionItem as `group-hover:session-title-marquee`. A descendant
@@ -784,8 +765,6 @@ body:has(dialog:modal) {
 @utility session-title-marquee {
 	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
 }
-
-/* ─── Markdown content ──────────────────────────────────────────────────────── */
 
 @layer components {
 	/* Prevent long unbroken strings (URLs, inline code, etc.) from overflowing
@@ -895,7 +874,6 @@ body:has(dialog:modal) {
 		border-radius: 8px;
 		overflow: hidden;
 	}
-	/* ── Table scroll container with shadow affordances ── */
 	.md-content .table-scroll-container {
 		position: relative;
 		@apply my-3.5;
@@ -977,8 +955,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Todo / Progress Overlay ────────────────────────────────────────── */
-
 @keyframes todo-fade-out {
 	from {
 		opacity: 1;
@@ -998,7 +974,6 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── File Viewer ──────────────────────────────────────────────────────────── */
 .file-viewer-pane {
 	min-width: 0;
 	min-height: 0;
@@ -1035,14 +1010,10 @@ body:has(dialog:modal) {
 	pointer-events: none;
 }
 
-/* ─── File Browser ──────────────────────────────────────────────────── */
-
 /* Hidden override for modal overlay */
 .fb-modal-overlay.hidden {
 	display: none;
 }
-
-/* ─── Terminal Touch Toolbar ────────────────────────────────────────── */
 
 /* Display logic must stay in CSS — hidden class / media query combo */
 .term-touch-toolbar {
@@ -1066,8 +1037,6 @@ body:has(dialog:modal) {
 		display: flex;
 	}
 }
-
-/* ─── Terminal Side Panel ──────────────────────────────────────────────────── */
 
 /* When visible, terminal-container is a flex column */
 #terminal-container:not(.hidden) {
@@ -1124,8 +1093,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Shimmer Animations ───────────────────────────────────────────────────── */
-
 @keyframes tool-shimmer-slide {
 	0% {
 		transform: translateX(-100%);
@@ -1173,7 +1140,6 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Content Visibility Optimization ──────────────────────────────────────── */
 /* Tells the browser to skip rendering (layout, paint, style) for off-screen
    message containers. The browser maintains scroll height via the intrinsic
    size estimate. Unlike JS virtualization, elements remain in the DOM so
@@ -1198,8 +1164,6 @@ body:has(dialog:modal) {
 	pointer-events: none;
 	transition: opacity 0.2s;
 }
-
-/* ─── Rewind Timeline Track ─────────────────────────────────────────── */
 
 .rewind-timeline {
 	position: absolute;
@@ -1276,8 +1240,6 @@ body:has(dialog:modal) {
 .notif-blocked-hint.hidden {
 	display: none;
 }
-
-/* ─── Split Diff View ───────────────────────────────────────────────── */
 
 .diff-split-view {
 	overflow-x: auto;
@@ -1356,8 +1318,6 @@ body:has(dialog:modal) {
 	background: rgba(var(--overlay-rgb), 0.05);
 }
 
-/* ─── Diff Toggle ──────────────────────────────────────────────────── */
-
 .diff-container {
 	margin: 0.5rem 0;
 }
@@ -1366,7 +1326,6 @@ body:has(dialog:modal) {
 	gap: 0.25rem;
 	margin-bottom: 0.5rem;
 }
-/* ─── File Edit History & Compare ──────────────────────────────────── */
 
 .file-history-panel {
 	scrollbar-width: thin;

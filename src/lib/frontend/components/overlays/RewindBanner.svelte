@@ -26,26 +26,18 @@
 	import { rewindSessionRpc } from "../../transport/ws-rpc-client.js";
 	import Surface from "../ui/Surface.svelte";
 
-	// ─── Props ──────────────────────────────────────────────────────────────────
-
 	let {
 		onRewind,
 	}: {
 		onRewind?: (uuid: string, mode: string) => void;
 	} = $props();
 
-	// ─── State ──────────────────────────────────────────────────────────────────
-
 	let selectedMode: string = $state("both");
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const showBanner = $derived(uiState.rewindActive);
 	const showModal = $derived(
 		uiState.rewindActive && uiState.rewindSelectedUuid !== null,
 	);
-
-	// ─── Handlers ───────────────────────────────────────────────────────────────
 
 	function handleExit(): void {
 		exitRewindMode();

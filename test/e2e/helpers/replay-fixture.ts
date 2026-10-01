@@ -1,4 +1,3 @@
-// ─── Replay Test Fixture ─────────────────────────────────────────────────────
 // Extends Playwright's base test with a `replay` fixture that starts a real
 // relay backed by MockOpenCodeServer for each test.
 //

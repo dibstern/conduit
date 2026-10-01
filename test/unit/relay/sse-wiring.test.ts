@@ -22,8 +22,6 @@ import {
 	wireSSEConsumerForTest,
 } from "../../helpers/sse-effect-harness.js";
 
-// ─── extractSessionId ────────────────────────────────────────────────────────
-
 describe("extractSessionId", () => {
 	it("returns top-level sessionID", async () => {
 		const event: OpenCodeEvent = {
@@ -77,8 +75,6 @@ describe("extractSessionId", () => {
 	});
 });
 
-// ─── shouldCache ─────────────────────────────────────────────────────────────
-
 describe("shouldCache", () => {
 	it("returns true for chat-relevant types", async () => {
 		const cacheableTypes = [
@@ -114,8 +110,6 @@ describe("shouldCache", () => {
 		}
 	});
 });
-
-// ─── handleSSEEventEffect ──────────────────────────────────────────────────────────
 
 describe("handleSSEEventEffect", () => {
 	it("translates and firehoses events to every client on the project (Phase 0b)", async () => {
@@ -827,8 +821,6 @@ describe("handleSSEEventEffect", () => {
 	});
 });
 
-// ─── wireSSEConsumerEffect ─────────────────────────────────────────────────────────
-
 describe("wireSSEConsumerEffect", () => {
 	it("registers event listeners on consumer", async () => {
 		const deps = createMockSSEWiringDeps();
@@ -1161,8 +1153,6 @@ describe("wireSSEConsumerEffect", () => {
 	});
 });
 
-// ─── tool_result truncation in SSE pipeline ─────────────────────────────────
-
 describe("handleSSEEventEffect – tool_result truncation", () => {
 	it("truncates tool_result over threshold before sending and caching", async () => {
 		const deps = createMockSSEWiringDeps();
@@ -1227,12 +1217,11 @@ describe("handleSSEEventEffect – tool_result truncation", () => {
 	});
 });
 
-// ─── Cross-session notification_event broadcast ──────────────────────────────
 // When the pipeline drops a notification-worthy event (done, error) because no
 // clients are viewing that session, the server should broadcast a
 // notification_event so clients on other sessions can fire sound/browser alerts.
 
-// ─── Notification routing through resolveNotifications (F2 wiring) ───────────
+// Notification routing through resolveNotifications (F2 wiring)
 // Verifies that handleSSEEventEffect gates push and cross-session broadcast through
 // resolveNotifications() — not inline logic. These tests exercise the REAL
 // wiring path, not the policy function in isolation.

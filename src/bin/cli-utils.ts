@@ -1,4 +1,3 @@
-// ─── CLI Utilities ──────────────────────────────────────────────────────────
 // Shared utilities used by CLI commands: arg parsing, IPC, network, QR, formatting.
 
 import { appendFileSync } from "node:fs";
@@ -22,12 +21,8 @@ import { formatErrorDetail } from "../lib/errors.js";
 import type { LogFormat, LogLevel } from "../lib/logger.js";
 import type { IPCResponse } from "../lib/types.js";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
-
 export { DEFAULT_CONFIG_DIR, DEFAULT_OC_PORT, DEFAULT_PORT };
 export const DEFAULT_SOCKET_PATH = join(DEFAULT_CONFIG_DIR, "relay.sock");
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface ParsedArgs {
 	command:
@@ -69,8 +64,6 @@ export interface ParsedArgs {
 	logFormat?: LogFormat;
 	restartDaemon: boolean;
 }
-
-// ─── Arg Parsing ────────────────────────────────────────────────────────────
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const result: ParsedArgs = {
@@ -303,8 +296,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
 	return result;
 }
 
-// ─── IPC Client ─────────────────────────────────────────────────────────────
-
 /** Single-attempt IPC command with a per-attempt timeout. */
 function sendIPCOnce(
 	socketPath: string,
@@ -434,8 +425,6 @@ export async function sendIpcRequest(
 	throw lastError ?? new Error("IPC command failed");
 }
 
-// ─── Network Address ────────────────────────────────────────────────────────
-
 /** Return the first non-internal IPv4 address, or null. */
 export function getNetworkAddress(): string | null {
 	const interfaces = networkInterfaces();
@@ -449,8 +438,6 @@ export function getNetworkAddress(): string | null {
 	}
 	return null;
 }
-
-// ─── QR Code Generation ────────────────────────────────────────────────────
 
 /**
  * Generate a QR code string from a URL using qrcode-terminal.
@@ -478,8 +465,6 @@ export function generateQR(url: string): string {
 		return `[QR code for: ${url}]`;
 	}
 }
-
-// ─── Help Text ──────────────────────────────────────────────────────────────
 
 export const HELP_TEXT = `Usage: conduit [options]
 
@@ -518,8 +503,6 @@ Options:
   --restart-daemon       Stop any running daemon before starting
   -h, --help            Show this help
 `;
-
-// ─── Formatting Helpers ─────────────────────────────────────────────────────
 
 export function formatUptime(seconds: number): string {
 	if (seconds < 60) return `${Math.floor(seconds)}s`;

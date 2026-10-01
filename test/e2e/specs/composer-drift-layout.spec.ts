@@ -1,4 +1,4 @@
-// ─── Composer Model-Drift Layout (mobile) ───────────────────────────────────
+// Composer Model-Drift Layout (mobile)
 // Regression coverage for: the model-drift indicator was an inline, shrink-0
 // sibling of the model picker inside the composer's bottom control row. Its
 // intrinsic width (~260px) exceeded the space left on a phone viewport, so it

@@ -1,4 +1,3 @@
-// ─── Compaction Persistence ─────────────────────────────────────────────────
 // Drives the real ingestion path rather than a projector constructed by hand.
 // The synchronous projector implemented compaction and was never run by the
 // daemon, so a test against it passed while every compaction was dropped.

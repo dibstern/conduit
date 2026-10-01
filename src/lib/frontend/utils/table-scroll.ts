@@ -1,4 +1,3 @@
-// ─── Table Scroll Shadows ────────────────────────────────────────────────────
 // Attaches scroll-position-aware shadow affordances to table scroll containers
 // produced by the custom marked renderer in markdown.ts.
 //

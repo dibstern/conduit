@@ -1,4 +1,3 @@
-<!-- ─── Activity Row ────────────────────────────────────────────────────────── -->
 <!-- One step in the expanded log: icon · verb · subject · how long it took.      -->
 <!-- Click to see the command and its output.                                     -->
 <!--                                                                              -->

@@ -1,4 +1,3 @@
-// ─── Discovery Store Tests ───────────────────────────────────────────────────
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,
@@ -33,7 +32,6 @@ import type {
 } from "../../../src/lib/frontend/types.js";
 import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
 
-// ─── Helper: cast incomplete test data to the expected type ─────────────────
 // Tests deliberately pass incomplete objects to verify defensive handling.
 function msg<T extends RelayMessage["type"]>(data: {
 	type: T;
@@ -42,13 +40,9 @@ function msg<T extends RelayMessage["type"]>(data: {
 	return data as Extract<RelayMessage, { type: T }>;
 }
 
-// ─── Reset state before each test ───────────────────────────────────────────
-
 beforeEach(() => {
 	clearDiscoveryState();
 });
-
-// ─── Pure helper: formatAgentLabel ──────────────────────────────────────────
 
 describe("formatAgentLabel", () => {
 	it("returns name when available", () => {
@@ -66,8 +60,6 @@ describe("formatAgentLabel", () => {
 		expect(formatAgentLabel(agent)).toBe("Explore");
 	});
 });
-
-// ─── Pure helper: formatModelName ───────────────────────────────────────────
 
 describe("formatModelName", () => {
 	it("returns name when available", () => {
@@ -104,8 +96,6 @@ describe("getModelDisplayName", () => {
 	});
 });
 
-// ─── Pure helper: filterCommands ────────────────────────────────────────────
-
 describe("filterCommands", () => {
 	const commands: CommandInfo[] = [
 		{ name: "help" },
@@ -136,8 +126,6 @@ describe("filterCommands", () => {
 	});
 });
 
-// ─── Pure helper: extractSlashQuery ─────────────────────────────────────────
-
 describe("extractSlashQuery", () => {
 	it("extracts query after slash at start of text", () => {
 		expect(extractSlashQuery("/hel", 4)).toEqual({
@@ -167,8 +155,6 @@ describe("extractSlashQuery", () => {
 		expect(extractSlashQuery("http://example", 14)).toBeNull();
 	});
 });
-
-// ─── handleAgentList ────────────────────────────────────────────────────────
 
 describe("handleAgentList", () => {
 	it("sets agents from message", () => {
@@ -227,8 +213,6 @@ describe("handleAgentList", () => {
 		expect(discoveryState.agents).toHaveLength(0);
 	});
 });
-
-// ─── handleModelList ────────────────────────────────────────────────────────
 
 describe("handleModelList", () => {
 	it("sets providers from message", () => {
@@ -305,8 +289,6 @@ describe("applyGetModelsResponse", () => {
 	});
 });
 
-// ─── handlePermissionModeInfo ───────────────────────────────────────────────
-
 describe("handlePermissionModeInfo", () => {
 	it("sets the session permission mode", () => {
 		handlePermissionModeInfo(
@@ -315,8 +297,6 @@ describe("handlePermissionModeInfo", () => {
 		expect(discoveryState.permissionMode).toBe("auto");
 	});
 });
-
-// ─── flushPendingPermissionMode ─────────────────────────────────────────────
 
 describe("flushPendingPermissionMode", () => {
 	it("sends the pre-bind selection to the server", async () => {
@@ -348,8 +328,6 @@ describe("flushPendingPermissionMode", () => {
 		expect(sent).toEqual(["ask"]);
 	});
 });
-
-// ─── Undoing a click that the server refused ────────────────────────────────
 
 describe("an undo only undoes its own choice", () => {
 	it("leaves a newer choice alone when an older request fails", () => {
@@ -426,8 +404,6 @@ describe("an undo only undoes its own choice", () => {
 	});
 });
 
-// ─── handleModelInfo ────────────────────────────────────────────────────────
-
 describe("handleModelInfo", () => {
 	it("sets current model and provider IDs (server sends 'model' and 'provider')", () => {
 		handleModelInfo({
@@ -450,8 +426,6 @@ describe("handleModelInfo", () => {
 	});
 });
 
-// ─── handleCommandList ──────────────────────────────────────────────────────
-
 describe("handleCommandList", () => {
 	it("sets commands and marks as fetched", () => {
 		const commands: CommandInfo[] = [
@@ -468,8 +442,6 @@ describe("handleCommandList", () => {
 		expect(discoveryState.commandsFetched).toBe(false);
 	});
 });
-
-// ─── getActiveModel with grouped routing options ────────────────────────────
 
 describe("getActiveModel", () => {
 	it("resolves a grouped model when the active id is a routing option", () => {
@@ -506,8 +478,6 @@ describe("getActiveModel", () => {
 		expect(getActiveModel()?.name).toBe("Claude Fable 5");
 	});
 });
-
-// ─── handleDefaultModelInfo ─────────────────────────────────────────────────
 
 describe("handleDefaultModelInfo", () => {
 	it("sets default model and provider IDs", () => {
@@ -560,8 +530,6 @@ describe("handleDefaultModelInfo", () => {
 		expect(discoveryState.defaultVariant).toBe("high");
 	});
 });
-
-// ─── Context window state ───────────────────────────────────────────────────
 
 describe("handleContextWindowInfo", () => {
 	it("sets the current context window and options from the server", () => {

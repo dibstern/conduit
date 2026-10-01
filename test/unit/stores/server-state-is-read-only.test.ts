@@ -1,4 +1,3 @@
-// ─── Server-owned reads are read-only ────────────────────────────────────────
 // The split gives each store a server half that only the `apply*`/`handle*`
 // functions may write. Marking the *getters* read-only is not enough: a
 // `ReadonlyMap<string, SessionInfo>` still hands out a mutable row, and a

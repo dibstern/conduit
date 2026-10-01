@@ -1,4 +1,3 @@
-// ─── Session Helpers ───────────────────────────────────────────────────────
 // Create and clean up test sessions for contract tests.
 
 import { expect, vi } from "vitest";

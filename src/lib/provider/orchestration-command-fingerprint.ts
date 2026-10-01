@@ -1,5 +1,4 @@
 // src/lib/provider/orchestration-command-fingerprint.ts
-// ─── Effective Dispatch Fingerprint ─────────────────────────────────────────
 // Pure canonicalizer for the durable command fingerprint. It derives the
 // *effective* provider dispatch request (provider instance, selected model
 // after provider-specific derivations, normalized+sorted options, prompt, image

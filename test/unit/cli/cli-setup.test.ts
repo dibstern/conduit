@@ -1,4 +1,4 @@
-// ─── First-Run Setup Flow — Unit Tests (Ticket 8.9) ──────────────────────────
+// First-Run Setup Flow — Unit Tests (Ticket 8.9)
 // Tests for printLogo, runSetup, and the full setup wizard flow.
 // Uses mock stdin (EventEmitter), stdout, and exit from the prompts test pattern.
 
@@ -9,8 +9,6 @@ import {
 	runSetup,
 	type SetupOptions,
 } from "../../../src/lib/cli/cli-setup.js";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Strip ANSI escape sequences from a string. */
 function stripAnsi(s: string): string {
@@ -106,8 +104,6 @@ async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	}
 }
 
-// ─── printLogo ───────────────────────────────────────────────────────────────
-
 describe("printLogo", () => {
 	it("clears the screen", () => {
 		const output: string[] = [];
@@ -194,8 +190,6 @@ describe("printLogo", () => {
 	});
 });
 
-// ─── Disclaimer ──────────────────────────────────────────────────────────────
-
 describe("disclaimer", () => {
 	it("shows warning text about LAN access", async () => {
 		const io = createMockIO();
@@ -238,8 +232,6 @@ describe("disclaimer", () => {
 		expect(io.getExitCode()).toBe(0);
 	});
 });
-
-// ─── Port ────────────────────────────────────────────────────────────────────
 
 describe("port prompt", () => {
 	it("defaults to 2633", async () => {
@@ -375,8 +367,6 @@ describe("port prompt", () => {
 	});
 });
 
-// ─── PIN ─────────────────────────────────────────────────────────────────────
-
 describe("PIN prompt", () => {
 	it("sets PIN correctly", async () => {
 		const io = createMockIO();
@@ -438,8 +428,6 @@ describe("PIN prompt", () => {
 	});
 });
 
-// ─── Keep awake ──────────────────────────────────────────────────────────────
-
 describe("keep awake", () => {
 	it("shows keep-awake prompt on all platforms", async () => {
 		const io = createMockIO();
@@ -485,8 +473,6 @@ describe("keep awake", () => {
 		expect(result.keepAwake).toBe(false);
 	});
 });
-
-// ─── Restore projects ────────────────────────────────────────────────────────
 
 describe("restore projects", () => {
 	it("skips restore when no recent projects", async () => {
@@ -624,8 +610,6 @@ describe("restore projects", () => {
 	});
 });
 
-// ─── Full flow ───────────────────────────────────────────────────────────────
-
 describe("full flow", () => {
 	it("completes with all defaults", async () => {
 		const io = createMockIO();
@@ -736,8 +720,6 @@ describe("full flow", () => {
 		expect(Array.isArray(result.restoredProjects)).toBe(true);
 	});
 });
-
-// ─── Edge cases ──────────────────────────────────────────────────────────────
 
 describe("edge cases", () => {
 	it("handles empty recent projects", async () => {

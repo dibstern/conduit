@@ -1,4 +1,3 @@
-// ─── DaemonConfigRef ────────────────────────────────────────────────────────
 // A single Ref<DaemonRuntimeConfig> replacing the 8 mutable `let` variables
 // in daemon-main.ts (port, host, pinHash, tlsEnabled, keepAwake,
 // keepAwakeCommand, keepAwakeArgs, shuttingDown) plus related runtime state.
@@ -9,8 +8,6 @@
 
 import { Context, Effect, Layer, Ref } from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
-
-// ─── Interface ──────────────────────────────────────────────────────────────
 
 export interface DaemonRuntimeConfig {
 	readonly port: number;
@@ -29,8 +26,6 @@ export interface DaemonRuntimeConfig {
 	readonly persistedSessionCounts: ReadonlyMap<string, number>;
 }
 
-// ─── Context Tag ────────────────────────────────────────────────────────────
-
 export class DaemonConfigRefTag extends Context.Tag("DaemonConfigRef")<
 	DaemonConfigRefTag,
 	Ref.Ref<DaemonRuntimeConfig>
@@ -48,8 +43,6 @@ export class DaemonConfigMirrorTag extends Context.Tag("DaemonConfigMirror")<
 export const DaemonConfigMirrorLive = (mirror: DaemonConfigMirror) =>
 	Layer.succeed(DaemonConfigMirrorTag, mirror);
 
-// ─── Layer factory ──────────────────────────────────────────────────────────
-
 export const DaemonConfigRefLive = (initial: DaemonRuntimeConfig) =>
 	Layer.effect(DaemonConfigRefTag, Ref.make(initial));
 
@@ -66,8 +59,6 @@ export const commitDaemonRuntimeConfig = (
 		}
 		return next;
 	});
-
-// ─── Convenience builder ────────────────────────────────────────────────────
 
 /** Build initial config from DaemonOptions + disk state. */
 export const makeDaemonConfigFromOptions = (options: {

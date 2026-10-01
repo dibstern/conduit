@@ -1,5 +1,4 @@
 import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/management-service.js";
-// ─── Daemon Startup Effects Tests ──────────────────────────────────────────
 // TDD tests for startup effect functions: crash counting, instance rehydration,
 // and error isolation policy.
 
@@ -24,8 +23,6 @@ import {
 	instanceNotFound,
 	invalidInstanceUrl,
 } from "../../../src/lib/instance/instance-errors.js";
-
-// ─── Mock helpers ──────────────────────────────────────────────────────────
 
 function makeMockCrashCounter(overrides?: {
 	record?: CrashCounter["record"];
@@ -75,8 +72,6 @@ function makeMockInstanceMgmt(
 		persistConfig: overrides?.persistConfig ?? vi.fn(),
 	};
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe("daemon startup effects", () => {
 	describe("recordCrashCounter", () => {

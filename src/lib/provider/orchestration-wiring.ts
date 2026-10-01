@@ -1,5 +1,4 @@
 // src/lib/provider/orchestration-wiring.ts
-// ─── Orchestration Wiring ───────────────────────────────────────────────────
 // Factory function to create the full orchestration layer (registry, provider
 // instances, engine) from an OpenCodeClient. Used by relay-stack.ts to
 // instantiate the provider layer alongside the existing relay pipeline.

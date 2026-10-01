@@ -1,4 +1,3 @@
-<!-- ─── Todo Progress Bar ─────────────────────────────────────────────────── -->
 <!-- Horizontal bar showing completion percentage with animated width. -->
 
 <script lang="ts">

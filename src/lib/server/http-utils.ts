@@ -1,4 +1,3 @@
-// ─── Shared HTTP Utilities ───────────────────────────────────────────────────
 // Pure helper functions used by both RelayServer (server.ts) and Daemon (daemon.ts).
 
 import type { IncomingMessage } from "node:http";

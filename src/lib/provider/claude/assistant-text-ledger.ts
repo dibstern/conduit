@@ -1,4 +1,3 @@
-// ─── Assistant Text Ledger ──────────────────────────────────────────────────
 // Who a block of assistant text IS, decided by arrival order alone.
 //
 // The Claude Agent SDK describes one piece of assistant text twice: as

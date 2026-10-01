@@ -1,4 +1,3 @@
-// ─── Effect-based Projection Runner ─────────────────────────────────────────
 // The only projection runner. Uses SqlClient.withTransaction for writes.
 
 import { SqlClient } from "@effect/sql";
@@ -19,16 +18,12 @@ import {
 	type StoredEventRow,
 } from "./stored-event-row.js";
 
-// ─── Error type ─────────────────────────────────────────────────────────────
-
 export class ProjectionRunnerError extends Data.TaggedError(
 	"ProjectionRunnerError",
 )<{
 	readonly operation: string;
 	readonly cause: unknown;
 }> {}
-
-// ─── Failure record ─────────────────────────────────────────────────────────
 
 export interface ProjectionFailure {
 	readonly projectorName: string;
@@ -39,16 +34,12 @@ export interface ProjectionFailure {
 	readonly failedAt: number;
 }
 
-// ─── Recovery result types ──────────────────────────────────────────────────
-
 export interface RecoveryResult {
 	readonly startCursor: number;
 	readonly endCursor: number;
 	readonly totalReplayed: number;
 	readonly durationMs: number;
 }
-
-// ─── Service interface ──────────────────────────────────────────────────────
 
 export interface ProjectionRunnerEffect {
 	/**
@@ -103,13 +94,9 @@ export interface ProjectionRunnerEffect {
 	readonly markRecovered: () => Effect.Effect<void>;
 }
 
-// ─── Service Tag ────────────────────────────────────────────────────────────
-
 export class ProjectionRunnerEffectTag extends Context.Tag(
 	"ProjectionRunnerEffect",
 )<ProjectionRunnerEffectTag, ProjectionRunnerEffect>() {}
-
-// ─── Service implementation ─────────────────────────────────────────────────
 
 export const makeProjectionRunnerEffect = (
 	projectors: readonly EffectProjector[],

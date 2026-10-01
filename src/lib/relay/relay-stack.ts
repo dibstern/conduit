@@ -1,4 +1,3 @@
-// ─── Relay Stack ─────────────────────────────────────────────────────────────
 // The complete relay wiring: OpenCode client, SSE consumer, event translator,
 // WebSocket handler, session manager, and Effect-owned relay services.
 //
@@ -472,8 +471,6 @@ export interface ProjectRelayStatusSnapshot {
 	readonly sse: ConnectionHealth;
 }
 
-// ─── Full Stack Config ──────────────────────────────────────────────────────
-
 export interface RelayStackConfig {
 	port: number;
 	host?: string;
@@ -507,8 +504,6 @@ export interface RelayStackConfig {
 	claudeSdk?: ProjectRelayConfig["claudeSdk"];
 }
 
-// ─── Stack ───────────────────────────────────────────────────────────────────
-
 export interface RelayStack {
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
@@ -528,8 +523,6 @@ export interface RelayStack {
 	/** Stop all components */
 	stop(): Promise<void>;
 }
-
-// ─── Create Per-Project Relay ────────────────────────────────────────────────
 
 /**
  * Create a per-project relay that attaches to an existing HTTP server.
@@ -608,11 +601,10 @@ export async function createProjectRelay(
 	} = startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
-	// ── Timer wiring (G5: permission timeouts) ─────────────────────────────
+	// Timer wiring (G5: permission timeouts)
 	// PermissionTimeoutLive is composed into RelayStateLive — no imperative wiring.
 	// Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
 
-	// ── Return project relay ────────────────────────────────────────────────
 	const getProjectRelayStatusSnapshot = (): ProjectRelayStatusSnapshot => {
 		return {
 			...statusSnapshot.getSnapshot(),
@@ -674,7 +666,7 @@ export async function createProjectRelay(
 	};
 }
 
-// ─── Create Full Stack (Server + Relay) ─────────────────────────────────────
+// Create Full Stack (Server + Relay)
 
 /**
  * Create a full relay stack with its own HTTP server.
@@ -688,8 +680,6 @@ export async function createRelayStack(
 ): Promise<RelayStack> {
 	const log = config.log ?? createLogger("relay");
 
-	// ── Push notification manager ────────────────────────────────────────────
-
 	const pushMgr =
 		config.pushManager ??
 		(await import("../server/push.js")
@@ -699,8 +689,6 @@ export async function createRelayStack(
 				return manager;
 			})
 			.catch(() => undefined));
-
-	// ── HTTP server ─────────────────────────────────────────────────────────
 
 	const server = new EffectRelayServer({
 		port: config.port,
@@ -726,7 +714,6 @@ export async function createRelayStack(
 	// Assign to a fresh const so TypeScript narrows to non-null in closures.
 	const httpServer = maybeServer;
 
-	// ── Multi-project relay management ──────────────────────────────────────
 	// The server owns browser upgrades and attaches /ws sockets to the initial relay.
 	// This matches the daemon pattern and allows dynamic project addition.
 
@@ -829,8 +816,6 @@ export async function createRelayStack(
 		return { slug, title, directory };
 	}
 
-	// ── Initial project relay ───────────────────────────────────────────────
-
 	const relay = await createProjectRelay({
 		httpServer,
 		opencodeUrl: config.opencodeUrl,
@@ -865,7 +850,6 @@ export async function createRelayStack(
 		getIsProcessing: () => relay.getStatusSnapshot().isProcessing,
 	});
 
-	// ── WebSocket upgrade handler ───────────────────────────────────────────
 	// Owns /ws upgrades and attaches sockets to the initial relay.
 	// /rpc uses per-request project routing.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where

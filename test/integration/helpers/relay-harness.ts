@@ -1,4 +1,3 @@
-// ─── Relay Harness ───────────────────────────────────────────────────────────
 // Starts the relay stack pointed at a MockOpenCodeServer backed by recordings.
 // Integration tests use this to exercise the exact same wiring as production,
 // without requiring a live OpenCode instance.

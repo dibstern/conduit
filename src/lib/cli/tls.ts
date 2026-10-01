@@ -1,4 +1,3 @@
-// ─── TLS Certificate Management ────────────────────────────────
 // Manages mkcert-based TLS certificates for HTTPS access over LAN/Tailscale.
 // All system calls (exec, fs, networkInterfaces) are injectable for testing.
 
@@ -11,8 +10,6 @@ import { promisify } from "node:util";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 
 const promisifiedExec = promisify(cpExec);
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface TlsCerts {
 	key: Buffer;
@@ -44,14 +41,10 @@ export interface TlsOptions {
 	fs?: TlsFs;
 }
 
-// ─── Defaults ────────────────────────────────────────────────────────────────
-
 async function defaultExec(cmd: string): Promise<string> {
 	const { stdout } = await promisifiedExec(cmd, { encoding: "utf8" });
 	return stdout;
 }
-
-// ─── PEM → DER conversion ───────────────────────────────────────────────────
 
 /**
  * Convert a PEM-encoded certificate to DER (binary) format.
@@ -65,8 +58,6 @@ export function pemToDer(pem: Buffer): Buffer {
 		.replace(/\s/g, "");
 	return Buffer.from(pemStr, "base64");
 }
-
-// ─── isRoutableIP ────────────────────────────────────────────────────────────
 
 /**
  * Returns true if the address is in a private or CGNAT range:
@@ -91,8 +82,6 @@ export function isRoutableIP(addr: string): boolean {
 
 	return false;
 }
-
-// ─── getAllIPs ────────────────────────────────────────────────────────────────
 
 /**
  * Collect all routable IPv4 addresses from network interfaces.
@@ -120,8 +109,6 @@ export function getAllIPs(
 
 	return ips;
 }
-
-// ─── getTailscaleIP ──────────────────────────────────────────────────────────
 
 /**
  * Get the Tailscale IP address. Prefers tailscale0/utun interfaces,
@@ -166,16 +153,12 @@ export function getTailscaleIP(
 	return null;
 }
 
-// ─── hasTailscale ────────────────────────────────────────────────────────────
-
 /** Returns true if a Tailscale IP is detected */
 export function hasTailscale(
 	opts?: Pick<TlsOptions, "networkInterfaces">,
 ): boolean {
 	return getTailscaleIP(opts) !== null;
 }
-
-// ─── hasMkcert ───────────────────────────────────────────────────────────────
 
 /** Returns true if mkcert is installed and its CA root is accessible */
 export async function hasMkcert(
@@ -190,8 +173,6 @@ export async function hasMkcert(
 	}
 }
 
-// ─── getMkcertCaRoot ─────────────────────────────────────────────────────────
-
 /** Get the mkcert CA root path, or null if mkcert is not available */
 export async function getMkcertCaRoot(
 	opts?: Pick<TlsOptions, "exec">,
@@ -203,8 +184,6 @@ export async function getMkcertCaRoot(
 		return null;
 	}
 }
-
-// ─── ensureCerts ─────────────────────────────────────────────────────────────
 
 /**
  * Main TLS certificate management function.

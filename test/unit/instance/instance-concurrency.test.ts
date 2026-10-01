@@ -1,12 +1,9 @@
-// ─── Concurrency Stress Tests ────────────────────────────────────────────────
 // Rapid parallel operations to surface race conditions in InstanceManager.
 
 import type { ChildProcess } from "node:child_process";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import { partialFake } from "../../helpers/partial-fake.js";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createMockProcess(pid = 99999): ChildProcess {
 	return partialFake<ChildProcess>({

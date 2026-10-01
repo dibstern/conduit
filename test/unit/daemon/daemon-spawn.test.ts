@@ -1,4 +1,3 @@
-// ─── Tests: spawnDaemon port pre-flight check ───────────────────────────────
 // Verifies that spawnDaemon detects ports already in use (EADDRINUSE) and
 // throws a clear, actionable error message before attempting to spawn.
 

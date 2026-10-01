@@ -1,4 +1,4 @@
-// ─── Poller Wiring (G3) ──────────────────────────────────────────────────────
+// Poller Wiring (G3)
 // Wires pollerManager "events" handler and sseStream "event" → poller bridge.
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
@@ -36,8 +36,6 @@ interface PollerManagerLike {
 	): void;
 	notifySSEEvent(sessionId: string): void;
 }
-
-// ─── Deps interface ──────────────────────────────────────────────────────────
 
 /** Narrowed Effect session service capabilities needed by poller wiring. */
 interface SessionServiceLike {
@@ -139,8 +137,6 @@ const handlePollerEventsEffect = (
 		}
 	});
 
-// ─── Wiring function ─────────────────────────────────────────────────────────
-
 export function wirePollers(deps: PollerWiringDeps): void {
 	const {
 		pollerManager,
@@ -154,7 +150,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		pollerLog,
 	} = deps;
 
-	// ── Message poller manager wiring (REST fallback → cache + per-session routing) ──
+	// Message poller manager wiring (REST fallback → cache + per-session routing)
 
 	pollerManager.on("events", (events, polledSessionId) => {
 		// If message poller found new content, signal that the session is
@@ -218,7 +214,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		}
 	});
 
-	// ── Notify poller manager of SSE events (to suppress REST polling) ────
+	// Notify poller manager of SSE events (to suppress REST polling)
 	sseStream.on("event", (event: unknown) => {
 		const sid = extractSessionId(event as SSEEvent);
 		if (sid) {

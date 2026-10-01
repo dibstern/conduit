@@ -1,5 +1,3 @@
-// ─── Tests: Effect-based config persistence with coalesced saves ──────────────
-
 import { FileSystem } from "@effect/platform";
 import { SystemError } from "@effect/platform/Error";
 import { describe, it } from "@effect/vitest";
@@ -16,8 +14,6 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-
-// ─── In-memory test FileSystem ────────────────────────────────────────────────
 
 const makeTestFileSystem = () => {
 	const files = new Map<string, string>();
@@ -65,8 +61,6 @@ const makeTestFileSystem = () => {
 	return { files, renames, directories, layer };
 };
 
-// ─── Helper: provide all test layers ──────────────────────────────────────────
-
 const CONFIG_PATH = "/test-config/daemon.json";
 
 const makeTestLayers = (
@@ -79,11 +73,7 @@ const makeTestLayers = (
 		makeDaemonStateLive(stateOverrides),
 	);
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
 describe("daemon-config-persistence", () => {
-	// ── persistConfig ──────────────────────────────────────────────────────
-
 	it.effect("persistConfig writes current state to disk", () =>
 		Effect.gen(function* () {
 			const testFs = makeTestFileSystem();
@@ -125,8 +115,6 @@ describe("daemon-config-persistence", () => {
 			expect(parsed.projects[0].slug).toBe("app");
 		}),
 	);
-
-	// ── loadConfig ─────────────────────────────────────────────────────────
 
 	it.effect("loadConfig returns parsed state from disk", () =>
 		Effect.gen(function* () {
@@ -268,8 +256,6 @@ describe("daemon-config-persistence", () => {
 			expect(state.dismissedPaths.size).toBe(0);
 		}),
 	);
-
-	// ── Coalescing ─────────────────────────────────────────────────────────
 
 	it.effect("coalesces rapid saves via atomic Ref.modify", () =>
 		Effect.gen(function* () {

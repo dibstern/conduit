@@ -1,4 +1,3 @@
-<!-- ─── Instance Model Picker ───────────────────────────────────────────────── -->
 <!-- Composer trigger carrying the selected harness-instance icon + model name. -->
 <!-- Opens an upward popover: 48px instance rail (left) + search & model rows   -->
 <!-- (right). Selecting a rail instance sets the session harness draft and      -->
@@ -47,8 +46,6 @@
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	// ─── State ──────────────────────────────────────────────────────────────────
-
 	let pickerOpen = $state(false);
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
@@ -60,8 +57,6 @@
 	// `aria-labelledby` points at. One base id per component instance, suffixed
 	// with the provider id, because the picker can mount more than once.
 	const groupHeadingId = $props.id();
-
-	// ─── Derived ────────────────────────────────────────────────────────────────
 
 	const instances = $derived(getAvailableInstances());
 
@@ -137,8 +132,6 @@
 		}
 		return "Select model";
 	});
-
-	// ─── Pure helpers ───────────────────────────────────────────────────────────
 
 	function driverLabel(id: string): string {
 		if (id === "claude") return "Claude";
@@ -236,8 +229,6 @@
 		return isActiveModel(model) ? `${base} model-item-active` : base;
 	}
 
-	// ─── Handlers ───────────────────────────────────────────────────────────────
-
 	function togglePicker(e: MouseEvent) {
 		e.stopPropagation();
 		variantRef?.close();
@@ -329,8 +320,6 @@
 			closePicker();
 		}
 	}
-
-	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 	$effect(() => {
 		document.addEventListener("keydown", handleKeydown);

@@ -1,4 +1,3 @@
-// ─── Frontend Effect Boundary ───────────────────────────────────────────────
 // Schema validation for incoming daemon→client WebSocket messages.
 // Validates against RelayMessageSchema (the full union of relay message types).
 //

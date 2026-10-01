@@ -678,8 +678,6 @@ export interface SessionManagerService {
 	pushViewerFamilies(): Effect.Effect<void, SessionManagerError>;
 }
 
-// ─── Service Tag ────────────────────────────────────────────────────────────
-
 /** Bundled service object for callers that prefer DI over free functions. */
 export class SessionManagerServiceTag extends Context.Tag(
 	"SessionManagerService",
@@ -893,8 +891,6 @@ const makeServiceCreateSession = ({
 		});
 	return serviceCreateSession;
 };
-
-// ─── Service Layer ──────────────────────────────────────────────────────────
 
 export const SessionManagerServiceLive: Layer.Layer<
 	SessionManagerServiceTag,

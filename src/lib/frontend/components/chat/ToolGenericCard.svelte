@@ -1,4 +1,3 @@
-<!-- ─── Tool Generic Card ─────────────────────────────────────────────────── -->
 <!-- Renders all non-question, non-subagent tool calls with expand/collapse, -->
 <!-- result preview, and truncation handling. -->
 
@@ -21,8 +20,6 @@
 	let { message }: {
 		message: ToolMessage;
 	} = $props();
-
-	// ─── Local state ────────────────────────────────────────────────────────
 
 	let expanded = $state(false);
 	let loadingFullContent = $state(false);
@@ -68,8 +65,6 @@
 	function handleToggle() {
 		expanded = !expanded;
 	}
-
-	// ─── Status display ─────────────────────────────────────────────────────
 
 	const statusIconName = $derived.by(() => {
 		switch (message.status) {

@@ -1,4 +1,3 @@
-// ─── Integration: Initial State on Connect ───────────────────────────────────
 // Verifies Bug C: when a browser connects, the relay sends all the initial
 // state needed for the UI to populate (session, agents, models, etc.)
 

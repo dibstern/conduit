@@ -1,4 +1,3 @@
-// ─── AC3: Permission Flow Shape Validation ────────────────────────────────
 // Validates permission endpoint shapes and the permission lifecycle.
 // Note: Triggering actual permissions requires sending a message that invokes
 // a tool (e.g., bash), which is complex in a contract test. This test validates

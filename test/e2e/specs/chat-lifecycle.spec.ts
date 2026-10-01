@@ -1,4 +1,3 @@
-// ─── E2E Chat Lifecycle Tests ────────────────────────────────────────────────
 // Tests deeper chat behaviors: tool calls, result bar, thinking blocks,
 // multi-turn conversations, and streaming state indicators.
 // Each test.describe uses a different recording via test.use().

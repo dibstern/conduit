@@ -6,8 +6,6 @@ import type {
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
 import { wireSSEConsumerForTest } from "../../helpers/sse-effect-harness.js";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 /** Create a controllable deferred promise. */
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -40,8 +38,6 @@ function makePendingQuestion(id: string, sessionID: string) {
 	};
 }
 
-// ─── Race: rapid SSE reconnect duplicates question rehydration ───────────────
-
 describe("race: SSE rehydration generation counter", () => {
 	it("supersedes first rehydration when connected fires twice rapidly (questions)", async () => {
 		// Two controllable question deferreds — one per connect
@@ -66,7 +62,6 @@ describe("race: SSE rehydration generation counter", () => {
 		const fireConnected = listeners.get("connected");
 		assert.exists(fireConnected, "expected connected listener");
 
-		// ── Two rapid connects ──
 		fireConnected();
 		fireConnected();
 
@@ -115,7 +110,6 @@ describe("race: SSE rehydration generation counter", () => {
 		const fireConnected = listeners.get("connected");
 		assert.exists(fireConnected, "expected connected listener");
 
-		// ── Two rapid connects ──
 		fireConnected();
 		fireConnected();
 

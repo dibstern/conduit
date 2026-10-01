@@ -1,4 +1,3 @@
-// ─── PTY Stream Effect Tests ─────────────────────────────────────────────────
 // Tests for the Effect.Stream-based PTY upstream WebSocket implementation.
 
 import { Duration, Effect, Exit, Stream } from "effect";

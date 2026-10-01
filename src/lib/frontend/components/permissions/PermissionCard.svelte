@@ -1,4 +1,3 @@
-<!-- ─── Permission Card ────────────────────────────────────────────────────── -->
 <!-- Displays a permission request with Allow / Always Allow / Deny actions. -->
 <!-- Preserves .permission-card class and [data-request-id] for E2E. -->
 

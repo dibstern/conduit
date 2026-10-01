@@ -1,4 +1,3 @@
-// ─── Version Store ──────────────────────────────────────────────────────────
 // Tracks current conduit version for the sidebar footer.
 
 export const versionState = $state({
