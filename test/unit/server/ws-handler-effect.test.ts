@@ -300,6 +300,37 @@ describe("WebSocket Handler Effect", () => {
 		}).pipe(Effect.provide(freshLayer())),
 	);
 
+	it.effect("skips a session_family identical to the one a client holds", () =>
+		Effect.gen(function* () {
+			const family = (title: string) =>
+				testMsg("session_family", {
+					rootId: "sess-A",
+					sessions: [{ id: "sess-A", title }],
+				});
+			const ws = mockWs();
+			yield* addClient("c1", ws);
+			yield* bindClientSession("c1", "sess-A");
+
+			yield* sendTo("c1", family("one"));
+			yield* sendTo("c1", family("one"));
+			yield* sendToSession("sess-A", family("one"));
+			expect(ws.sent).toEqual([JSON.stringify(family("one"))]);
+
+			// A changed family, and other message types, still go out.
+			yield* sendToSession("sess-A", family("two"));
+			yield* sendTo("c1", testMsg("session_status"));
+			yield* sendTo("c1", testMsg("session_status"));
+			expect(ws.sent).toHaveLength(4);
+
+			// A reconnect starts with an empty family, so it gets resent.
+			yield* removeClient("c1");
+			const reconnected = mockWs();
+			yield* addClient("c1", reconnected);
+			yield* sendTo("c1", family("two"));
+			expect(reconnected.sent).toEqual([JSON.stringify(family("two"))]);
+		}).pipe(Effect.provide(freshLayer())),
+	);
+
 	// ── getClientCount + getClientIds ─────────────────────────────────────
 
 	it.effect("getClientCount reflects current state", () =>
