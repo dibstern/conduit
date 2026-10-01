@@ -35,9 +35,7 @@ export class TransportSocketError extends Error {
 
 /** Get or create the long-lived runtime (app lifetime). */
 export async function getRuntime() {
-	if (!runtime) {
-		runtime = ManagedRuntime.make(TransportLayer);
-	}
+	runtime ??= ManagedRuntime.make(TransportLayer);
 	return runtime;
 }
 

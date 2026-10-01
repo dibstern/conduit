@@ -21,12 +21,12 @@ export const askUserQuestionSummarizer: ToolSummarizer<AskUserQuestionInput> = {
 		if (Array.isArray(questions) && questions.length > 0) {
 			const first = questions[0];
 			const subtitle = first?.header || first?.question;
+			const truncatedSubtitle =
+				subtitle && subtitle.length > 60
+					? `${subtitle.slice(0, 60)}\u2026`
+					: subtitle;
 			return {
-				subtitle: subtitle
-					? subtitle.length > 60
-						? `${subtitle.slice(0, 60)}\u2026`
-						: subtitle
-					: "Question",
+				subtitle: truncatedSubtitle || "Question",
 			};
 		}
 		return { subtitle: "Question" };

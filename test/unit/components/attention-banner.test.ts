@@ -49,6 +49,7 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
+	handleSessionFamily,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
@@ -263,6 +264,35 @@ describe("AttentionBanner merge logic", () => {
 		expect(status.textContent).toContain("1 session");
 		expect(status.textContent).toContain("Unrelated session");
 		expect(status.textContent).not.toContain("Child session");
+	});
+
+	// A workflow session can own thousands of subagents, and every new one
+	// resends the whole family. Walking descendants by rescanning the family
+	// once per descendant is quadratic in tracked reads and froze the UI for
+	// seconds on each resend.
+	it("re-derives a family of thousands of subagents without stalling", async () => {
+		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
+		await renderBanner();
+
+		const start = performance.now();
+		handleSessionFamily({
+			type: "session_family",
+			rootId: "ses_current",
+			sessions: [
+				{ id: "ses_current", title: "Parent", status: "idle", createdAt: 0 },
+				...Array.from({ length: 3000 }, (_, i) => ({
+					id: `ses_child${i}`,
+					title: `Child ${i}`,
+					status: "idle" as const,
+					createdAt: 0,
+					parentID: "ses_current",
+				})),
+			],
+		});
+		flushSync();
+
+		expect(performance.now() - start).toBeLessThan(200);
+		expect(screen.getByRole("status").textContent).toContain("1 session");
 	});
 
 	it("switches session on click through ViewSession", async () => {
