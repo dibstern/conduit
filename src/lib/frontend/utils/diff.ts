@@ -11,15 +11,15 @@ export type { DiffOp, SplitRow };
 
 /** Compute LCS-based diff between two arrays of lines. */
 export function computeDiff(oldLines: string[], newLines: string[]): DiffOp[] {
-	const m = oldLines.length;
-	const n = newLines.length;
+	const oldLineCount = oldLines.length;
+	const newLineCount = newLines.length;
 
 	// Build LCS table
-	const dp: number[][] = Array.from({ length: m + 1 }, () =>
-		new Array(n + 1).fill(0),
+	const dp: number[][] = Array.from({ length: oldLineCount + 1 }, () =>
+		new Array(newLineCount + 1).fill(0),
 	);
-	for (let i = 1; i <= m; i++) {
-		for (let j = 1; j <= n; j++) {
+	for (let i = 1; i <= oldLineCount; i++) {
+		for (let j = 1; j <= newLineCount; j++) {
 			if (oldLines[i - 1] === newLines[j - 1]) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
 				dp[i]![j] = dp[i - 1]![j - 1]! + 1;
@@ -32,8 +32,8 @@ export function computeDiff(oldLines: string[], newLines: string[]): DiffOp[] {
 
 	// Backtrack to build diff
 	const ops: DiffOp[] = [];
-	let i = m;
-	let j = n;
+	let i = oldLineCount;
+	let j = newLineCount;
 	while (i > 0 || j > 0) {
 		if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
 			ops.unshift({

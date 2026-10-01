@@ -84,8 +84,8 @@ export async function tryServeStatic(
 	const resolved = resolve(staticDir, filePath);
 	if (!resolved.startsWith(resolve(staticDir))) return false;
 	try {
-		const s = await stat(resolved);
-		if (!s.isFile()) return false;
+		const fileStats = await stat(resolved);
+		if (!fileStats.isFile()) return false;
 		const content = await readFile(resolved);
 		const ext = extname(resolved).toLowerCase();
 		const contentType = MIME_TYPES[ext] ?? "application/octet-stream";

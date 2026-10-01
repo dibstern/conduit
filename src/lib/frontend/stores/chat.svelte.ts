@@ -207,9 +207,9 @@ export function getOrCreateSessionActivity(id: string): SessionActivity {
 	if (id === "") throw new Error("getOrCreateSessionActivity: empty sessionId");
 	const existing = sessionActivity.get(id);
 	if (existing) return existing;
-	const a: SessionActivity = $state(createEmptySessionActivity());
-	sessionActivity.set(id, a);
-	return a;
+	const activity: SessionActivity = $state(createEmptySessionActivity());
+	sessionActivity.set(id, activity);
+	return activity;
 }
 
 export function getOrCreateSessionMessages(id: string): SessionMessages {
@@ -219,11 +219,13 @@ export function getOrCreateSessionMessages(id: string): SessionMessages {
 		touchLRU(id);
 		return existing;
 	}
-	const m: SessionMessages = $state(createEmptySessionMessages());
-	sessionMessages.set(id, m);
+	const sessionMessageState: SessionMessages = $state(
+		createEmptySessionMessages(),
+	);
+	sessionMessages.set(id, sessionMessageState);
 	ensureLRUCap();
 	touchLRU(id);
-	return m;
+	return sessionMessageState;
 }
 
 export function getOrCreateSessionSlot(id: string): {
@@ -289,13 +291,19 @@ function ensureLRUCap(): void {
 export function findMessage<T extends ChatMessage["type"]>(
 	messages: ChatMessage[],
 	type: T,
-	predicate: (m: Extract<ChatMessage, { type: T }>) => boolean,
+	predicate: (message: Extract<ChatMessage, { type: T }>) => boolean,
 ): { index: number; message: Extract<ChatMessage, { type: T }> } | undefined {
 	for (let i = 0; i < messages.length; i++) {
 		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const m = messages[i]!;
-		if (m.type === type && predicate(m as Extract<ChatMessage, { type: T }>)) {
-			return { index: i, message: m as Extract<ChatMessage, { type: T }> };
+		const message = messages[i]!;
+		if (
+			message.type === type &&
+			predicate(message as Extract<ChatMessage, { type: T }>)
+		) {
+			return {
+				index: i,
+				message: message as Extract<ChatMessage, { type: T }>,
+			};
 		}
 	}
 	return undefined;
@@ -511,15 +519,18 @@ function applyToolUpdate(
 export function updateLastMessage<T extends ChatMessage["type"]>(
 	messages: readonly ChatMessage[],
 	type: T,
-	predicate: (m: Extract<ChatMessage, { type: T }>) => boolean,
-	updater: (m: Extract<ChatMessage, { type: T }>) => ChatMessage,
+	predicate: (message: Extract<ChatMessage, { type: T }>) => boolean,
+	updater: (message: Extract<ChatMessage, { type: T }>) => ChatMessage,
 ): { messages: ChatMessage[]; found: boolean } {
 	const out = [...messages];
 	for (let i = out.length - 1; i >= 0; i--) {
 		// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-		const m = out[i]!;
-		if (m.type === type && predicate(m as Extract<ChatMessage, { type: T }>)) {
-			out[i] = updater(m as Extract<ChatMessage, { type: T }>);
+		const message = out[i]!;
+		if (
+			message.type === type &&
+			predicate(message as Extract<ChatMessage, { type: T }>)
+		) {
+			out[i] = updater(message as Extract<ChatMessage, { type: T }>);
 			return { messages: out, found: true };
 		}
 	}
@@ -738,35 +749,37 @@ function currentContextLimit(): number | undefined {
 export function restoreContextFromMessages(messages: SessionMessages): void {
 	const msgs = getMessages(messages);
 	for (let i = msgs.length - 1; i >= 0; i--) {
-		const m = msgs[i];
+		const message = msgs[i];
 		// A compaction divider defines context size when it is the most recent
 		// context-defining event (i.e. no real turn ran after `/compact`). The
 		// `/compact` turn itself reports 0 tokens, so its result is skipped below.
-		if (m?.type === "system" && typeof m.postTokens === "number") {
+		if (message?.type === "system" && typeof message.postTokens === "number") {
 			const limit = currentContextLimit();
 			if (limit !== undefined) {
 				messages.contextPercent = Math.min(
 					100,
-					Math.round((m.postTokens / limit) * 100),
+					Math.round((message.postTokens / limit) * 100),
 				);
 			}
 			return;
 		}
-		if (m?.type !== "result") continue;
+		if (message?.type !== "result") continue;
 		const total =
-			(m.inputTokens ?? 0) +
-			(m.outputTokens ?? 0) +
-			(m.cacheRead ?? 0) +
-			(m.cacheWrite ?? 0);
+			(message.inputTokens ?? 0) +
+			(message.outputTokens ?? 0) +
+			(message.cacheRead ?? 0) +
+			(message.cacheWrite ?? 0);
 		// Skip zero-token results (e.g. the `/compact` turn) so the walk falls
 		// through to the compaction divider that carries the true post size.
 		if (total <= 0) continue;
 		updateContextFromTokens(messages, {
-			...(m.inputTokens != null && { input: m.inputTokens }),
-			...(m.outputTokens != null && { output: m.outputTokens }),
-			...(m.cacheRead != null && { cache_read: m.cacheRead }),
-			...(m.cacheWrite != null && { cache_creation: m.cacheWrite }),
-			...(m.context_window != null && { context_window: m.context_window }),
+			...(message.inputTokens != null && { input: message.inputTokens }),
+			...(message.outputTokens != null && { output: message.outputTokens }),
+			...(message.cacheRead != null && { cache_read: message.cacheRead }),
+			...(message.cacheWrite != null && { cache_creation: message.cacheWrite }),
+			...(message.context_window != null && {
+				context_window: message.context_window,
+			}),
 		});
 		return;
 	}
@@ -817,9 +830,9 @@ export function applyTerminalTurn(
 		const msgs = [...getMessages(messages)];
 		for (const idx of finResult.indices) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — index from finalizeAll
-			const m = msgs[idx]!;
-			if (m.type === "tool") {
-				msgs[idx] = { ...m, status: "completed" };
+			const message = msgs[idx]!;
+			if (message.type === "tool") {
+				msgs[idx] = { ...message, status: "completed" };
 			}
 		}
 		setMessages(messages, msgs);

@@ -144,8 +144,9 @@ export function printLogo(stdout: Writable): void {
 		const cyan: [number, number, number] = [0, 229, 255];
 		const pink: [number, number, number] = [255, 45, 123];
 		for (let i = 0; i < CONDUIT_ART.length; i++) {
-			const t = CONDUIT_ART.length > 1 ? i / (CONDUIT_ART.length - 1) : 0;
-			const rgb = lerpColor(cyan, pink, t);
+			const progress =
+				CONDUIT_ART.length > 1 ? i / (CONDUIT_ART.length - 1) : 0;
+			const rgb = lerpColor(cyan, pink, progress);
 			const color = `\x1b[1;38;2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
 			stdout.write(`${pad}${color}${CONDUIT_ART[i]}${a.reset}\n`);
 		}
@@ -157,12 +158,12 @@ export function printLogo(stdout: Writable): void {
 		// Pink row (L→R fade)
 		let pinkRow = pad;
 		for (let i = 0; i < GRID_COLS; i++) {
-			const t = i / (GRID_COLS - 1);
-			const r = Math.round(255 - t * 200);
-			const g = Math.round(45 - t * 35);
-			const b = Math.round(123 - t * 90);
+			const progress = i / (GRID_COLS - 1);
+			const red = Math.round(255 - progress * 200);
+			const green = Math.round(45 - progress * 35);
+			const blue = Math.round(123 - progress * 90);
 			const cw = baseCellWidth + (i < remainder ? 1 : 0);
-			pinkRow += `\x1b[38;2;${r};${g};${b}m${"\u2584".repeat(cw)}`;
+			pinkRow += `\x1b[38;2;${red};${green};${blue}m${"\u2584".repeat(cw)}`;
 		}
 		pinkRow += a.reset;
 		stdout.write(`${pinkRow}\n`);
@@ -170,12 +171,12 @@ export function printLogo(stdout: Writable): void {
 		// Cyan row (R→L fade)
 		let cyanRow = pad;
 		for (let i = 0; i < GRID_COLS; i++) {
-			const t = i / (GRID_COLS - 1);
-			const r = 0;
-			const g = Math.round(60 + t * 169);
-			const b = Math.round(70 + t * 185);
+			const progress = i / (GRID_COLS - 1);
+			const red = 0;
+			const green = Math.round(60 + progress * 169);
+			const blue = Math.round(70 + progress * 185);
 			const cw = baseCellWidth + (i < remainder ? 1 : 0);
-			cyanRow += `\x1b[38;2;${r};${g};${b}m${"\u2580".repeat(cw)}`;
+			cyanRow += `\x1b[38;2;${red};${green};${blue}m${"\u2580".repeat(cw)}`;
 		}
 		cyanRow += a.reset;
 		stdout.write(`${cyanRow}\n`);
@@ -319,24 +320,24 @@ async function askPort(
 						return;
 					}
 
-					const p = Number.parseInt(val, 10);
+					const port = Number.parseInt(val, 10);
 
-					if (!p || p < 1 || p > 65535) {
+					if (!port || port < 1 || port > 65535) {
 						log(`${sym.warn}  ${a.red}Invalid port number${a.reset}`, stdout);
 						doAskPort();
 						return;
 					}
 
-					isPortFree(p).then((free) => {
+					isPortFree(port).then((free) => {
 						if (!free) {
 							log(
-								`${sym.warn}  ${a.yellow}Port ${p} is already in use${a.reset}`,
+								`${sym.warn}  ${a.yellow}Port ${port} is already in use${a.reset}`,
 								stdout,
 							);
 							doAskPort();
 							return;
 						}
-						resolve(p);
+						resolve(port);
 					});
 				},
 				textOpts,

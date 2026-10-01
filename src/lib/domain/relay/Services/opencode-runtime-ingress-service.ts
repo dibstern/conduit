@@ -849,12 +849,12 @@ export class EffectOpenCodeRuntimeIngress
 	startStatsLogging(intervalMs = 60_000): void {
 		this.stopStatsLogging();
 		this.statsIntervalId = setInterval(() => {
-			const s = this.stats;
+			const stats = this.stats;
 			this.log.info("opencode-runtime-ingress stats", {
-				eventsReceived: s.eventsReceived,
-				eventsWritten: s.eventsWritten,
-				eventsSkipped: s.eventsSkipped,
-				errors: s.errors,
+				eventsReceived: stats.eventsReceived,
+				eventsWritten: stats.eventsWritten,
+				eventsSkipped: stats.eventsSkipped,
+				errors: stats.errors,
 			});
 		}, intervalMs);
 		if (

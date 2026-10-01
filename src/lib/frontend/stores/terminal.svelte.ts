@@ -81,9 +81,9 @@ function nextTabTitle(): string {
 		const match = /^Terminal (\d+)$/.exec(title);
 		if (match) used.add(Number(match[1]));
 	}
-	let n = 1;
-	while (used.has(n)) n++;
-	return `Terminal ${n}`;
+	let terminalNumber = 1;
+	while (used.has(terminalNumber)) terminalNumber++;
+	return `Terminal ${terminalNumber}`;
 }
 
 /** Record a PTY the server reported, labelling it on first sight. */

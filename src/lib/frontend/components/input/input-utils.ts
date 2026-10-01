@@ -84,13 +84,13 @@ export async function resizeImageIfNeeded(
 	let quality = 0.85;
 
 	for (let attempt = 0; attempt < MAX_RESIZE_ATTEMPTS; attempt++) {
-		const w = Math.round(img.naturalWidth * scale);
-		const h = Math.round(img.naturalHeight * scale);
-		if (w < 1 || h < 1) break;
+		const width = Math.round(img.naturalWidth * scale);
+		const height = Math.round(img.naturalHeight * scale);
+		if (width < 1 || height < 1) break;
 
-		canvas.width = w;
-		canvas.height = h;
-		ctx.drawImage(img, 0, 0, w, h);
+		canvas.width = width;
+		canvas.height = height;
+		ctx.drawImage(img, 0, 0, width, height);
 
 		const result = canvas.toDataURL("image/jpeg", quality);
 		if (base64Length(result) <= MAX_BASE64_BYTES) {

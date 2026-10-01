@@ -249,11 +249,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 			options?.roots !== undefined ? { roots: options.roots } : undefined,
 		);
 		// Client-side filter since OpenCode's list endpoint may not support search directly
-		const q = query.toLowerCase();
+		const normalizedQuery = query.toLowerCase();
 		const matches = sessions.filter((s) => {
 			return (
-				(s.title ?? "").toLowerCase().includes(q) ||
-				s.id.toLowerCase().includes(q)
+				(s.title ?? "").toLowerCase().includes(normalizedQuery) ||
+				s.id.toLowerCase().includes(normalizedQuery)
 			);
 		});
 		return toSessionInfoList(matches, this.getStatuses?.(), this.lastMessageAt);

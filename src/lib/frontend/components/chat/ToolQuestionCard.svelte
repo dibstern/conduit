@@ -75,12 +75,12 @@
 		// another session's identical text must not bind (answers go by toolId).
 		const fallbackQuestions = questionDataFromInput;
 		if (fallbackQuestions) {
-			const contentMatch = permissionsState.pendingQuestions.find((pq) => {
-				if (pq.sessionId !== sessionState.currentId) return false;
-				if (pq.questions.length !== fallbackQuestions.length) return false;
-				return pq.questions.every((pqQ, i) => {
-					const q = fallbackQuestions[i];
-					return q && pqQ.question === q.question && pqQ.header === q.header;
+			const contentMatch = permissionsState.pendingQuestions.find((pendingQuestion) => {
+				if (pendingQuestion.sessionId !== sessionState.currentId) return false;
+				if (pendingQuestion.questions.length !== fallbackQuestions.length) return false;
+				return pendingQuestion.questions.every((question, i) => {
+					const fallbackQuestion = fallbackQuestions[i];
+					return fallbackQuestion && question.question === fallbackQuestion.question && question.header === fallbackQuestion.header;
 				});
 			});
 			if (contentMatch) return contentMatch;

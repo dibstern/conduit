@@ -90,29 +90,37 @@ type CanonicalItemType =
 	| "dynamic_tool_call";
 
 function classifyToolItemType(toolName: string): CanonicalItemType {
-	const n = toolName.toLowerCase();
-	if (n.includes("bash") || n.includes("shell") || n.includes("command")) {
+	const normalizedToolName = toolName.toLowerCase();
+	if (
+		normalizedToolName.includes("bash") ||
+		normalizedToolName.includes("shell") ||
+		normalizedToolName.includes("command")
+	) {
 		return "command_execution";
 	}
 	if (
-		n === "read" ||
-		n.includes("grep") ||
-		n.includes("glob") ||
-		n.includes("search")
+		normalizedToolName === "read" ||
+		normalizedToolName.includes("grep") ||
+		normalizedToolName.includes("glob") ||
+		normalizedToolName.includes("search")
 	) {
 		return "file_read";
 	}
 	if (
-		n.includes("edit") ||
-		n.includes("write") ||
-		n.includes("patch") ||
-		n.includes("create") ||
-		n.includes("delete")
+		normalizedToolName.includes("edit") ||
+		normalizedToolName.includes("write") ||
+		normalizedToolName.includes("patch") ||
+		normalizedToolName.includes("create") ||
+		normalizedToolName.includes("delete")
 	) {
 		return "file_change";
 	}
-	if (n.includes("websearch") || n.includes("web_search")) return "web_search";
-	if (n.includes("mcp")) return "mcp_tool_call";
+	if (
+		normalizedToolName.includes("websearch") ||
+		normalizedToolName.includes("web_search")
+	)
+		return "web_search";
+	if (normalizedToolName.includes("mcp")) return "mcp_tool_call";
 	return "dynamic_tool_call";
 }
 
@@ -1245,9 +1253,13 @@ export class ClaudeEventTranslator {
 					tool.partialInputJson = merged;
 					let parsed: Record<string, unknown> | undefined;
 					try {
-						const p: unknown = JSON.parse(merged);
-						if (p && typeof p === "object" && !Array.isArray(p)) {
-							parsed = p as Record<string, unknown>;
+						const parsedJson: unknown = JSON.parse(merged);
+						if (
+							parsedJson &&
+							typeof parsedJson === "object" &&
+							!Array.isArray(parsedJson)
+						) {
+							parsed = parsedJson as Record<string, unknown>;
 						}
 					} catch {
 						return;

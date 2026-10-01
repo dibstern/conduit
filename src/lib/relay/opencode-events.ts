@@ -59,11 +59,11 @@ export interface PartDeltaEvent extends SSEEventBase {
 
 export function isPartDeltaEvent(event: unknown): event is PartDeltaEvent {
 	if (!hasProps(event) || event.type !== "message.part.delta") return false;
-	const p = event.properties;
+	const properties = event.properties;
 	return (
-		typeof p["partID"] === "string" &&
-		typeof p["field"] === "string" &&
-		typeof p["delta"] === "string"
+		typeof properties["partID"] === "string" &&
+		typeof properties["field"] === "string" &&
+		typeof properties["delta"] === "string"
 	);
 }
 
@@ -115,8 +115,11 @@ export function isPermissionAskedEvent(
 	event: unknown,
 ): event is PermissionAskedEvent {
 	if (!hasProps(event) || event.type !== "permission.asked") return false;
-	const p = event.properties;
-	return typeof p["id"] === "string" && typeof p["permission"] === "string";
+	const properties = event.properties;
+	return (
+		typeof properties["id"] === "string" &&
+		typeof properties["permission"] === "string"
+	);
 }
 
 // ─── Question Asked (gap) ────────────────────────────────────────────────────
@@ -143,8 +146,11 @@ export function isQuestionAskedEvent(
 	event: unknown,
 ): event is QuestionAskedEvent {
 	if (!hasProps(event) || event.type !== "question.asked") return false;
-	const p = event.properties;
-	return typeof p["id"] === "string" && Array.isArray(p["questions"]);
+	const properties = event.properties;
+	return (
+		typeof properties["id"] === "string" &&
+		Array.isArray(properties["questions"])
+	);
 }
 
 // ─── Server Heartbeat (gap) ──────────────────────────────────────────────────
@@ -199,10 +205,11 @@ export interface PartUpdatedEvent extends SSEEventBase {
 
 export function isPartUpdatedEvent(event: unknown): event is PartUpdatedEvent {
 	if (!hasProps(event) || event.type !== "message.part.updated") return false;
-	const p = event.properties;
+	const properties = event.properties;
 	// A valid part.updated must have a part object with at least a type
-	if (!p["part"] || typeof p["part"] !== "object") return false;
-	const part = p["part"] as Record<string, unknown>;
+	if (!properties["part"] || typeof properties["part"] !== "object")
+		return false;
+	const part = properties["part"] as Record<string, unknown>;
 	return typeof part["type"] === "string";
 }
 
@@ -218,8 +225,11 @@ export interface PartRemovedEvent extends SSEEventBase {
 
 export function isPartRemovedEvent(event: unknown): event is PartRemovedEvent {
 	if (!hasProps(event) || event.type !== "message.part.removed") return false;
-	const p = event.properties;
-	return typeof p["partID"] === "string" && typeof p["messageID"] === "string";
+	const properties = event.properties;
+	return (
+		typeof properties["partID"] === "string" &&
+		typeof properties["messageID"] === "string"
+	);
 }
 
 // ─── Session Status ──────────────────────────────────────────────────────────
@@ -307,8 +317,8 @@ export function isPermissionRepliedEvent(
 	event: unknown,
 ): event is PermissionRepliedEvent {
 	if (!hasProps(event) || event.type !== "permission.replied") return false;
-	const p = event.properties;
-	return typeof p["requestID"] === "string";
+	const properties = event.properties;
+	return typeof properties["requestID"] === "string";
 }
 
 // ─── Message Updated ─────────────────────────────────────────────────────────
@@ -362,8 +372,8 @@ export function isMessageRemovedEvent(
 	event: unknown,
 ): event is MessageRemovedEvent {
 	if (!hasProps(event) || event.type !== "message.removed") return false;
-	const p = event.properties;
-	return typeof p["messageID"] === "string";
+	const properties = event.properties;
+	return typeof properties["messageID"] === "string";
 }
 
 // ─── PTY Events ──────────────────────────────────────────────────────────────

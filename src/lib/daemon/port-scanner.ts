@@ -49,8 +49,8 @@ export class PortScanner {
 	async scan(): Promise<ScanResult> {
 		const [start, end] = this.config.portRange;
 		const ports: number[] = [];
-		for (let p = start; p <= end; p++) {
-			if (!this.excluded.has(p)) ports.push(p);
+		for (let port = start; port <= end; port++) {
+			if (!this.excluded.has(port)) ports.push(port);
 		}
 
 		const results = await Promise.all(
@@ -94,9 +94,9 @@ export class PortScanner {
 	start(): void {
 		this.stop();
 		this.timer = setInterval(() => {
-			const p = this.scan().catch(() => {});
-			this.pending.add(p);
-			p.finally(() => this.pending.delete(p));
+			const scanPromise = this.scan().catch(() => {});
+			this.pending.add(scanPromise);
+			scanPromise.finally(() => this.pending.delete(scanPromise));
 		}, this.config.intervalMs);
 	}
 

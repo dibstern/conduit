@@ -226,13 +226,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					const translated = translateDomainEventToRelay(domainEvent);
 					if (translated.kind === "emit") {
 						for (const raw of translated.messages) {
-							const m = tagWithSessionId(
+							const message = tagWithSessionId(
 								raw,
 								domainEvent.sessionId || sessionId,
 							);
-							send(m);
+							send(message);
 							const isTerminal =
-								m.type === "done" || (m.type === "error" && m.code !== "RETRY");
+								message.type === "done" ||
+								(message.type === "error" && message.code !== "RETRY");
 							if (isTerminal) finish();
 						}
 					}
@@ -344,14 +345,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						const translated = translateDomainEventToRelay(domainEvent);
 						if (translated.kind === "emit") {
 							for (const raw of translated.messages) {
-								const m = tagWithSessionId(
+								const message = tagWithSessionId(
 									raw,
 									domainEvent.sessionId || sessionId,
 								);
-								send(m);
+								send(message);
 								const isTerminal =
-									m.type === "done" ||
-									(m.type === "error" && m.code !== "RETRY");
+									message.type === "done" ||
+									(message.type === "error" && message.code !== "RETRY");
 								if (isTerminal) finish();
 							}
 						}

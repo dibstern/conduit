@@ -19,9 +19,9 @@ let seq = 0;
 
 /** Returns the current fixture time, then advances it by `ms`. */
 function stamp(ms: number): number {
-	const t = clock;
+	const timestamp = clock;
 	clock += ms;
-	return t;
+	return timestamp;
 }
 
 const uuid = () => `fixture-${++seq}`;

@@ -36,14 +36,16 @@ export function updateTodosFromToolResult(jsonString: string): void {
 				: [];
 
 		todoState.items = rawItems.map((item: unknown, i: number) => {
-			const t = item as Record<string, unknown>;
-			const desc = t["description"] ? String(t["description"]) : undefined;
+			const todo = item as Record<string, unknown>;
+			const desc = todo["description"]
+				? String(todo["description"])
+				: undefined;
 			return {
-				id: t["id"] ? String(t["id"]) : `todo-${i}`,
+				id: todo["id"] ? String(todo["id"]) : `todo-${i}`,
 				// OpenCode TodoWrite outputs `content`; our TodoItem type uses `subject`
-				subject: String(t["subject"] ?? t["content"] ?? ""),
+				subject: String(todo["subject"] ?? todo["content"] ?? ""),
 				...(desc != null && { description: desc }),
-				status: (t["status"] as TodoItem["status"]) ?? "pending",
+				status: (todo["status"] as TodoItem["status"]) ?? "pending",
 			};
 		});
 	} catch {

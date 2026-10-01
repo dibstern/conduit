@@ -151,11 +151,11 @@ export function gradient(text: string, opts?: GradientOptions): string {
 			}
 		}
 
-		const t = visibleLen > 1 ? visibleIdx / (visibleLen - 1) : 0;
-		const r = Math.round(r0 + (r1 - r0) * t);
-		const g = Math.round(g0 + (g1 - g0) * t);
-		const b = Math.round(b0 + (b1 - b0) * t);
-		out += `\x1b[38;2;${r};${g};${b}m${text[i]}`;
+		const progress = visibleLen > 1 ? visibleIdx / (visibleLen - 1) : 0;
+		const red = Math.round(r0 + (r1 - r0) * progress);
+		const green = Math.round(g0 + (g1 - g0) * progress);
+		const blue = Math.round(b0 + (b1 - b0) * progress);
+		out += `\x1b[38;2;${red};${green};${blue}m${text[i]}`;
 		visibleIdx++;
 		i++;
 	}

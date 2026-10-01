@@ -121,8 +121,8 @@ function optBool(
 	input: Record<string, unknown>,
 	key: string,
 ): Record<string, boolean> {
-	const v = input[key];
-	if (typeof v === "boolean") return { [key]: v };
+	const value = input[key];
+	if (typeof value === "boolean") return { [key]: value };
 	return {};
 }
 

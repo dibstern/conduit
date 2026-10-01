@@ -372,9 +372,9 @@ export function promptText(
 			// Multiple matches -- find longest common prefix and show candidates
 			// biome-ignore lint/style/noNonNullAssertion: safe — guarded by length check
 			let common = matches[0]!;
-			for (let m = 1; m < matches.length; m++) {
+			for (let matchIndex = 1; matchIndex < matches.length; matchIndex++) {
 				// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-				const matchStr = matches[m]!;
+				const matchStr = matches[matchIndex]!;
 				let k = 0;
 				while (
 					k < common.length &&
@@ -535,9 +535,9 @@ export function promptSelect<T = string>(
 	let hintBoxLines = 0;
 	if (opts.hint && opts.hint.length > 0) {
 		log(sym.end, stdout);
-		for (let h = 0; h < opts.hint.length; h++) {
+		for (let hintIndex = 0; hintIndex < opts.hint.length; hintIndex++) {
 			// biome-ignore lint/style/noNonNullAssertion: safe — loop bounded by array length
-			renderHintLine(opts.hint[h]!);
+			renderHintLine(opts.hint[hintIndex]!);
 		}
 		hintBoxLines = 1 + opts.hint.length;
 	}

@@ -233,8 +233,8 @@ export function skillName(tool: ToolMessage): string {
 }
 
 export function toolCommand(tool: ToolMessage): string | undefined {
-	const c = ensureCanonical(tool.name, tool.input);
-	return c.tool === "Bash" ? c.command : undefined;
+	const canonicalTool = ensureCanonical(tool.name, tool.input);
+	return canonicalTool.tool === "Bash" ? canonicalTool.command : undefined;
 }
 
 /** First non-empty line of markdown, stripped of leading syntax and truncated. */
@@ -388,7 +388,7 @@ export interface TurnStats {
 export function turnStats(segment: Segment): TurnStats {
 	const read = new Set<string>();
 	const edited = new Set<string>();
-	const s: TurnStats = {
+	const stats: TurnStats = {
 		tools: 0,
 		failed: 0,
 		thinking: 0,
@@ -404,51 +404,51 @@ export function turnStats(segment: Segment): TurnStats {
 	};
 	for (const part of segment.activity) {
 		if (part.type === "thinking") {
-			s.thinking++;
+			stats.thinking++;
 			continue;
 		}
 		if (part.type === "system") {
-			s.compactions++;
+			stats.compactions++;
 			continue;
 		}
 		if (part.type !== "tool") continue;
-		s.tools++;
-		if (part.status === "error" || part.isError) s.failed++;
-		const c = ensureCanonical(part.name, part.input);
-		switch (c.tool) {
+		stats.tools++;
+		if (part.status === "error" || part.isError) stats.failed++;
+		const canonicalTool = ensureCanonical(part.name, part.input);
+		switch (canonicalTool.tool) {
 			case "Read":
-				read.add(c.filePath);
+				read.add(canonicalTool.filePath);
 				break;
 			case "Edit":
 			case "Write":
-				edited.add(c.filePath);
+				edited.add(canonicalTool.filePath);
 				break;
 			case "Bash":
-				s.commands++;
+				stats.commands++;
 				break;
 			case "Grep":
 			case "Glob":
 			case "LSP":
-				s.searches++;
+				stats.searches++;
 				break;
 			case "WebFetch":
 			case "WebSearch":
-				s.fetches++;
+				stats.fetches++;
 				break;
 			case "Skill":
-				s.skills++;
+				stats.skills++;
 				break;
 			case "Task":
-				s.subagents++;
+				stats.subagents++;
 				break;
 			default:
-				if (isSubagentToolName(part.name)) s.subagents++;
-				else s.others++;
+				if (isSubagentToolName(part.name)) stats.subagents++;
+				else stats.others++;
 		}
 	}
-	s.reads = read.size;
-	s.edits = edited.size;
-	return s;
+	stats.reads = read.size;
+	stats.edits = edited.size;
+	return stats;
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {
@@ -482,9 +482,9 @@ export function fmtDuration(ms: number): string {
 	// as "0.0s" reads like a broken clock, so sub-second spans keep their unit.
 	if (ms < 1000) return `${Math.round(ms)}ms`;
 	if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-	const m = Math.floor(ms / 60_000);
+	const minutes = Math.floor(ms / 60_000);
 	const sec = Math.round((ms % 60_000) / 1000);
-	return `${m}m ${sec}s`;
+	return `${minutes}m ${sec}s`;
 }
 
 /** When the prompt was sent, or failing that, when the first stamped work began. */
@@ -599,10 +599,11 @@ export function stepDurations(
 	}
 	return activity.map((part, i) => {
 		if (part.type === "system") return 0;
-		const t = part.createdAt;
-		if (t === undefined) return 0;
-		if (part.endedAt !== undefined && part.endedAt > t) return part.endedAt - t;
-		return Math.max(0, nextStart[i]! - t);
+		const createdAt = part.createdAt;
+		if (createdAt === undefined) return 0;
+		if (part.endedAt !== undefined && part.endedAt > createdAt)
+			return part.endedAt - createdAt;
+		return Math.max(0, nextStart[i]! - createdAt);
 	});
 }
 
@@ -632,13 +633,13 @@ export function stepCaption(
 ): string {
 	const part = segment.activity[i];
 	if (!part) return "";
-	const d =
+	const duration =
 		part.type === "system"
 			? undefined
 			: stepDurations(segment, turn, final, now)?.[i];
-	return d === undefined
+	return duration === undefined
 		? partLabel(part)
-		: `${partLabel(part)} · ${fmtDuration(d)}`;
+		: `${partLabel(part)} · ${fmtDuration(duration)}`;
 }
 
 /** One skill as a chapter of the turn. */
@@ -676,7 +677,7 @@ export function skillChapters(
 			: [],
 	);
 	return skills.map(({ part, index }, k) => {
-		const t = part.createdAt;
+		const createdAt = part.createdAt;
 		const next = skills[k + 1];
 		const running = !next && open;
 		const end = next
@@ -688,11 +689,11 @@ export function skillChapters(
 			index,
 			name: skillName(part),
 			running,
-			...(t !== undefined && start !== undefined && t >= start
-				? { offset: t - start }
+			...(createdAt !== undefined && start !== undefined && createdAt >= start
+				? { offset: createdAt - start }
 				: {}),
-			...(t !== undefined && end !== undefined && end >= t
-				? { duration: end - t }
+			...(createdAt !== undefined && end !== undefined && end >= createdAt
+				? { duration: end - createdAt }
 				: {}),
 		};
 	});
@@ -715,18 +716,25 @@ export interface TurnEconomics {
  * cache; a provider that reports no window gets no context reading at all.
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
-	const r = lastResult(turn);
+	const result = lastResult(turn);
 	const duration = turnDuration(turn, now);
-	const window = r?.context_window;
+	const window = result?.context_window;
 	const used =
-		r && (r.inputTokens !== undefined || r.cacheRead !== undefined)
-			? (r.inputTokens ?? 0) + (r.cacheRead ?? 0) + (r.cacheWrite ?? 0)
+		result &&
+		(result.inputTokens !== undefined || result.cacheRead !== undefined)
+			? (result.inputTokens ?? 0) +
+				(result.cacheRead ?? 0) +
+				(result.cacheWrite ?? 0)
 			: undefined;
 	return {
 		...(duration !== undefined ? { duration } : {}),
-		...(r?.cost !== undefined ? { cost: r.cost } : {}),
-		...(r?.inputTokens !== undefined ? { tokensIn: r.inputTokens } : {}),
-		...(r?.outputTokens !== undefined ? { tokensOut: r.outputTokens } : {}),
+		...(result?.cost !== undefined ? { cost: result.cost } : {}),
+		...(result?.inputTokens !== undefined
+			? { tokensIn: result.inputTokens }
+			: {}),
+		...(result?.outputTokens !== undefined
+			? { tokensOut: result.outputTokens }
+			: {}),
 		...(used !== undefined && window !== undefined && window > 0
 			? {
 					context: {

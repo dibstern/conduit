@@ -42,11 +42,11 @@ export class VersionCheckerTag extends Context.Tag("VersionChecker")<
  * Simplified variant extracted from version-check.ts.
  */
 const isNewerVersion = (current: string, latest: string): boolean => {
-	const c = current.replace(/^v/, "").split(".");
-	const l = latest.replace(/^v/, "").split(".");
+	const currentParts = current.replace(/^v/, "").split(".");
+	const latestParts = latest.replace(/^v/, "").split(".");
 	for (let i = 0; i < 3; i++) {
-		const cv = parseInt(c[i] ?? "0", 10);
-		const lv = parseInt(l[i] ?? "0", 10);
+		const cv = parseInt(currentParts[i] ?? "0", 10);
+		const lv = parseInt(latestParts[i] ?? "0", 10);
 		if (lv > cv) return true;
 		if (lv < cv) return false;
 	}

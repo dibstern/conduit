@@ -53,8 +53,8 @@
 	let cursor = $state(0);
 
 	function title(part: ActivityPart, i: number): string {
-		const d = part.type === "system" ? undefined : durations?.[i];
-		return d === undefined ? partLabel(part) : `${partLabel(part)} · ${fmtDuration(d)}`;
+		const duration = part.type === "system" ? undefined : durations?.[i];
+		return duration === undefined ? partLabel(part) : `${partLabel(part)} · ${fmtDuration(duration)}`;
 	}
 
 	function onKeyDown(e: KeyboardEvent & { currentTarget: HTMLElement }, i: number) {
@@ -62,8 +62,8 @@
 		// Don't let the transcript scroll while scrubbing.
 		e.preventDefault();
 		e.stopPropagation();
-		const n = segment.activity.length;
-		cursor = (i + (e.key === "ArrowRight" ? 1 : -1) + n) % n;
+		const activityCount = segment.activity.length;
+		cursor = (i + (e.key === "ArrowRight" ? 1 : -1) + activityCount) % activityCount;
 		onhover?.(cursor);
 		const next = e.currentTarget.parentElement?.children[cursor];
 		if (next instanceof HTMLElement) next.focus();

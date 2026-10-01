@@ -169,13 +169,13 @@
 	 */
 	const listboxStatusText = $derived.by(() => {
 		if (commandListboxVisible) {
-			const n = filteredCommands.length;
-			return `${n} command${n === 1 ? "" : "s"} available`;
+			const commandCount = filteredCommands.length;
+			return `${commandCount} command${commandCount === 1 ? "" : "s"} available`;
 		}
 		if (fileListboxVisible) {
 			if (filteredFiles.length === 0) return "Loading files";
-			const n = filteredFiles.length;
-			return `${n} file${n === 1 ? "" : "s"} available`;
+			const fileCount = filteredFiles.length;
+			return `${fileCount} file${fileCount === 1 ? "" : "s"} available`;
 		}
 		return "";
 	});

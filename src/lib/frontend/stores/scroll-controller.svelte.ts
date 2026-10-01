@@ -96,8 +96,8 @@ export function createScrollController(
 		if (distFromBottom >= REFOLLOW_THRESHOLD) {
 			// And not while the transcript is still hydrating, where the controller
 			// is force-pinning the bottom and any position off it is transient.
-			const s = getState();
-			if (s === "following" || s === "detached") onUserScroll?.();
+			const state = getState();
+			if (state === "following" || state === "detached") onUserScroll?.();
 		}
 
 		// Re-follow when scrolled to the very bottom (within 5px).
@@ -152,8 +152,8 @@ export function createScrollController(
 		},
 
 		onNewContent(): void {
-			const s = getState();
-			if (s === "following") {
+			const state = getState();
+			if (state === "following") {
 				// Scroll synchronously — not via rAF. In Svelte 5, $effect runs
 				// after the DOM is committed but before the browser paints. Scrolling
 				// here means the browser paints with the correct scroll position.

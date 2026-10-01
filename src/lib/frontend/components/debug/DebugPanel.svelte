@@ -29,11 +29,11 @@
 	}
 
 	async function copyLog() {
-		const lines = getDebugEvents().map((e) => {
-			const t = fmtTime(e.time);
-			let line = e.detail ? `${t} ${e.event} ${e.detail}` : `${t} ${e.event}`;
-			if (e.payload) {
-				line += `\n  ${JSON.stringify(e.payload)}`;
+		const lines = getDebugEvents().map((event) => {
+			const timestamp = fmtTime(event.time);
+			let line = event.detail ? `${timestamp} ${event.event} ${event.detail}` : `${timestamp} ${event.event}`;
+			if (event.payload) {
+				line += `\n  ${JSON.stringify(event.payload)}`;
 			}
 			return line;
 		});
@@ -80,12 +80,12 @@
 
 	/** Format timestamp as HH:MM:SS.mmm */
 	function fmtTime(time: number): string {
-		const d = new Date(time);
-		const h = String(d.getHours()).padStart(2, "0");
-		const m = String(d.getMinutes()).padStart(2, "0");
-		const s = String(d.getSeconds()).padStart(2, "0");
-		const ms = String(d.getMilliseconds()).padStart(3, "0");
-		return `${h}:${m}:${s}.${ms}`;
+		const date = new Date(time);
+		const hours = String(date.getHours()).padStart(2, "0");
+		const minutes = String(date.getMinutes()).padStart(2, "0");
+		const seconds = String(date.getSeconds()).padStart(2, "0");
+		const ms = String(date.getMilliseconds()).padStart(3, "0");
+		return `${hours}:${minutes}:${seconds}.${ms}`;
 	}
 
 	/** Status dot color class. */
@@ -110,88 +110,88 @@
 	 */
 	function payloadSummary(payload: unknown): string {
 		if (!payload || typeof payload !== "object") return "";
-		const p = payload as Record<string, unknown>;
+		const properties = payload as Record<string, unknown>;
 		const id = (v: unknown) => typeof v === "string" ? v : "";
 
-		switch (p["type"]) {
+		switch (properties["type"]) {
 			// ── Chat-visible: streaming ──────────────────────────────────────
 			case "delta":
-				return `${typeof p["text"] === "string" ? `${p["text"].length}ch` : ""}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
+				return `${typeof properties["text"] === "string" ? `${properties["text"].length}ch` : ""}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "thinking_start":
 			case "thinking_stop":
-				return p["messageId"] ? `msg=${id(p["messageId"])}` : "";
+				return properties["messageId"] ? `msg=${id(properties["messageId"])}` : "";
 			case "thinking_delta":
-				return `${typeof p["text"] === "string" ? `${p["text"].length}ch` : ""}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
+				return `${typeof properties["text"] === "string" ? `${properties["text"].length}ch` : ""}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 
 			// ── Chat-visible: tools ──────────────────────────────────────────
 			case "tool_start":
-				return `${p["name"] ?? "?"} id=${id(p["id"])}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
+				return `${properties["name"] ?? "?"} id=${id(properties["id"])}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "tool_executing":
-				return `${p["name"] ?? "?"} id=${id(p["id"])}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
+				return `${properties["name"] ?? "?"} id=${id(properties["id"])}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "tool_result":
-				return `${p["is_error"] ? "ERR " : ""}${id(p["id"])}${p["messageId"] ? ` msg=${id(p["messageId"])}` : ""}`;
+				return `${properties["is_error"] ? "ERR " : ""}${id(properties["id"])}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "tool_content":
-				return `id=${id(p["toolId"])}`;
+				return `id=${id(properties["toolId"])}`;
 
 			// ── Chat-visible: permissions / questions ────────────────────────
 			case "permission_request":
-				return `${p["toolName"] ?? "?"} sess=${id(p["sessionId"])} req=${id(p["requestId"])}`;
+				return `${properties["toolName"] ?? "?"} sess=${id(properties["sessionId"])} req=${id(properties["requestId"])}`;
 			case "permission_resolved":
-				return `${p["decision"]} req=${id(p["requestId"])}`;
+				return `${properties["decision"]} req=${id(properties["requestId"])}`;
 			case "ask_user":
-				return `tool=${id(p["toolId"])}`;
+				return `tool=${id(properties["toolId"])}`;
 			case "ask_user_resolved":
 			case "ask_user_error":
-				return `tool=${id(p["toolId"])}`;
+				return `tool=${id(properties["toolId"])}`;
 
 			// ── Chat-visible: session lifecycle ──────────────────────────────
 			case "result":
-				return `sess=${id(p["sessionId"])} cost=$${typeof p["cost"] === "number" ? p["cost"].toFixed(4) : "?"}`;
+				return `sess=${id(properties["sessionId"])} cost=$${typeof properties["cost"] === "number" ? properties["cost"].toFixed(4) : "?"}`;
 			case "done":
-				return `code=${p["code"] ?? "?"}`;
+				return `code=${properties["code"] ?? "?"}`;
 			case "status":
-				return String(p["status"] ?? "");
+				return String(properties["status"] ?? "");
 			case "error":
-				return `[${p["code"]}] ${p["message"]}`;
+				return `[${properties["code"]}] ${properties["message"]}`;
 
 			// ── Session management ───────────────────────────────────────────
 			case "session_list":
-				return Array.isArray(p["sessions"]) ? `${p["sessions"].length} sessions` : "";
+				return Array.isArray(properties["sessions"]) ? `${properties["sessions"].length} sessions` : "";
 
 			// ── Connection / infra ───────────────────────────────────────────
 			case "connection_status":
-				return String(p["status"] ?? "");
+				return String(properties["status"] ?? "");
 			case "notification_event":
-				return `${p["eventType"] ?? "?"}${p["sessionId"] ? ` sess=${id(p["sessionId"])}` : ""}${p["message"] ? `: ${p["message"]}` : ""}`;
+				return `${properties["eventType"] ?? "?"}${properties["sessionId"] ? ` sess=${id(properties["sessionId"])}` : ""}${properties["message"] ? `: ${properties["message"]}` : ""}`;
 			case "client_count":
-				return `${p["count"] ?? 0} clients`;
+				return `${properties["count"] ?? 0} clients`;
 
 			// ── Discovery / metadata ─────────────────────────────────────────
 			case "instance_list":
-				return Array.isArray(p["instances"]) ? `${p["instances"].length} instances` : "";
+				return Array.isArray(properties["instances"]) ? `${properties["instances"].length} instances` : "";
 			case "pty_list":
-				return Array.isArray(p["ptys"]) ? `${p["ptys"].length} ptys` : "";
+				return Array.isArray(properties["ptys"]) ? `${properties["ptys"].length} ptys` : "";
 			case "variant_info":
-				return p["variant"] ? String(p["variant"]) : "";
+				return properties["variant"] ? String(properties["variant"]) : "";
 			case "context_window_info":
-				return p["contextWindow"] ? String(p["contextWindow"]) : "";
+				return properties["contextWindow"] ? String(properties["contextWindow"]) : "";
 			case "model_info":
-				return p["provider"] && p["model"] ? `${p["provider"]}:${p["model"]}` : "";
+				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
 			case "default_model_info":
-				return p["provider"] && p["model"] ? `${p["provider"]}:${p["model"]}` : "";
+				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
 			case "model_list": {
-				if (!Array.isArray(p["providers"])) return "";
-				const counts = (p["providers"] as Array<{ name?: string; models?: unknown[] }>)
+				if (!Array.isArray(properties["providers"])) return "";
+				const counts = (properties["providers"] as Array<{ name?: string; models?: unknown[] }>)
 					.map((prov) => `${prov.name ?? "?"}: ${Array.isArray(prov.models) ? prov.models.length : 0}`)
 					.join(", ");
 				return counts;
 			}
 			case "project_list":
-				return Array.isArray(p["projects"]) ? `${p["projects"].length} projects${p["current"] ? ` current=${p["current"]}` : ""}` : "";
+				return Array.isArray(properties["projects"]) ? `${properties["projects"].length} projects${properties["current"] ? ` current=${properties["current"]}` : ""}` : "";
 			case "command_list":
-				return Array.isArray(p["commands"]) ? `${p["commands"].length} commands` : "";
+				return Array.isArray(properties["commands"]) ? `${properties["commands"].length} commands` : "";
 			case "agent_list":
-				return Array.isArray(p["agents"]) ? `${p["agents"].length} agents${p["activeAgentId"] ? ` active=${p["activeAgentId"]}` : ""}` : "";
+				return Array.isArray(properties["agents"]) ? `${properties["agents"].length} agents${properties["activeAgentId"] ? ` active=${properties["activeAgentId"]}` : ""}` : "";
 			default:
 				return "";
 		}

@@ -584,7 +584,7 @@ export class InstanceManager {
 		const backoffMs = Math.min(1000 * 2 ** (recent.length - 1), 30_000);
 		const timer = setTimeout(() => {
 			this.pendingRestarts.delete(id);
-			const p = (async () => {
+			const restartPromise = (async () => {
 				try {
 					// Reset status so startInstance doesn't return early
 					instance.status = "stopped";
@@ -598,7 +598,7 @@ export class InstanceManager {
 					});
 				}
 			})();
-			this.trackPromise(p);
+			this.trackPromise(restartPromise);
 		}, backoffMs);
 
 		this.pendingRestarts.set(id, timer);

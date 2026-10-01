@@ -178,18 +178,18 @@ function showBrowserNotification(
 	sessionId: string | undefined,
 ): boolean {
 	try {
-		const n = new Notification(content.title, {
+		const notification = new Notification(content.title, {
 			body: content.body,
 			tag: content.tag,
 		});
-		n.onclick = () => {
+		notification.onclick = () => {
 			window.focus();
 			if (sessionId) {
 				_navigateToSession?.(sessionId);
 			}
-			n.close();
+			notification.close();
 		};
-		setTimeout(() => n.close(), NOTIFICATION_DISMISS_MS);
+		setTimeout(() => notification.close(), NOTIFICATION_DISMISS_MS);
 		return true;
 	} catch {
 		return false;

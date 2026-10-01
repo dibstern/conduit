@@ -60,9 +60,9 @@
 
 	function getShareUrl(): string {
 		if (typeof window === "undefined") return "";
-		const h = window.location.hostname;
+		const hostname = window.location.hostname;
 		// If we're on a local address and have a network host, rewrite the URL
-		if (isLocalHost(h) && networkHost) {
+		if (isLocalHost(hostname) && networkHost) {
 			return window.location.href.replace(window.location.origin, networkHost);
 		}
 		return window.location.href;

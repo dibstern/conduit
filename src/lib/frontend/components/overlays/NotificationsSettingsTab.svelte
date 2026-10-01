@@ -70,7 +70,7 @@
 				state.browserBlocked = perm === "denied";
 				if (perm !== "granted") return;
 			}
-			try { const n = new Notification("Browser Alerts Enabled", { body: "You will be notified when tasks complete.", tag: "opencode-browser-test" }); setTimeout(() => n.close(), 5000); } catch { /* */ }
+			try { const notification = new Notification("Browser Alerts Enabled", { body: "You will be notified when tasks complete.", tag: "opencode-browser-test" }); setTimeout(() => notification.close(), 5000); } catch { /* */ }
 		}
 		state.notifSettings.browser = newValue;
 		saveNotifSettings(state.notifSettings);

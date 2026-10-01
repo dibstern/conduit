@@ -119,10 +119,10 @@ function optBool(
 	...keys: string[]
 ): Record<string, boolean> {
 	for (const k of keys) {
-		const v = input[k];
-		if (typeof v === "boolean") {
+		const value = input[k];
+		if (typeof value === "boolean") {
 			const canonicalKey = keys[keys.length - 1] ?? k;
-			return { [canonicalKey]: v };
+			return { [canonicalKey]: value };
 		}
 	}
 	return {};
@@ -135,8 +135,9 @@ function optField(
 	...inputKeys: string[]
 ): Record<string, unknown> {
 	for (const k of inputKeys) {
-		const v = input[k];
-		if (v !== undefined && v !== null && v !== "") return { [canonicalKey]: v };
+		const value = input[k];
+		if (value !== undefined && value !== null && value !== "")
+			return { [canonicalKey]: value };
 	}
 	return {};
 }
@@ -145,7 +146,7 @@ function optField(
 function optTimeoutMs(
 	input: Record<string, unknown>,
 ): { timeoutMs: number } | Record<string, never> {
-	const v = input["timeout"] ?? input["timeout_ms"] ?? input["timeoutMs"];
-	if (typeof v === "number") return { timeoutMs: v };
+	const value = input["timeout"] ?? input["timeout_ms"] ?? input["timeoutMs"];
+	if (typeof value === "number") return { timeoutMs: value };
 	return {};
 }

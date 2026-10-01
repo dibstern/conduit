@@ -481,15 +481,15 @@ export const getModelsResponse = (
 		let variantList: string[] = [];
 		if (activeModel) {
 			for (const p of providers) {
-				const m = p.models.find(
+				const matchingModel = p.models.find(
 					(mod) =>
 						mod.id === activeModel.modelID ||
 						mod.routingOptions?.some(
 							(option) => option.value === activeModel.modelID,
 						),
 				);
-				if (m?.variants) {
-					variantList = [...m.variants];
+				if (matchingModel?.variants) {
+					variantList = [...matchingModel.variants];
 					break;
 				}
 			}

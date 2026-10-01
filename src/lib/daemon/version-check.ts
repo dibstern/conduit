@@ -310,11 +310,11 @@ export class VersionChecker {
 
 	/** Run a check, catching errors and reporting via callback. Tracked for drain. */
 	private runCheck(): void {
-		const p = this.check().catch((err: unknown) => {
+		const checkPromise = this.check().catch((err: unknown) => {
 			const error = err instanceof Error ? err : new Error(String(err));
 			this.onCheckError?.({ error });
 		});
-		this.pending.add(p);
-		p.finally(() => this.pending.delete(p));
+		this.pending.add(checkPromise);
+		checkPromise.finally(() => this.pending.delete(checkPromise));
 	}
 }
