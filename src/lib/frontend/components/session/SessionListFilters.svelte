@@ -24,20 +24,19 @@
 		{ value: "unread", label: "Unread" },
 	];
 
-	function filterTone(needsAttention: boolean, active: boolean): "accent" | "default" | "secondary" {
-		if (needsAttention) return "accent";
-		if (active) return "default";
-		return "secondary";
-	}
+	// Literal px: the 12px root would shrink rem steps below the design's sizes.
+	// touchTarget restores a 44px hit area on phones without growing the chip.
+	const CHIP_CLASSES =
+		"shrink-0 gap-[6px] rounded-full border px-[11px] py-[8px] md:px-[9px] md:py-[5px] text-[12.5px] md:text-[11.5px] leading-none font-brand";
 
 	function filterSurfaceClass(needsAttention: boolean, active: boolean): string {
-		if (needsAttention) return "border-accent/40 bg-accent/10";
-		if (active) return "border-border bg-bg-alt";
-		return "border-border-subtle";
+		if (needsAttention) return "border-accent/55 bg-accent/14 text-status-pink";
+		if (active) return "border-border-chip bg-bg-alt text-text";
+		return "border-border text-text-secondary";
 	}
 </script>
 
-	<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
+	<div id="session-search" class="shrink-0 px-[12px] md:px-[10px] pt-[4px]">
 		<SessionSearchField
 			value={localSearchValue}
 			oninput={onsearchinput}
@@ -45,14 +44,17 @@
 			{onaddproject}
 		/>
 	</div>
-	<div class="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">
-			<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+	<div class="flex shrink-0 items-center gap-1 px-[12px] md:px-[10px]">
+			<!-- Vertical padding lives here, not on the row: it is the room the
+			     chips' 44px hit areas need inside this scroll container. -->
+			<div class="flex min-w-0 flex-1 items-center gap-[6px] pt-[9px] pb-[7px] md:pt-[8px] md:pb-[4px] overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 				{#if grouping !== "status"}
 					<Button
 						variant="ghost"
 						size="content"
-						tone="default"
-						class="shrink-0 gap-1.5 rounded-full border border-border bg-bg-alt px-2.5 text-xs font-brand {sessionViewState.compact ? 'min-h-[44px]' : 'min-h-8'}"
+						tone="inherit"
+						touchTarget
+						class="{CHIP_CLASSES} {filterSurfaceClass(false, true)}"
 						data-testid="session-group-chip"
 						onclick={() => setSessionGrouping("status")}
 					>
@@ -66,8 +68,9 @@
 					<Button
 						variant="ghost"
 						size="content"
-						tone={filterTone(needsAttention, active)}
-						class="shrink-0 gap-1.5 rounded-full border px-2.5 text-xs font-brand {sessionViewState.compact ? 'min-h-[44px]' : 'min-h-8'} {filterSurfaceClass(needsAttention, active)}"
+						tone="inherit"
+						touchTarget
+						class="{CHIP_CLASSES} {filterSurfaceClass(needsAttention, active)}"
 						aria-pressed={active}
 						data-testid={`session-filter-chip-${chip.value}`}
 						onclick={() => setSessionStatusFilter(active ? null : chip.value)}

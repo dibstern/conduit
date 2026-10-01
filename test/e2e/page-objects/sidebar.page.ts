@@ -5,8 +5,6 @@ export class SidebarPage {
 	readonly sidebar: Locator;
 	readonly sessionList: Locator;
 	readonly newSessionBtn: Locator;
-	readonly resumeSessionBtn: Locator;
-	readonly terminalBtn: Locator;
 	readonly searchInput: Locator;
 	readonly searchContainer: Locator;
 	readonly fileTree: Locator;
@@ -17,8 +15,6 @@ export class SidebarPage {
 		this.sidebar = page.locator("#sidebar");
 		this.sessionList = page.locator("#session-list");
 		this.newSessionBtn = page.locator("#new-session-btn");
-		this.resumeSessionBtn = page.locator("#resume-session-btn");
-		this.terminalBtn = page.locator("#terminal-sidebar-btn");
 		this.searchInput = page.locator("#session-search-input");
 		this.searchContainer = page.locator("#session-search");
 		this.fileTree = page.locator("#file-tree");

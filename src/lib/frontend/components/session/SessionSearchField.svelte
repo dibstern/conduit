@@ -116,17 +116,18 @@
 <svelte:window onkeydown={handleShortcut} />
 
 <div
-	class="flex h-8 min-h-[44px] md:min-h-0 items-center gap-1.5 rounded-lg border border-border bg-bg-surface pl-1 pr-2 focus-within:border-border-chip focus-within:bg-bg-alt"
+	class="flex h-[38px] md:h-[32px] items-center gap-[8px] rounded-[11px] border border-border-subtle bg-bg-surface pl-[6px] md:pl-[7px] pr-[11px] text-[13.5px] md:text-[12.5px] focus-within:border-border-chip focus-within:bg-bg-alt"
 	data-testid="session-search-field"
 >
 	<Menu bind:open={pickerOpen} ariaLabel="Project scope">
 		{#snippet trigger({ props })}
 			<Button
 				{...props}
-				variant="pill"
+				variant="ghost"
 				size="content"
+				tone="default"
 				touchTarget
-				class="max-w-[60%] shrink-0"
+				class="max-w-[60%] shrink-0 gap-1 rounded-full border border-border-chip bg-bg-alt px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand"
 				title="Project scope (⌘P)"
 				data-testid="session-scope-chip"
 			>
@@ -169,14 +170,16 @@
 			onclick={() => setSessionScope(null)}
 		/>
 	{/if}
-	<Icon name="search" size={12} class="shrink-0 text-text-dimmer" />
+	<Icon name="search" size={13} class="shrink-0 text-text-dimmer" />
+	<!-- The field paints 38px tall; the negative margin lets the transparent
+	     input overhang its border to keep a 44px tap target on phones. -->
 	<TextInput
 		bind:element={input}
 		id="session-search-input"
 		aria-label="Search sessions"
 		chrome="bare"
 		size="content"
-		class="min-w-0 flex-1 min-h-[44px] md:min-h-0 bg-transparent text-xs text-text font-brand placeholder:text-text-dimmer"
+		class="min-w-0 flex-1 self-stretch -my-[4px] md:my-0 bg-transparent text-[13.5px] md:text-[12.5px] text-text font-brand placeholder:text-text-dimmer"
 		placeholder="Search sessions..."
 		autocomplete="off"
 		spellcheck={false}

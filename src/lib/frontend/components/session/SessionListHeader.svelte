@@ -1,17 +1,13 @@
 <script lang="ts">
-	import { sessionCreation } from "../../stores/session.svelte.js";
-	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
-	import Icon from "../ui/Icon.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
-	let { selectMode, selectionCount, allSelected, onselectall, ondone, onnewsession, onenterselect }: {
+	let { selectMode, selectionCount, allSelected, onselectall, ondone, onenterselect }: {
 		selectMode: boolean;
 		selectionCount: number;
 		allSelected: boolean;
 		onselectall: () => void;
 		ondone: () => void;
-		onnewsession: () => void;
 		onenterselect: () => void;
 	} = $props();
 
@@ -32,24 +28,6 @@
 			<div class="session-list-header flex items-center justify-between px-2 py-1">
 				<span class="text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer font-brand">Sessions</span>
 				<div class="session-list-header-actions flex items-center gap-0.5">
-					<!-- The one control here that is not `iconOnly`: its busy glyph is a
-					     BlockGrid, the app-wide in-progress affordance. Button's `loading`
-					     would swap it for a loader-circle, which appears nowhere else. -->
-					<Button
-						variant="toolbar"
-						size="content"
-						class={TOOLBAR_ICON_BOX}
-						title="New session"
-						ariaLabel="New session"
-						onclick={onnewsession}
-						disabled={sessionCreation.value.phase === "creating"}
-					>
-						{#if sessionCreation.value.phase === "creating"}
-							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-						{:else}
-							<Icon name="plus" size={14} />
-						{/if}
-					</Button>
 					<Button
 						variant="toolbar"
 						size="content"

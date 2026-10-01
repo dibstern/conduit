@@ -90,16 +90,20 @@ test.describe("Session Management", () => {
 		expect(filtered).toBe(0);
 	});
 
-	test("action buttons are visible in sidebar", async ({ page, relayUrl }) => {
+	test("new session lives in the sidebar header, not an action list", async ({
+		page,
+		relayUrl,
+	}) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		await app.goto(relayUrl);
 
-		// All action buttons should be present
-		await expect(sidebar.newSessionBtn).toBeVisible();
-		await expect(sidebar.resumeSessionBtn).toBeVisible();
+		await expect(
+			page.locator("#sidebar-header #new-session-btn"),
+		).toBeVisible();
+		await expect(page.locator("#session-actions")).toHaveCount(0);
 		await expect(page.locator("#file-browser-btn")).toHaveCount(0);
-		await expect(sidebar.terminalBtn).toBeVisible();
+		await expect(sidebar.sessionList).toBeVisible();
 	});
 
 	test("Files pane opens and closes beside sessions", async ({

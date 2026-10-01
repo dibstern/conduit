@@ -8,8 +8,6 @@ import {
 import {
 	applyListDaemonSessionsResponse,
 	clearSessionState,
-	requestNewSession,
-	resetSessionCreation,
 	sessionState,
 	setSearchQuery,
 } from "../../stores/session.svelte.js";
@@ -324,15 +322,6 @@ export const Searching: Story = {
 export const Hover: Story = {
 	...Empty,
 	parameters: { pseudo: { hover: true } },
-};
-
-export const Loading: Story = {
-	...Empty,
-	beforeEach: () => {
-		resetSessionCreation();
-		requestNewSession();
-		return resetSessionCreation;
-	},
 };
 
 // `/` is the way into the always-visible field from anywhere outside a text

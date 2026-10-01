@@ -10,7 +10,6 @@
 		sessionMatchesStatus,
 		isSessionSnoozed,
 		setSearchQuery,
-		sendNewSession,
 	} from "../../stores/session.svelte.js";
 	import { currentSearchQuery, refreshSessionList, sessionList } from "../../stores/session-list.svelte.js";
 	import {
@@ -224,10 +223,6 @@
 	// debounce does not need to re-check what was typed since.
 	function requestRemoteSearch(query: string) {
 		sessionList.search(query);
-	}
-
-	function handleNewSession() {
-		sendNewSession();
 	}
 
 	function clearSearch() {
@@ -453,7 +448,7 @@
 			ondismiss={() => { routerState.sessionNotFound = false; }}
 		/>
 	{/if}
-	<SessionListHeader {selectMode} {selectionCount} {allSelected} onselectall={handleToggleSelectAll} ondone={resetSelectMode} onnewsession={handleNewSession} onenterselect={() => handleEnterSelect()} />
+	<SessionListHeader {selectMode} {selectionCount} {allSelected} onselectall={handleToggleSelectAll} ondone={resetSelectMode} onenterselect={() => handleEnterSelect()} />
 	<SessionListFilters {localSearchValue} {live} {searchSummary} onsearchinput={handleSearchInput} onclearsearch={clearSearch} {onaddproject} />
 	{#if feedStale}
 		<div class="px-3.5 py-1 text-xs text-text-dimmer font-brand" data-testid="session-list-stale">May be out of date</div>

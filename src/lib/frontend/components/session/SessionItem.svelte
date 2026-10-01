@@ -18,6 +18,9 @@
 			word: string;
 			spoken: string;
 			colour: string;
+			/** The status word's chrome: a filled pill when the row is blocked on
+			 *  you, bare coloured text otherwise. */
+			pill: string;
 			icon:
 				| "triangle-alert"
 				| "message-square"
@@ -33,13 +36,15 @@
 			word: "Approve",
 			spoken: "Needs approval",
 			colour: "text-warning",
+			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-amber",
 			icon: "triangle-alert",
 			emphasis: "strong",
 		},
 		"needs-reply": {
 			word: "Reply",
 			spoken: "Needs reply",
-			colour: "text-brand-b",
+			colour: "text-status-indigo",
+			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-indigo",
 			icon: "message-square",
 			emphasis: "strong",
 		},
@@ -47,6 +52,7 @@
 			word: "Failed",
 			spoken: "Failed",
 			colour: "text-error",
+			pill: "px-[2px] font-medium text-error",
 			icon: "octagon-alert",
 			emphasis: "strong",
 		},
@@ -58,6 +64,7 @@
 			word: "",
 			spoken: "Working",
 			colour: "text-accent",
+			pill: "",
 			icon: "block-grid",
 			emphasis: "normal",
 		},
@@ -65,6 +72,7 @@
 			word: "Done",
 			spoken: "Done, unread",
 			colour: "text-success",
+			pill: "px-[2px] font-medium text-success",
 			icon: "check",
 			emphasis: "strong",
 		},
@@ -72,6 +80,7 @@
 			word: "",
 			spoken: "",
 			colour: "text-text-dimmer",
+			pill: "",
 			icon: "circle",
 			emphasis: "dim",
 		},
@@ -678,7 +687,7 @@
 			     already leads with it; announcing it twice per row is noise. -->
 			{#if status.word && !shelfRow}
 				<span
-					class="session-item-status inline-flex items-center px-0.5 text-sm font-medium whitespace-nowrap font-brand {status.colour} md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}"
+					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-brand {status.pill} md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}"
 					aria-hidden="true"
 				>
 					{status.word}

@@ -1,8 +1,7 @@
-<!-- Left sidebar with session actions and session list. -->
+<!-- Left sidebar with the session list. New session is a FAB on phones, + in the header on desktop. -->
 <!-- Desktop: collapsible via toggle. Phone: full-screen list route. -->
 
 <script lang="ts">
-	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
@@ -16,9 +15,6 @@
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { navigate, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { createPtyRpc } from "../../transport/ws-rpc-client.js";
-	import { beginCreateTab, failCreateTab, terminalState, togglePanel as toggleTerminalPanel } from "../../stores/terminal.svelte.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
@@ -44,6 +40,8 @@
 		collapseSidebar();
 	}
 
+	const newSessionPending = $derived(sessionCreation.value.phase === "creating");
+
 	function handleNewSession() {
 		sendNewSession();
 	}
@@ -52,25 +50,6 @@
 		const id = prompt("Enter session ID to resume:");
 		if (id?.trim()) {
 			switchToSession(id.trim());
-		}
-	}
-
-	function requestTerminalCreate() {
-		const slug = getCurrentSlug();
-		if (!slug || !beginCreateTab()) return;
-		void createPtyRpc({
-			projectSlug: slug,
-			originId: getBrowserClientId(),
-		}).catch(() => {
-			failCreateTab("Failed to create terminal");
-		});
-	}
-
-	function handleTerminalSidebar() {
-		const wasOpen = terminalState.panelOpen;
-		toggleTerminalPanel();
-		if (!wasOpen && terminalState.tabs.size === 0) {
-			requestTerminalCreate();
 		}
 	}
 
@@ -155,6 +134,14 @@
 					Projects…
 				</MenuItem>
 				<MenuItem
+					title="Resume a session by ID"
+					data-testid="list-overflow-resume"
+					class="min-h-[44px] md:min-h-0"
+					onselect={handleResumeSession}
+				>
+					Resume by ID…
+				</MenuItem>
+				<MenuItem
 					title="Settings"
 					data-testid="list-overflow-settings"
 					class="min-h-[44px] md:min-h-0"
@@ -183,6 +170,22 @@
 				<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
 				<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
 			</a>
+			<span class="flex-1"></span>
+			<Button
+				id="new-session-btn"
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="alt"
+				iconOnly
+				icon="plus"
+				iconSize={18}
+				class="p-1 rounded-md"
+				title="New session"
+				ariaLabel="New session"
+				loading={newSessionPending}
+				onclick={handleNewSession}
+			/>
 			<Button
 				id="sidebar-projects-btn"
 				variant="ghost"
@@ -247,72 +250,7 @@
 	{#if listScreen}<Banners />{/if}
 
 	<!-- Sidebar nav -->
-	<nav id="sidebar-nav" class="flex-1 flex flex-col overflow-hidden">
-		<!-- Action buttons (always visible) -->
-		<div
-			id="session-actions"
-			class="flex flex-col gap-px px-2.5 py-2 shrink-0"
-		>
-			<!--
-				`align="start"` because BASE has no `justify-*` and ALIGN's default
-				`center` would emit one: a plain flex row already starts its items,
-				so `justify-start` is what "unchanged" looks like here.
-				`disabledStyle="undimmed"` matches the as-found `disabled:cursor-default`
-				with no dimming; the default `dim` would have faded the button to 50%.
-			-->
-			<Button
-				id="new-session-btn"
-				variant="ghost"
-				size="content"
-				align="start"
-				tone="secondary"
-				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
-				disabledStyle="undimmed"
-				disabled={sessionCreation.value.phase === "creating"}
-				onclick={handleNewSession}
-			>
-				{#if sessionCreation.value.phase === "creating"}
-					<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-				{:else}
-					<Icon name="plus" size={16} class="shrink-0" />
-				{/if}
-				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
-					>New session</span
-				>
-			</Button>
-			<Button
-				id="resume-session-btn"
-				variant="ghost"
-				size="content"
-				align="start"
-				tone="secondary"
-				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
-				onclick={handleResumeSession}
-			>
-				<Icon name="link" size={16} class="shrink-0" />
-				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
-					>Resume with ID</span
-				>
-			</Button>
-			<Button
-				id="terminal-sidebar-btn"
-				variant="ghost"
-				size="content"
-				align="start"
-				tone="secondary"
-				hoverFill="sidebar"
-				class="session-action-btn gap-2 w-full min-h-[44px] md:min-h-0 py-1.5 px-2.5 rounded-md text-base duration-100 text-left font-brand"
-				onclick={handleTerminalSidebar}
-			>
-				<Icon name="square-terminal" size={16} class="shrink-0" />
-				<span class="overflow-hidden text-ellipsis whitespace-nowrap"
-					>Terminal</span
-				>
-			</Button>
-		</div>
-
+	<nav id="sidebar-nav" class="relative flex-1 flex flex-col overflow-hidden">
 		<!-- Sessions panel -->
 		<div
 			id="sidebar-panel-sessions"
@@ -323,6 +261,24 @@
 				<SessionList onaddproject={() => { projectsOpen = true; }} />
 			</div>
 		</div>
+
+		{#if sessionViewState.compact}
+			<Button
+				id="new-session-btn"
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
+				iconOnly
+				icon="plus"
+				iconSize={20}
+				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
+				title="New session"
+				ariaLabel="New session"
+				loading={newSessionPending}
+				onclick={handleNewSession}
+			/>
+		{/if}
 	</nav>
 
 </div>

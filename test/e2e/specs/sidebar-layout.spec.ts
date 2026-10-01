@@ -1058,7 +1058,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 			page.getByRole("textbox", { name: "Rename project" }),
 		).toBeVisible();
 		await measure("#sidebar-projects-panel");
+		// The first Escape ends the rename, the second closes the panel, which
+		// overlays the list header now that no action rows push it down.
 		await page.keyboard.press("Escape");
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("sidebar-projects-panel")).toHaveCount(0);
 		await page.getByRole("button", { name: "Select sessions" }).click();
 		await expect(
 			page

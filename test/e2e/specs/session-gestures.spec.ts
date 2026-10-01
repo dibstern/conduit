@@ -355,7 +355,9 @@ test.describe("phone", () => {
 		harness,
 	}) => {
 		const { row, title } = await setUp(page, relayUrl, harness);
-		await page.setViewportSize({ width: 393, height: 852 });
+		// Short enough that the docked sheet rises under the first row, so the
+		// finger lifts over an item: the case the touchend guard exists for.
+		await page.setViewportSize({ width: 393, height: 700 });
 		await page.goto(new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const project = (
@@ -384,7 +386,7 @@ test.describe("phone", () => {
 		expect(box).not.toBeNull();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
-		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(700);
 		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
 		if (project)
 			await expect(page.getByTestId("session-sheet-header")).toContainText(

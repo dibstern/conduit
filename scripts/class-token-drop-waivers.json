@@ -291,5 +291,9 @@
 	"src/lib/frontend/components/session/SessionItem.svelte :: stage": "Not a class: the swipe stage conditional moved out of the class attribute into a helper.",
 	"src/lib/frontend/components/session/SessionListFilters.svelte :: active": "Not a class: the active-state conditional moved out of the class attribute into a helper.",
 	"src/lib/frontend/components/session/SessionListFilters.svelte :: chip.value": "Not a class: the filter chip value conditional moved out of the class attribute into a helper.",
-	"src/lib/frontend/components/session/SessionListFilters.svelte :: count": "Not a class: the filter count conditional moved out of the class attribute into a helper."
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: count": "Not a class: the filter count conditional moved out of the class attribute into a helper.",
+	"src/lib/frontend/components/layout/Sidebar.svelte :: duration-100,gap-px,px-2.5,py-1.5,py-2,session-action-btn,text-base,text-ellipsis,whitespace-nowrap": "The New session / Resume with ID / Terminal action rows were removed to match docs/plans/mobile-first-sidebar.html: new session is a FAB on phones and + in the header on desktop, terminal is a session-bar view, resume moved to the phone list menu.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: px-0.5": "Status word padding now comes from the per-tier pill classes (px-[2px] quiet, px-[10px] loud) per the design's .pill rules.",
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: gap-1.5,min-h-8,min-h-[44px],px-2.5,py-1,sessionViewState.compact": "Filter chips and search row resized to the design's literal px (.chip 12.5px 8x11 phone, 11.5px 5x9 desktop); the 44px phone hit area now comes from Button touchTarget instead of a 44px-tall chip.",
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: border-border,gap-1.5,h-8,pl-1,pr-2,rounded-lg": "Search field resized to the design's .sfield (38px/32px tall, 11px radius, border-subtle, 8px gap, 11px side padding)."
 }
