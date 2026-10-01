@@ -190,6 +190,12 @@
 		void tick().then(() => document.getElementById("files-pane-expand")?.focus({ preventScroll: true }));
 	}
 
+	function filesPaneExpandLabel(): string {
+		if (filesPaneForcedExpanded) return "Not enough room to show chat beside Files";
+		if (filesPaneExpanded) return "Restore Files pane";
+		return "Expand Files pane";
+	}
+
 	function handlePanePointerDown(event: PointerEvent) {
 		if (event.button !== 0) return;
 		event.preventDefault();
@@ -747,7 +753,7 @@
 						{/if}
 					{/snippet}
 					{#snippet paneActions()}
-						<Button id="files-pane-expand" variant={uiState.fileViewerOpen ? "ghost" : "toolbar"} size="content" tone={uiState.fileViewerOpen ? "muted" : "dimmer"} hoverFill="overlay" class="h-6 w-6 shrink-0 rounded-md" iconOnly icon={filesPaneExpanded ? "minimize" : "maximize"} iconSize={uiState.fileViewerOpen ? 16 : 14} ariaLabel={filesPaneForcedExpanded ? "Not enough room to show chat beside Files" : filesPaneExpanded ? "Restore Files pane" : "Expand Files pane"} title={filesPaneForcedExpanded ? "Not enough room to show chat beside Files" : filesPaneExpanded ? "Restore Files pane" : "Expand Files pane"} aria-pressed={filesPaneExpanded} disabled={filesPaneForcedExpanded} onclick={toggleFilesPaneExpanded} />
+						<Button id="files-pane-expand" variant={uiState.fileViewerOpen ? "ghost" : "toolbar"} size="content" tone={uiState.fileViewerOpen ? "muted" : "dimmer"} hoverFill="overlay" class="h-6 w-6 shrink-0 rounded-md" iconOnly icon={filesPaneExpanded ? "minimize" : "maximize"} iconSize={uiState.fileViewerOpen ? 16 : 14} ariaLabel={filesPaneExpandLabel()} title={filesPaneExpandLabel()} aria-pressed={filesPaneExpanded} disabled={filesPaneForcedExpanded} onclick={toggleFilesPaneExpanded} />
 						<Button variant={uiState.fileViewerOpen ? "ghost" : "toolbar"} size="content" tone={uiState.fileViewerOpen ? "muted" : "dimmer"} hoverFill="overlay" class="h-6 w-6 shrink-0 rounded-md" iconOnly icon="x" iconSize={uiState.fileViewerOpen ? 16 : 14} ariaLabel="Close Files pane" title="Close Files pane" onclick={closeFilesPane} />
 					{/snippet}
 					{#if !filesPaneExpanded}

@@ -31,29 +31,36 @@
 		) {
 			record = record["raw"] as Record<string, unknown>;
 		}
-		return {
+		let subagentType = "general";
+		if (typeof record["subagentType"] === "string") {
+			subagentType = record["subagentType"];
+		} else if (typeof record["subagent_type"] === "string") {
+			subagentType = record["subagent_type"];
+		}
+		let taskId: string | undefined;
+		if (typeof record["taskId"] === "string") taskId = record["taskId"];
+		else if (typeof record["task_id"] === "string") taskId = record["task_id"];
+		const task = {
 			description:
 				typeof record["description"] === "string"
 					? record["description"]
 					: "",
-			subagentType:
-				typeof record["subagentType"] === "string"
-					? record["subagentType"]
-					: typeof record["subagent_type"] === "string"
-						? record["subagent_type"]
-						: "general",
+			subagentType,
 			prompt: typeof record["prompt"] === "string" ? record["prompt"] : "",
-			...(typeof record["taskId"] === "string"
-				? { taskId: record["taskId"] }
-				: typeof record["task_id"] === "string"
-					? { taskId: record["task_id"] }
-					: {}),
 		};
+		if (taskId !== undefined) return { ...task, taskId };
+		return task;
 	}
 
 	const taskInput = $derived(readTaskInput(message.input));
 
 	const subagentSessionId = $derived(findSubagentSessionId(message));
+	const glowClass = $derived.by(() => {
+		if (message.status === "error") return "glow-tool-error";
+		if (message.status === "completed") return "glow-brand-b";
+		if (message.status === "running") return "glow-tool-running";
+		return "";
+	});
 
 	const agentLabel = $derived(
 		taskInput
@@ -111,7 +118,7 @@
 	});
 </script>
 
-<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
+<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {glowClass}">
 	{#if message.status === 'running'}
 		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 	{/if}

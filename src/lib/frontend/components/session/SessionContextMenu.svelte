@@ -43,13 +43,13 @@
 	let selected = false;
 	let focusScheduled = false;
 	const status = $derived(ATTENTION_DISPLAY[sessionAttention(session)]);
-	const activity = $derived(
-		session.pinnedAt == null && session.settledAt != null
-			? formatTimeAgo(session.settledAt)
-			: session.pinnedAt == null && isSessionSnoozed(session, now)
-				? formatSnoozeTime(session.snoozedUntil ?? null, now)
-				: formatTimeAgo(session.updatedAt),
-	);
+	const activity = $derived.by(() => {
+		if (session.pinnedAt == null && session.settledAt != null)
+			return formatTimeAgo(session.settledAt);
+		if (session.pinnedAt == null && isSessionSnoozed(session, now))
+			return formatSnoozeTime(session.snoozedUntil ?? null, now);
+		return formatTimeAgo(session.updatedAt);
+	});
 	const verbs = $derived([
 		...getSessionVerbs(session, now, host, presentation === "sheet" ? "sheet" : "center"),
 		...(extras.length > 0 ? [{ divider: true } as const, ...extras] : []),

@@ -41,11 +41,15 @@ export async function runBulkChange(
 	);
 	oncomplete();
 	const count = changed.length;
-	const verb = kind === "settle" ? "Settled" : pinned ? "Pinned" : "Unpinned";
+	let verb = "Unpinned";
+	if (kind === "settle") verb = "Settled";
+	else if (pinned) verb = "Pinned";
+	const completedSessionLabel = count === 1 ? "session" : "sessions";
+	const inputSessionLabel = input.length === 1 ? "session" : "sessions";
 	const message =
 		(count === input.length
-			? `${verb} ${count} ${count === 1 ? "session" : "sessions"}`
-			: `${verb} ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`) +
+			? `${verb} ${count} ${completedSessionLabel}`
+			: `${verb} ${count} of ${input.length} ${inputSessionLabel}`) +
 		(skipped ? `, ${skipped} skipped` : "");
 	showToast(message, {
 		duration: 5000,
@@ -99,13 +103,20 @@ export async function runBulkSnooze(
 	);
 	oncomplete();
 	const count = changed.length;
+	const completedSessionLabel = count === 1 ? "session" : "sessions";
+	const inputSessionLabel = input.length === 1 ? "session" : "sessions";
+	let untilMessage = "";
+	if (count > 0) {
+		untilMessage =
+			until === null
+				? " until something happens"
+				: ` until ${formatSnoozeTime(until, now)}`;
+	}
 	const message =
 		(count === input.length
-			? `Snoozed ${count} ${count === 1 ? "session" : "sessions"}`
-			: `Snoozed ${count} of ${input.length} ${input.length === 1 ? "session" : "sessions"}`) +
-		(count > 0
-			? ` until ${until === null ? "something happens" : formatSnoozeTime(until, now)}`
-			: "") +
+			? `Snoozed ${count} ${completedSessionLabel}`
+			: `Snoozed ${count} of ${input.length} ${inputSessionLabel}`) +
+		untilMessage +
 		(skipped ? `, ${skipped} skipped` : "");
 	showToast(message, {
 		duration: 5000,

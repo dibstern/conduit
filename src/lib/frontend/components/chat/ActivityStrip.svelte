@@ -68,6 +68,13 @@
 		const next = e.currentTarget.parentElement?.children[cursor];
 		if (next instanceof HTMLElement) next.focus();
 	}
+
+	function partWidthClass(part: ActivityPart, index: number): string {
+		if (part.type === "system") return "compaction-seam shrink-0 w-0.5 mx-px";
+		if (active === index || emphasis?.has(index)) return "min-w-0.5 opacity-100";
+		if (emphasis) return "min-w-0.5 opacity-20 hover:opacity-100";
+		return "min-w-0.5 opacity-60 hover:opacity-100";
+	}
 </script>
 
 <div
@@ -80,9 +87,7 @@
 	{#each segment.activity as part, i (part.uuid)}
 		<button
 			type="button"
-			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part)} {part.type === 'system'
-				? 'compaction-seam shrink-0 w-0.5 mx-px'
-				: `min-w-0.5 ${active === i || emphasis?.has(i) ? 'opacity-100' : emphasis ? 'opacity-20 hover:opacity-100' : 'opacity-60 hover:opacity-100'}`}"
+			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part)} {partWidthClass(part, i)}"
 			style={part.type === "system" ? undefined : `flex-grow: ${weights[i] ?? 1}`}
 			title={title(part, i)}
 			aria-label={title(part, i)}

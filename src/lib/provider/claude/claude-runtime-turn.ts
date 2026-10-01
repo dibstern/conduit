@@ -151,8 +151,11 @@ export function sdkResultToTurnResult(
 			: typeof resultField === "string" && resultField.length > 0
 				? resultField
 				: "Unknown error";
+	let status: TurnResult["status"] = "error";
+	if (isSuccess) status = "completed";
+	else if (isInterrupted) status = "interrupted";
 	return {
-		status: isSuccess ? "completed" : isInterrupted ? "interrupted" : "error",
+		status,
 		cost: result.total_cost_usd ?? 0,
 		tokens: {
 			input: result.usage?.input_tokens ?? 0,

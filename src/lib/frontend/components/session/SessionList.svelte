@@ -341,7 +341,9 @@
 			if (rows.length === 0) return;
 			const current = rows.indexOf(document.activeElement as HTMLAnchorElement);
 			const active = rows.findIndex((row) => row.dataset["sessionId"] === sessionState.currentId);
-			const next = current < 0 ? (active < 0 ? 0 : active) : Math.max(0, Math.min(rows.length - 1, current + (event.key === "j" ? 1 : -1)));
+			let next: number;
+			if (current < 0) next = active < 0 ? 0 : active;
+			else next = Math.max(0, Math.min(rows.length - 1, current + (event.key === "j" ? 1 : -1)));
 			event.preventDefault();
 			rows[next]?.focus();
 			rows[next]?.scrollIntoView({ block: "nearest" });

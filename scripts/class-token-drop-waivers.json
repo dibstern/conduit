@@ -285,5 +285,11 @@
 	"test/unit/stores/session-delete-sidebar.test.ts :: session_list": "Not a class. This is the retired WebSocket message name in a rewritten test.",
 	"test/unit/stores/session-store-invariants.test.ts :: p": "Not a class. This was a project slug in a removed ListSessions fixture.",
 	"test/integration/flows/session-lifecycle.integration.ts :: NoMatchWillEverExist-zzz-integration": "Not a class. This was the query in a retired ListSessions RPC integration test.",
-	"test/unit/stores/session-store-invariants.test.ts :: session_list": "Not a class. This was the retired WebSocket message name in a rewritten test."
+	"test/unit/stores/session-store-invariants.test.ts :: session_list": "Not a class. This was the retired WebSocket message name in a rewritten test.",
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: copyState": "Not a class: the copy-state conditional moved out of the class attribute into a derived class recipe.",
+	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: message.status": "Not a class: the status conditional moved out of the class attribute into a derived class recipe.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: stage": "Not a class: the swipe stage conditional moved out of the class attribute into a helper.",
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: active": "Not a class: the active-state conditional moved out of the class attribute into a helper.",
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: chip.value": "Not a class: the filter chip value conditional moved out of the class attribute into a helper.",
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: count": "Not a class: the filter count conditional moved out of the class attribute into a helper."
 }

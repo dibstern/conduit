@@ -325,9 +325,9 @@ export function partLabel(part: ActivityPart): string {
 		case "tool":
 			return `${toolVerb(part)} ${toolSubject(part)}`.trim();
 		case "thinking":
-			return part.done
-				? `Thought${part.duration ? ` for ${fmtDuration(part.duration)}` : ""}`
-				: `${thinkingVerb(part)}…`;
+			if (part.done)
+				return `Thought${part.duration ? ` for ${fmtDuration(part.duration)}` : ""}`;
+			return `${thinkingVerb(part)}…`;
 		case "assistant":
 			return firstLine(part.rawText);
 		case "system":
@@ -452,7 +452,8 @@ export function turnStats(segment: Segment): TurnStats {
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {
-	return n === 0 ? "" : `${n} ${n === 1 ? one : many}`;
+	if (n === 0) return "";
+	return `${n} ${n === 1 ? one : many}`;
 }
 
 /**

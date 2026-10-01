@@ -753,14 +753,14 @@ class FindNamespace {
 		query: string,
 		options?: { dirs?: boolean },
 	): Promise<readonly unknown[]> {
+		let dirs: "true" | "false" | undefined;
+		if (options?.dirs != null) dirs = options.dirs ? "true" : "false";
 		return this.api.sdk("find.files", decodeOpenCodeFindFilesResponse, () =>
 			call(
 				this.api._sdk.find.files({
 					query: {
 						query,
-						...(options?.dirs != null
-							? { dirs: options.dirs ? "true" : "false" }
-							: {}),
+						...(dirs === undefined ? {} : { dirs }),
 					},
 				}),
 			),

@@ -42,6 +42,16 @@
 	type CopyState = "idle" | "primed" | "done";
 	let copyState: CopyState = $state("idle");
 	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+	const copyButtonClass = $derived.by(() => {
+		if (copyState === "done") return "border-success/30 bg-success/10 text-success";
+		if (copyState === "primed") return "border-brand-b/30 bg-brand-b/10 text-brand-b";
+		return "border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary";
+	});
+	const copyButtonLabel = $derived.by(() => {
+		if (copyState === "done") return "Copied!";
+		if (copyState === "primed") return "Click to confirm copy";
+		return "Copy message";
+	});
 
 	// ─── Mermaid init (once globally) ──────────────────────────────────────────
 
@@ -405,9 +415,9 @@
 					iconOnly
 					icon={copyState === 'done' ? 'check' : 'copy'}
 					iconSize={14}
-					class="w-7 h-7 rounded-md border backdrop-blur-sm {copyState === 'done' ? 'border-success/30 bg-success/10 text-success' : copyState === 'primed' ? 'border-brand-b/30 bg-brand-b/10 text-brand-b' : 'border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary'}"
-					title={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
-					ariaLabel={copyState === 'done' ? 'Copied!' : copyState === 'primed' ? 'Click to confirm copy' : 'Copy message'}
+					class="w-7 h-7 rounded-md border backdrop-blur-sm {copyButtonClass}"
+					title={copyButtonLabel}
+					ariaLabel={copyButtonLabel}
 					onclick={handleClick}
 				/>
 				{#if forkMessageId}

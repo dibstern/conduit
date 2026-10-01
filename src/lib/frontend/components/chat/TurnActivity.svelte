@@ -66,8 +66,13 @@
 
 	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */
 	function chapterTiming(c: SkillChapter): string {
-		const at = c.offset === undefined ? undefined : c.offset < 1000 ? "at start" : `${fmtDuration(c.offset)} in`;
-		const span = c.running ? "running" : c.duration === undefined ? undefined : fmtDuration(c.duration);
+		let at: string | undefined;
+		if (c.offset !== undefined) {
+			at = c.offset < 1000 ? "at start" : `${fmtDuration(c.offset)} in`;
+		}
+		let span: string | undefined;
+		if (c.running) span = "running";
+		else if (c.duration !== undefined) span = fmtDuration(c.duration);
 		return [at, span].filter(Boolean).join(" · ");
 	}
 

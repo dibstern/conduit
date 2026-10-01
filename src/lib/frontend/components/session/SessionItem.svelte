@@ -257,14 +257,21 @@
 	// The open row is never faded or greyed, whatever its tier: it is the one
 	// row you have to find at a glance. Its weight still follows the tier, so
 	// being open never reads as unread.
-	const titleClass = $derived(
-		shelfRow
-			? `text-base font-normal ${active ? "text-text" : "text-text-secondary"}`
-			: `text-lg ${active && status.emphasis !== "strong" ? "text-text font-normal" : emphasis.title}`,
-	);
-	const rowOpacityClass = $derived(
-		active ? "" : shelfRow ? "opacity-50" : woken ? "" : emphasis.row,
-	);
+	const titleClass = $derived.by(() => {
+		if (shelfRow)
+			return `text-base font-normal ${active ? "text-text" : "text-text-secondary"}`;
+		return `text-lg ${active && status.emphasis !== "strong" ? "text-text font-normal" : emphasis.title}`;
+	});
+	const rowOpacityClass = $derived.by(() => {
+		if (active) return "";
+		if (shelfRow) return "opacity-50";
+		if (woken) return "";
+		return emphasis.row;
+	});
+	const selectionControlClass = $derived.by(() => {
+		if (active) return selected ? "text-brand-a" : "text-text-muted";
+		return selected ? "text-accent" : "text-text-dimmer";
+	});
 
 	// Status first, per the design reference. A screen reader user scanning the
 	// list hears what a row wants before its title. This overrides the row's own
@@ -459,6 +466,22 @@
 		e.stopPropagation();
 		startRename();
 	}
+
+	function swipeVerb(direction: "settle" | "snooze"): string {
+		if (direction === "settle") return settled || actions.settled ? "Un-settle" : "Settle";
+		return snoozed || actions.snoozed ? "Unsnooze" : "Snooze";
+	}
+
+	function swipeToneClass(direction: "settle" | "snooze", stage: string): string {
+		if (stage === "commit") return direction === "settle" ? "bg-success text-bg" : "bg-accent text-bg";
+		return direction === "settle" ? "bg-success/15 text-success" : "bg-accent/15 text-accent";
+	}
+
+	function swipeIcon(verb: string): "check" | "moon" | "undo" {
+		if (verb === "Settle") return "check";
+		if (verb === "Snooze") return "moon";
+		return "undo";
+	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -466,7 +489,7 @@
 <div class="relative overflow-hidden rounded-panel session-swipe-wrapper">
 	{#if (dragging && swipeStage !== "none" && swipeAllowed) || heldDirection}
 		{@const direction = heldDirection ?? swipeDirection}
-		{@const verb = direction === "settle" ? (settled || actions.settled ? "Un-settle" : "Settle") : (snoozed || actions.snoozed ? "Unsnooze" : "Snooze")}
+		{@const verb = swipeVerb(direction)}
 		{@const stage = heldDirection ? "reveal" : swipeStage}
 		{#if direction === "settle" && stage === "reveal" && canMarkRead}
 			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
@@ -512,10 +535,10 @@
 			data-testid="session-swipe-action"
 			data-stage={stage}
 			ariaLabel="{verb} {displayTitle}"
-			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-brand text-sm font-medium {stage === 'commit' ? (direction === 'settle' ? 'bg-success text-bg' : 'bg-accent text-bg') : (direction === 'settle' ? 'bg-success/15 text-success' : 'bg-accent/15 text-accent')}"
+			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-brand text-sm font-medium {swipeToneClass(direction, stage)}"
 			onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction(heldDirection, false); }}
 		>
-			<Icon name={verb === "Settle" ? "check" : verb === "Snooze" ? "moon" : "undo"} size={16} />
+			<Icon name={swipeIcon(verb)} size={16} />
 			{stage === "commit" ? `Release to ${verb.toLowerCase()}` : verb}
 		</Button>
 		{/if}
@@ -559,13 +582,7 @@
 			role="checkbox"
 			aria-checked={selected}
 			ariaLabel="Select {displayTitle}"
-			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] min-h-[44px] md:min-h-0 rounded duration-100 {active
-				? selected
-					? 'text-brand-a'
-					: 'text-text-muted'
-				: selected
-					? 'text-accent'
-					: 'text-text-dimmer'}"
+			class="col-start-1 row-start-1 row-span-2 self-stretch shrink-0 w-[44px] min-h-[44px] md:min-h-0 rounded duration-100 {selectionControlClass}"
 			onclick={handleSelectionToggle}
 		>
 			<Icon name={selected ? "circle-check" : "circle"} size={18} />

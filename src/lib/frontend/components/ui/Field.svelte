@@ -29,7 +29,11 @@
 	const inputId = $derived(id ?? uid);
 	const hintId = $derived(`${inputId}-hint`);
 	const errorId = $derived(`${inputId}-error`);
-	const describedBy = $derived(error ? errorId : hint ? hintId : undefined);
+	const describedBy = $derived.by(() => {
+		if (error) return errorId;
+		if (hint) return hintId;
+		return undefined;
+	});
 	const invalid = $derived(Boolean(error));
 
 	// Getters keep the wiring reactive across the context boundary.

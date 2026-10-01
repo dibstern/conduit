@@ -137,6 +137,12 @@
 		message.status === "completed" && !message.isError && questionAnswer !== null,
 	);
 	const isUnanswered = $derived(message.status === "completed" && !isAnswered);
+	const glowClass = $derived.by(() => {
+		if (message.status === "error") return "glow-tool-error";
+		if (isAnswered) return "glow-brand-b";
+		if (message.status === "running") return "glow-tool-running";
+		return "";
+	});
 
 	const statusIconName = $derived.by(() => {
 		if (isUnanswered) return "minus";
@@ -165,7 +171,7 @@
 	<QuestionCard request={questionRequest} inline synthetic={pendingQuestionRequest === null} />
 {:else}
 	<!-- Completed/historical question: show read-only summary -->
-	<div class="{isAnswered ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : isAnswered ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
+	<div class="{isAnswered ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {glowClass}">
 		{#if message.status === 'running'}
 			<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 		{/if}

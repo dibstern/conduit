@@ -385,8 +385,11 @@ export function getAvailableInstances(): InstanceOption[] {
 			status: inst.status,
 		});
 	}
-	const rank = (i: InstanceOption) =>
-		i.id === "claude" ? 0 : i.id === "opencode" ? 1 : 2;
+	const rank = (i: InstanceOption) => {
+		if (i.id === "claude") return 0;
+		if (i.id === "opencode") return 1;
+		return 2;
+	};
 	return [...byId.values()].sort(
 		(a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
 	);

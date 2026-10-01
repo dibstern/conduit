@@ -27,6 +27,12 @@
 	let expanded = $state(false);
 	let loadingFullContent = $state(false);
 	let loadingTimeout: ReturnType<typeof setTimeout> | undefined;
+	const glowClass = $derived.by(() => {
+		if (message.status === "error") return "glow-tool-error";
+		if (message.status === "completed") return "glow-brand-b";
+		if (message.status === "running") return "glow-tool-running";
+		return "";
+	});
 
 	function formatKB(length: number): string {
 		return `${(length / 1024).toFixed(1)} KB`;
@@ -136,7 +142,7 @@
 	});
 </script>
 
-<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {message.status === 'error' ? 'glow-tool-error' : message.status === 'completed' ? 'glow-brand-b' : message.status === 'running' ? 'glow-tool-running' : ''}">
+<div class="{message.status === 'completed' ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {glowClass}">
 	{#if message.status === 'running'}
 		<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
 	{/if}

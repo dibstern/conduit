@@ -9,6 +9,11 @@
 		if (percent >= 50) return "bg-warning";
 		return "bg-brand-b";
 	});
+	const contextLabelColor = $derived.by(() => {
+		if (contextFillColor === "bg-brand-a") return "text-brand-a";
+		if (contextFillColor === "bg-warning") return "text-warning";
+		return "text-brand-b";
+	});
 </script>
 
 <div
@@ -16,7 +21,7 @@
 	class="flex items-center gap-2 pb-1.5 px-2"
 >
 	<span
-		class="context-mini-label font-mono text-xs font-semibold whitespace-nowrap min-w-6 {contextFillColor === 'bg-brand-a' ? 'text-brand-a' : contextFillColor === 'bg-warning' ? 'text-warning' : 'text-brand-b'}"
+		class="context-mini-label font-mono text-xs font-semibold whitespace-nowrap min-w-6 {contextLabelColor}"
 		id="context-mini-label"
 	>
 		{percent}%

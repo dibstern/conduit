@@ -141,7 +141,9 @@
 	// ─── Pure helpers ───────────────────────────────────────────────────────────
 
 	function driverLabel(id: string): string {
-		return id === "claude" ? "Claude" : id === "opencode" ? "OpenCode" : id;
+		if (id === "claude") return "Claude";
+		if (id === "opencode") return "OpenCode";
+		return id;
 	}
 
 	/** Strip date suffixes like -20250514 from model names. */

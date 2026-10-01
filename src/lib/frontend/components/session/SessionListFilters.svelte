@@ -23,6 +23,18 @@
 		{ value: "running", label: "Running" },
 		{ value: "unread", label: "Unread" },
 	];
+
+	function filterTone(needsAttention: boolean, active: boolean): "accent" | "default" | "secondary" {
+		if (needsAttention) return "accent";
+		if (active) return "default";
+		return "secondary";
+	}
+
+	function filterSurfaceClass(needsAttention: boolean, active: boolean): string {
+		if (needsAttention) return "border-accent/40 bg-accent/10";
+		if (active) return "border-border bg-bg-alt";
+		return "border-border-subtle";
+	}
 </script>
 
 	<div id="session-search" class="shrink-0 px-2.5 py-1 pb-1.5">
@@ -50,11 +62,12 @@
 				{#each filterChips as chip (chip.value)}
 					{@const active = statusFilter === chip.value}
 					{@const count = live.filter((session) => sessionMatchesStatus(session, chip.value)).length}
+					{@const needsAttention = chip.value === "needs-you" && count > 0}
 					<Button
 						variant="ghost"
 						size="content"
-						tone={chip.value === "needs-you" && count > 0 ? "accent" : active ? "default" : "secondary"}
-						class="shrink-0 gap-1.5 rounded-full border px-2.5 text-xs font-brand {sessionViewState.compact ? 'min-h-[44px]' : 'min-h-8'} {chip.value === 'needs-you' && count > 0 ? 'border-accent/40 bg-accent/10' : active ? 'border-border bg-bg-alt' : 'border-border-subtle'}"
+						tone={filterTone(needsAttention, active)}
+						class="shrink-0 gap-1.5 rounded-full border px-2.5 text-xs font-brand {sessionViewState.compact ? 'min-h-[44px]' : 'min-h-8'} {filterSurfaceClass(needsAttention, active)}"
 						aria-pressed={active}
 						data-testid={`session-filter-chip-${chip.value}`}
 						onclick={() => setSessionStatusFilter(active ? null : chip.value)}

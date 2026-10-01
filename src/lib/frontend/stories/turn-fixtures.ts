@@ -59,13 +59,16 @@ function tool(
 	opts: { ms?: number; error?: boolean; running?: boolean } = {},
 ): ToolMessage {
 	const id = uuid();
+	let status: ToolMessage["status"] = "completed";
+	if (opts.running) status = "running";
+	else if (opts.error) status = "error";
 	return {
 		type: "tool",
 		uuid: id,
 		id,
 		name,
 		input,
-		status: opts.running ? "running" : opts.error ? "error" : "completed",
+		status,
 		...(result !== undefined ? { result } : {}),
 		isError: opts.error ?? false,
 		createdAt: stamp(opts.ms ?? 900),

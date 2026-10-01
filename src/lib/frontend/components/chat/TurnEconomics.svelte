@@ -20,9 +20,12 @@
 	}: { economics: TurnEconomics; showDuration?: boolean } = $props();
 
 	const ctx = $derived(economics.context);
-	const gaugeClass = $derived(
-		ctx === undefined ? "" : ctx.pct >= 80 ? "bg-error" : ctx.pct >= 60 ? "bg-thinking" : "bg-brand-b",
-	);
+	const gaugeClass = $derived.by(() => {
+		if (ctx === undefined) return "";
+		if (ctx.pct >= 80) return "bg-error";
+		if (ctx.pct >= 60) return "bg-thinking";
+		return "bg-brand-b";
+	});
 </script>
 
 <!-- .turn-meta / .turn-duration are E2E hooks: the turn's bill wherever it lands,
