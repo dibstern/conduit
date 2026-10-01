@@ -66,22 +66,25 @@ async function lift(row: Locator) {
 	});
 }
 
-async function longPress(row: Locator) {
-	await row.evaluate(async (element) => {
-		const box = element.getBoundingClientRect();
-		const init = {
-			pointerType: "touch",
-			pointerId: 9,
-			isPrimary: true,
-			bubbles: true,
-			clientX: box.left + box.width / 2,
-			clientY: box.top + box.height / 2,
-		};
-		element.dispatchEvent(new PointerEvent("pointerdown", init));
-		await new Promise((resolve) => setTimeout(resolve, 700));
-		element.dispatchEvent(new PointerEvent("pointerup", init));
-		(element as HTMLElement).click();
+// A real touch through the browser's input pipeline: the sheet opens while the
+// finger is down, so its release must not reach the sheet. Synthetic events
+// skip the mousedown and click a browser derives from that release.
+async function longPress(page: Page, row: Locator) {
+	const box = await row.boundingBox();
+	if (!box) throw new Error("row is not rendered");
+	const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send("Input.dispatchTouchEvent", {
+		type: "touchStart",
+		touchPoints: [point],
 	});
+	await page.waitForTimeout(700);
+	await cdp.send("Input.dispatchTouchEvent", {
+		type: "touchEnd",
+		touchPoints: [],
+	});
+	await cdp.detach();
+	return point;
 }
 
 // Tap the part of a held action exposed by the translated row.
@@ -334,7 +337,7 @@ test.describe("phone", () => {
 		await expect(page.getByTestId("snooze-option-1h")).toHaveCount(0);
 
 		// Long press opens the bottom sheet and does not navigate.
-		await longPress(row);
+		await longPress(page, row);
 		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
 		await expect(page.getByTestId("session-action-sheet")).toBeVisible();
 		await expect(page).toHaveURL(onList);
@@ -361,10 +364,21 @@ test.describe("phone", () => {
 			.split("·")[0]
 			?.trim();
 
-		await longPress(row);
+		const finger = await longPress(page, row);
 		const sheet = page.getByTestId("session-action-sheet");
 		await expect(sheet).toBeVisible();
 		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
+		// The finger lifted over an item, which must stay untouched.
+		const under = await page.evaluate(
+			({ x, y }) =>
+				document
+					.elementFromPoint(x, y)
+					?.closest('[role^="menuitem"]')
+					?.getAttribute("data-testid") ?? null,
+			finger,
+		);
+		expect(under).toMatch(/^session-ctx-/);
+		await expect(sheet.locator(":focus")).toHaveCount(0);
 		const panel = sheet;
 		const box = await panel.boundingBox();
 		expect(box).not.toBeNull();
@@ -392,7 +406,7 @@ test.describe("phone", () => {
 		await expect(sheet).toHaveCount(0);
 		await expect(row.getByTitle("Pinned session")).toBeVisible();
 
-		await longPress(row);
+		await longPress(page, row);
 		await expect(sheet).toBeVisible();
 		await page
 			.getByTestId("menu-sheet-scrim")
@@ -463,7 +477,7 @@ test.describe("phone", () => {
 		await gotoRelay(page, new URL("/", relayUrl).toString());
 		const row = page.locator("#session-list .session-item").first();
 		await expect(row).toBeVisible();
-		await longPress(row);
+		await longPress(page, row);
 		const listMenu = page.getByTestId("session-action-sheet");
 		const listVerbs = await listMenu
 			.locator(

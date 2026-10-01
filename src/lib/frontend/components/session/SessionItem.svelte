@@ -212,6 +212,10 @@
 	let suppressClick = false;
 	let suppressTimer: ReturnType<typeof setTimeout> | undefined;
 	let suppressNativeContextMenu = false;
+	// The sheet opens under a finger that is still down. Its release would
+	// otherwise reach the sheet as mousedown and click at the lift point,
+	// focusing or running whichever item is now under it.
+	let consumeTouchEnd = false;
 
 	// Combined rename state: local (double-click) OR external (context menu)
 	const isRenaming = $derived(localRenaming || renamingProp);
@@ -381,13 +385,17 @@
 				() => { suppressNativeContextMenu = false; },
 				NATIVE_CONTEXT_MENU_SUPPRESSION_MS,
 			);
-			armClickSuppression();
-			if (rowEl) oncontextmenuProp?.(session, rowEl, "touch");
-			stopPointer();
+			openFromLongPress();
 		}, LONG_PRESS_DELAY_MS);
 		window.addEventListener("pointermove", movePointer);
 		window.addEventListener("pointerup", finishPointer);
 		window.addEventListener("pointercancel", cancelPointer);
+	}
+
+	function openFromLongPress() {
+		consumeTouchEnd = true;
+		if (rowEl) oncontextmenuProp?.(session, rowEl, "touch");
+		stopPointer();
 	}
 
 	function movePointer(event: PointerEvent) {
@@ -557,9 +565,14 @@
 		if (selectMode || !oncontextmenuProp) return;
 		event.preventDefault();
 		if (suppressNativeContextMenu) { suppressNativeContextMenu = false; return; }
-		if (activePointer !== null) { stopPointer(); armClickSuppression(); }
+		if (activePointer !== null) { openFromLongPress(); return; }
 		oncontextmenuProp(session, event.currentTarget);
 	}}
+	ontouchend={(event) => {
+		if (consumeTouchEnd) event.preventDefault();
+		consumeTouchEnd = false;
+	}}
+	ontouchcancel={() => { consumeTouchEnd = false; }}
 >
 	<!-- Selection circle (select mode) -->
 	{#if selectMode}

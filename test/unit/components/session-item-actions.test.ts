@@ -292,7 +292,10 @@ describe("SessionItem row actions", () => {
 		vi.advanceTimersByTime(500);
 		await fireEvent.contextMenu(row);
 		expect(oncontextmenu).toHaveBeenCalledTimes(1);
-		await fireEvent.click(row);
+		// The sheet is now under the finger. Cancelling the release stops the
+		// browser's mousedown and click, so neither row nor sheet sees them.
+		expect(await fireEvent.touchEnd(row)).toBe(false);
+		expect(await fireEvent.touchEnd(row)).toBe(true);
 		expect(onswitchsession).not.toHaveBeenCalled();
 	});
 
@@ -309,6 +312,8 @@ describe("SessionItem row actions", () => {
 		await fireEvent.contextMenu(row);
 		vi.advanceTimersByTime(200);
 		expect(oncontextmenu).toHaveBeenCalledTimes(1);
+		expect(oncontextmenu).toHaveBeenCalledWith(expect.anything(), row, "touch");
+		expect(await fireEvent.touchEnd(row)).toBe(false);
 	});
 
 	it("renders stateful desktop verbs with menu reasons", async () => {
