@@ -13,8 +13,7 @@ async function navigateToStory(
 	storyId: string,
 ): Promise<void> {
 	await page.goto(STORY_URL(storyId), { waitUntil: "domcontentloaded" });
-	await page.waitForTimeout(800);
-	await page.waitForSelector(".todo-overlay", { timeout: 5_000 });
+	await expect(page.locator(".todo-overlay")).toBeVisible();
 }
 
 // ─── TodoHeader ──────────────────────────────────────────────────────────────

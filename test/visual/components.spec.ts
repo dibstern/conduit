@@ -582,7 +582,13 @@ if (stories.length > 0) {
 						await page.addStyleTag({
 							content: `#storybook-root { min-height: ${sizeNorm.minHeight}px; }`,
 						});
-						await page.waitForTimeout(50);
+						// Let the injected style apply before capture; stories may override it.
+						await page.evaluate(
+							() =>
+								new Promise<void>((resolve) =>
+									requestAnimationFrame(() => resolve()),
+								),
+						);
 					}
 
 					// Per-story tolerances are a per-CALL option, which beats the
@@ -631,7 +637,13 @@ if (stories.length > 0) {
 						await page.addStyleTag({
 							content: "#storybook-root { padding: 8px; }",
 						});
-						await page.waitForTimeout(50);
+						// Let the injected style apply before capture; stories may override it.
+						await page.evaluate(
+							() =>
+								new Promise<void>((resolve) =>
+									requestAnimationFrame(() => resolve()),
+								),
+						);
 					}
 
 					if (!usesViewportCapture) {

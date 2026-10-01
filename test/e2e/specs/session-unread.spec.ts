@@ -777,7 +777,7 @@ async function droppedReport(
 		await expect(dot(B, ctx.sessionId)).toHaveCount(0);
 		await proxy.reconnect();
 		await expect(dot(A, ctx.sessionId)).toHaveCount(0, { timeout: 20_000 });
-		// A stray flush would follow the reconnect's session list.
+		// Negative observation window: a stray flush would follow the reconnect's session list.
 		await A.waitForTimeout(1_000);
 		expect(proxy.reports()).toBe(3);
 		await ctx.report.record(

@@ -20,8 +20,7 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--closed"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".model-btn");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".model-btn")).toBeVisible();
 
 		const label = page.locator(".model-btn .model-label");
 		await expect(label).toBeVisible();
@@ -32,8 +31,7 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--closed"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".model-btn");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".model-btn")).toBeVisible();
 
 		// Dropdown should not be visible initially
 		await expect(page.locator(".model-dropdown")).toBeHidden();
@@ -48,8 +46,7 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--open"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".model-dropdown");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".model-dropdown")).toBeVisible();
 
 		// Should show provider header
 		const providerHeader = page.locator(".model-provider-header");
@@ -71,8 +68,7 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--open"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".model-dropdown");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".model-dropdown")).toBeVisible();
 
 		// Dropdown should be open (play function opens it)
 		await expect(page.locator(".model-dropdown")).toBeVisible();
@@ -86,8 +82,7 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--open"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".model-dropdown");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".model-dropdown")).toBeVisible();
 
 		await expect(page.locator(".model-dropdown")).toBeVisible();
 
@@ -105,8 +100,7 @@ test.describe("ModelVariant", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector('[data-testid="variant-badge"]');
-		await page.waitForTimeout(200);
+		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
 
 		const badge = page.locator('[data-testid="variant-badge"]');
 		await expect(badge).toBeVisible();
@@ -118,8 +112,7 @@ test.describe("ModelVariant", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector('[data-testid="variant-badge"]');
-		await page.waitForTimeout(200);
+		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
 
 		// Dropdown should not be visible initially
 		await expect(page.locator('[data-testid="variant-dropdown"]')).toBeHidden();
@@ -135,8 +128,7 @@ test.describe("ModelVariant", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector('[data-testid="variant-badge"]');
-		await page.waitForTimeout(200);
+		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
 
 		// Open the variant dropdown
 		await page.locator('[data-testid="variant-badge"]').click();
@@ -153,8 +145,7 @@ test.describe("ModelVariant", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector('[data-testid="variant-badge"]');
-		await page.waitForTimeout(200);
+		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
 
 		// Open the variant dropdown
 		await page.locator('[data-testid="variant-badge"]').click();
@@ -182,8 +173,7 @@ test.describe("InstanceModelPicker + ModelVariant coordination", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector('[data-testid="variant-badge"]');
-		await page.waitForTimeout(200);
+		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
 
 		// Open the variant dropdown first
 		await page.locator('[data-testid="variant-badge"]').click();
@@ -203,8 +193,7 @@ test.describe("InstanceModelPicker + ModelVariant coordination", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--with-variants"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector('[data-testid="variant-badge"]');
-		await page.waitForTimeout(200);
+		await expect(page.locator('[data-testid="variant-badge"]')).toBeVisible();
 
 		// Open the model dropdown first
 		await page.locator(".model-btn").click();

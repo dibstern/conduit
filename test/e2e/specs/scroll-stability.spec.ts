@@ -911,7 +911,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		await scrollUpIncrementally(page, 3000);
 		const scrollBefore = await getScrollTop(page);
 
-		// Deliberate window: the test accepts either a prepend or no load at
+		// Negative observation window: the test accepts either a prepend or no load at
 		// all, and nothing signals "no more history", so give HistoryLoader
 		// time to fire before sampling.
 		await page.waitForTimeout(2000);

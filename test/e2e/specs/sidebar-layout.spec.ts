@@ -242,6 +242,8 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 			{ timeout: 5_000 },
 		)
 		.toBeGreaterThan(1);
+	// Negative observation window: the stale line only appears 3s after the
+	// feed drops, so wait past that before asserting it never showed.
 	await page.waitForTimeout(3_300);
 	await expect(page.getByTestId("session-list-stale")).toBeHidden();
 });

@@ -132,8 +132,10 @@ async function wokenUntilOpened(
 	const box = await transcript.boundingBox();
 	if (!box) throw new Error("the transcript is not rendered");
 	await page.mouse.move(box.x + 8, box.y + 8);
+	// Negative observation window: hovering must not clear the woken badge.
 	await page.waitForTimeout(600);
 	await page.mouse.click(box.x + 8, box.y + 8);
+	// Negative observation window: clicking the open view must not clear it either.
 	await page.waitForTimeout(600);
 	await expect(pill(page, sessionId)).toHaveText(badge);
 	expect(unsnoozes).toBe(0);

@@ -13,7 +13,7 @@ async function navigateToStory(
 	storyId: string,
 ): Promise<void> {
 	await page.goto(STORY_URL(storyId), { waitUntil: "domcontentloaded" });
-	await page.waitForTimeout(800);
+	await expect(page.locator("#input")).toBeVisible();
 }
 
 // ─── InputArea ───────────────────────────────────────────────────────────────

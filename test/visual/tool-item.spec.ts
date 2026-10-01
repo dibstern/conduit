@@ -20,8 +20,7 @@ test.describe("ToolGenericCard", () => {
 		await page.goto(storyUrl("chat-toolitem--completed"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Tool name should be visible
 		const toolName = page.locator(".tool-name");
@@ -37,8 +36,7 @@ test.describe("ToolGenericCard", () => {
 		await page.goto(storyUrl("chat-toolitem--completed"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Result should not be visible initially
 		await expect(page.locator(".tool-result")).toBeHidden();
@@ -52,8 +50,7 @@ test.describe("ToolGenericCard", () => {
 		await page.goto(storyUrl("chat-toolitem--completed"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Click to expand
 		await page.locator(".tool-header").click();
@@ -68,8 +65,7 @@ test.describe("ToolGenericCard", () => {
 		await page.goto(storyUrl("chat-toolitem--bash-with-description"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Tool name should be Bash
 		await expect(page.locator(".tool-name")).toHaveText("Bash");
@@ -87,8 +83,7 @@ test.describe("ToolGenericCard", () => {
 		await page.goto(storyUrl("chat-toolitem--running"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Running state shows a subtitle with "Running…"
 		const subtitle = page.locator(".tool-subtitle-text");
@@ -104,8 +99,7 @@ test.describe("ToolGenericCard", () => {
 		await page.goto(storyUrl("chat-toolitem--error-state"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Tool name should be Bash
 		await expect(page.locator(".tool-name")).toHaveText("Bash");
@@ -136,8 +130,7 @@ test.describe("ToolQuestionCard", () => {
 		await page.goto(storyUrl("chat-toolitem--question-running"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Running question with no matching pending question in store renders
 		// as a synthetic interactive QuestionCard (not the read-only summary)
@@ -152,8 +145,7 @@ test.describe("ToolQuestionCard", () => {
 		await page.goto(storyUrl("chat-toolitem--question-answered"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Subtitle should show "Answered ✓"
 		const subtitle = page.locator(".tool-subtitle-text");
@@ -170,8 +162,7 @@ test.describe("ToolQuestionCard", () => {
 		await page.goto(storyUrl("chat-toolitem--question-skipped"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Subtitle should show "Skipped ✗"
 		const subtitle = page.locator(".tool-subtitle-text");
@@ -183,8 +174,7 @@ test.describe("ToolQuestionCard", () => {
 		await page.goto(storyUrl("chat-toolitem--question-answered"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Completed questions render read-only with options visible
 		const options = page.locator(".question-tool-section .rounded-lg");
@@ -202,8 +192,7 @@ test.describe("ToolSubagentCard", () => {
 		await page.goto(storyUrl("chat-toolitem--subagent-running"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Should show the subagent header
 		const header = page.locator(".subagent-header");
@@ -224,8 +213,7 @@ test.describe("ToolSubagentCard", () => {
 		await page.goto(storyUrl("chat-toolitem--subagent-completed"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Completed subagent has child session metadata, so it should show a navigation arrow.
 		const header = page.locator(".subagent-header");
@@ -243,8 +231,7 @@ test.describe("ToolSubagentCard", () => {
 		await page.goto(storyUrl("chat-toolitem--subagent-running"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.waitForSelector(".tool-item");
-		await page.waitForTimeout(200);
+		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Running state should show "Running…" subtitle
 		const subtitle = page.locator(".tool-subtitle-text");
