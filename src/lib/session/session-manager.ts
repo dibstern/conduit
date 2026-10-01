@@ -11,6 +11,9 @@ import type { HistoryMessage } from "../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../types.js";
 import { toSessionInfoList } from "./session-info-list.js";
 
+/** Fetch enough sessions to initialize the complete local session count. */
+const INITIAL_SESSION_LIST_LIMIT = 10_000;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface SessionManagerOptions {
@@ -265,7 +268,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	 */
 	async initialize(title?: string): Promise<string> {
 		// Fetch all sessions (not just the default 100) for accurate counting
-		const existing = await this.client.session.list({ limit: 10000 });
+		const existing = await this.client.session.list({
+			limit: INITIAL_SESSION_LIST_LIMIT,
+		});
 		this._lastKnownSessionCount = existing.length;
 		if (existing.length > 0) {
 			// Seed lastMessageAt from session metadata timestamps.

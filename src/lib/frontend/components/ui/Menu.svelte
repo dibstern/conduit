@@ -17,6 +17,8 @@
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 	import { getDialogTarget } from "./dialog-context.js";
 
+	const SCRIM_ACTIVATION_DELAY_MS = 50;
+
 	type MenuSide = "top" | "right" | "bottom" | "left";
 	type MenuAlign = "start" | "center" | "end";
 	type TriggerSnippet = Snippet<[{ props: Record<string, unknown> }]>;
@@ -142,7 +144,10 @@
 			return;
 		}
 		// Bits opens on pointerdown and installs outside dismissal after mount.
-		const timer = setTimeout(() => { scrimInteractive = true; }, 50);
+		const timer = setTimeout(
+			() => { scrimInteractive = true; },
+			SCRIM_ACTIVATION_DELAY_MS,
+		);
 		return () => clearTimeout(timer);
 	});
 

@@ -29,6 +29,7 @@ export type KeepAwakeEvents = {
 
 const DEFAULT_COMMAND = "caffeinate";
 const DEFAULT_ARGS = ["-di"];
+const COMMAND_DISCOVERY_TIMEOUT_MS = 2_000;
 
 const LINUX_COMMAND = "systemd-inhibit";
 const LINUX_ARGS = [
@@ -45,7 +46,7 @@ function defaultWhichSync(cmd: string): string | null {
 	try {
 		const result = execFileSync("which", [cmd], {
 			encoding: "utf-8",
-			timeout: 2000,
+			timeout: COMMAND_DISCOVERY_TIMEOUT_MS,
 		});
 		return result.trim() || null;
 	} catch {

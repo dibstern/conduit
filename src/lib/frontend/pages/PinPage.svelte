@@ -7,6 +7,8 @@
 	import { onMount } from "svelte";
 	import { navigate } from "../stores/router.svelte.js";
 
+	const LOW_PIN_ATTEMPT_WARNING_THRESHOLD = 3;
+
 	// ─── Props ──────────────────────────────────────────────────────────────────
 
 	let {
@@ -66,7 +68,10 @@
 				return;
 			}
 			let msg = "Wrong PIN";
-			if (typeof data.attemptsLeft === "number" && data.attemptsLeft <= 3) {
+			if (
+				typeof data.attemptsLeft === "number" &&
+				data.attemptsLeft <= LOW_PIN_ATTEMPT_WARNING_THRESHOLD
+			) {
 				msg += ` (${data.attemptsLeft} left)`;
 			}
 			error = msg;

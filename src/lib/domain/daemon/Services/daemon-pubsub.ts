@@ -30,6 +30,8 @@ export type DaemonEvent = Data.TaggedEnum<{
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();
 
+const DAEMON_EVENT_BUFFER_CAPACITY = 256;
+
 export class DaemonEventBusTag extends Context.Tag("DaemonEventBus")<
 	DaemonEventBusTag,
 	PubSub.PubSub<DaemonEvent>
@@ -38,7 +40,7 @@ export class DaemonEventBusTag extends Context.Tag("DaemonEventBus")<
 // sliding(256) — oldest events dropped if consumer falls behind.
 export const DaemonEventBusLive = Layer.effect(
 	DaemonEventBusTag,
-	PubSub.sliding<DaemonEvent>({ capacity: 256 }),
+	PubSub.sliding<DaemonEvent>({ capacity: DAEMON_EVENT_BUFFER_CAPACITY }),
 );
 
 // ─── Publisher Helpers ──────────────────────────────────────────────────────

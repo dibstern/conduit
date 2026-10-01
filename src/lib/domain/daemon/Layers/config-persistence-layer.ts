@@ -18,6 +18,7 @@ import {
 } from "effect";
 import {
 	type DaemonConfig,
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../daemon/config-persistence.js";
@@ -72,7 +73,7 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		keepAwake: runtime.keepAwake,
 		autoSettleAfterDays:
 			runtime.autoSettleAfterDays === undefined
-				? 3
+				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: runtime.autoSettleAfterDays,
 		...(runtime.keepAwakeCommand !== undefined && {
 			keepAwakeCommand: runtime.keepAwakeCommand,

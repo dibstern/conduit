@@ -13,6 +13,9 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { addInstanceRpc, removeInstanceRpc, renameInstanceRpc, scanNowRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
+
+	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
+
 	let { state = $bindable() }: { state: {
 		expandedInstanceId: string | null;
 		renamingInstanceId: string | null;
@@ -237,7 +240,7 @@
 		if (ok) {
 			state.copiedKey = key;
 			if (state.copyTimer) clearTimeout(state.copyTimer);
-			state.copyTimer = setTimeout(() => { state.copiedKey = null; state.copyTimer = null; }, 2000);
+			state.copyTimer = setTimeout(() => { state.copiedKey = null; state.copyTimer = null; }, INSTANCE_KEY_COPY_FEEDBACK_MS);
 		} else { showToast("Failed to copy — clipboard unavailable", { variant: "warn" }); }
 	}
 	function toggleScenario(id: string) { state.expandedScenario = state.expandedScenario === id ? null : id; }

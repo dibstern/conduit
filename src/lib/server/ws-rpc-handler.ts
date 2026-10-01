@@ -20,6 +20,8 @@ import {
 	WsRpcServerLayer,
 } from "./ws-rpc.js";
 
+const RPC_CONNECTION_CONCURRENCY = 32;
+
 type RpcWebSocketHandlerOptions = (
 	| { readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> }
 	| {
@@ -85,7 +87,9 @@ const runRpcWebSocketConnection = <R>(
 			// to be forked. The scope then stays open only while the client is
 			// connected; closing it tears the RPC server down. Before this the
 			// fiber lived forever and every reconnect leaked one.
-			yield* RpcServer.make(WsRpcGroup, { concurrency: 32 }).pipe(
+			yield* RpcServer.make(WsRpcGroup, {
+				concurrency: RPC_CONNECTION_CONCURRENCY,
+			}).pipe(
 				Effect.provide(RpcServer.layerProtocolSocketServer),
 				Effect.provideService(SocketServer.SocketServer, socketServer),
 				Effect.provide(serverLayer),

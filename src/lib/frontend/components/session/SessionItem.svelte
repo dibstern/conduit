@@ -197,6 +197,9 @@
 		onrenameend?: () => void;
 	} = $props();
 
+	const CLICK_SUPPRESSION_MS = 450;
+	const NATIVE_CONTEXT_MENU_SUPPRESSION_MS = 1_000;
+
 	// ─── Local state ────────────────────────────────────────────────────────────
 
 	let localRenaming = $state(false);
@@ -327,7 +330,10 @@
 	function armClickSuppression() {
 		suppressClick = true;
 		if (suppressTimer) clearTimeout(suppressTimer);
-		suppressTimer = setTimeout(() => { suppressClick = false; }, 450);
+		suppressTimer = setTimeout(
+			() => { suppressClick = false; },
+			CLICK_SUPPRESSION_MS,
+		);
 	}
 
 	function closeHold(notify = true) {
@@ -380,7 +386,10 @@
 		longPressTimer = setTimeout(() => {
 			if (activePointer === null || gesture !== "pending") return;
 			suppressNativeContextMenu = true;
-			setTimeout(() => { suppressNativeContextMenu = false; }, 1000);
+			setTimeout(
+				() => { suppressNativeContextMenu = false; },
+				NATIVE_CONTEXT_MENU_SUPPRESSION_MS,
+			);
 			armClickSuppression();
 			if (rowEl) oncontextmenuProp?.(session, rowEl, "touch");
 			stopPointer();

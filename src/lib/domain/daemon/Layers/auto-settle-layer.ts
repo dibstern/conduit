@@ -1,4 +1,5 @@
 import { Cause, Clock, Effect, Layer, Option, Ref, Schedule } from "effect";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { hasColdAutoSettleCandidate } from "../Services/daemon-session-reader.js";
@@ -8,6 +9,8 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
+
+const MILLISECONDS_PER_DAY = 86_400_000;
 
 export const AutoSettleLive = Layer.scopedDiscard(
 	Effect.gen(function* () {
@@ -19,7 +22,9 @@ export const AutoSettleLive = Layer.scopedDiscard(
 		const sweep = Effect.gen(function* () {
 			const days = (yield* Ref.get(configRef)).autoSettleAfterDays;
 			if (days === null) return;
-			const idleWindowMs = (days === undefined ? 3 : days) * 86_400_000;
+			const idleWindowMs =
+				(days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days) *
+				MILLISECONDS_PER_DAY;
 			const now = yield* Clock.currentTimeMillis;
 			const projects = yield* allProjects.pipe(
 				Effect.provideService(ProjectRegistryTag, registry),

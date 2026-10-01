@@ -32,6 +32,8 @@ type DetailRow = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"] & {
 	_tag: "transcriptMessage";
 };
 
+const FRAME_FALLBACK_DELAY_MS = 16;
+
 const partTypes: ReadonlySet<string> = new Set([
 	"text",
 	"reasoning",
@@ -559,7 +561,7 @@ export function viewTranscript(
 									pendingFrame =
 										typeof requestAnimationFrame === "function"
 											? requestAnimationFrame(render)
-											: setTimeout(render, 16);
+											: setTimeout(render, FRAME_FALLBACK_DELAY_MS);
 								} else for (const id of newUserIds) pendingUsers.add(id);
 							}),
 					),

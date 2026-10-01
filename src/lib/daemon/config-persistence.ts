@@ -28,6 +28,9 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+/** Days of inactivity before automatic settlement when no value is persisted. */
+export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
+
 export interface DaemonConfig {
 	pid: number;
 	port: number;
@@ -241,7 +244,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		tls: false,
 		debug: false,
 		keepAwake: false,
-		autoSettleAfterDays: 3,
+		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 		dangerouslySkipPermissions: false,
 		projects: [],
 	};
@@ -281,7 +284,7 @@ export const ServerConfigLive = (configDir?: string) =>
 				...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
 				autoSettleAfterDays:
 					decoded.autoSettleAfterDays === undefined
-						? 3
+						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 						: decoded.autoSettleAfterDays,
 			};
 		}),
@@ -356,7 +359,7 @@ export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 			...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
 			autoSettleAfterDays:
 				decoded.autoSettleAfterDays === undefined
-					? 3
+					? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 					: decoded.autoSettleAfterDays,
 		};
 	} catch {

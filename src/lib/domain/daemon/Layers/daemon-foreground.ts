@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { Cause, Deferred, Effect, Exit, ManagedRuntime } from "effect";
 import {
 	type DaemonConfig,
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import type {
@@ -99,7 +100,7 @@ const buildInitialRuntimeConfig = (
 		keepAwake: options.keepAwake ?? persisted?.keepAwake ?? false,
 		autoSettleAfterDays:
 			persisted?.autoSettleAfterDays === undefined
-				? 3
+				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: persisted.autoSettleAfterDays,
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),

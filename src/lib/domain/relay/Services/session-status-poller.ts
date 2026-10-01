@@ -29,6 +29,8 @@ import { busySessionIds } from "../../../session-busy.js";
 export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
 const STATUS_CORRECTION_CONCURRENCY = 8;
+const POLLER_EVENT_BUFFER_CAPACITY = 64;
+const STATUS_RECONCILIATION_MAX_RETRIES = 5;
 
 /**
  * If a session has been "busy" for longer than this with no events,
@@ -105,7 +107,9 @@ export const makePollerStateLive = (
 export const makePollerPubSubLive = (): Layer.Layer<PollerPubSubTag> =>
 	Layer.effect(
 		PollerPubSubTag,
-		PubSub.sliding<PollerChangedEvent>({ capacity: 64 }),
+		PubSub.sliding<PollerChangedEvent>({
+			capacity: POLLER_EVENT_BUFFER_CAPACITY,
+		}),
 	);
 
 // ─── Errors ───────────────────────────────────────────────────────────────
@@ -434,7 +438,7 @@ export const startReconciliationLoop = <E, R>(
 		Effect.repeat(Schedule.spaced(interval)),
 		Effect.retry(
 			Schedule.exponential("2 seconds").pipe(
-				Schedule.intersect(Schedule.recurs(5)),
+				Schedule.intersect(Schedule.recurs(STATUS_RECONCILIATION_MAX_RETRIES)),
 			),
 		),
 		Effect.catchAll((e) =>

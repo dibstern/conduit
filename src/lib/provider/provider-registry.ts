@@ -9,6 +9,7 @@ import { ProviderNotRegistered } from "./errors.js";
 import type { ProviderInstance } from "./types.js";
 
 const log = createLogger("provider-registry");
+const PROVIDER_SHUTDOWN_CONCURRENCY = 4;
 
 export class ProviderRegistryTag extends Context.Tag("ProviderRegistry")<
 	ProviderRegistryTag,
@@ -94,7 +95,7 @@ export class ProviderRegistry {
 							),
 						),
 					),
-			{ concurrency: 4, discard: true },
+			{ concurrency: PROVIDER_SHUTDOWN_CONCURRENCY, discard: true },
 		);
 	}
 }

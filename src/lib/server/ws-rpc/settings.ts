@@ -5,6 +5,7 @@ import {
 } from "../../contracts/claude-settings.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfig,
 	saveDaemonConfig,
@@ -28,7 +29,7 @@ export const settingsHandlers = {
 			return {
 				autoSettleAfterDays:
 					persisted?.autoSettleAfterDays === undefined
-						? 3
+						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 						: persisted.autoSettleAfterDays,
 			};
 		}),

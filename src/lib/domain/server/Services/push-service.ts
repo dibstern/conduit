@@ -11,6 +11,8 @@ import {
 	type PushSubscriptionData,
 } from "../../../server/push.js";
 
+const PUSH_SEND_CONCURRENCY = 10;
+
 export interface PushSubscription {
 	id: string;
 	endpoint: string;
@@ -79,7 +81,7 @@ export const PushManagerLive = (config: PushManagerConfig) =>
 											Effect.logWarning(`Push send failed for ${sub.id}: ${e}`),
 										),
 									),
-							{ concurrency: 10, discard: true },
+							{ concurrency: PUSH_SEND_CONCURRENCY, discard: true },
 						);
 					}),
 				getPublicKey: Effect.succeed(undefined),
@@ -115,7 +117,7 @@ export const PushManagerLive = (config: PushManagerConfig) =>
 											Effect.logWarning(`Push send failed for ${sub.id}: ${e}`),
 										),
 									),
-							{ concurrency: 10, discard: true },
+							{ concurrency: PUSH_SEND_CONCURRENCY, discard: true },
 						);
 					}),
 				getLegacyManager: Effect.succeed(Option.none()),

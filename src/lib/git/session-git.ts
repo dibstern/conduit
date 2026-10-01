@@ -6,6 +6,8 @@ import { DEFAULT_RECONCILIATION_INTERVAL_MS } from "../domain/relay/Services/ses
 import type { ProjectInfo, SessionGit } from "../shared-types.js";
 
 const execFileAsync = promisify(execFile);
+const GIT_COMMAND_TIMEOUT_MS = 2_000;
+
 const git = async (
 	directory: string,
 	...args: string[]
@@ -13,7 +15,7 @@ const git = async (
 	try {
 		const { stdout } = await execFileAsync("git", args, {
 			cwd: directory,
-			timeout: 2_000,
+			timeout: GIT_COMMAND_TIMEOUT_MS,
 			env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
 		});
 		return stdout.trim();

@@ -8,6 +8,7 @@
 //   DaemonConfigRefLive(initial) → Layer providing the Tag
 
 import { Context, Effect, Layer, Ref } from "effect";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 
 // ─── Interface ──────────────────────────────────────────────────────────────
 
@@ -90,7 +91,9 @@ export const makeDaemonConfigFromOptions = (options: {
 	tlsEnabled: options.tlsEnabled ?? false,
 	keepAwake: options.keepAwake ?? false,
 	autoSettleAfterDays:
-		options.autoSettleAfterDays === undefined ? 3 : options.autoSettleAfterDays,
+		options.autoSettleAfterDays === undefined
+			? DEFAULT_AUTO_SETTLE_AFTER_DAYS
+			: options.autoSettleAfterDays,
 	keepAwakeCommand: options.keepAwakeCommand,
 	keepAwakeArgs: options.keepAwakeArgs,
 	claudeConfigDir: options.claudeConfigDir,

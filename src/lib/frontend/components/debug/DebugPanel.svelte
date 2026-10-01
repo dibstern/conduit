@@ -10,6 +10,8 @@
 	import { setLogLevelRpc } from "../../transport/ws-rpc-client.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 
+	const COPY_FLASH_DURATION_MS = 1_200;
+
 	let copyFlash = $state(false);
 
 	function toggleVerbose() {
@@ -39,7 +41,7 @@
 		});
 		if (!await copyToClipboard(lines.join("\n"))) return;
 		copyFlash = true;
-		setTimeout(() => { copyFlash = false; }, 1200);
+		setTimeout(() => { copyFlash = false; }, COPY_FLASH_DURATION_MS);
 	}
 
 	// ─── Props ──────────────────────────────────────────────────────────────
