@@ -24,11 +24,11 @@ export const bashSummarizer: ToolSummarizer<BashInput> = {
 		const command = input.command || undefined;
 		const description = input.description || undefined;
 
-		const subtitle = command
-			? command.length > 40
-				? `${command.slice(0, 40)}\u2026`
-				: command
-			: description;
+		let subtitle = description;
+		if (command) {
+			subtitle =
+				command.length > 40 ? `${command.slice(0, 40)}\u2026` : command;
+		}
 
 		return {
 			...(subtitle && { subtitle }),

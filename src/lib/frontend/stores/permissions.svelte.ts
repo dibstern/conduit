@@ -40,20 +40,28 @@ export function getHasPending(): boolean {
 
 /**
  * Collect all descendant session IDs (children, grandchildren, etc.)
- * for a given session. Uses BFS over `sessionState.familySessions` which
- * includes `parentID` for subagent sessions.
+ * for a given session, from `sessionState.familySessions` which includes
+ * `parentID` for subagent sessions.
+ *
+ * Reads the family exactly once: a workflow can own thousands of subagents,
+ * and rescanning the reactive array per descendant was quadratic in tracked
+ * reads, freezing the UI for seconds on every family update.
  */
 export function getDescendantSessionIds(parentId: string): Set<string> {
+	const childrenByParent = new Map<string, string[]>();
+	for (const { id, parentID } of sessionState.familySessions) {
+		if (!parentID) continue;
+		const siblings = childrenByParent.get(parentID);
+		if (siblings) siblings.push(id);
+		else childrenByParent.set(parentID, [id]);
+	}
 	const descendants = new Set<string>();
-	const queue = [parentId];
-	while (queue.length > 0) {
-		// biome-ignore lint/style/noNonNullAssertion: safe — queue.length > 0 guarantees shift returns a value
-		const id = queue.shift()!;
-		for (const s of sessionState.familySessions) {
-			if (s.parentID === id && !descendants.has(s.id)) {
-				descendants.add(s.id);
-				queue.push(s.id);
-			}
+	const pending = [parentId];
+	for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+		for (const child of childrenByParent.get(id) ?? []) {
+			if (descendants.has(child)) continue;
+			descendants.add(child);
+			pending.push(child);
 		}
 	}
 	return descendants;

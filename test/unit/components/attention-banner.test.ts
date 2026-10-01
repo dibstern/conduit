@@ -236,6 +236,32 @@ describe("AttentionBanner merge logic", () => {
 		expect(status.textContent).not.toContain("Child session");
 	});
 
+	// A workflow session can own thousands of subagents, and every new one
+	// resends the whole family. Walking descendants by rescanning the family
+	// once per descendant is quadratic in tracked reads and froze the UI for
+	// seconds on each resend.
+	it("re-derives a family of thousands of subagents without stalling", async () => {
+		const family = (childCount: number) =>
+			[
+				{ id: "ses_current", title: "Parent", createdAt: 0 },
+				...Array.from({ length: childCount }, (_, i) => ({
+					id: `ses_child${i}`,
+					title: `Child ${i}`,
+					createdAt: 0,
+					parentID: "ses_current",
+				})),
+			] as typeof sessionState.familySessions;
+		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
+		await renderBanner();
+
+		const start = performance.now();
+		sessionState.familySessions = family(3000);
+		flushSync();
+
+		expect(performance.now() - start).toBeLessThan(200);
+		expect(screen.getByRole("status").textContent).toContain("1 session");
+	});
+
 	it("dispatches session_viewed and switches session on click", async () => {
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
 		setSessionTitles({ ses_other1: "Clickable session" });
