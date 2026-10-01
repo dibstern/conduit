@@ -9,6 +9,11 @@ import { SqlClient } from "@effect/sql";
 import { Effect, Exit, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
 	type SessionEventBus,
@@ -23,6 +28,11 @@ import {
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+	makeMockOpenCodeAPI,
+} from "../../helpers/mock-factories.js";
 
 const recordingBus = (advances: ReadModelAdvance[]) =>
 	Layer.succeed(SessionEventBusTag, {
@@ -35,7 +45,11 @@ const recordingBus = (advances: ReadModelAdvance[]) =>
 const withPersistence = async <A>(
 	body: (
 		advances: ReadModelAdvance[],
-	) => Effect.Effect<A, unknown, PersistenceEffectContext>,
+	) => Effect.Effect<
+		A,
+		unknown,
+		PersistenceEffectContext | ConfigTag | LoggerTag | OpenCodeAPITag
+	>,
 ): Promise<A> => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-read-model-advance-"));
 	const advances: ReadModelAdvance[] = [];
@@ -48,7 +62,15 @@ const withPersistence = async <A>(
 	try {
 		return await Effect.runPromise(
 			body(advances).pipe(
-				Effect.provide(Layer.merge(persistence, bus)),
+				Effect.provide(
+					Layer.mergeAll(
+						persistence,
+						bus,
+						Layer.succeed(ConfigTag, makeMockConfig()),
+						Layer.succeed(LoggerTag, makeMockLogger()),
+						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					),
+				),
 				Effect.orDie,
 			),
 		);

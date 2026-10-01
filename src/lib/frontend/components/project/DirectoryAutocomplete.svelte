@@ -178,7 +178,7 @@
 	// Resolved by option id rather than a descendant class query: the old lookup
 	// started at `document` and matched the first `.dir-autocomplete-list` in the
 	// page, which is the wrong list once two instances are mounted
-	// (conduit-test-9kov).
+	//.
 	function scrollActiveIntoView() {
 		requestAnimationFrame(() => {
 			document
@@ -196,7 +196,7 @@
 	     upward inside the sidebar projects panel, whose root is
 	     `overflow-hidden` around a project list capped at 280px. A 300px
 	     drop-up would be clipped by that ancestor; the composer, where the
-	     other two live, has no such ceiling (conduit-test-9kov). -->
+	     other two live, has no such ceiling. -->
 	{#if expanded}
 		<DetachedListbox
 			id={listboxId}
@@ -251,8 +251,8 @@
 	<!-- Input -->
 	<!-- `text-[12px]` overrides the sm scale on purpose. conduit's root font-size
 	     is 12px, so `text-xs` resolves to 9px, and a monospace filesystem path at
-	     9px is not readable. Tracked as conduit-test-gpeu (the field type
-	     scale) rather than settled per call site. -->
+	     9px is not readable. The field type
+	     scale remains unresolved (tracked in conduit-test-gpeu). -->
 	<TextInput
 		size="sm"
 		class="font-mono text-[12px] min-h-[44px] md:min-h-0"

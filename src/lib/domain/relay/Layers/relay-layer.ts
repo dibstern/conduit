@@ -61,14 +61,16 @@ export const makeRelayStateLive = (
 	Layer.mergeAll(
 		// Session state
 		makeSessionRegistryStateLive(),
-		makeOverridesStateLive(),
 		Layer.provideMerge(
 			makeSessionTitleServiceLive(
 				options.titleQueryFactory != null
 					? { queryFactory: options.titleQueryFactory }
 					: {},
 			),
-			SessionManagerStateAndServiceLive,
+			Layer.provideMerge(
+				SessionManagerStateAndServiceLive,
+				makeOverridesStateLive(),
+			),
 		),
 		// Poller state
 		makePollerManagerStateLive(),

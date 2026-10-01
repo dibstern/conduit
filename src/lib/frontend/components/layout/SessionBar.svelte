@@ -181,7 +181,7 @@
 	runs on is part of where you are. Absent with a single instance. It keeps
 	the pill recipe's 18px height rather than the bar's 44px touch target,
 	because a 44px rounded-full pill reads as a rendering fault; the real fix is
-	a small-paint/large-hit-area capability on ui/Button (conduit-test-lciu).
+	a small-paint/large-hit-area capability on ui/Button (tracked in conduit-test-lciu).
 -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>

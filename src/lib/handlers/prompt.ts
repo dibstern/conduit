@@ -4,17 +4,13 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { Data, Effect } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
-import {
-	makeProviderTurnService,
-	ProviderTurnServiceTag,
-} from "../domain/relay/Services/provider-turn-service.js";
+import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
-	getAgent,
 	getContextWindow,
 	getModel,
 	getVariant,
@@ -85,13 +81,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const originalActiveId = activeId;
 		const sessionModel = yield* getModel(activeId);
 		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
-		const providerTurnServiceOption = yield* Effect.serviceOption(
-			ProviderTurnServiceTag,
-		);
-		const providerTurnService =
-			providerTurnServiceOption._tag === "Some"
-				? providerTurnServiceOption.value
-				: yield* makeProviderTurnService;
+		const providerTurnService = yield* ProviderTurnServiceTag;
 		activeId = yield* providerTurnService.prepareTurnSession({
 			clientId,
 			commandId: input.commandId,
@@ -150,11 +140,8 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
-		const agentServiceOption = yield* Effect.serviceOption(AgentServiceTag);
-		const sessionAgent =
-			agentServiceOption._tag === "Some"
-				? yield* agentServiceOption.value.getActiveAgent(activeId)
-				: yield* getAgent(activeId);
+		const agentService = yield* AgentServiceTag;
+		const sessionAgent = yield* agentService.getActiveAgent(activeId);
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 

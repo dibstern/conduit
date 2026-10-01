@@ -59,10 +59,10 @@ export const RelayRegistering: Story = {
  * OpenCode instance is stopped while other instances exist.
  *
  * This story exists because those two buttons were in ZERO baselines
- * (conduit-test-8dgv). `showInstanceActions` is a four-way `$derived` fed by
+ *. `showInstanceActions` is a four-way `$derived` fed by
  * effects that only fire on real store data, so none of the other stories here
  * reach it — which made the whole branch invisible to the visual suite. It was
- * caught only by perturbing Button's BASE_CLASSES during the de3.5 migration
+ * caught only by perturbing Button's BASE_CLASSES during the component migration
  * and noticing that every ConnectOverlay story stayed green.
  *
  * Seeded, not mocked: these are the same plain `$state` stores the sibling
@@ -117,7 +117,7 @@ export const InstanceActions: Story = {
 	 * stops holding the overlay still renders perfectly happily — just without
 	 * the buttons. That produces a stable, plausible screenshot of the wrong
 	 * thing, which is exactly how ChatLayout's baselines spent three stories
-	 * photographing this very overlay (conduit-test-732b).
+	 * photographing this very overlay.
 	 */
 	play: async ({ canvasElement }) => {
 		await waitFor(() => {

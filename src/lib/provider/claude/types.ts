@@ -15,6 +15,7 @@
 
 import type { Effect } from "effect";
 import type { SessionPermissionMode } from "../../shared-types.js";
+import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
@@ -100,15 +101,19 @@ export interface PendingApproval {
 	readonly toolName: string;
 	readonly toolInput: Record<string, unknown>;
 	readonly createdAt: string;
-	resolve(decision: PermissionDecision): Effect.Effect<void, unknown>;
-	reject(error: Error): Effect.Effect<void, unknown>;
+	resolve(
+		decision: PermissionDecision,
+	): Effect.Effect<void, ClaudeAdapterError>;
+	reject(error: Error): Effect.Effect<void, ClaudeAdapterError>;
 }
 
 export interface PendingQuestion {
 	readonly requestId: string;
 	readonly createdAt: string;
-	resolve(answers: Record<string, unknown>): Effect.Effect<void, unknown>;
-	reject(error: Error): Effect.Effect<void, unknown>;
+	resolve(
+		answers: Record<string, unknown>,
+	): Effect.Effect<void, ClaudeAdapterError>;
+	reject(error: Error): Effect.Effect<void, ClaudeAdapterError>;
 }
 
 // ─── Tool In Flight ────────────────────────────────────────────────────────
@@ -124,9 +129,9 @@ export interface ToolInFlight {
 	input: Record<string, unknown>;
 	partialInputJson: string;
 	lastEmittedFingerprint?: string;
-	/** Phase 2: tool_use blocks buffer until content_block_stop. */
+	/** Tool_use blocks buffer until content_block_stop. */
 	pendingStart?: boolean;
-	/** Phase 2: accumulated parsed input from input_json_delta. */
+	/** Accumulated parsed input from input_json_delta. */
 	bufferedInput?: Record<string, unknown>;
 }
 

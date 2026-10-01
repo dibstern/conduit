@@ -49,6 +49,12 @@ export const StatusPollerLive: Layer.Layer<
 	| PollerPubSubTag
 	| PollerStateTag
 	| RelayStatusSnapshotTag
+	| SessionManagerStateTag
+	| PendingInteractionServiceTag
+	| ReadQueryEffectTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
 > = Layer.scoped(
 	StatusPollerTag,
 	Effect.gen(function* () {
@@ -58,84 +64,55 @@ export const StatusPollerLive: Layer.Layer<
 		const stateRef = yield* PollerStateTag;
 		const pubsub = yield* PollerPubSubTag;
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
-		const sessionState = yield* Effect.serviceOption(SessionManagerStateTag);
-		const pendingInteractions = yield* Effect.serviceOption(
-			PendingInteractionServiceTag,
-		);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
-		const persistenceReady =
-			config.persistenceDbPath != null && readQueryOption._tag === "Some";
+		const sessionState = yield* SessionManagerStateTag;
+		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const readQuery = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 		// The corrective event is the poller's only write, and it moves the read
 		// model, so it goes through the seam that projects and announces together.
-		const commitAndSignalOption =
-			eventStoreOption._tag === "Some" &&
-			projectionRunnerOption._tag === "Some" &&
-			sqlOption._tag === "Some"
-				? yield* makeCommitAndSignal.pipe(
-						Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-						Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
-						Effect.provideService(
-							ProjectionRunnerEffectTag,
-							projectionRunnerOption.value,
-						),
-					)
-				: undefined;
-		const reconciliationDeps: ReconciliationDeps | undefined =
-			persistenceReady && commitAndSignalOption !== undefined
-				? {
-						getRestStatuses: () =>
-							Effect.tryPromise(() => api.session.statuses()),
-						getProjectedSessions: (reportedIds) =>
-							readQueryOption.value.getSessionsForReconciliation(reportedIds),
-						getSessionsAwaitingUser: () =>
-							pendingInteractions._tag === "Some"
-								? Effect.all([
-										pendingInteractions.value.listPendingQuestions(),
-										pendingInteractions.value.listPendingPermissions(),
-									]).pipe(
-										Effect.map(
-											([questions, permissions]) =>
-												new Set(
-													[...questions, ...permissions].map(
-														(p) => p.sessionId,
-													),
-												),
-										),
-									)
-								: Effect.succeed(new Set<string>()),
-						injectCorrectiveEvent: (sessionId: string, status: string) =>
-							commitAndSignalOption([
-								canonicalEvent(
-									"session.status",
-									sessionId,
-									{
-										sessionId,
-										status: status as SessionStatusValue,
-									},
-									{
-										metadata: {
-											synthetic: true,
-											source: "reconciliation-loop",
-										},
-									},
-								),
-							]),
-					}
-				: undefined;
+		const commitAndSignal = yield* makeCommitAndSignal.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+			Effect.provideService(EventStoreEffectTag, eventStore),
+			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+		);
+		const reconciliationDeps: ReconciliationDeps = {
+			getRestStatuses: () => Effect.tryPromise(() => api.session.statuses()),
+			getProjectedSessions: (reportedIds) =>
+				readQuery.getSessionsForReconciliation(reportedIds),
+			getSessionsAwaitingUser: () =>
+				Effect.all([
+					pendingInteractions.listPendingQuestions(),
+					pendingInteractions.listPendingPermissions(),
+				]).pipe(
+					Effect.map(
+						([questions, permissions]) =>
+							new Set([...questions, ...permissions].map((p) => p.sessionId)),
+					),
+				),
+			injectCorrectiveEvent: (sessionId: string, status: string) =>
+				commitAndSignal([
+					canonicalEvent(
+						"session.status",
+						sessionId,
+						{
+							sessionId,
+							status: status as SessionStatusValue,
+						},
+						{
+							metadata: {
+								synthetic: true,
+								source: "reconciliation-loop",
+							},
+						},
+					),
+				]),
+		};
 		const readProjectedStatuses = (): Effect.Effect<
 			Record<string, SessionStatus>,
 			unknown
-		> =>
-			persistenceReady
-				? readQueryOption.value
-						.getAllSessionStatuses()
-						.pipe(Effect.map(toStatusRecord))
-				: Effect.tryPromise(() => api.session.statuses());
+		> => readQuery.getAllSessionStatuses().pipe(Effect.map(toStatusRecord));
 		const pollerState = <A, E, R>(
 			effect: Effect.Effect<A, E, R | PollerStateTag>,
 		) => effect.pipe(Effect.provideService(PollerStateTag, stateRef));
@@ -144,7 +121,7 @@ export const StatusPollerLive: Layer.Layer<
 		) => effect.pipe(Effect.provideService(PollerPubSubTag, pubsub));
 		const pollDeps = {
 			getRawStatuses: readProjectedStatuses,
-			...(reconciliationDeps ? { reconciliation: reconciliationDeps } : {}),
+			reconciliation: reconciliationDeps,
 		};
 		const interval = Duration.millis(
 			config.statusPollerInterval ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
@@ -257,24 +234,16 @@ export const StatusPollerLive: Layer.Layer<
 			getCurrentStatuses: () => pollerState(getCurrentStatuses),
 			isProcessing: (sessionId) =>
 				Effect.gen(function* () {
-					const parents =
-						sessionState._tag === "Some"
-							? new Map(
-									HashMap.toEntries(
-										(yield* Ref.get(sessionState.value)).cachedParentMap,
-									),
-								)
-							: new Map<string, string>();
+					const parents = new Map(
+						HashMap.toEntries((yield* Ref.get(sessionState)).cachedParentMap),
+					);
 					return yield* pollerState(isProcessing(sessionId, parents));
 				}),
 			// Pre-status rendering activity belongs to the client session view.
 			markMessageActivity: () => Effect.void,
 			clearMessageActivity: () => Effect.void,
 			notifySSEIdle: () => forkPoll,
-			reconcileNow: () =>
-				reconciliationDeps != null
-					? reconcileNow(reconciliationDeps)
-					: Effect.void,
+			reconcileNow: () => reconcileNow(reconciliationDeps),
 		};
 		yield* Effect.addFinalizer(() => service.drain());
 		return service;

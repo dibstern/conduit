@@ -18,8 +18,10 @@ import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
+	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { markSeen } from "../../../src/lib/domain/relay/Services/session-attention.js";
@@ -31,11 +33,9 @@ import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import {
-	deleteSession,
-	setForkEntry,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { deleteSession } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { setForkEntry } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { forkSessionForClient } from "../../../src/lib/handlers/session.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
@@ -59,6 +59,7 @@ import {
 } from "../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
+	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -83,9 +84,16 @@ const sdkForkSession = vi.spyOn(defaultClaudeSessionForkSdk, "forkSession");
 // path's publisher, the test driver's publisher and the subscription's listener
 // onto one PubSub. No clock anywhere: the version column removed the window.
 
-const makeShellTestLayer = () => {
+const makeShellTestLayer = (
+	handlerApi?: ReturnType<typeof makeMockOpenCodeAPI>,
+) => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-shell-sub-"));
 	const filename = join(dir, "events.db");
+	const persistenceLayer = makePersistenceEffectLayer(
+		filename,
+		undefined,
+		SessionEventBusLive,
+	);
 	const cleanup = Layer.scopedDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
@@ -93,13 +101,19 @@ const makeShellTestLayer = () => {
 	);
 	return Layer.mergeAll(
 		PendingSendOwnershipLive,
-		makePersistenceEffectLayer(filename, undefined, SessionEventBusLive),
+		RelayStatusSnapshotLive,
+		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+		persistenceLayer,
+		...(handlerApi === undefined
+			? []
+			: [makeTestHandlerLayer({ api: handlerApi, persistenceLayer })]),
 		SessionEventBusLive,
 		Layer.succeed(
 			OrchestrationEngineTag,
 			withDispatchEffect({ dispatch: async () => undefined }),
 		),
 		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+		Layer.succeed(LoggerTag, makeMockLogger()),
 		cleanup,
 	);
 };
@@ -284,8 +298,9 @@ describe("subscribeShell", () => {
 	for (const entry of ["command", "handler"] as const) {
 		it.scoped(
 			`a new Claude fork through the ${entry} publishes both lineage fields and resumes the SDK child`,
-			() =>
-				Effect.gen(function* () {
+			() => {
+				const api = makeMockOpenCodeAPI();
+				return Effect.gen(function* () {
 					yield* recoverProjections;
 					yield* commit([
 						sessionCreated("claude-parent"),
@@ -310,7 +325,6 @@ describe("subscribeShell", () => {
 					});
 					const { q } = yield* openShell();
 					yield* takeN(q, 2);
-					const api = makeMockOpenCodeAPI();
 					const child =
 						entry === "command"
 							? yield* forkSession("claude-parent", "ui-boundary")
@@ -318,7 +332,7 @@ describe("subscribeShell", () => {
 									clientId: "client",
 									sessionId: "claude-parent",
 									messageId: "ui-boundary",
-								}).pipe(Effect.provide(makeTestHandlerLayer({ api })));
+								});
 					if (!child) throw new Error("Expected a fork");
 					const read = yield* ReadQueryEffectTag;
 					expect(yield* read.getSession(child.id)).toMatchObject({
@@ -340,7 +354,12 @@ describe("subscribeShell", () => {
 					expect(api.session.fork).not.toHaveBeenCalled();
 					expect(api.session.message).not.toHaveBeenCalled();
 					expect(api.session.messagesPage).not.toHaveBeenCalled();
-				}).pipe(Effect.provide(makeShellTestLayer())),
+				}).pipe(
+					Effect.provide(
+						makeShellTestLayer(entry === "handler" ? api : undefined),
+					),
+				);
+			},
 		);
 	}
 	it.scoped(

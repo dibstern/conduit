@@ -273,7 +273,7 @@
 				>
 					Allow
 				</Button>
-				<!-- Normalized onto plain `success-soft` (de3.35.2). This used to sit
+				<!-- Normalized onto plain `success-soft`. This used to sit
 				     one notch softer than its Allow sibling on all three colours, to
 				     de-emphasise the more consequential choice. Aligned rather than
 				     given a variant of its own, on two grounds: it was a single-file

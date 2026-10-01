@@ -8,9 +8,15 @@ import { expect, vi } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
@@ -18,6 +24,7 @@ import {
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -28,10 +35,13 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 type OperationsOutsideReadModelParity = keyof Pick<
@@ -293,6 +303,11 @@ describe("SessionManager read-your-writes parity", () => {
 			() => {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-session-parity-"));
 				const api = makeMockOpenCodeAPI();
+				const configLayer = Layer.succeed(
+					ConfigTag,
+					makeMockConfig({ configDir: dir, projectDir: dir }),
+				);
+				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 				const persistenceLayer = makePersistenceEffectLayer(
 					join(dir, "events.db"),
 				);
@@ -300,14 +315,23 @@ describe("SessionManager read-your-writes parity", () => {
 					SessionManagerServiceLive,
 					Layer.mergeAll(
 						makeSessionManagerStateLive(),
+						PendingSendOwnershipLive,
 						Layer.succeed(OpenCodeAPITag, api),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(
-							ConfigTag,
-							makeMockConfig({ configDir: dir, projectDir: dir }),
+						loggerLayer,
+						configLayer,
+						Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+						Layer.succeed(BackgroundLivenessTag, () => false),
+						RelayStatusSnapshotLive,
+						makeOverridesStateLive(),
+						OpenCodeInstanceClientsLive.pipe(
+							Layer.provide(Layer.merge(configLayer, loggerLayer)),
 						),
 						DaemonEventBusLive,
 						persistenceLayer,
+						Layer.succeed(
+							OrchestrationEngineTag,
+							new OrchestrationEngine({ registry: new ProviderRegistry() }),
+						),
 					),
 				);
 

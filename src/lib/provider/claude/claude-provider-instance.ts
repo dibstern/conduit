@@ -11,9 +11,8 @@ import type {
 } from "../types.js";
 import {
 	type ClaudeProviderInstanceDeps,
-	ClaudeProviderRuntime,
+	type ClaudeProviderRuntime,
 	makeClaudeProviderRuntime,
-	makeUnsafeClaudeProviderRuntime,
 } from "./claude-provider-runtime.js";
 import { toSdkPermissionMode } from "./permission-mode-map.js";
 
@@ -23,13 +22,8 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	readonly providerId = "claude";
 	private readonly runtime: ClaudeProviderRuntime;
 
-	constructor(runtime: ClaudeProviderRuntime);
-	constructor(deps: ClaudeProviderInstanceDeps);
-	constructor(input: ClaudeProviderRuntime | ClaudeProviderInstanceDeps) {
-		this.runtime =
-			input instanceof ClaudeProviderRuntime
-				? input
-				: makeUnsafeClaudeProviderRuntime(input);
+	constructor(runtime: ClaudeProviderRuntime) {
+		this.runtime = runtime;
 	}
 
 	discoverEffect(): Effect.Effect<

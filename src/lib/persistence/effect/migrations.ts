@@ -454,7 +454,7 @@ function sameStrings(
 
 const executeSqlStatements = (
 	sqlText: string,
-): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		for (const statement of splitSqlStatements(sqlText)) {
@@ -466,7 +466,7 @@ const runAddColumnMigrationIfMissing = (
 	tableName: string,
 	columnName: string,
 	sqlText: string,
-): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql.unsafe<{ name: string }>(
@@ -484,7 +484,7 @@ const failSchemaMismatch = (
 
 const verifyExistingBaselineSchema: Effect.Effect<
 	void,
-	unknown,
+	SqlError | Migrator.MigrationError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -594,7 +594,7 @@ const verifyExistingBaselineSchema: Effect.Effect<
 
 const runBaselineEventStoreMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError | Migrator.MigrationError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -648,7 +648,7 @@ const runMessagesContextWindowMigration = runAddColumnMigrationIfMissing(
 
 const runTurnModelExecutionMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -685,7 +685,7 @@ const runSessionsLastTurnErrorMigration = runAddColumnMigrationIfMissing(
 
 const runProjectionFailuresMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -748,7 +748,7 @@ const runSessionsSnoozedMigration = runAddColumnMigrationIfMissing(
 
 const runSessionsAutoSettleMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -783,7 +783,7 @@ export const MAX_PURGEABLE_SKELETON_SESSIONS = 25;
 /** Ids matching the legacy-skeleton predicate. Shared by the migration and the boot diagnostic. */
 export const selectLegacySkeletonSessionIds: Effect.Effect<
 	readonly string[],
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -831,7 +831,7 @@ export const selectLegacySkeletonSessionIds: Effect.Effect<
 
 const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -848,7 +848,7 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 		// freezes the store at migration 9 on every subsequent boot — and as a defect
 		// it escapes Effect.mapError at the call site. Loudness is provided instead by
 		// the boot diagnostic in persistence-service.ts, which re-checks every boot
-		// while the condition persists. Tracked as conduit-test-070.
+		// while the condition persists.
 		yield* Effect.logError(
 			`Legacy skeleton purge ABORTED: ${ids.length} sessions matched, above the ` +
 				`${MAX_PURGEABLE_SKELETON_SESSIONS} safety threshold. Nothing was deleted. ` +
@@ -864,7 +864,7 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
 		// if the predicate above is ever widened to match a session that actually has
 		// messages, the DELETE below raises FOREIGN KEY constraint failed and the
 		// transaction rolls back instead of quietly destroying real content. Deleting
-		// messages here would remove exactly that protection. Tracked as conduit-test-070.
+		// messages here would remove exactly that protection.
 		yield* sql`DELETE FROM activities WHERE session_id = ${id}`;
 		yield* sql`DELETE FROM pending_approvals WHERE session_id = ${id}`;
 		yield* sql`DELETE FROM turns WHERE session_id = ${id}`;
@@ -899,7 +899,7 @@ const runPurgeLegacySkeletonSessionsMigration: Effect.Effect<
  */
 const runBackfillCompactionMessagesMigration: Effect.Effect<
 	void,
-	unknown,
+	SqlError,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -986,7 +986,10 @@ export const effectMigrationEntries = {
 	"0029_message_tombstones": executeSqlStatements(
 		readMigrationSql(MESSAGE_TOMBSTONES_MIGRATION),
 	),
-} satisfies Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>;
+} satisfies Record<
+	string,
+	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
+>;
 
 /**
  * Session columns that hold state no event can rebuild, keyed by the migration

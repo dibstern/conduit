@@ -48,7 +48,7 @@ export const UnderlinedLink: Story = {
 /**
  * The guard, not decoration. TextButton must never emit two utilities from the
  * same Tailwind group, because which one wins is decided by stylesheet emission
- * order rather than by anything visible at the call site (conduit-test-ixfu).
+ * order rather than by anything visible at the call site.
  *
  * It also asserts the three groups BASE deliberately leaves unclaimed — display,
  * padding and transition — stay unclaimed, so a call site can always pass its
@@ -85,7 +85,7 @@ export const NoCollidingUtilities: Story = {
 /**
  * Disabled drops the hover step entirely rather than trying to out-specify it.
  * A CSS-only suppression would need a second utility in the same group, and the
- * winner is decided by emission order — the bug conduit-test-or29 was filed for.
+ * winner is decided by emission order and could let disabled buttons light up on hover.
  */
 export const DisabledDropsHover: Story = {
 	args: { tone: "accent", disabled: true, children: label("Scanning...") },

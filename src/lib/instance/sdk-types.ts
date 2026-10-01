@@ -1,4 +1,4 @@
-// ─── SDK Type Re-exports (Task 9) ────────────────────────────────────────────
+// ─── SDK Type Re-exports ────────────────────────────────────────────
 // Single import point for types from @opencode-ai/sdk.
 // All relay code should import SDK types from here, not directly from the SDK.
 //
@@ -100,7 +100,7 @@ export type {
 	UserMessage,
 } from "@opencode-ai/sdk/client";
 
-// ─── Derived type aliases (Task 10) ─────────────────────────────────────────
+// ─── Derived type aliases ─────────────────────────────────────────
 // These replace the hand-maintained string unions in shared-types.ts with
 // types derived directly from the SDK's discriminated unions.
 
@@ -121,7 +121,7 @@ export type PartType = _Part["type"];
  */
 export type ToolStatus = _ToolState["status"];
 
-// ─── Local relay types (migrated from opencode-client.ts, Task 15) ──────────
+// ─── Local relay types (migrated from opencode-client.ts) ──────────
 // These are simplified interfaces used by relay handlers and the OpenCodeAPI
 // adapter. They do NOT match the SDK's strict types 1:1 (e.g., SDK Agent has
 // many required fields that the API doesn't always return).

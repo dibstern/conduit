@@ -11,7 +11,7 @@ describe("EventSink Effect boundary", () => {
 		const providerTypes = source("src/lib/provider/types.ts");
 
 		expect(providerTypes).toContain(
-			"push(event: ProviderRuntimeEvent): Effect.Effect<void, unknown>;",
+			"push(event: ProviderRuntimeEvent): Effect.Effect<void, EventSinkError>;",
 		);
 		expect(providerTypes).not.toContain(
 			"push(event: ProviderRuntimeEvent): Promise<void>",
@@ -23,10 +23,10 @@ describe("EventSink Effect boundary", () => {
 		const prompt = source("src/lib/handlers/prompt.ts");
 
 		expect(providerTypes).toMatch(
-			/requestPermission\(\s*request: PermissionRequest,\s*\): Effect\.Effect<PermissionResponse, unknown>;/,
+			/requestPermission\(\s*request: PermissionRequest,\s*\): Effect\.Effect<PermissionResponse, EventSinkError>;/,
 		);
 		expect(providerTypes).toMatch(
-			/requestQuestion\(\s*request: QuestionRequest,\s*\): Effect\.Effect<Record<string, unknown>, unknown>;/,
+			/requestQuestion\(\s*request: QuestionRequest,\s*\): Effect\.Effect<Record<string, unknown>, EventSinkError>;/,
 		);
 		expect(providerTypes).not.toMatch(
 			/requestPermission\(request: PermissionRequest\): Promise</,

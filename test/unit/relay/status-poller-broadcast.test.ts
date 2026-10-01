@@ -306,8 +306,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		socket.destroy();
 	});
 
-	// Wait for SSE + status poller to initialize
-	await new Promise((r) => setTimeout(r, 200));
+	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 
 	return {
 		relay,
@@ -343,9 +342,31 @@ async function createTestHarness(): Promise<TestHarness> {
 
 describe("Status poller → browser processing/done transitions", () => {
 	let harness: TestHarness;
+	const publishStatus = (sessionId: string, status: "busy" | "idle") => {
+		harness.mock.sessionStatuses[sessionId] = { type: status };
+		harness.mock.injectSSE({
+			type: "session.status",
+			properties: { sessionID: sessionId, status: { type: status } },
+		});
+	};
 
 	beforeAll(async () => {
 		harness = await createTestHarness();
+		publishStatus("sess-A", "idle");
+		publishStatus("sess-B", "idle");
+		await vi.waitFor(
+			async () => {
+				const statuses = await harness.relay.effectRuntime.runtime.runPromise(
+					Effect.gen(function* () {
+						const state = yield* Ref.get(yield* PollerStateTag);
+						return state.previousStatuses;
+					}),
+				);
+				expect(statuses["sess-A"]?.type).toBe("idle");
+				expect(statuses["sess-B"]?.type).toBe("idle");
+			},
+			{ timeout: 3000 },
+		);
 	}, 15_000);
 
 	afterAll(async () => {
@@ -375,8 +396,8 @@ describe("Status poller → browser processing/done transitions", () => {
 		await client.viewSession("sess-A");
 		client.clearReceived();
 
-		// Simulate session A becoming busy (e.g., TUI started processing)
-		harness.mock.sessionStatuses["sess-A"] = { type: "busy" };
+		// Persist session A's status through the provider event stream.
+		publishStatus("sess-A", "busy");
 
 		// Wait for status poller to detect the change (polls every 500ms)
 		const status = await client.waitFor("status", {
@@ -386,7 +407,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		expect(status["status"]).toBe("processing");
 
 		// Reset for cleanup
-		harness.mock.sessionStatuses["sess-A"] = { type: "idle" };
+		publishStatus("sess-A", "idle");
 		// Wait for idle transition to settle
 		await client.waitFor("done", { timeout: 3000 });
 
@@ -401,7 +422,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		client.clearReceived();
 
 		// First make session B busy
-		harness.mock.sessionStatuses["sess-B"] = { type: "busy" };
+		publishStatus("sess-B", "busy");
 		await client.waitFor("status", {
 			timeout: 3000,
 			predicate: (m) => m["status"] === "processing",
@@ -409,7 +430,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		client.clearReceived();
 
 		// Now make session B idle again
-		harness.mock.sessionStatuses["sess-B"] = { type: "idle" };
+		publishStatus("sess-B", "idle");
 
 		const done = await client.waitFor("done", { timeout: 3000 });
 		expect(done["type"]).toBe("done");
@@ -430,7 +451,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		clientB.clearReceived();
 
 		// Only session A becomes busy
-		harness.mock.sessionStatuses["sess-A"] = { type: "busy" };
+		publishStatus("sess-A", "busy");
 
 		// Client A should get status:processing
 		await clientA.waitFor("status", {
@@ -438,7 +459,7 @@ describe("Status poller → browser processing/done transitions", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		// Client B should NOT get status:processing — give it time to NOT arrive
+		// Client B must receive no processing status during this window.
 		await new Promise((r) => setTimeout(r, 150));
 		const bStatuses = clientB
 			.getReceivedOfType("status")
@@ -446,7 +467,7 @@ describe("Status poller → browser processing/done transitions", () => {
 		expect(bStatuses).toHaveLength(0);
 
 		// Cleanup
-		harness.mock.sessionStatuses["sess-A"] = { type: "idle" };
+		publishStatus("sess-A", "idle");
 		await clientA.waitFor("done", { timeout: 3000 });
 
 		await clientA.close();
@@ -454,7 +475,7 @@ describe("Status poller → browser processing/done transitions", () => {
 	});
 
 	it("shares status-poller state with the relay Effect runtime", async () => {
-		harness.mock.sessionStatuses["sess-A"] = { type: "busy" };
+		publishStatus("sess-A", "busy");
 
 		await vi.waitFor(
 			() => expect(harness.relay.isAnySessionProcessing()).toBe(true),
@@ -471,7 +492,7 @@ describe("Status poller → browser processing/done transitions", () => {
 			);
 		expect(relayRuntimeStatus).toBe("busy");
 
-		harness.mock.sessionStatuses["sess-A"] = { type: "idle" };
+		publishStatus("sess-A", "idle");
 		await vi.waitFor(
 			() => expect(harness.relay.isAnySessionProcessing()).toBe(false),
 			{ timeout: 3000 },

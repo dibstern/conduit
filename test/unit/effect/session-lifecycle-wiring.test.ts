@@ -13,8 +13,14 @@ import {
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
+	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -24,9 +30,12 @@ import {
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
 import {
 	handleSessionCreated,
@@ -34,12 +43,20 @@ import {
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 } from "../../helpers/mock-factories.js";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
+
+const waitForAssertion = (assertion: () => void) =>
+	Effect.promise(() => vi.waitFor(assertion));
+
+const flushSubscribers = Effect.promise(
+	() => new Promise<void>((resolve) => setImmediate(resolve)),
+);
 
 function makeMockDeps() {
 	const monitoringState: { current: MonitoringState } = {
@@ -127,14 +144,31 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	});
 
 	const baseLayer = Layer.mergeAll(
+		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(BackgroundLivenessTag, () => false),
+		makeOverridesStateLive(),
+		RelayStatusSnapshotLive,
+		OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(
+				Layer.merge(
+					Layer.succeed(ConfigTag, makeMockConfig()),
+					Layer.succeed(LoggerTag, services.log),
+				),
+			),
+		),
 		Layer.succeed(WebSocketHandlerTag, services.wsHandler as any),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(PollerManagerTag, services.pollerManager as any),
 		Layer.succeed(StatusPollerTag, services.statusPoller),
 		Layer.succeed(LoggerTag, services.log),
 		makeSessionManagerStateLive(),
+		PendingSendOwnershipLive,
 		DaemonEventBusLive,
 		persistenceLayer,
+		Layer.succeed(
+			OrchestrationEngineTag,
+			new OrchestrationEngine({ registry: new ProviderRegistry() }),
+		),
 	);
 
 	const serviceLayer = Layer.mergeAll(wiringLayer, SessionManagerServiceLive);
@@ -235,9 +269,11 @@ describe("SessionLifecycleWiringLive", () => {
 		return Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
 			// Allow subscriber fibers to start and subscribe to PubSub
-			yield* Effect.sleep("10 millis");
+			yield* flushSubscribers;
 			yield* PubSub.publish(bus, DaemonEvent.RelayBroadcast({ message: msg }));
-			yield* Effect.sleep("10 millis");
+			yield* waitForAssertion(() =>
+				expect(services.wsHandler.broadcast).toHaveBeenCalledWith(msg),
+			);
 
 			expect(services.wsHandler.broadcast).toHaveBeenCalledWith(msg);
 		}).pipe(
@@ -273,11 +309,13 @@ describe("SessionLifecycleWiringLive", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
-				yield* Effect.sleep("10 millis");
+				yield* flushSubscribers;
 				yield* service.createSession("Service Created", {
 					providerId: "opencode",
 				});
-				yield* Effect.sleep("50 millis");
+				yield* waitForAssertion(() =>
+					expect(services.pollerManager.startPolling).toHaveBeenCalled(),
+				);
 
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "Service Created",
@@ -319,9 +357,11 @@ describe("SessionLifecycleWiringLive", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
-				yield* Effect.sleep("10 millis");
+				yield* flushSubscribers;
 				yield* service.deleteSession("service-deleted");
-				yield* Effect.sleep("50 millis");
+				yield* waitForAssertion(() =>
+					expect(services.pollerManager.stopPolling).toHaveBeenCalled(),
+				);
 				const sql = yield* SqlClient.SqlClient;
 				const events = yield* sql<{
 					readonly type: string;
@@ -425,12 +465,14 @@ describe("SessionLifecycleWiringLive", () => {
 
 		return Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
-			yield* Effect.sleep("10 millis");
+			yield* flushSubscribers;
 			yield* PubSub.publish(
 				bus,
 				DaemonEvent.SessionCreated({ sessionId: "s1" }),
 			);
-			yield* Effect.sleep("50 millis");
+			yield* waitForAssertion(() =>
+				expect(services.pollerManager.startPolling).toHaveBeenCalled(),
+			);
 
 			expect(deps.translator.reset).toHaveBeenCalledWith("s1");
 			expect(services.pollerManager.startPolling).toHaveBeenCalledWith(
@@ -458,17 +500,21 @@ describe("SessionLifecycleWiringLive", () => {
 
 			return Effect.gen(function* () {
 				const bus = yield* DaemonEventBusTag;
-				yield* Effect.sleep("10 millis");
+				yield* flushSubscribers;
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.SessionCreated({ sessionId: "s-fails" }),
 				);
-				yield* Effect.sleep("50 millis");
+				yield* waitForAssertion(() =>
+					expect(pino.child.error).toHaveBeenCalled(),
+				);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.SessionDeleted({ sessionId: "s-after-failure" }),
 				);
-				yield* Effect.sleep("50 millis");
+				yield* waitForAssertion(() =>
+					expect(services.pollerManager.stopPolling).toHaveBeenCalled(),
+				);
 
 				expect(services.client.session.messages).toHaveBeenCalledWith(
 					"s-fails",
@@ -509,12 +555,14 @@ describe("SessionLifecycleWiringLive", () => {
 
 			return Effect.gen(function* () {
 				const bus = yield* DaemonEventBusTag;
-				yield* Effect.sleep("10 millis");
+				yield* flushSubscribers;
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.SessionDeleted({ sessionId: "s1" }),
 				);
-				yield* Effect.sleep("10 millis");
+				yield* waitForAssertion(() =>
+					expect(services.pollerManager.stopPolling).toHaveBeenCalled(),
+				);
 
 				expect(deps.translator.reset).toHaveBeenCalledWith("s1");
 				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith("s1");
@@ -544,7 +592,7 @@ describe("SessionLifecycleWiringLive", () => {
 
 			return Effect.gen(function* () {
 				const bus = yield* DaemonEventBusTag;
-				yield* Effect.sleep("10 millis");
+				yield* flushSubscribers;
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.SessionCreated({ sessionId: "s1" }),
@@ -553,6 +601,7 @@ describe("SessionLifecycleWiringLive", () => {
 					bus,
 					DaemonEvent.SessionDeleted({ sessionId: "s1" }),
 				);
+				// No poller start may occur while the delayed history rebuild completes.
 				yield* Effect.sleep("300 millis");
 
 				expect(services.pollerManager.stopPolling).toHaveBeenCalledWith("s1");
@@ -579,7 +628,7 @@ describe("SessionLifecycleWiringLive", () => {
 
 			return Effect.gen(function* () {
 				const bus = yield* DaemonEventBusTag;
-				yield* Effect.sleep("10 millis");
+				yield* flushSubscribers;
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.SessionCreated({ sessionId: "s1" }),
@@ -592,7 +641,7 @@ describe("SessionLifecycleWiringLive", () => {
 					bus,
 					DaemonEvent.SessionCreated({ sessionId: "s1" }),
 				);
-				yield* Effect.sleep("50 millis");
+				yield* waitForAssertion(() => expect(resolvers).toHaveLength(2));
 
 				resolvers[0]?.([
 					{ id: "old-message", role: "assistant", sessionID: "s1", parts: [] },
@@ -600,7 +649,9 @@ describe("SessionLifecycleWiringLive", () => {
 				resolvers[1]?.([
 					{ id: "new-message", role: "assistant", sessionID: "s1", parts: [] },
 				]);
-				yield* Effect.sleep("50 millis");
+				yield* waitForAssertion(() =>
+					expect(services.pollerManager.startPolling).toHaveBeenCalled(),
+				);
 
 				expect(services.pollerManager.startPolling).toHaveBeenCalledTimes(1);
 				expect(services.pollerManager.startPolling).toHaveBeenCalledWith("s1", [
@@ -620,12 +671,14 @@ describe("SessionLifecycleWiringLive", () => {
 
 		return Effect.gen(function* () {
 			const bus = yield* DaemonEventBusTag;
-			yield* Effect.sleep("10 millis");
+			yield* flushSubscribers;
 			yield* PubSub.publish(
 				bus,
 				DaemonEvent.SessionCreated({ sessionId: "s1" }),
 			);
-			yield* Effect.sleep("50 millis");
+			yield* waitForAssertion(() =>
+				expect(deps.translator.reset).toHaveBeenCalledWith("s1"),
+			);
 
 			expect(deps.translator.reset).toHaveBeenCalledWith("s1");
 			expect(services.pollerManager.startPolling).not.toHaveBeenCalled();

@@ -27,6 +27,7 @@ import {
 	ProjectorCursorEffectTag,
 } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import { PersistenceError } from "../../../src/lib/persistence/errors.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -37,7 +38,6 @@ import type {
 	MessageWithParts,
 } from "../../../src/lib/persistence/read-model-types.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -50,6 +50,7 @@ import type {
 	SessionMessage,
 } from "../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	createMockQuery,
 	makeBaseSendTurnInput,
@@ -159,9 +160,11 @@ describe("Claude subagent materialization pipeline", () => {
 						eventStore.append(event).pipe(
 							Effect.mapError(
 								(cause) =>
-									new Error(
-										`append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
-									),
+									new PersistenceError({
+										code: "APPEND_FAILED",
+										message: `append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
+										context: { cause },
+									}),
 							),
 							Effect.flatMap((stored) =>
 								projectionRunner
@@ -293,7 +296,7 @@ describe("Claude subagent materialization pipeline", () => {
 						}),
 					] satisfies SDKMessage[];
 
-					const instance = new ClaudeProviderInstance({
+					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: dir,
 						queryFactory: () => createMockQuery(queryMessages),
 						materializeSubagents,
@@ -308,17 +311,16 @@ describe("Claude subagent materialization pipeline", () => {
 						}),
 					);
 					const waitForFinalCatchUp = () =>
-						Effect.gen(function* () {
-							const deadline = Date.now() + 2_000;
-							while (Date.now() < deadline) {
-								const rows = yield* sql<MessageRow>`
-									SELECT * FROM messages WHERE session_id = ${childSessionId}`;
-								if (rows.length >= 2) return;
-								yield* Effect.promise(
-									() => new Promise<void>((resolve) => setTimeout(resolve, 25)),
-								);
-							}
-						});
+						Effect.promise(() =>
+							vi.waitFor(
+								async () => {
+									const rows = await Effect.runPromise(sql<MessageRow>`
+								SELECT * FROM messages WHERE session_id = ${childSessionId}`);
+									expect(rows.length).toBeGreaterThanOrEqual(2);
+								},
+								{ timeout: 2_000 },
+							),
+						);
 					yield* waitForFinalCatchUp();
 
 					const parentMessages = yield* sql<MessageRow>`
@@ -337,6 +339,7 @@ describe("Claude subagent materialization pipeline", () => {
 						SELECT id FROM sessions WHERE parent_id IS NULL ORDER BY updated_at DESC`;
 					const allSessions = yield* sql<{ id: string }>`
 						SELECT id FROM sessions ORDER BY updated_at DESC`;
+					yield* instance.shutdownEffect();
 
 					return {
 						childSessionId,
@@ -401,9 +404,11 @@ describe("Claude subagent materialization pipeline", () => {
 						eventStore.append(event).pipe(
 							Effect.mapError(
 								(cause) =>
-									new Error(
-										`append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
-									),
+									new PersistenceError({
+										code: "APPEND_FAILED",
+										message: `append ${event.type} failed: ${JSON.stringify(event.data)} (${describeCause(cause)})`,
+										context: { cause },
+									}),
 							),
 							Effect.flatMap((stored) =>
 								projectionRunner
@@ -459,25 +464,16 @@ describe("Claude subagent materialization pipeline", () => {
 								message.rawText === "Auth is fine",
 						);
 					const waitForProjectedChildTranscript = () =>
-						Effect.gen(function* () {
-							const timeoutMs = 2_000;
-							const pollIntervalMs = 25;
-							const deadline = Date.now() + timeoutMs;
-							let state = yield* readProjectedState();
-							while (
-								!hasProjectedChildTranscript(state) &&
-								Date.now() < deadline
-							) {
-								yield* Effect.promise(
-									() =>
-										new Promise<void>((resolve) =>
-											setTimeout(resolve, pollIntervalMs),
-										),
-								);
-								state = yield* readProjectedState();
-							}
-							return state;
-						});
+						Effect.promise(() =>
+							vi.waitFor(
+								async () => {
+									const state = await Effect.runPromise(readProjectedState());
+									expect(hasProjectedChildTranscript(state)).toBe(true);
+									return state;
+								},
+								{ timeout: 2_000 },
+							),
+						);
 
 					const parentSessionId = "parent-live-session";
 					const parentClaudeSessionId = "sdk-parent-live";
@@ -649,7 +645,7 @@ describe("Claude subagent materialization pipeline", () => {
 						throw: gen.throw.bind(gen),
 						[Symbol.asyncIterator]: () => gen,
 					}) as unknown as Query;
-					const instance = new ClaudeProviderInstance({
+					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: dir,
 						queryFactory: () => query,
 						subagentSdk: sdk,

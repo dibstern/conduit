@@ -3,7 +3,15 @@
 // the relay pipeline and arrive at WebSocket clients in the correct order.
 // Also covers the history + SSE overlap scenario.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -20,10 +28,8 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("delivers tool_start, tool_executing, tool_result in order", async () => {
@@ -233,7 +239,13 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 		// The frontend's ToolRegistry handles the overlap gracefully
 		// (completed→running is silently rejected). We verify the relay
 		// doesn't crash and still delivers events.
-		await new Promise((r) => setTimeout(r, 300));
+		await vi.waitFor(() => {
+			expect(
+				client
+					.getReceivedOfType("tool_executing")
+					.filter((message) => message["id"] === "toolu_overlap1").length,
+			).toBeGreaterThan(1);
+		});
 
 		// Verify no relay-level errors during the overlap
 		const errors = client

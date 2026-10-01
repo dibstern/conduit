@@ -21,6 +21,7 @@ import {
 	ProjectsProvider,
 	PushProvider,
 	type RouterProjectInfo,
+	SetupInfoProvider,
 } from "../../../src/lib/server/effect-http-router.js";
 
 // ─── Test Layers ────────────────────────────────────────────────────────────
@@ -309,7 +310,14 @@ describe("Effect HTTP Router", () => {
 		it("effectRouterWithCors adds CORS headers to responses", async () => {
 			const { handler, dispose } = HttpApp.toWebHandlerLayer(
 				effectRouterWithCors,
-				Layer.merge(TestProjectsLayer, baseRouterLayer()),
+				Layer.mergeAll(
+					TestProjectsLayer,
+					baseRouterLayer(),
+					Layer.succeed(SetupInfoProvider, {
+						getPort: () => Effect.succeed(2633),
+						getIsTls: () => Effect.succeed(false),
+					}),
+				),
 			);
 			disposers.push(dispose);
 

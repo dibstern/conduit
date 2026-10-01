@@ -86,8 +86,8 @@ describe("EffectPromptQueue", () => {
 		const q = await makeQueue();
 		const consumerPromise = takeN(q, 1);
 
-		// Give the consumer a tick to start awaiting.
-		await new Promise((r) => setTimeout(r, 10));
+		// Flush the consumer's pending async-iterator subscription.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		await enqueue(q, msg("hello"));
 		const items = await consumerPromise;
@@ -116,7 +116,7 @@ describe("EffectPromptQueue", () => {
 			return items;
 		})();
 
-		await new Promise((r) => setTimeout(r, 10));
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		await close(q);
 
 		const items = await consumer;

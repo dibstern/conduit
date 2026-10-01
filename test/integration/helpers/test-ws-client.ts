@@ -845,11 +845,11 @@ export class TestWsClient {
 		await Promise.all([
 			this.waitFor("status", { timeout }),
 			this.waitFor("session_family", { timeout }),
+			this.waitFor("agent_list", { timeout }),
+			this.waitFor("model_list", { timeout }),
 		]);
 		const sessionId = this.getActiveSessionId();
 		if (sessionId) await this.viewSession(sessionId);
-		// Give agents/models a moment to arrive (they're async)
-		await new Promise((r) => setTimeout(r, 100));
 	}
 
 	/**

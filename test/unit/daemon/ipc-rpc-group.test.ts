@@ -29,6 +29,7 @@ import {
 	DaemonStateTag,
 	makeDaemonStateLive,
 } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	IpcHandlersLayer,
@@ -81,6 +82,7 @@ const makeMockShutdownSignal = () =>
 
 const makeBaseTestLayer = (relaySnapshot?: RelayStatusSnapshot) =>
 	Layer.mergeAll(
+		InstanceHealthCheckLive,
 		makeDaemonStateLive({ projects: [] }),
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,

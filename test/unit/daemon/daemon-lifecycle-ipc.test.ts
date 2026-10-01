@@ -48,6 +48,7 @@ import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daem
 import { DaemonHandleTag } from "../../../src/lib/domain/daemon/Services/daemon-handle.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { IpcHandlersLayer } from "../../../src/lib/domain/daemon/Services/ipc-rpc-group.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -89,6 +90,7 @@ const makeNativeIpcDispatcher = () => {
 			persistedSessionCounts: new Map<string, number>(),
 		};
 	const nativeDeps = Layer.mergeAll(
+		InstanceHealthCheckLive,
 		makeDaemonStateLive(),
 		Layer.effect(DaemonConfigRefTag, Ref.make(initialConfig)),
 		Layer.succeed(DaemonHandleTag, {

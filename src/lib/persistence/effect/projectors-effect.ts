@@ -947,7 +947,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 			// Claude translator is the sole emitter and its runtime serializes
 			// turn admission, so a turn's model_resolved always lands before the
 			// next turn's row exists. A second emitter, or concurrent turns,
-			// needs a real key first — see conduit-test-7i3.
+			// needs a real key first (tracked in conduit-test-7i3).
 			if (isEventType(event, "turn.model_resolved")) {
 				return owners(
 					yield* sql<OwnedRow>`

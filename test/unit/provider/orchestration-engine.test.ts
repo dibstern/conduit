@@ -1,9 +1,11 @@
 // test/unit/provider/orchestration-engine.test.ts
+
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 
 // Mock the logger module so we can spy on log.error calls
 const { mockLogError } = vi.hoisted(() => ({
@@ -54,7 +56,6 @@ vi.mock("../../../src/lib/logger.js", () => ({
 	}),
 }));
 
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	type DiscoverCommand,
@@ -743,7 +744,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => mockQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
@@ -781,7 +782,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => mockQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
@@ -848,7 +849,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => throwingQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
@@ -996,7 +997,7 @@ describe("OrchestrationEngine", () => {
 			const queryFactory = vi.fn(() => throwingQuery);
 
 			const claudeRegistry = new ProviderRegistry();
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});

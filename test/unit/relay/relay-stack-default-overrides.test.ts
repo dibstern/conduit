@@ -22,7 +22,6 @@ import {
 	type ProjectRelay,
 	RelayCreationAbortedError,
 } from "../../../src/lib/relay/relay-stack.js";
-import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 
 interface MockOpenCode {
 	server: Server;
@@ -130,12 +129,12 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		relay = await createProjectRelay({
-			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),
 			slug: "test-default-overrides",
 			configDir,
+			persistenceDbPath: join(configDir, "events.db"),
 			log: createSilentLogger(),
 		});
 		const sseHealth = {
@@ -187,12 +186,12 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		relay = await createProjectRelay({
-			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),
 			slug: "test-default-agent-command",
 			configDir,
+			persistenceDbPath: join(configDir, "events.db"),
 			log: createSilentLogger(),
 		});
 
@@ -213,12 +212,12 @@ describe("createProjectRelay override-state defaults", () => {
 		);
 
 		relay = await createProjectRelay({
-			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
 			slug: "test-no-opencode-startup",
 			configDir,
+			persistenceDbPath: join(configDir, "events.db"),
 			log: createSilentLogger(),
 			statusPollerInterval: 60_000,
 			messagePollerInterval: 60_000,
@@ -233,11 +232,11 @@ describe("createProjectRelay override-state defaults", () => {
 		controller.abort();
 
 		const rejected = createProjectRelay({
-			persistenceDbPath: tempEventsDbPath(),
 			httpServer: relayServer,
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
 			slug: "test-aborted-relay",
+			persistenceDbPath: join(tmpdir(), "conduit-aborted-relay.db"),
 			signal: controller.signal,
 			log: createSilentLogger(),
 		});

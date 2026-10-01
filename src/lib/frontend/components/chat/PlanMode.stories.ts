@@ -68,7 +68,7 @@ export const Collapsed: Story = {
 		mode: "content",
 		content: mockPlanContent,
 	},
-	// conduit-test-732b: local state starts expanded; args alone never collapsed it.
+	// Local state starts expanded; args alone never collapsed it.
 	play: async ({ canvasElement }) => {
 		const toggle = within(canvasElement).getByRole("button", {
 			name: "Implementation Plan",

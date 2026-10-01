@@ -2,19 +2,20 @@
 // has to be bijective in both directions: the forward half is what the session
 // actually enforces, and the reverse half is what lets conduit trust the mode
 // the SDK reports back on each turn's init message.
+
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import type {
 	Query,
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import type { ModelInfo } from "../../../../src/lib/provider/types.js";
 import type { SessionPermissionMode } from "../../../../src/lib/shared-types.js";
+import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import {
 	createMockEventSink,
 	makeBaseSendTurnInput,
@@ -99,7 +100,7 @@ describe("Claude permission mode mapping", () => {
 	for (const [conduitMode, sdkMode] of FORWARD) {
 		it(`puts the live query into "${sdkMode}" for conduit "${conduitMode}"`, async () => {
 			const { query, setPermissionMode } = makeMockQuery(singleTurn());
-			const instance = new ClaudeProviderInstance({
+			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: workspace,
 				queryFactory: vi.fn(() => query),
 				capabilitiesService: makeCapabilitiesService(),
@@ -140,7 +141,7 @@ describe("Claude permission mode mapping", () => {
 				return query;
 			},
 		);
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 			capabilitiesService: makeCapabilitiesService(),
@@ -175,7 +176,7 @@ describe("Claude permission mode mapping", () => {
 				);
 			}
 		});
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: vi.fn(
 				(args: { options?: { allowDangerouslySkipPermissions?: boolean } }) => {

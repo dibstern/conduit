@@ -40,6 +40,9 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 
 async function preparePageForScreenshot(page: Page) {
+	await expect(page.locator("body")).toBeVisible();
+	await expect(page.locator("#messages")).toBeVisible();
+	await expect(page.locator("#input-area")).toBeVisible();
 	await waitForFonts(page);
 	await waitForIcons(page);
 	await freezeAnimations(page);

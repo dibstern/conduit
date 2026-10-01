@@ -1,4 +1,4 @@
-// ─── TLS Certificate Management (Ticket 8.2) ────────────────────────────────
+// ─── TLS Certificate Management ────────────────────────────────
 // Manages mkcert-based TLS certificates for HTTPS access over LAN/Tailscale.
 // All system calls (exec, fs, networkInterfaces) are injectable for testing.
 

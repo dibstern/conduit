@@ -112,7 +112,7 @@
 				<!-- `icon`, not a child <Icon>: Button suppresses children
 				     entirely when `iconOnly` is set, so passing the glyph as a
 				     child rendered an empty ghost button. The baselines captured
-				     that absence (conduit-test-uv4b); Button's trap is conduit-test-arl1. -->
+				     that absence. -->
 				<Button
 					variant="ghost"
 					size="sm"

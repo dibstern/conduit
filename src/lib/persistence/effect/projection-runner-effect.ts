@@ -173,7 +173,6 @@ export const makeProjectionRunnerEffect = (
 			}>`UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
 			return rows[0]?.value ?? 0;
 		});
-
 		const recordFailure = (
 			projector: EffectProjector,
 			event: StoredEvent,

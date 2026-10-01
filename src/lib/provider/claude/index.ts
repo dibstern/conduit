@@ -13,7 +13,6 @@ export {
 	ClaudeCapabilitiesServiceLive,
 	ClaudeCapabilitiesServiceTag,
 	makeClaudeCapabilitiesService,
-	makeUnsafeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
 export type { ClaudeEventTranslatorDeps } from "./claude-event-translator.js";
 export { ClaudeEventTranslator } from "./claude-event-translator.js";

@@ -218,7 +218,7 @@
 	 * What this actually wants is `ui/MenuItem`, which cannot be used here: it
 	 * renders a Bits `DropdownMenu.Item` and needs a menu context this
 	 * hand-rolled popover does not provide. Tracked as a design-system gap
-	 * rather than papered over with `!` overrides (conduit-test-de3.35.6).
+	 * rather than papered over with `!` overrides.
 	 */
 	/**
 	 * `text-accent` on the active row is deleted, not ported: `.text-text` is
@@ -368,7 +368,7 @@
 	     emitted AFTER them in the built stylesheet. Every override in this file
 	     was checked that way rather than assumed: Tailwind's emission order is
 	     not alphabetical, and collisions within one family resolve in opposite
-	     directions (conduit-test-de3.35.6).
+	     directions.
 
 	     Button's default `align="center"` is harmless despite `max-w-[200px]`:
 	     the label span shrinks and ellipsises before the button reaches its cap,
@@ -508,7 +508,7 @@
 					     about whether the field has focus, and this input is the first thing
 					     the popover focuses. A keyboard user Tabbing back to it from the model
 					     rows had no way to tell the search box was live
-					     (conduit-test-de3.35.9.3). `focus-only` keeps the chromeless rest state
+. `focus-only` keeps the chromeless rest state
 					     and adds an inset outline only under :focus-visible.
 
 					     `aria-label` because the only name this field has is its placeholder,
@@ -563,7 +563,7 @@
 							     A group is what this genuinely is -- a run of controls under a
 							     heading -- and it makes the provider name part of every row's
 							     announced context rather than a visual-only divider
-							     (conduit-test-de3.35.9.3). -->
+. -->
 							<div
 								class={providerSectionClass(group)}
 								role="group"

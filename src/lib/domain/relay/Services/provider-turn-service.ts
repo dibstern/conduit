@@ -1,152 +1,35 @@
-import { randomUUID } from "node:crypto";
-import {
-	Context,
-	Deferred,
-	Effect,
-	type Fiber,
-	FiberId,
-	FiberMap,
-	Layer,
-	MutableHashMap,
-	Runtime,
-} from "effect";
-import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
-import { formatErrorDetail, RelayError } from "../../../errors.js";
-import type { PromptOptions } from "../../../instance/sdk-types.js";
-import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-} from "../../../persistence/effect/claude-event-persist-effect.js";
-import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
-import {
-	type ReadQueryEffect,
-	ReadQueryEffectTag,
-} from "../../../persistence/effect/read-query-effect.js";
-import { createEventId } from "../../../persistence/events.js";
-import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
-import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
-import {
-	createRelayEventSink,
-	type RelayEventSinkPersist,
-} from "../../../provider/relay-event-sink.js";
+import { Context, Effect, FiberMap, Layer } from "effect";
+import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
+import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type {
-	EventSink,
-	PermissionRequest,
-	PermissionResponse,
-	QuestionRequest,
-	SendTurnInput,
-	TurnResult,
-} from "../../../provider/types.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
-import {
 	PendingInteractionServiceTag,
-	type PendingQuestion,
+	PendingQuestion,
 } from "./pending-interaction-service.js";
+import type { PendingSendOwnershipTag } from "./pending-send-ownership.js";
+import type { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
-	PendingSendOwnershipLive,
-	PendingSendOwnershipTag,
-} from "./pending-send-ownership.js";
+	ProviderTurnDispatchFibersTag,
+	ProviderTurnTimeoutRuntimeTag,
+	sendTurn,
+} from "./provider-turn-dispatch.js";
 import {
-	type ProviderRuntimeIngestion,
-	ProviderRuntimeIngestionTag,
-} from "./provider-runtime-ingestion-service.js";
-import {
+	completeRecoveredQuestion,
+	interruptTurn,
+	prepareTurnSession,
+} from "./provider-turn-session.js";
+import type {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "./services.js";
-import {
-	type SessionManagerService,
-	SessionManagerServiceTag,
-} from "./session-manager-service.js";
-import {
-	clearProcessingTimeout,
-	getPermissionMode,
-	OverridesStateTag,
-	PROCESSING_TIMEOUT_DURATION,
-	resetProcessingTimeout,
-	setModel,
-	setModelDefault,
-	setPermissionMode,
-} from "./session-overrides-state.js";
-import { SessionTitleServiceTag } from "./session-title-service.js";
+import type { SessionManagerServiceTag } from "./session-manager-service.js";
+import { OverridesStateTag } from "./session-overrides-state.js";
+import type { SessionTitleServiceTag } from "./session-title-service.js";
 
-const CLAUDE_PROVIDER_ID = "claude";
-const OPENCODE_PROVIDER_ID = "opencode";
-
-const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
-	push: () => Effect.void,
-	requestPermission: () => Effect.succeed({ decision: "once" as const }),
-	requestQuestion: () => Effect.succeed({}),
-	resolvePermission: () => Effect.void,
-	resolveQuestion: () => Effect.void,
-};
-
-export class ProviderRuntimeIngestionRequired extends Error {
-	readonly _tag = "ProviderRuntimeIngestionRequired" as const;
-
-	constructor(readonly sessionId: string) {
-		super(
-			`ProviderRuntimeIngestion is required for provider output: session=${sessionId}`,
-		);
-	}
-}
-
-const makeProviderRuntimeIngestionRequiredSink = (
-	sessionId: string,
-): EventSink => {
-	const fail = () =>
-		Effect.fail(new ProviderRuntimeIngestionRequired(sessionId));
-	return {
-		push: fail,
-		requestPermission: (_request: PermissionRequest) => fail(),
-		requestQuestion: (_request: QuestionRequest) => fail(),
-		resolvePermission: (_requestId: string, _response: PermissionResponse) =>
-			fail(),
-		resolveQuestion: (_requestId: string, _answers: Record<string, unknown>) =>
-			fail(),
-		cancelSessionInteractions: () => Effect.void,
-	};
-};
-
-// Compatibility constructor support for the old prompt-handler fallback seam.
-// Production wiring uses the scoped Layer below so dispatch fibers are
-// interrupted with the relay ProviderTurnService scope.
-const makeUnsafeFiberMap = <K, A = unknown, E = unknown>(): FiberMap.FiberMap<
-	K,
-	A,
-	E
-> =>
-	({
-		[FiberMap.TypeId]: FiberMap.TypeId,
-		deferred: Deferred.unsafeMake<void, E>(FiberId.none),
-		state: {
-			_tag: "Open",
-			backing: MutableHashMap.empty<K, Fiber.RuntimeFiber<A, E>>(),
-		},
-		[Symbol.iterator](this: {
-			state:
-				| { readonly _tag: "Closed" }
-				| {
-						readonly _tag: "Open";
-						readonly backing: MutableHashMap.MutableHashMap<
-							K,
-							Fiber.RuntimeFiber<A, E>
-						>;
-				  };
-		}) {
-			if (this.state._tag === "Closed") {
-				return [][Symbol.iterator]();
-			}
-			return this.state.backing[Symbol.iterator]();
-		},
-	}) as unknown as FiberMap.FiberMap<K, A, E>;
+export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
 
 export interface ProviderTurnServiceSendInput {
 	readonly clientId: string;
@@ -184,13 +67,24 @@ export interface ProviderTurnService {
 		question: PendingQuestion,
 		result: string | null,
 		answers?: Record<string, unknown>,
-	) => Effect.Effect<void, unknown>;
+	) => Effect.Effect<
+		void,
+		Effect.Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
+	>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
-	) => Effect.Effect<string, unknown, OverridesStateTag>;
+	) => Effect.Effect<
+		string,
+		Effect.Effect.Error<ReturnType<typeof prepareTurnSession>>,
+		OverridesStateTag
+	>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
-	) => Effect.Effect<void, unknown, OverridesStateTag>;
+	) => Effect.Effect<
+		void,
+		Effect.Effect.Error<ReturnType<typeof sendTurn>>,
+		OverridesStateTag
+	>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
 	) => Effect.Effect<void, never, OverridesStateTag>;
@@ -201,820 +95,42 @@ export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
 	ProviderTurnService
 >() {}
 
-class ProviderTurnDispatchFibersTag extends Context.Tag(
-	"ProviderTurnDispatchFibers",
-)<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
-
-export function isProviderTurnInterruptProvider(
-	driver: ProviderDriverKind,
-): boolean {
-	return driver === CLAUDE_PROVIDER_ID;
-}
-
-function isClaudeDriver(driver: ProviderDriverKind): boolean {
-	return driver === CLAUDE_PROVIDER_ID;
-}
-
-function targetSessionForRelayMessage(
-	msg: unknown,
-	fallbackSessionId: string,
-): string {
-	if (msg == null || typeof msg !== "object" || !("sessionId" in msg)) {
-		return fallbackSessionId;
-	}
-	const sessionId = (msg as { readonly sessionId?: unknown }).sessionId;
-	return typeof sessionId === "string" && sessionId.length > 0
-		? sessionId
-		: fallbackSessionId;
-}
-
-type PriorHistoryReaders = {
-	readQueryEffect?: ReadQueryEffect;
-};
-
-function loadPriorHistoryForTurn(
-	sessionId: string,
-	sessionManagerService: SessionManagerService,
-	readers: PriorHistoryReaders,
-): Effect.Effect<SendTurnInput["history"], unknown> {
-	if (readers.readQueryEffect) {
-		return readers.readQueryEffect.getSessionMessagesWithParts(sessionId).pipe(
-			Effect.map(
-				(rows) =>
-					messageRowsToHistory(rows, {
-						pageSize: Number.MAX_SAFE_INTEGER,
-					}).messages,
-			),
-		);
-	}
-	return sessionManagerService
-		.loadPreRenderedHistory(sessionId)
-		.pipe(Effect.map((history) => history.messages));
-}
-
-function buildLegacyPrompt(input: ProviderTurnServiceSendInput): PromptOptions {
-	const prompt: PromptOptions = {
-		text: input.text,
-		...(input.images && input.images.length > 0
-			? { images: Array.from(input.images) }
-			: {}),
-	};
-	if (input.agent) prompt.agent = input.agent;
-	if (input.model && input.modelUserSelected) prompt.model = input.model;
-	if (input.variant) prompt.variant = input.variant;
-	return prompt;
-}
-
-export const makeProviderTurnService = Effect.gen(function* () {
-	const client = yield* OpenCodeAPITag;
-	const ownership = yield* PendingSendOwnershipTag;
-	const wsHandler = yield* WebSocketHandlerTag;
-	const log = yield* LoggerTag;
-	const sessionManagerService = yield* SessionManagerServiceTag;
-	const config = yield* ConfigTag;
-	const pendingInteractionService = yield* PendingInteractionServiceTag;
+const makeProviderTurnService = Effect.gen(function* () {
+	const context = yield* Effect.context<
+		| OpenCodeAPITag
+		| WebSocketHandlerTag
+		| LoggerTag
+		| ConfigTag
+		| SessionManagerServiceTag
+		| PendingInteractionServiceTag
+		| PendingSendOwnershipTag
+		| OverridesStateTag
+		| OrchestrationEngineTag
+		| ReadQueryEffectTag
+		| ClaudeEventPersistEffectTag
+		| ProviderRuntimeIngestionTag
+		| ProviderStateEffectTag
+		| SessionTitleServiceTag
+		| ProviderTurnDispatchFibersTag
+	>();
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
 	const overridesRef = yield* OverridesStateTag;
-	const runTimeout = Runtime.runFork(runtime);
-	const dispatchFibersOption = yield* Effect.serviceOption(
-		ProviderTurnDispatchFibersTag,
-	);
-	const dispatchFibers =
-		dispatchFibersOption._tag === "Some"
-			? dispatchFibersOption.value
-			: makeUnsafeFiberMap<string, void, unknown>();
-
-	const sendErrorMessage = (
-		input: ProviderTurnServiceSendInput,
-		message: ReturnType<RelayError["toMessage"]>,
-	) => {
-		if (input.errorDelivery === "session") {
-			wsHandler.sendToSession(input.sessionId, message);
-		} else {
-			wsHandler.sendTo(input.clientId, message);
-		}
+	const providedContext = Context.add(context, ProviderTurnTimeoutRuntimeTag, {
+		runtime,
+		overridesRef,
+	});
+	const service: ProviderTurnService = {
+		completeRecoveredQuestion: (question, result, answers) =>
+			completeRecoveredQuestion(question, result, answers).pipe(
+				Effect.provide(providedContext),
+			),
+		prepareTurnSession: (input) =>
+			prepareTurnSession(input).pipe(Effect.provide(providedContext)),
+		sendTurn: (input) => sendTurn(input).pipe(Effect.provide(providedContext)),
+		interruptTurn: (input) =>
+			interruptTurn(input).pipe(Effect.provide(providedContext)),
 	};
-
-	const loadClaudeHistory = (sessionId: string) =>
-		Effect.gen(function* () {
-			const readQueryEffectOption =
-				yield* Effect.serviceOption(ReadQueryEffectTag);
-			const historyReaders: PriorHistoryReaders = {
-				...(readQueryEffectOption._tag === "Some"
-					? { readQueryEffect: readQueryEffectOption.value }
-					: {}),
-			};
-			const result = yield* Effect.either(
-				loadPriorHistoryForTurn(
-					sessionId,
-					sessionManagerService,
-					historyReaders,
-				),
-			);
-			if (result._tag === "Right") {
-				return { history: result.right, loaded: true };
-			}
-			log.warn(
-				`Failed to load prior Claude history for ${sessionId}: ${
-					result.left instanceof Error ? result.left.message : result.left
-				}`,
-			);
-			return { history: [], loaded: false };
-		});
-
-	const maybePersistClaudeUserMessage = (input: {
-		readonly sessionId: string;
-		readonly text: string;
-		readonly isFirstClaudeMessage: boolean;
-	}) =>
-		Effect.gen(function* () {
-			const claudeEventPersistEffectOption = yield* Effect.serviceOption(
-				ClaudeEventPersistEffectTag,
-			);
-			if (claudeEventPersistEffectOption._tag === "None") return;
-
-			const persistResult = yield* Effect.either(
-				claudeEventPersistEffectOption.value.persistUserMessage(
-					input.sessionId,
-					input.text,
-				),
-			);
-			const titleServiceOption = yield* Effect.serviceOption(
-				SessionTitleServiceTag,
-			);
-			if (
-				input.isFirstClaudeMessage &&
-				titleServiceOption._tag === "Some" &&
-				persistResult._tag === "Right"
-			) {
-				yield* titleServiceOption.value.startForFirstClaudeMessage({
-					sessionId: input.sessionId,
-					firstMessage: input.text,
-				});
-			}
-			if (persistResult._tag === "Left") {
-				const error = persistResult.left;
-				if (error._tag === "ClaudeSessionLifecycleError") {
-					log.error(
-						`Claude turn persistence rejected by session lifecycle: ` +
-							`session=${error.sessionId} operation=${error.operation} ` +
-							`role=${error.role} reason=${error.reason}`,
-					);
-					return yield* error;
-				} else {
-					log.warn(
-						`Non-fatal persistence error for Claude user message: ${formatErrorDetail(error)}`,
-					);
-				}
-			}
-		});
-
-	const makeEventSink = (
-		sessionId: string,
-		driver: ProviderDriverKind,
-		persist: ClaudeEventPersistEffect | undefined,
-		ingestion: ProviderRuntimeIngestion | undefined,
-	): SendTurnInput["eventSink"] => {
-		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
-		if (!ingestion) return makeProviderRuntimeIngestionRequiredSink(sessionId);
-		let eventSinkPersist: RelayEventSinkPersist | undefined;
-		if (persist) eventSinkPersist = persist;
-		return createRelayEventSink({
-			sessionId,
-			providerId: driver,
-			send: (msg) =>
-				wsHandler.sendToSession(
-					targetSessionForRelayMessage(msg, sessionId),
-					msg,
-				),
-			clearTimeout: () => {
-				runTimeout(clearProcessingTimeout(sessionId));
-			},
-			resetTimeout: () => {
-				runTimeout(
-					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
-				);
-			},
-			applyReportedPermissionMode: (mode) =>
-				setPermissionMode(sessionId, mode).pipe(
-					Effect.provideService(OverridesStateTag, overridesRef),
-				),
-			...(eventSinkPersist ? { persist: eventSinkPersist } : {}),
-			// The SDK calls canUseTool from a bare Promise, so the asks this sink
-			// records arrive with no services at all. Fill them in from the relay,
-			// or the commit finds no notifier and the woken session never reaches
-			// the sidebar.
-			ingestion: {
-				ingest: (event) =>
-					ingestion
-						.ingest(event)
-						.pipe(
-							Effect.mapInputContext((caller: Context.Context<never>) =>
-								Context.merge(runtime.context, caller),
-							),
-						),
-			},
-			pendingInteractions: {
-				beginPermissionRequest: (request) =>
-					pendingInteractionService.beginPermissionRequest(request),
-				resolvePermissionRequest: (requestId, response) =>
-					pendingInteractionService.resolvePermissionRequest(
-						requestId,
-						response,
-					),
-				beginQuestionRequest: (request) =>
-					pendingInteractionService.beginQuestionRequest(request),
-				resolveQuestionRequest: (requestId, answers) =>
-					pendingInteractionService.resolveQuestionRequest(requestId, answers),
-				cancelSessionInteractions: (reason, options) =>
-					pendingInteractionService.cancelSessionInteractions(
-						sessionId,
-						reason,
-						options,
-					),
-			},
-		});
-	};
-
-	const handleDispatchFailure = (
-		input: ProviderTurnServiceSendInput,
-		sendErr: unknown,
-	) =>
-		Effect.gen(function* () {
-			ownership.remove(input.sessionId, input.commandId);
-			log.warn(
-				`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
-				formatErrorDetail(sendErr),
-			);
-			yield* clearProcessingTimeout(input.sessionId);
-			wsHandler.sendToSession(input.sessionId, {
-				type: "done",
-				sessionId: input.sessionId,
-				code: 1,
-			});
-			sendErrorMessage(
-				input,
-				RelayError.fromCaught(
-					sendErr,
-					"SEND_FAILED",
-					"Failed to send message",
-				).toMessage(input.sessionId),
-			);
-		});
-
-	const handleDispatchResult = (
-		input: ProviderTurnServiceSendInput,
-		result: TurnResult,
-	) =>
-		Effect.gen(function* () {
-			// The interrupter already sent done; finalizing again can end a newer turn.
-			if (result.status === "interrupted" && !result.error) return;
-
-			// Other non-`completed` terminal statuses (error / cancelled / orphaned)
-			// must finalize the turn: a completed turn's `done` arrives via the
-			// streamed provider events, but these results emit no such stream, so
-			// without this the browser stays "processing" until the 2-minute
-			// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
-			// the reason.
-			if (result.status !== "completed") {
-				ownership.remove(input.sessionId, input.commandId);
-				const msg =
-					result.error?.message ??
-					(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
-				log.warn(
-					`client=${input.clientId} session=${input.sessionId} engine dispatch ${result.status}: ${msg}`,
-				);
-				yield* clearProcessingTimeout(input.sessionId);
-				wsHandler.sendToSession(input.sessionId, {
-					type: "done",
-					sessionId: input.sessionId,
-					code: 1,
-				});
-				sendErrorMessage(
-					input,
-					new RelayError(msg, {
-						code: "SEND_FAILED",
-					}).toMessage(input.sessionId),
-				);
-				return;
-			}
-
-			if (!result.providerStateUpdates?.length) {
-				return;
-			}
-			const providerStateEffectOption = yield* Effect.serviceOption(
-				ProviderStateEffectTag,
-			);
-			if (providerStateEffectOption._tag === "None") return;
-
-			const updates = result.providerStateUpdates.map((update) => ({
-				key: update.key,
-				value: String(update.value),
-			}));
-			const saveResult = yield* Effect.either(
-				providerStateEffectOption.value.saveUpdates(input.sessionId, updates),
-			);
-			if (saveResult._tag === "Left") {
-				log.warn(
-					`Non-fatal provider state persistence error for ${input.sessionId}: ${formatErrorDetail(saveResult.left)}`,
-				);
-			}
-		});
-
-	const sendViaEngine = (
-		input: ProviderTurnServiceSendInput,
-		providerId: string,
-		driver: ProviderDriverKind,
-		claudeConfigDir: string | undefined,
-		orchestrationEngine: OrchestrationEngine,
-	) =>
-		Effect.gen(function* () {
-			let resolvedInput = input;
-			if (isClaudeDriver(driver) && input.model === undefined) {
-				const discovery = yield* Effect.either(
-					orchestrationEngine.dispatchEffect({
-						type: "discover",
-						providerId,
-					}),
-				);
-				const models =
-					discovery._tag === "Right" ? (discovery.right.models ?? []) : [];
-				const inferred =
-					models.find((model) => model.id === "default") ?? models[0];
-				if (inferred === undefined) {
-					ownership.remove(input.sessionId, input.commandId);
-					const reason =
-						discovery._tag === "Left"
-							? `discovery failed: ${formatErrorDetail(discovery.left)}`
-							: "discovery returned no usable model catalog";
-					log.error(
-						`client=${input.clientId} session=${input.sessionId} Claude model inference failed: ${reason}`,
-					);
-					yield* clearProcessingTimeout(input.sessionId);
-					sendErrorMessage(input, {
-						type: "error",
-						code: "MODEL_REQUIRED",
-						message: "A Claude model is required, but none could be selected.",
-						sessionId: input.sessionId,
-					});
-					wsHandler.sendToSession(input.sessionId, {
-						type: "done",
-						sessionId: input.sessionId,
-						code: 1,
-					});
-					return;
-				}
-
-				const inferredModel = {
-					providerID: inferred.providerId,
-					modelID: inferred.id,
-				};
-				yield* setModelDefault(input.sessionId, inferredModel);
-				log.info(
-					`session=${input.sessionId} inferred provider=${inferred.providerId} model=${inferred.id} reason=no server-side session or default model; inferred from Claude catalog`,
-				);
-				resolvedInput = {
-					...input,
-					model: inferredModel,
-					modelUserSelected: false,
-				};
-			}
-
-			const priorHistoryResult = isClaudeDriver(driver)
-				? yield* loadClaudeHistory(resolvedInput.sessionId)
-				: { history: [], loaded: false };
-			const priorHistory = priorHistoryResult.history;
-			const isFirstClaudeMessage =
-				isClaudeDriver(driver) &&
-				priorHistoryResult.loaded &&
-				priorHistory.length === 0;
-
-			yield* isClaudeDriver(driver)
-				? maybePersistClaudeUserMessage({
-						sessionId: resolvedInput.sessionId,
-						text: resolvedInput.text,
-						isFirstClaudeMessage,
-					})
-				: Effect.void;
-
-			const claudeEventPersistEffectOption = yield* Effect.serviceOption(
-				ClaudeEventPersistEffectTag,
-			);
-			const providerRuntimeIngestionOption = yield* Effect.serviceOption(
-				ProviderRuntimeIngestionTag,
-			);
-			const providerStateEffectOption = yield* Effect.serviceOption(
-				ProviderStateEffectTag,
-			);
-			const providerState =
-				providerStateEffectOption._tag === "Some"
-					? yield* providerStateEffectOption.value.getState(
-							resolvedInput.sessionId,
-						)
-					: {};
-			const eventSink = makeEventSink(
-				resolvedInput.sessionId,
-				driver,
-				claudeEventPersistEffectOption._tag === "Some"
-					? claudeEventPersistEffectOption.value
-					: undefined,
-				providerRuntimeIngestionOption._tag === "Some"
-					? providerRuntimeIngestionOption.value
-					: undefined,
-			);
-			const imageList =
-				resolvedInput.images && resolvedInput.images.length > 0
-					? Array.from(resolvedInput.images)
-					: undefined;
-			// OpenCode keeps its own session model, so we only override it on an
-			// explicit pick. The Claude SDK has no such memory: omitting `model`
-			// makes it resolve the config dir's settings.json `model` instead, so a
-			// session inheriting the global default (or one whose per-session pick
-			// was lost to a daemon restart) would silently run a different model
-			// than the one conduit displays. Always send what we display.
-			const sendModel =
-				resolvedInput.model &&
-				(resolvedInput.modelUserSelected ||
-					(isClaudeDriver(driver) &&
-						resolvedInput.model.providerID === CLAUDE_PROVIDER_ID));
-			const sendTurnInput: SendTurnInput = {
-				sessionId: resolvedInput.sessionId,
-				turnId: randomUUID(),
-				prompt: resolvedInput.text,
-				history: priorHistory,
-				providerState,
-				...(sendModel && resolvedInput.model
-					? {
-							model: {
-								providerId: resolvedInput.model.providerID,
-								modelId: resolvedInput.model.modelID,
-							},
-						}
-					: {}),
-				workspaceRoot: config.projectDir ?? "",
-				...(claudeConfigDir === undefined
-					? {}
-					: { configDir: claudeConfigDir }),
-				eventSink,
-				abortSignal: new AbortController().signal,
-				permissionMode: yield* getPermissionMode(resolvedInput.sessionId),
-				...(imageList ? { images: imageList } : {}),
-				...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-				...(resolvedInput.variant ? { variant: resolvedInput.variant } : {}),
-				...(resolvedInput.contextWindow
-					? { contextWindow: resolvedInput.contextWindow }
-					: {}),
-			};
-
-			const previousProviderId =
-				yield* orchestrationEngine.getProviderForSessionEffect(
-					resolvedInput.sessionId,
-				);
-			const restorePreviousBinding = Effect.sync(() => {
-				if (previousProviderId) {
-					orchestrationEngine.bindSession(
-						resolvedInput.sessionId,
-						previousProviderId,
-					);
-				} else {
-					orchestrationEngine.unbindSession(resolvedInput.sessionId);
-				}
-			});
-			yield* Effect.sync(() =>
-				orchestrationEngine.bindSession(resolvedInput.sessionId, providerId),
-			);
-
-			const dispatchProgram = Effect.try({
-				try: () =>
-					orchestrationEngine.dispatchEffect({
-						type: "send_turn",
-						commandId: resolvedInput.commandId,
-						providerId,
-						input: sendTurnInput,
-					}),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.flatten,
-				Effect.flatMap((result) => handleDispatchResult(resolvedInput, result)),
-				Effect.catchAll((error) =>
-					restorePreviousBinding.pipe(
-						Effect.zipRight(handleDispatchFailure(resolvedInput, error)),
-					),
-				),
-				Effect.onInterrupt(() => restorePreviousBinding),
-			);
-			yield* FiberMap.run(
-				dispatchFibers,
-				`${resolvedInput.sessionId}:${sendTurnInput.turnId}`,
-				dispatchProgram,
-			).pipe(Effect.asVoid);
-		});
-
-	const completeRecoveredQuestion = (
-		question: PendingQuestion,
-		result: string | null,
-		answers: Record<string, unknown> = {},
-	) =>
-		Effect.gen(function* () {
-			let messageId = question.messageId;
-			let partId = question.partId ?? question.toolCallId ?? question.requestId;
-			if (!messageId) {
-				const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
-				const tool =
-					readQuery._tag === "Some" &&
-					readQuery.value.getPendingClaudeQuestionTool
-						? yield* readQuery.value.getPendingClaudeQuestionTool(
-								question.sessionId,
-								question.toolCallId ?? question.requestId,
-							)
-						: undefined;
-				if (!tool)
-					return yield* Effect.fail(
-						new Error(
-							`Pending Claude question tool not found: ${question.requestId}`,
-						),
-					);
-				messageId = tool.message_id;
-				partId = tool.id;
-			}
-			const ingestion = yield* Effect.serviceOption(
-				ProviderRuntimeIngestionTag,
-			);
-			if (ingestion._tag === "None") {
-				return yield* Effect.fail(
-					new ProviderRuntimeIngestionRequired(question.sessionId),
-				);
-			}
-			const completedEvent = {
-				eventId: createEventId(),
-				type: "tool.completed" as const,
-				providerId: CLAUDE_PROVIDER_ID,
-				sessionId: question.sessionId,
-				providerRefs: {
-					providerToolUseId: question.toolCallId ?? question.requestId,
-				},
-				rawSource: { kind: "relay.recovered-question" },
-				createdAt: Date.now(),
-				data: {
-					messageId,
-					partId,
-					result,
-					duration: 0,
-				},
-			};
-			const resolvedEvent = {
-				...completedEvent,
-				eventId: createEventId(),
-				type: "question.resolved" as const,
-				data: { id: question.requestId, answers },
-			};
-			if (question.messageId) {
-				// A fresh mapper has not seen the stored tool start. Seed its identity
-				// so completion updates the existing card without an Unknown tool.
-				yield* ingestion.value.ingestBatch([
-					{
-						...completedEvent,
-						eventId: createEventId(),
-						type: "tool.started",
-						data: {
-							messageId,
-							partId,
-							toolName: "AskUserQuestion",
-							callId: question.toolCallId ?? question.requestId,
-							input: { tool: "AskUserQuestion", questions: question.questions },
-						},
-					},
-					completedEvent,
-					resolvedEvent,
-				]);
-			} else {
-				yield* ingestion.value.ingestBatch([completedEvent, resolvedEvent]);
-			}
-		});
-
-	const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
-		Effect.gen(function* () {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None") return input.sessionId;
-
-			const orchestrationEngine = engineOption.value;
-			const providerId =
-				(yield* orchestrationEngine.getProviderForSessionEffect(
-					input.sessionId,
-				)) ??
-				(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
-					? CLAUDE_PROVIDER_ID
-					: OPENCODE_PROVIDER_ID);
-			const daemonConfig = loadDaemonConfig(config.configDir);
-			const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
-			if (driver === undefined) return input.sessionId;
-			if (isClaudeDriver(driver)) {
-				// A Claude turn blocked on a question never reaches the next message, so
-				// replying instead of answering interrupts it and resolves the question.
-				const pendingQuestions =
-					yield* pendingInteractionService.listPendingQuestions(
-						input.sessionId,
-					);
-				for (const question of pendingQuestions) {
-					if (!question.recovered) continue;
-					yield* completeRecoveredQuestion(question, null);
-					yield* pendingInteractionService.markQuestionResolved(
-						question.requestId,
-					);
-				}
-				if (pendingQuestions.some((question) => !question.recovered)) {
-					yield* interruptTurn({
-						clientId: input.clientId,
-						sessionId: input.sessionId,
-						commandId: `${input.commandId}:interrupt-for-question`,
-					});
-				}
-				for (const question of pendingQuestions) {
-					wsHandler.broadcast({
-						type: "ask_user_resolved",
-						sessionId: input.sessionId,
-						toolId: question.requestId,
-					});
-				}
-				return input.sessionId;
-			}
-
-			const readQueryEffectOption =
-				yield* Effect.serviceOption(ReadQueryEffectTag);
-			if (readQueryEffectOption._tag === "None") return input.sessionId;
-
-			const rowResult = yield* Effect.either(
-				readQueryEffectOption.value.getSession(input.sessionId),
-			);
-			if (rowResult._tag === "Left") {
-				log.warn(
-					`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.left)}`,
-				);
-				return input.sessionId;
-			}
-
-			const row = rowResult.right;
-			if (
-				!row ||
-				resolveProviderRoutingDriver(daemonConfig, row.provider) ===
-					OPENCODE_PROVIDER_ID
-			) {
-				return input.sessionId;
-			}
-
-			const targetProvider = input.model?.providerID ?? providerId;
-			const session = yield* sessionManagerService.createSession(row.title, {
-				providerId: targetProvider,
-			});
-			if (input.model && input.modelUserSelected) {
-				yield* setModel(session.id, input.model);
-			}
-			orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
-			wsHandler.setClientSession(input.clientId, session.id);
-			yield* Effect.forkDaemon(
-				sessionManagerService
-					.pushViewerFamilies()
-					.pipe(
-						Effect.catchAll((err) =>
-							Effect.sync(() =>
-								log.warn(
-									`Failed to push viewed families after OpenCode materialization: ${err}`,
-								),
-							),
-						),
-					),
-			);
-			log.info(
-				`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
-			);
-			return session.id;
-		});
-
-	const sendTurn = (input: ProviderTurnServiceSendInput) =>
-		Effect.gen(function* () {
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "Some") {
-				const providerId =
-					(yield* engineOption.value.getProviderForSessionEffect(
-						input.sessionId,
-					)) ??
-					(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
-						? CLAUDE_PROVIDER_ID
-						: OPENCODE_PROVIDER_ID);
-				const daemonConfig = loadDaemonConfig(config.configDir);
-				const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
-				if (driver === undefined) {
-					yield* handleDispatchFailure(
-						input,
-						new Error(
-							`Cannot resolve provider instance for turn routing: ${providerId}`,
-						),
-					);
-					return;
-				}
-				yield* sendViaEngine(
-					input,
-					providerId,
-					driver,
-					resolveClaudeInstanceConfigDir(daemonConfig, providerId),
-					engineOption.value,
-				);
-				return;
-			}
-
-			const sendResult = yield* Effect.either(
-				Effect.tryPromise(() =>
-					client.session.prompt(input.sessionId, buildLegacyPrompt(input)),
-				),
-			);
-			if (sendResult._tag === "Left") {
-				yield* handleDispatchFailure(input, sendResult.left);
-			}
-		});
-
-	const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
-		Effect.gen(function* () {
-			const abortResult = yield* Effect.either(
-				Effect.tryPromise(() => client.session.abort(input.sessionId)),
-			);
-			if (abortResult._tag === "Left") {
-				log.warn(
-					`client=${input.clientId} session=${input.sessionId} Abort failed:`,
-					formatErrorDetail(abortResult.left),
-				);
-			}
-			wsHandler.sendToSession(input.sessionId, {
-				type: "done",
-				sessionId: input.sessionId,
-				code: 1,
-			});
-		});
-
-	const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
-		Effect.gen(function* () {
-			log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
-			ownership.clear(input.sessionId);
-			yield* clearProcessingTimeout(input.sessionId);
-
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "None") {
-				yield* interruptLegacyTurn(input);
-				return;
-			}
-
-			const providerId = yield* engineOption.value.getProviderForSessionEffect(
-				input.sessionId,
-			);
-			if (!providerId) {
-				yield* interruptLegacyTurn(input);
-				return;
-			}
-			const driver = resolveProviderRoutingDriver(
-				loadDaemonConfig(config.configDir),
-				providerId,
-			);
-			if (driver === undefined) {
-				log.warn(
-					`client=${input.clientId} session=${input.sessionId} Cannot resolve provider instance for interrupt routing: ${providerId}`,
-				);
-				wsHandler.sendToSession(input.sessionId, {
-					type: "done",
-					sessionId: input.sessionId,
-					code: 1,
-				});
-				return;
-			}
-			if (!isProviderTurnInterruptProvider(driver)) {
-				yield* interruptLegacyTurn(input);
-				return;
-			}
-
-			const interruptResult = yield* Effect.either(
-				engineOption.value.dispatchEffect({
-					type: "interrupt_turn",
-					commandId: input.commandId,
-					sessionId: input.sessionId,
-				}),
-			);
-			if (interruptResult._tag === "Left") {
-				log.warn(
-					`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-					formatErrorDetail(interruptResult.left),
-				);
-			}
-			wsHandler.sendToSession(input.sessionId, {
-				type: "done",
-				sessionId: input.sessionId,
-				code: 1,
-			});
-		});
-
-	return {
-		completeRecoveredQuestion,
-		prepareTurnSession,
-		sendTurn,
-		interruptTurn,
-	} satisfies ProviderTurnService;
+	return service;
 });
 
 const ProviderTurnDispatchFibersLive = Layer.scoped(
@@ -1023,7 +139,7 @@ const ProviderTurnDispatchFibersLive = Layer.scoped(
 );
 
 export const ProviderTurnServiceLive: Layer.Layer<
-	ProviderTurnServiceTag | PendingSendOwnershipTag,
+	ProviderTurnServiceTag,
 	never,
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
@@ -1031,8 +147,14 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| ConfigTag
 	| SessionManagerServiceTag
 	| PendingInteractionServiceTag
+	| PendingSendOwnershipTag
 	| OverridesStateTag
+	| OrchestrationEngineTag
+	| ReadQueryEffectTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
+	| ProviderStateEffectTag
+	| SessionTitleServiceTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
-	Layer.provideMerge(PendingSendOwnershipLive),
 );

@@ -15,9 +15,8 @@ describe("Integration: Switch to Streaming Session", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		await new Promise((resolve) => setTimeout(resolve, 500));
 	});
 
 	it("returns completed transcript content after switching away and back", async () => {
@@ -35,11 +34,17 @@ describe("Integration: Switch to Streaming Session", () => {
 			const firstDelta = await client.waitForAny(["delta", "thinking_delta"]);
 			expect(firstDelta["text"]).toBeTruthy();
 			await client.waitFor("done");
+			client.clearReceived();
 
 			const created = await client.createSession(
 				"Streaming Bug Test - Session B",
 			);
 			expect(created["id"]).not.toBe(sessionA);
+			expect(
+				client
+					.getReceivedOfType("delta")
+					.filter((message) => message["sessionId"] === sessionA),
+			).toHaveLength(0);
 			const viewed = await client.switchSession(sessionA);
 			expect(viewed["id"]).toBe(sessionA);
 

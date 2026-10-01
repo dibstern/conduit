@@ -103,20 +103,16 @@ function createMockIO() {
 	};
 }
 
-/** Wait for a given number of milliseconds. */
-function tick(ms = 15): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+/** Flush queued prompt work before sending the next key. */
+function tick(): Promise<void> {
+	return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /** Send a sequence of keys with delays between them. */
-async function sendKeys(
-	stdin: EventEmitter,
-	keys: string[],
-	delay = 15,
-): Promise<void> {
+async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	for (const key of keys) {
 		stdin.emit("data", key);
-		await tick(delay);
+		await tick();
 	}
 }
 
@@ -387,7 +383,7 @@ describe("menu items", () => {
 
 		// Press Enter to select "Setup notifications" (first item)
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(onSetupNotifications).toHaveBeenCalled();
 	});
@@ -415,7 +411,7 @@ describe("menu items", () => {
 
 		// Down arrow once to "Projects", then Enter
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(onProjects).toHaveBeenCalled();
 	});
@@ -447,7 +443,7 @@ describe("notifications", () => {
 
 		// First item is "Setup notifications"
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(onSetupNotifications).toHaveBeenCalledOnce();
 	});
@@ -473,7 +469,7 @@ describe("notifications", () => {
 
 		// Select "Setup notifications"
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		// getDaemonInfo should have been called at least twice (initial + re-render)
 		expect(renderCount).toBeGreaterThanOrEqual(2);
@@ -506,7 +502,7 @@ describe("projects", () => {
 
 		// Navigate to "Projects" (index 1)
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(onProjects).toHaveBeenCalledOnce();
 	});
@@ -531,7 +527,7 @@ describe("projects", () => {
 
 		// Navigate to "Projects" and select
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(renderCount).toBeGreaterThanOrEqual(2);
 	});
@@ -563,7 +559,7 @@ describe("settings", () => {
 
 		// Navigate to "Settings" (index 2)
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(onSettings).toHaveBeenCalledOnce();
 	});
@@ -588,7 +584,7 @@ describe("settings", () => {
 
 		// Navigate to "Settings" and select
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(renderCount).toBeGreaterThanOrEqual(2);
 	});
@@ -655,7 +651,7 @@ describe("shutdown", () => {
 
 		// Decline (default is No, press Enter)
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		// Should have re-rendered (getDaemonInfo called again)
 		expect(renderCount).toBeGreaterThanOrEqual(2);
@@ -727,7 +723,7 @@ describe("hotkeys", () => {
 
 		// Press "o"
 		io.stdin.emit("data", "o");
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		expect(onOpenBrowser).toHaveBeenCalledOnce();
 	});
@@ -752,7 +748,7 @@ describe("hotkeys", () => {
 
 		// Press "o"
 		io.stdin.emit("data", "o");
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		// Should have re-rendered
 		expect(renderCount).toBeGreaterThanOrEqual(2);
@@ -783,12 +779,12 @@ describe("edge cases", () => {
 			io.opts({
 				getDaemonInfo: async () => {
 					// Simulate async delay
-					await tick(5);
+					await new Promise((resolve) => setTimeout(resolve, 5));
 					return defaultDaemonInfo({ version: "9.9.9" });
 				},
 			}),
 		);
-		await tick(30);
+		await vi.waitFor(() => expect(io.text()).toContain("v9.9.9"));
 
 		expect(io.text()).toContain("v9.9.9");
 
@@ -817,7 +813,7 @@ describe("edge cases", () => {
 
 		// Select "Setup notifications" with no callback — should not throw
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(50);
+		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
 
 		// Menu re-renders even with no callback
 		expect(renderCount).toBeGreaterThanOrEqual(2);

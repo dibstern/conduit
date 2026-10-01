@@ -33,8 +33,8 @@ type Story = StoryObj<typeof meta>;
 
 // ─── Shared setup info ──────────────────────────────────────────────────────
 
-// There is deliberately NO "Tailscale step" story here (conduit-test-de3.34,
-// owner decision 4A). buildStepList() only includes the "tailscale" step when
+// There is deliberately NO "Tailscale step" story here. buildStepList() only
+// includes the "tailscale" step when
 // `!platform.isTailscale && !isLocal && !lanMode`, and Storybook serves from
 // localhost, so `isLocal` is always true and the step can never be reached from
 // this page no matter what args a story passes. The story that used to claim
@@ -76,7 +76,7 @@ export const PWAStep: Story = {
 	},
 };
 
-// There is deliberately NO "done step" story here either (conduit-test-732b).
+// There is deliberately NO "done step" story here either.
 // SetupPage always starts at step index 0, and the story that used to sit here
 // passed args byte-identical to PWAStep's, so it captured the PWA step under the
 // name "Done" — a baseline identical to PWAStep's and an assertion of nothing.

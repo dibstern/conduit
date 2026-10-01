@@ -7,7 +7,7 @@
 
 	/**
 	 * A real element, not a `getBoundingClientRect` stub. Since
-	 * conduit-test-de3.35.4 the menu is positioned by floating-ui through
+	 * the menu is positioned by floating-ui through
 	 * bits-ui's `customAnchor`, which needs a live node to measure and to
 	 * collide against — a stub returning only `bottom`/`right` silently
 	 * produced a menu pinned to the top-left corner.

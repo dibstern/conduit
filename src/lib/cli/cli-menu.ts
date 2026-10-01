@@ -1,4 +1,4 @@
-// ─── Main Menu Loop (Ticket 8.10) ─────────────────────────────────────────────
+// ─── Main Menu Loop ─────────────────────────────────────────────
 // Interactive CLI main menu for conduit. Displays daemon status and
 // provides menu navigation for notifications, projects, settings, shutdown,
 // and keep-alive exit. Ported from claude-relay/bin/cli.js lines 1361-1482.

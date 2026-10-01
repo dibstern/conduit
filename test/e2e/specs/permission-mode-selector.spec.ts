@@ -323,6 +323,7 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 		await page.locator('[data-session-id="sess-pm-001"]').click();
 
 		// Flushing "ask" (or nothing) is acceptable; flushing "full" is not.
+		// No elevated mode may be flushed during this observation window.
 		await page.waitForTimeout(500);
 		const flushed = switchCalls(rpc).map((c) => c.payload["mode"]);
 		expect(flushed).not.toContain("full");

@@ -19,6 +19,8 @@ import {
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -39,12 +41,13 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 const makeLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-sub-"));
+	const persistenceLayer = makePersistenceEffectLayer(
+		join(dir, "events.db"),
+		undefined,
+		SessionEventBusLive,
+	);
 	const persistence = Layer.mergeAll(
-		makePersistenceEffectLayer(
-			join(dir, "events.db"),
-			undefined,
-			SessionEventBusLive,
-		),
+		persistenceLayer,
 		SessionEventBusLive,
 		Layer.scopedDiscard(
 			Effect.addFinalizer(() =>
@@ -53,10 +56,12 @@ const makeLayer = () => {
 		),
 	);
 	const dependencies = Layer.mergeAll(
-		makeTestHandlerLayer(),
+		makeTestHandlerLayer({ persistenceLayer }),
 		persistence,
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
+		RelayStatusSnapshotLive,
+		Layer.succeed(BackgroundLivenessTag, () => false),
 	);
 	return WsRpcServerLayer.pipe(
 		Layer.provideMerge(

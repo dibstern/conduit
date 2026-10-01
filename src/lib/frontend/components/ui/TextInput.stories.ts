@@ -113,7 +113,7 @@ export const Bare: Story = {
  * keyboard focus indicator. It exists for the two chromeless fields that are
  * NOT wrapped in a focus-within row -- the terminal tab-rename box and the
  * model picker's search -- where `bare` alone left focus completely invisible
- * (conduit-test-de3.35.9.3).
+ *.
  *
  * The indicator is an outline drawn INSIDE the border box rather than a ring,
  * because both call sites sit flush against something (a tab strip, a popover

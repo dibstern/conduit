@@ -108,7 +108,7 @@ export const Collapsed: Story = {
 	args: {
 		items: mixedItems,
 	},
-	// conduit-test-732b: the shared items rendered expanded until the header was clicked.
+	// The shared items rendered expanded until the header was clicked.
 	play: async ({ canvasElement }) => {
 		const toggle = within(canvasElement).getByRole("button", { name: /Tasks/ });
 		await userEvent.click(toggle);

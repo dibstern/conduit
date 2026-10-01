@@ -85,9 +85,9 @@ function createMockIO() {
 	};
 }
 
-/** Wait for a given number of milliseconds. */
-function tick(ms = 15): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+/** Flush queued prompt work before the next interaction. */
+function tick(): Promise<void> {
+	return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /** Send a single key to stdin after a microtask delay. */
@@ -96,17 +96,13 @@ function sendKey(stdin: EventEmitter, key: string): void {
 }
 
 /**
- * Send a sequence of keys with delays between them.
+ * Send a sequence of keys, flushing prompt work between them.
  * Returns a promise that resolves after all keys are sent.
  */
-async function sendKeys(
-	stdin: EventEmitter,
-	keys: string[],
-	delay = 15,
-): Promise<void> {
+async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	for (const key of keys) {
 		stdin.emit("data", key);
-		await tick(delay);
+		await tick();
 	}
 }
 
@@ -362,7 +358,7 @@ describe("port prompt", () => {
 
 		// Accept default port (which will be "in use")
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(30);
+		await tick();
 
 		const all = stripAnsi(io.output.join(""));
 		expect(all).toContain("already in use");
@@ -779,11 +775,11 @@ describe("edge cases", () => {
 
 		// First attempt — port in use
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(30);
+		await tick();
 
 		// Second attempt — port in use
 		await sendKeys(io.stdin, ["\r"]);
-		await tick(30);
+		await tick();
 
 		// Third attempt — succeeds, then skip PIN, accept keep-awake default
 		await sendKeys(io.stdin, ["\r"]);

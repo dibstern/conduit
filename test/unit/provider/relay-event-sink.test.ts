@@ -1,3 +1,4 @@
+import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -5,6 +6,7 @@ import type {
 	ProviderRuntimeEventType,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { PendingInteractionCancelled } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PersistenceError } from "../../../src/lib/persistence/errors.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
@@ -303,10 +305,7 @@ describe("createRelayEventSink — persistence", () => {
 			partId: "part_1",
 			text: "Hello",
 		});
-		const ingestionError = {
-			_tag: "TestIngestionFailure",
-			message: "ingestion failed",
-		};
+		const ingestionError = new SqlError({ message: "ingestion failed" });
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send,
@@ -317,7 +316,10 @@ describe("createRelayEventSink — persistence", () => {
 
 		const result = await Effect.runPromise(Effect.either(sink.push(event)));
 
-		expect(result).toMatchObject({ _tag: "Left", left: ingestionError });
+		expect(result._tag).toBe("Left");
+		if (result._tag === "Left") {
+			expect(result.left).toBe(ingestionError);
+		}
 		expect(send).not.toHaveBeenCalled();
 	});
 
@@ -385,7 +387,11 @@ describe("createRelayEventSink — persistence", () => {
 
 	it("continues sending to WebSocket even if Effect persistence fails", async () => {
 		const send = vi.fn();
-		const persistEvent = vi.fn(() => Effect.fail(new Error("disk full")));
+		const persistEvent = vi.fn(() =>
+			Effect.fail(
+				new PersistenceError({ code: "WRITE_FAILED", message: "disk full" }),
+			),
+		);
 
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
@@ -546,10 +552,7 @@ describe("createRelayEventSink — permission/question", () => {
 						resolvePermission = resolve;
 					});
 					return {
-						awaitResponse: Effect.tryPromise({
-							try: () => promise,
-							catch: (cause) => cause,
-						}),
+						awaitResponse: Effect.promise(() => promise),
 					};
 				}),
 			),
@@ -620,10 +623,7 @@ describe("createRelayEventSink — permission/question", () => {
 						resolvePermission = resolve;
 					});
 					return {
-						awaitResponse: Effect.tryPromise({
-							try: () => promise,
-							catch: (cause) => cause,
-						}),
+						awaitResponse: Effect.promise(() => promise),
 					};
 				}),
 			),
@@ -639,10 +639,7 @@ describe("createRelayEventSink — permission/question", () => {
 						resolveQuestion = resolve;
 					});
 					return {
-						awaitAnswers: Effect.tryPromise({
-							try: () => promise,
-							catch: (cause) => cause,
-						}),
+						awaitAnswers: Effect.promise(() => promise),
 					};
 				}),
 			),
@@ -884,7 +881,15 @@ describe("createRelayEventSink — permission delegation", () => {
 		const cancelled = {
 			...port,
 			beginPermissionRequest: () =>
-				Effect.succeed({ awaitResponse: Effect.fail(new Error("cancelled")) }),
+				Effect.succeed({
+					awaitResponse: Effect.fail(
+						new PendingInteractionCancelled({
+							requestId: "req_auto",
+							sessionId: "ses-1",
+							reason: "disposed",
+						}),
+					),
+				}),
 		};
 		expect(
 			(await recorded((sink) => sink.requestPermission(request), cancelled)).at(

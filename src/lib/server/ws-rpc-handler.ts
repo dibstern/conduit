@@ -20,10 +20,22 @@ import {
 	WsRpcServerLayer,
 } from "./ws-rpc.js";
 
-interface RpcWebSocketHandlerOptions {
-	readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown>;
-	readonly maxPayload?: number;
-}
+type RpcWebSocketHandlerOptions = (
+	| { readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> }
+	| {
+			readonly context: Effect.Effect<
+				Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+				unknown
+			>;
+			readonly runFork: (
+				effect: Effect.Effect<
+					void,
+					never,
+					Layer.Layer.Context<typeof WsRpcServerLayer>
+				>,
+			) => void;
+	  }
+) & { readonly maxPayload?: number };
 
 type RpcTransportRunFork = <A, E>(
 	effect: Effect.Effect<A, E, WsTransportTag>,
@@ -36,7 +48,10 @@ interface RpcWebSocketHandlerRuntime {
 }
 
 export interface RpcWebSocketHandlerShape {
-	readonly context?: Effect.Effect<Context.Context<unknown>, unknown>;
+	readonly context?: Effect.Effect<
+		Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+		unknown
+	>;
 	readonly handleUpgrade: (
 		req: IncomingMessage,
 		socket: Duplex,
@@ -95,16 +110,19 @@ export const makeWsRpcWebSocketHandler = (
 		const transport = yield* WsTransportTag;
 		const runtime = yield* Effect.runtime<WsTransportTag>();
 		return new WsRpcWebSocketHandler(
-			Effect.suspend(() =>
-				Effect.map(options.runtime.runtimeEffect, (value) => value.context),
-			),
+			"runtime" in options
+				? Effect.suspend(() =>
+						Effect.map(options.runtime.runtimeEffect, (value) => value.context),
+					)
+				: options.context,
 			{
 				transport,
 				runTransportFork: Runtime.runFork(runtime),
-				runConnection: (ws) =>
-					options.runtime.runFork(
-						runRpcWebSocketConnection(ws, WsRpcServerLayer),
-					),
+				runConnection: (ws) => {
+					const connection = runRpcWebSocketConnection(ws, WsRpcServerLayer);
+					if ("runtime" in options) options.runtime.runFork(connection);
+					else options.runFork(connection);
+				},
 			},
 		);
 	});
@@ -151,7 +169,10 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	});
 
 export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
-	readonly context?: Effect.Effect<Context.Context<unknown>, unknown>;
+	readonly context?: Effect.Effect<
+		Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+		unknown
+	>;
 	private readonly runConnection: (ws: WebSocket) => void;
 	private readonly transport: WsTransport;
 	private readonly runTransportFork: RpcTransportRunFork;

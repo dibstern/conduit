@@ -81,8 +81,8 @@ describe("race: SSE rehydration generation counter", () => {
 
 		// Resolve the FIRST connect's questions (stale — should be superseded)
 		q1.resolve([question]);
-		// Give the microtask queue a tick to process
-		await new Promise((r) => setTimeout(r, 10));
+		// Flush the stale completion before checking that it did not broadcast.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		// The stale rehydration must NOT broadcast again — total is still 1
 		expect(deps.wsHandler.sendToSession).toHaveBeenCalledTimes(1);
@@ -138,7 +138,8 @@ describe("race: SSE rehydration generation counter", () => {
 
 		// Resolve the stale first connect
 		p1.resolve([perm]);
-		await new Promise((r) => setTimeout(r, 10));
+		// Flush the stale completion before checking that it did not broadcast.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		// Still only 1 permission_request broadcast (stale was superseded)
 		const permCalls = vi

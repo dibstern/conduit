@@ -14,6 +14,7 @@ import {
 	loadRelaySettings,
 	saveRelaySettings,
 } from "../../../../src/lib/relay/relay-settings.js";
+import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import { getClaudeRuntimeSessionCountForTest } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockQuery,
@@ -86,13 +87,13 @@ function makeBlockingQuery(
 }
 
 describe("Claude provider runtime boundary", () => {
-	it("wires the persisted override getter into both production constructors", () => {
+	it("wires the persisted override getter into the scoped constructor", () => {
 		const wiring = source("src/lib/provider/orchestration-wiring.ts");
 		const getters = wiring.match(
 			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(options\.configDir\)\.claudeSettings/g,
 		);
 
-		expect(getters).toHaveLength(2);
+		expect(getters).toHaveLength(1);
 	});
 
 	it("keeps live Claude turn state out of the provider instance facade", () => {
@@ -125,7 +126,7 @@ describe("Claude provider runtime boundary", () => {
 
 	it("uses only the default SDK settings without an overrides getter", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
 				capturedSettings.push(options?.settings);
@@ -155,7 +156,7 @@ describe("Claude provider runtime boundary", () => {
 		const claudeSettingsOverrides = vi.fn(
 			() => loadRelaySettings(configDir).claudeSettings,
 		);
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
 				capturedSettings.push(options?.settings);
@@ -195,7 +196,7 @@ describe("Claude provider runtime boundary", () => {
 
 	it("removes trust-tiered keys from SDK settings overrides", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
 				capturedSettings.push(options?.settings);

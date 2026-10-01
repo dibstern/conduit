@@ -1,4 +1,4 @@
-// ─── Storage Monitor (Ticket 6.2 AC8) ───────────────────────────────────────
+// ─── Storage Monitor ───────────────────────────────────────
 // Periodically checks available disk space and notifies via callbacks on
 // transitions between low/ok states. Used by the Daemon to warn about disk
 // space issues.

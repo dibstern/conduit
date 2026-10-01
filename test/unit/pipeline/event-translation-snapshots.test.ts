@@ -227,10 +227,7 @@ describe("RelayEventSink lifecycle", () => {
 						resolvePermission = resolve;
 					});
 					return Effect.succeed({
-						awaitResponse: Effect.tryPromise({
-							try: () => promise,
-							catch: (cause) => cause,
-						}),
+						awaitResponse: Effect.promise(() => promise),
 					});
 				},
 				resolvePermissionRequest(requestId, response) {

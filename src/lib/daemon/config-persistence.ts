@@ -1,4 +1,4 @@
-// ─── Config Persistence Module (Ticket 8.3) ─────────────────────────────────
+// ─── Config Persistence Module ─────────────────────────────────
 // Handles persistent daemon config at ~/.conduit/daemon.json,
 // recent projects at ~/.conduit/recent.json, and crash info at
 // ~/.conduit/crash.json. Uses atomic writes (tmp + rename) for

@@ -11,7 +11,7 @@
 // Documented exception per conventions.
 //
 // Defines its own Tag that will coexist with the one in services.ts until
-// Phase 3 consumer migration.
+// Consumer migration.
 
 import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 

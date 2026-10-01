@@ -2,11 +2,15 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -14,14 +18,21 @@ import {
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import {
 	handleAskUserResponse,
 	handleQuestionReject,
 } from "../../../src/lib/handlers/permissions.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
-import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import {
+	makeMockAgentService,
+	makeMockSessionManagerService,
+	makeMockSessionTitleService,
+} from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function makeWsHandler() {
 	return {
@@ -50,18 +61,27 @@ describe("permission/question processing timeouts through Effect state", () => {
 			const client = {
 				question: { reply: vi.fn(async () => undefined) },
 			} as unknown as OpenCodeAPI;
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
-				Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
-				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
+			const persistence = makePersistenceEffectLayer(":memory:");
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
+					Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+					PendingInteractionServiceLive,
+					PendingSendOwnershipLive,
+					Layer.succeed(LoggerTag, createSilentLogger()),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+					makeOverridesStateLive(),
+					persistence,
+					makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+					Layer.succeed(AgentServiceTag, makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 				),
-				makeOverridesStateLive(),
 			);
 
 			return Effect.gen(function* () {
@@ -90,6 +110,8 @@ describe("permission/question processing timeouts through Effect state", () => {
 					makeMockSessionManagerService(),
 				),
 				makeOverridesStateLive(),
+				PendingInteractionServiceLive,
+				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 			);
 
 			return Effect.gen(function* () {

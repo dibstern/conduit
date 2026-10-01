@@ -24,6 +24,7 @@ import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	addWithoutRelay,
@@ -84,6 +85,7 @@ describe("HttpServerRefTag", () => {
 
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
+		InstanceHealthCheckLive,
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 		ConfigPersistenceNoopLive,
 		DaemonEventBusLive,

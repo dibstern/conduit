@@ -1,4 +1,4 @@
-// ─── Push Notifications (Ticket 4.6) ──────────────────────────────────────────
+// ─── Push Notifications ──────────────────────────────────────────
 // Server-side push notification delivery using the web-push library.
 // Manages VAPID keys, browser subscriptions, and sending notifications.
 

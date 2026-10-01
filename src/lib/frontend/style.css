@@ -389,7 +389,7 @@
 
 @layer base {
 	/* The house focus ring as a floor, not a rollout.
-	   de3.19 planned to hand components the ring as they migrated onto
+	   Component migration aimed to hand components the ring as they moved onto
 	   ui/Button and ui/Pill, but roughly a third of the focusable surface is
 	   structural — disclosure headers, file-tree rows, session-list rows — and
 	   never migrates, so it would never have been reached. Those elements were
@@ -408,7 +408,7 @@
 	   primitives' (0,2,0) selectors win with or without the layer, so the
 	   picture matches the product. Verified by keyboard-Tabbing the real build:
 	   both primitives report outline-style none and keep their box-shadow ring
-	   (conduit-test-j7ny). */
+. */
 	:where(:focus-visible) {
 		outline: 2px solid var(--color-text);
 		outline-offset: 0;
@@ -480,66 +480,21 @@
 
 /* ─── Custom Animation Utilities ───────────────────────────────────────────── */
 
-@utility animate-pulse-dot {
-	animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
-@utility animate-shimmer {
-	animation: shimmer 3s ease-in-out infinite;
-}
-
-@utility animate-tool-shimmer {
-	animation: tool-shimmer 3s ease-in-out infinite;
-}
-
-@utility animate-history-spin {
-	animation: history-spin 0.8s linear infinite;
-}
-
-@utility animate-history-fade-in {
-	animation: history-fade-in 0.2s ease-out;
-}
-
 @utility animate-todo-spin {
-	animation: todo-spin 0.8s linear infinite;
-}
-
-@utility animate-fb-slide-in {
-	animation: fb-slide-in 0.2s ease-out;
-}
-
-@utility animate-fb-fade-in {
-	animation: fb-fade-in 0.15s ease-out;
-}
-
-@utility animate-session-slide-in {
-	animation: session-slide-in 0.2s ease-out;
-}
-
-@utility animate-session-fade-in {
-	animation: session-fade-in 0.15s ease-out;
+	animation: spin 0.8s linear infinite;
 }
 
 @utility animate-bounce-bar {
 	animation: bounce-bar 1.5s ease-in-out infinite;
 }
 
-/* ─── Connection Overlay (7.5) ────────────────────────────────────────────── */
+/* ─── Connection Overlay ────────────────────────────────────────────── */
 
 .connect-overlay.hidden {
 	display: none;
 }
 
-@keyframes shimmer {
-	0% {
-		background-position: 200% center;
-	}
-	100% {
-		background-position: -200% center;
-	}
-}
-
-/* ─── Modal System (7.10) ──────────────────────────────────────────────────── */
+/* ─── Modal System ──────────────────────────────────────────────────── */
 
 /* showModal() makes the page inert but does not stop it scrolling behind the
    dialog, which on mobile reads as the modal drifting off-screen. */
@@ -789,16 +744,6 @@ body:has(dialog:modal) {
 
 /* ─── Animations ────────────────────────────────────────────────────────────── */
 
-@keyframes pulse-dot {
-	0%,
-	100% {
-		opacity: 1;
-	}
-	50% {
-		opacity: 0.4;
-	}
-}
-
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
@@ -1032,50 +977,7 @@ body:has(dialog:modal) {
 	}
 }
 
-/* ─── Session Sidebar (4.3 + 7.3) ─────────────────────────────────────────── */
-
-@keyframes session-slide-in {
-	from {
-		transform: translateX(-100%);
-	}
-	to {
-		transform: translateX(0);
-	}
-}
-
-@keyframes session-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-/* ─── Progressive History Loading (4.8) — keyframes only ───────────────────── */
-
-@keyframes history-spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
-
-@keyframes history-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-/* ─── Todo / Progress Overlay (4.7) ────────────────────────────────────────── */
-
-@keyframes todo-spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
+/* ─── Todo / Progress Overlay ────────────────────────────────────────── */
 
 @keyframes todo-fade-out {
 	from {
@@ -1133,32 +1035,14 @@ body:has(dialog:modal) {
 	pointer-events: none;
 }
 
-/* ─── File Browser (4.4) ──────────────────────────────────────────────────── */
-
-@keyframes fb-slide-in {
-	from {
-		transform: translateX(100%);
-	}
-	to {
-		transform: translateX(0);
-	}
-}
-
-@keyframes fb-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
+/* ─── File Browser ──────────────────────────────────────────────────── */
 
 /* Hidden override for modal overlay */
 .fb-modal-overlay.hidden {
 	display: none;
 }
 
-/* ─── Terminal Touch Toolbar (7.14) ────────────────────────────────────────── */
+/* ─── Terminal Touch Toolbar ────────────────────────────────────────── */
 
 /* Display logic must stay in CSS — hidden class / media query combo */
 .term-touch-toolbar {
@@ -1242,15 +1126,6 @@ body:has(dialog:modal) {
 
 /* ─── Shimmer Animations ───────────────────────────────────────────────────── */
 
-@keyframes tool-shimmer {
-	0% {
-		background-position: 200% center;
-	}
-	100% {
-		background-position: -200% center;
-	}
-}
-
 @keyframes tool-shimmer-slide {
 	0% {
 		transform: translateX(-100%);
@@ -1324,7 +1199,7 @@ body:has(dialog:modal) {
 	transition: opacity 0.2s;
 }
 
-/* ─── Rewind Timeline Track (8.21) ─────────────────────────────────────────── */
+/* ─── Rewind Timeline Track ─────────────────────────────────────────── */
 
 .rewind-timeline {
 	position: absolute;
@@ -1402,7 +1277,7 @@ body:has(dialog:modal) {
 	display: none;
 }
 
-/* ─── Split Diff View (8.20) ───────────────────────────────────────────────── */
+/* ─── Split Diff View ───────────────────────────────────────────────── */
 
 .diff-split-view {
 	overflow-x: auto;
@@ -1481,7 +1356,7 @@ body:has(dialog:modal) {
 	background: rgba(var(--overlay-rgb), 0.05);
 }
 
-/* ─── Diff Toggle (8.20) ──────────────────────────────────────────────────── */
+/* ─── Diff Toggle ──────────────────────────────────────────────────── */
 
 .diff-container {
 	margin: 0.5rem 0;
@@ -1491,7 +1366,7 @@ body:has(dialog:modal) {
 	gap: 0.25rem;
 	margin-bottom: 0.5rem;
 }
-/* ─── File Edit History & Compare (8.23) ──────────────────────────────────── */
+/* ─── File Edit History & Compare ──────────────────────────────────── */
 
 .file-history-panel {
 	scrollbar-width: thin;

@@ -32,6 +32,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import {
 	type InstanceManagerState,
 	InstanceManagerStateTag,
@@ -87,7 +88,7 @@ const httpServerRefWithServerLayer = Layer.effect(
 
 const registryLayer = makeProjectRegistryLive();
 const instanceLayer = makeInstanceManagerStateLive();
-const eventBusLayer = DaemonEventBusLive;
+const eventBusLayer = Layer.merge(DaemonEventBusLive, InstanceHealthCheckLive);
 const persistenceLayer = ConfigPersistenceNoopLive;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

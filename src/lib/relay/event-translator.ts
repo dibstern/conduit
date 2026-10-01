@@ -1,4 +1,4 @@
-// ─── Event Translator (Ticket 1.3) ──────────────────────────────────────────
+// ─── Event Translator ──────────────────────────────────────────
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 

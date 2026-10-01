@@ -4,7 +4,6 @@ import {
 	type SessionStateProjectionNotifier,
 	SessionStateProjectionNotifierTag,
 } from "../../../persistence/effect/session-state-projection-notifier.js";
-import { WebSocketHandlerTag } from "../Services/services.js";
 import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
 
 const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
@@ -21,13 +20,12 @@ export const makeSessionStateProjectionNotifierLive = (
 ): Layer.Layer<
 	SessionStateProjectionNotifierTag,
 	never,
-	WebSocketHandlerTag | SessionManagerServiceTag
+	SessionManagerServiceTag
 > =>
 	Layer.scoped(
 		SessionStateProjectionNotifierTag,
 		Effect.gen(function* () {
 			const scope = yield* Scope.Scope;
-			const wsHandler = yield* WebSocketHandlerTag;
 			const sessionManagerService = yield* SessionManagerServiceTag;
 			const broadcastPending = yield* Ref.make(false);
 

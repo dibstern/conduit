@@ -15,16 +15,18 @@
 // 100+ second real-time waits while still exercising the same code paths.
 
 import { randomBytes } from "node:crypto";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import { dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -66,6 +68,7 @@ interface MockOpenCode {
 	sessionStatuses: Record<string, { type: string; [key: string]: unknown }>;
 	sessionList: SessionDef[];
 	messageRequestCounts: Record<string, number>;
+	statusRequestCount: number;
 	injectSSE(event: { type: string; properties: Record<string, unknown> }): void;
 	getMessageRequestCount(sessionId: string): number;
 	resetMessageRequestCounts(): void;
@@ -90,6 +93,7 @@ async function createMockOpenCode(
 	}
 
 	const messageRequestCounts: Record<string, number> = {};
+	let statusRequestCount = 0;
 	const toOpenCodeSession = (session: SessionDef) => ({
 		id: session.id,
 		projectID: "proj-test",
@@ -150,6 +154,7 @@ async function createMockOpenCode(
 		}
 
 		if (url.pathname === "/session/status") {
+			statusRequestCount++;
 			res.end(JSON.stringify(sessionStatuses));
 			return;
 		}
@@ -201,6 +206,9 @@ async function createMockOpenCode(
 		sessionStatuses,
 		sessionList,
 		messageRequestCounts,
+		get statusRequestCount() {
+			return statusRequestCount;
+		},
 		injectSSE(event) {
 			const data = JSON.stringify(event);
 			for (const client of sseClients) {
@@ -276,6 +284,7 @@ async function createTestHarness(
 			}
 		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath))),
 	);
+	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-sse-gating-"));
 
 	const relay = await createProjectRelay({
 		persistenceDbPath: dbPath,
@@ -283,6 +292,8 @@ async function createTestHarness(
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
 		slug: `test-sse-gating-${relayPort}`,
+		// Keep the real ~/.config/conduit settings out of the relay.
+		configDir: persistenceDir,
 		noServer: true,
 		log: createSilentLogger(),
 		pollerGatingConfig: {
@@ -324,8 +335,54 @@ async function createTestHarness(
 		socket.destroy();
 	});
 
-	// Wait for SSE + status poller to initialize
-	await new Promise((r) => setTimeout(r, 200));
+	// The poller reads projected SQLite status, so mirror the mock's status
+	// mutations into the per-harness store without emitting SSE coverage.
+	const db = new Database(dbPath);
+	// parent_id matters: notification routing treats a session without one as top-level.
+	const upsertRow = db.prepare(`
+		INSERT INTO sessions (id, provider, title, parent_id, status, created_at, updated_at)
+		VALUES (?, 'opencode', 'Untitled', ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET status = excluded.status,
+			updated_at = excluded.updated_at
+	`);
+	const upsertStatus = (sessionId: string, status: string, now: number) =>
+		upsertRow.run(
+			sessionId,
+			mock.sessionList.find((s) => s.id === sessionId)?.parentID ?? null,
+			status,
+			now,
+			now,
+		);
+	for (const [sessionId, status] of Object.entries(mock.sessionStatuses)) {
+		upsertStatus(sessionId, status.type, Date.now());
+	}
+	mock.sessionStatuses = new Proxy(mock.sessionStatuses, {
+		set(target, sessionId, value: unknown) {
+			if (
+				typeof sessionId === "string" &&
+				typeof value === "object" &&
+				value !== null &&
+				"type" in value &&
+				typeof value.type === "string"
+			) {
+				upsertStatus(sessionId, value.type, Date.now());
+			}
+			return Reflect.set(target, sessionId, value);
+		},
+		deleteProperty(target, sessionId) {
+			if (typeof sessionId === "string") {
+				db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+			}
+			return Reflect.deleteProperty(target, sessionId);
+		},
+	});
+
+	await vi.waitFor(
+		() => {
+			expect(mock.sseClients.size).toBeGreaterThan(0);
+		},
+		{ timeout: 3000 },
+	);
 
 	return {
 		relay,
@@ -340,16 +397,28 @@ async function createTestHarness(
 		},
 		async stop() {
 			await relay.stop();
+			db.close();
 			await new Promise<void>((resolve) => eventSockets.close(() => resolve()));
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 			rmSync(dirname(dbPath), { recursive: true, force: true });
+			rmSync(persistenceDir, { recursive: true, force: true });
 		},
 	};
 }
 
-/** Helper: wait for a specified duration */
+/** Only used for windows that assert activity stays absent. */
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForStatusPollCycles(mock: MockOpenCode, cycles = 4) {
+	const before = mock.statusRequestCount;
+	await vi.waitFor(
+		() => {
+			expect(mock.statusRequestCount).toBeGreaterThanOrEqual(before + cycles);
+		},
+		{ timeout: 3000 },
+	);
+}
 
 /** Helper: connect client and switch to a session */
 async function connectAndView(
@@ -363,8 +432,7 @@ async function connectAndView(
 	return client;
 }
 
-/** Helper: reset harness state for the next test within a shared describe.
- *  Uses generous timing to ensure the reducer fully settles under contention. */
+/** Helper: reset harness state for the next test within a shared describe. */
 async function resetForNextTest(
 	harness: TestHarness,
 	sessions: string[],
@@ -372,11 +440,8 @@ async function resetForNextTest(
 	for (const sid of sessions) {
 		harness.mock.sessionStatuses[sid] = { type: "idle" };
 	}
+	await waitForStatusPollCycles(harness.mock);
 	harness.mock.resetMessageRequestCounts();
-	// Let the reducer process the idle transition — needs enough status poll cycles
-	// to fully settle. Under resource contention (sequential suite runs), the poller
-	// may drift, so we wait for grace + staleness + several poll cycles.
-	await wait(TEST_GRACE_MS + TEST_STALENESS_MS + TEST_STATUS_POLL_MS * 4);
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -413,6 +478,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 			});
 		}, TEST_SSE_INJECT_INTERVAL);
 
+		// Observe a full SSE-covered window to prove polling stays suppressed.
 		await wait(TEST_GRACE_MS * 2 + TEST_STALENESS_MS);
 		clearInterval(sseInterval);
 
@@ -439,6 +505,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 		});
 
 		// Inject SSE events only for sess-2 (wrong session)
+		harness.mock.resetMessageRequestCounts();
 		const sseInterval = setInterval(() => {
 			harness.mock.injectSSE({
 				type: "message.delta",
@@ -446,8 +513,14 @@ describe("Group 1: SSE coverage and grace period", () => {
 			});
 		}, TEST_SSE_INJECT_INTERVAL);
 
-		// Wait past grace period + some buffer
-		await wait(TEST_GRACE_MS * 2);
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
+					0,
+				);
+			},
+			{ timeout: 3000 },
+		);
 		clearInterval(sseInterval);
 
 		const count = harness.mock.getMessageRequestCount("sess-1");
@@ -475,14 +548,20 @@ describe("Group 1: SSE coverage and grace period", () => {
 		// Reset counts AFTER busy is confirmed to exclude init requests
 		harness.mock.resetMessageRequestCounts();
 
-		// Only wait half the grace period — no poller yet
+		// Observe the early grace window to confirm no poller has started.
 		await wait(Math.floor(TEST_GRACE_MS * 0.6));
 
 		const countDuringGrace = harness.mock.getMessageRequestCount("sess-1");
 
-		// Now wait past grace period for poller to start
 		harness.mock.resetMessageRequestCounts();
-		await wait(TEST_GRACE_MS + TEST_STATUS_POLL_MS * 3);
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
+					countDuringGrace,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		const countAfterGrace = harness.mock.getMessageRequestCount("sess-1");
 
@@ -507,8 +586,15 @@ describe("Group 1: SSE coverage and grace period", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		// Wait past grace period + extra time for poller to poll
-		await wait(TEST_GRACE_MS * 2);
+		harness.mock.resetMessageRequestCounts();
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
+					0,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		const count = harness.mock.getMessageRequestCount("sess-1");
 		// Grace expired + no SSE → poller should have started and polled
@@ -546,18 +632,32 @@ describe("Group 2: SSE dynamics", () => {
 		});
 
 		// SSE events flow for a short burst
+		let injected = 0;
 		const sseInterval = setInterval(() => {
 			harness.mock.injectSSE({
 				type: "message.delta",
 				properties: { sessionID: "sess-1", text: "..." },
 			});
+			injected++;
 		}, TEST_SSE_INJECT_INTERVAL);
 
-		await wait(TEST_STALENESS_MS * 0.4);
+		await vi.waitFor(
+			() => {
+				expect(injected).toBeGreaterThanOrEqual(2);
+			},
+			{ timeout: 3000 },
+		);
 		clearInterval(sseInterval);
 
-		// SSE stops — wait for staleness threshold + grace + buffer
-		await wait(TEST_STALENESS_MS + TEST_GRACE_MS + TEST_STATUS_POLL_MS * 3);
+		harness.mock.resetMessageRequestCounts();
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
+					0,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		const count = harness.mock.getMessageRequestCount("sess-1");
 		// After SSE went stale + grace, poller should have started
@@ -581,28 +681,51 @@ describe("Group 2: SSE dynamics", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		// Wait past grace for poller to start
-		await wait(TEST_GRACE_MS * 2);
+		harness.mock.resetMessageRequestCounts();
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
+					0,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		// Measure baseline rate (polling without SSE)
 		harness.mock.resetMessageRequestCounts();
-		await wait(TEST_MSG_POLL_MS * 4);
+		await waitForStatusPollCycles(harness.mock, 6);
 		const rateWithoutSSE = harness.mock.getMessageRequestCount("sess-1");
+		expect(rateWithoutSSE).toBeGreaterThan(0);
 
 		// Start SSE injection
+		let injected = 0;
 		const sseInterval = setInterval(() => {
 			harness.mock.injectSSE({
 				type: "message.delta",
 				properties: { sessionID: "sess-1", text: "..." },
 			});
+			injected++;
 		}, TEST_SSE_INJECT_INTERVAL);
 
-		// Let reducer detect SSE coverage and stop poller
-		await wait(TEST_STATUS_POLL_MS * 4);
+		await vi.waitFor(
+			() => {
+				expect(injected).toBeGreaterThanOrEqual(2);
+			},
+			{ timeout: 3000 },
+		);
+		const statusBefore = harness.mock.statusRequestCount;
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.statusRequestCount).toBeGreaterThan(
+					statusBefore + 1,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		// Measure rate with SSE
 		harness.mock.resetMessageRequestCounts();
-		await wait(TEST_MSG_POLL_MS * 4);
+		await waitForStatusPollCycles(harness.mock, 6);
 		const rateWithSSE = harness.mock.getMessageRequestCount("sess-1");
 
 		clearInterval(sseInterval);
@@ -644,7 +767,7 @@ describe("Group 3: Idle transitions", () => {
 		// Reset counts AFTER busy is confirmed to exclude init/seeding requests
 		harness.mock.resetMessageRequestCounts();
 
-		// Only busy for a fraction of grace period, then go idle
+		// Observe a short grace window to confirm the poller stays inactive.
 		await wait(Math.floor(TEST_GRACE_MS * 0.3));
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
@@ -677,17 +800,22 @@ describe("Group 3: Idle transitions", () => {
 
 		// SSE events flowing — keep them going long enough for the reducer to
 		// register SSE coverage (multiple poll cycles under contention).
+		let injected = 0;
 		const sseInterval = setInterval(() => {
 			harness.mock.injectSSE({
 				type: "message.delta",
 				properties: { sessionID: "sess-1", text: "..." },
 			});
+			injected++;
 		}, TEST_SSE_INJECT_INTERVAL);
 
-		// Wait for several status poll cycles so the reducer fully registers
-		// the busy+SSE-covered state before we transition to idle.
-		// Under resource contention the poller can drift, so use a generous window.
-		await wait(TEST_STATUS_POLL_MS * 4);
+		await vi.waitFor(
+			() => {
+				expect(injected).toBeGreaterThanOrEqual(2);
+			},
+			{ timeout: 3000 },
+		);
+		await waitForStatusPollCycles(harness.mock);
 		clearInterval(sseInterval);
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
@@ -714,8 +842,15 @@ describe("Group 3: Idle transitions", () => {
 			predicate: (m) => m["status"] === "processing",
 		});
 
-		// Wait past grace for poller to start
-		await wait(TEST_GRACE_MS * 2);
+		harness.mock.resetMessageRequestCounts();
+		await vi.waitFor(
+			() => {
+				expect(harness.mock.getMessageRequestCount("sess-1")).toBeGreaterThan(
+					0,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		// Verify poller is running
 		const countBefore = harness.mock.getMessageRequestCount("sess-1");
@@ -726,8 +861,9 @@ describe("Group 3: Idle transitions", () => {
 		const done = await client.waitFor("done", { timeout: 3000 });
 		expect(done["type"]).toBe("done");
 
-		// Reset counts after idle, wait for a few poll cycles → poller should have stopped
+		// Reset counts after idle; verify no further polling over several intervals.
 		harness.mock.resetMessageRequestCounts();
+		// Observe a quiet window after idle to prove the message poller stopped.
 		await wait(TEST_MSG_POLL_MS * 3);
 		const countAfter = harness.mock.getMessageRequestCount("sess-1");
 		// Poller stopped → no new message requests
@@ -769,6 +905,7 @@ describe("Group 4: Cross-session and lifecycle", () => {
 		});
 
 		// SSE events for sess-2 only
+		harness.mock.resetMessageRequestCounts();
 		const sseInterval = setInterval(() => {
 			harness.mock.injectSSE({
 				type: "message.delta",
@@ -776,8 +913,16 @@ describe("Group 4: Cross-session and lifecycle", () => {
 			});
 		}, TEST_SSE_INJECT_INTERVAL);
 
-		// Wait past grace period for pollers to start
-		await wait(TEST_GRACE_MS * 2);
+		await vi.waitFor(
+			() => {
+				const countSess1 = harness.mock.getMessageRequestCount("sess-1");
+				expect(countSess1).toBeGreaterThan(0);
+				expect(harness.mock.getMessageRequestCount("sess-2")).toBeLessThan(
+					countSess1,
+				);
+			},
+			{ timeout: 3000 },
+		);
 
 		clearInterval(sseInterval);
 
@@ -792,7 +937,7 @@ describe("Group 4: Cross-session and lifecycle", () => {
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
-		await wait(TEST_GRACE_MS);
+		await waitForStatusPollCycles(harness.mock);
 		await client.close();
 	}, 5_000);
 
@@ -801,15 +946,14 @@ describe("Group 4: Cross-session and lifecycle", () => {
 
 		// sess-2 goes busy
 		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 
 		// Remove sess-2 from session list and status map
 		const idx = harness.mock.sessionList.findIndex((s) => s.id === "sess-2");
 		if (idx >= 0) harness.mock.sessionList.splice(idx, 1);
 		delete harness.mock.sessionStatuses["sess-2"];
 
-		// Wait — should not crash
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 
 		// Connect a client and verify relay still works with sess-1
 		const client = await harness.connectClient();
@@ -848,9 +992,9 @@ describe("Group 5: Notifications", () => {
 
 		// sess-2 (subagent of sess-1) goes busy then idle
 		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 
 		// Client viewing sess-1 should NOT receive notification_event for subagent done
 		// (filter out session_viewed which is the harmless indicator-clearing broadcast)
@@ -870,7 +1014,7 @@ describe("Group 5: Notifications", () => {
 
 		// sess-1 (NOT a subagent) goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 
 		client.clearReceived();
 
@@ -910,7 +1054,7 @@ describe("Group 5: Notifications", () => {
 
 		// Should NOT receive notification_event (done was delivered to viewer directly)
 		// (filter out session_viewed which is the harmless indicator-clearing broadcast)
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 		const notifications = client
 			.getReceivedOfType("notification_event")
 			.filter((m) => m["eventType"] !== "session_viewed");
@@ -927,7 +1071,7 @@ describe("Group 5: Notifications", () => {
 
 		// sess-1 goes busy (no viewer)
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await wait(TEST_STATUS_POLL_MS * 3);
+		await waitForStatusPollCycles(harness.mock);
 
 		client.clearReceived();
 
@@ -991,11 +1135,9 @@ describe("Group 6: Retry status and cycling", () => {
 			timeout: 3000,
 			predicate: (m) => m["status"] === "processing",
 		});
-		await wait(TEST_STATUS_POLL_MS * 2);
 
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		await client.waitFor("done", { timeout: 3000 });
-		await wait(TEST_STATUS_POLL_MS * 2);
 
 		client.clearReceived();
 
@@ -1005,7 +1147,6 @@ describe("Group 6: Retry status and cycling", () => {
 			timeout: 3000,
 			predicate: (m) => m["status"] === "processing",
 		});
-		await wait(TEST_STATUS_POLL_MS * 2);
 
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		await client.waitFor("done", { timeout: 3000 });
@@ -1027,7 +1168,7 @@ describe("Group 6: Retry status and cycling", () => {
 		// Session stays idle — clear received after initial setup
 		client.clearReceived();
 
-		// Wait several status poll cycles in steady state
+		// Observe a steady-state window to prove no session_list spam occurs.
 		await wait(TEST_STATUS_POLL_MS * 6);
 
 		const sessionListMsgs = client.getReceivedOfType("session_family");

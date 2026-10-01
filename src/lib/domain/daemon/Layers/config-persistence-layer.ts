@@ -124,7 +124,7 @@ export const ConfigSnapshotFromEffectStateLive = Layer.effect(
 // ─── ConfigWriter service ──────────────────────────────────────────────────
 
 export interface ConfigWriter {
-	readonly write: (config: DaemonConfig) => Effect.Effect<void, unknown>;
+	readonly write: (config: DaemonConfig) => Effect.Effect<void, Error>;
 }
 
 export class ConfigWriterTag extends Context.Tag("ConfigWriter")<

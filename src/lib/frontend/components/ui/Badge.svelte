@@ -4,8 +4,7 @@
   The seven real badge sites agreed on the shape (inline tinted chip, small
   text, no interaction) and disagreed on almost every value: three radii, four
   text colours, four font weights, two of them sizing by height and five by
-  padding. This primitive picks one of each and records the divergences in
-  conduit-test-7oga rather than encoding the drift as props.
+  padding. This primitive picks one of each rather than encoding the drift as props.
 
   Deliberately NOT a Badge: the "CCS detected on port 8317" chip in
   overlays/SettingsPanel. It is an icon plus a full sentence on a green fill,

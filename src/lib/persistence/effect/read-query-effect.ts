@@ -131,10 +131,8 @@ export const sessionRowsToSessionInfoList = (
 			id: row.id,
 			title: row.title,
 			status:
-				row.status === "busy" ||
-				row.status === "retry" ||
-				row.status === "error"
-					? row.status
+				status === "busy" || status === "retry" || status === "error"
+					? status
 					: "idle",
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,

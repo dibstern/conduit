@@ -7,19 +7,25 @@ import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
+import {
+	persistSessionPermissionMode,
+	restoreSessionPermissionModes,
+} from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import {
 	deleteSession,
-	listSessions,
-	persistSessionPermissionMode,
-	recordMessageActivity,
-	restoreSessionPermissionModes,
-	SessionManagerError,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -27,6 +33,7 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { recordMessageActivity } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
 import {
 	getPermissionMode,
 	makeOverridesStateLive,
@@ -49,9 +56,12 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
+	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 describe("SessionManager Effect", () => {
@@ -64,12 +74,31 @@ describe("SessionManager Effect", () => {
 		},
 	});
 
-	const makeTestLayer = (mockApi: ReturnType<typeof makeMockApi>) =>
-		Layer.mergeAll(
+	const makeTestLayer = (
+		mockApi: ReturnType<typeof makeMockApi>,
+		configDir?: string,
+	) => {
+		const configLayer = Layer.succeed(
+			ConfigTag,
+			makeMockConfig(configDir ? { configDir } : {}),
+		);
+		const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+		return Layer.mergeAll(
 			makeSessionManagerStateLive(),
 			PendingSendOwnershipLive,
 			Layer.succeed(OpenCodeAPITag, mockApi as unknown as OpenCodeAPI),
+			makePersistenceEffectLayer(":memory:"),
+			configLayer,
+			loggerLayer,
+			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+			Layer.succeed(BackgroundLivenessTag, () => false),
+			RelayStatusSnapshotLive,
+			makeOverridesStateLive(),
+			OpenCodeInstanceClientsLive.pipe(
+				Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+			),
 		);
+	};
 
 	const makeLiveServiceLayer = (
 		mockApi: ReturnType<typeof makeMockApi>,
@@ -89,45 +118,21 @@ describe("SessionManager Effect", () => {
 		return Layer.provideMerge(
 			SessionManagerServiceLive,
 			Layer.mergeAll(
-				Layer.fresh(makeTestLayer(mockApi)),
+				Layer.fresh(makeTestLayer(mockApi, configDir)),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				DaemonEventBusLive,
 				persistenceLayer,
+				Layer.succeed(
+					OrchestrationEngineTag,
+					new OrchestrationEngine({ registry: new ProviderRegistry() }),
+				),
 				...(readQueryOverride
 					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
-					: []),
-				...(configDir
-					? [Layer.succeed(ConfigTag, makeMockConfig({ configDir }))]
 					: []),
 				...(projectionRunnerOverride ? [projectionRunnerOverride] : []),
 			),
 		);
 	};
-
-	it.effect("listSessions fetches from API and caches parent map", () => {
-		const mockApi = makeMockApi();
-		// Return sessions with a parentID to verify parent-map caching
-		mockApi.session.list.mockResolvedValue([
-			{ id: "child1", title: "Child", parentID: "parent1" },
-			{ id: "parent1", title: "Parent" },
-			// biome-ignore lint/suspicious/noExplicitAny: test mock with extra parentID field
-		] as any);
-
-		return Effect.gen(function* () {
-			const result = yield* listSessions();
-
-			expect(result).toHaveLength(2);
-			expect(mockApi.session.list).toHaveBeenCalled();
-
-			// Verify parent map was cached
-			const ref = yield* SessionManagerStateTag;
-			const state = yield* Ref.get(ref);
-			const parentId = HashMap.get(state.cachedParentMap, "child1").pipe(
-				Option.getOrNull,
-			);
-			expect(parentId).toBe("parent1");
-		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
-	});
 
 	it.effect("recordMessageActivity updates timestamp", () => {
 		const mockApi = makeMockApi();
@@ -580,16 +585,6 @@ describe("SessionManager Effect", () => {
 				),
 			);
 		},
-	);
-
-	it.effect(
-		"permission mode persistence is a no-op without persistence services",
-		() =>
-			Effect.gen(function* () {
-				expect(
-					yield* persistSessionPermissionMode("ses-no-persistence", "auto"),
-				).toBeUndefined();
-			}),
 	);
 
 	it.effect(

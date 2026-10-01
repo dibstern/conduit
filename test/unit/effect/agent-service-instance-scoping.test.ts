@@ -58,21 +58,15 @@ const makeLayer = ({
 }: {
 	readonly api?: OpenCodeAPI;
 	readonly log?: Logger;
-	readonly engine?: OrchestrationEngine | null;
+	readonly engine?: OrchestrationEngine;
 } = {}) => {
 	const baseDependencies = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, api),
 		makeOverridesStateLive(),
 		Layer.succeed(LoggerTag, log),
+		Layer.succeed(OrchestrationEngineTag, engine),
 	);
-	const dependencies =
-		engine === null
-			? baseDependencies
-			: Layer.merge(
-					baseDependencies,
-					Layer.succeed(OrchestrationEngineTag, engine),
-				);
-	return Layer.provideMerge(AgentServiceLive, dependencies);
+	return Layer.provideMerge(AgentServiceLive, baseDependencies);
 };
 
 describe("AgentService instance scoping", () => {
@@ -168,7 +162,7 @@ describe("AgentService instance scoping", () => {
 					providerScope: { id: "claude", name: "Claude" },
 					agents: [],
 				});
-			}).pipe(Effect.provide(makeLayer({ engine: null }))),
+			}).pipe(Effect.provide(makeLayer())),
 	),
 		it.effect("does not clear a session agent during scoped discovery", () =>
 			Effect.gen(function* () {
@@ -185,7 +179,7 @@ describe("AgentService instance scoping", () => {
 				);
 
 				expect(yield* service.getActiveAgent("session-1")).toBe("build");
-			}).pipe(Effect.provide(makeLayer({ engine: null }))),
+			}).pipe(Effect.provide(makeLayer())),
 		);
 
 	it.effect("returns an empty OpenCode snapshot when discovery fails", () => {

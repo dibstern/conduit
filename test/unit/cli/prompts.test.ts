@@ -97,7 +97,7 @@ function sendKey(stdin: EventEmitter, key: string): void {
 
 /** Yield one event-loop tick so the prompt processes the preceding input. */
 function tick(): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, 1));
+	return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /**

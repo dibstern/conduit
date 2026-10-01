@@ -22,10 +22,10 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../src/lib/provider/claude/claude-capabilities-service.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
@@ -344,7 +344,7 @@ describe("WsRpcServerLayer GetModels", () => {
 						uuid: "00000000-0000-0000-0000-000000000001",
 						session_id: `${sessionId}-sdk`,
 					} as unknown as SDKMessage;
-					const instance = new ClaudeProviderInstance({
+					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: "/tmp/ws",
 						capabilitiesService,
 						queryFactory: vi.fn(() =>

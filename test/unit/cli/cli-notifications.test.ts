@@ -90,20 +90,16 @@ function createMockIO() {
 	};
 }
 
-/** Wait for a given number of milliseconds. */
-function tick(ms = 15): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+/** Flush queued prompt work before the next interaction. */
+function tick(): Promise<void> {
+	return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-/** Send a sequence of keys with delays between them. */
-async function sendKeys(
-	stdin: EventEmitter,
-	keys: string[],
-	delay = 15,
-): Promise<void> {
+/** Send a sequence of keys, flushing prompt work between them. */
+async function sendKeys(stdin: EventEmitter, keys: string[]): Promise<void> {
 	for (const key of keys) {
 		stdin.emit("data", key);
-		await tick(delay);
+		await tick();
 	}
 }
 
@@ -456,7 +452,7 @@ describe("HTTPS section", () => {
 
 		// Toggle 2: Yes
 		await sendKeys(io.stdin, ["y", "\r"]);
-		await tick(30);
+		await tick();
 
 		expect(restartWithTLS).toHaveBeenCalled();
 		const text = io.text();
@@ -544,7 +540,7 @@ describe("setup QR section", () => {
 
 		// Toggle 2: Yes
 		await sendKeys(io.stdin, ["y", "\r"]);
-		await tick(30);
+		await tick();
 
 		const text = io.text();
 		// After restartWithTLS updates config.tls to true, port+1 = 2634

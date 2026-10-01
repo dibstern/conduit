@@ -1,4 +1,4 @@
-// ─── Session Management Layer (Ticket 2.3) ───────────────────────────────────
+// ─── Session Management Layer ───────────────────────────────────
 // Manages the mapping between OpenCode sessions and the relay's representation.
 // OpenCode (SQLite) is always the source of truth — the relay never duplicates
 // storage. This layer proxies session CRUD and maintains in-memory active state.

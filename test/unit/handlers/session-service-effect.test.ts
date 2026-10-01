@@ -12,12 +12,14 @@ import type {
 	SessionManagerShape,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
@@ -33,12 +35,14 @@ import {
 	setSessionSettledForClient,
 } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
@@ -108,11 +112,13 @@ function makeSessionMetadataLayer(options: {
 	const logger = options.logger ?? makeMockLogger();
 
 	const baseLayer = Layer.mergeAll(
+		makePersistenceEffectLayer(":memory:"),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(OpenCodeModelServiceTag, modelService),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		Layer.succeed(LoggerTag, logger),
+		Layer.succeed(ConfigTag, makeMockConfig()),
 		PendingInteractionServiceLive,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),

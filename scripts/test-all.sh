@@ -53,6 +53,9 @@ run "E2E replay tests"         pnpm exec playwright test --config test/e2e/playw
 run "E2E daemon tests"         pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts
 run "E2E multi-instance tests" pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts
 run "E2E notification navigation tests" pnpm exec playwright test --config test/e2e/playwright-notification-nav.config.ts
+run "E2E notification reducer tests" pnpm exec playwright test --config test/e2e/playwright-notification-reducer.config.ts
+run "E2E question flow tests"  pnpm exec playwright test --config test/e2e/playwright-question-flow.config.ts
+run "E2E composer selector tests" pnpm exec playwright test --config test/e2e/playwright-variant.config.ts
 run "E2E subagent tests"       pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts
 run "E2E visual tests"         pnpm exec playwright test --config test/e2e/playwright-visual.config.ts
 

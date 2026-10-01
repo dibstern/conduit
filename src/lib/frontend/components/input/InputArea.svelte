@@ -163,7 +163,7 @@
 
 	/**
 	 * Spoken announcement for the mention menus. The composer is a plain textarea,
-	 * not a combobox (conduit-test-n9s, option 3C), so there is no `aria-expanded`
+	 * not a combobox (option 3C), so there is no `aria-expanded`
 	 * for a screen reader to read the opened state off. This live region carries
 	 * that signal instead. Empty string when nothing is open, so closing is silent.
 	 */

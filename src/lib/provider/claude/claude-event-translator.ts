@@ -18,7 +18,7 @@
  *   session.compaction (compaction progress and results)
  *   turn.completed (result)
  *
- * All payloads match the EventPayloadMap interfaces from Phase 1 Task 4.
+ * All payloads match the EventPayloadMap interfaces.
  */
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
@@ -33,6 +33,7 @@ import type {
 } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
+import type { EventSinkError } from "../event-sink-errors.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
 import { AssistantTextLedger, type Emission } from "./assistant-text-ledger.js";
@@ -248,7 +249,7 @@ export class ClaudeEventTranslator {
 	// Who each block of assistant text is, and what of it has already been
 	// sent. Identity is positional, so no rewrite of the text can change it.
 	private readonly ledger = new AssistantTextLedger();
-	private bufferedWrites: Effect.Effect<void, unknown>[] | undefined;
+	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
 	// Per-request usage of the LAST main-chain assistant message. The SDK's
 	// result.usage is cumulative across every API request in the turn (cache
@@ -280,7 +281,7 @@ export class ClaudeEventTranslator {
 	private pushMessageCreated(
 		ctx: ClaudeSessionContext,
 		messageId: string,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.suspend(() => {
 			if (messageId.length === 0 || this.announcedMessageIds.has(messageId)) {
 				return Effect.void;
@@ -305,7 +306,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		messageId: string,
 		emissions: readonly Emission[],
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			if (emissions.length === 0) return;
 			if (emissions.some((emission) => emission.kind !== "divergence")) {
@@ -365,7 +366,9 @@ export class ClaudeEventTranslator {
 	 *  turn message (result / interrupt / error) is the ONLY authoritative
 	 *  signal that the session stopped working. Every terminal path must go
 	 *  through here or the session stays busy forever. */
-	private endTurn(ctx: ClaudeSessionContext): Effect.Effect<void, unknown> {
+	private endTurn(
+		ctx: ClaudeSessionContext,
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			yield* this.push(
 				ctx,
@@ -384,14 +387,14 @@ export class ClaudeEventTranslator {
 	translate(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() => this.translateMessage(ctx, message));
 	}
 
 	private translateMessage(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			// Capture SDK session id for resume cursor on any message.
 			// All SDK message variants carry session_id (required or optional),
@@ -424,7 +427,7 @@ export class ClaudeEventTranslator {
 	translateError(
 		ctx: ClaudeSessionContext,
 		cause: unknown,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
 			Effect.gen(this, function* () {
 				const errorMsg = cause instanceof Error ? cause.message : String(cause);
@@ -446,7 +449,7 @@ export class ClaudeEventTranslator {
 	private translateSystem(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			switch (message.subtype) {
 				case "status": {
@@ -665,7 +668,7 @@ export class ClaudeEventTranslator {
 	private reportPermissionMode(
 		ctx: ClaudeSessionContext,
 		sdkMode: string | undefined,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			if (sdkMode === undefined) return;
 			const mode = fromSdkPermissionMode(sdkMode);
@@ -694,7 +697,7 @@ export class ClaudeEventTranslator {
 	private translateTaskStarted(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_started" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		if (!message.tool_use_id) return Effect.void;
 		const extras = message as unknown as Record<string, unknown>;
 		return this.pushTaskMetadata(ctx, message.tool_use_id, {
@@ -716,7 +719,7 @@ export class ClaudeEventTranslator {
 	private translateTaskProgress(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_progress" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		if (!message.tool_use_id) return Effect.void;
 		const usage = message.usage as Record<string, unknown>;
 		const extras = message as unknown as Record<string, unknown>;
@@ -743,7 +746,7 @@ export class ClaudeEventTranslator {
 	private translateTaskNotification(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_notification" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			if (!message.tool_use_id) return;
 			const usage = message.usage as Record<string, unknown> | undefined;
@@ -781,7 +784,7 @@ export class ClaudeEventTranslator {
 	private translateToolProgress(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage & { type: "tool_progress" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		const parentToolUseId = message.parent_tool_use_id;
 		if (!parentToolUseId) return Effect.void;
 		return this.pushTaskMetadata(ctx, parentToolUseId, {
@@ -797,7 +800,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const providerTaskId = metadata["providerTaskId"];
 			const subagentTasks = ctx.subagentTasks;
@@ -857,7 +860,7 @@ export class ClaudeEventTranslator {
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
 		messageId: string,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		const tool = this.findInFlightTool(parentToolUseId, ctx);
 		if (!tool)
 			return this.startBackgroundBashTool(
@@ -907,7 +910,7 @@ export class ClaudeEventTranslator {
 		parentToolUseId: string,
 		metadata: Record<string, unknown>,
 		messageId: string,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		if (metadata["subagentType"] !== "local_bash") return Effect.void;
 		const command =
 			stringMetadata(metadata, "description") ??
@@ -943,7 +946,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		parentToolUseId: string,
 		result: string | null,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			// No in-flight tool means no tool.started was ever emitted for this
 			// id; completing it would leave an orphan downstream.
@@ -1008,7 +1011,7 @@ export class ClaudeEventTranslator {
 	private translateStreamEvent(
 		ctx: ClaudeSessionContext,
 		message: SDKPartialAssistantMessage,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		// Cast: StreamEvent widens the SDK typing with the `ping` keepalive
 		// the runtime really does pass through but the SDK's types omit
 		// (plain annotation would be flow-narrowed back to the SDK type).
@@ -1036,7 +1039,7 @@ export class ClaudeEventTranslator {
 	private handleMessageStart(
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "message_start" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			// Capture the assistant message ID at the START of streaming so all
 			// content blocks (text, tool_use, thinking) share a single messageId.
@@ -1084,7 +1087,7 @@ export class ClaudeEventTranslator {
 	private handleBlockStop(
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_stop" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const index = event.index;
 			const tool = ctx.inFlightTools.get(index);
@@ -1152,7 +1155,7 @@ export class ClaudeEventTranslator {
 	private handleBlockStart(
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_start" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const index = event.index;
 			const block = event.content_block;
@@ -1218,7 +1221,7 @@ export class ClaudeEventTranslator {
 	private handleBlockDelta(
 		ctx: ClaudeSessionContext,
 		event: StreamEvent & { type: "content_block_delta" },
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const index = event.index;
 			const tool = ctx.inFlightTools.get(index);
@@ -1280,7 +1283,7 @@ export class ClaudeEventTranslator {
 	private translateAssistantSnapshot(
 		ctx: ClaudeSessionContext,
 		message: SDKAssistantMessage,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			ctx.lastAssistantUuid = message.uuid;
 
@@ -1398,7 +1401,7 @@ export class ClaudeEventTranslator {
 	private translateUserToolResults(
 		ctx: ClaudeSessionContext,
 		message: SDKUserMessage,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
@@ -1452,7 +1455,7 @@ export class ClaudeEventTranslator {
 	private translateResult(
 		ctx: ClaudeSessionContext,
 		result: SDKResultMessage,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			if (isInterruptedResult(result)) {
 				yield* this.push(
@@ -1588,13 +1591,15 @@ export class ClaudeEventTranslator {
 
 	/** Flush any pendingStart tools (e.g. on stream interruption).
 	 *  Emits tool.started + tool.completed for each buffered tool. */
-	flushPendingTools(ctx: ClaudeSessionContext): Effect.Effect<void, unknown> {
+	flushPendingTools(
+		ctx: ClaudeSessionContext,
+	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() => this.flushPendingToolsMessage(ctx));
 	}
 
 	private flushPendingToolsMessage(
 		ctx: ClaudeSessionContext,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			for (const [index, tool] of ctx.inFlightTools) {
 				if (!tool.pendingStart) continue;
@@ -1637,11 +1642,11 @@ export class ClaudeEventTranslator {
 	// ─── Push Helper ─────────────────────────────────────────────────────
 
 	private collectWrites(
-		work: () => Effect.Effect<void, unknown>,
-	): Effect.Effect<void, unknown> {
+		work: () => Effect.Effect<void, EventSinkError>,
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const previousWrites = this.bufferedWrites;
-			const writes: Effect.Effect<void, unknown>[] = [];
+			const writes: Effect.Effect<void, EventSinkError>[] = [];
 			this.bufferedWrites = writes;
 			yield* work().pipe(
 				Effect.ensuring(
@@ -1657,7 +1662,7 @@ export class ClaudeEventTranslator {
 	private push(
 		ctx: ClaudeSessionContext,
 		event: ProviderRuntimeEvent,
-	): Effect.Effect<void, unknown> {
+	): Effect.Effect<void, EventSinkError> {
 		const sink = this.deps.getSink(ctx);
 		if (!sink) return Effect.void;
 		const write = sink.push(event);

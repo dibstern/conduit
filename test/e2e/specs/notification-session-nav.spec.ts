@@ -139,9 +139,6 @@ test.describe("Notification → Session Navigation", () => {
 			sessionId: SESS_B,
 		});
 
-		// Give the frontend a tick to process the notification_event
-		await page.waitForTimeout(200);
-
 		// Simulate the notification click path: dispatch a navigate_to_session
 		// message on navigator.serviceWorker, which is where
 		// initSWMessageListener() registers its handler.

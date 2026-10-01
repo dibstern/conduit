@@ -41,7 +41,12 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 	await expect(mirror).toHaveText("/commit the fix");
 	await expect(textarea).toHaveClass(/text-transparent/);
 
-	await textarea.fill(LARGE_DRAFT);
+	// One input event, like a paste. Playwright's fill() types 116KB through
+	// the protocol and takes ~20s on its own, even into a bare textarea.
+	await textarea.evaluate((el: HTMLTextAreaElement, draft) => {
+		el.value = draft;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+	}, LARGE_DRAFT);
 
 	// The mirror is emptied — it never lays the draft out a second time…
 	await expect(mirror).toHaveText("");
@@ -49,6 +54,10 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 	await expect(textarea).not.toHaveClass(/text-transparent/);
 	// CSS pins the row to the cap without reading scrollHeight.
 	await expect(textarea.locator("..")).toHaveClass(/h-\[120px\]/);
+	// Height is pinned to the cap without measuring the draft.
+	await expect
+		.poll(async () => (await textarea.boundingBox())?.height)
+		.toBe(120);
 	// The draft itself is untouched.
 	expect(await textarea.inputValue()).toBe(LARGE_DRAFT);
 });

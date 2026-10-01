@@ -9,11 +9,12 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
+import type { ClaudeProviderInstanceDeps } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import type {
 	Query,
 	SDKMessage,
 } from "../../../src/lib/provider/claude/types.js";
+import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	createMockEventSink,
 	createMockQuery,
@@ -193,7 +194,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		const mockQuery = createMockQuery(messages);
 		const queryFactory = vi.fn(() => mockQuery);
 
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory,
 		});
@@ -425,10 +426,10 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			},
 		);
 
-		const instance = new ClaudeProviderInstance({
+		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactory as unknown as NonNullable<
-				ConstructorParameters<typeof ClaudeProviderInstance>[0]["queryFactory"]
+				ClaudeProviderInstanceDeps["queryFactory"]
 			>,
 		});
 

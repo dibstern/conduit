@@ -33,17 +33,15 @@ async function waitForPersistedConfig(
 		config: NonNullable<ReturnType<typeof loadDaemonConfig>>,
 	) => boolean,
 ): Promise<NonNullable<ReturnType<typeof loadDaemonConfig>>> {
-	const deadline = Date.now() + 1_000;
-	let lastConfig: ReturnType<typeof loadDaemonConfig> = null;
-
-	while (Date.now() < deadline) {
-		lastConfig = loadDaemonConfig(configDir);
-		if (lastConfig && predicate(lastConfig)) return lastConfig;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-
-	throw new Error(
-		`Timed out waiting for persisted config: ${JSON.stringify(lastConfig)}`,
+	return vi.waitFor(
+		() => {
+			const config = loadDaemonConfig(configDir);
+			if (config && predicate(config)) return config;
+			throw new Error(
+				`Timed out waiting for persisted config: ${JSON.stringify(config)}`,
+			);
+		},
+		{ timeout: 1_000 },
 	);
 }
 

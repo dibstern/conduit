@@ -25,7 +25,7 @@
 		 * the component instance, so this is the only way out. The composer's
 		 * auto-resize reads scrollHeight and writes style.height on every
 		 * keystroke, and its mention menus read and move selectionStart
-		 * (conduit-test-1k0g).
+		 *.
 		 */
 		element?: HTMLTextAreaElement | undefined;
 		class?: string;

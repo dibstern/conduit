@@ -10,6 +10,11 @@ import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, HashMap, Layer, Logger } from "effect";
 import { describe, expect, it } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -49,6 +54,11 @@ import {
 import resumedTurnEvents from "../../fixtures/claude-resumed-turn.json" with {
 	type: "json",
 };
+import {
+	makeMockConfig,
+	makeMockLogger,
+	makeMockOpenCodeAPI,
+} from "../../helpers/mock-factories.js";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -3223,7 +3233,16 @@ describe("ProjectionRunnerEffect", () => {
 					applySessionCommand({
 						type: "session.deleted",
 						data: { sessionId: "s1" },
-					}).pipe(Effect.provideService(ReadQueryEffectTag, readQuery)),
+					}).pipe(
+						Effect.provide(
+							Layer.mergeAll(
+								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ConfigTag, makeMockConfig()),
+								Layer.succeed(LoggerTag, makeMockLogger()),
+								Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+							),
+						),
+					),
 				);
 				expect(result._tag).toBe("Left");
 				if (result._tag === "Left")

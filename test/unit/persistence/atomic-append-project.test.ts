@@ -10,13 +10,13 @@ import { expect, it } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import {
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -26,8 +26,10 @@ import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
 it("a kill after append leaves no durable event ahead of its projection", async () => {
@@ -135,7 +137,17 @@ it.each([
 						data: { sessionId: "published", title: "After" },
 					});
 				}
-			}).pipe(Effect.provide(Layer.merge(persistence, bus))),
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						persistence,
+						bus,
+						Layer.succeed(ConfigTag, makeMockConfig()),
+						Layer.succeed(LoggerTag, makeMockLogger()),
+						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					),
+				),
+			),
 		);
 		expect(observed).toEqual([
 			{
@@ -156,16 +168,7 @@ it("failed establishment validation rolls back the seed, event and projections",
 			(projector) => projector.name !== "provider",
 		),
 	);
-	const layer = Layer.provideMerge(
-		SessionManagerServiceLive,
-		Layer.mergeAll(
-			persistence,
-			makeSessionManagerStateLive(),
-			DaemonEventBusLive,
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-		),
-	);
+	const layer = makeTestHandlerLayer({ persistenceLayer: persistence });
 	try {
 		await Effect.runPromise(
 			Effect.gen(function* () {

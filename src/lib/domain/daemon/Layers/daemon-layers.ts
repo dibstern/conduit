@@ -78,7 +78,10 @@ import {
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
 import { DaemonWsClientRegistryLive } from "../Services/daemon-ws-client-registry.js";
-import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
+import {
+	InstanceHealthCheckLive,
+	type InstanceHealthCheckTag,
+} from "../Services/instance-health-service.js";
 import {
 	getInstances as getEffectInstances,
 	getInstanceUrl,
@@ -307,13 +310,16 @@ export const DaemonWiringLive: Layer.Layer<
 const InstanceHealthPollingLive: Layer.Layer<
 	never,
 	never,
-	DaemonEventBusTag | InstanceManagerStateTag | PollerFibersTag
+	| DaemonEventBusTag
+	| InstanceHealthCheckTag
+	| InstanceManagerStateTag
+	| PollerFibersTag
 > = Layer.scopedDiscard(startInitialUnmanagedInstanceHealthPollers);
 
 const ManagedOpenCodeServersLive: Layer.Layer<
 	never,
 	never,
-	DaemonEventBusTag | InstanceManagerStateTag
+	DaemonEventBusTag | InstanceHealthCheckTag | InstanceManagerStateTag
 > = Layer.scopedDiscard(startManagedOpenCodeServers);
 
 // ─── DaemonState & RelayCache Layers ──────────────────────────────────────

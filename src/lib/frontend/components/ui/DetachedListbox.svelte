@@ -38,7 +38,7 @@
 		// The caller keeps DOM focus on its own input and drives the list from
 		// there, so active-descendant wiring belongs on the INPUT. Accepting it
 		// here would let a consumer point the listbox at itself and silently
-		// double up the relationship (conduit-test-9kov).
+		// double up the relationship.
 		| "aria-activedescendant"
 		| "aria-owns"
 	>;

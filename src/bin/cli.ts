@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ─── CLI Entry Point (Ticket 3.3) ───────────────────────────────────────────
+// ─── CLI Entry Point ───────────────────────────────────────────
 // Thin wrapper around cli-core.ts for testability.
 
 import { run } from "./cli-core.js";

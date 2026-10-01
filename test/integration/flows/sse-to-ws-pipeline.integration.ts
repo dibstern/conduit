@@ -3,7 +3,15 @@
 // WebSocket clients. Sends prompts and observes the full event pipeline:
 // SSE -> translator -> WebSocket broadcast.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -22,9 +30,9 @@ describe("Integration: SSE to WS Pipeline", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test before
-		// new test's client connects and starts asserting.
-		await new Promise((r) => setTimeout(r, 1000));
+		await vi.waitFor(() => {
+			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
+		});
 	});
 
 	it("SSE stream is running after relay startup", async () => {
@@ -36,11 +44,9 @@ describe("Integration: SSE to WS Pipeline", () => {
 		// The stream object exists and was wired up
 		expect(consumer).toBeTruthy();
 
-		// Give it a moment to connect, then check
-		await new Promise((r) => setTimeout(r, 1000));
-		// After a second, it should be connected (if mock is running)
-		const health = consumer.getHealth();
-		expect(health.connected).toBe(true);
+		await vi.waitFor(() => {
+			expect(consumer.getHealth().connected).toBe(true);
+		});
 	});
 
 	it("sending a prompt produces status:processing then done", async () => {

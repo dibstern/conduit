@@ -27,19 +27,18 @@ function makeInteractiveSink(): EventSink & {
 	resolvePermission(
 		requestId: string,
 		response: PermissionResponse,
-	): Effect.Effect<void, unknown>;
+	): Effect.Effect<void>;
 } {
 	const pending = new Map<string, (response: PermissionResponse) => void>();
 	return {
 		push: vi.fn(() => Effect.void),
 		requestPermission: vi.fn((request) =>
-			Effect.tryPromise({
-				try: () =>
+			Effect.promise(
+				() =>
 					new Promise<PermissionResponse>((resolve) => {
 						pending.set(request.requestId, resolve);
 					}),
-				catch: (cause) => cause,
-			}),
+			),
 		),
 		requestQuestion: vi.fn(() => Effect.succeed({})),
 		resolvePermission: vi.fn((requestId, response) =>
@@ -54,31 +53,29 @@ function makeInteractiveSink(): EventSink & {
 
 function pendingPermissionEffect(
 	register: (resolve: (value: unknown) => void) => void,
-): Effect.Effect<PermissionResponse, unknown> {
-	return Effect.tryPromise({
-		try: () =>
+): Effect.Effect<PermissionResponse> {
+	return Effect.promise(
+		() =>
 			new Promise<PermissionResponse>((resolve) => {
 				register(resolve as (value: unknown) => void);
 			}),
-		catch: (cause) => cause,
-	});
+	);
 }
 
 function pendingQuestionEffect(
 	register: (resolve: (value: Record<string, unknown>) => void) => void,
-): Effect.Effect<Record<string, unknown>, unknown> {
-	return Effect.tryPromise({
-		try: () =>
+): Effect.Effect<Record<string, unknown>> {
+	return Effect.promise(
+		() =>
 			new Promise<Record<string, unknown>>((resolve) => {
 				register(resolve);
 			}),
-		catch: (cause) => cause,
-	});
+	);
 }
 
 function permissionResponseEffect(
 	response: unknown,
-): Effect.Effect<PermissionResponse, unknown> {
+): Effect.Effect<PermissionResponse> {
 	return Effect.succeed(response as PermissionResponse);
 }
 
@@ -159,9 +156,9 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		// Give the microtask queue a tick.
-		await new Promise((r) => setTimeout(r, 0));
-		expect(ctx.pendingApprovals.size).toBe(1);
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(1));
+		// Allow the sink's deferred resolver to register before resolving it.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		const pending = [...ctx.pendingApprovals.values()][0];
 		expect(pending?.toolName).toBe("Bash");
 
@@ -209,12 +206,12 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(sink.requestQuestion).toHaveBeenCalled());
 		let settled = false;
 		void callbackPromise.then(() => {
 			settled = true;
 		});
-		await new Promise((r) => setTimeout(r, 0));
+		await Promise.resolve();
 		expect(settled).toBe(false);
 		expect(sink.requestQuestion).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -288,7 +285,7 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(1));
 		ac.abort();
 		const result = await callbackPromise;
 		expect(result.behavior).toBe("deny");
@@ -408,7 +405,9 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		await new Promise((r) => setTimeout(r, 0));
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(1));
+		// Allow the interactive sink to start awaiting this permission.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		const pending = [...ctx.pendingApprovals.values()][0];
 		expect(pending).toBeDefined();
 
@@ -476,9 +475,9 @@ describe("ClaudePermissionBridge", () => {
 			},
 		);
 
-		// Let microtasks settle — both pending approvals should exist
-		await new Promise((r) => setTimeout(r, 0));
-		expect(ctx.pendingApprovals.size).toBe(2);
+		await vi.waitFor(() => expect(ctx.pendingApprovals.size).toBe(2));
+		// Allow both sink resolvers to register before resolving either call.
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		// Resolve only the first call
 		resolveSinkA({ decision: "once" });
@@ -490,7 +489,7 @@ describe("ClaudePermissionBridge", () => {
 		void promiseB.then(() => {
 			bSettled = true;
 		});
-		await new Promise((r) => setTimeout(r, 0));
+		await Promise.resolve();
 		expect(bSettled).toBe(false);
 
 		// Now resolve the second call

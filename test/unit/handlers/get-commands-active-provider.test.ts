@@ -51,7 +51,10 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.merge(
 		apiLayer,
-		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+		Layer.merge(
+			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
+			Layer.succeed(LoggerTag, mockLogger()),
+		),
 	);
 }
 
@@ -157,6 +160,7 @@ describe("handleGetCommands active provider", () => {
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 		);
 
 		return handleGetCommands("client-1", {}).pipe(

@@ -51,7 +51,7 @@ export const Hover: Story = {
  * the banner alone — so the confirm/cancel pair had no hovered baseline at
  * all, and a change to the Cancel button's hover colour passed this file green
  * while the identical change to ConfirmModal's Cancel correctly churned. Green
- * meant "not covered", not "unchanged" (conduit-test-llxm).
+ * meant "not covered", not "unchanged".
  */
 export const WithModalHover: Story = {
 	...WithModal,

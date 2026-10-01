@@ -210,30 +210,32 @@ export const makeSessionTitleServiceLive = (
 ): Layer.Layer<
 	SessionTitleServiceTag,
 	never,
-	LoggerTag | SessionManagerServiceTag
+	| LoggerTag
+	| ConfigTag
+	| WebSocketHandlerTag
+	| SessionManagerServiceTag
+	| ReadQueryEffectTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
 > =>
 	Layer.scoped(
 		SessionTitleServiceTag,
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
-			const wsHandlerOption = yield* Effect.serviceOption(WebSocketHandlerTag);
+			const wsHandler = yield* WebSocketHandlerTag;
 			const sessionManagerService = yield* SessionManagerServiceTag;
-			const configOption = yield* Effect.serviceOption(ConfigTag);
-			const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-			const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-			const projectionRunnerOption = yield* Effect.serviceOption(
-				ProjectionRunnerEffectTag,
-			);
-			const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+			const config = yield* ConfigTag;
+			const readQuery = yield* ReadQueryEffectTag;
+			const eventStore = yield* EventStoreEffectTag;
+			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			const sql = yield* SqlClient.SqlClient;
 			const inFlight = yield* Ref.make(HashSet.empty<string>());
 			const queryFactory =
 				options.queryFactory ?? ((params) => sdkQuery(params));
 			const now = options.now ?? (() => new Date());
-			const cwd =
-				configOption._tag === "Some"
-					? (configOption.value.projectDir ?? process.cwd())
-					: process.cwd();
+			const cwd = config.projectDir ?? process.cwd();
 
 			const generateTitle = (firstMessage: string) =>
 				Effect.gen(function* () {
@@ -316,8 +318,7 @@ export const makeSessionTitleServiceLive = (
 					log.warn(
 						`SESSION_TITLE_GENERATION_FAILED sessionId=${sessionId} reason=${reason}`,
 					);
-					if (wsHandlerOption._tag === "None") return;
-					wsHandlerOption.value.broadcast({
+					wsHandler.broadcast({
 						type: "system_error",
 						code: "SESSION_TITLE_GENERATION_FAILED",
 						message:
@@ -332,10 +333,8 @@ export const makeSessionTitleServiceLive = (
 
 			const applyTitleIfStillDefault = (sessionId: string, title: string) =>
 				Effect.gen(function* () {
-					if (readQueryOption._tag === "None") return false;
-
 					const currentResult = yield* Effect.either(
-						readQueryOption.value.getSession(sessionId),
+						readQuery.getSession(sessionId),
 					);
 					if (currentResult._tag === "Left") return false;
 
@@ -343,17 +342,15 @@ export const makeSessionTitleServiceLive = (
 					if (!current) return false;
 					if (!isClaudeSessionProvider(current.provider)) return false;
 					if (!isDefaultSessionTitle(current.title)) return false;
-					if (
-						eventStoreOption._tag === "None" ||
-						projectionRunnerOption._tag === "None" ||
-						sqlOption._tag === "None"
-					) {
-						return false;
+					const recovered = yield* projectionRunner.isRecovered();
+					if (!recovered) {
+						yield* projectionRunner
+							.recover()
+							.pipe(
+								Effect.provideService(SqlClient.SqlClient, sql),
+								Effect.asVoid,
+							);
 					}
-
-					const eventStore = eventStoreOption.value;
-					const projectionRunner = projectionRunnerOption.value;
-					const sql = sqlOption.value;
 
 					const createdAt = Date.now();
 					// The auto-title rename is a read-model change like any other, so it
@@ -384,9 +381,7 @@ export const makeSessionTitleServiceLive = (
 						isClaudeSessionProvider(appliedRow.provider);
 					if (!applied) return false;
 
-					if (wsHandlerOption._tag === "Some") {
-						yield* sessionManagerService.pushViewerFamilies();
-					}
+					yield* sessionManagerService.pushViewerFamilies();
 					return true;
 				});
 

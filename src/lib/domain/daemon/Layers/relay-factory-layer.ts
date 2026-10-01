@@ -38,6 +38,7 @@ import { ConfigPersistenceTag } from "../Services/config-persistence-service.js"
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
 	getInstances as getEffectInstances,
@@ -152,6 +153,7 @@ export const RelayFactoryLive = (
 	| ProjectRegistryTag
 	| InstanceManagerStateTag
 	| PollerFibersTag
+	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
@@ -166,6 +168,7 @@ export const RelayFactoryLive = (
 			const projectRegistry = yield* ProjectRegistryTag;
 			const instanceState = yield* InstanceManagerStateTag;
 			const pollerFibers = yield* PollerFibersTag;
+			const healthCheck = yield* InstanceHealthCheckTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -229,6 +232,7 @@ export const RelayFactoryLive = (
 					E,
 					| InstanceManagerStateTag
 					| PollerFibersTag
+					| InstanceHealthCheckTag
 					| DaemonEventBusTag
 					| ConfigPersistenceTag
 				>,
@@ -236,6 +240,7 @@ export const RelayFactoryLive = (
 				effect.pipe(
 					Effect.provideService(InstanceManagerStateTag, instanceState),
 					Effect.provideService(PollerFibersTag, pollerFibers),
+					Effect.provideService(InstanceHealthCheckTag, healthCheck),
 					Effect.provideService(DaemonEventBusTag, eventBus),
 					Effect.provideService(ConfigPersistenceTag, configPersistence),
 				);

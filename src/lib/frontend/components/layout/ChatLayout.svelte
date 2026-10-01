@@ -223,85 +223,60 @@
 		setFilesPaneWidth(Math.min(paneMaxWidth, Math.max(FILES_PANE_MIN_WIDTH, width)));
 	}
 
+	function dragPoint(e: MouseEvent | TouchEvent) {
+		const point = "touches" in e ? e.touches[0] : e;
+		return { x: point?.clientX ?? 0, y: point?.clientY ?? 0 };
+	}
+
+	/** Follows a mouse or touch drag on the document until it is released. */
+	function trackDrag(
+		onMove: (point: { x: number; y: number }) => void,
+		onEnd: () => void,
+	) {
+		const move = (ev: MouseEvent | TouchEvent) => onMove(dragPoint(ev));
+		const end = () => {
+			document.removeEventListener("mousemove", move);
+			document.removeEventListener("mouseup", end);
+			document.removeEventListener("touchmove", move);
+			document.removeEventListener("touchend", end);
+			onEnd();
+		};
+		document.addEventListener("mousemove", move);
+		document.addEventListener("mouseup", end);
+		document.addEventListener("touchmove", move, { passive: false });
+		document.addEventListener("touchend", end);
+	}
+
 	function handleSidebarResizeStart(e: MouseEvent | TouchEvent) {
 		if (uiState.sidebarCollapsed) return;
 		e.preventDefault();
 		isSidebarResizing = true;
-		const startX = "touches" in e ? ((e as TouchEvent).touches[0]?.clientX ?? 0) : e.clientX;
+		const startX = dragPoint(e).x;
 		const startW = uiState.sidebarWidth;
-
-		function onMove(ev: MouseEvent | TouchEvent) {
-			const clientX =
-				"touches" in ev
-					? ((ev as TouchEvent).touches[0]?.clientX ?? 0)
-					: (ev as MouseEvent).clientX;
-			const delta = clientX - startX;
-			const newW = Math.max(
-				SIDEBAR_MIN_WIDTH,
-				Math.min(SIDEBAR_MAX_WIDTH, startW + delta),
-			);
-			setSidebarWidth(newW);
-		}
-
-		function onEnd() {
-			isSidebarResizing = false;
-			document.removeEventListener("mousemove", onMove);
-			document.removeEventListener("mouseup", onEnd);
-			document.removeEventListener("touchmove", onMove);
-			document.removeEventListener("touchend", onEnd);
-		}
-
-		document.addEventListener("mousemove", onMove);
-		document.addEventListener("mouseup", onEnd);
-		document.addEventListener("touchmove", onMove, { passive: false });
-		document.addEventListener("touchend", onEnd);
+		trackDrag(
+			({ x }) => setSidebarWidth(Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, startW + x - startX))),
+			() => { isSidebarResizing = false; },
+		);
 	}
 
 	function handleResizeStart(e: MouseEvent | TouchEvent) {
 		e.preventDefault();
 		isResizing = true;
-		const startY =
-			"touches" in e ? ((e as TouchEvent).touches[0]?.clientY ?? 0) : e.clientY;
+		const startY = dragPoint(e).y;
 		const startH = terminalHeight;
-		const maxH = appEl
-			? appEl.clientHeight * TERMINAL_MAX_RATIO
-			: window.innerHeight * TERMINAL_MAX_RATIO;
-
-		function onMove(ev: MouseEvent | TouchEvent) {
-			const clientY =
-				"touches" in ev
-					? ((ev as TouchEvent).touches[0]?.clientY ?? 0)
-					: (ev as MouseEvent).clientY;
-			// Dragging up = increasing terminal height
-			const delta = startY - clientY;
-			const newH = Math.max(
-				TERMINAL_MIN_HEIGHT,
-				Math.min(maxH, startH + delta),
-			);
-			terminalHeight = newH;
-		}
-
-		function onEnd() {
-			isResizing = false;
-			document.removeEventListener("mousemove", onMove);
-			document.removeEventListener("mouseup", onEnd);
-			document.removeEventListener("touchmove", onMove);
-			document.removeEventListener("touchend", onEnd);
-			// Persist
-			try {
-				localStorage.setItem(
-					TERMINAL_STORAGE_KEY,
-					String(Math.round(terminalHeight)),
-				);
-			} catch {
-				/* ignore */
-			}
-		}
-
-		document.addEventListener("mousemove", onMove);
-		document.addEventListener("mouseup", onEnd);
-		document.addEventListener("touchmove", onMove, { passive: false });
-		document.addEventListener("touchend", onEnd);
+		const maxH = (appEl?.clientHeight ?? window.innerHeight) * TERMINAL_MAX_RATIO;
+		trackDrag(
+			// Dragging up grows the terminal.
+			({ y }) => { terminalHeight = Math.max(TERMINAL_MIN_HEIGHT, Math.min(maxH, startH + startY - y)); },
+			() => {
+				isResizing = false;
+				try {
+					localStorage.setItem(TERMINAL_STORAGE_KEY, String(Math.round(terminalHeight)));
+				} catch {
+					/* ignore */
+				}
+			},
+		);
 	}
 
 	/**

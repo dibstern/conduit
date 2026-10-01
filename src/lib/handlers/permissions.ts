@@ -325,15 +325,9 @@ export const handlePermissionResponse = (
 				`client=${clientId} session=${sessionId} ${result.toolName}: ${result.mapped}`,
 			);
 
-			let isClaudeSession = false;
-			const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-			if (engineOption._tag === "Some") {
-				const engine = engineOption.value;
-				const providerId = yield* engine.getProviderForSessionEffect(sessionId);
-				if (providerId === "claude") {
-					isClaudeSession = true;
-				}
-			}
+			const engine = yield* OrchestrationEngineTag;
+			const isClaudeSession =
+				(yield* engine.getProviderForSessionEffect(sessionId)) === "claude";
 
 			if (!isClaudeSession) {
 				yield* Effect.either(

@@ -24,7 +24,7 @@
 
   Radios also cannot be un-checked by pressing the checked one, which deletes a
   guard the ToggleGroup version needed: "pick exactly one of N" is the semantics
-  rather than something each call site has to defend (conduit-test-mkah).
+  rather than something each call site has to defend.
 
   `type="button"` is set by hand because bits' RadioGroup.Item does not set it
   and a default-submit inside a form is a nasty thing to discover later. Its

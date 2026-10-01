@@ -21,6 +21,7 @@ import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-adv
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -32,11 +33,8 @@ import {
 	makeSessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import {
-	persistSessionPermissionMode,
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	makePollerPubSubLive,
@@ -59,6 +57,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
 const versionOf = (sessionId: string) =>
@@ -115,6 +114,7 @@ const makeStatusPollerLayer = (dbPath: string, restStatuses: RestStatuses) => {
 			makePollerPubSubLive(),
 			RelayStatusSnapshotLive,
 			makeSessionManagerStateLive(),
+			PendingInteractionServiceLive,
 		),
 	);
 };
@@ -140,16 +140,16 @@ const withTempDb = async (body: (dbPath: string) => Promise<void>) => {
 it("establishOpenCodeSession advances the version of the session it seeds", async () => {
 	await withTempDb(async (dbPath) => {
 		const bus = makeSessionEventBusLive();
-		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
-			Layer.mergeAll(
-				bus,
-				makePersistenceEffectLayer(dbPath, createAllEffectProjectors(), bus),
-				makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-			),
+		const layer = Layer.mergeAll(
+			bus,
+			makeTestHandlerLayer({
+				api: makeMockOpenCodeAPI(),
+				persistenceLayer: makePersistenceEffectLayer(
+					dbPath,
+					createAllEffectProjectors(),
+					bus,
+				),
+			}),
 		);
 		await Effect.runPromise(
 			Effect.scoped(
@@ -180,16 +180,16 @@ it("establishOpenCodeSession advances the version of the session it seeds", asyn
 it("local session creation advances its row version and announces its session", async () => {
 	await withTempDb(async (dbPath) => {
 		const bus = makeSessionEventBusLive();
-		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
-			Layer.mergeAll(
-				bus,
-				makePersistenceEffectLayer(dbPath, createAllEffectProjectors(), bus),
-				makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-			),
+		const layer = Layer.mergeAll(
+			bus,
+			makeTestHandlerLayer({
+				api: makeMockOpenCodeAPI(),
+				persistenceLayer: makePersistenceEffectLayer(
+					dbPath,
+					createAllEffectProjectors(),
+					bus,
+				),
+			}),
 		);
 		await Effect.runPromise(
 			Effect.scoped(
@@ -218,16 +218,16 @@ it("local session creation advances its row version and announces its session", 
 it("session-manager rename advances its row version and announces its session", async () => {
 	await withTempDb(async (dbPath) => {
 		const bus = makeSessionEventBusLive();
-		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
-			Layer.mergeAll(
-				bus,
-				makePersistenceEffectLayer(dbPath, createAllEffectProjectors(), bus),
-				makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-			),
+		const layer = Layer.mergeAll(
+			bus,
+			makeTestHandlerLayer({
+				api: makeMockOpenCodeAPI(),
+				persistenceLayer: makePersistenceEffectLayer(
+					dbPath,
+					createAllEffectProjectors(),
+					bus,
+				),
+			}),
 		);
 		await Effect.runPromise(
 			Effect.scoped(
@@ -354,6 +354,7 @@ it("the auto-title rename advances the version of the session it renames", async
 			Layer.mergeAll(
 				bus,
 				makePersistenceEffectLayer(dbPath, createAllEffectProjectors(), bus),
+				Layer.succeed(ConfigTag, makeMockConfig()),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				Layer.succeed(SessionManagerServiceTag, sessionManager),
 				// The service only reports a finished rename through the ws

@@ -284,7 +284,7 @@ export const sendToSession = (sessionId: string, message: RelayMessage) =>
 	});
 
 /**
- * Phase 0b: project-scoped per-session event firehose.
+ * Project-scoped per-session event firehose.
  *
  * Delivers message to every client connected to this handler. Clients that
  * have NOT yet been marked as bootstrapped have the event buffered in their
@@ -330,7 +330,7 @@ export const broadcastPerSessionEvent = (
 	});
 
 /**
- * Phase 0b: mark a client as having completed its initial handshake.
+ * Mark a client as having completed its initial handshake.
  *
  * Called after initial state has been sent. Flushes any
  * per-session events buffered in the client's bootstrapQueue, preserving

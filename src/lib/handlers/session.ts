@@ -221,12 +221,9 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		if (readQueryOption._tag === "None") return true;
+		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(
-			readQueryOption.value.getSession(sessionId),
-		);
+		const rowResult = yield* Effect.either(readQuery.getSession(sessionId));
 		if (rowResult._tag === "Left") return true;
 
 		const row = rowResult.right;

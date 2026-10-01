@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeInstanceClientsTag } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
@@ -190,21 +190,26 @@ async function eventually<T>(
 	matches: (value: T) => boolean,
 	timeoutMs = 3_000,
 ): Promise<T> {
-	const deadline = Date.now() + timeoutMs;
-	let lastValue: T | undefined;
-	while (Date.now() < deadline) {
-		lastValue = await read();
-		if (matches(lastValue)) return lastValue;
-		await new Promise((resolve) => setTimeout(resolve, 50));
-	}
-	throw new Error(
-		`condition not met before timeout; last value=${JSON.stringify(lastValue)}`,
+	return vi.waitFor(
+		async () => {
+			const value = await read();
+			if (matches(value)) return value;
+			throw new Error(
+				`condition not met before timeout; last value=${JSON.stringify(value)}`,
+			);
+		},
+		{ timeout: timeoutMs },
 	);
 }
 
 describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 	it("does not construct the legacy OpenCodeRuntimeIngress fallback", () => {
-		const source = readFileSync("src/lib/relay/relay-stack.ts", "utf8");
+		const source = [
+			"src/lib/relay/project-relay-layers.ts",
+			"src/lib/relay/project-relay-startup.ts",
+		]
+			.map((path) => readFileSync(path, "utf8"))
+			.join("\n");
 
 		expect(source).not.toContain("new OpenCodeRuntimeIngress");
 		expect(source).toContain("makeEffectOpenCodeRuntimeIngress");

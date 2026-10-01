@@ -19,6 +19,7 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
@@ -36,6 +37,7 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 }));
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
+	InstanceHealthCheckLive,
 	Layer.succeed(PortScannerTag, {
 		getKnownPorts: () => Effect.succeed(new Set<number>()),
 		scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
@@ -255,6 +257,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		const layer = RelayFactoryLive(join(dir, "config")).pipe(
 			Layer.provide(
 				Layer.mergeAll(
+					InstanceHealthCheckLive,
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,
@@ -383,6 +386,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		const layer = RelayFactoryLive(join(dir, "config")).pipe(
 			Layer.provide(
 				Layer.mergeAll(
+					InstanceHealthCheckLive,
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,

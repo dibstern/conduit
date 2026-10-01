@@ -3,7 +3,7 @@
 // Integration tests use this to exercise the exact same wiring as production,
 // without requiring a live OpenCode instance.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -39,6 +39,8 @@ export async function createRelayHarness(
 	options: {
 		/** Config directory holding daemon.json (named provider instances). */
 		readonly configDir?: string;
+		/** Relay default model ("provider/model"); it decides the provider of new sessions. */
+		readonly defaultModel?: string;
 	} = {},
 ): Promise<RelayHarness> {
 	const recording =
@@ -49,6 +51,13 @@ export async function createRelayHarness(
 	await mock.start();
 	const dbDir = mkdtempSync(join(tmpdir(), "conduit-relay-integration-"));
 	const eventsDbPath = join(dbDir, "events.db");
+	writeFileSync(
+		join(dbDir, "settings.jsonc"),
+		JSON.stringify({
+			defaultModel:
+				options.defaultModel ?? "anthropic/claude-opus-4-5-20251101",
+		}),
+	);
 
 	const stack = await createRelayStack({
 		port: 0,
@@ -90,8 +99,6 @@ export async function createRelayHarness(
 			await stack.stop();
 			await mock.stop();
 			rmSync(dbDir, { recursive: true, force: true });
-			// Allow OS to fully release ports and file descriptors
-			await new Promise((r) => setTimeout(r, 100));
 		},
 	};
 }

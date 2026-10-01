@@ -20,10 +20,8 @@ describe("Integration: Per-Tab Sessions", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		// Let relay pipeline drain events from previous test.
-		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	// ── Independent Session Viewing ──────────────────────────────────────────
@@ -94,6 +92,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		expect(switched1["id"]).toBeTruthy();
 
 		// Client2 remains on its current session.
+		// Observe a full window to ensure client2 gets no session switch.
 		await new Promise((r) => setTimeout(r, 500));
 		expect(client2.getActiveSessionId()).toBe(initial2);
 
@@ -208,7 +207,7 @@ describe("Integration: Per-Tab Sessions", () => {
 			originId: "browser-tab-a",
 		});
 
-		// Wait and verify client2 (session B) does NOT receive it
+		// Observe a full window to ensure the draft does not reach session B.
 		await new Promise((r) => setTimeout(r, 1000));
 		const syncs = client2.getReceivedOfType("input_sync");
 		expect(syncs).toHaveLength(0);

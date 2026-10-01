@@ -2,7 +2,7 @@
   TextButton — a button whose entire affordance is a colour step on hover.
 
   No box: no background, no border, no padding, no radius. The eleven sites this
-  replaces (conduit-test-de3.35.9.1) had each hand-written the same three ideas —
+  replaces had each hand-written the same three ideas —
   "it is clickable", "it is dimmer than body text", "it brightens under the
   cursor" — and agreed on all three. What they disagreed about was everything
   structural, which is why almost nothing lives in BASE_CLASSES here.
@@ -10,7 +10,7 @@
   Why this is NOT a Button variant: every Button variant that sets a neutral text
   colour also sets a hover background, and a consumer `class` can only ADD
   utilities, never subtract one. The empty-fill column was unreachable from
-  Button by construction, not by omission (conduit-test-de3.35.9.2).
+  Button by construction, not by omission.
 
   BASE is deliberately almost empty, and each absence was measured rather than
   assumed:
@@ -23,7 +23,7 @@
   - No `display`. Only one of the eleven wanted flex; the rest are happy as the
     default inline-block. Emitting one here would put BASE in the display group
     and force that site to fight it — the exact trap `align` was created to
-    remove (conduit-test-ixfu).
+    remove.
   - No `transition`. Five sites animate the hover, five do not, and one animates
     opacity instead. That is a real inconsistency, but it is a taste call, so it
     stays visible at the call site rather than being decided by a refactor.
@@ -99,8 +99,8 @@
 
 	// The hover step is dropped rather than overridden when disabled. A CSS-only
 	// fix would need a second utility in the same group, and the one that wins is
-	// decided by stylesheet order — the failure mode conduit-test-or29 was filed
-	// for, where disabled buttons still lit up under the cursor.
+	// decided by stylesheet order — the failure mode where disabled buttons
+	// still lit up under the cursor.
 	const buttonClass = $derived(
 		[
 			BASE_CLASSES,

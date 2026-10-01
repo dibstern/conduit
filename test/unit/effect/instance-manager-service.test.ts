@@ -9,7 +9,10 @@ import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import { InstanceHealthCheckTag } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
+import {
+	InstanceHealthCheckLive,
+	InstanceHealthCheckTag,
+} from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import {
 	type AddInstanceInput,
 	addInstance,
@@ -29,6 +32,7 @@ import {
 const testLayer = makeInstanceManagerStateLive().pipe(
 	Layer.provideMerge(DaemonEventBusLive),
 	Layer.provideMerge(ConfigPersistenceNoopLive),
+	Layer.provideMerge(InstanceHealthCheckLive),
 );
 
 const sampleInput: AddInstanceInput = {

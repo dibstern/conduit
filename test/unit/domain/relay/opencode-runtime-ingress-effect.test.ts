@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
+import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -12,6 +13,7 @@ import {
 } from "../../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
 	type ProviderRuntimeIngestion,
+	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -75,7 +77,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 function makeFakeIngress(options?: {
 	readonly ingestBatch?: (
 		events: readonly ProviderRuntimeEvent[],
-	) => Effect.Effect<number, unknown>;
+	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 }) {
 	const ingestion = {
 		ingest: vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1)),
@@ -436,7 +438,9 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 	it("returns error and increments error stats when ingestion fails", async () => {
 		const { hook } = makeFakeIngress({
 			ingestBatch: () =>
-				Effect.fail(new Error("SQLITE_BUSY: database is locked")),
+				Effect.fail(
+					new SqlError({ message: "SQLITE_BUSY: database is locked" }),
+				),
 		});
 		const event = makeSSEEvent("message.created", {
 			sessionID: SESSION_ID,

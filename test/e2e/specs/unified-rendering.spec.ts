@@ -236,7 +236,6 @@ test.describe("Unified Rendering: Scroll", () => {
 			el.scrollTop = 0;
 			el.dispatchEvent(new Event("scroll"));
 		});
-		await page.waitForTimeout(300);
 
 		// Scroll button should appear
 		const scrollBtn = page.locator("#scroll-btn");

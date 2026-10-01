@@ -12,7 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sendIpcRequest } from "../../../src/bin/cli-utils.js";
 import { hashPin } from "../../../src/lib/auth.js";
 import {
@@ -205,20 +205,25 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		// Add a project — creates a relay stack with its own services
 		await daemon.addProject(process.cwd());
 
-		// Let relay services start
-		await new Promise((r) => setTimeout(r, 500));
-
-		// Verify relay is serving
-		const statusBefore = await httpStatus(`http://127.0.0.1:${port}/health`);
-		expect(statusBefore).toBe(200);
+		await vi.waitFor(
+			async () => {
+				const statusBefore = await httpStatus(
+					`http://127.0.0.1:${port}/health`,
+				);
+				expect(statusBefore).toBe(200);
+			},
+			{ timeout: 2_000 },
+		);
 
 		// Stop everything — daemon + all relay services
 		await daemon.stop();
 		daemon = null;
-		await new Promise((r) => setTimeout(r, 300));
-
-		// Everything is gone — expect a connection error
-		const statusAfter = await httpStatus(`http://127.0.0.1:${port}/health`);
-		expect(typeof statusAfter).toBe("string"); // error code, not a status number
+		await vi.waitFor(
+			async () => {
+				const statusAfter = await httpStatus(`http://127.0.0.1:${port}/health`);
+				expect(typeof statusAfter).toBe("string"); // error code, not a status number
+			},
+			{ timeout: 2_000 },
+		);
 	}, 15_000);
 });

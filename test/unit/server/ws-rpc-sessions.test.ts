@@ -39,45 +39,27 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer ResolveSession", () => {
-	it.scoped.each([false, true])(
-		"uses session manager existence with store=%s",
-		(withStore) => {
-			const dbDir = mkdtempSync(join(tmpdir(), "ws-rpc-resolve-"));
-			const sessionExists = vi.fn((sessionId: string) =>
-				Effect.succeed(sessionId === "existing"),
-			);
-			const layer = Layer.merge(
-				makeTestHandlerLayer({
-					config: makeMockConfig({ slug: "project-a" }),
-					sessionManagerService: makeMockSessionManagerService({
-						sessionExists,
-					}),
-				}),
-				withStore
-					? makePersistenceEffectLayer(join(dbDir, "events.db"))
-					: Layer.empty,
-			);
+	it.scoped("uses session manager existence with persistence", () => {
+		const sessionExists = vi.fn((sessionId: string) =>
+			Effect.succeed(sessionId === "existing"),
+		);
+		const layer = makeTestHandlerLayer({
+			config: makeMockConfig({ slug: "project-a" }),
+			sessionManagerService: makeMockSessionManagerService({ sessionExists }),
+		});
 
-			return Effect.gen(function* () {
-				const client = yield* rpcClient;
-				expect(yield* client.ResolveSession({ sessionId: "existing" })).toEqual(
-					{
-						projectSlug: "project-a",
-					},
-				);
-				expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
-					projectSlug: null,
-				});
-				expect(sessionExists).toHaveBeenCalledWith("existing");
-				expect(sessionExists).toHaveBeenCalledWith("missing");
-			}).pipe(
-				Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))),
-				Effect.ensuring(
-					Effect.sync(() => rmSync(dbDir, { recursive: true, force: true })),
-				),
-			);
-		},
-	);
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+			expect(yield* client.ResolveSession({ sessionId: "existing" })).toEqual({
+				projectSlug: "project-a",
+			});
+			expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
+				projectSlug: null,
+			});
+			expect(sessionExists).toHaveBeenCalledWith("existing");
+			expect(sessionExists).toHaveBeenCalledWith("missing");
+		}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
+	});
 });
 
 describe("WsRpcServerLayer ListSessions", () => {
@@ -296,6 +278,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			setForkEntry,
 			pushViewerFamilies,
 		});
+		const persistenceLayer = makePersistenceEffectLayer(":memory:");
 
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -353,9 +336,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 							api,
 							wsHandler,
 							sessionManagerService,
+							persistenceLayer,
 						}),
 					),
-					Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
+					Layer.provideMerge(persistenceLayer),
 				),
 			),
 		);
@@ -422,6 +406,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				.spyOn(defaultClaudeSessionForkSdk, "forkSession")
 				.mockResolvedValueOnce({ sessionId: "sdk-fork" })
 				.mockResolvedValueOnce({ sessionId: "sdk-rollback" });
+			const persistenceLayer = makePersistenceEffectLayer(
+				join(dir, "events.db"),
+			);
 			const layer = WsRpcServerLayer.pipe(
 				Layer.provideMerge(
 					Layer.mergeAll(
@@ -429,12 +416,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 							api,
 							wsHandler,
 							sessionManagerService,
+							persistenceLayer,
 							config: makeMockConfig({
 								configDir: dir,
 								projectDir: "/project",
 							}),
 						}),
-						makePersistenceEffectLayer(join(dir, "events.db")),
+						persistenceLayer,
 					),
 				),
 			);
@@ -866,6 +854,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 	});
 
 	it.effect("returns older history pages from SQLite", () => {
+		const persistenceLayer = makePersistenceEffectLayer(":memory:");
 		return Effect.gen(function* () {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
@@ -904,8 +893,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer()),
-					Layer.provideMerge(makePersistenceEffectLayer(":memory:")),
+					Layer.provideMerge(makeTestHandlerLayer({ persistenceLayer })),
+					Layer.provideMerge(persistenceLayer),
 				),
 			),
 		);

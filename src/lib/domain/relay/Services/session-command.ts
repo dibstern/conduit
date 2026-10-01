@@ -6,12 +6,12 @@
 // the event store AND OpenCode, delete wrote OpenCode only, create wrote
 // OpenCode only. listSessions has always read the SQLite read model, so a
 // mutation that skipped the event store simply never reached the UI — which is
-// exactly how conduit-test-42k7 (deleted sessions reappearing) happened.
+// how deleted sessions reappeared in the sidebar.
 //
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { SqlClient } from "@effect/sql";
-import { Data, Effect } from "effect";
+import { type Cause, Data, Effect } from "effect";
 import {
 	loadDaemonConfig,
 	resolveClaudeInstanceConfigDir,
@@ -85,7 +85,9 @@ export type SessionCommand = {
  */
 export interface SessionUpstreamAdapter {
 	readonly provider: "opencode" | "claude";
-	readonly sync: (command: SessionCommand) => Effect.Effect<void, unknown>;
+	readonly sync: (
+		command: SessionCommand,
+	) => Effect.Effect<void, Cause.UnknownException>;
 }
 
 export interface ApplySessionCommandOptions {
@@ -106,18 +108,15 @@ export const openCodeUpstreamAdapter = (
 			case "session.deleted":
 				// No retry: delete is not idempotent, and upstream cleanup is
 				// best-effort.
-				return Effect.tryPromise({
-					try: () => api.session.delete(command.data.sessionId),
-					catch: (cause) => cause,
-				});
+				return Effect.tryPromise(() =>
+					api.session.delete(command.data.sessionId),
+				).pipe(Effect.asVoid);
 			case "session.renamed":
-				return Effect.tryPromise({
-					try: () =>
-						api.session.update(command.data.sessionId, {
-							title: command.data.title,
-						}),
-					catch: (cause) => cause,
-				});
+				return Effect.tryPromise(() =>
+					api.session.update(command.data.sessionId, {
+						title: command.data.title,
+					}),
+				).pipe(Effect.asVoid);
 			case "session.created":
 				// Whoever created the session chose its id — upstream for
 				// OpenCode-backed sessions, locally for the rest — so by the time this
@@ -163,127 +162,90 @@ export const isClaudeSessionRow = (
  * does this effect, because a user told the session was deleted must not find
  * it still listed. Upstream sync is best-effort and cannot fail the command.
  *
- * When the SQLite services are absent (relay stacks that run without an event
- * store) the local write is skipped and only upstream sync runs, which is the
- * behaviour every mutating method had before this module existed.
  */
 export const applySessionCommand = (
 	command: SessionCommand,
 	options: ApplySessionCommandOptions = {},
 ) =>
 	Effect.gen(function* () {
-		// Optional: a Claude-only relay never wires the OpenCode API, and a
-		// mutation on a Claude-backed session has no upstream to reach anyway.
-		// Requiring it here would put OpenCode in the type of every local create.
-		const apiOption = yield* Effect.serviceOption(OpenCodeAPITag);
-		const logOption = yield* Effect.serviceOption(LoggerTag);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
-		const projectionRunnerOption = yield* Effect.serviceOption(
-			ProjectionRunnerEffectTag,
-		);
-		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const api = yield* OpenCodeAPITag;
+		const log = yield* LoggerTag;
+		const config = yield* ConfigTag;
+		const readQuery = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 
 		const { sessionId } = command.data;
-		let row: SessionRow | undefined;
 
-		if (
-			readQueryOption._tag === "Some" &&
-			eventStoreOption._tag === "Some" &&
-			projectionRunnerOption._tag === "Some" &&
-			sqlOption._tag === "Some"
-		) {
-			// One append+project+announce pipeline, shared with every other
-			// producer. The command path used to own a copy of it plus its own
-			// publish; the read model announces itself now, so there is nothing
-			// left here that could drift from the other pipeline.
-			const commitAndSignal = yield* makeCommitAndSignal.pipe(
-				Effect.provideService(SqlClient.SqlClient, sqlOption.value),
-				Effect.provideService(EventStoreEffectTag, eventStoreOption.value),
-				Effect.provideService(
-					ProjectionRunnerEffectTag,
-					projectionRunnerOption.value,
-				),
-			);
+		const commitAndSignal = yield* makeCommitAndSignal.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+			Effect.provideService(EventStoreEffectTag, eventStore),
+			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+		);
 
-			row = yield* readQueryOption.value.getSession(sessionId).pipe(
+		const row = yield* readQuery.getSession(sessionId).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionCommandError({
+						operation: `${command.type}.getSession`,
+						cause,
+					}),
+			),
+		);
+
+		// session.created is the one command that does not require an existing
+		// row — it is what brings the row into being, and its payload names the
+		// provider. Every other command describes a change to a row that must
+		// already be there: no row is not an error (it may already be gone, and
+		// upstream may still hold it), there is simply nothing to record.
+		// This is why forkOpenCodeSession applies session.created before any
+		// session.forked can land: an UPDATE onto a row that is not there yet
+		// writes nothing and reports success.
+		const appendProvider =
+			command.type === "session.created"
+				? command.data.provider
+				: row?.provider;
+
+		if (appendProvider !== undefined) {
+			yield* commitAndSignal([
+				canonicalEvent(command.type, sessionId, command.data, {
+					provider: appendProvider,
+					createdAt: Date.now(),
+					metadata: { source: "relay" },
+				}),
+			]).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({
-							operation: `${command.type}.getSession`,
+							operation: `${command.type}.commit`,
 							cause,
 						}),
 				),
 			);
-
-			// session.created is the one command that does not require an existing
-			// row — it is what brings the row into being, and its payload names the
-			// provider. Every other command describes a change to a row that must
-			// already be there: no row is not an error (it may already be gone, and
-			// upstream may still hold it), there is simply nothing to record.
-			// This is why forkOpenCodeSession applies session.created before any
-			// session.forked can land: an UPDATE onto a row that is not there yet
-			// writes nothing and reports success.
-			const appendProvider =
-				command.type === "session.created"
-					? command.data.provider
-					: row?.provider;
-
-			if (appendProvider !== undefined) {
-				yield* commitAndSignal([
-					canonicalEvent(command.type, sessionId, command.data, {
-						provider: appendProvider,
-						createdAt: Date.now(),
-						metadata: { source: "relay" },
-					}),
-				]).pipe(
-					// Projection failures still reach the caller: a user told the
-					// session was deleted must not find it still listed.
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({
-								operation: `${command.type}.commit`,
-								cause,
-							}),
-					),
-				);
-			}
 		}
 
-		// No adapter means no upstream to sync: the relay has no OpenCode API
-		// wired at all, so there is no session registry anywhere to fall out of
-		// step with.
 		const defaultAdapter =
-			row !== undefined &&
-			isClaudeSessionRow(
-				row,
-				configOption._tag === "Some" ? configOption.value.configDir : undefined,
-			)
+			row !== undefined && isClaudeSessionRow(row, config.configDir)
 				? claudeUpstreamAdapter
-				: apiOption._tag === "Some"
-					? openCodeUpstreamAdapter(apiOption.value)
-					: undefined;
+				: openCodeUpstreamAdapter(api);
 		const adapter =
 			options.upstreamAdapter === undefined
 				? defaultAdapter
 				: options.upstreamAdapter;
 
-		if (adapter !== undefined && adapter !== null) {
+		if (adapter !== null)
 			yield* adapter.sync(command).pipe(
 				Effect.catchAll((cause) =>
 					Effect.sync(() => {
-						if (logOption._tag === "Some") {
-							logOption.value.warn("Upstream session sync failed", {
-								operation: command.type,
-								sessionId,
-								cause,
-							});
-						}
+						log.warn("Upstream session sync failed", {
+							operation: command.type,
+							sessionId,
+							cause,
+						});
 					}),
 				),
 			);
-		}
 	}).pipe(
 		Effect.annotateLogs("sessionId", command.data.sessionId),
 		Effect.withSpan("session.applySessionCommand", {
@@ -308,7 +270,7 @@ export const normalizeSessionTitle = (title?: string): string => {
  * left to the caller.
  *
  * That folding is the point. A caller who creates the session upstream and
- * forgets to record it locally is how conduit-test-42k7 happened; there is no
+ * forgets to record it locally can make the session absent from the read model; there is no
  * longer a way to express it from outside this module.
  */
 export const createOpenCodeSession = (
@@ -354,7 +316,7 @@ export const createOpenCodeSession = (
  * direct `api.session.fork` call lives here and `session.created` is applied in
  * the same function. Before this, the forked session reached the read model
  * only if the provider event stream happened to mention it — with no parent, so
- * it surfaced as a root session in the sidebar (conduit-test-o5vp).
+ * it surfaced as a root session in the sidebar.
  *
  * Resolve tip forks before publishing creation so the first subscription row
  * already carries the fork point.

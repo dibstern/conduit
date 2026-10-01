@@ -30,14 +30,14 @@
 		 * the field silently never takes focus. Three call sites had each worked
 		 * around that with an identical one-line `use:focusOnMount` action, which
 		 * is the other thing that cannot cross a component boundary
-		 * (conduit-test-de3.35.7).
+		 *.
 		 */
 		autofocus?: boolean;
 		/**
 		 * The real `<input>` node. `bind:this` on a COMPONENT tag hands back the
 		 * component instance, not the element, so without this no call site can
 		 * focus the field later, `.select()` it, or read its geometry — and both
-		 * chromeless call sites needed to (conduit-test-d1d4). `autofocus` below covers only the one
+		 * chromeless call sites needed to. `autofocus` below covers only the one
 		 * case of focusing on mount.
 		 */
 		element?: HTMLInputElement | undefined;

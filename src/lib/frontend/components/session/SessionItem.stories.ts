@@ -231,7 +231,7 @@ export const Dense: Story = {
 };
 
 export const WithContextMenu: Story = {
-	// conduit-test-732b: SessionItem only emits a callback; the fixture renders its menu.
+	// SessionItem only emits a callback; the fixture renders its menu.
 	render: (args) => ({ Component: SessionItemWithContextMenu, props: args }),
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
@@ -242,7 +242,7 @@ export const WithContextMenu: Story = {
 		await fireEvent.contextMenu(row);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
-			// menuitem, not button: since conduit-test-de3.35.4 the menu is
+			// menuitem, not button: the menu now is
 			// ui/Menu + ui/MenuItem, which render real menu roles.
 			await body.findByRole("menuitem", { name: "Copy resume command" }),
 			"More options must render the session context menu before capture",
@@ -353,7 +353,7 @@ export const SwipeArmedToCommit: Story = {
 	play: dragStory(1, 0.65),
 };
 
-// The inline rename field had no baseline before conduit-test-de3.35.7, which
+// The inline rename field had no baseline before the field migration, which
 // is how it kept a bespoke recipe through three migration batches unnoticed.
 export const Renaming: Story = {
 	args: {
@@ -371,7 +371,7 @@ export const Renaming: Story = {
 // Select mode is the only state that renders the selection control, and it had
 // no story at all -- which is how it kept a checkbox drawn entirely in glyphs,
 // with no role and no checked state, through the whole migration
-// (conduit-test-de3.35.9.3).
+//.
 export const SelectMode: Story = {
 	args: {
 		session: mockSession,

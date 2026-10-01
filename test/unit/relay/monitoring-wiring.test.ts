@@ -24,7 +24,8 @@ import type { PushNotificationSender } from "../../../src/lib/server/push.js";
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
-const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
+const flushPromises = () =>
+	new Promise<void>((resolve) => setImmediate(resolve));
 
 function createHarness(parentMap = new Map<string, string>()) {
 	const broadcastPerSessionEvent = vi.fn();

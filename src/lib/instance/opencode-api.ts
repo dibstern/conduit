@@ -1,4 +1,4 @@
-// ─── OpenCodeAPI Adapter (Task 5) ───────────────────────────────────────────
+// ─── OpenCodeAPI Adapter ───────────────────────────────────────────
 // Unified namespaced API wrapping the @opencode-ai/sdk client and gap endpoints.
 // Callers use `api.session.list()` instead of `client.session.list({ ... })`.
 //

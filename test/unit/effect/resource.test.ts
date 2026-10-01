@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect } from "effect";
+import { Duration, Effect, TestClock } from "effect";
 import { expect } from "vitest";
 
 import {
@@ -16,7 +16,7 @@ describe("Effect resource utilities", () => {
 		expect(trackedFetch.length).toBe(2); // (url, init?)
 	});
 
-	it.live("repeating clears interval on scope close", () =>
+	it.effect("repeating clears interval on scope close", () =>
 		Effect.gen(function* () {
 			let count = 0;
 			const result = yield* Effect.scoped(
@@ -28,7 +28,7 @@ describe("Effect resource utilities", () => {
 							}),
 						10,
 					);
-					yield* Effect.sleep(Duration.millis(55));
+					yield* TestClock.adjust(Duration.millis(55));
 					return count;
 				}),
 			);
@@ -36,7 +36,7 @@ describe("Effect resource utilities", () => {
 
 			// After scope closes, interval should be cleared
 			const countAfter = count;
-			yield* Effect.promise(() => new Promise((r) => setTimeout(r, 50)));
+			yield* TestClock.adjust(Duration.millis(50));
 			expect(count).toBe(countAfter); // No more increments
 		}),
 	);
@@ -56,7 +56,7 @@ describe("Effect resource utilities", () => {
 					// Don't wait for timeout — scope closes immediately
 				}),
 			);
-			yield* Effect.promise(() => new Promise((r) => setTimeout(r, 50)));
+			yield* TestClock.adjust(Duration.millis(50));
 			expect(fired).toBe(false); // Timeout was cleared
 		}),
 	);

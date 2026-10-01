@@ -60,7 +60,7 @@
 	<!-- Was a hand-rolled dropdown before de3: a bare <button> toggling an
 	     absolutely-positioned <div> of bare <button>s, with no aria-expanded,
 	     no aria-haspopup, no role, no arrow keys, no Escape and no dismiss on
-	     outside click. ui/Menu brings the whole contract (conduit-test-de3.35.6).
+	     outside click. ui/Menu brings the whole contract.
 
 	     MenuRadioGroup rather than plain items because exactly one instance is
 	     current, which the old markup knew and never said: it rendered every

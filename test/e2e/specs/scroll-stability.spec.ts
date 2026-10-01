@@ -49,12 +49,38 @@ async function getClientHeight(page: Page): Promise<number> {
 	});
 }
 
+async function waitForStableScroll(page: Page): Promise<void> {
+	let previous: number | undefined;
+	await expect
+		.poll(async () => {
+			const current = await getScrollTop(page);
+			const stable = previous !== undefined && current === previous;
+			previous = current;
+			return stable;
+		})
+		.toBe(true);
+}
+
+async function waitForInitialMessages(page: Page): Promise<void> {
+	// Fixtures differ in size, so wait for a non-zero count that holds steady.
+	let previous = -1;
+	await expect
+		.poll(async () => {
+			const current = await page.locator(".msg-container").count();
+			const stable = current > 0 && current === previous;
+			previous = current;
+			return stable;
+		})
+		.toBe(true);
+	await waitForStableScroll(page);
+}
+
 async function scrollTo(page: Page, scrollTop: number): Promise<void> {
 	await page.evaluate((st) => {
 		const el = document.getElementById("messages");
 		if (el) el.scrollTop = st;
 	}, scrollTop);
-	await page.waitForTimeout(300);
+	await waitForStableScroll(page);
 }
 
 async function mockRelayWithViewSessionRpc(
@@ -89,7 +115,6 @@ async function scrollUpIncrementally(
 	page: Page,
 	totalPixels: number,
 	stepPx = 120,
-	stepDelay = 60,
 ): Promise<void> {
 	let remaining = totalPixels;
 	while (remaining > 0) {
@@ -99,11 +124,8 @@ async function scrollUpIncrementally(
 			if (el) el.scrollTop = Math.max(0, el.scrollTop - px);
 		}, step);
 		remaining -= step;
-		if (remaining > 0) {
-			await page.waitForTimeout(stepDelay);
-		}
+		await waitForStableScroll(page);
 	}
-	await page.waitForTimeout(500);
 }
 
 // ─── Message generation ─────────────────────────────────────────────────────
@@ -269,7 +291,7 @@ test.describe("Scroll Stability — Mobile", () => {
 		});
 
 		// Wait for all messages to render + initial scroll to bottom
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Verify enough scrollable content exists
 		const scrollHeight = await getScrollHeight(page);
@@ -305,7 +327,10 @@ test.describe("Scroll Stability — Mobile", () => {
 			text: "A message from another browser tab",
 		});
 
-		// Wait for reactive effects to settle
+		await expect(page.locator("#messages")).toContainText(
+			"A message from another browser tab",
+		);
+		// The scroll position must not jump during this observation window.
 		await page.waitForTimeout(1000);
 
 		// Assert: scroll should NOT have snapped to exact bottom.
@@ -333,13 +358,12 @@ test.describe("Scroll Stability — Mobile", () => {
 			timeout: 15_000,
 		});
 
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Scroll very far up — near the top of the conversation
 		const scrollHeight = await getScrollHeight(page);
 		const targetScroll = Math.max(0, Math.floor(scrollHeight * 0.1));
 		await scrollTo(page, targetScroll);
-		await page.waitForTimeout(800);
 
 		const scrollBefore = await getScrollTop(page);
 
@@ -364,6 +388,10 @@ test.describe("Scroll Stability — Mobile", () => {
 		});
 		wsMock.sendMessage({ type: "client_count", count: 4 });
 
+		await expect(page.locator("#messages")).toContainText(
+			"Burst message from another tab",
+		);
+		// The burst must not move the reading position during this window.
 		await page.waitForTimeout(1000);
 
 		const scrollAfter = await getScrollTop(page);
@@ -388,14 +416,14 @@ test.describe("Scroll Stability — Mobile", () => {
 			timeout: 15_000,
 		});
 
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// First, force scroll to bottom to establish baseline
 		await page.evaluate(() => {
 			const el = document.getElementById("messages");
 			if (el) el.scrollTop = el.scrollHeight;
 		});
-		await page.waitForTimeout(500);
+		await waitForStableScroll(page);
 
 		const scrollBtn = page.locator("#scroll-btn");
 
@@ -407,7 +435,6 @@ test.describe("Scroll Stability — Mobile", () => {
 
 		// Click it — should return to bottom
 		await scrollBtn.click();
-		await page.waitForTimeout(800);
 
 		// After clicking, button should be hidden (we're at bottom)
 		await expect(scrollBtn).toBeHidden({ timeout: 3000 });
@@ -438,15 +465,31 @@ test.describe("Scroll Controller — History Load", () => {
 			timeout: 15_000,
 		});
 
-		// Sample scroll position rapidly for 2 seconds after connect overlay hides.
-		// If the old "visible replay scrolling" bug exists, we'd see scrollTop
-		// increasing gradually from 0 to scrollHeight. With the fix, scrollTop
-		// should either be 0 (loading) or near-bottom (after single commit).
-		for (let i = 0; i < 20; i++) {
-			const pos = await getScrollTop(page);
-			scrollPositions.push(pos);
-			await page.waitForTimeout(100);
-		}
+		// Sample until the rendered transcript settles at bottom. An animated
+		// replay would produce many intermediate scroll positions.
+		let previousPosition: number | undefined;
+		await expect
+			.poll(
+				async () => {
+					const { position, height, viewport } = await page
+						.locator("#messages")
+						.evaluate((el) => ({
+							position: el.scrollTop,
+							height: el.scrollHeight,
+							viewport: el.clientHeight,
+						}));
+					scrollPositions.push(position);
+					const settled = previousPosition === position;
+					previousPosition = position;
+					return (
+						settled &&
+						height > viewport * 2 &&
+						height - position - viewport < 50
+					);
+				},
+				{ intervals: [100], timeout: 5000 },
+			)
+			.toBe(true);
 
 		// The final position should be near the bottom
 		const finalScrollTop = await getScrollTop(page);
@@ -484,7 +527,7 @@ test.describe("Scroll Controller — History Load", () => {
 			timeout: 15_000,
 		});
 
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Count rendered message containers
 		const msgContainerCount = await page.evaluate(() => {
@@ -520,11 +563,10 @@ test.describe("Scroll Controller — Streaming", () => {
 			timeout: 15_000,
 		});
 
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Simulate streaming: status:processing, then deltas
 		wsMock.sendMessage({ type: "status", status: "processing" });
-		await page.waitForTimeout(200);
 
 		// Send streaming deltas
 		for (let i = 0; i < 10; i++) {
@@ -532,8 +574,11 @@ test.describe("Scroll Controller — Streaming", () => {
 				type: "delta",
 				text: `Streaming content line ${i}. This is a fairly long line to ensure the scroll height changes meaningfully with each delta. `,
 			});
-			await page.waitForTimeout(100);
+			await expect(page.locator("#messages")).toContainText(
+				`Streaming content line ${i}.`,
+			);
 		}
+		await waitForStableScroll(page);
 
 		// While streaming, scroll should be near the bottom (auto-following)
 		const scrollTop = await getScrollTop(page);
@@ -564,19 +609,21 @@ test.describe("Scroll Controller — Streaming", () => {
 			timeout: 15_000,
 		});
 
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Start streaming
 		wsMock.sendMessage({ type: "status", status: "processing" });
-		await page.waitForTimeout(200);
 		wsMock.sendMessage({ type: "delta", text: "Starting response..." });
-		await page.waitForTimeout(200);
+		await expect(page.locator("#messages")).toContainText(
+			"Starting response...",
+		);
 
 		// Scroll up while streaming using mouse wheel
 		const messagesEl = page.locator("#messages");
 		await messagesEl.hover();
 		await page.mouse.wheel(0, -500);
-		await page.waitForTimeout(300);
+		await expect(page.locator("#scroll-btn")).toBeVisible();
+		await waitForStableScroll(page);
 
 		const scrollAfterWheel = await getScrollTop(page);
 
@@ -590,8 +637,12 @@ test.describe("Scroll Controller — Streaming", () => {
 				type: "delta",
 				text: `More streaming content ${i}. `,
 			});
-			await page.waitForTimeout(150);
+			await expect(page.locator("#messages")).toContainText(
+				`More streaming content ${i}.`,
+			);
 		}
+		// Streaming must not snap the detached viewport to bottom during this window.
+		await page.waitForTimeout(150);
 
 		// Scroll position should NOT have been forced to bottom
 		const scrollAfterMoreStreaming = await getScrollTop(page);
@@ -611,7 +662,11 @@ test.describe("Scroll Controller — Streaming", () => {
 
 		// Click button to re-follow
 		await scrollBtn.click();
-		await page.waitForTimeout(500);
+		await expect
+			.poll(
+				async () => scrollHeight - (await getScrollTop(page)) - clientHeight,
+			)
+			.toBeLessThan(150);
 
 		// Now we should be at the bottom
 		const scrollAfterFollow = await getScrollTop(page);
@@ -648,7 +703,7 @@ test.describe("Scroll Stability — Desktop", () => {
 			timeout: 15_000,
 		});
 
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		const scrollHeight = await getScrollHeight(page);
 		const clientHeight = await getClientHeight(page);
@@ -676,6 +731,10 @@ test.describe("Scroll Stability — Desktop", () => {
 			text: "Desktop burst message",
 		});
 
+		await expect(page.locator("#messages")).toContainText(
+			"Desktop burst message",
+		);
+		// The desktop reading position must not jump during this window.
 		await page.waitForTimeout(1000);
 
 		const scrollAfter = await getScrollTop(page);
@@ -789,7 +848,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			state: "hidden",
 			timeout: 15_000,
 		});
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Session A should be at the bottom
 		const distA = await page.evaluate(() => {
@@ -799,8 +858,15 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		expect(distA).toBeLessThan(50);
 
 		// Click on Session B in the sidebar
+		const sessionACount = await page.locator(".msg-container").count();
 		await page.locator('text="Session B"').click();
-		await page.waitForTimeout(3000);
+		await expect(page.locator('[data-session-id="sess-switch-B"]')).toHaveClass(
+			/active/,
+		);
+		await expect
+			.poll(() => page.locator(".msg-container").count())
+			.not.toBe(sessionACount);
+		await waitForStableScroll(page);
 
 		// Session B should also be scrolled to the bottom
 		const distB = await page.evaluate(() => {
@@ -834,7 +900,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			state: "hidden",
 			timeout: 15_000,
 		});
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Count initial messages
 		const initialCount = await page.evaluate(() => {
@@ -845,8 +911,11 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		await scrollUpIncrementally(page, 3000);
 		const scrollBefore = await getScrollTop(page);
 
-		// Wait for prepend to happen (HistoryLoader fires, loads from buffer)
+		// Deliberate window: the test accepts either a prepend or no load at
+		// all, and nothing signals "no more history", so give HistoryLoader
+		// time to fire before sampling.
 		await page.waitForTimeout(2000);
+		await waitForStableScroll(page);
 
 		// Check if more messages were loaded
 		const afterCount = await page.evaluate(() => {
@@ -941,7 +1010,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			state: "hidden",
 			timeout: 15_000,
 		});
-		await page.waitForTimeout(1000);
+		await expect(page.locator("#messages")).toBeVisible();
 
 		// Simulate: user sent a message, server starts processing
 		wsMock.sendMessage({
@@ -954,7 +1023,6 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			sessionId: "sess-empty-001",
 			status: "processing",
 		});
-		await page.waitForTimeout(300);
 
 		// Stream response
 		for (let i = 0; i < 8; i++) {
@@ -963,10 +1031,19 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 				sessionId: "sess-empty-001",
 				text: `This is line ${i} of the response. It contains enough text to create vertical height in the scroll container for testing purposes. `,
 			});
-			await page.waitForTimeout(100);
+			await expect(page.locator("#messages")).toContainText(
+				`This is line ${i} of the response.`,
+			);
 		}
 
-		await page.waitForTimeout(500);
+		await expect
+			.poll(async () =>
+				page.evaluate(() => {
+					const el = document.getElementById("messages");
+					return el ? el.scrollHeight - el.scrollTop - el.clientHeight : -1;
+				}),
+			)
+			.toBeLessThan(100);
 
 		// Should be near the bottom — auto-scroll working for empty session
 		const distFromBottom = await page.evaluate(() => {
@@ -1006,22 +1083,23 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			state: "hidden",
 			timeout: 15_000,
 		});
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// ── Turn 1: stream and complete ──
 		wsMock.sendMessage({ type: "status", status: "processing" });
-		await page.waitForTimeout(200);
 
 		for (let i = 0; i < 5; i++) {
 			wsMock.sendMessage({
 				type: "delta",
 				text: `Turn 1 content line ${i}. Adding enough text to grow the scroll height meaningfully. `,
 			});
-			await page.waitForTimeout(80);
+			await expect(page.locator("#messages")).toContainText(
+				`Turn 1 content line ${i}.`,
+			);
 		}
 		wsMock.sendMessage({ type: "done", code: 0 });
 		wsMock.sendMessage({ type: "status", status: "idle" });
-		await page.waitForTimeout(500);
+		await waitForStableScroll(page);
 
 		// Should be at bottom after turn 1
 		let dist = await page.evaluate(() => {
@@ -1036,18 +1114,23 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			type: "user_message",
 			text: "Follow-up question for turn 2",
 		});
-		await page.waitForTimeout(200);
+		wsMock.sendMessage({ type: "status", status: "processing" });
+		await expect(page.locator("#messages")).toContainText(
+			"Follow-up question for turn 2",
+		);
 
 		for (let i = 0; i < 5; i++) {
 			wsMock.sendMessage({
 				type: "delta",
 				text: `Turn 2 content line ${i}. More text to ensure scrolling continues to work on subsequent turns. `,
 			});
-			await page.waitForTimeout(80);
+			await expect(page.locator("#messages")).toContainText(
+				`Turn 2 content line ${i}.`,
+			);
 		}
 		wsMock.sendMessage({ type: "done", code: 0 });
 		wsMock.sendMessage({ type: "status", status: "idle" });
-		await page.waitForTimeout(500);
+		await waitForStableScroll(page);
 
 		// Should still be at bottom after turn 2
 		dist = await page.evaluate(() => {
@@ -1074,7 +1157,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			state: "hidden",
 			timeout: 15_000,
 		});
-		await page.waitForTimeout(3000);
+		await waitForInitialMessages(page);
 
 		// Count initial messages (should be ~50 due to paging)
 		const initialCount = await page.evaluate(() => {
@@ -1088,7 +1171,13 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			const el = document.getElementById("messages");
 			if (el) el.scrollTop = 0;
 		});
-		await page.waitForTimeout(2000);
+		await expect
+			.poll(
+				async () =>
+					(await page.locator(".msg-container").count()) > initialCount ||
+					(await page.locator(".history-beginning").isVisible()),
+			)
+			.toBe(true);
 
 		// More messages should have loaded through LoadMoreHistory.
 		const afterCount = await page.evaluate(() => {
@@ -1192,7 +1281,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			state: "hidden",
 			timeout: 15_000,
 		});
-		await page.waitForTimeout(2000);
+		await waitForInitialMessages(page);
 
 		// Verify Session A is at bottom
 		let dist = await page.evaluate(() => {
@@ -1209,8 +1298,15 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		await expect(scrollBtn).toBeVisible({ timeout: 3000 });
 
 		// Switch to Session B
+		const sessionACount = await page.locator(".msg-container").count();
 		await page.locator('text="Session B (short)"').click();
-		await page.waitForTimeout(3000);
+		await expect(
+			page.locator('[data-session-id="sess-scrollup-B"]'),
+		).toHaveClass(/active/);
+		await expect
+			.poll(() => page.locator(".msg-container").count())
+			.not.toBe(sessionACount);
+		await waitForStableScroll(page);
 
 		// Session B should be at the bottom, regardless of A's scroll state
 		dist = await page.evaluate(() => {

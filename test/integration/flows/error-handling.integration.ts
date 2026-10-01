@@ -93,12 +93,22 @@ describe("Integration: Error Handling", () => {
 			rawWs.once("error", reject);
 		});
 
+		let parseErrors = 0;
+		rawWs.on("message", (data) => {
+			const message = JSON.parse(data.toString()) as Record<string, unknown>;
+			if (
+				message["type"] === "system_error" &&
+				message["code"] === "PARSE_ERROR"
+			) {
+				parseErrors++;
+			}
+		});
+
 		// Send garbage data
 		rawWs.send("this is not valid json {{{");
 		rawWs.send("<<<>>>");
 
-		// Wait for error response(s) — the server should reply, not crash
-		await new Promise((r) => setTimeout(r, 500));
+		await vi.waitFor(() => expect(parseErrors).toBe(2));
 
 		// Close the raw socket
 		await new Promise<void>((resolve) => {
@@ -184,8 +194,12 @@ describe("Integration: Error Handling", () => {
 		client.send({ type: "get_file_content", path: "/does/not/exist.txt" }); // removed legacy WS command
 		client.send({ type: "message" }); // removed legacy WS command
 
-		// Wait for the server to process them all
-		await new Promise((r) => setTimeout(r, 2000));
+		await vi.waitFor(
+			() => {
+				expect(client.getReceivedOfType("system_error")).toHaveLength(5);
+			},
+			{ timeout: 3_000 },
+		);
 
 		// Now send a valid request and verify the server still works
 		client.clearReceived();

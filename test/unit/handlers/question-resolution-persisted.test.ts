@@ -16,6 +16,7 @@ import { Effect, Layer, Stream } from "effect";
 import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
@@ -24,6 +25,7 @@ import {
 	PendingSendOwnershipLive,
 	type PendingSendOwnershipTag,
 } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -57,7 +59,10 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
-import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
+import {
+	makeMockAgentService,
+	makeMockSessionManagerService,
+} from "../../helpers/mock-factories.js";
 
 const SESSION = "session-1";
 const QUESTION = "que-1";
@@ -96,6 +101,8 @@ type HandlerStack =
 	| WebSocketHandlerTag
 	| LoggerTag
 	| SessionManagerServiceTag
+	| AgentServiceTag
+	| ProviderTurnServiceTag
 	| OverridesStateTag;
 
 const withHandlerStack = async (
@@ -132,6 +139,12 @@ const withHandlerStack = async (
 		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 		Layer.succeed(LoggerTag, createSilentLogger()),
 		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+		Layer.succeed(AgentServiceTag, makeMockAgentService()),
+		Layer.succeed(ProviderTurnServiceTag, {
+			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+			sendTurn: () => Effect.void,
+			interruptTurn: () => Effect.void,
+		}),
 		makeOverridesStateLive(),
 	);
 
