@@ -1,5 +1,6 @@
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { expect, it } from "vitest";
+import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -28,17 +29,24 @@ it("publishes committed permission counts through the root subscription", async 
 		);
 		const counts: Array<number | undefined> = [];
 		runtime.runFork(
-			Stream.runForEach(subscribeShell(), (envelope) =>
-				Effect.sync(() => {
-					if (envelope._tag === "snapshot") {
-						counts.push(
-							envelope.rows.find((row) => row.id === "s1")
-								?.pendingPermissionCount,
-						);
-					} else if (envelope._tag === "upsert" && envelope.item.id === "s1") {
-						counts.push(envelope.item.pendingPermissionCount);
-					}
-				}),
+			Stream.runForEach(
+				subscribeShell().pipe(
+					Stream.provideService(BackgroundLivenessTag, () => false),
+				),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") {
+							counts.push(
+								envelope.rows.find((row) => row.id === "s1")
+									?.pendingPermissionCount,
+							);
+						} else if (
+							envelope._tag === "upsert" &&
+							envelope.item.id === "s1"
+						) {
+							counts.push(envelope.item.pendingPermissionCount);
+						}
+					}),
 			),
 		);
 		await expect.poll(() => counts.length, { timeout: 700 }).toBeGreaterThan(0);

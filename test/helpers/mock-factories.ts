@@ -1076,6 +1076,7 @@ export function makeTestHandlerLayer(
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
+		Layer.succeed(BackgroundLivenessTag, () => false),
 		sessionTitleServiceLayer,
 		connectPtyUpstreamLayer,
 		orchestrationLayer,

@@ -290,6 +290,8 @@ export interface ReadQueryEffect {
 		readonly after?: number;
 		readonly through?: number;
 		readonly roots?: boolean;
+		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
+		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -817,6 +819,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly after?: number;
 		readonly through?: number;
 		readonly roots?: boolean;
+		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -876,6 +879,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
+						...(range?.hasLiveBackgroundWork && {
+							hasLiveBackgroundWork: range.hasLiveBackgroundWork,
+						}),
 					});
 					return {
 						rows: rows.flatMap((row, index) => {
