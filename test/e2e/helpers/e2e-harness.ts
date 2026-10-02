@@ -6,7 +6,7 @@
 // Both serve the built frontend from dist/frontend/ via the relay's static
 // file server, so Playwright can navigate directly to the relay URL.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Socket } from "@effect/platform";
@@ -175,6 +175,8 @@ export async function createReplayHarness(
 		/** Claude lane: open a Claude session whose SDK turns replay these
 		 *  committed traces. No live model call is possible. */
 		claudeReplay?: ClaudeReplayPlan;
+		/** Isolated project override; its event store lives in .conduit/events.db. */
+		projectDir?: string;
 	} = {},
 ): Promise<ReplayHarness> {
 	const recording = loadOpenCodeRecording(recordingName);
@@ -195,7 +197,11 @@ export async function createReplayHarness(
 
 	const claudeReplayer =
 		options.claudeReplay && createClaudeTraceReplayer(options.claudeReplay);
-	const eventsDbPath = path.join(configDir, "events.db");
+	const projectDir = options.projectDir ?? process.cwd();
+	const eventsDbPath = options.projectDir
+		? path.join(projectDir, ".conduit", "events.db")
+		: path.join(configDir, "events.db");
+	mkdirSync(path.dirname(eventsDbPath), { recursive: true });
 	saveRelaySettings(
 		{
 			defaultModel: claudeReplayer
@@ -224,7 +230,7 @@ export async function createReplayHarness(
 			port,
 			host: "127.0.0.1",
 			opencodeUrl: mock.url,
-			projectDir: process.cwd(),
+			projectDir,
 			slug: "e2e-replay",
 			sessionTitle: "E2E Replay Session",
 			staticDir,
