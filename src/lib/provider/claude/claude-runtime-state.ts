@@ -1,8 +1,5 @@
 import { type Deferred, Effect, HashMap, HashSet, Option, Ref } from "effect";
-import type {
-	ClaudeProviderInstanceDeps,
-	ClaudeProviderRuntimeState,
-} from "./claude-provider-runtime.js";
+import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
 import type { ClaudeSessionContext } from "./types.js";
 
 export const getOrUndefined = <A>(option: Option.Option<A>): A | undefined =>
@@ -46,21 +43,14 @@ export function setSession(
 
 export function removeSession(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
-	onBackgroundTask: ClaudeProviderInstanceDeps["onBackgroundTask"],
 	sessionId: string,
 ): Effect.Effect<void> {
 	return Ref.update(stateRef, (state) => ({
 		...state,
 		sessions: HashMap.remove(state.sessions, sessionId),
 		endedStreams: HashSet.remove(state.endedStreams, sessionId),
-	})).pipe(
-		// The removed query's background tasks can never report back.
-		Effect.andThen(
-			Effect.sync(() =>
-				onBackgroundTask?.({ sessionId, kind: "session-ended" }),
-			),
-		),
-	);
+		shutdownAfterTurn: HashSet.remove(state.shutdownAfterTurn, sessionId),
+	}));
 }
 
 export function getSetupLock(
