@@ -368,10 +368,7 @@ export class ProviderSideEffectReactor {
 				return yield* instance.sendTurnEffect({
 					...payload,
 					commandId: row.command_id,
-					...(driver === "claude" &&
-					process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
-						? { commandAttempt }
-						: {}),
+					...(driver === "claude" ? { commandAttempt } : {}),
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
 				});

@@ -132,7 +132,7 @@ async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	if (args.includes("--help")) {
 		console.log(
-			"Usage: pnpm bench:send-path [--dist <baseline dist>] [--candidate <candidate dist>] [--candidate-runner process] [--output <results.json>]\n5 alternating 200-send batches per build after 10 warmup sends; compare median batch p99s with a +2ms gate.",
+			"Usage: pnpm bench:send-path [--dist <baseline dist>] [--candidate <candidate dist>] [--output <results.json>]\n5 alternating 200-send batches per build after 10 warmup sends; compare median batch p99s with a +2ms gate. Each build uses its default runner path.",
 		);
 		return;
 	}
@@ -141,26 +141,17 @@ async function main(): Promise<void> {
 		const value = args[index + 1];
 		if (
 			!key ||
-			!["--dist", "--candidate", "--candidate-runner", "--output"].includes(
-				key,
-			) ||
+			!["--dist", "--candidate", "--output"].includes(key) ||
 			!value ||
 			value.startsWith("--") ||
 			options[key]
 		) {
 			throw new Error(
-				"Expected --dist <directory>, --candidate <directory>, --candidate-runner process, or --output <file>; use --help",
+				"Expected --dist <directory>, --candidate <directory>, or --output <file>; use --help",
 			);
 		}
-		options[key] = key === "--candidate-runner" ? value : resolve(value);
+		options[key] = resolve(value);
 	}
-	if (
-		options["--candidate-runner"] &&
-		(options["--candidate-runner"] !== "process" || !options["--candidate"])
-	)
-		throw new Error(
-			"--candidate-runner requires --candidate and the value process",
-		);
 	const dist = options["--dist"] ?? resolve("dist");
 	for (const build of [dist, options["--candidate"]].filter(
 		(path): path is string => path !== undefined,
@@ -204,21 +195,16 @@ async function main(): Promise<void> {
 	try {
 		// Confirm both factories before sending any warmup prompts. A stale
 		// candidate must fail closed even when the baseline is compatible.
-		for (const [index, buildDist] of [dist, options["--candidate"]].entries()) {
+		for (const buildDist of [dist, options["--candidate"]]) {
 			if (!buildDist) continue;
-			const runnerMode =
-				index === 1 && options["--candidate-runner"] ? "process" : "in-process";
 			const harness = await ProcessHarness.start({
 				dist: buildDist,
-				...(runnerMode === "process"
-					? { claudeRunner: "process" as const }
-					: {}),
 			});
 			harnesses.push(harness);
 			const browser = await harness.connect();
 			builds.push({
 				dist: buildDist,
-				runnerMode,
+				runnerMode: "in-process",
 				harness,
 				browser,
 				sessionId: await browser.createSession(),
@@ -232,18 +218,21 @@ async function main(): Promise<void> {
 					build.sessionId,
 					`${build.prefix}-warmup-${index}`,
 				);
-			if (build.runnerMode === "process") {
-				const runner = build.harness.marks.find(
-					(mark) => mark.kind === "runner-started",
-				);
-				const query = build.harness.marks.find((mark) => mark.kind === "query");
+			const runner = build.harness.marks.find(
+				(mark) => mark.kind === "runner-started",
+			);
+			const query = build.harness.marks.find((mark) => mark.kind === "query");
+			const serverPid = build.harness.generations[0]?.pid;
+			if (query?.kind !== "query" || serverPid === undefined)
+				throw new Error("SDK query activation was not acknowledged");
+			if (runner || query.pid !== serverPid) {
 				if (
 					runner?.kind !== "runner-started" ||
-					query?.kind !== "query" ||
 					query.pid !== runner.pid ||
-					query.pid === build.harness.generations[0]?.pid
+					query.pid === serverPid
 				)
 					throw new Error("Process runner activation was not acknowledged");
+				build.runnerMode = "process";
 			}
 		}
 		for (let index = 0; index < BATCHES; index++) {

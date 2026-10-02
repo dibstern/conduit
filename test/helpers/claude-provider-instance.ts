@@ -4,7 +4,10 @@ import {
 	ClaudeProviderInstance,
 	type ClaudeProviderInstanceDeps,
 } from "../../src/lib/provider/claude/claude-provider-instance.js";
-import { makeClaudeProviderRuntime } from "../../src/lib/provider/claude/claude-provider-runtime.js";
+import {
+	makeClaudeProviderRuntime,
+	makeClaudeSessionRunner,
+} from "../../src/lib/provider/claude/claude-provider-runtime.js";
 import type { SDKUserMessage } from "../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../src/lib/provider/event-sink-errors.js";
 import type { SendTurnInput } from "../../src/lib/provider/types.js";
@@ -16,6 +19,7 @@ export function makeTestClaudeProviderInstance(
 	const runtime = Effect.runSync(
 		Scope.extend(
 			makeClaudeProviderRuntime({
+				runnerFactory: makeClaudeSessionRunner,
 				...deps,
 				...(deps.queryFactory && !deps.capabilitiesService
 					? {

@@ -254,7 +254,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 	) {
 		const harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
-			claudeRunner: "process",
 			restartProof: true,
 			buildId: OLD_BUILD,
 			...options,

@@ -150,13 +150,10 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
-		if (process.env["CONDUIT_CLAUDE_RUNNER"] === "process") {
-			const orchestration = yield* getOrchestrationLayer;
-			const instance =
-				yield* orchestration.registry.getInstanceEffect("claude");
-			if (instance instanceof ClaudeProviderInstance)
-				yield* instance.recoverEffect();
-		}
+		const orchestration = yield* getOrchestrationLayer;
+		const instance = yield* orchestration.registry.getInstanceEffect("claude");
+		if (instance instanceof ClaudeProviderInstance)
+			yield* instance.recoverEffect();
 		const restoredPermissionModes = yield* restoreSessionPermissionModes();
 		if (restoredPermissionModes > 0) {
 			yield* Effect.sync(() =>
@@ -215,7 +212,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 					}
 					return "";
 				});
-		const orchestration = yield* getOrchestrationLayer;
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;

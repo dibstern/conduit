@@ -1,7 +1,7 @@
 // src/lib/provider/claude/claude-provider-runtime.ts
 /**
  * ClaudeProviderRuntime adapts provider operations and EventSink to session
- * messages. The in-process session runner owns the live Claude Agent SDK state.
+ * messages. A per-session runner process owns the live Claude Agent SDK state.
  *
  * Architectural notes:
  * - One SDK query() per conduit session, not per turn.
@@ -178,6 +178,8 @@ export interface ClaudeProviderInstanceDeps {
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
+	/** Tests can host the session engine locally; production defaults to a process. */
+	readonly runnerFactory?: typeof makeClaudeSessionRunner;
 }
 
 export type ClaudeSessionRunnerDeps = Pick<
@@ -238,13 +240,9 @@ export const makeClaudeProviderRuntime = (
 			void,
 			ProviderInstanceFailure
 		>();
-		const processRunnerEnabled =
-			process.env["CONDUIT_CLAUDE_RUNNER"] === "process";
 		let runtime: ClaudeProviderRuntime | undefined;
 		const runner = yield* (
-			processRunnerEnabled
-				? makeProcessClaudeSessionRunner
-				: makeClaudeSessionRunner
+			deps.runnerFactory ?? makeProcessClaudeSessionRunner
 		)(
 			{
 				workspaceRoot: deps.workspaceRoot,
@@ -275,7 +273,6 @@ export const makeClaudeProviderRuntime = (
 			interactionFibers,
 			preWarmFibers,
 			providerScope,
-			processRunnerEnabled,
 		);
 		const providerRuntime = runtime;
 		yield* Effect.addFinalizer(() =>
@@ -400,7 +397,6 @@ export class ClaudeProviderRuntime {
 			ProviderInstanceFailure
 		>,
 		private readonly providerScope: Scope.Scope,
-		private readonly processRunnerEnabled = false,
 	) {}
 
 	private commandEffect(
@@ -457,13 +453,10 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
-			const sinkId =
-				process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
-					? claudeRunnerSinkId(
-							input.commandId ?? randomUUID(),
-							input.commandAttempt,
-						)
-					: randomUUID();
+			const sinkId = claudeRunnerSinkId(
+				input.commandId ?? randomUUID(),
+				input.commandAttempt,
+			);
 			this.sinks.set(sinkId, eventSink);
 			this.reportSinkForTesting("allocated", sinkId, input.sessionId);
 			const aborted = Effect.async<void>((resume) => {
@@ -495,7 +488,6 @@ export class ClaudeProviderRuntime {
 	preWarmSessionEffect(
 		input: PreWarmSessionInput,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		if (!this.processRunnerEnabled) return Effect.void;
 		const preWarm = Effect.gen(this, function* () {
 			let model = input.model;
 			if (!model) {
@@ -723,9 +715,7 @@ export class ClaudeProviderRuntime {
 						`${output.sinkId}:${output.request.requestId}`,
 						request.pipe(
 							Effect.onExit((exit) =>
-								Exit.isFailure(exit) &&
-								(process.env["CONDUIT_CLAUDE_RUNNER"] !== "process" ||
-									!preserveClaudeRunners())
+								Exit.isFailure(exit) && !preserveClaudeRunners()
 									? this.runner
 											.executeEffect({
 												type: "interaction-failed",

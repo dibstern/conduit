@@ -185,6 +185,7 @@ describe("Claude prompt title generation", () => {
 				expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(events).toEqual(["persist", "title"]);
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
@@ -221,6 +222,7 @@ describe("Claude prompt title generation", () => {
 			expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 				"session-1",
 				"follow up",
+				{ messageId: expect.any(String) },
 			);
 			expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 			expect(engine.dispatchEffect).toHaveBeenCalledWith(
@@ -293,6 +295,7 @@ describe("Claude prompt title generation", () => {
 				expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"first prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
@@ -349,6 +352,7 @@ describe("Claude prompt title generation", () => {
 				expect(persistService.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"maybe first prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(

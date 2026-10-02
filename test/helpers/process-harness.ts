@@ -9,6 +9,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
@@ -100,7 +101,7 @@ export class ProcessHarness {
 	private constructor(
 		private readonly dist?: string,
 		private readonly enqueueMarkDelayMs = 0,
-		private readonly claudeRunner?: "process",
+		private readonly realSdk = false,
 		private readonly shellEnvProof = false,
 		private readonly managedOpenCode = false,
 		ignoreOpenCodeSigterm = false,
@@ -204,7 +205,7 @@ export class ProcessHarness {
 		options: {
 			dist?: string;
 			enqueueMarkDelayMs?: number;
-			claudeRunner?: "process";
+			realSdk?: boolean;
 			shellEnvProof?: boolean;
 			managedOpenCode?: boolean;
 			ignoreOpenCodeSigterm?: boolean;
@@ -231,7 +232,7 @@ export class ProcessHarness {
 				? resolve(options.dist ?? process.env["CONDUIT_TEST_DIST"] ?? "dist")
 				: undefined,
 			options.enqueueMarkDelayMs,
-			options.claudeRunner,
+			options.realSdk,
 			options.shellEnvProof,
 			options.managedOpenCode,
 			options.ignoreOpenCodeSigterm,
@@ -270,8 +271,15 @@ export class ProcessHarness {
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
-		const fakeModule = pathToFileURL(
-			fileURLToPath(new URL("./fake-claude-process-sdk.ts", import.meta.url)),
+		const sdkModule = pathToFileURL(
+			fileURLToPath(
+				new URL(
+					this.realSdk
+						? "./real-claude-process-sdk.ts"
+						: "./fake-claude-process-sdk.ts",
+					import.meta.url,
+				),
+			),
 		).href;
 		const child = spawn(
 			process.execPath,
@@ -294,8 +302,19 @@ export class ProcessHarness {
 					XDG_CACHE_HOME: join(this.root, "cache"),
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
-					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
-					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
+					CLAUDE_CONFIG_DIR: this.realSdk
+						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
+						: join(this.root, "claude"),
+					// An explicit config path must keep the login's original Keychain service.
+					...(this.realSdk
+						? {
+								CLAUDE_SECURESTORAGE_CONFIG_DIR:
+									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
+									process.env["CLAUDE_CONFIG_DIR"] ??
+									"",
+							}
+						: {}),
+					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
 					...Object.fromEntries(
 						[
@@ -377,9 +396,6 @@ export class ProcessHarness {
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
 						: {}),
-					...(this.claudeRunner
-						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
-						: {}),
 					...(this.runnerReattachGraceMs !== undefined
 						? {
 								CONDUIT_CLAUDE_RUNNER_REATTACH_GRACE_MS: String(
@@ -440,7 +456,7 @@ export class ProcessHarness {
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
 						generation &&
-						value["module"] === fakeModule &&
+						value["module"] === sdkModule &&
 						value["projectDir"] === this.projectDir
 					)
 						generation.fakeSdkActive = true;
@@ -452,7 +468,7 @@ export class ProcessHarness {
 		this.rememberManagedOpenCode();
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
-		if (options.skipBrowserProbe) return;
+		if (options.skipBrowserProbe || this.realSdk) return;
 		const probe = await ProcessBrowser.connect(this.port);
 		try {
 			const deadline = Date.now() + 2000;

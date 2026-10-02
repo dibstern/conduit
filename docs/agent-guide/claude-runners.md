@@ -1,7 +1,16 @@
 # Claude process runners
 
-`CONDUIT_CLAUDE_RUNNER=process` enables one independent process per Claude
-session. The default in-process path retains its existing lifecycle.
+The production server uses one independent process per Claude session. The
+in-process session engine runs inside that child and remains available through
+an explicit dependency for tests that inject a query factory.
+
+Opening a session or focusing its composer pre-warms its runner. Both triggers
+apply by default. A session that has never been pre-warmed still spawns its
+runner on the first send. The recorded real-SDK timings were about 3.8 seconds
+cold versus about 17 ms pre-warmed. Sending before warming finishes pays the
+remaining initialization time. Failed warming or changes to launch options and
+inherited settings can discard the warm SDK query. An exited runner also makes
+the next send spawn a fresh process unless another open or focus hint warms it.
 
 The project runtime directory is `<config>/r/<project-path-sha256-prefix>/`.
 Each runner has a short Unix socket name, a matching `.json` registration with
@@ -41,7 +50,7 @@ the cursor's `attachment_id`; the transaction fences pending writes from an olde
 attachment. A crash after commit but before acknowledgment therefore cannot
 duplicate an event on replay. Data replies are retained in `claude_runner_replies` so a lost
 reply does not strand a history or subagent operation. These tables are created
-only by the enabled process-runner path.
+when Claude runner persistence is initialized.
 
 Full approval replies are saved in `claude_runner_permission_replies` in the
 same transaction as the resolution event, preserving remembered permission
@@ -133,10 +142,37 @@ abandoned candidates only after verifying their socket identity.
 export npm_config_verify_deps_before_run=false pnpm_config_verify_deps_before_run=false
 pnpm build
 CONDUIT_TEST_DIST=dist npx --no-install vitest run --config vitest.integration.config.ts \
+  test/integration/daemon/claude-runner-upgrade.test.ts \
   test/integration/daemon/claude-runner-restart.test.ts \
-  test/integration/daemon/claude-process-runner.test.ts
-pnpm bench:send-path --dist dist --candidate dist --candidate-runner process \
-  --output test-results/85kb-9-gate2.json
+  test/integration/daemon/claude-process-runner.test.ts \
+  test/integration/daemon/process-harness.test.ts \
+  test/integration/daemon/process-harness-build.test.ts
+CONDUIT_PREWARM_E2E_DIST=dist npx --no-install vitest run --config vitest.integration.config.ts \
+  test/integration/daemon/claude-prewarm.test.ts
+pnpm bench:send-path --dist /tmp/85kb-15-baseline-dist --candidate dist \
+  --output test-results/85kb-15-gate.json
+```
+
+Each benchmark build uses its default runner path. Preserve a pre-.15 build
+before making changes to compare its in-process default with the current
+process default. The synthetic first-send benchmark also takes a separate
+baseline directory:
+
+```sh
+node --import tsx test/bench/claude-prewarm.ts \
+  --baseline-dist /tmp/85kb-15-baseline-dist --dist dist \
+  --output test-results/85kb-15-prewarm.json
+```
+
+The real-SDK smoke is opt-in and uses the user's existing Claude login with an
+isolated server config and project. Its session query uses the real SDK, while
+title generation and capability probing use fakes. It sends one small prompt,
+verifies the turn ran in a separate runner PID, and writes spawn, first-event
+and turn-end timings to `test-results/85kb-15-real-sdk.json`.
+
+```sh
+RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
+  test/e2e/provider/claude-runner-real-sdk.test.ts
 ```
 
 The restart harness uses an isolated HOME, config and project with the fake SDK.

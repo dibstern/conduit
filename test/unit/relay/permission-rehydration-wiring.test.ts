@@ -216,6 +216,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			httpServer: relayServer,
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
 			projectDir: process.cwd(),
+			configDir: persistenceDir,
 			slug: "test-perm-rehydrate",
 			persistenceDbPath: join(persistenceDir, "events.db"),
 			log: createSilentLogger(),

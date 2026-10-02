@@ -477,6 +477,7 @@ describe("ProviderTurnService", () => {
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(log.info).toHaveBeenCalledWith(
 					expect.stringContaining(
@@ -775,6 +776,7 @@ describe("ProviderTurnService", () => {
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(events).toEqual(["persist", "title"]);
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
@@ -864,6 +866,7 @@ describe("ProviderTurnService", () => {
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -952,6 +955,7 @@ describe("ProviderTurnService", () => {
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
@@ -1034,6 +1038,7 @@ describe("ProviderTurnService", () => {
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
+					{ messageId: expect.any(String) },
 				);
 				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 				expect(log.warn).toHaveBeenCalledWith(

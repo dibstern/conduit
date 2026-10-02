@@ -440,9 +440,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// (interrupt, cancel, timeout) is the SDK being told no.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
-						Exit.isFailure(exit) &&
-						process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-						preserveClaudeRunners()
+						Exit.isFailure(exit) && preserveClaudeRunners()
 							? Effect.void
 							: recordInteraction("permission.resolved", {
 									id: request.requestId,
@@ -452,8 +450,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								}).pipe(
 									Effect.locally(
 										currentClaudeRunnerPermissionReply,
-										process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-											Exit.isSuccess(exit)
+										Exit.isSuccess(exit)
 											? {
 													sessionId,
 													requestId: request.requestId,
@@ -530,11 +527,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// later records the resolution. Any other end resolves it here.
 				return yield* ask.pipe(
 					Effect.onExit((exit) => {
-						if (
-							Exit.isFailure(exit) &&
-							process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-							preserveClaudeRunners()
-						)
+						if (Exit.isFailure(exit) && preserveClaudeRunners())
 							return Effect.void;
 						if (Exit.isSuccess(exit)) {
 							return recordInteraction("question.resolved", {

@@ -22,7 +22,6 @@ import { ProviderRegistryTag } from "../provider/provider-registry.js";
 /** Resolve the same launch inputs as a send without admitting a turn. */
 export const preWarmSession = (sessionId: string) =>
 	Effect.gen(function* () {
-		if (process.env["CONDUIT_CLAUDE_RUNNER"] !== "process") return;
 		const readQuery = yield* ReadQueryEffectTag;
 		if (!(yield* readQuery.getSession(sessionId))) return;
 		const config = yield* ConfigTag;

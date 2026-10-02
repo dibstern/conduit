@@ -394,11 +394,7 @@ const prepareEngineTurnInput = (
 			isClaudeDriver(driver) &&
 			priorHistoryResult.loaded &&
 			priorHistory.length === 0;
-		const userMessageId =
-			isClaudeDriver(driver) &&
-			process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
-				? randomUUID()
-				: undefined;
+		const userMessageId = isClaudeDriver(driver) ? randomUUID() : undefined;
 
 		yield* isClaudeDriver(driver)
 			? maybePersistClaudeUserMessage({
