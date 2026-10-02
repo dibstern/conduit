@@ -307,5 +307,6 @@
 		"reason": "The project row's name/token layout moved verbatim into ProjectScopeItem, which adds the remove affordances."
 	},
 	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: bg-bg-surface,border-border,pt-2": "Select mode restyle: the action bar is now tinted with the accent (bg-accent-bg, border-accent) to match the select-mode header, and pt-1.5 makes room for the new Apply-to-N count row.",
-	"src/lib/frontend/components/session/SessionListHeader.svelte :: gap-2,px-4": "Select mode restyle: the header became an accent-tinted bar with an exit X, so it uses gap-1 and asymmetric pl-1.5/pr-2.5 padding to align the X with the rows below."
+	"src/lib/frontend/components/session/SessionListHeader.svelte :: gap-2,px-4": "Select mode restyle: the header became an accent-tinted bar with an exit X, so it uses gap-1 and asymmetric pl-1.5/pr-2.5 padding to align the X with the rows below.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: group-hover:pr-[3em]": "The marquee's blank gap before it loops moved into the marquee-scroll keyframe (translateX(calc(-100% - 3em))). As hover padding it widened a short title and pushed the pin star after it sideways."
 }

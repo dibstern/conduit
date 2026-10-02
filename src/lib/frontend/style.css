@@ -750,8 +750,11 @@ body:has(dialog:modal) {
 	0% {
 		transform: translateX(0);
 	}
+	/* The extra 3em is the blank gap before the loop restarts. Padding the
+	   title for it instead would widen a short title on hover and push the
+	   pin star after it sideways. */
 	100% {
-		transform: translateX(-100%);
+		transform: translateX(calc(-100% - 3em));
 	}
 }
 

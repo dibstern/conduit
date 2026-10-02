@@ -656,7 +656,7 @@
 			/>
 		{:else}
 			<span
-				class="session-title-inner inline-block group-hover:pr-[3em] group-hover:session-title-marquee overflow-hidden text-ellipsis whitespace-nowrap min-w-0 group-hover:text-clip"
+				class="session-title-inner inline-block group-hover:session-title-marquee overflow-hidden text-ellipsis whitespace-nowrap min-w-0 group-hover:text-clip"
 				>{displayTitle}</span
 			>
 			{#if sessionAttention(session) === "done-unread"}
