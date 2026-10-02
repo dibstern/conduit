@@ -1,8 +1,9 @@
 // Manages OpenCode instance CRUD, URL resolution, lifecycle events,
 // process spawning, and health checks.
 
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { homedir } from "node:os";
+import type { ManagedOpenCodeProcessIdentity } from "../contracts/managed-opencode.js";
 import { formatErrorDetail } from "../errors.js";
 import type { InstanceConfig, OpenCodeInstance } from "../types.js";
 import {
@@ -12,11 +13,31 @@ import {
 	instanceNotFound,
 	invalidInstanceUrl,
 } from "./instance-errors.js";
+import {
+	availableOpenCodePort,
+	canReuseManagedOpenCode,
+	commitManagedOpenCodeSpawn,
+	inspectManagedOpenCodeProcess,
+	isProcessAlive,
+	ManagedOpenCodeProcessError,
+	type ManagedOpenCodeRecord,
+	managedOpenCodeEnv,
+	probeOpenCodeHealth,
+	publicManagedOpenCodeEnv,
+	spawnManagedOpenCode,
+	stopManagedOpenCode,
+	waitForOpenCodeHealth,
+} from "./managed-opencode-process.js";
 
 export type InstanceSpawner = (
 	port: number,
 	env?: Record<string, string>,
-) => Promise<{ pid: number; process: ChildProcess }>;
+	id?: string,
+) => Promise<{
+	pid: number;
+	process: ChildProcess;
+	processIdentity?: ManagedOpenCodeProcessIdentity;
+}>;
 
 export type InstanceHealthChecker = (
 	port: number,
@@ -40,6 +61,7 @@ export interface InstanceManagerOptions {
 	restartWindowMs?: number;
 	/** Health polling interval (ms). Default: 5 000. */
 	healthPollIntervalMs?: number;
+	configDir?: string;
 }
 
 export class InstanceManager {
@@ -47,12 +69,21 @@ export class InstanceManager {
 	private readonly maxRestartsPerWindow: number;
 	private readonly restartWindowMs: number;
 	private readonly healthPollIntervalMs: number;
+	private readonly configDir: string | undefined;
 
 	private readonly instances = new Map<string, OpenCodeInstance>();
 	/** External URLs for unmanaged instances (keeps OpenCodeInstance clean). */
 	private readonly externalUrls = new Map<string, string>();
 	/** Tracks spawned child processes by instance ID. */
 	private readonly processes = new Map<string, ChildProcess>();
+	/** Backend-only credentials and supervisor generation identities. */
+	private readonly instanceRecords = new Map<string, ManagedOpenCodeRecord>();
+	/** Retains authenticated ownership until cleanup succeeds, including removals. */
+	private readonly ownedProcesses = new Map<
+		ManagedOpenCodeProcessIdentity,
+		ManagedOpenCodeRecord
+	>();
+	private readonly pendingStops = new Map<string, Promise<void>>();
 	/** Injectable spawner function (for testing). */
 	private spawner: InstanceSpawner | null = null;
 	/** Injectable health checker function (for testing). */
@@ -87,6 +118,7 @@ export class InstanceManager {
 		this.maxRestartsPerWindow = options.maxRestartsPerWindow ?? 3;
 		this.restartWindowMs = options.restartWindowMs ?? 60_000;
 		this.healthPollIntervalMs = options.healthPollIntervalMs ?? 5_000;
+		this.configDir = options.configDir;
 	}
 
 	/** Register a callback for a specific event type. */
@@ -121,7 +153,12 @@ export class InstanceManager {
 	 * Register a new instance with status "stopped".
 	 * Rejects duplicate IDs and enforces maxInstances.
 	 */
-	addInstance(id: string, config: InstanceConfig): OpenCodeInstance {
+	addInstance(
+		id: string,
+		config: InstanceConfig & {
+			processIdentity?: ManagedOpenCodeProcessIdentity;
+		},
+	): OpenCodeInstance {
 		if (this.instances.has(id)) {
 			throw instanceAlreadyExists(id);
 		}
@@ -144,13 +181,25 @@ export class InstanceManager {
 			name: config.name,
 			port: config.port,
 			managed: config.managed,
+			...(config.managed && config.pid !== undefined
+				? {
+						pid: config.pid,
+						...(config.version !== undefined && { version: config.version }),
+					}
+				: {}),
 			status: "stopped",
-			...(config.env != null && { env: config.env }),
+			...(config.env != null && {
+				env: publicManagedOpenCodeEnv(config.env),
+			}),
 			restartCount: 0,
 			createdAt: Date.now(),
 		};
 
 		this.instances.set(id, instance);
+		this.instanceRecords.set(id, {
+			...config,
+			...(config.env != null && { env: { ...config.env } }),
+		});
 
 		if (config.url) {
 			this.externalUrls.set(id, config.url);
@@ -182,6 +231,7 @@ export class InstanceManager {
 		this.restartTimestamps.delete(id);
 
 		this.instances.delete(id);
+		this.instanceRecords.delete(id);
 		this.externalUrls.delete(id);
 		this.notify("instance_removed", id);
 	}
@@ -210,7 +260,8 @@ export class InstanceManager {
 		updates: { name?: string; env?: Record<string, string>; port?: number },
 	): OpenCodeInstance {
 		const instance = this.instances.get(id);
-		if (!instance) throw instanceNotFound(id);
+		const record = this.instanceRecords.get(id);
+		if (!instance || !record) throw instanceNotFound(id);
 
 		const isRunning =
 			instance.status === "healthy" || instance.status === "starting";
@@ -222,14 +273,16 @@ export class InstanceManager {
 		}
 		if (updates.port !== undefined && updates.port !== instance.port) {
 			instance.port = updates.port;
+			record.port = updates.port;
 			changed = true;
 			if (isRunning) instance.needsRestart = true;
 		}
 		if (updates.env !== undefined) {
-			const oldEnv = JSON.stringify(instance.env ?? {});
+			const oldEnv = JSON.stringify(record.env ?? {});
 			const newEnv = JSON.stringify(updates.env);
 			if (oldEnv !== newEnv) {
-				instance.env = { ...updates.env };
+				record.env = { ...updates.env };
+				instance.env = publicManagedOpenCodeEnv(updates.env);
 				changed = true;
 				if (isRunning) instance.needsRestart = true;
 			}
@@ -269,7 +322,8 @@ export class InstanceManager {
 	 */
 	async startInstance(id: string): Promise<void> {
 		const instance = this.instances.get(id);
-		if (!instance) {
+		const record = this.instanceRecords.get(id);
+		if (!instance || !record) {
 			throw instanceNotFound(id);
 		}
 
@@ -281,61 +335,143 @@ export class InstanceManager {
 		if (instance.status === "healthy" || instance.status === "starting") {
 			return;
 		}
-
-		// If unhealthy, kill the old process before spawning a new one
-		if (instance.status === "unhealthy") {
-			const oldProc = this.processes.get(id);
-			if (oldProc) {
-				oldProc.removeAllListeners("exit");
-				oldProc.kill("SIGTERM");
-				this.processes.delete(id);
-			}
-			this.stopHealthPolling(id);
-		}
+		const wasUnhealthy = instance.status === "unhealthy";
 
 		// Cancel any pending restart timer (user is manually starting)
 		this.cancelPendingRestart(id);
+		this.stopHealthPolling(id);
 
-		// Transition to "starting"
+		// Reserve recovery before the first await so concurrent starts cannot spawn.
 		instance.status = "starting";
 		instance.needsRestart = false;
 		this.notify("status_changed", instance);
 
 		try {
+			const pendingStop = this.pendingStops.get(id);
+			if (pendingStop) await pendingStop;
+			if (!this.spawner && (await canReuseManagedOpenCode(record))) {
+				const owned = await inspectManagedOpenCodeProcess(
+					record.processIdentity,
+				);
+				if (owned?.running && owned.listening) {
+					if (
+						this.instances.get(id) !== instance ||
+						instance.status !== "starting"
+					) {
+						return;
+					}
+					record.pid = owned.pid;
+					instance.pid = owned.pid;
+					if (record.processIdentity)
+						this.ownedProcesses.set(record.processIdentity, { ...record });
+					instance.status = "healthy";
+					instance.lastHealthCheck = Date.now();
+					this.notify("status_changed", instance);
+					this.startHealthPolling(id);
+					return;
+				}
+			}
+
+			const oldProc = this.processes.get(id);
+			if (oldProc && (wasUnhealthy || !this.spawner)) {
+				oldProc.removeAllListeners("exit");
+				if (this.spawner) oldProc.kill("SIGTERM");
+				this.processes.delete(id);
+			}
+			const oldIdentity = record.processIdentity;
+			if (!this.spawner && oldIdentity) {
+				await this.stopManagedProcess(record);
+				delete record.processIdentity;
+			}
+
 			// Spawn the process
 			const spawnFn = this.spawner ?? this.defaultSpawner.bind(this);
 
 			// Give each instance its own XDG_DATA_HOME so auth.json is isolated
-			const effectiveEnv: Record<string, string> = { ...instance.env };
+			const effectiveEnv = managedOpenCodeEnv(record.env);
 			if (!effectiveEnv["XDG_DATA_HOME"]) {
 				const base =
 					process.env["XDG_DATA_HOME"] ?? `${homedir()}/.local/share`;
 				effectiveEnv["XDG_DATA_HOME"] = `${base}/conduit/${id}`;
 			}
 
-			// Ensure managed instances inherit the global OPENCODE_SERVER_PASSWORD
 			if (
-				!effectiveEnv["OPENCODE_SERVER_PASSWORD"] &&
-				process.env["OPENCODE_SERVER_PASSWORD"]
+				!this.spawner &&
+				(instance.pid !== undefined || instance.port === 0)
 			) {
-				effectiveEnv["OPENCODE_SERVER_PASSWORD"] =
-					process.env["OPENCODE_SERVER_PASSWORD"];
+				instance.port = await availableOpenCodePort();
+			}
+			if (
+				this.instances.get(id) !== instance ||
+				instance.status !== "starting"
+			) {
+				return;
+			}
+			delete instance.pid;
+			delete instance.version;
+			delete record.pid;
+			delete record.version;
+			record.port = instance.port;
+			record.env = effectiveEnv;
+			instance.env = publicManagedOpenCodeEnv(effectiveEnv);
+			const {
+				pid,
+				process: proc,
+				processIdentity,
+			} = await spawnFn(instance.port, effectiveEnv, id);
+			if (!this.spawner && processIdentity)
+				this.ownedProcesses.set(processIdentity, {
+					...record,
+					pid,
+					processIdentity,
+				});
+			if (
+				this.instances.get(id) !== instance ||
+				instance.status !== "starting"
+			) {
+				if (this.spawner) proc.kill("SIGTERM");
+				else if (processIdentity)
+					await this.stopManagedProcess({ ...record, pid, processIdentity });
+				return;
 			}
 
-			const { pid, process: proc } = await spawnFn(instance.port, effectiveEnv);
-
 			instance.pid = pid;
+			record.pid = pid;
+			if (processIdentity) record.processIdentity = processIdentity;
 			this.processes.set(id, proc);
 
 			// Wire up exit handler for crash recovery
 			proc.on("exit", (code: number | null, signal: string | null) => {
 				this.handleProcessExit(id, code, signal);
 			});
+			if (!this.spawner) {
+				this.notify("status_changed", instance);
+				await commitManagedOpenCodeSpawn(proc);
+			}
 
 			// Run initial health check
 			const checkFn =
 				this.healthChecker ?? this.defaultHealthChecker.bind(this);
-			const healthy = await checkFn(instance.port, instance);
+			let healthy: boolean;
+			if (!this.spawner && !this.healthChecker && record.processIdentity) {
+				const health = await waitForOpenCodeHealth(
+					{
+						port: instance.port,
+						env: effectiveEnv,
+						processIdentity: record.processIdentity,
+					},
+					proc,
+				);
+				instance.pid = health.pid;
+				record.pid = health.pid;
+				if (health.version !== undefined) {
+					instance.version = health.version;
+					record.version = health.version;
+				}
+				healthy = true;
+			} else {
+				healthy = await checkFn(instance.port, instance);
+			}
 
 			// Guard: check if process exited during the health check await
 			const afterHealthCheck = this.instances.get(id);
@@ -360,12 +496,23 @@ export class InstanceManager {
 			const proc = this.processes.get(id);
 			if (proc) {
 				proc.removeAllListeners("exit");
-				proc.kill("SIGTERM");
+				if (this.spawner) proc.kill("SIGTERM");
 				this.processes.delete(id);
 			}
-			instance.status = "stopped";
-			delete instance.pid;
-			this.notify("status_changed", instance);
+			try {
+				if (!this.spawner) await this.stopManagedProcess(record);
+			} finally {
+				const cleanupPending =
+					record.processIdentity !== undefined &&
+					this.ownedProcesses.has(record.processIdentity);
+				instance.status = cleanupPending ? "unhealthy" : "stopped";
+				if (!cleanupPending) {
+					delete instance.pid;
+					delete record.pid;
+					delete record.processIdentity;
+				}
+				this.notify("status_changed", instance);
+			}
 			throw err;
 		}
 	}
@@ -376,11 +523,15 @@ export class InstanceManager {
 	 */
 	stopInstance(id: string): void {
 		const instance = this.instances.get(id);
+		const record = this.instanceRecords.get(id);
 		if (!instance) {
 			throw instanceNotFound(id);
 		}
 
-		if (instance.status === "stopped") {
+		if (
+			instance.status === "stopped" &&
+			(!record?.processIdentity || this.pendingStops.has(id))
+		) {
 			return;
 		}
 
@@ -394,13 +545,42 @@ export class InstanceManager {
 		const proc = this.processes.get(id);
 		if (proc) {
 			proc.removeAllListeners("exit");
-			proc.kill("SIGTERM");
+			if (this.spawner) proc.kill("SIGTERM");
 			this.processes.delete(id);
+		}
+		if (!this.spawner && instance.managed && record?.processIdentity) {
+			const identity = record.processIdentity;
+			const stopping = this.stopManagedProcess({ ...record }).then(() => {
+				if (record.processIdentity === identity) {
+					delete record.pid;
+					delete record.version;
+					delete record.processIdentity;
+				}
+			});
+			this.pendingStops.set(id, stopping);
+			this.trackPromise(
+				stopping
+					.catch((cause: unknown) =>
+						this.notify("instance_error", {
+							id,
+							error: formatErrorDetail(cause),
+						}),
+					)
+					.finally(() => {
+						if (this.pendingStops.get(id) === stopping)
+							this.pendingStops.delete(id);
+					}),
+			);
+		} else if (record) {
+			delete record.pid;
+			delete record.version;
+			delete record.processIdentity;
 		}
 
 		// Update status
 		instance.status = "stopped";
 		delete instance.pid;
+		delete instance.version;
 		instance.needsRestart = false;
 		this.notify("status_changed", instance);
 	}
@@ -414,7 +594,10 @@ export class InstanceManager {
 		for (const instance of this.instances.values()) {
 			this.cancelPendingRestart(instance.id);
 			this.stopHealthPolling(instance.id);
-			if (instance.status !== "stopped") {
+			if (
+				instance.status !== "stopped" ||
+				this.instanceRecords.get(instance.id)?.processIdentity
+			) {
 				this.stopInstance(instance.id);
 			}
 		}
@@ -425,6 +608,11 @@ export class InstanceManager {
 		this.stopAll();
 		await Promise.allSettled([...this.pendingPromises]);
 		this.pendingPromises.clear();
+		await Promise.all(
+			[...this.ownedProcesses.values()].map((record) =>
+				this.stopManagedProcess(record),
+			),
+		);
 	}
 
 	// Health polling (private)
@@ -520,6 +708,15 @@ export class InstanceManager {
 		const instance = this.instances.get(id);
 		if (!instance) return;
 
+		// The supervisor cleans up its private group before emitting exit.
+		const record = this.instanceRecords.get(id);
+		if (record) {
+			if (record.processIdentity)
+				this.ownedProcesses.delete(record.processIdentity);
+			delete record.pid;
+			delete record.processIdentity;
+		}
+		delete instance.pid;
 		this.processes.delete(id);
 		this.stopHealthPolling(id);
 
@@ -593,42 +790,66 @@ export class InstanceManager {
 	private defaultSpawner(
 		port: number,
 		env?: Record<string, string>,
-	): Promise<{ pid: number; process: ChildProcess }> {
-		return new Promise((resolve, reject) => {
-			const proc = spawn("opencode", ["serve", "--port", String(port)], {
-				env: { ...process.env, ...env },
-				stdio: "pipe",
-			});
-
-			proc.once("spawn", () => {
-				const pid = proc.pid;
-				if (pid === undefined)
-					reject(new Error("opencode spawned without a pid"));
-				else resolve({ pid, process: proc });
-			});
-
-			proc.once("error", (err) => {
-				reject(err);
-			});
-		});
+		id = "opencode",
+	): ReturnType<typeof spawnManagedOpenCode> {
+		return spawnManagedOpenCode(id, port, env ?? {}, this.configDir);
 	}
 
 	/** Default health checker: GET http://localhost:{port}/global/health. */
 	private async defaultHealthChecker(
 		port: number,
-		_instance: OpenCodeInstance,
+		instance: OpenCodeInstance,
 	): Promise<boolean> {
-		try {
-			// /health belongs to the OpenCode web UI, and since 1.18.x the SPA
-			// answers 200 with HTML for any unknown path — so it reports healthy
-			// even when the API is gone. /global/health is the API's own probe.
-			const res = await fetch(`http://localhost:${port}/global/health`);
-			if (!res.ok) return false;
-			const body = (await res.json()) as { healthy?: boolean };
-			return body.healthy === true;
-		} catch {
-			return false;
+		const record = this.instanceRecords.get(instance.id);
+		const health = await probeOpenCodeHealth(port, {
+			...(process.env["OPENCODE_SERVER_PASSWORD"]
+				? { OPENCODE_SERVER_PASSWORD: process.env["OPENCODE_SERVER_PASSWORD"] }
+				: {}),
+			...(process.env["OPENCODE_SERVER_USERNAME"]
+				? { OPENCODE_SERVER_USERNAME: process.env["OPENCODE_SERVER_USERNAME"] }
+				: {}),
+			...(record?.env ?? instance.env),
+		});
+		if (health && !this.spawner && instance.managed) {
+			const owned = await inspectManagedOpenCodeProcess(
+				record?.processIdentity,
+			);
+			if (!record || !owned?.running || !owned.listening) return false;
+			record.pid = owned.pid;
+			instance.pid = owned.pid;
 		}
+		if (health?.version !== undefined) {
+			instance.version = health.version;
+			if (record) record.version = health.version;
+		}
+		return health !== undefined;
+	}
+
+	private async stopManagedProcess(
+		record: ManagedOpenCodeRecord,
+	): Promise<void> {
+		const processIdentity = record.processIdentity;
+		if (!processIdentity) return;
+		const owned = await inspectManagedOpenCodeProcess(processIdentity);
+		if (!owned) {
+			if (
+				isProcessAlive(processIdentity.supervisorPid) ||
+				(record.pid !== undefined && isProcessAlive(record.pid))
+			) {
+				this.ownedProcesses.set(processIdentity, { ...record });
+				throw new ManagedOpenCodeProcessError({
+					message: "Could not verify managed OpenCode cleanup",
+				});
+			}
+			this.ownedProcesses.delete(processIdentity);
+			return;
+		}
+		this.ownedProcesses.set(processIdentity, { ...record, pid: owned.pid });
+		if (!(await stopManagedOpenCode({ pid: owned.pid, processIdentity })))
+			throw new ManagedOpenCodeProcessError({
+				message: "Could not stop managed OpenCode supervisor",
+			});
+		this.ownedProcesses.delete(processIdentity);
 	}
 
 	/** Track a fire-and-forget promise for drain. */

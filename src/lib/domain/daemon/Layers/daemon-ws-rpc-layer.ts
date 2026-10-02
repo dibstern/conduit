@@ -36,6 +36,7 @@ import {
 	type PollerFibersTag,
 	persistConfig,
 	removeInstance,
+	requestManagedOpenCodeShutdown,
 	startInstance,
 	stopInstance,
 	updateInstance,
@@ -200,9 +201,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						return { ok: true as const };
 					}),
 				),
-			Shutdown: () =>
+			Shutdown: (request) =>
 				run(
 					Effect.gen(function* () {
+						if (!request.preserveManagedInstances) {
+							yield* requestManagedOpenCodeShutdown;
+						}
 						const state = yield* DaemonStateTag;
 						yield* Ref.update(state, (current) => ({
 							...current,

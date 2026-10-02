@@ -142,6 +142,8 @@ export interface ProjectRelayConfig {
 	httpServer: import("node:http").Server;
 	/** OpenCode server URL (e.g., "http://localhost:4096") */
 	opencodeUrl: string;
+	/** Credentials of the OpenCode instance selected for this relay. */
+	opencodeAuth?: { username: string; password: string };
 	/** Project working directory */
 	projectDir: string;
 	/** URL slug for this project */

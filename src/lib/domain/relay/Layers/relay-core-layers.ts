@@ -31,6 +31,9 @@ export const OpenCodeAPILive: Layer.Layer<OpenCodeAPITag, never, ConfigTag> =
 				authHeaders,
 			} = yield* createSdkClientEffect({
 				baseUrl: config.opencodeUrl,
+				...(config.opencodeAuth !== undefined
+					? { auth: config.opencodeAuth }
+					: {}),
 				...(config.noServer &&
 					config.projectDir != null && {
 						directory: config.projectDir,

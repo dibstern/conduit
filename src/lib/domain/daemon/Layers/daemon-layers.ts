@@ -83,11 +83,11 @@ import {
 	getInstances as getEffectInstances,
 	getInstanceUrl,
 	InstanceManagerStateTag,
+	ManagedOpenCodeLifecycleLive,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 	type PollerFibersTag,
 	startInitialUnmanagedInstanceHealthPollers,
-	startManagedOpenCodeServers,
 } from "../Services/instance-manager-service.js";
 
 import {
@@ -307,12 +307,6 @@ const InstanceHealthPollingLive: Layer.Layer<
 	| InstanceManagerStateTag
 	| PollerFibersTag
 > = Layer.scopedDiscard(startInitialUnmanagedInstanceHealthPollers);
-
-const ManagedOpenCodeServersLive: Layer.Layer<
-	never,
-	never,
-	DaemonEventBusTag | InstanceHealthCheckTag | InstanceManagerStateTag
-> = Layer.scopedDiscard(startManagedOpenCodeServers);
 
 /**
  * DaemonState layer — loads config from disk, seeds Ref.
@@ -802,20 +796,19 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
 
-	const withManagedOpenCodeServers = ManagedOpenCodeServersLive.pipe(
-		Layer.provideMerge(registryState),
-	);
-
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
-		Layer.provideMerge(withManagedOpenCodeServers),
+		Layer.provideMerge(registryState),
 	);
 
 	const withConfigPersistence = ConfigPersistenceLive.pipe(
 		Layer.provideMerge(effectSnapshotLayer),
 	);
+	const withManagedOpenCodeServers = ManagedOpenCodeLifecycleLive(
+		configDir,
+	).pipe(Layer.provideMerge(withConfigPersistence));
 
 	const registries = RelayFactoryLive(configDir).pipe(
-		Layer.provideMerge(withConfigPersistence),
+		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 
 	const withRelayCache = makeRelayCacheLayer.pipe(
