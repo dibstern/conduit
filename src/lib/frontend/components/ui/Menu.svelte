@@ -131,6 +131,15 @@
 		};
 	}
 
+	// The tap that opens a sheet ends in a click at the same spot. When the
+	// trigger sits low, a sheet row is there by then and would be chosen.
+	function swallowOpeningClick(event: MouseEvent) {
+		if (event.timeStamp > touchClickDeadline) return;
+		touchClickDeadline = 0;
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
 	function handleOpenChange(nextOpen: boolean) {
 		open = nextOpen;
 		onopenchange?.(nextOpen);
@@ -228,7 +237,7 @@
 					     scrollable-region-focusable fails. Bits intercepts Tab inside the menu, so
 					     this adds no stray tab stop. Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<div class="mx-auto mt-[8px] mb-[6px] h-[4px] w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
 						{@render children()}
 					</div>
