@@ -82,6 +82,14 @@
 	--color-status-violet: #c0a8ff;
 	--color-status-pink: #ff9dc2;
 
+	/* === SESSION STATE GLYPHS ===
+	   The sidebar's dither glyph and its status word. Brighter than status ink
+	   because the glyph sits on its own 14% tint of the colour. */
+	--color-session-working: #ff4d94;
+	--color-session-monitoring: #33b5ff;
+	--color-session-done: #4ade80;
+	--color-session-idle: #8b93a0;
+
 	/* === STATUS FILLS (theme-invariant) ===
 	   A saturated fill is the same colour in both themes; only what you read ON
 	   a surface changes. Pair with --color-on-fill, which is the fixed ink these
@@ -252,6 +260,11 @@
 	--color-status-indigo: #5344d4;
 	--color-status-violet: #6a3ed4;
 	--color-status-pink: #c4004f;
+
+	--color-session-working: #e0006f;
+	--color-session-monitoring: #1d5df5;
+	--color-session-done: #3d9a0f;
+	--color-session-idle: #6b7280;
 
 	--color-inverse-bg: #1b1e24;
 	--color-inverse-text: #f2f4f8;
@@ -510,18 +523,20 @@ body:has(dialog:modal) {
 /* Session bar (design bar 20) */
 
 /* On phones, the grid moves the title beside the back control in the island.
-   The <h1> stays mounted throughout. Identity appears before the title on
-   phones and after it on desktop, matching DOM, focus, and visual order.
+   The <h1> stays mounted throughout. Expanded, row 1 is back then a
+   right-aligned group of identity and Views, and the title owns row 2. DOM,
+   focus, and visual order match: identity and Views come before the title on
+   phones and after it on desktop.
 
    `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` floors at its content's
    width, and the title and the project identity both have to be allowed to
-   truncate instead of pushing the back control off the edge. */
+   truncate instead of pushing the back control or Views off the edge. */
 #session-bar {
 	display: grid;
 	grid-template-columns: auto minmax(0, 1fr) auto;
 	grid-template-areas:
-		"back  meta  meta"
-		"title title views";
+		"back  meta  views"
+		"title title title";
 	align-items: center;
 	column-gap: 6px;
 	padding: 3px 12px 6px;
@@ -606,8 +621,9 @@ body:has(dialog:modal) {
 }
 
 /* Desktop keeps the same controls mounted in one row. Nothing grows: the title,
-   its ▾ and chip hug each other, identity follows, and an auto margin pushes
-   Settle, the status dot and ⋯ to the end. When space runs out the identity
+   its ▾ and chip hug each other on the left, and the title row's auto margin
+   pushes identity, Settle, the status dot and ⋯ to the end, so identity groups
+   with the controls on the right as it does on phones. When space runs out the identity
    yields first (its large shrink factor) down to its own floor, then the
    title down to its 110px floor. The title row keeps the default `min-width: auto`, so its floor is
    its real contents; a fixed floor smaller than title + ▾ + chip let the
@@ -622,6 +638,7 @@ body:has(dialog:modal) {
 }
 #session-bar[data-compact="false"] #session-bar-title-row {
 	flex: 0 1 auto;
+	margin-inline-end: auto;
 }
 #session-bar[data-compact="false"] #session-bar-title {
 	min-width: 110px;
@@ -637,8 +654,10 @@ body:has(dialog:modal) {
 	/* Yield first, but keep a readable stub of the branch; the narrowest
 	   container query hides it outright rather than squeezing it to nothing. */
 	min-width: 96px;
-	margin-inline-end: auto;
-	justify-content: flex-start;
+	/* A floor for yielding, never padding: a shorter identity keeps its own
+	   width so the skills chip before it sits flush. Browsers without
+	   calc-size() keep the plain floor and show a gap instead. */
+	min-width: calc-size(max-content, min(size, 96px));
 	overflow: hidden;
 }
 #session-bar[data-compact="false"] #session-bar-settle {
@@ -671,10 +690,6 @@ body:has(dialog:modal) {
 @container session-bar (max-width: 390px) {
 	#session-bar-meta.desktop-session-identity {
 		display: none;
-	}
-	/* The hidden identity took the pushing margin with it. */
-	#session-bar[data-compact="false"] #session-bar-title-row {
-		margin-inline-end: auto;
 	}
 	#session-bar-title-row [data-testid="session-bar-state-chip"] {
 		min-width: 28px;

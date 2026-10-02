@@ -48,6 +48,7 @@ export const connectClaudeRunner = (options: {
 	readonly onIdleExit?: () => void;
 	readonly onCommandAccepted?: (sinkId: string) => void;
 	readonly onUpgradeState?: (state: ClaudeRunnerUpgradeState) => void;
+	readonly onOutputCommitted?: (output: ClaudeSessionOutput) => void;
 }) =>
 	Effect.gen(function* () {
 		const outputLock = yield* Effect.makeSemaphore(1);
@@ -59,6 +60,33 @@ export const connectClaudeRunner = (options: {
 			(resume) => {
 				let settled = false;
 				let active = true;
+				let receivedSequence = 0;
+				const outputWaiters = new Set<{
+					sequence: number;
+					complete: () => void;
+				}>();
+				const releaseOutputWaiters = () => {
+					for (const waiter of outputWaiters) {
+						if (!active || acknowledged >= waiter.sequence) {
+							outputWaiters.delete(waiter);
+							waiter.complete();
+						}
+					}
+				};
+				const beforeCommandFailure = () => {
+					const sequence = receivedSequence;
+					return Effect.async<void>((resume) => {
+						if (!active || acknowledged >= sequence) {
+							resume(Effect.void);
+							return;
+						}
+						const waiter = { sequence, complete: () => resume(Effect.void) };
+						outputWaiters.add(waiter);
+						return Effect.sync(() => {
+							outputWaiters.delete(waiter);
+						});
+					});
+				};
 				let greeted = false;
 				let resyncScheduled = false;
 				let resyncFailures = 0;
@@ -174,6 +202,7 @@ export const connectClaudeRunner = (options: {
 											}),
 										onSuccess: () =>
 											Effect.sync(() => {
+												releaseOutputWaiters();
 												connection.write({
 													type: "replay",
 													acknowledgedSequence: acknowledged,
@@ -187,6 +216,12 @@ export const connectClaudeRunner = (options: {
 								),
 							);
 						} else if (message.type === "output") {
+							if (
+								message.sequence !== undefined &&
+								Number.isSafeInteger(message.sequence) &&
+								message.sequence >= 1
+							)
+								receivedSequence = Math.max(receivedSequence, message.sequence);
 							let replied = false;
 							const reply = (result: ClaudeSessionOutputReply) => {
 								if (replied || !active) return;
@@ -267,17 +302,21 @@ export const connectClaudeRunner = (options: {
 												attachmentId,
 												committed,
 												consumed: false,
-												onCommitted:
-													message.output.type === "event" &&
-													message.output.event.type === "turn.completed"
-														? () => {
-																// The SDK may settle the completed turn once its event and
-																// cursor are durable; publication still holds outputLock.
-																acknowledged = sequence;
-																lastReply = {};
-																reply({});
-															}
-														: undefined,
+												onCommitted: () => {
+													// Durable terminal state must survive publication failure.
+													options.onOutputCommitted?.(message.output);
+													if (
+														message.output.type === "event" &&
+														message.output.event.type === "turn.completed"
+													) {
+														// The SDK may settle the completed turn once its event and
+														// cursor are durable; publication still holds outputLock.
+														acknowledged = sequence;
+														lastReply = {};
+														releaseOutputWaiters();
+														reply({});
+													}
+												},
 											};
 											const result = yield* options
 												.emit(message.output, options.sessionId)
@@ -354,6 +393,7 @@ export const connectClaudeRunner = (options: {
 											onSuccess: (result) =>
 												Effect.sync(() => {
 													resyncFailures = 0;
+													releaseOutputWaiters();
 													reply(result);
 												}),
 										}),
@@ -363,9 +403,11 @@ export const connectClaudeRunner = (options: {
 					},
 					(failure) => {
 						active = false;
+						releaseOutputWaiters();
 						finish(Effect.fail(failure));
 						options.onClose(failure);
 					},
+					beforeCommandFailure,
 				);
 				socket.once("connect", () =>
 					connection.write({

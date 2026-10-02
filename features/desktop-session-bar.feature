@@ -3,6 +3,7 @@ Feature: Desktop merged session bar
 Scenario Outline: The merged bar contains the global actions
   Given the conduit app is served with the long-transcript mockup
   Then the desktop session bar remains one row
+  And the desktop identity sits in the right-hand group
   When I enable the desktop Debug action
   And I open the session overflow menu
   Then the desktop overflow lists Share, Settings and Debug panel in order

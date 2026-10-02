@@ -1,8 +1,33 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
+import { Cause, Deferred, Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	CLAUDE_RUNNER_PROTOCOL_VERSION,
+	ClaudeRunnerSocket,
+	claudeRunnerIdleFailure,
+} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import {
+	claudeRunnerDirectory,
+	discoverClaudeRunners,
+	registerClaudeRunner,
+} from "../../../src/lib/provider/claude/claude-runner-registry.js";
 import { isRecord } from "../../../src/lib/utils.js";
+import {
+	cleanupTestClaudeRunners,
+	testRunnerAlive,
+} from "../../helpers/claude-runner-cleanup.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -53,6 +78,397 @@ function started(harness: ProcessHarness) {
 		throw new Error("Missing runner proof");
 	return runner;
 }
+
+describe("Claude runner admission socket probes", () => {
+	const probes: Array<Awaited<ReturnType<typeof probe>>> = [];
+
+	async function probe(mode: "idle" | "reject" | "delayed") {
+		// Runner test marks are plain IPC objects; Vitest's fork uses encoded IPC.
+		const send = process.send;
+		if (send)
+			vi.spyOn(
+				process as { send(message: unknown, ...args: unknown[]): boolean },
+				"send",
+			).mockImplementation((message, ...args) =>
+				isRecord(message) && message["channel"] === "conduit-process-test"
+					? true
+					: Reflect.apply(send, process, [message, ...args]),
+			);
+		const root = mkdtempSync("/tmp/cw3-");
+		const workspaceRoot = join(root, "project");
+		const configDir = join(root, "config");
+		for (const directory of [workspaceRoot, configDir, join(root, "home")])
+			mkdirSync(directory, { recursive: true });
+		vi.stubEnv("HOME", join(root, "home"));
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude"));
+		vi.stubEnv("CONDUIT_CONFIG_DIR", configDir);
+		vi.stubEnv(
+			"CONDUIT_TEST_CLAUDE_QUERY_MODULE",
+			pathToFileURL(resolve("dist/test/helpers/fake-claude-process-sdk.js"))
+				.href,
+		);
+		const { BUILD_ID }: typeof import("../../../src/lib/build-id.js") =
+			await import(pathToFileURL(resolve("dist/src/lib/build-id.js")).href);
+		const {
+			makeProcessClaudeSessionRunner,
+		}: typeof import("../../../src/lib/provider/claude/claude-process-session-runner.js") =
+			await import(
+				pathToFileURL(
+					resolve(
+						"dist/src/lib/provider/claude/claude-process-session-runner.js",
+					),
+				).href
+			);
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1000)"],
+			{ stdio: "ignore" },
+		);
+		const pid = child.pid;
+		if (!pid) throw new Error("Missing probe process PID");
+		const exited = new Promise<void>((done) =>
+			child.once("exit", () => done()),
+		);
+		const sessionId = "socket-probe-session";
+		const runnerId = "abcdefabcdef";
+		const directory = claudeRunnerDirectory(workspaceRoot, configDir);
+		mkdirSync(directory, { recursive: true });
+		const socketPath = join(directory, runnerId);
+		const sockets = new Set<Socket>();
+		const commands: string[] = [];
+		const outputs: import("../../../src/lib/provider/claude/claude-session-runner.js").ClaudeSessionOutput[] =
+			[];
+		const received = await Effect.runPromise(Deferred.make<void>());
+		let attempts = 0;
+		let rejecting = mode === "reject";
+		let delayedPeer: ClaudeRunnerSocket | undefined;
+		const replyHello = (peer: ClaudeRunnerSocket) =>
+			peer.write({
+				type: "hello",
+				protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
+				buildId: BUILD_ID,
+				runnerId,
+				sessionId,
+				pid,
+			});
+		let pending:
+			| Extract<
+					import("../../../src/lib/provider/claude/claude-runner-protocol.js").ClaudeRunnerMessage,
+					{ type: "command" }
+			  >
+			| undefined;
+		const server = createServer((socket) => {
+			attempts++;
+			sockets.add(socket);
+			socket.once("close", () => sockets.delete(socket));
+			if (rejecting) {
+				socket.once("data", () => {
+					Deferred.unsafeDone(received, Effect.void);
+					socket.destroy();
+				});
+				return;
+			}
+			const peer = new ClaudeRunnerSocket(
+				socket,
+				(message) => {
+					if (message.type === "hello") {
+						if (mode === "delayed") {
+							delayedPeer = peer;
+							Deferred.unsafeDone(received, Effect.void);
+						} else replyHello(peer);
+					}
+					if (message.type !== "command") return;
+					commands.push(message.command.type);
+					if (message.command.type === "send-turn") {
+						pending = message;
+						Deferred.unsafeDone(received, Effect.void);
+					} else if (message.command.type === "end-session") {
+						peer.write({ type: "idle-exit" });
+						if (pending)
+							peer.write({
+								type: "command-reply",
+								commandId: pending.commandId,
+								failure: claudeRunnerIdleFailure(),
+							});
+						peer.write({
+							type: "command-reply",
+							commandId: message.commandId,
+							failure: claudeRunnerIdleFailure(),
+						});
+					} else if (message.command.type === "shutdown") {
+						void exited.then(() =>
+							peer.write({
+								type: "command-reply",
+								commandId: message.commandId,
+							}),
+						);
+						child.kill("SIGTERM");
+					} else
+						peer.write({ type: "command-reply", commandId: message.commandId });
+				},
+				() => {},
+			);
+		});
+		await new Promise<void>((done, fail) => {
+			server.once("error", fail);
+			server.listen(socketPath, done);
+		});
+		registerClaudeRunner({
+			runnerId,
+			sessionId,
+			socketPath,
+			buildId: BUILD_ID,
+			pid,
+		});
+		const runnerPids = new Set([pid]);
+		const fixture = {
+			root,
+			workspaceRoot,
+			configDir,
+			child,
+			exited,
+			server,
+			sockets,
+			commands,
+			outputs,
+			received,
+			runnerPids,
+			get attempts() {
+				return attempts;
+			},
+			allowHello() {
+				rejecting = false;
+				if (delayedPeer) replyHello(delayedPeer);
+			},
+			make: makeProcessClaudeSessionRunner(
+				{ workspaceRoot, daemonConfigDir: configDir },
+				(output) =>
+					Effect.sync(() => {
+						outputs.push(output);
+						return {};
+					}),
+			),
+			send: {
+				type: "send-turn" as const,
+				sinkId: "probe-send",
+				aborted: false,
+				input: {
+					sessionId,
+					turnId: "probe-turn",
+					userMessageId: "probe-user",
+					prompt: "admission-respawn",
+					history: [],
+					providerState: {},
+					workspaceRoot,
+					model: { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
+				},
+			},
+			preWarm: {
+				type: "pre-warm" as const,
+				sessionId,
+				input: { sessionId, workspaceRoot, providerState: {} },
+			},
+			recordPids() {
+				for (const entry of discoverClaudeRunners(workspaceRoot, configDir))
+					runnerPids.add(entry.pid);
+			},
+		};
+		return fixture;
+	}
+
+	afterEach(async (context) => {
+		for (const fixture of probes.splice(0)) {
+			if (testRunnerAlive(fixture.child.pid ?? 0))
+				fixture.child.kill("SIGKILL");
+			await fixture.exited;
+			for (const socket of fixture.sockets) socket.destroy();
+			await new Promise<void>((done) => fixture.server.close(() => done()));
+			const cleanup = await cleanupTestClaudeRunners(
+				fixture.root,
+				[...fixture.runnerPids],
+				fixture.configDir,
+			);
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				`test-results/85kb-w3fix-${context.task.name.replace(/\W+/g, "-")}.json`,
+				JSON.stringify(
+					{
+						result: context.task.result?.state,
+						attempts: fixture.attempts,
+						commands: fixture.commands,
+						outputs: fixture.outputs,
+						cleanup,
+					},
+					null,
+					2,
+				),
+			);
+			for (const pid of fixture.runnerPids)
+				expect(testRunnerAlive(pid)).toBe(false);
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+		vi.unstubAllEnvs();
+		vi.restoreAllMocks();
+	});
+
+	it("settles end-session and respawns an unaccepted send refused by idle exit", async () => {
+		const fixture = await probe("idle");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					yield* runner.recoverEffect;
+					const send = yield* Effect.fork(runner.executeEffect(fixture.send));
+					yield* Deferred.await(fixture.received);
+					const end = yield* Effect.fork(
+						Effect.either(
+							runner.executeEffect({
+								type: "end-session",
+								sessionId: fixture.send.input.sessionId,
+							}),
+						),
+					);
+					const ended = yield* Fiber.join(end).pipe(
+						Effect.timeout("6 seconds"),
+					);
+					expect(ended).toMatchObject({
+						_tag: "Left",
+						left: { code: "runner_idle_exit" },
+					});
+					expect(
+						(yield* Fiber.join(send).pipe(Effect.timeout("10 seconds"))).status,
+					).toBe("completed");
+					fixture.recordPids();
+					expect([...fixture.runnerPids]).toHaveLength(2);
+					expect(
+						fixture.outputs.some(
+							(output) =>
+								output.type === "event" && output.event.type === "turn.error",
+						),
+					).toBe(false);
+				}),
+			),
+		);
+	}, 30_000);
+
+	it("makes pre-warm a no-op while adoption is retrying", async () => {
+		const fixture = await probe("reject");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					const recovery = yield* Effect.fork(runner.recoverEffect);
+					yield* Deferred.await(fixture.received);
+					yield* runner
+						.executeEffect(fixture.preWarm)
+						.pipe(Effect.timeout("250 millis"));
+					expect(fixture.commands).toEqual([]);
+					fixture.child.kill("SIGTERM");
+					yield* Effect.tryPromise(() => fixture.exited);
+					yield* Fiber.join(recovery);
+				}),
+			),
+		);
+	}, 15_000);
+
+	it("does not attach a retrying adoption after explicit shutdown", async () => {
+		const fixture = await probe("reject");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					const recovery = yield* Effect.fork(
+						Effect.exit(runner.recoverEffect),
+					);
+					yield* Deferred.await(fixture.received);
+					yield* runner
+						.executeEffect({ type: "shutdown" })
+						.pipe(Effect.timeout("6 seconds"));
+					const attempts = fixture.attempts;
+					fixture.allowHello();
+					yield* Fiber.join(recovery).pipe(Effect.timeout("4 seconds"));
+					expect(fixture.attempts).toBe(attempts);
+					expect(fixture.commands).toEqual([]);
+				}),
+			),
+		);
+	}, 15_000);
+
+	it("stops a late verified adoption after explicit shutdown", async () => {
+		const fixture = await probe("delayed");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					const recovery = yield* Effect.fork(
+						Effect.exit(runner.recoverEffect),
+					);
+					yield* Deferred.await(fixture.received);
+					yield* runner
+						.executeEffect({ type: "shutdown" })
+						.pipe(Effect.timeout("6 seconds"));
+					fixture.allowHello();
+					yield* Effect.promise(() => fixture.exited).pipe(
+						Effect.timeout("5 seconds"),
+					);
+					yield* Fiber.join(recovery).pipe(Effect.timeout("6 seconds"));
+					expect(fixture.commands).toEqual([]);
+				}),
+			),
+		);
+	}, 15_000);
+
+	it.each([
+		"dead",
+		"live",
+		"interrupted",
+	] as const)("settles a waiting send after %s adoption is abandoned", async (phase) => {
+		const fixture = await probe("reject");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					const recovery = yield* Effect.fork(
+						Effect.either(runner.recoverEffect),
+					);
+					yield* Deferred.await(fixture.received);
+					const send = yield* Effect.fork(
+						Effect.exit(runner.executeEffect(fixture.send)),
+					);
+					yield* Effect.sleep("25 millis");
+					if (phase === "dead") {
+						fixture.child.kill("SIGTERM");
+						yield* Effect.tryPromise(() => fixture.exited);
+					} else if (phase === "interrupted") yield* Fiber.interrupt(recovery);
+					if (phase !== "interrupted")
+						yield* Fiber.join(recovery).pipe(Effect.timeout("4 seconds"));
+					const result = yield* Fiber.join(send).pipe(
+						Effect.timeout("10 seconds"),
+					);
+					fixture.recordPids();
+					if (phase === "dead") {
+						expect(result).toMatchObject({
+							_tag: "Success",
+							value: { status: "completed" },
+						});
+						expect([...fixture.runnerPids]).toHaveLength(2);
+					} else {
+						expect(result._tag).toBe("Failure");
+						if (phase === "interrupted" && result._tag === "Failure")
+							expect(Cause.isInterruptedOnly(result.cause)).toBe(true);
+						expect([...fixture.runnerPids]).toHaveLength(1);
+						expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
+					}
+				}),
+			),
+		);
+	}, 30_000);
+});
 
 describe("built-dist Claude runner lifecycle", () => {
 	const fixtures: Array<{ harness: ProcessHarness; sessionId?: string }> = [];

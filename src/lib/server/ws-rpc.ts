@@ -11,6 +11,7 @@ import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
 import { modelsHandlers } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
+import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
 import { settingsHandlers } from "./ws-rpc/settings.js";
 import { terminalsHandlers } from "./ws-rpc/terminals.js";
@@ -48,6 +49,8 @@ export {
 	type GetModelsResponse,
 	GetProjects,
 	type GetProjectsResponse,
+	GetSessionSkills,
+	type GetSessionSkillsResponse,
 	GetSkillContent,
 	type GetSkillContentResponse,
 	GetStatus,
@@ -136,6 +139,7 @@ const unaryHandlers = {
 	...settingsHandlers,
 	...terminalsHandlers,
 	...filesHandlers,
+	...sessionSkillsHandlers,
 	...modelsHandlers,
 	...sessionsHandlers,
 	...conversationHandlers,

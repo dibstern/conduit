@@ -21,6 +21,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 export type ClaudeTraceName =
 	| "background-shell-turn"
 	| "pong-thinking-text-turn"
+	| "skill-loads-turn"
 	| "subagent-task-turn";
 
 export interface ClaudeReplayPlan {

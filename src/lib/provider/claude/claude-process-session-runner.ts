@@ -15,6 +15,7 @@ import {
 	type ClaudeRunnerSocket,
 	claudeRunnerBuildId,
 	claudeRunnerFailure,
+	claudeRunnerSinkId,
 } from "./claude-runner-protocol.js";
 import { makeClaudeRunnerReceiptStore } from "./claude-runner-receipts.js";
 import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
@@ -48,6 +49,7 @@ interface RunnerChild {
 	readonly socketPath: string;
 	readonly outputs: Effect.Semaphore;
 	stopping: boolean;
+	stopSignalled?: boolean;
 	ending: number;
 	endingReleased?: Deferred.Deferred<void>;
 	idleExiting: boolean;
@@ -99,6 +101,7 @@ export const makeProcessClaudeSessionRunner = (
 			}
 		>();
 		let closing = false;
+		let preserving = false;
 		const upgradeMark = (
 			sessionId: string,
 			old: RunnerChild,
@@ -122,7 +125,11 @@ export const makeProcessClaudeSessionRunner = (
 
 		const stop = (entry: RunnerChild) =>
 			Effect.gen(function* () {
-				if (entry.stopping) return yield* Deferred.await(entry.stopped);
+				if (entry.stopping) {
+					yield* Deferred.await(entry.stopped);
+					// A late verified hello may arrive after an unverified stop.
+					if (entry.stopSignalled || !entry.verified) return;
+				}
 				entry.stopping = true;
 				const cleanup = Effect.async<void>((resume) => {
 					entry.connection?.destroy();
@@ -146,6 +153,7 @@ export const makeProcessClaudeSessionRunner = (
 					child?.once("exit", finish);
 					const kill = (signal: NodeJS.Signals) => {
 						try {
+							entry.stopSignalled = true;
 							process.kill(pid, signal);
 						} catch {
 							finish();
@@ -185,11 +193,37 @@ export const makeProcessClaudeSessionRunner = (
 			for (const [sinkId, binding] of sinks)
 				if (binding.sessionId === sessionId) sinks.delete(sinkId);
 		};
+		const releaseEntryWaiters = (
+			entry: RunnerChild,
+			cause: Cause.Cause<ClaudeSessionFailure>,
+		) =>
+			Effect.gen(function* () {
+				yield* Deferred.failCause(entry.ready, cause);
+				yield* Deferred.succeed(entry.drained, undefined);
+				if (entry.endingReleased)
+					yield* Deferred.succeed(entry.endingReleased, undefined);
+			});
 		const shutdown = lock
 			.withPermits(1)(
 				Effect.suspend(() => {
 					closing = true;
-					if (preserveClaudeRunners())
+					preserving = preserveClaudeRunners();
+					const entries = [...children.values(), ...candidates];
+					const release = Effect.forEach(
+						entries,
+						(entry) =>
+							releaseEntryWaiters(
+								entry,
+								Cause.fail(
+									claudeRunnerFailure(
+										"shutdown",
+										"Claude runners are shutting down",
+									),
+								),
+							),
+						{ discard: true },
+					);
+					if (preserving)
 						return Effect.sync(() => {
 							for (const entry of children.values()) {
 								entry.stopping = true;
@@ -206,8 +240,9 @@ export const makeProcessClaudeSessionRunner = (
 									concurrency: 4,
 								}),
 							),
+							Effect.ensuring(release),
 						);
-					return Effect.forEach([...children.values(), ...candidates], stop, {
+					return Effect.forEach(entries, stop, {
 						discard: true,
 						concurrency: 4,
 					}).pipe(
@@ -217,6 +252,7 @@ export const makeProcessClaudeSessionRunner = (
 								sinks.clear();
 							}),
 						),
+						Effect.ensuring(release),
 					);
 				}),
 			)
@@ -296,6 +332,11 @@ export const makeProcessClaudeSessionRunner = (
 				deps: { ...deps, daemonConfigDir: configDir },
 				...(receipts ? { receipts } : {}),
 				runFork,
+				onOutputCommitted: (output) =>
+					observeClaudeRunnerTurn(
+						output,
+						"sinkId" in output ? sinks.get(output.sinkId) : undefined,
+					),
 				emit: (received) => {
 					const operation = Effect.suspend(() => {
 						// A retired query's shutdown notices must not clear its replacement.
@@ -360,45 +401,112 @@ export const makeProcessClaudeSessionRunner = (
 					Effect.gen(function* () {
 						entry.verified = true;
 						entry.pid = hello.pid;
-						entry.connection = connection;
+						const ownsEntry = () =>
+							(entry.candidate
+								? candidates.has(entry)
+								: children.get(sessionId) === entry) &&
+							!entry.failure &&
+							!entry.stopping &&
+							!closing;
+						if (ownsEntry() && !connection.closed)
+							entry.connection = connection;
+						const ensureAttached = () =>
+							Effect.suspend(() => {
+								if (
+									ownsEntry() &&
+									entry.connection === connection &&
+									!connection.closed
+								)
+									return Effect.void;
+								connection.destroy();
+								return (
+									closing && !preserving ? stop(entry) : Effect.void
+								).pipe(
+									Effect.andThen(
+										Effect.fail(
+											claudeRunnerFailure(
+												"restore runner",
+												"Claude runner attachment is no longer active",
+											),
+										),
+									),
+								);
+							});
+						yield* ensureAttached();
 						entry.buildId = hello.buildId;
 						entry.upgrade.state = hello.upgradeState;
 						for (const binding of entry.candidate
 							? []
 							: (hello.bindings ?? [])) {
 							let history: readonly HistoryMessage[] = [];
+							let userMessageId: string | undefined;
+							let messageId = "";
+							let terminal = false;
+							let pending = false;
 							if (sql) {
 								const rows = yield* sql<{
 									payload_json: string;
-								}>`SELECT payload_json FROM provider_command_outbox WHERE command_id = ${binding.commandId ?? binding.sinkId} AND session_id = ${sessionId}`.pipe(
+									status: string;
+									attempt_count: number;
+									assistant_message_id: string | null;
+									state: string | null;
+								}>`SELECT outbox.payload_json, outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
+									FROM provider_command_outbox outbox
+									LEFT JOIN turns ON turns.session_id = outbox.session_id
+										AND turns.user_message_id = json_extract(outbox.payload_json, '$.userMessageId')
+									WHERE outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("restore runner history", cause),
 									),
 								);
-								if (rows[0])
-									history =
-										(
-											JSON.parse(rows[0].payload_json) as {
-												history?: readonly HistoryMessage[];
-											}
-										).history ?? [];
+								yield* ensureAttached();
+								const row = rows[0];
+								if (row) {
+									const payload = JSON.parse(row.payload_json) as {
+										history?: readonly HistoryMessage[];
+										userMessageId?: string;
+									};
+									history = payload.history ?? [];
+									userMessageId = payload.userMessageId;
+									// Acknowledged events will not replay after adoption.
+									messageId = row.assistant_message_id ?? "";
+									terminal =
+										row.state !== null &&
+										row.state !== "pending" &&
+										row.state !== "running";
+									pending =
+										row.status === "running" &&
+										binding.sinkId ===
+											claudeRunnerSinkId(
+												binding.commandId ?? binding.sinkId,
+												row.attempt_count,
+											);
+								}
 							}
+							const completed = pending
+								? yield* Deferred.make<void>()
+								: undefined;
+							yield* ensureAttached();
 							sinks.set(binding.sinkId, {
 								sessionId,
 								history,
-								messageId: "",
-								terminal: false,
-								pending: false,
+								...(userMessageId ? { userMessageId } : {}),
+								messageId,
+								terminal,
+								pending,
 								accepted: true,
 								releaseRequested: false,
-								completed: undefined,
+								completed,
 							});
 						}
 						for (const pending of entry.candidate
 							? []
-							: (hello.pendingOutputs ?? []))
+							: (hello.pendingOutputs ?? [])) {
+							yield* ensureAttached();
 							if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 								yield* emit(pending.output, sessionId);
+						}
+						yield* ensureAttached();
 						if (process.env["NODE_ENV"] === "test" && process.connected)
 							process.send?.({
 								channel: "conduit-process-test",
@@ -725,11 +833,18 @@ export const makeProcessClaudeSessionRunner = (
 
 		class ProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			readonly recoverEffect = Effect.gen(function* () {
+				if (closing)
+					return yield* Effect.fail(
+						claudeRunnerFailure(
+							"recover runner",
+							"Claude runners are shutting down",
+						),
+					);
 				for (const registration of discoverClaudeRunners(
 					deps.workspaceRoot,
 					configDir,
 				)) {
-					const abandoned =
+					let abandoned =
 						registration.role === "candidate" ||
 						children.has(registration.sessionId);
 					const entry: RunnerChild = {
@@ -750,76 +865,221 @@ export const makeProcessClaudeSessionRunner = (
 						>(),
 						stopped: yield* Deferred.make<void>(),
 					};
-					if (abandoned) candidates.add(entry);
-					else children.set(registration.sessionId, entry);
-					let connected = yield* Effect.either(
-						attach(registration.sessionId, entry),
-					);
-					// A previous server may still own the socket while its shutdown
-					// drains. Rejected hellos do not prove that the runner is dead.
-					for (
-						let retry = 0;
-						(connected._tag === "Left" || connected.right.closed) &&
-						runnerPidAlive(registration.pid) &&
-						retry < 4;
-						retry++
-					) {
-						yield* Effect.sleep(100 * 2 ** retry);
-						connected = yield* Effect.either(
-							attach(registration.sessionId, entry),
-						);
-					}
-					entry.recovering = false;
-					if (connected._tag === "Left" || connected.right.closed) {
-						evict(registration.sessionId, entry);
-						if (!runnerPidAlive(registration.pid)) {
-							removeClaudeRunner(entry.socketPath);
-							continue;
-						}
-						// Keep its registration, spool and approval ownership intact.
-						// Startup must not orphan approvals or launch a second runner.
-						return yield* Effect.fail(
-							connected._tag === "Left"
-								? connected.left
-								: claudeRunnerFailure(
+					yield* lock.withPermits(1)(
+						Effect.gen(function* () {
+							if (closing)
+								return yield* Effect.fail(
+									claudeRunnerFailure(
 										"recover runner",
-										"Claude runner disconnected during recovery",
+										"Claude runners are shutting down",
 									),
-						);
-					}
-					yield* Deferred.succeed(entry.ready, connected.right);
-					if (abandoned) {
-						yield* stop(entry);
-						candidates.delete(entry);
-						continue;
-					}
-					if (sql) {
-						const commands = yield* recoverClaudeRunnerCommands(
-							sql,
-							registration.sessionId,
-							connected.right,
-						).pipe(
-							Effect.mapError((cause) =>
-								claudeRunnerFailure("recover runner commands", cause),
-							),
-						);
-						entry.commandsInFlight += commands.length;
-						for (const command of commands)
-							runFork(
-								command.pipe(
-									Effect.catchAllCause((cause) =>
-										Effect.logError("Claude command recovery failed", cause),
-									),
-									Effect.ensuring(
-										Effect.sync(() => {
-											entry.commandsInFlight--;
-											upgrade(registration.sessionId, entry);
-										}),
+								);
+							abandoned ||= children.has(registration.sessionId);
+							entry.candidate = abandoned;
+							if (abandoned) candidates.add(entry);
+							else children.set(registration.sessionId, entry);
+						}),
+					);
+					const ensureRecovering = Effect.suspend(() =>
+						!closing &&
+						!entry.stopping &&
+						!entry.failure &&
+						(entry.candidate
+							? candidates.has(entry)
+							: children.get(registration.sessionId) === entry)
+							? Effect.void
+							: Effect.fail(
+									claudeRunnerFailure(
+										"recover runner",
+										"Claude runner recovery is no longer active",
 									),
 								),
+					);
+					yield* Effect.gen(function* () {
+						yield* ensureRecovering;
+						let connected = yield* Effect.either(
+							attach(registration.sessionId, entry),
+						);
+						yield* ensureRecovering;
+						// A previous server may still own the socket while its shutdown
+						// drains. Rejected hellos do not prove that the runner is dead.
+						for (
+							let retry = 0;
+							(connected._tag === "Left" || connected.right.closed) &&
+							runnerPidAlive(registration.pid) &&
+							retry < 4;
+							retry++
+						) {
+							yield* Effect.sleep(100 * 2 ** retry);
+							yield* ensureRecovering;
+							connected = yield* Effect.either(
+								attach(registration.sessionId, entry),
 							);
-					}
-					upgrade(registration.sessionId, entry);
+							yield* ensureRecovering;
+						}
+						if (connected._tag === "Left" || connected.right.closed) {
+							const failure =
+								connected._tag === "Left"
+									? connected.left
+									: claudeRunnerFailure(
+											"recover runner",
+											"Claude runner disconnected during recovery",
+										);
+							if (!runnerPidAlive(registration.pid)) {
+								entry.recovering = false;
+								entry.failure = {
+									...failure,
+									code: "runner_recovery_abandoned",
+								};
+								evict(registration.sessionId, entry);
+								candidates.delete(entry);
+								yield* releaseEntryWaiters(entry, Cause.fail(entry.failure));
+								removeClaudeRunner(entry.socketPath);
+								return;
+							}
+							// Keep its registration, spool and approval ownership intact.
+							// Startup must not orphan approvals or launch a second runner.
+							return yield* Effect.fail(failure);
+						}
+						if (abandoned) {
+							entry.recovering = false;
+							yield* Deferred.succeed(entry.ready, connected.right);
+							yield* stop(entry).pipe(
+								Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+								Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
+							);
+							return;
+						}
+						const commands = sql
+							? yield* recoverClaudeRunnerCommands(
+									sql,
+									registration.sessionId,
+									connected.right,
+									(sinkId, failure) => {
+										const binding = sinks.get(sinkId);
+										if (!binding?.pending) return Effect.void;
+										return entry.outputs.withPermits(1)(
+											failClaudeRunnerTurn(
+												(output) => emit(output, registration.sessionId),
+												sinkId,
+												binding,
+												failure,
+											).pipe(
+												Effect.ensuring(
+													Effect.sync(() => sinks.delete(sinkId)),
+												),
+											),
+										);
+									},
+									() => preserving,
+									deps,
+								).pipe(
+									Effect.mapError((cause) =>
+										claudeRunnerFailure("recover runner commands", cause),
+									),
+								)
+							: [];
+						yield* lock.withPermits(1)(
+							Effect.gen(function* () {
+								yield* ensureRecovering;
+								entry.commandsInFlight += commands.length;
+								for (const command of commands) {
+									let binding = sinks.get(command.sinkId);
+									// The server can persist admission before the runner sees it.
+									if (!binding) {
+										binding = {
+											sessionId: registration.sessionId,
+											history: command.input.history,
+											...(command.input.userMessageId
+												? { userMessageId: command.input.userMessageId }
+												: {}),
+											messageId: command.messageId,
+											terminal: command.terminal,
+											pending: true,
+											accepted: false,
+											releaseRequested: false,
+											completed: yield* Deferred.make<void>(),
+										};
+										sinks.set(command.sinkId, binding);
+									}
+									runFork(
+										command.wait.pipe(
+											Effect.tap(() => {
+												if (
+													!binding ||
+													sinks.get(command.sinkId) !== binding ||
+													preserving
+												)
+													return Effect.void;
+												return entry.outputs.withPermits(1)(
+													Effect.gen(function* () {
+														binding.pending = false;
+														if (binding.releaseRequested || entry.failure) {
+															yield* emit(
+																{
+																	type: "release-sink",
+																	sinkId: command.sinkId,
+																},
+																registration.sessionId,
+															);
+															sinks.delete(command.sinkId);
+														}
+													}),
+												);
+											}),
+											Effect.ensuring(
+												binding?.completed
+													? Deferred.succeed(binding.completed, undefined)
+													: Effect.void,
+											),
+											Effect.catchAllCause((cause) =>
+												Effect.logError(
+													"Claude command recovery failed",
+													cause,
+												),
+											),
+											Effect.ensuring(
+												Effect.sync(() => {
+													entry.commandsInFlight--;
+													upgrade(registration.sessionId, entry);
+												}),
+											),
+										),
+									);
+								}
+								// Waiters own restored turns before commands or close callbacks run.
+								entry.recovering = false;
+								yield* Deferred.succeed(entry.ready, connected.right);
+								if (connected.right.closed)
+									failed(
+										registration.sessionId,
+										entry,
+										claudeRunnerFailure(
+											"recover runner",
+											"Claude runner disconnected during recovery",
+										),
+									);
+								else upgrade(registration.sessionId, entry);
+							}),
+						);
+					}).pipe(
+						Effect.onExit((exit) => {
+							if (exit._tag === "Success") return Effect.void;
+							entry.recovering = false;
+							entry.failure = claudeRunnerFailure(
+								"recover runner",
+								Cause.squash(exit.cause),
+							);
+							entry.connection?.destroy();
+							evict(registration.sessionId, entry);
+							candidates.delete(entry);
+							return releaseEntryWaiters(entry, exit.cause).pipe(
+								Effect.andThen(
+									closing && !preserving ? stop(entry) : Effect.void,
+								),
+							);
+						}),
+					);
 				}
 			});
 			executeEffect(
@@ -892,6 +1152,7 @@ export const makeProcessClaudeSessionRunner = (
 									command.type === "pre-warm" &&
 									existing &&
 									(existing.failure ||
+										existing.recovering ||
 										existing.idleExiting ||
 										existing.stopping ||
 										existing.ending > 0)
@@ -945,10 +1206,8 @@ export const makeProcessClaudeSessionRunner = (
 									sinks.set(command.sinkId, turn);
 								runFork(
 									start(sessionId, created).pipe(
-										Effect.exit,
-										Effect.flatMap((exit) =>
-											Deferred.done(created.ready, exit),
-										),
+										Effect.onExit((exit) => Deferred.done(created.ready, exit)),
+										Effect.ignore,
 										Effect.asVoid,
 									),
 								);
@@ -972,6 +1231,7 @@ export const makeProcessClaudeSessionRunner = (
 					if (
 						command.type === "pre-warm" &&
 						(entry.failure ||
+							entry.recovering ||
 							entry.idleExiting ||
 							entry.stopping ||
 							entry.ending > 0)
@@ -1021,35 +1281,36 @@ export const makeProcessClaudeSessionRunner = (
 						const bindings = [...sinks.values()].filter(
 							(binding) => binding.sessionId === sessionId,
 						);
-						return yield* connection
-							.commandEffect(commandId, payload)
-							.pipe(
-								Effect.ensuring(
-									stop(entry).pipe(
-										Effect.andThen(
-											Effect.suspend(() =>
-												entry.failure
-													? Deferred.await(entry.drained)
-													: Effect.forEach(
-															bindings,
+						return yield* connection.commandEffect(commandId, payload).pipe(
+							Effect.ensuring(
+								stop(entry).pipe(
+									Effect.andThen(
+										Effect.suspend(() =>
+											entry.failure
+												? Deferred.await(entry.drained)
+												: Effect.forEach(
+														bindings.filter(
 															(binding) =>
-																binding.completed
-																	? Deferred.await(binding.completed)
-																	: Effect.void,
-															{ discard: true },
-														).pipe(
-															Effect.ensuring(
-																Effect.sync(() => evict(sessionId, entry)),
-															),
-															Effect.ensuring(
-																Deferred.succeed(entry.drained, undefined),
-															),
+																!entry.idleExiting || binding.accepted,
 														),
-											),
+														(binding) =>
+															binding.completed
+																? Deferred.await(binding.completed)
+																: Effect.void,
+														{ discard: true },
+													).pipe(
+														Effect.ensuring(
+															Effect.sync(() => evict(sessionId, entry)),
+														),
+														Effect.ensuring(
+															Deferred.succeed(entry.drained, undefined),
+														),
+													),
 										),
 									),
 								),
-							);
+							),
+						);
 					}
 					if (
 						process.env["NODE_ENV"] === "test" &&
@@ -1099,7 +1360,8 @@ export const makeProcessClaudeSessionRunner = (
 					),
 					Effect.retry({
 						while: (failure) =>
-							failure.code === "runner_idle_exit" &&
+							(failure.code === "runner_idle_exit" ||
+								failure.code === "runner_recovery_abandoned") &&
 							turn !== undefined &&
 							!turn.accepted &&
 							!closing,
@@ -1128,6 +1390,7 @@ export const makeProcessClaudeSessionRunner = (
 						if (
 							command.type !== "send-turn" ||
 							!turn ||
+							preserving ||
 							Cause.isInterruptedOnly(cause)
 						)
 							return Effect.void;

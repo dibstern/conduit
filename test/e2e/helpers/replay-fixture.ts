@@ -28,6 +28,8 @@ interface ReplayOptions {
 	/** Claude lane: open a Claude session replaying these SDK traces, one per
 	 *  sent turn. The test fails unless exactly the planned turns are sent. */
 	claudeReplay: ClaudeReplayPlan | undefined;
+	/** Optional isolated project, prepared before the harness creates a session. */
+	projectDir: string | undefined;
 }
 
 /** Fixtures provided to tests */
@@ -44,11 +46,13 @@ export const test = base.extend<ReplayFixtures & ReplayOptions>({
 	// Default recording — override per-describe with test.use({ recording: "..." })
 	recording: ["chat-simple", { option: true }],
 	claudeReplay: [undefined, { option: true }],
+	projectDir: [undefined, { option: true }],
 
 	// Per-test harness lifecycle
-	harness: async ({ recording, claudeReplay }, use) => {
+	harness: async ({ recording, claudeReplay, projectDir }, use) => {
 		const harness = await createReplayHarness(recording, {
 			...(claudeReplay ? { claudeReplay } : {}),
+			...(projectDir ? { projectDir } : {}),
 		});
 		try {
 			await use(harness);

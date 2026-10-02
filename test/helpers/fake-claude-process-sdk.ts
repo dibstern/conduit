@@ -39,6 +39,8 @@ export type ProcessMark =
 	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
+	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
+	| { kind: "assistant-held"; prompt: string; queryId: string }
 	| {
 			kind: "background-work";
 			phase: "started" | "completed";
@@ -413,6 +415,15 @@ function query(params: {
 						: { permissionMode: livePermissionMode }),
 				},
 			});
+			if (prompt === "fail-before-assistant-restart") {
+				const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+				if (!proof) throw new Error("Missing pre-assistant failure gate");
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				const release = join(dirname(proof), "release-before-assistant");
+				while (!existsSync(release))
+					await new Promise<void>((done) => setTimeout(done, 20));
+				throw new Error("Harness failure before assistant message");
+			}
 			if (promptIndex === 1) {
 				mark({
 					kind: "system-init",
@@ -637,6 +648,11 @@ function query(params: {
 					content: [{ type: "text", text: responseChunks(prompt).join("") }],
 				},
 			} as unknown as SDKMessage;
+			if (prompt === "terminal-replay-interrupt") {
+				mark({ kind: "assistant-held", prompt, queryId });
+				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
+				return;
+			}
 			yield {
 				type: "result",
 				subtype: "success",
