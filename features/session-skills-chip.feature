@@ -112,3 +112,72 @@ Scenario: A missing skill run shows a quiet toast without moving the transcript
   And I tap the skill row "missing-skill"
   Then a quiet toast says "That skill run is no longer in this session"
   And the transcript has not moved for the skill navigation
+
+Scenario Outline: Holding a phone skill offers every run without jumping on release
+  Given the viewport is a phone
+  And the session loaded skills with transcript anchors
+  And the conduit app is served with the skill-navigation mockup
+  When I open the skills chip
+  And I hold the skill row "paged-skill"
+  Then the skills list opens as a sheet
+  And the earlier runs for "paged-skill" show "Jump to turn 3 (agent · 5m ago); Jump to turn 1 (agent · 5m ago); Jump to turn 2 (agent · 10m ago)"
+  And no older transcript pages were requested
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I select the skill action "Jump to turn 1"
+  Then two older transcript pages were requested
+  And the Skill step in turn 1 is focused in its expanded activity panel and in the viewport
+  And the skills toggle for turn 1 stays closed
+  And the skills menu is closed
+
+Examples:
+  | baseline            | threshold |
+  | session-skills-runs | 98        |
+
+Scenario Outline: A desktop skill's document stays inside the open popover
+  Given the session loaded skills with transcript anchors
+  And the conduit app is served with the skill-navigation mockup
+  When I open the skills chip
+  And I right-click the skill row "paged-skill"
+  Then the earlier runs for "paged-skill" show "Jump to turn 3 (agent · 5m ago); Jump to turn 1 (agent · 5m ago); Jump to turn 2 (agent · 10m ago)"
+  When I select the skill action "Open SKILL.md"
+  Then SKILL.md was requested for "paged-skill"
+  And the skill document heading "Skill instructions" is visible inside the open popover
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I select the skill action "Hide SKILL.md"
+  Then the skill document is hidden
+  When I select the skill action "Open SKILL.md"
+  Then the skill document heading "Skill instructions" is visible inside the open popover
+  When I press ArrowLeft in the skills menu
+  Then the skills list shows "paged-skill ×3 (agent · turns 1, 3, 2 · 5m ago); user-skill (you · turn 42 · 5m ago)"
+  And the skill row "paged-skill" is focused
+  And the skill document is hidden
+  When I right-click the skill row "paged-skill"
+  And I select the skill action "Open SKILL.md"
+  Then the skill document heading "Skill instructions" is visible inside the open popover
+  When I press Escape in the skills menu
+  Then the skills menu is closed
+  When I open the skills chip
+  Then the skills list shows "paged-skill ×3 (agent · turns 1, 3, 2 · 5m ago); user-skill (you · turn 42 · 5m ago)"
+  And the skill document is hidden
+
+Examples:
+  | baseline           | threshold |
+  | session-skills-doc | 98        |
+
+Scenario Outline: Keyboard users can enter earlier runs and return to the same row
+  Given the session loaded skills with transcript anchors
+  And the conduit app is served with the skill-navigation mockup
+  When I open the skills chip
+  And I focus the skill row "paged-skill"
+  And I press <key> in the skills menu
+  Then the earlier runs for "paged-skill" show "Jump to turn 3 (agent · 5m ago); Jump to turn 1 (agent · 5m ago); Jump to turn 2 (agent · 10m ago)"
+  And the first skill run is focused
+  When I select the skill action "All skills"
+  Then the skills list shows "paged-skill ×3 (agent · turns 1, 3, 2 · 5m ago); user-skill (you · turn 42 · 5m ago)"
+  And the skill row "paged-skill" is focused
+
+Examples:
+  | key         |
+  | ArrowRight  |
+  | ContextMenu |
+  | Shift+F10   |

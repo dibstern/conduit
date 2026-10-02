@@ -256,6 +256,13 @@ export const mockAppHandlers: StepHandler[] = [
 					GetSessionSkills: async () => ({
 						loads: mockSessionSkills.get(page) ?? [],
 					}),
+					GetSkillContent: async (payload) => ({
+						projectSlug: String(payload["projectSlug"] ?? "myapp"),
+						name: String(payload["name"] ?? ""),
+						path: ".agents/skills/paged-skill/SKILL.md",
+						content:
+							"---\nname: paged-skill\ndescription: A navigation fixture\n---\n# Skill instructions\n\nReview the earlier runs before continuing.\n",
+					}),
 					SwitchPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],

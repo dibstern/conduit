@@ -111,6 +111,186 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "hold a skill row",
+		match: /^I hold the skill row "([\w:-]+)"$/,
+		run: async ({ world, match }) => {
+			const row = world.page.locator(
+				`[data-testid="session-skills-row"][data-skill="${match[1]}"]`,
+			);
+			await expect(row).toBeVisible();
+			const box = await row.boundingBox();
+			if (!box) throw new Error("skill row has no touch target");
+			const touch = await world.page.context().newCDPSession(world.page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [
+						{ x: box.x + box.width / 2, y: box.y + box.height / 2 },
+					],
+				});
+				await expect(
+					world.page.getByTestId("session-skills-runs"),
+				).toBeVisible();
+			} finally {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+				await touch.detach();
+			}
+			await expect(world.page.getByTestId("session-skills-runs")).toBeVisible();
+		},
+	},
+	{
+		name: "right-click a skill row",
+		match: /^I right-click the skill row "([\w:-]+)"$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.locator(`[data-testid="session-skills-row"][data-skill="${match[1]}"]`)
+				.click({ button: "right" });
+		},
+	},
+	{
+		name: "focus a skill row",
+		match: /^I focus the skill row "([\w:-]+)"$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.locator(`[data-testid="session-skills-row"][data-skill="${match[1]}"]`)
+				.focus();
+		},
+	},
+	{
+		name: "press a skills menu key",
+		match:
+			/^I press (ArrowRight|ArrowLeft|ContextMenu|Shift\+F10|Escape) in the skills menu$/,
+		run: async ({ world, match }) => {
+			await world.page.keyboard.press(match[1] ?? "");
+		},
+	},
+	{
+		name: "earlier skill runs in order",
+		match: /^the earlier runs for "([\w:-]+)" show "(.*)"$/,
+		run: async ({ world, match }) => {
+			const group = world.page.getByTestId("session-skills-runs");
+			await expect(group.getByRole("presentation")).toHaveText(match[1] ?? "");
+			await expect(world.page.getByTestId("session-skills-row")).toHaveCount(0);
+			await expect(world.page.getByTestId("session-skills-hint")).toHaveCount(
+				0,
+			);
+			const runs = group.getByTestId("session-skills-run");
+			const expected = (match[2] ?? "").split(";").map((run) => run.trim());
+			await expect(runs).toHaveCount(expected.length);
+			const actual = await runs.evaluateAll((items) =>
+				items.map((item) => {
+					const turn = item.getAttribute("data-turn") ?? "";
+					const meta = item
+						.querySelector("[data-testid='session-skills-run-meta']")
+						?.textContent?.trim();
+					return `Jump to turn ${turn} (${meta})`;
+				}),
+			);
+			expect(actual).toEqual(expected);
+		},
+	},
+	{
+		name: "first skill run receives focus",
+		match: /^the first skill run is focused$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("session-skills-run").first(),
+			).toBeFocused();
+		},
+	},
+	{
+		name: "originating skill row receives focus",
+		match: /^the skill row "([\w:-]+)" is focused$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.locator(
+					`[data-testid="session-skills-row"][data-skill="${match[1]}"]`,
+				),
+			).toBeFocused();
+		},
+	},
+	{
+		name: "select a skill action",
+		match:
+			/^I select the skill action "(All skills|Open SKILL\.md|Hide SKILL\.md|Jump to turn [0-9]+)"$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByRole("menu", { name: "Skills used" })
+				.getByRole("menuitem")
+				.filter({ hasText: match[1] ?? "" })
+				.click();
+		},
+	},
+	{
+		name: "holding a skill does not page history",
+		match: /^no older transcript pages were requested$/,
+		run: async ({ world }) => {
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((request) => request.tag === "LoadMoreHistory"),
+			).toHaveLength(0);
+		},
+	},
+	{
+		name: "skill doc RPC requested name",
+		match: /^SKILL\.md was requested for "([\w:-]+)"$/,
+		run: async ({ world, match }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "GetSkillContent" &&
+					request.payload["name"] === match[1],
+			);
+		},
+	},
+	{
+		name: "skill document visible inside open popover",
+		match:
+			/^the skill document heading "(.*)" is visible inside the open popover$/,
+		run: async ({ world, match }) => {
+			const menu = world.page.getByRole("menu", { name: "Skills used" });
+			await expect(menu).toBeVisible();
+			await expect(world.page.getByTestId("menu-sheet-scrim")).toHaveCount(0);
+			const doc = menu.getByTestId("session-skills-doc");
+			await expect(
+				doc.getByRole("heading", { name: match[1] ?? "", exact: true }),
+			).toBeVisible();
+			await expect(doc.locator("pre code.language-yaml")).toContainText(
+				"name: paged-skill",
+			);
+			await expect(
+				menu.getByRole("menuitem", { name: "Hide SKILL.md", exact: true }),
+			).toBeVisible();
+			const width = await doc.evaluate((el) => ({
+				actual: el.getBoundingClientRect().width,
+				limit:
+					Number.parseFloat(
+						getComputedStyle(document.documentElement).fontSize,
+					) * 28,
+			}));
+			expect(width.actual).toBeLessThanOrEqual(width.limit);
+		},
+	},
+	{
+		name: "skill document is hidden",
+		match: /^the skill document is hidden$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("session-skills-doc")).toHaveCount(0);
+		},
+	},
+	{
+		name: "skills menu is closed",
+		match: /^the skills menu is closed$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("menu", { name: "Skills used" }),
+			).toHaveCount(0);
+		},
+	},
+	{
 		name: "skill navigation paged older history twice",
 		match: /^two older transcript pages were requested$/,
 		run: async ({ world }) => {
@@ -380,6 +560,13 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("menu-sheet-scrim")).toHaveCount(
 				match[1] === "sheet" ? 1 : 0,
 			);
+			const hint = world.page.getByTestId("session-skills-hint");
+			if ((await world.page.getByTestId("session-skills-runs").count()) === 0)
+				await expect(hint).toHaveText(
+					match[1] === "sheet"
+						? "Hold a skill for earlier runs and SKILL.md"
+						: "Right-click a skill for earlier runs and SKILL.md",
+				);
 		},
 	},
 	{
