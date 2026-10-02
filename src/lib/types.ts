@@ -131,6 +131,7 @@ export interface StoredProject {
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
+	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 }
 
 export interface RecentProject {
@@ -148,6 +149,10 @@ export interface FileContentResult {
 
 /** Config for creating a per-project relay that receives attached sockets. */
 export interface ProjectRelayConfig {
+	/** Immediate cached environment snapshot; shell resolution runs in the background. */
+	shellEnv?: (
+		directory: string,
+	) => Readonly<Record<string, string | undefined>>;
 	/** Shared HTTP server owned by the caller. */
 	httpServer: import("node:http").Server;
 	/** OpenCode server URL (e.g., "http://localhost:4096") */

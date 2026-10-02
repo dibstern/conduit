@@ -154,6 +154,8 @@ export interface ClaudeSessionContext {
 	readonly startedAt: string;
 	readonly promptQueue: PromptQueueController;
 	readonly query: Query;
+	/** Claude config directory selected when this SDK query was created. */
+	readonly configDir?: string;
 	/** Serializes turn admission while each caller awaits the prior turn.
 	 *  Runtime-owned contexts always set this; translator-only test contexts may omit it. */
 	readonly turnAdmissionSemaphore?: Effect.Semaphore;

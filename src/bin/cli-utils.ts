@@ -27,6 +27,7 @@ export const DEFAULT_SOCKET_PATH = join(DEFAULT_CONFIG_DIR, "relay.sock");
 export interface ParsedArgs {
 	command:
 		| "default"
+		| "doctor"
 		| "daemon"
 		| "foreground"
 		| "status"
@@ -85,6 +86,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		const arg = argv[i];
 
 		switch (arg) {
+			case "doctor":
+			case "--doctor":
+				result.command = "doctor";
+				break;
 			case "--daemon":
 				result.command = "daemon";
 				break;
@@ -469,6 +474,9 @@ export function generateQR(url: string): string {
 export const HELP_TEXT = `Usage: conduit [options]
 
   With no flags, launches the interactive setup wizard and main menu.
+
+Commands:
+  doctor                Check registered projects' shell env and tools locally
 
 Options:
   --status              Show daemon status

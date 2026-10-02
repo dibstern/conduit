@@ -18,9 +18,12 @@ const DIRECT_ANTHROPIC_ENV_KEYS = [
 ] as const;
 
 export function makeClaudeSdkEnv(opts?: {
-	configDir?: string;
+	configDir?: string | undefined;
+	baseEnv?: Readonly<Record<string, string | undefined>> | undefined;
 }): NonNullable<SDKOptions["env"]> {
-	const env: Record<string, string | undefined> = { ...process.env };
+	const env: Record<string, string | undefined> = {
+		...(opts?.baseEnv ?? process.env),
+	};
 	for (const key of DIRECT_ANTHROPIC_ENV_KEYS) {
 		delete env[key];
 	}

@@ -345,9 +345,32 @@ describe("WsRpcServerLayer ListSessions", () => {
 		);
 	});
 
-	it.effect(
-		"forks a Claude transcript and binds its copied history to a new session",
-		() => {
+	it.effect.each([
+		{
+			profile: "instance",
+			instanceConfigDir: "/instance-config",
+			sessionConfigDir: undefined,
+		},
+		{
+			profile: "shell",
+			instanceConfigDir: undefined,
+			sessionConfigDir: "/shell-config",
+		},
+		{
+			profile: "saved",
+			instanceConfigDir: "/updated-instance-config",
+			sessionConfigDir: "/original-config",
+		},
+		{
+			profile: "legacy project",
+			instanceConfigDir: undefined,
+			sessionConfigDir: undefined,
+		},
+	])(
+		"forks a Claude transcript using the $profile profile and binds its copied history",
+		({ instanceConfigDir, sessionConfigDir }) => {
+			const claudeConfigDir =
+				sessionConfigDir ?? instanceConfigDir ?? "/current-project-config";
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-fork-rpc-"));
 			writeFileSync(
 				join(dir, "daemon.json"),
@@ -360,7 +383,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 							port: 0,
 							managed: false,
 							driver: "claude",
-							configDir: "/instance-config",
+							...(instanceConfigDir !== undefined && {
+								configDir: instanceConfigDir,
+							}),
 						},
 					],
 				}),
@@ -420,6 +445,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 							config: makeMockConfig({
 								configDir: dir,
 								projectDir: "/project",
+								shellEnv: () => ({
+									CLAUDE_CONFIG_DIR: "/current-project-config",
+								}),
 							}),
 						}),
 						persistenceLayer,
@@ -440,6 +468,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const providerState = yield* ProviderStateEffectTag;
 				yield* providerState.saveUpdates("ses-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },
+					...(sessionConfigDir !== undefined
+						? [{ key: "claudeConfigDir", value: sessionConfigDir }]
+						: []),
 				]);
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const timestamp = Date.now() - 1000;
@@ -583,16 +614,19 @@ describe("WsRpcServerLayer ListSessions", () => {
 				expect(
 					(yield* providerState.getState(result.sessionId))["resumeSessionId"],
 				).toBe("sdk-fork");
+				expect(
+					(yield* providerState.getState(result.sessionId))["claudeConfigDir"],
+				).toBe(claudeConfigDir);
 				expect(api.session.fork).not.toHaveBeenCalled();
 				expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
 					dir: "/project",
-					configDir: "/instance-config",
+					configDir: claudeConfigDir,
 					title: "Parent (fork)",
 					upToMessageId: "parent-final",
 				});
 				expect(readTranscript).toHaveBeenCalledWith("sdk-parent", {
 					dir: "/project",
-					configDir: "/instance-config",
+					configDir: claudeConfigDir,
 				});
 				expect(readTranscript).toHaveBeenCalledTimes(1);
 				const forkNotice = vi
@@ -658,7 +692,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				});
 				expect(forkSession).toHaveBeenLastCalledWith("sdk-parent", {
 					dir: "/project",
-					configDir: "/instance-config",
+					configDir: claudeConfigDir,
 					title: "Parent (fork)",
 					upToMessageId: "parent-final",
 				});

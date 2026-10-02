@@ -18,6 +18,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import {
 	type Settings,
 	query as sdkQuery,
@@ -132,6 +134,9 @@ export interface ClaudeProviderInstanceDeps {
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
 	readonly workspaceRoot: string;
+	readonly shellEnv?: (
+		directory: string,
+	) => Readonly<Record<string, string | undefined>>;
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
@@ -471,11 +476,14 @@ export class ClaudeProviderRuntime {
 						validateOptionsJsonShape({
 							cwd: input.workspaceRoot,
 							abortController,
-							env: makeClaudeSdkEnv(
-								input.configDir !== undefined
-									? { configDir: input.configDir }
-									: undefined,
-							),
+							env: makeClaudeSdkEnv({
+								configDir:
+									input.configDir ??
+									(typeof input.providerState["claudeConfigDir"] === "string"
+										? input.providerState["claudeConfigDir"]
+										: undefined),
+								baseEnv: this.deps.shellEnv?.(input.workspaceRoot),
+							}),
 							includePartialMessages: true,
 							forwardSubagentText: true,
 							settings: buildClaudeFlagSettings(
@@ -511,7 +519,15 @@ export class ClaudeProviderRuntime {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				ctx = { ...context, query };
+				ctx = {
+					...context,
+					query,
+					configDir: resolve(
+						input.workspaceRoot,
+						options.env?.["CLAUDE_CONFIG_DIR"] ??
+							join(options.env?.["HOME"] ?? homedir(), ".claude"),
+					),
+				};
 
 				yield* setSession(this.stateRef, sessionId, ctx);
 

@@ -122,6 +122,10 @@ import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import {
+	makeProjectShellEnvLive,
+	ProjectShellEnvWiringLive,
+} from "./project-shell-env-layer.js";
+import {
 	HttpServerRefTag,
 	RelayFactoryError,
 	RelayFactoryLive,
@@ -769,6 +773,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		tlsCertWithDeps,
 		EnsureCertsLive,
 		PushNotificationManagerLive(configDir),
+		makeProjectShellEnvLive(),
 	).pipe(Layer.provideMerge(foundation));
 
 	const versionCheckLayer = options.versionCheck
@@ -880,7 +885,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withDaemonControl),
 	);
 
-	const withDaemonWiring = DaemonWiringLive.pipe(Layer.provideMerge(servers));
+	const withDaemonWiring = Layer.merge(
+		DaemonWiringLive,
+		ProjectShellEnvWiringLive,
+	).pipe(Layer.provideMerge(servers));
 
 	// Tier 4: Background services (optional)
 	// When a config is not provided, a no-op stub Layer provides the Tag
