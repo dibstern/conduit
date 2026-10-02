@@ -18,7 +18,7 @@
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
-	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
+	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
 	import {
 		discoveryState,
 		extractSlashQuery,
@@ -69,7 +69,23 @@
 	// current draft and restores the target session's draft (or empty string).
 
 	const inputDrafts = new Map<string, string>();
-	let previousSessionId: string | null = null;
+	const reloadRestoredDrafts = new Set<string>();
+	// Extend the existing draft map across a reload, including drafts typed
+	// before a session exists. Session drafts also keep using the server RPC.
+	const reloadDraftKey = "conduit-reload-drafts";
+	try {
+		const saved = sessionStorage.getItem(reloadDraftKey);
+		if (saved) {
+			for (const [id, text] of JSON.parse(saved) as [string, string][]) {
+				inputDrafts.set(id, text);
+				reloadRestoredDrafts.add(id);
+			}
+			sessionStorage.removeItem(reloadDraftKey);
+		}
+	} catch {
+		// A restricted browser can still use the existing server draft sync.
+	}
+	let previousSessionId: string | null | undefined;
 
 	$effect(() => {
 		const currentId = sessionState.currentId;
@@ -82,7 +98,7 @@
 				// Restore draft for the session we're entering
 				inputText = inputDrafts.get(currentId ?? "") ?? "";
 				previousSessionId = currentId;
-				lastLocalEditAt = 0;
+				lastLocalEditAt = reloadRestoredDrafts.delete(currentId ?? "") ? Date.now() : 0;
 				// Cancel any pending outgoing sync from the previous session
 				if (inputSyncTimer) {
 					clearTimeout(inputSyncTimer);
@@ -109,12 +125,32 @@
 	$effect(() => {
 		if (inputSyncState.lastUpdated <= lastSyncApplied) return;
 		lastSyncApplied = inputSyncState.lastUpdated;
+		if (inputSyncState.reloadPending) return;
 		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
 		inputText = inputSyncState.text;
 	});
 
 	/** Timer for debounced outgoing input sync. */
 	let inputSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+	$effect(() => registerInputDraftPersistence(async () => {
+		if (inputSyncTimer) {
+			clearTimeout(inputSyncTimer);
+			inputSyncTimer = null;
+		}
+		let savedText: string;
+		let savedSessionId: string | null;
+		do {
+			savedText = inputText;
+			savedSessionId = sessionState.currentId;
+			await syncInputDraft(savedText);
+		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
+		// Images live only in this composer. Defer reload until sent or removed.
+		if (pendingImages.length > 0) return false;
+		inputDrafts.set(sessionState.currentId ?? "", inputText);
+		sessionStorage.setItem(reloadDraftKey, JSON.stringify([...inputDrafts]));
+		return true;
+	}));
 
 	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(slashQuery !== null);
@@ -212,16 +248,16 @@
 		);
 	}
 
-	function syncInputDraft(text: string) {
+	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
-		void syncInputDraftRpc({
+		if (!sessionId || !projectSlug) return Promise.resolve();
+		return syncInputDraftRpc({
 			projectSlug,
 			sessionId,
 			text,
 			originId: getBrowserClientId(),
-		}).catch(() => undefined);
+		});
 	}
 
 	function handleInput() {
@@ -234,7 +270,7 @@
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
 		inputSyncTimer = setTimeout(() => {
 			inputSyncTimer = null;
-			syncInputDraft(inputText);
+			void syncInputDraft(inputText).catch(() => undefined);
 		}, 300);
 	}
 
@@ -389,7 +425,7 @@
 			clearTimeout(inputSyncTimer);
 			inputSyncTimer = null;
 		}
-		syncInputDraft("");
+		void syncInputDraft("").catch(() => undefined);
 	}
 
 	function handleStop() {

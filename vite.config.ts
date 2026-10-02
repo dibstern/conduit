@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
@@ -66,7 +67,7 @@ function manifestIconPlugin(): Plugin {
 	};
 }
 
-export default defineConfig({
+const config = defineConfig({
 	root: "src/lib/frontend",
 	publicDir: "static",
 	plugins: [
@@ -132,3 +133,14 @@ export default defineConfig({
 		},
 	},
 });
+
+export default defineConfig(({ command }) => ({
+	...config,
+	define: {
+		__CONDUIT_BUILD_ID__: JSON.stringify(
+			command === "build"
+				? (process.env["CONDUIT_BUILD_ID"] ?? randomUUID())
+				: "dev",
+		),
+	},
+}));
