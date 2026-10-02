@@ -404,8 +404,6 @@ export function createMockProjectRelay(
 		...overrides,
 		setDefaultAgent:
 			overrides?.setDefaultAgent ?? vi.fn().mockResolvedValue(undefined),
-		setDefaultModel:
-			overrides?.setDefaultModel ?? vi.fn().mockResolvedValue(undefined),
 	};
 }
 

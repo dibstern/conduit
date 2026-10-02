@@ -2,7 +2,11 @@
 // run() with process.argv. Command handlers and utilities live in sibling modules.
 
 import { getTailscaleIP } from "../lib/cli/tls.js";
-import type { IpcTaggedRequest } from "../lib/contracts/ipc-requests.js";
+import type { WsRpcRequest } from "../lib/contracts/ws-rpc.js";
+import {
+	type SendRPC,
+	sendRpcRequest,
+} from "../lib/daemon/daemon-rpc-client.js";
 import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
@@ -11,7 +15,6 @@ import {
 	startDaemonChildProcess,
 	startForegroundDaemon,
 } from "../lib/domain/daemon/Layers/daemon-foreground.js";
-import type { IPCResponse } from "../lib/types.js";
 import {
 	type CommandContext,
 	handleAdd,
@@ -26,13 +29,14 @@ import {
 	handleTitle,
 } from "./cli-command-handlers.js";
 import { handleDefault } from "./cli-default-command.js";
+import { handleDoctor } from "./cli-doctor.js";
 import { handleInstance } from "./cli-instance-command.js";
+import { handleService } from "./cli-service.js";
 import {
 	DEFAULT_SOCKET_PATH,
 	generateQR,
 	getNetworkAddress,
 	parseArgs,
-	sendIpcRequest,
 } from "./cli-utils.js";
 
 // Re-exports (preserve public API)
@@ -42,16 +46,17 @@ export {
 	generateQR,
 	getNetworkAddress,
 	parseArgs,
-	sendIpcRequest,
 } from "./cli-utils.js";
 
 export interface CLIOptions {
+	/** Config directory for local diagnostics. */
+	configDir?: string;
 	cwd?: string;
 	stdin?: NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
 	stdout?: { write(s: string): void };
 	stderr?: { write(s: string): void };
 	exit?: (code: number) => void;
-	sendIPC?: (cmd: IpcTaggedRequest) => Promise<IPCResponse>;
+	sendRPC?: SendRPC;
 	isDaemonRunning?: () => Promise<boolean>;
 	spawnDaemon?: (
 		opts?: DaemonOptions,
@@ -75,7 +80,7 @@ export interface InteractiveContext {
 	stdout: { write(s: string): void };
 	stderr: { write(s: string): void };
 	exit: (code: number) => void;
-	ipcSend: (cmd: IpcTaggedRequest) => Promise<IPCResponse>;
+	rpcSend: SendRPC;
 	checkDaemon: () => Promise<boolean>;
 	spawnDaemon: (opts?: DaemonOptions) => Promise<{ pid: number; port: number }>;
 	getAddr: () => string | null;
@@ -90,10 +95,10 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	const stderr = options?.stderr ?? process.stderr;
 	const exit = options?.exit ?? process.exit;
 
-	const ipcSend =
-		options?.sendIPC ??
-		((request: IpcTaggedRequest) =>
-			sendIpcRequest(DEFAULT_SOCKET_PATH, request));
+	const rpcSend: SendRPC =
+		options?.sendRPC ??
+		(<R extends WsRpcRequest>(request: R) =>
+			sendRpcRequest(DEFAULT_SOCKET_PATH, request));
 
 	const checkDaemon =
 		options?.isDaemonRunning ?? (() => isDaemonRunning(DEFAULT_SOCKET_PATH));
@@ -128,7 +133,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		stdout,
 		stderr,
 		exit,
-		ipcSend,
+		rpcSend,
 		checkDaemon,
 		spawnDaemonFn,
 		startForegroundDaemonFn,
@@ -139,6 +144,13 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	};
 
 	switch (args.command) {
+		case "service":
+			return handleService(context);
+		case "doctor":
+			return handleDoctor({
+				stdout,
+				...(options?.configDir && { configDir: options.configDir }),
+			});
 		case "daemon":
 			return handleDaemon(context);
 		case "foreground":

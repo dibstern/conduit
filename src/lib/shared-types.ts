@@ -993,16 +993,14 @@ const ClientCountSchema = Schema.Struct({
 	count: Schema.Number,
 });
 
-/** Relay wire-protocol version. Bump whenever a message's semantics change
- *  incompatibly (e.g. a mode literal is reinterpreted), so a freshly-loaded
- *  frontend can detect a stale daemon that predates the change. The daemon
- *  sends this to each client on connect; the frontend warns on mismatch —
- *  and on absence, which marks a daemon older than the handshake itself. */
+/** Bump on wire-contract changes. The build ID covers behavioural changes
+ *  with the same wire shape. Absence marks a daemon older than the handshake. */
 export const WS_PROTOCOL_VERSION = 2;
 
 const ProtocolVersionSchema = Schema.Struct({
 	type: Schema.Literal("protocol_version"),
 	version: Schema.Number,
+	buildId: Schema.optional(Schema.String),
 });
 
 const InputSyncSchema = Schema.Struct({

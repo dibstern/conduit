@@ -5,8 +5,6 @@ import { expect } from "vitest";
 import {
 	activePollersGauge,
 	configPersistsCounter,
-	ipcCommandsCounter,
-	ipcLatencyHistogram,
 	rateLimitRejectionsCounter,
 	sseReconnectsCounter,
 	wsConnectionsGauge,
@@ -29,34 +27,6 @@ describe("Effect.Metric definitions", () => {
 			yield* Metric.set(activePollersGauge, 5);
 			const state = yield* Metric.value(activePollersGauge);
 			expect(state.value).toBe(5);
-		}),
-	);
-
-	it.effect("ipcCommandsCounter tracks tagged commands", () =>
-		Effect.gen(function* () {
-			const getStatusCounter = Metric.tagged(
-				ipcCommandsCounter,
-				"cmd",
-				"get_status",
-			);
-			yield* Metric.update(getStatusCounter, 1);
-			yield* Metric.update(getStatusCounter, 1);
-			yield* Metric.update(
-				Metric.tagged(ipcCommandsCounter, "cmd", "shutdown"),
-				1,
-			);
-			// Tagged counters are separate from the base counter, so just
-			// verify the operations complete without error.
-		}),
-	);
-
-	it.effect("ipcLatencyHistogram records values", () =>
-		Effect.gen(function* () {
-			yield* Metric.update(ipcLatencyHistogram, 15);
-			yield* Metric.update(ipcLatencyHistogram, 150);
-			const state = yield* Metric.value(ipcLatencyHistogram);
-			expect(state.count).toBe(2);
-			expect(state.sum).toBe(165);
 		}),
 	);
 

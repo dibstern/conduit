@@ -4,6 +4,7 @@
 // instantiate the provider layer alongside the existing relay pipeline.
 
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, type Scope } from "effect";
 import {
@@ -35,6 +36,7 @@ import {
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
 import type { ProviderCommandStoreFailure } from "./orchestration-side-effect-reactor.js";
+import { ProjectShellEnvResolver } from "./project-shell-env.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
 	type ProviderSessionBindingReadModel,
@@ -45,6 +47,7 @@ import type { TurnResult } from "./types.js";
 const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
+	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
 	readonly onBackgroundTask?: (
 		input: import("../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
@@ -58,6 +61,7 @@ export interface OrchestrationLayerOptions {
 }
 
 export interface OrchestrationRuntimeLayerOptions {
+	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
 	readonly onBackgroundTask?: (
 		input: import("../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
@@ -164,7 +168,21 @@ const createOrchestrationComponentsEffect = (
 			sdk: defaultClaudeSubagentSdk,
 			persist,
 		});
+		let shellEnv = options.shellEnv;
+		if (!shellEnv) {
+			const resolver = yield* Effect.acquireRelease(
+				Effect.sync(() => new ProjectShellEnvResolver()),
+				(value) => Effect.sync(() => value.close()),
+			);
+			const directory = options.workspaceRoot ?? process.cwd();
+			const config = loadDaemonConfig(options.configDir)?.projects.find(
+				(project) => resolve(project.path) === resolve(directory),
+			);
+			resolver.register(directory, config?.shellEnv);
+			shellEnv = (projectDir) => resolver.get(projectDir);
+		}
 		const claudeInstance = yield* ClaudeDriver.create({
+			shellEnv,
 			...(options.onBackgroundTask
 				? { onBackgroundTask: options.onBackgroundTask }
 				: {}),
@@ -266,6 +284,7 @@ export const makeOrchestrationRuntimeLayer = (
 			const client = yield* OpenCodeAPITag;
 			const components = yield* createOrchestrationComponentsEffect({
 				client,
+				...(options.shellEnv && { shellEnv: options.shellEnv }),
 				...(options.onBackgroundTask
 					? { onBackgroundTask: options.onBackgroundTask }
 					: {}),

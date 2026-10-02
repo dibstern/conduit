@@ -1,11 +1,11 @@
 // src/lib/provider/claude/claude-provider-runtime.ts
 /**
- * ClaudeProviderRuntime -- Effect-owned Claude Agent SDK runtime state and
- * provider operations.
+ * ClaudeProviderRuntime adapts provider operations and EventSink to session
+ * messages. The in-process session runner owns the live Claude Agent SDK state.
  *
  * Architectural notes:
  * - One SDK query() per conduit session, not per turn.
- * - First sendTurnEffect() creates an EffectPromptQueue (backed by Effect Queue)
+ * - The first send-turn command creates an EffectPromptQueue (backed by Effect Queue)
  *   + calls query() + starts a background stream consumer. Subsequent
  *   turns enqueue into the existing queue.
  * - Discovery reads the live model list through ClaudeCapabilitiesService. The
@@ -18,14 +18,19 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import {
 	type Settings,
 	query as sdkQuery,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+	Cause,
 	Context,
 	Deferred,
 	Effect,
+	Exit,
+	Fiber,
 	FiberMap,
 	HashMap,
 	HashSet,
@@ -35,15 +40,22 @@ import {
 } from "effect";
 import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
 import { createLogger } from "../../logger.js";
-import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
+import {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectTag,
+} from "../../persistence/effect/claude-event-persist-effect.js";
+import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import {
 	type ClaudeAdapterError,
 	ClaudeBoundaryError,
 	ClaudeRuntimeError,
+	EventSinkIngestionError,
 } from "../event-sink-errors.js";
 import type {
+	EventSink,
 	PermissionDecision,
+	PermissionResponse,
 	ProviderCapabilities,
 	SendTurnInput,
 	TurnResult,
@@ -95,6 +107,13 @@ import {
 	validateUserMessage,
 } from "./claude-sdk-validation.js";
 import type {
+	ClaudeSessionCommand,
+	ClaudeSessionFailure,
+	ClaudeSessionOutput,
+	ClaudeSessionOutputReply,
+	ClaudeSessionRunner,
+} from "./claude-session-runner.js";
+import type {
 	ClaudeSubagentSdk,
 	MaterializeClaudeSubagentsInput,
 	MaterializedClaudeSubagent,
@@ -132,6 +151,9 @@ export interface ClaudeProviderInstanceDeps {
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
 	readonly workspaceRoot: string;
+	readonly shellEnv?: (
+		directory: string,
+	) => Readonly<Record<string, string | undefined>>;
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
@@ -147,6 +169,16 @@ export interface ClaudeProviderInstanceDeps {
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
 }
 
+export type ClaudeSessionRunnerDeps = Pick<
+	ClaudeProviderInstanceDeps,
+	| "workspaceRoot"
+	| "shellEnv"
+	| "queryFactory"
+	| "subagentSdk"
+	| "subagentPollTimeoutMs"
+	| "capabilitiesService"
+> & { readonly materializeSubagents?: boolean };
+
 export interface ClaudeProviderRuntimeState {
 	readonly sessions: HashMap.HashMap<string, ClaudeSessionContext>;
 	readonly setupLocks: HashMap.HashMap<string, Deferred.Deferred<void, Error>>;
@@ -155,6 +187,7 @@ export interface ClaudeProviderRuntimeState {
 		ReadonlyArray<Deferred.Deferred<TurnResult, Error>>
 	>;
 	readonly endedStreams: HashSet.HashSet<string>;
+	readonly shutdownAfterTurn: HashSet.HashSet<string>;
 }
 
 interface ClaudeSubagentFinalizationFiberKey {
@@ -168,6 +201,7 @@ const emptyClaudeProviderRuntimeState = (): ClaudeProviderRuntimeState => ({
 	setupLocks: HashMap.empty(),
 	turnWaiters: HashMap.empty(),
 	endedStreams: HashSet.empty(),
+	shutdownAfterTurn: HashSet.empty(),
 });
 
 export class ClaudeProviderRuntimeTag extends Context.Tag(
@@ -178,10 +212,51 @@ export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
 ): Effect.Effect<ClaudeProviderRuntime, never, Scope.Scope> =>
 	Effect.gen(function* () {
+		const capabilitiesService =
+			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
+		const abortFibers = yield* FiberMap.make<string, void, never>();
+		const interactionFibers = yield* FiberMap.make<string, void, never>();
+		let runtime: ClaudeProviderRuntime | undefined;
+		const runner = yield* makeClaudeSessionRunner(
+			{
+				workspaceRoot: deps.workspaceRoot,
+				...(deps.shellEnv ? { shellEnv: deps.shellEnv } : {}),
+				...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
+				...(deps.subagentSdk ? { subagentSdk: deps.subagentSdk } : {}),
+				...(deps.subagentPollTimeoutMs !== undefined
+					? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
+					: {}),
+				materializeSubagents: deps.materializeSubagents !== undefined,
+				capabilitiesService,
+			},
+			(output) =>
+				runtime ? runtime.handleOutputEffect(output) : Effect.succeed({}),
+		);
+		runtime = new ClaudeProviderRuntime(
+			{ ...deps, capabilitiesService },
+			runner,
+			abortFibers,
+			interactionFibers,
+		);
+		const providerRuntime = runtime;
+		yield* Effect.addFinalizer(() =>
+			providerRuntime.shutdownEffect().pipe(Effect.ignore),
+		);
+		return runtime;
+	});
+
+export const makeClaudeSessionRunner = (
+	deps: ClaudeSessionRunnerDeps,
+	emit: (
+		output: ClaudeSessionOutput,
+	) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
+): Effect.Effect<ClaudeSessionRunner, never, Scope.Scope> =>
+	Effect.gen(function* () {
 		const stateRef = yield* Ref.make<ClaudeProviderRuntimeState>(
 			emptyClaudeProviderRuntimeState(),
 		);
 		const streamFibers = yield* FiberMap.make<string, void, unknown>();
+		const shutdownFibers = yield* FiberMap.make<string, void, never>();
 		const subagentFinalizationFibers = yield* FiberMap.make<
 			ClaudeSubagentFinalizationFiberKey,
 			void,
@@ -189,16 +264,18 @@ export const makeClaudeProviderRuntime = (
 		>();
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
-		const runtime = new ClaudeProviderRuntime(
+		const runner = new InProcessClaudeSessionRunner(
 			{ ...deps, capabilitiesService },
 			stateRef,
 			streamFibers,
 			subagentFinalizationFibers,
+			shutdownFibers,
+			emit,
 		);
 		yield* Effect.addFinalizer(() =>
-			runtime.shutdownEffect().pipe(Effect.ignore),
+			runner.executeEffect({ type: "shutdown" }).pipe(Effect.ignore),
 		);
-		return runtime;
+		return runner;
 	});
 
 export const ClaudeProviderRuntimeLive = (
@@ -206,8 +283,358 @@ export const ClaudeProviderRuntimeLive = (
 ): Layer.Layer<ClaudeProviderRuntimeTag, never, Scope.Scope> =>
 	Layer.scoped(ClaudeProviderRuntimeTag, makeClaudeProviderRuntime(deps));
 
+function sessionFailure(
+	operation: string,
+	cause: unknown,
+): ClaudeSessionFailure {
+	const failure =
+		cause instanceof ProviderInstanceFailure ? cause.cause : cause;
+	return {
+		operation:
+			cause instanceof ProviderInstanceFailure ? cause.operation : operation,
+		message:
+			typeof failure === "object" &&
+			failure !== null &&
+			"message" in failure &&
+			typeof failure.message === "string"
+				? failure.message
+				: asError(failure).message,
+		...(failure instanceof Error ? { name: failure.name } : {}),
+		...(typeof failure === "object" &&
+		failure !== null &&
+		"code" in failure &&
+		(typeof failure.code === "string" || typeof failure.code === "number")
+			? { code: failure.code }
+			: {}),
+		...(typeof failure === "object" &&
+		failure !== null &&
+		"retryable" in failure &&
+		typeof failure.retryable === "boolean"
+			? { retryable: failure.retryable }
+			: {}),
+	};
+}
+
+/** Provider API compatibility and event-store interaction routing only. */
 export class ClaudeProviderRuntime {
 	readonly providerId = "claude";
+	private readonly sinks = new Map<string, EventSink>();
+
+	constructor(
+		private readonly deps: ClaudeProviderInstanceDeps,
+		private readonly runner: ClaudeSessionRunner,
+		private readonly abortFibers: FiberMap.FiberMap<string, void, never>,
+		private readonly interactionFibers: FiberMap.FiberMap<string, void, never>,
+	) {}
+
+	private commandEffect(
+		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
+	private commandEffect(
+		command: Exclude<ClaudeSessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<void, ProviderInstanceFailure>;
+	private commandEffect(
+		command: ClaudeSessionCommand,
+	): Effect.Effect<TurnResult | undefined, ProviderInstanceFailure> {
+		return this.runner.executeEffect(command).pipe(
+			Effect.mapError(
+				(failure) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: failure.operation,
+						cause: Object.assign(new Error(failure.message), failure),
+					}),
+			),
+		);
+	}
+
+	discoverEffect(): Effect.Effect<
+		ProviderCapabilities,
+		ProviderInstanceFailure
+	> {
+		return discoverCapabilitiesEffect(
+			this.deps.workspaceRoot,
+			this.deps.capabilitiesService,
+		).pipe(
+			Effect.mapError(
+				(cause: ClaudeAdapterError) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "discover",
+						cause: cause instanceof ClaudeBoundaryError ? cause.cause : cause,
+					}),
+			),
+		);
+	}
+
+	sendTurnEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
+		return Effect.gen(this, function* () {
+			const { eventSink, abortSignal, ...turn } = input;
+			const claudeSettingsOverrides = yield* Effect.try({
+				try: () => this.deps.claudeSettingsOverrides?.(),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "sendTurn",
+						cause,
+					}),
+			});
+			const sinkId = randomUUID();
+			this.sinks.set(sinkId, eventSink);
+			const aborted = Effect.async<void>((resume) => {
+				const onAbort = () => resume(Effect.void);
+				if (abortSignal.aborted) onAbort();
+				else abortSignal.addEventListener("abort", onAbort, { once: true });
+				return Effect.sync(() =>
+					abortSignal.removeEventListener("abort", onAbort),
+				);
+			});
+			yield* FiberMap.run(
+				this.abortFibers,
+				sinkId,
+				aborted.pipe(
+					Effect.andThen(this.runner.executeEffect({ type: "abort", sinkId })),
+					Effect.ignore,
+				),
+			);
+			return yield* this.commandEffect({
+				type: "send-turn",
+				sinkId,
+				aborted: abortSignal.aborted,
+				claudeSettingsOverrides,
+				input: turn,
+			});
+		});
+	}
+
+	interruptTurnEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({ type: "interrupt", sessionId });
+	}
+	resolvePermissionEffect(
+		sessionId: string,
+		requestId: string,
+		decision: PermissionDecision,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({
+			type: "resolve-permission",
+			sessionId,
+			requestId,
+			decision,
+		});
+	}
+	resolveQuestionEffect(
+		sessionId: string,
+		requestId: string,
+		answers: Record<string, unknown>,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({
+			type: "resolve-question",
+			sessionId,
+			requestId,
+			answers,
+		});
+	}
+	applyLiveSettingsEffect(
+		sessionId: string,
+		settings: {
+			readonly modelId?: string | undefined;
+			readonly contextWindow?: string | undefined;
+			readonly variant?: string | undefined;
+		},
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({
+			type: "apply-live-settings",
+			sessionId,
+			settings,
+		});
+	}
+	setPermissionModeEffect(
+		sessionId: string,
+		mode: ClaudeSDKPermissionMode,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({ type: "set-permission-mode", sessionId, mode });
+	}
+	endSessionEffect(
+		sessionId: string,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({ type: "end-session", sessionId });
+	}
+	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({ type: "shutdown" }).pipe(
+			Effect.ensuring(
+				Effect.gen(this, function* () {
+					this.sinks.clear();
+					yield* FiberMap.clear(this.abortFibers);
+					yield* FiberMap.clear(this.interactionFibers);
+				}),
+			),
+		);
+	}
+
+	handleOutputEffect(
+		output: ClaudeSessionOutput,
+	): Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> {
+		return Effect.gen(this, function* () {
+			if (output.type === "background-task") {
+				this.deps.onBackgroundTask?.(output.transition);
+				return;
+			}
+			const sink = this.sinks.get(output.sinkId);
+			if (!sink) return;
+			switch (output.type) {
+				case "event":
+					return yield* sink
+						.push(output.event)
+						.pipe(Effect.mapError((cause) => sessionFailure("push", cause)));
+				case "permission-request":
+				case "question-request": {
+					const request = Effect.suspend(() =>
+						output.type === "permission-request"
+							? sink.requestPermission(output.request).pipe(
+									Effect.flatMap((response) =>
+										this.runner.executeEffect({
+											type: "answer-permission",
+											sinkId: output.sinkId,
+											requestId: output.request.requestId,
+											response,
+										}),
+									),
+								)
+							: sink.requestQuestion(output.request).pipe(
+									Effect.flatMap((answers) =>
+										this.runner.executeEffect({
+											type: "answer-question",
+											sinkId: output.sinkId,
+											requestId: output.request.requestId,
+											answers,
+										}),
+									),
+								),
+					);
+					yield* FiberMap.run(
+						this.interactionFibers,
+						`${output.sinkId}:${output.request.requestId}`,
+						request.pipe(
+							Effect.onExit((exit) =>
+								Exit.isFailure(exit)
+									? this.runner
+											.executeEffect({
+												type: "interaction-failed",
+												sinkId: output.sinkId,
+												requestId: output.request.requestId,
+												kind:
+													output.type === "permission-request"
+														? "permission"
+														: "question",
+												failure: sessionFailure(
+													"request interaction",
+													Cause.squash(exit.cause),
+												),
+											})
+											.pipe(Effect.ignore)
+									: Effect.void,
+							),
+							Effect.catchAllCause(() => Effect.void),
+						),
+					);
+					return;
+				}
+				case "resolve-permission":
+					return yield* sink
+						.resolvePermission(output.requestId, output.response)
+						.pipe(
+							Effect.mapError((cause) =>
+								sessionFailure("resolvePermission", cause),
+							),
+						);
+				case "resolve-question":
+					return yield* sink
+						.resolveQuestion(output.requestId, output.answers)
+						.pipe(
+							Effect.mapError((cause) =>
+								sessionFailure("resolveQuestion", cause),
+							),
+						);
+				case "cancel-interactions":
+					return yield* Effect.suspend(
+						() =>
+							sink.cancelSessionInteractions?.(output.reason, {
+								recoverQuestions: output.recoverQuestions,
+							}) ?? Effect.void,
+					).pipe(Effect.catchAllCause(() => Effect.void));
+				case "cancel-interaction":
+					return yield* FiberMap.remove(
+						this.interactionFibers,
+						`${output.sinkId}:${output.requestId}`,
+					);
+				case "release-sink":
+					for (const [key] of Array.from(this.interactionFibers)) {
+						if (key.startsWith(`${output.sinkId}:`)) {
+							yield* FiberMap.remove(this.interactionFibers, key);
+						}
+					}
+					this.sinks.delete(output.sinkId);
+					yield* FiberMap.remove(this.abortFibers, output.sinkId);
+					return;
+				case "materialize-subagents":
+					return yield* this.deps
+						.materializeSubagents?.({
+							...output.input,
+							knownTasks: new Map(output.input.knownTasks),
+						})
+						.pipe(
+							Effect.mapError((cause) => sessionFailure(output.type, cause)),
+						) ?? Effect.succeed([]);
+				case "ensure-subagent-session": {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					const ensureSession =
+						this.deps.ensureClaudeSubagentSession ??
+						(persist._tag === "Some"
+							? persist.value.ensureClaudeSubagentSession
+							: undefined);
+					return yield* ensureSession?.(output.input).pipe(
+						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					) ?? Effect.void;
+				}
+			}
+		}).pipe(
+			Effect.map((children) => (children ? { children } : {})),
+			Effect.catchAllDefect((cause) =>
+				Effect.fail(sessionFailure(output.type, cause)),
+			),
+		);
+	}
+}
+
+class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
+	readonly providerId = "claude";
+	/** The first send's abort signal stays linked for the query's lifetime. */
+	private readonly sessionAbortSources = new Map<string, EventSink>();
+	private readonly sinkBindings = new Map<
+		string,
+		{
+			readonly sessionId: string;
+			readonly finished: Deferred.Deferred<void>;
+			readonly claudeSettingsOverrides: Settings | undefined;
+			readonly sink: EventSink;
+			readonly abortController: AbortController;
+			readonly permissions: Map<
+				string,
+				Deferred.Deferred<PermissionResponse, ClaudeSessionFailure>
+			>;
+			readonly questions: Map<
+				string,
+				Deferred.Deferred<Record<string, unknown>, ClaudeSessionFailure>
+			>;
+			references: number;
+		}
+	>();
 
 	/** Permission bridge is stateless; the live sink comes from the session context. */
 	private permissionBridge: ClaudePermissionBridge =
@@ -217,10 +644,9 @@ export class ClaudeProviderRuntime {
 	private readonly queryFactory: NonNullable<
 		ClaudeProviderInstanceDeps["queryFactory"]
 	>;
-	private readonly claudeSettingsOverrides: ClaudeProviderInstanceDeps["claudeSettingsOverrides"];
 
 	constructor(
-		private readonly deps: ClaudeProviderInstanceDeps,
+		private readonly deps: ClaudeSessionRunnerDeps,
 		private readonly stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 		private readonly streamFibers: FiberMap.FiberMap<string, void, unknown>,
 		private readonly subagentFinalizationFibers: FiberMap.FiberMap<
@@ -228,11 +654,431 @@ export class ClaudeProviderRuntime {
 			void,
 			never
 		>,
+		private readonly shutdownFibers: FiberMap.FiberMap<string, void, never>,
+		private readonly emit: (
+			output: ClaudeSessionOutput,
+		) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
 	) {
 		this.queryFactory =
 			deps.queryFactory ??
 			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
-		this.claudeSettingsOverrides = deps.claudeSettingsOverrides;
+	}
+
+	executeEffect(
+		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<TurnResult, ClaudeSessionFailure>;
+	executeEffect(
+		command: Exclude<ClaudeSessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<void, ClaudeSessionFailure>;
+	executeEffect(
+		command: ClaudeSessionCommand,
+	): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure>;
+	executeEffect(
+		command: ClaudeSessionCommand,
+	): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure> {
+		const execute = Effect.gen(this, function* () {
+			switch (command.type) {
+				case "send-turn": {
+					const finished = yield* Deferred.make<void>();
+					const eventSink = this.makeSessionSink(
+						command.sinkId,
+						command.input.sessionId,
+						finished,
+						command.claudeSettingsOverrides,
+					);
+					const controller = this.sinkBindings.get(
+						command.sinkId,
+					)?.abortController;
+					if (!controller)
+						return yield* Effect.die("Missing Claude runner sink binding");
+					if (command.aborted) controller.abort();
+					return yield* this.sendTurnEffect({
+						...command.input,
+						eventSink,
+						abortSignal: controller.signal,
+					}).pipe(
+						Effect.ensuring(Deferred.succeed(finished, undefined)),
+						Effect.ensuring(this.releaseSinkEffect(eventSink)),
+					);
+				}
+				case "answer-permission": {
+					const pending = this.sinkBindings
+						.get(command.sinkId)
+						?.permissions.get(command.requestId);
+					if (pending) yield* Deferred.succeed(pending, command.response);
+					return;
+				}
+				case "answer-question": {
+					const pending = this.sinkBindings
+						.get(command.sinkId)
+						?.questions.get(command.requestId);
+					if (pending) yield* Deferred.succeed(pending, command.answers);
+					return;
+				}
+				case "interaction-failed": {
+					const binding = this.sinkBindings.get(command.sinkId);
+					if (command.kind === "permission") {
+						const pending = binding?.permissions.get(command.requestId);
+						if (pending) yield* Deferred.fail(pending, command.failure);
+					} else {
+						const pending = binding?.questions.get(command.requestId);
+						if (pending) yield* Deferred.fail(pending, command.failure);
+					}
+					return;
+				}
+				case "resolve-permission":
+					yield* this.resolvePermissionEffect(
+						command.sessionId,
+						command.requestId,
+						command.decision,
+					);
+					return;
+				case "resolve-question":
+					yield* this.resolveQuestionEffect(
+						command.sessionId,
+						command.requestId,
+						command.answers,
+					);
+					return;
+				case "interrupt":
+					yield* this.interruptTurnEffect(command.sessionId);
+					return;
+				case "abort":
+					this.sinkBindings.get(command.sinkId)?.abortController.abort();
+					return;
+				case "end-session":
+					yield* this.endSessionEffect(command.sessionId);
+					return;
+				case "apply-live-settings":
+					yield* this.applyLiveSettingsEffect(
+						command.sessionId,
+						command.settings,
+					);
+					return;
+				case "set-permission-mode":
+					yield* this.setPermissionModeEffect(command.sessionId, command.mode);
+					return;
+				case "shutdown":
+					yield* this.shutdownEffect();
+					return;
+				case "shutdown-after-turn": {
+					const ctx = yield* getSession(this.stateRef, command.sessionId);
+					if (
+						!ctx &&
+						!Array.from(this.sinkBindings.values()).some(
+							(binding) => binding.sessionId === command.sessionId,
+						)
+					)
+						return;
+					yield* Ref.update(this.stateRef, (state) => ({
+						...state,
+						shutdownAfterTurn: HashSet.add(
+							state.shutdownAfterTurn,
+							command.sessionId,
+						),
+					}));
+					yield* this.scheduleShutdownAfterTurnEffect(command.sessionId);
+					return;
+				}
+			}
+		});
+		return execute.pipe(
+			Effect.mapError((cause) => sessionFailure(command.type, cause)),
+		);
+	}
+
+	private scheduleShutdownAfterTurnEffect(
+		sessionId: string,
+	): Effect.Effect<void> {
+		return FiberMap.run(
+			this.shutdownFibers,
+			sessionId,
+			Effect.gen(this, function* () {
+				while (
+					HashSet.has(
+						(yield* getState(this.stateRef)).shutdownAfterTurn,
+						sessionId,
+					)
+				) {
+					const sends = Array.from(this.sinkBindings.values()).filter(
+						(binding) => binding.sessionId === sessionId,
+					);
+					yield* Effect.forEach(
+						sends,
+						(binding) => Deferred.await(binding.finished),
+						{ discard: true },
+					);
+					const finalizers = Array.from(this.subagentFinalizationFibers).filter(
+						([key]) => key.sessionId === sessionId,
+					);
+					yield* Effect.forEach(finalizers, ([, fiber]) => Fiber.await(fiber), {
+						discard: true,
+					});
+					// Sends admitted while finalization ran still use the warm query.
+					const finished = yield* Effect.forEach(
+						Array.from(this.sinkBindings.values()).filter(
+							(binding) => binding.sessionId === sessionId,
+						),
+						(binding) => Deferred.isDone(binding.finished),
+					);
+					if (
+						finished.some((done) => !done) ||
+						Array.from(this.subagentFinalizationFibers).some(
+							([key]) => key.sessionId === sessionId,
+						)
+					)
+						continue;
+					const state = yield* getState(this.stateRef);
+					// Eviction cancels the request for the old query generation.
+					if (!HashSet.has(state.shutdownAfterTurn, sessionId)) return;
+					const ctx = getOrUndefined(HashMap.get(state.sessions, sessionId));
+					if (ctx)
+						yield* this.disposeSessionEffect(
+							ctx,
+							"Runner shutting down after turn",
+						);
+					else
+						yield* Ref.update(this.stateRef, (state) => ({
+							...state,
+							shutdownAfterTurn: HashSet.remove(
+								state.shutdownAfterTurn,
+								sessionId,
+							),
+						}));
+					return;
+				}
+			}).pipe(Effect.ignore),
+			{ onlyIfMissing: true },
+		).pipe(Effect.asVoid);
+	}
+
+	private makeSessionSink(
+		sinkId: string,
+		sessionId: string,
+		finished: Deferred.Deferred<void>,
+		claudeSettingsOverrides: Settings | undefined,
+	): EventSink {
+		const permissions = new Map<
+			string,
+			Deferred.Deferred<PermissionResponse, ClaudeSessionFailure>
+		>();
+		const questions = new Map<
+			string,
+			Deferred.Deferred<Record<string, unknown>, ClaudeSessionFailure>
+		>();
+		const sinkFailure = (cause: ClaudeSessionFailure) =>
+			new EventSinkIngestionError({
+				cause: Object.assign(new Error(cause.message), cause),
+			});
+		const emit = (output: ClaudeSessionOutput) =>
+			this.emit(output).pipe(Effect.asVoid, Effect.mapError(sinkFailure));
+		const sink: EventSink & { readonly runnerSinkId: string } = {
+			runnerSinkId: sinkId,
+			push: (event) => emit({ type: "event", sinkId, event }),
+			requestPermission: (request) =>
+				Effect.gen(function* () {
+					const deferred = yield* Deferred.make<
+						PermissionResponse,
+						ClaudeSessionFailure
+					>();
+					permissions.set(request.requestId, deferred);
+					return yield* emit({
+						type: "permission-request",
+						sinkId,
+						request,
+					}).pipe(
+						Effect.andThen(
+							Deferred.await(deferred).pipe(Effect.mapError(sinkFailure)),
+						),
+						Effect.ensuring(
+							Effect.sync(() => permissions.delete(request.requestId)).pipe(
+								Effect.andThen(
+									emit({
+										type: "cancel-interaction",
+										sinkId,
+										requestId: request.requestId,
+									}),
+								),
+								Effect.ignore,
+							),
+						),
+					);
+				}),
+			requestQuestion: (request) =>
+				Effect.gen(function* () {
+					const deferred = yield* Deferred.make<
+						Record<string, unknown>,
+						ClaudeSessionFailure
+					>();
+					questions.set(request.requestId, deferred);
+					return yield* emit({
+						type: "question-request",
+						sinkId,
+						request,
+					}).pipe(
+						Effect.andThen(
+							Deferred.await(deferred).pipe(Effect.mapError(sinkFailure)),
+						),
+						Effect.ensuring(
+							Effect.sync(() => questions.delete(request.requestId)).pipe(
+								Effect.andThen(
+									emit({
+										type: "cancel-interaction",
+										sinkId,
+										requestId: request.requestId,
+									}),
+								),
+								Effect.ignore,
+							),
+						),
+					);
+				}),
+			resolvePermission: (requestId, response) =>
+				emit({ type: "resolve-permission", sinkId, requestId, response }),
+			resolveQuestion: (requestId, answers) =>
+				emit({ type: "resolve-question", sinkId, requestId, answers }),
+			cancelSessionInteractions: (reason, options) =>
+				emit({
+					type: "cancel-interactions",
+					sinkId,
+					reason,
+					recoverQuestions: options?.recoverQuestions ?? false,
+				}).pipe(
+					Effect.ignore,
+					Effect.andThen(
+						Effect.forEach(
+							permissions.values(),
+							(pending) => Deferred.succeed(pending, { decision: "reject" }),
+							{ discard: true },
+						),
+					),
+					Effect.andThen(
+						Effect.forEach(
+							questions.values(),
+							(pending) =>
+								Deferred.fail(pending, {
+									operation: "requestQuestion",
+									message: reason,
+								}),
+							{ discard: true },
+						),
+					),
+				),
+		};
+		this.sinkBindings.set(sinkId, {
+			sessionId,
+			finished,
+			claudeSettingsOverrides,
+			sink,
+			abortController: new AbortController(),
+			permissions,
+			questions,
+			references: 1,
+		});
+		return sink;
+	}
+
+	private retainSink(sink: EventSink | undefined): void {
+		if (
+			sink &&
+			"runnerSinkId" in sink &&
+			typeof sink.runnerSinkId === "string"
+		) {
+			const binding = this.sinkBindings.get(sink.runnerSinkId);
+			if (binding) binding.references++;
+		}
+	}
+
+	private sinkId(sink: EventSink | undefined): string | undefined {
+		return sink &&
+			"runnerSinkId" in sink &&
+			typeof sink.runnerSinkId === "string"
+			? sink.runnerSinkId
+			: undefined;
+	}
+
+	private recordBackgroundTaskEffect(
+		transition: BackgroundTaskTransition,
+	): Effect.Effect<void> {
+		return this.emit({ type: "background-task", transition }).pipe(
+			Effect.orDie,
+			Effect.asVoid,
+		);
+	}
+
+	private materializeSubagentsEffect(
+		ctx: ClaudeSessionContext,
+		input: MaterializeClaudeSubagentsInput,
+	): Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError> {
+		const sinkId = this.sinkId(ctx.eventSink);
+		if (!sinkId) return Effect.succeed([]);
+		return this.emit({
+			type: "materialize-subagents",
+			sinkId,
+			input: { ...input, knownTasks: Array.from(input.knownTasks) },
+		}).pipe(
+			Effect.map((reply) => reply.children ?? []),
+			Effect.mapError(
+				(cause) =>
+					new ClaudeBoundaryError({
+						operation: "materializeSubagents",
+						cause: new Error(cause.message),
+					}),
+			),
+		);
+	}
+
+	private ensureSubagentSessionEffect(
+		ctx: ClaudeSessionContext,
+		input: Parameters<
+			NonNullable<ClaudeProviderInstanceDeps["ensureClaudeSubagentSession"]>
+		>[0],
+	): Effect.Effect<void, ClaudeAdapterError> {
+		const sinkId = this.sinkId(ctx.eventSink);
+		if (!sinkId) return Effect.void;
+		return this.emit({ type: "ensure-subagent-session", sinkId, input }).pipe(
+			Effect.asVoid,
+			Effect.mapError(
+				(cause) =>
+					new ClaudeBoundaryError({
+						operation: "ensureClaudeSubagentSession",
+						cause: new Error(cause.message),
+					}),
+			),
+		);
+	}
+
+	private releaseSinkEffect(sink: EventSink | undefined): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			if (
+				!sink ||
+				!("runnerSinkId" in sink) ||
+				typeof sink.runnerSinkId !== "string"
+			)
+				return;
+			const binding = this.sinkBindings.get(sink.runnerSinkId);
+			if (!binding || --binding.references > 0) return;
+			this.sinkBindings.delete(sink.runnerSinkId);
+			yield* this.emit({
+				type: "release-sink",
+				sinkId: sink.runnerSinkId,
+			}).pipe(Effect.ignore);
+		});
+	}
+
+	private removeSessionEffect(sessionId: string): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			const ctx = yield* getSession(this.stateRef, sessionId);
+			yield* removeSession(this.stateRef, sessionId);
+			yield* this.recordBackgroundTaskEffect({
+				sessionId,
+				kind: "session-ended",
+			});
+			yield* this.releaseSinkEffect(ctx?.eventSink);
+			const abortSource = this.sessionAbortSources.get(sessionId);
+			this.sessionAbortSources.delete(sessionId);
+			yield* this.releaseSinkEffect(abortSource);
+		});
 	}
 
 	private buildUserMessage(input: SendTurnInput): SDKUserMessage {
@@ -327,11 +1173,7 @@ export class ClaudeProviderRuntime {
 								resumeSessionId: existingCtx.resumeSessionId,
 							}
 						: input.providerState;
-				yield* removeSession(
-					this.stateRef,
-					this.deps.onBackgroundTask,
-					sessionId,
-				);
+				yield* this.removeSessionEffect(sessionId);
 				return yield* this.createSessionAndSendTurnEffect({
 					...input,
 					providerState,
@@ -349,11 +1191,7 @@ export class ClaudeProviderRuntime {
 				(yield* isStreamEnded(this.stateRef, sessionId))
 			) {
 				log.info(`Evicting ended session stream on sendTurn: ${sessionId}`);
-				yield* removeSession(
-					this.stateRef,
-					this.deps.onBackgroundTask,
-					sessionId,
-				);
+				yield* this.removeSessionEffect(sessionId);
 			} else if (existingCtx) {
 				return yield* this.enqueueTurnEffect(existingCtx, input);
 			}
@@ -471,15 +1309,19 @@ export class ClaudeProviderRuntime {
 						validateOptionsJsonShape({
 							cwd: input.workspaceRoot,
 							abortController,
-							env: makeClaudeSdkEnv(
-								input.configDir !== undefined
-									? { configDir: input.configDir }
-									: undefined,
-							),
+							env: makeClaudeSdkEnv({
+								configDir:
+									input.configDir ??
+									(typeof input.providerState["claudeConfigDir"] === "string"
+										? input.providerState["claudeConfigDir"]
+										: undefined),
+								baseEnv: this.deps.shellEnv?.(input.workspaceRoot),
+							}),
 							includePartialMessages: true,
 							forwardSubagentText: true,
 							settings: buildClaudeFlagSettings(
-								this.claudeSettingsOverrides?.(),
+								this.sinkBindings.get(this.sinkId(input.eventSink) ?? "")
+									?.claudeSettingsOverrides,
 							),
 							settingSources: ["user", "project", "local"],
 							canUseTool,
@@ -511,15 +1353,25 @@ export class ClaudeProviderRuntime {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				ctx = { ...context, query };
+				ctx = {
+					...context,
+					query,
+					configDir: resolve(
+						input.workspaceRoot,
+						options.env?.["CLAUDE_CONFIG_DIR"] ??
+							join(options.env?.["HOME"] ?? homedir(), ".claude"),
+					),
+				};
 
+				this.retainSink(ctx.eventSink);
+				this.retainSink(input.eventSink);
+				this.sessionAbortSources.set(sessionId, input.eventSink);
 				yield* setSession(this.stateRef, sessionId, ctx);
 
 				const translator = makeClaudeTranslationService({
 					getSink: (ctx) => ctx.eventSink,
-					...(this.deps.onBackgroundTask
-						? { onBackgroundTask: this.deps.onBackgroundTask }
-						: {}),
+					onBackgroundTask: (transition) =>
+						this.recordBackgroundTaskEffect(transition),
 				});
 				yield* FiberMap.run(
 					this.streamFibers,
@@ -774,7 +1626,10 @@ export class ClaudeProviderRuntime {
 							// Marks the turn as started so a system/init arriving before
 							// the first assistant chunk cannot report the session idle.
 							ctx.turnInFlight = true;
+							const priorSink = ctx.eventSink;
+							this.retainSink(input.eventSink);
 							ctx.eventSink = input.eventSink;
+							yield* this.releaseSinkEffect(priorSink);
 							// Marks the assistant-message boundary: if the SDK's streaming
 							// turn is still open, no `result` resets the translator, and
 							// this reply would otherwise merge into the previous message.
@@ -833,6 +1688,7 @@ export class ClaudeProviderRuntime {
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
+			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
 			yield* this.disposeSessionEffect(ctx, "Claude agent changed");
 
 			const providerState = { ...input.providerState };
@@ -933,7 +1789,7 @@ export class ClaudeProviderRuntime {
 				}
 				yield* translator.translate(ctx, decodedMessage);
 				yield* handleSubagentTaskStartedEffect(
-					this.deps.ensureClaudeSubagentSession,
+					(input) => this.ensureSubagentSessionEffect(ctx, input),
 					ctx,
 					decodedMessage,
 				);
@@ -959,10 +1815,29 @@ export class ClaudeProviderRuntime {
 			sessionId: ctx.sessionId,
 			turnId: ctx.currentTurnId ?? "unknown",
 		};
+		this.retainSink(ctx.eventSink);
 		return FiberMap.run(
 			this.subagentFinalizationFibers,
 			key,
-			finalizeSubagentsAfterResultEffect(this.deps, ctx, result),
+			finalizeSubagentsAfterResultEffect(
+				{
+					...(this.deps.subagentSdk
+						? { subagentSdk: this.deps.subagentSdk }
+						: {}),
+					...(this.deps.subagentPollTimeoutMs !== undefined
+						? { subagentPollTimeoutMs: this.deps.subagentPollTimeoutMs }
+						: {}),
+					...(this.deps.materializeSubagents
+						? {
+								materializeSubagents: (
+									input: MaterializeClaudeSubagentsInput,
+								) => this.materializeSubagentsEffect(ctx, input),
+							}
+						: {}),
+				},
+				ctx,
+				result,
+			).pipe(Effect.ensuring(this.releaseSinkEffect(ctx.eventSink))),
 		).pipe(Effect.asVoid);
 	}
 
@@ -1043,7 +1918,7 @@ export class ClaudeProviderRuntime {
 				Effect.gen(this, function* () {
 					const current = yield* getSession(this.stateRef, ctx.sessionId);
 					if (current === undefined || current === ctx) {
-						this.deps.onBackgroundTask?.({
+						yield* this.recordBackgroundTaskEffect({
 							sessionId: ctx.sessionId,
 							kind: "session-ended",
 						});
@@ -1070,6 +1945,7 @@ export class ClaudeProviderRuntime {
 		sessionId: string,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
+			yield* FiberMap.remove(this.shutdownFibers, sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return;
 
@@ -1082,6 +1958,13 @@ export class ClaudeProviderRuntime {
 				durationMs: 0,
 				providerStateUpdates: [],
 			});
+			if (
+				HashSet.has(
+					(yield* getState(this.stateRef)).shutdownAfterTurn,
+					sessionId,
+				)
+			)
+				yield* this.scheduleShutdownAfterTurnEffect(sessionId);
 		});
 	}
 
@@ -1248,11 +2131,7 @@ export class ClaudeProviderRuntime {
 			}).pipe(Effect.ignore);
 
 			yield* FiberMap.remove(this.streamFibers, ctx.sessionId);
-			yield* removeSession(
-				this.stateRef,
-				this.deps.onBackgroundTask,
-				ctx.sessionId,
-			);
+			yield* this.removeSessionEffect(ctx.sessionId);
 		});
 	}
 
@@ -1269,6 +2148,7 @@ export class ClaudeProviderRuntime {
 		sessionId: string,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
+			yield* FiberMap.remove(this.shutdownFibers, sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return; // idempotent
 			log.info(`Ending Claude session: ${sessionId}`);
@@ -1289,6 +2169,7 @@ export class ClaudeProviderRuntime {
 
 	shutdownLocalEffect(): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
+			yield* FiberMap.clear(this.shutdownFibers);
 			log.info("ClaudeProviderRuntime shutting down");
 			const state = yield* getState(this.stateRef);
 			for (const ctx of HashMap.values(state.sessions)) {

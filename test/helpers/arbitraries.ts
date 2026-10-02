@@ -4,10 +4,7 @@
 
 import { Schema } from "effect";
 import fc from "fast-check";
-import {
-	type IpcTaggedRequest,
-	IpcTaggedRequestSchema,
-} from "../../src/lib/contracts/ipc-requests.js";
+import { WsRpcRequest } from "../../src/lib/contracts/ws-rpc.js";
 import type { SSEEvent } from "../../src/lib/relay/opencode-events.js";
 import type {
 	FrontendDecision,
@@ -318,10 +315,10 @@ export const unknownEvent = fc
 	}) as fc.Arbitrary<SSEEvent>;
 
 /** Valid wire requests, decoded through the same schema as the daemon. */
-export const validIpcRequest: fc.Arbitrary<IpcTaggedRequest> = fc
+export const validDaemonRpcRequest: fc.Arbitrary<WsRpcRequest> = fc
 	.oneof(
 		fc.constant({ _tag: "GetStatus" }),
-		fc.constant({ _tag: "ListProjects" }),
+		fc.constant({ _tag: "GetProjects" }),
 		fc.constant({ _tag: "Shutdown" }),
 		fc.constant({ _tag: "RestartWithConfig" }),
 		fc.record({
@@ -343,62 +340,62 @@ export const validIpcRequest: fc.Arbitrary<IpcTaggedRequest> = fc
 			args: fc.array(fc.string({ maxLength: 30 }), { maxLength: 5 }),
 		}),
 		fc.record({
-			_tag: fc.constant("SetProjectTitle"),
+			_tag: fc.constant("RenameProject"),
 			slug: fc.string({ minLength: 1, maxLength: 50 }),
-			title: fc.string({ maxLength: 100 }),
+			title: fc.string({ minLength: 1, maxLength: 100 }),
 		}),
 		fc.record({
 			_tag: fc.constant("SetAgent"),
-			slug: fc.string({ maxLength: 50 }),
+			slug: fc.string({ minLength: 1, maxLength: 50 }),
 			agent: fc.constantFrom("build", "plan", "general"),
 		}),
 		fc.record({
-			_tag: fc.constant("SetModel"),
-			slug: fc.string({ maxLength: 50 }),
-			provider: fc.string({ maxLength: 50 }),
-			model: fc.string({ maxLength: 100 }),
+			_tag: fc.constant("SetDefaultModel"),
+			projectSlug: fc.string({ minLength: 1, maxLength: 50 }),
+			provider: fc.string({ minLength: 1, maxLength: 50 }),
+			model: fc.string({ minLength: 1, maxLength: 100 }),
 		}),
-		fc.constant({ _tag: "InstanceList" }),
+		fc.constant({ _tag: "GetInstances" }),
 		fc.record({
-			_tag: fc.constant("InstanceAdd"),
+			_tag: fc.constant("AddInstance"),
 			name: fc.string({ minLength: 1, maxLength: 50 }),
 			managed: fc.constant(true),
 			port: fc.integer({ min: 1, max: 65535 }),
 		}),
 		fc.record({
-			_tag: fc.constant("InstanceAdd"),
+			_tag: fc.constant("AddInstance"),
 			name: fc.string({ minLength: 1, maxLength: 50 }),
 			managed: fc.constant(false),
 			url: fc.constant("http://host:4096"),
 		}),
 		fc.record({
-			_tag: fc.constant("InstanceRemove"),
-			id: fc.string({ minLength: 1, maxLength: 50 }),
+			_tag: fc.constant("RemoveInstance"),
+			instanceId: fc.string({ minLength: 1, maxLength: 50 }),
 		}),
 		fc.record({
-			_tag: fc.constant("InstanceStart"),
-			id: fc.string({ minLength: 1, maxLength: 50 }),
+			_tag: fc.constant("StartInstance"),
+			instanceId: fc.string({ minLength: 1, maxLength: 50 }),
 		}),
 		fc.record({
-			_tag: fc.constant("InstanceStop"),
-			id: fc.string({ minLength: 1, maxLength: 50 }),
+			_tag: fc.constant("StopInstance"),
+			instanceId: fc.string({ minLength: 1, maxLength: 50 }),
 		}),
 		fc.record({
-			_tag: fc.constant("InstanceStatus"),
-			id: fc.string({ minLength: 1, maxLength: 50 }),
+			_tag: fc.constant("GetInstanceStatus"),
+			instanceId: fc.string({ minLength: 1, maxLength: 50 }),
 		}),
 	)
-	.map((payload) => Schema.decodeUnknownSync(IpcTaggedRequestSchema)(payload));
+	.map((payload) => Schema.decodeUnknownSync(WsRpcRequest)(payload));
 
 /** Invalid wire requests. */
-export const invalidIpcRequest = fc.oneof(
+export const invalidDaemonRpcRequest = fc.oneof(
 	fc
 		.record({ _tag: fc.string({ minLength: 1, maxLength: 30 }) })
 		.filter(
 			(value) =>
 				![
 					"GetStatus",
-					"ListProjects",
+					"GetProjects",
 					"Shutdown",
 					"RestartWithConfig",
 					"AddProject",
@@ -406,20 +403,20 @@ export const invalidIpcRequest = fc.oneof(
 					"SetPin",
 					"SetKeepAwake",
 					"SetKeepAwakeCommand",
-					"SetProjectTitle",
+					"RenameProject",
 					"SetAgent",
-					"SetModel",
-					"InstanceList",
-					"InstanceAdd",
-					"InstanceRemove",
-					"InstanceStart",
-					"InstanceStop",
-					"InstanceStatus",
-					"InstanceUpdate",
+					"SetDefaultModel",
+					"GetInstances",
+					"AddInstance",
+					"RemoveInstance",
+					"StartInstance",
+					"StopInstance",
+					"GetInstanceStatus",
+					"UpdateInstance",
 				].includes(value._tag),
 		),
 	fc.constant({ _tag: "AddProject", directory: "" }),
-	fc.constant({ _tag: "InstanceAdd", name: "work", managed: true }),
+	fc.constant({ _tag: "AddInstance", name: "", managed: true }),
 );
 
 /** Invalid JSON strings */

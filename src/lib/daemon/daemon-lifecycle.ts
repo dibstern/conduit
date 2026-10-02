@@ -1,5 +1,5 @@
 // Daemon Lifecycle (extracted from Daemon)
-// Standalone functions for HTTP and IPC server lifecycle management,
+// Standalone functions for HTTP server lifecycle management,
 // parameterized by a DaemonLifecycleContext so they can be tested and
 // composed independently.
 
@@ -11,71 +11,13 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import {
-	createServer as createNetServer,
-	type Server as NetServer,
-	type Socket,
-} from "node:net";
-
-import * as Headers from "@effect/platform/Headers";
-import { Effect, Either, Schema } from "effect";
-import {
-	type IpcTaggedRequest,
-	IpcTaggedRequestSchema,
-} from "../contracts/ipc-requests.js";
-import { IpcRpcGroup } from "../domain/daemon/Services/ipc-rpc-group.js";
-import { formatErrorDetail } from "../errors.js";
+import { createServer as createNetServer, type Socket } from "node:net";
 import { createLogger } from "../logger.js";
 import { serveStaticFile, tryServeStatic } from "../server/static-files.js";
 import type { SetupInfoResponse } from "../shared-types.js";
-import type { IPCResponse } from "../types.js";
-import { serializeResponse } from "./ipc-protocol.js";
-import { removeSocketFile } from "./pid-manager.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const log = createLogger("daemon");
-
-function isTaggedPayload(value: unknown): value is { _tag: string } {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"_tag" in value &&
-		typeof value._tag === "string"
-	);
-}
-
-function makeTaggedPostResponseAction(
-	request: IpcTaggedRequest | undefined,
-	response: IPCResponse,
-	actions: IpcPostResponseActions | undefined,
-): (() => void) | undefined {
-	if (!actions || !request || response.ok !== true) return undefined;
-	if (request._tag !== "Shutdown" && request._tag !== "RestartWithConfig") {
-		return undefined;
-	}
-	return actions.scheduleShutdown;
-}
-
-export const dispatchTaggedRequestEffect = (request: IpcTaggedRequest) =>
-	Effect.gen(function* () {
-		const handler = yield* IpcRpcGroup.accessHandler(request._tag);
-		return yield* handler(request, Headers.empty);
-	}).pipe(
-		Effect.catchAll((error) =>
-			Effect.succeed({
-				ok: false,
-				error: formatErrorDetail(error),
-			}),
-		),
-	);
-
-export type TaggedIpcDispatcher = (
-	request: IpcTaggedRequest,
-) => Promise<IPCResponse>;
-
-export interface IpcPostResponseActions {
-	readonly scheduleShutdown: () => void;
-}
 
 // Mutable context so lifecycle functions can store server references back.
 
@@ -89,8 +31,6 @@ export interface DaemonLifecycleContext {
 	 * WebSocket upgrades is stored here. Falls back to httpServer when null.
 	 */
 	upgradeServer: HttpServer | null;
-	ipcServer: NetServer | null;
-	ipcClients: Set<Socket>;
 	clientCount: number;
 	socketPath: string;
 	router: {
@@ -446,120 +386,6 @@ export function closeOnboardingServer(
 		ctx.onboardingServer.close(() => {
 			clearTimeout(timeout);
 			ctx.onboardingServer = null;
-			resolve();
-		});
-	});
-}
-
-/** Create and start the IPC (Unix socket) server with command routing. */
-export function startIPCServer(
-	ctx: DaemonLifecycleContext,
-	dispatchTaggedRequest: TaggedIpcDispatcher,
-	postResponseActions?: IpcPostResponseActions,
-): Promise<void> {
-	return new Promise((resolve, reject) => {
-		// Remove stale socket file if it exists
-		removeSocketFile(ctx.socketPath);
-
-		ctx.ipcServer = createNetServer((socket: Socket) => {
-			ctx.ipcClients.add(socket);
-			ctx.clientCount++;
-
-			let buffer = "";
-			let cleaned = false;
-
-			const cleanup = () => {
-				if (cleaned) return;
-				cleaned = true;
-				ctx.ipcClients.delete(socket);
-				ctx.clientCount--;
-			};
-
-			socket.on("data", async (chunk: Buffer) => {
-				buffer += chunk.toString("utf-8");
-
-				// Process complete lines (JSON-lines protocol)
-				let newlineIndex: number;
-				while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-					const line = buffer.slice(0, newlineIndex).trim();
-					buffer = buffer.slice(newlineIndex + 1);
-
-					if (line.length === 0) continue;
-
-					let parsedLine: unknown;
-					try {
-						parsedLine = JSON.parse(line);
-					} catch {
-						socket.write(
-							serializeResponse({ ok: false, error: "Invalid JSON" }),
-						);
-						continue;
-					}
-
-					if (!isTaggedPayload(parsedLine)) {
-						socket.write(
-							serializeResponse({
-								ok: false,
-								error:
-									"The cmd-format IPC request is no longer supported; update your CLI.",
-							}),
-						);
-						continue;
-					}
-
-					const ipcT0 = Date.now();
-					const decoded = Schema.decodeUnknownEither(IpcTaggedRequestSchema)(
-						parsedLine,
-					);
-					const response = Either.isRight(decoded)
-						? await dispatchTaggedRequest(decoded.right)
-						: { ok: false, error: formatErrorDetail(decoded.left) };
-					const ipcMs = Date.now() - ipcT0;
-					if (ipcMs > 100) {
-						log.warn(`[ipc] ${parsedLine._tag} took ${ipcMs}ms`);
-					} else {
-						log.debug(`[ipc] ${parsedLine._tag} ${ipcMs}ms`);
-					}
-					socket.write(
-						serializeResponse(response),
-						makeTaggedPostResponseAction(
-							Either.isRight(decoded) ? decoded.right : undefined,
-							response,
-							postResponseActions,
-						),
-					);
-				}
-			});
-
-			socket.on("close", () => {
-				cleanup();
-			});
-
-			socket.on("error", () => {
-				cleanup();
-			});
-		});
-
-		ctx.ipcServer.on("error", (err) => {
-			reject(err);
-		});
-
-		ctx.ipcServer.listen(ctx.socketPath, () => {
-			resolve();
-		});
-	});
-}
-
-/** Close the IPC server. */
-export function closeIPCServer(ctx: DaemonLifecycleContext): Promise<void> {
-	return new Promise((resolve) => {
-		if (!ctx.ipcServer) {
-			resolve();
-			return;
-		}
-
-		ctx.ipcServer.close(() => {
-			ctx.ipcServer = null;
 			resolve();
 		});
 	});

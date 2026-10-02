@@ -9,20 +9,19 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { sendIpcRequest } from "../../../src/bin/cli-utils.js";
 import {
-	InstanceAdd,
-	InstanceList,
-	InstanceRemove,
-	InstanceStatus,
-	InstanceStop,
-	InstanceUpdate,
-} from "../../../src/lib/contracts/ipc-requests.js";
+	AddInstance,
+	GetInstanceStatus,
+	GetInstances,
+	RemoveInstance,
+	StopInstance,
+	UpdateInstance,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	startDaemonChildProcess,
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
-import type { OpenCodeInstance } from "../../../src/lib/types.js";
 
 async function listen(server: Server): Promise<number> {
 	return new Promise((resolve) => {
@@ -271,8 +270,8 @@ describe("startForegroundDaemon", () => {
 		}
 	});
 
-	it("serves instance lifecycle commands through the foreground IPC socket", async () => {
-		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-ipc-"));
+	it("serves instance lifecycle commands through the foreground RPC socket", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-rpc-"));
 		const configDir = join(root, "config");
 		const staticDir = join(root, "static");
 		const socketPath = join(root, "relay.sock");
@@ -294,17 +293,21 @@ describe("startForegroundDaemon", () => {
 		});
 
 		try {
-			const addResult = await sendIpcRequest(
+			const addResult = await sendRpcRequest(
 				socketPath,
-				new InstanceAdd({
+				new AddInstance({
 					name: "Alt Provider",
 					port: 4555,
 					managed: false,
 					url: "http://127.0.0.1:4555",
 				}),
 			);
-			expect(addResult.ok).toBe(true);
-			const added = (addResult as { instance: OpenCodeInstance }).instance;
+			const added = addResult.instances.find(
+				(instance) => instance.id === addResult.addedInstanceId,
+			);
+			expect(added).toBeDefined();
+			if (added === undefined)
+				throw new Error("Added instance missing from RPC response");
 			expect(added).toMatchObject({
 				id: "alt-provider",
 				name: "Alt Provider",
@@ -313,51 +316,45 @@ describe("startForegroundDaemon", () => {
 				status: "starting",
 			});
 
-			const updateResult = await sendIpcRequest(
+			const updateResult = await sendRpcRequest(
 				socketPath,
-				new InstanceUpdate({
-					id: added.id,
+				new UpdateInstance({
+					instanceId: added.id,
 					name: "Renamed Provider",
 					port: 4556,
 				}),
 			);
-			expect(updateResult.ok).toBe(true);
 			expect(
-				(updateResult as { instance: OpenCodeInstance }).instance,
+				updateResult.instances.find((instance) => instance.id === added.id),
 			).toMatchObject({
 				id: added.id,
 				name: "Renamed Provider",
 				port: 4556,
 			});
 
-			const stopResult = await sendIpcRequest(
+			const stopResult = await sendRpcRequest(
 				socketPath,
-				new InstanceStop({
-					id: added.id,
+				new StopInstance({
+					instanceId: added.id,
 				}),
 			);
-			expect(stopResult.ok).toBe(true);
+			expect(stopResult.instances).toEqual([
+				expect.objectContaining({ id: added.id, status: "stopped" }),
+			]);
 
-			const statusResult = await sendIpcRequest(
+			const statusResult = await sendRpcRequest(
 				socketPath,
-				new InstanceStatus({
-					id: added.id,
+				new GetInstanceStatus({
+					instanceId: added.id,
 				}),
 			);
-			expect(statusResult.ok).toBe(true);
-			expect(
-				(statusResult as { instance: OpenCodeInstance }).instance,
-			).toMatchObject({
+			expect(statusResult.instance).toMatchObject({
 				id: added.id,
 				status: "stopped",
 			});
 
-			const listResult = await sendIpcRequest(socketPath, new InstanceList({}));
-			expect(listResult.ok).toBe(true);
-			expect(
-				(listResult as { instances: ReadonlyArray<OpenCodeInstance> })
-					.instances,
-			).toEqual([
+			const listResult = await sendRpcRequest(socketPath, new GetInstances({}));
+			expect(listResult.instances).toEqual([
 				expect.objectContaining({
 					id: added.id,
 					name: "Renamed Provider",
@@ -365,13 +362,13 @@ describe("startForegroundDaemon", () => {
 				}),
 			]);
 
-			const removeResult = await sendIpcRequest(
+			const removeResult = await sendRpcRequest(
 				socketPath,
-				new InstanceRemove({
-					id: added.id,
+				new RemoveInstance({
+					instanceId: added.id,
 				}),
 			);
-			expect(removeResult.ok).toBe(true);
+			expect(removeResult.instances).toEqual([]);
 			expect(daemon.getInstances()).toEqual([]);
 		} finally {
 			await daemon.stop();

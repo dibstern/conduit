@@ -6,6 +6,7 @@ import type net from "node:net";
 import {
 	Context,
 	Data,
+	Deferred,
 	Duration,
 	Effect,
 	Exit,
@@ -17,10 +18,12 @@ import {
 import { WebSocket } from "ws";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
+import type { ResolveRpcContext } from "../../../server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
 } from "../../../server/ws-rpc-handler.js";
+import { ShutdownSignalTag } from "../../daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
@@ -85,6 +88,38 @@ export interface WebSocketRelayRouter {
 export class WebSocketRelayRouterTag extends Context.Tag(
 	"WebSocketRelayRouter",
 )<WebSocketRelayRouterTag, WebSocketRelayRouter>() {}
+
+export const resolveProjectRpcContext = (
+	relayRouter: WebSocketRelayRouter,
+	slug: string,
+): ReturnType<ResolveRpcContext> =>
+	Effect.gen(function* () {
+		yield* relayRouter.ensureRelayStarted(slug);
+		const relay = yield* relayRouter.waitForRelay(slug, RELAY_WAIT_TIMEOUT_MS);
+		yield* relayRouter.touchLastUsed(slug);
+		if (!relay.rpcWsHandler.context)
+			return yield* Effect.fail(
+				new WsRpcError({ message: "RPC context unavailable" }),
+			);
+		return yield* relay.rpcWsHandler.context;
+	}).pipe(
+		Effect.catchAll((cause) =>
+			Effect.fail(
+				cause instanceof WsRpcError
+					? cause
+					: new WsRpcError({
+							message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+						}),
+			),
+		),
+		Effect.catchAllDefect((cause) =>
+			Effect.fail(
+				new WsRpcError({
+					message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+				}),
+			),
+		),
+	);
 
 const toRelayUnavailable = (slug: string, cause: unknown) =>
 	new WebSocketUpgradeError({
@@ -226,6 +261,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| DaemonWsRpcHandlersTag
 	| DaemonWsClientRegistryTag
 	| ProjectRegistryTag
+	| ShutdownSignalTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		const configRef = yield* DaemonConfigRefTag;
@@ -235,6 +271,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
 		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const projectRegistry = yield* ProjectRegistryTag;
+		const shutdownSignal = yield* ShutdownSignalTag;
 		const runtime = yield* Effect.runtime<never>();
 		const scope = yield* Effect.scope;
 		const server = yield* Ref.get(httpServerRef);
@@ -338,31 +375,11 @@ export const WebSocketRoutingLive: Layer.Layer<
 			});
 
 		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(
-			(slug) =>
-				resolveRpcRelay(slug)
-					.pipe(
-						Effect.flatMap((relay) => {
-							if (!relay.rpcWsHandler.context) {
-								return Effect.fail(new Error("RPC context unavailable"));
-							}
-							return relay.rpcWsHandler.context;
-						}),
-					)
-					.pipe(
-						Effect.catchAll((cause) =>
-							Effect.fail(
-								cause instanceof WsRpcError
-									? cause
-									: toRpcUnavailable(slug, cause),
-							),
-						),
-						Effect.catchAllDefect((cause) =>
-							Effect.fail(toRpcUnavailable(slug, cause)),
-						),
-					),
+			(slug) => resolveProjectRpcContext(relayRouter, slug),
 			daemonHandlers,
 			undefined,
 			reattachViewSession,
+			() => Deferred.succeed(shutdownSignal, undefined).pipe(Effect.asVoid),
 		);
 
 		const attachDaemonSocket = (ws: WebSocket, req: http.IncomingMessage) =>

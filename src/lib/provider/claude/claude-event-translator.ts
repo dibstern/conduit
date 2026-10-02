@@ -238,7 +238,7 @@ export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
-	) => void;
+	) => void | Effect.Effect<void>;
 	readonly logger?: Logger;
 }
 
@@ -595,7 +595,7 @@ export class ClaudeEventTranslator {
 				// The full live set, replacing the previous one. Ambient tasks
 				// (watchers, housekeeping) are not activity, per the SDK.
 				case "background_tasks_changed": {
-					this.deps.onBackgroundTask?.({
+					const transition = this.deps.onBackgroundTask?.({
 						sessionId: ctx.sessionId,
 						kind: "snapshot",
 						taskIds: message.tasks
@@ -607,6 +607,7 @@ export class ClaudeEventTranslator {
 							)
 							.map((task) => task.task_id),
 					});
+					if (transition) yield* transition;
 					return;
 				}
 

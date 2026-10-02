@@ -1,9 +1,6 @@
 import { Duration, Effect } from "effect";
 import { createLogger } from "../../logger.js";
-import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-} from "../../persistence/effect/claude-event-persist-effect.js";
+import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
 	type ClaudeAdapterError,
 	ClaudeBoundaryError,
@@ -38,6 +35,12 @@ type SubagentDeps = Pick<
 	| "ensureClaudeSubagentSession"
 	| "subagentPollTimeoutMs"
 >;
+
+type EnsureSubagentSession = (
+	input: Parameters<
+		NonNullable<ClaudeProviderInstanceDeps["ensureClaudeSubagentSession"]>
+	>[0],
+) => Effect.Effect<void, ClaudeAdapterError>;
 
 function isClaudeTaskStartedMessage(
 	message: SDKMessage,
@@ -166,7 +169,7 @@ export function finalizeSubagentsAfterResultEffect(
 }
 
 export function handleSubagentTaskStartedEffect(
-	ensureSession: ClaudeProviderInstanceDeps["ensureClaudeSubagentSession"],
+	ensureSession: EnsureSubagentSession | undefined,
 	ctx: ClaudeSessionContext,
 	message: SDKMessage,
 ): Effect.Effect<void, ClaudeAdapterError> {
@@ -395,10 +398,8 @@ function resolveSubagentSdk(deps: SubagentDeps): ClaudeSubagentSdk | undefined {
 }
 
 function resolveEnsureClaudeSubagentSessionEffect(
-	ensureClaudeSubagentSession: ClaudeProviderInstanceDeps["ensureClaudeSubagentSession"],
-): Effect.Effect<
-	ClaudeEventPersistEffect["ensureClaudeSubagentSession"] | undefined
-> {
+	ensureClaudeSubagentSession: EnsureSubagentSession | undefined,
+): Effect.Effect<EnsureSubagentSession | undefined> {
 	return Effect.gen(function* () {
 		if (ensureClaudeSubagentSession) {
 			return ensureClaudeSubagentSession;

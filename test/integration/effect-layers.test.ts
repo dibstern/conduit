@@ -4,7 +4,8 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Schema } from "effect";
 import { expect } from "vitest";
-import { IpcTaggedRequestSchema } from "../../src/lib/contracts/ipc-requests.js";
+import { WsRpcRequest } from "../../src/lib/contracts/ws-rpc.js";
+import { DaemonWsRpcHandlersTag } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
@@ -19,7 +20,6 @@ import {
 	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { handleGetStatus } from "../../src/lib/domain/daemon/Services/ipc-handlers.js";
 import {
 	makeRelayCacheLive,
 	RelayCacheTag,
@@ -48,6 +48,7 @@ import {
 	makePollerStateLive,
 	PollerStateTag,
 } from "../../src/lib/domain/relay/Services/session-status-poller.js";
+import { makeDaemonRpcTestLayer } from "../helpers/daemon-rpc.js";
 
 /** All Effect-native state layers + mock Tags for imperative services. */
 const composedLayer = Layer.mergeAll(
@@ -95,16 +96,16 @@ describe("Integration: Full Layer Composition", () => {
 		}).pipe(Effect.provide(Layer.fresh(composedLayer))),
 	);
 
-	it.effect("decodes and handles a tagged GetStatus request", () =>
+	it.scoped("decodes and handles a browser RPC GetStatus request", () =>
 		Effect.gen(function* () {
-			const request = yield* Schema.decodeUnknown(IpcTaggedRequestSchema)(
+			const request = yield* Schema.decodeUnknown(WsRpcRequest)(
 				JSON.parse('{"_tag":"GetStatus"}'),
 			);
 			if (request._tag !== "GetStatus") throw new Error("Expected GetStatus");
-			const result = yield* handleGetStatus(request);
-			expect(result.ok).toBe(true);
+			const handlers = yield* DaemonWsRpcHandlersTag;
+			const result = yield* handlers.GetStatus(request);
 			expect(result.uptime).toBeDefined();
-		}).pipe(Effect.provide(Layer.fresh(makeDaemonStateLive()))),
+		}).pipe(Effect.provide(Layer.fresh(makeDaemonRpcTestLayer()))),
 	);
 
 	it.scoped("PubSub events flow between publisher and subscriber", () =>

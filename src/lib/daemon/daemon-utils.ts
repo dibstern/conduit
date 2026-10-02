@@ -90,7 +90,7 @@ export async function findFreePort(startFrom: number): Promise<number> {
 }
 
 /**
- * Check if a daemon is already running by probing the PID file and IPC socket.
+ * Check if a daemon is already running by probing the PID file and RPC socket.
  *
  * Extracted from Daemon.isRunning() so callers don't need the full Daemon class.
  * The static method `Daemon.isRunning` delegates here.

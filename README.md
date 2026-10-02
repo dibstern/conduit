@@ -287,6 +287,30 @@ npx conduit-code --log-format <format>            pretty | json
 Environment variables: `OPENCODE_URL`, `HOST`, `CONDUIT_CONFIG_DIR`,
 `OPENCODE_SERVER_PASSWORD`.
 
+### Run as a user service
+
+On macOS or Linux, install an optional service to start Conduit at login and
+restart it after it exits:
+
+```sh
+conduit --stop                         # Stop an existing self-daemonised server first
+conduit service install --port 2633
+conduit service status                # Installed/loaded/running state, PID and log paths
+conduit service uninstall             # Stop the service and remove its unit
+```
+
+The service uses `$SHELL -l -c` to resolve Conduit, Node and credentials through
+your login shell. Probes and services start with the same system PATH; configure
+tools in login-shell startup files if they are only available in your interactive
+shell. If `conduit` is absent from that PATH, installation warns and
+uses the installed CLI entry with `node` resolved through PATH. It preserves the
+installation working directory and server flags. To change flags, uninstall and
+reinstall. macOS uses `~/Library/LaunchAgents/dev.conduit.server.plist`; Linux uses
+`$XDG_CONFIG_HOME/systemd/user/conduit.service`, defaulting to
+`~/.config/systemd/user/conduit.service`. Logs are `service.stdout.log` and
+`service.stderr.log` in the Conduit config directory, `~/.conduit` by default;
+`CONDUIT_CONFIG_DIR` or `XDG_CONFIG_HOME` can override it. Uninstall retains logs.
+
 ---
 
 ## Architecture

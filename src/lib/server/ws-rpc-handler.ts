@@ -7,10 +7,15 @@ import { Cause, Context, Effect, Layer, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { WebSocket } from "ws";
 import {
+	type OnSuccessfulShutdownResponse,
+	withRpcShutdownResponse,
+} from "../daemon/daemon-rpc-server.js";
+import {
 	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
+import { isRecord } from "../utils.js";
 import {
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
@@ -69,6 +74,7 @@ const runRpcWebSocketConnection = <R>(
 		never,
 		R
 	>,
+	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -82,6 +88,10 @@ const runRpcWebSocketConnection = <R>(
 				run: (handler) =>
 					handler(socket).pipe(Effect.orDie, Effect.zipRight(Effect.never)),
 			});
+			const protocol = yield* RpcServer.makeProtocolSocketServer.pipe(
+				Effect.provideService(SocketServer.SocketServer, socketServer),
+				Effect.provide(RpcSerialization.layerJson),
+			);
 
 			// RpcServer.make runs the protocol loop until interrupted, so it has
 			// to be forked. The scope then stays open only while the client is
@@ -90,10 +100,13 @@ const runRpcWebSocketConnection = <R>(
 			yield* RpcServer.make(WsRpcGroup, {
 				concurrency: RPC_CONNECTION_CONCURRENCY,
 			}).pipe(
-				Effect.provide(RpcServer.layerProtocolSocketServer),
-				Effect.provideService(SocketServer.SocketServer, socketServer),
+				Effect.provideService(
+					RpcServer.Protocol,
+					onSuccessfulShutdownResponse
+						? withRpcShutdownResponse(protocol, onSuccessfulShutdownResponse)
+						: protocol,
+				),
 				Effect.provide(serverLayer),
-				Effect.provide(RpcSerialization.layerJson),
 				Effect.interruptible,
 				Effect.forkScoped,
 			);
@@ -140,6 +153,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
 	reattachViewSession?: ReattachDaemonViewSession,
+	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 ) =>
 	Effect.gen(function* () {
 		const transportContext = yield* Layer.build(
@@ -160,7 +174,14 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			runTransportFork: Runtime.runFork(runtime),
 			runConnection: (ws) =>
 				Runtime.runFork(runtime)(
-					Effect.forkIn(runRpcWebSocketConnection(ws, serverLayer), scope),
+					Effect.forkIn(
+						runRpcWebSocketConnection(
+							ws,
+							serverLayer,
+							onSuccessfulShutdownResponse,
+						),
+						scope,
+					),
 				),
 		});
 		yield* Effect.addFinalizer(() =>
@@ -219,6 +240,38 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	private onConnection(ws: WebSocket): void {
 		this.clients.add(ws);
 		ws.on("close", () => this.clients.delete(ws));
+		if (
+			process.env["NODE_ENV"] === "test" &&
+			process.send &&
+			process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"]
+		) {
+			ws.on("message", (data) => {
+				const at = process.hrtime.bigint().toString();
+				let frames: unknown;
+				try {
+					frames = JSON.parse(data.toString());
+				} catch {
+					return;
+				}
+				const values: unknown[] = Array.isArray(frames) ? frames : [frames];
+				for (const frame of values) {
+					if (
+						isRecord(frame) &&
+						frame["_tag"] === "Request" &&
+						frame["tag"] === "SendMessage" &&
+						isRecord(frame["payload"]) &&
+						typeof frame["payload"]["text"] === "string"
+					) {
+						process.send?.({
+							channel: "conduit-process-test",
+							kind: "receipt",
+							prompt: frame["payload"]["text"],
+							at,
+						});
+					}
+				}
+			});
+		}
 		this.runConnection(ws);
 	}
 

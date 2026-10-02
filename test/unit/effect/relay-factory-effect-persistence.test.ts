@@ -219,6 +219,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						title: "Effect Project",
 						directory: projectDir,
 						instanceId: "opencode",
+						missing: false,
 					},
 				]);
 				expect(instances).toEqual([

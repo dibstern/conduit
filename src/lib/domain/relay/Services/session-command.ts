@@ -486,16 +486,19 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 				cause: "Claude fork requires project configuration",
 			});
 		}
-		const claudeConfigDir = resolveClaudeInstanceConfigDir(
-			loadDaemonConfig(config.value.configDir),
-			parent.provider,
-		);
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
 		const parentState = yield* state.getState(parentSessionId);
+		const claudeConfigDir =
+			parentState["claudeConfigDir"] ??
+			resolveClaudeInstanceConfigDir(
+				loadDaemonConfig(config.value.configDir),
+				parent.provider,
+			) ??
+			config.value.shellEnv?.(config.value.projectDir)["CLAUDE_CONFIG_DIR"];
 		const providerSessionId = parentState["resumeSessionId"];
 		if (!providerSessionId) {
 			return yield* new SessionCommandError({
@@ -591,6 +594,9 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 				yield* project(stored);
 				yield* state.saveUpdates(forked.sdkSessionId, [
 					{ key: "resumeSessionId", value: forked.sdkSessionId },
+					...(claudeConfigDir !== undefined
+						? [{ key: "claudeConfigDir", value: claudeConfigDir }]
+						: []),
 				]);
 			}),
 		);

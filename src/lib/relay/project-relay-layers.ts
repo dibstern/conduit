@@ -98,6 +98,7 @@ export interface RelayRuntime {
 
 export interface ProjectRelayLayerInputs {
 	config: ProjectRelayConfig;
+	testSendLimit?: number;
 	backgroundLiveness: ReturnType<typeof makeSessionBackgroundLiveness>;
 	getWsHandler: () => WebSocketHandlerShape;
 	defaultCommandQueueLayer: Layer.Layer<
@@ -116,6 +117,7 @@ export interface ProjectRelayLayerInputs {
 /** Build the shared per-project Layer graph and its managed runtime. */
 export function createProjectRelayLayers({
 	config,
+	testSendLimit,
 	backgroundLiveness,
 	getWsHandler,
 	defaultCommandQueueLayer,
@@ -123,6 +125,7 @@ export function createProjectRelayLayers({
 	const hasInstanceManagement = hasInstanceManagementConfig(config);
 	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
+		...(config.shellEnv && { shellEnv: config.shellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		...(config.claudeSdk != null && {
 			claudeQueryFactory: config.claudeSdk.query,
@@ -307,11 +310,12 @@ export function createProjectRelayLayers({
 	// SessionLifecycleWiringLive) are added after monitoring state exists
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(
-		makeRelayStateLive(
-			config.claudeSdk?.titleQuery
-				? { titleQueryFactory: config.claudeSdk.titleQuery }
-				: {},
-		),
+		makeRelayStateLive({
+			...(config.claudeSdk?.titleQuery && {
+				titleQueryFactory: config.claudeSdk.titleQuery,
+			}),
+			...(testSendLimit !== undefined && { testSendLimit }),
+		}),
 		bridgeLayers,
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(

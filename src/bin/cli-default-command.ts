@@ -1,4 +1,4 @@
-import { AddProject, GetStatus } from "../lib/contracts/ipc-requests.js";
+import { AddProject, GetStatus } from "../lib/contracts/ws-rpc.js";
 import { isDaemonSpawnPortInUseError } from "../lib/daemon/daemon-spawn.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { CommandContext } from "./cli-command-handlers.js";
@@ -12,7 +12,7 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		stdout,
 		stderr,
 		exit,
-		ipcSend,
+		rpcSend,
 		checkDaemon,
 		spawnDaemonFn,
 		getAddr,
@@ -43,7 +43,7 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 			stdout,
 			stderr,
 			exit,
-			ipcSend,
+			rpcSend,
 			checkDaemon,
 			spawnDaemon: spawnDaemonFn,
 			getAddr,
@@ -77,16 +77,15 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		}
 	}
 
-	const registerResponse = await ipcSend(
-		new AddProject({
-			directory: cwd,
-		}),
-	);
-	const slug = registerResponse.ok
-		? (registerResponse.slug as string)
-		: undefined;
+	let slug: string | undefined;
+	try {
+		const registerResponse = await rpcSend(new AddProject({ directory: cwd }));
+		slug = registerResponse.addedSlug;
+	} catch {
+		// The default view remains available when project registration fails.
+	}
 
-	const statusResponse = await ipcSend(new GetStatus({}));
+	const statusResponse = await rpcSend(new GetStatus({}));
 	const scheme = statusResponse["tlsEnabled"] === true ? "https" : "http";
 	// 3b. Build URLs with Tailscale priority (consistent with interactive path)
 	const tsIP = getTsIP();

@@ -3,7 +3,6 @@
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
 import { NodeFileSystem } from "@effect/platform-node";
-import type { Rpc, RpcGroup } from "@effect/rpc";
 import {
 	Cause,
 	Context,
@@ -19,19 +18,15 @@ import {
 } from "effect";
 import {
 	closeHttpServer,
-	closeIPCServer,
 	closeOnboardingServer,
 	type DaemonLifecycleContext,
-	dispatchTaggedRequestEffect,
 	type HttpServerStartConfig,
-	type IpcPostResponseActions,
 	type OnboardingServerDeps,
 	type OnboardingServerStartConfig,
 	startHttpServer,
-	startIPCServer,
 	startOnboardingServer,
-	type TaggedIpcDispatcher,
 } from "../../../daemon/daemon-lifecycle.js";
+import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import {
 	removePidFile,
 	removeSocketFile,
@@ -39,13 +34,16 @@ import {
 } from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
+import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
 	makeDaemonHttpRouterLive,
 } from "../../server/Layers/http-router-layer.js";
 import {
+	resolveProjectRpcContext,
 	WebSocketRelayRouterLive,
+	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
 import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
@@ -91,10 +89,7 @@ import {
 	startInitialUnmanagedInstanceHealthPollers,
 	startManagedOpenCodeServers,
 } from "../Services/instance-manager-service.js";
-import {
-	IpcHandlersLayer,
-	type IpcRpcGroup,
-} from "../Services/ipc-rpc-group.js";
+
 import {
 	addProjectToEffectRegistry,
 	getProject,
@@ -117,10 +112,17 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
-import { DaemonWsRpcHandlersLive } from "./daemon-ws-rpc-layer.js";
+import {
+	DaemonWsRpcHandlersLive,
+	DaemonWsRpcHandlersTag,
+} from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
+import {
+	makeProjectShellEnvLive,
+	ProjectShellEnvWiringLive,
+} from "./project-shell-env-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryError,
@@ -165,12 +167,6 @@ export class DaemonLifecycleLayerError extends Data.TaggedError(
 		return `${this.operation} failed: ${inner}`;
 	}
 }
-
-const startLifecycleServer = (operation: string, start: () => Promise<void>) =>
-	Effect.tryPromise({
-		try: start,
-		catch: (cause) => new DaemonLifecycleLayerError({ operation, cause }),
-	});
 
 const loggedFinalizerPromise = (operation: string, run: () => Promise<void>) =>
 	Effect.tryPromise({
@@ -473,10 +469,6 @@ export const makeRelayCacheLayer: Layer.Layer<
 					rpcWsHandler: relay.rpcWsHandler,
 					getStatusSnapshot: () => relay.getStatusSnapshot(),
 					setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
-					setDefaultModel: (model: {
-						readonly providerID: string;
-						readonly modelID: string;
-					}) => relay.setDefaultModel(model),
 					stop: () => relay.stop(),
 				};
 			}),
@@ -551,54 +543,35 @@ export const makeHttpServerLive = (ctx: DaemonLifecycleContext) =>
 		Layer.provide(Layer.succeed(DaemonLifecycleContextTag, ctx)),
 	);
 
-/**
- * IPC (Unix socket) server layer — starts the IPC server with command routing
- * and closes it on scope close.
- */
-export const makeIpcServerLive = (
-	postResponseActions?: IpcPostResponseActions,
-) =>
-	Layer.scopedDiscard(
-		Effect.gen(function* () {
-			const ctx = yield* DaemonLifecycleContextTag;
-			const runtime = yield* Effect.runtime<IpcDispatchServices>();
-			const shutdownSignal = yield* ShutdownSignalTag;
-			const resolvedPostResponseActions = postResponseActions ?? {
-				scheduleShutdown: () => {
-					Deferred.unsafeDone(shutdownSignal, Effect.void);
+/** Local clients use the browser RPC contract and handler layer. */
+export const DaemonRpcServerLive = Layer.scopedDiscard(
+	Effect.gen(function* () {
+		const ctx = yield* DaemonLifecycleContextTag;
+		const handlers = yield* DaemonWsRpcHandlersTag;
+		const relayRouter = yield* WebSocketRelayRouterTag;
+		const shutdownSignal = yield* ShutdownSignalTag;
+		const server = makeDaemonRpcSocketLayer(
+			ctx.socketPath,
+			makeRoutedWsRpcServerLayer(
+				(slug) => resolveProjectRpcContext(relayRouter, slug),
+				handlers,
+			),
+			{
+				onSuccessfulShutdownResponse: () =>
+					Deferred.succeed(shutdownSignal, undefined).pipe(Effect.asVoid),
+				onClientCountChange: (count) => {
+					ctx.clientCount = count;
 				},
-			};
-			yield* startLifecycleServer("startIPCServer", () =>
-				startIPCServer(
-					ctx,
-					makeTaggedIpcDispatcher(runtime),
-					resolvedPostResponseActions,
-				),
-			);
-			yield* Effect.addFinalizer(() =>
-				closeLifecycleServer("closeIPCServer", () => closeIPCServer(ctx)),
-			);
-		}),
-	);
-
-type IpcDispatchServices = Rpc.ToHandler<RpcGroup.Rpcs<typeof IpcRpcGroup>>;
-
-function makeTaggedIpcDispatcher(
-	runtime: Runtime.Runtime<IpcDispatchServices>,
-): TaggedIpcDispatcher {
-	return (request) =>
-		new Promise((resolve, reject) => {
-			Runtime.runCallback(runtime)(dispatchTaggedRequestEffect(request), {
-				onExit: (exit) => {
-					if (Exit.isSuccess(exit)) {
-						resolve(exit.value);
-						return;
-					}
-					reject(Cause.squash(exit.cause));
-				},
-			});
-		});
-}
+			},
+		);
+		yield* Layer.build(server).pipe(
+			Effect.mapError(
+				(cause) =>
+					new DaemonLifecycleLayerError({ operation: "startRpcServer", cause }),
+			),
+		);
+	}),
+);
 
 /**
  * Onboarding server layer — starts an HTTP-only onboarding server when TLS is
@@ -688,7 +661,6 @@ export const makePidFileLive = (
  */
 export interface DaemonLiveOptions {
 	// Server lifecycle (still partially imperative — AP-38 deferred)
-	ipcPostResponseActions?: IpcPostResponseActions;
 	staticDir: string;
 
 	/** Full runtime config snapshot used to seed DaemonConfigRef. */
@@ -769,6 +741,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		tlsCertWithDeps,
 		EnsureCertsLive,
 		PushNotificationManagerLive(configDir),
+		makeProjectShellEnvLive(),
 	).pipe(Layer.provideMerge(foundation));
 
 	const versionCheckLayer = options.versionCheck
@@ -868,19 +841,17 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	// Tier 3: Servers (imperative lifecycle)
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.staticDir);
-	const httpAndIpc = Layer.mergeAll(
-		HttpServerLive,
-		makeIpcServerLive(options.ipcPostResponseActions),
-	)
-		.pipe(Layer.provideMerge(httpRequestHandler))
-		.pipe(Layer.provideMerge(IpcHandlersLayer));
+	const http = HttpServerLive.pipe(Layer.provideMerge(httpRequestHandler));
 
 	const servers = OnboardingServerLive(options.staticDir).pipe(
-		Layer.provideMerge(httpAndIpc),
+		Layer.provideMerge(http),
 		Layer.provideMerge(withDaemonControl),
 	);
 
-	const withDaemonWiring = DaemonWiringLive.pipe(Layer.provideMerge(servers));
+	const withDaemonWiring = Layer.merge(
+		DaemonWiringLive,
+		ProjectShellEnvWiringLive,
+	).pipe(Layer.provideMerge(servers));
 
 	// Tier 4: Background services (optional)
 	// When a config is not provided, a no-op stub Layer provides the Tag
@@ -905,6 +876,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
+		DaemonRpcServerLive,
 		AutoSettleLive,
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
