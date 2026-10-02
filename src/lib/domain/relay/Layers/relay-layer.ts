@@ -55,7 +55,11 @@ const SessionManagerStateAndServiceLive = Layer.provideMerge(
  * (E2E replay passes one so no title request reaches a live model).
  */
 export const makeRelayStateLive = (
-	options: { readonly titleQueryFactory?: ClaudeTitleQueryFactory } = {},
+	options: {
+		readonly titleQueryFactory?: ClaudeTitleQueryFactory;
+		/** Process-fake benchmark capacity; ordinary relays retain five sends/10s. */
+		readonly testSendLimit?: number;
+	} = {},
 ) =>
 	Layer.mergeAll(
 		// Session state
@@ -87,7 +91,10 @@ export const makeRelayStateLive = (
 		// Instance management state
 		makeInstanceManagerStateLive(),
 		// Rate limiter (scoped — cleanup fiber runs every 60s)
-		RateLimiterLive({ maxRequests: 5, windowMs: 10_000 }),
+		RateLimiterLive({
+			maxRequests: options.testSendLimit ?? 5,
+			windowMs: 10_000,
+		}),
 	);
 
 export const RelayStateLive = makeRelayStateLive();

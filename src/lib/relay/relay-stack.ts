@@ -123,6 +123,10 @@ export class RelayCreationInProgressError extends Data.TaggedError(
 	}
 }
 
+class RelayTestSdkConfigurationError extends Data.TaggedError(
+	"RelayTestSdkConfigurationError",
+)<{ readonly module: string; readonly message: string }> {}
+
 interface StandaloneProjectEntry {
 	slug: string;
 	directory: string;
@@ -537,6 +541,32 @@ export interface RelayStack {
 export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
+	// Child-process tests load their fake at the existing SDK factory seam.
+	// Normal launches never import test code or change provider selection.
+	const testQueryModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
+	let testSendLimit: number | undefined;
+	if (
+		process.env["NODE_ENV"] === "test" &&
+		process.send &&
+		testQueryModule &&
+		!config.claudeSdk
+	) {
+		const { claudeSdk } = (await import(testQueryModule)) as {
+			claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]>;
+		};
+		if (
+			typeof claudeSdk?.query !== "function" ||
+			typeof claudeSdk.titleQuery !== "function"
+		) {
+			throw new RelayTestSdkConfigurationError({
+				module: testQueryModule,
+				message:
+					"Process test module must export Claude query and title factories",
+			});
+		}
+		config = { ...config, claudeSdk };
+		testSendLimit = 10_000;
+	}
 	const log = config.log ?? createLogger("relay");
 	// Background liveness is created before startup supplies its broadcaster.
 	let broadcastBackgroundSessionLists: (() => void) | undefined;
@@ -569,6 +599,7 @@ export async function createProjectRelay(
 	const defaultCommandQueue = new RelayDefaultCommandQueue();
 	const layers = createProjectRelayLayers({
 		config,
+		...(testSendLimit !== undefined && { testSendLimit }),
 		backgroundLiveness,
 		getWsHandler: () => wsHandler,
 		defaultCommandQueueLayer:
@@ -612,6 +643,14 @@ export async function createProjectRelay(
 			sse: sseStream.getHealth(),
 		};
 	};
+	if (testSendLimit !== undefined && process.connected) {
+		process.send?.({
+			channel: "conduit-process-test",
+			kind: "fake-sdk-active",
+			module: testQueryModule,
+			projectDir: config.projectDir,
+		});
+	}
 
 	return {
 		settleIdleSessions: (idleWindowMs, now) =>

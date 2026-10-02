@@ -41,6 +41,7 @@
 		"test:pbt": "vitest run test/unit --testNamePattern 'property|PBT|fc\\.'",
 		"test:watch": "vitest",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"bench:send-path": "tsx test/bench/send-path.ts",
 		"test:contract": "vitest run --config vitest.contract.config.ts",
 		"test:e2e": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-replay.config.ts",
 		"test:e2e:ui": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --ui",
