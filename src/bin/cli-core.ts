@@ -27,6 +27,7 @@ import {
 } from "./cli-command-handlers.js";
 import { handleDefault } from "./cli-default-command.js";
 import { handleInstance } from "./cli-instance-command.js";
+import { handleService } from "./cli-service.js";
 import {
 	DEFAULT_SOCKET_PATH,
 	generateQR,
@@ -139,6 +140,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	};
 
 	switch (args.command) {
+		case "service":
+			return handleService(context);
 		case "daemon":
 			return handleDaemon(context);
 		case "foreground":
