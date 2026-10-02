@@ -7,7 +7,7 @@ Use this guide before changing daemon behavior, project routing, relay wiring, e
 | Area | Shape |
 |---|---|
 | CLI | `src/bin/cli.ts` is the thin entrypoint; `src/bin/cli-core.ts` routes commands. |
-| Process model | The CLI either runs a relay in-process with `foreground` or controls a long-lived daemon over Unix socket IPC. |
+| Process model | The CLI either runs a relay in-process with `foreground` or controls a long-lived daemon over Unix socket RPC. |
 | Daemon | Daemon lifecycle is owned by Effect domain services/layers under `src/lib/domain/daemon/*`, with low-level socket/server helpers still living in `src/lib/daemon/*`. CLI foreground and child-daemon startup enter through Effect-backed starter facades. |
 | Multi-project model | One daemon can host many projects, each mounted under `/p/<slug>`. |
 
@@ -20,7 +20,7 @@ Mermaid Diagram: docs/agent-guide/system-context-diagram.mermaid
 | Layer | Main modules | Responsibility |
 |---|---|---|
 | CLI / control | `src/bin/*`, `src/lib/cli/*` | Operator-facing commands, setup, watcher, TLS helpers |
-| Daemon | `src/lib/daemon/*`, `src/lib/domain/daemon/*` | Process lifecycle, persisted state, IPC, project and instance registration |
+| Daemon | `src/lib/daemon/*`, `src/lib/domain/daemon/*` | Process lifecycle, persisted state, local RPC, project and instance registration |
 | HTTP / WS edge | `src/lib/server/*` | Shared HTTP server, auth gate, static assets, project route dispatch, WebSocket upgrades |
 | Project relay | `src/lib/relay/*`, `src/lib/domain/relay/*` | Per-project relay composition, provider event ingestion, event translation, pollers, PTY upstreams |
 | Persistence | `src/lib/persistence/*`, `src/lib/domain/persistence/*` | SQLite event store, projectors (sessions, messages, turns, providers, approvals, activities), migrations |
@@ -44,7 +44,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 | Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
 | Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals, activities) are the primary record. Projectors maintain materialized views from the append-only event log. |
-| Daemon-owned state | The config directory holds socket and PID files, daemon config, recent projects, and push settings. |
+| Daemon-owned state | The config directory holds protected local RPC socket and PID files, daemon config, recent projects, and push settings. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
 
 ## Effect Ownership Guardrails
@@ -52,6 +52,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 - Daemon and relay internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
 - The surviving runtime boundaries are explicit compatibility edges: standalone HTTP handler construction, OpenCode SDK fetch, Claude SDK permission callback, frontend transport Promise API, and the public `createProjectRelay()` startup Promise API.
 - `relay-stack.ts` must not regain `Layer.succeed(Tag, alreadyConstructedInstance)` bridge composition. Relay state belongs in self-constructing domain Layers under `src/lib/domain/relay/*`.
+- CLI commands use the same `WsRpcGroup` and daemon handlers over a filesystem-protected Unix socket with NDJSON framing. Browser PIN authentication remains required on network WebSockets.
 - Browser real-time transport remains WebSocket-based. Effect RPC runs over the WebSocket protocol for migrated browser operations; raw PTY input remains the terminal data-plane path.
 
 ## Communication Flow
@@ -60,7 +61,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 |---|---|
 | Browser to relay | Browser loads the SPA over HTTP, `RequestRouter` serves auth/setup/health/info/themes/project routes, the daemon upgrades `/ws` and attaches sockets to relay `WebSocketHandler`s, and `src/lib/handlers/index.ts` dispatches incoming message types to session, instance, file, terminal, and bridge services. |
 | Provider to event store to browser | Provider instances stream events into the SQLite event store. Projectors update materialized views (sessions, messages, turns). Pollers reconcile provider-side status. `WebSocketHandler` broadcasts normalized events to relevant clients or session viewers. |
-| CLI to daemon | Commands such as `status`, `stop`, `add_project`, and `set_pin` go over IPC; the daemon updates config and registries, mounts new relays on the shared HTTP and WebSocket surface, and rebroadcasts instance status changes. |
+| CLI to daemon | Commands such as `status`, `stop`, `AddProject`, and `SetPin` use the browser RPC contract over the protected Unix socket; the daemon updates config and registries, mounts new relays on the shared HTTP and WebSocket surface, and rebroadcasts instance status changes. |
 
 ## Browser Routes
 

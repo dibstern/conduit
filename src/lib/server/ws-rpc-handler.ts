@@ -7,6 +7,10 @@ import { Cause, Context, Effect, Layer, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { WebSocket } from "ws";
 import {
+	type OnSuccessfulShutdownResponse,
+	withRpcShutdownResponse,
+} from "../daemon/daemon-rpc-server.js";
+import {
 	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
@@ -69,6 +73,7 @@ const runRpcWebSocketConnection = <R>(
 		never,
 		R
 	>,
+	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -82,6 +87,10 @@ const runRpcWebSocketConnection = <R>(
 				run: (handler) =>
 					handler(socket).pipe(Effect.orDie, Effect.zipRight(Effect.never)),
 			});
+			const protocol = yield* RpcServer.makeProtocolSocketServer.pipe(
+				Effect.provideService(SocketServer.SocketServer, socketServer),
+				Effect.provide(RpcSerialization.layerJson),
+			);
 
 			// RpcServer.make runs the protocol loop until interrupted, so it has
 			// to be forked. The scope then stays open only while the client is
@@ -90,10 +99,13 @@ const runRpcWebSocketConnection = <R>(
 			yield* RpcServer.make(WsRpcGroup, {
 				concurrency: RPC_CONNECTION_CONCURRENCY,
 			}).pipe(
-				Effect.provide(RpcServer.layerProtocolSocketServer),
-				Effect.provideService(SocketServer.SocketServer, socketServer),
+				Effect.provideService(
+					RpcServer.Protocol,
+					onSuccessfulShutdownResponse
+						? withRpcShutdownResponse(protocol, onSuccessfulShutdownResponse)
+						: protocol,
+				),
 				Effect.provide(serverLayer),
-				Effect.provide(RpcSerialization.layerJson),
 				Effect.interruptible,
 				Effect.forkScoped,
 			);
@@ -140,6 +152,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
 	reattachViewSession?: ReattachDaemonViewSession,
+	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 ) =>
 	Effect.gen(function* () {
 		const transportContext = yield* Layer.build(
@@ -160,7 +173,14 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			runTransportFork: Runtime.runFork(runtime),
 			runConnection: (ws) =>
 				Runtime.runFork(runtime)(
-					Effect.forkIn(runRpcWebSocketConnection(ws, serverLayer), scope),
+					Effect.forkIn(
+						runRpcWebSocketConnection(
+							ws,
+							serverLayer,
+							onSuccessfulShutdownResponse,
+						),
+						scope,
+					),
 				),
 		});
 		yield* Effect.addFinalizer(() =>

@@ -3,15 +3,15 @@
 // Tests cover:
 // T1: parseArgs — all flags parsed correctly, defaults, --help, unknown flags (AC1-AC8)
 // T2: Default invocation — checks daemon, spawns if needed, registers project, outputs QR/URL (AC1)
-// T3: --status — sends get_status, formats output (AC2)
+// T3: --status — sends GetStatus, formats output (AC2)
 // T4: --stop — sends shutdown, displays confirmation (AC3)
-// T5: --pin — validates 4-8 digit, sends set_pin (AC4)
-// T6: --add/--remove/--list/--title — correct IPC commands (AC5)
+// T5: --pin — validates 4-8 digit, sends SetPin (AC4)
+// T6: --add/--remove/--list/--title — correct RPC commands (AC5)
 // T7: --port/--oc-port — passed through (AC6)
-// T8: Error handling — daemon not reachable, IPC errors (AC8)
+// T8: Error handling — daemon not reachable, RPC errors (AC8)
 // T9: getNetworkAddress — returns first non-internal IPv4 (AC1)
 // T10: QR generation — mock (AC7)
-// T11: sendIpcRequest — rejects for non-existent socket (IPC client)
+// T11: daemon RPC transport has dedicated socket tests
 // PBT: Property-based arg parsing
 
 import fc from "fast-check";
@@ -23,18 +23,15 @@ import {
 	type InteractiveContext,
 	parseArgs,
 	run,
-	sendIpcRequest,
 } from "../../../src/bin/cli-core.js";
 import { HELP_TEXT } from "../../../src/bin/cli-utils.js";
 import {
-	AddProject,
-	GetStatus,
-	InstanceAdd,
-	type IpcTaggedRequest,
-} from "../../../src/lib/contracts/ipc-requests.js";
+	WsRpcError,
+	type WsRpcRequest,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import type { SendRPC } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { DaemonSpawnPortInUseError } from "../../../src/lib/daemon/daemon-spawn.js";
 import { RELAY_ENV_KEYS } from "../../../src/lib/env.js";
-import type { IPCResponse } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
@@ -44,20 +41,23 @@ interface MockCLIState {
 	output: string;
 	errors: string;
 	exitCode: number | null;
-	ipcCommands: IpcTaggedRequest[];
+	rpcRequests: WsRpcRequest[];
 }
 
 /** Create a mock CLIOptions with captured output.
  *  Access captured data via the returned `.state` property.
  */
 function createMockCLI(
-	overrides?: Partial<CLIOptions>,
+	overrides?: Partial<Omit<CLIOptions, "sendRPC">> & {
+		sendRPC?: (request: WsRpcRequest) => Promise<unknown>;
+	},
 ): CLIOptions & { state: MockCLIState } {
+	const { sendRPC, ...otherOverrides } = overrides ?? {};
 	const state: MockCLIState = {
 		output: "",
 		errors: "",
 		exitCode: null,
-		ipcCommands: [],
+		rpcRequests: [],
 	};
 
 	const opts: CLIOptions & { state: MockCLIState } = {
@@ -76,16 +76,17 @@ function createMockCLI(
 		exit: (code: number) => {
 			state.exitCode = code;
 		},
-		sendIPC: async (cmd: IpcTaggedRequest): Promise<IPCResponse> => {
-			state.ipcCommands.push(cmd);
-			return { ok: true };
-		},
+		sendRPC: (async (request: WsRpcRequest) => {
+			state.rpcRequests.push(request);
+			return {};
+		}) as SendRPC,
 		isDaemonRunning: async () => true,
 		spawnDaemon: async () => ({ pid: 12345, port: 2633 }),
 		generateQR: (url: string) => `[QR:${url}]`,
 		getNetworkAddress: () => "192.168.1.100",
 		getTailscaleIP: () => null,
-		...overrides,
+		...otherOverrides,
+		...(sendRPC && { sendRPC: sendRPC as SendRPC }),
 	};
 
 	return opts;
@@ -343,10 +344,10 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 				spawnCalled = true;
 				return { pid: 99, port: 2633 };
 			},
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				if (cmd._tag === "AddProject") {
-					return { ok: true, slug: "my-project" };
+					return { addedSlug: "my-project" };
 				}
 				return { ok: true };
 			},
@@ -369,10 +370,10 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 				spawnCalled = true;
 				return { pid: 99, port: 2633 };
 			},
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				if (cmd._tag === "AddProject") {
-					return { ok: true, slug: "my-project" };
+					return { addedSlug: "my-project" };
 				}
 				return { ok: true };
 			},
@@ -385,12 +386,12 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 		expect(cli.state.output).toContain("192.168.1.100");
 	});
 
-	it("registers cwd via add_project IPC command", async () => {
+	it("registers cwd via AddProject RPC command", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				if (cmd._tag === "AddProject") {
-					return { ok: true, slug: "my-project" };
+					return { addedSlug: "my-project" };
 				}
 				return { ok: true };
 			},
@@ -398,7 +399,7 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 
 		await run([], cli);
 
-		const addCmd = cli.state.ipcCommands.find((c) => c._tag === "AddProject");
+		const addCmd = cli.state.rpcRequests.find((c) => c._tag === "AddProject");
 		expect(addCmd).toBeDefined();
 		assert.exists(addCmd, "expected add command");
 		expect(addCmd.directory).toBe("/home/user/my-project");
@@ -407,9 +408,9 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 	it("uses localhost when no network address available", async () => {
 		const cli = createMockCLI({
 			getNetworkAddress: () => null,
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "AddProject") return { addedSlug: "test" };
 				return { ok: true };
 			},
 		});
@@ -421,9 +422,9 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 
 	it("shows QR code in output", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "AddProject") return { addedSlug: "test" };
 				return { ok: true };
 			},
 		});
@@ -435,9 +436,9 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 
 	it("shows PIN tip", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "AddProject") return { addedSlug: "test" };
 				return { ok: true };
 			},
 		});
@@ -447,12 +448,12 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 		expect(cli.state.output).toContain("PIN");
 	});
 
-	it("handles add_project returning ok: false gracefully (slug is undefined)", async () => {
+	it("keeps the default URL when AddProject fails", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				// add_project fails
-				return { ok: false, error: "disk full" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "AddProject") throw new Error("disk full");
+				return { port: 2633, tlsEnabled: false };
 			},
 		});
 
@@ -465,11 +466,11 @@ describe("T2: Default invocation — auto-start, register, display (AC1)", () =>
 	});
 });
 
-describe("T3: --status — sends get_status, formats output (AC2)", () => {
+describe("T3: --status — sends GetStatus, formats output (AC2)", () => {
 	it("displays status when daemon is running", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				if (cmd._tag === "GetStatus") {
 					return {
 						ok: true,
@@ -490,8 +491,8 @@ describe("T3: --status — sends get_status, formats output (AC2)", () => {
 		expect(cli.state.output).toContain("2633");
 		expect(cli.state.output).toContain("3");
 		expect(cli.state.output).toContain("2");
-		// Also verifies the correct IPC command was sent
-		expect(cli.state.ipcCommands[0]?._tag).toBe("GetStatus");
+		// Also verifies the correct RPC command was sent
+		expect(cli.state.rpcRequests[0]?._tag).toBe("GetStatus");
 	});
 
 	it.each([
@@ -499,7 +500,7 @@ describe("T3: --status — sends get_status, formats output (AC2)", () => {
 		[125, "2m 5s"],
 	])("formats uptime %ds as %s", async (uptime, expected) => {
 		const cli = createMockCLI({
-			sendIPC: async () => ({
+			sendRPC: async () => ({
 				ok: true,
 				uptime,
 				port: 2633,
@@ -517,24 +518,24 @@ describe("T3: --status — sends get_status, formats output (AC2)", () => {
 describe("T4: --stop — sends shutdown (AC3)", () => {
 	it("sends shutdown command and displays confirmation", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				return { ok: true };
 			},
 		});
 
 		await run(["--stop"], cli);
 
-		expect(cli.state.ipcCommands).toHaveLength(1);
-		const command = cli.state.ipcCommands[0];
-		assert.exists(command, "expected IPC command");
+		expect(cli.state.rpcRequests).toHaveLength(1);
+		const command = cli.state.rpcRequests[0];
+		assert.exists(command, "expected RPC command");
 		expect(command._tag).toBe("Shutdown");
 		expect(cli.state.output).toContain("Daemon stopped");
 	});
 
-	it("handles IPC error gracefully", async () => {
+	it("handles RPC error gracefully", async () => {
 		const cli = createMockCLI({
-			sendIPC: async () => {
+			sendRPC: async () => {
 				throw new Error("Connection refused");
 			},
 		});
@@ -546,22 +547,22 @@ describe("T4: --stop — sends shutdown (AC3)", () => {
 	});
 });
 
-describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
+describe("T5: --pin — validates digit, sends SetPin (AC4)", () => {
 	it.each([
 		"1234",
 		"123456",
 		"12345678",
 	])("accepts valid %s-digit PIN", async (pin) => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				return { ok: true };
 			},
 		});
 
 		await run(["--pin", pin], cli);
 
-		const pinCmd = cli.state.ipcCommands[0];
+		const pinCmd = cli.state.rpcRequests[0];
 		assert.exists(pinCmd, "expected pin command");
 		expect(pinCmd._tag === "SetPin" && pinCmd.pin).toBe(pin);
 		expect(cli.state.output).toContain("PIN updated");
@@ -582,11 +583,11 @@ describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
 		expect(cli.state.exitCode).toBe(1);
 	});
 
-	it("shows error when set_pin IPC returns ok: false", async () => {
+	it("shows error when SetPin RPC fails", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				return { ok: false, error: "PIN storage failed" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				throw new Error("PIN storage failed");
 			},
 		});
 
@@ -600,8 +601,8 @@ describe("T5: --pin — validates digit, sends set_pin (AC4)", () => {
 		fc.assert(
 			fc.asyncProperty(fc.stringMatching(/^\d{4,8}$/), async (pin) => {
 				const cli = createMockCLI({
-					sendIPC: async (cmd) => {
-						cli.state.ipcCommands.push(cmd);
+					sendRPC: async (cmd) => {
+						cli.state.rpcRequests.push(cmd);
 						return { ok: true };
 					},
 				});
@@ -638,12 +639,12 @@ it.each([
 
 describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	describe("--add", () => {
-		it("sends add_project with resolved path", async () => {
+		it("sends AddProject with resolved path", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
 					if (cmd._tag === "AddProject") {
-						return { ok: true, slug: "test-project" };
+						return { addedSlug: "test-project" };
 					}
 					return { ok: true };
 				},
@@ -651,18 +652,18 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 			await run(["--add", "/tmp/test-project"], cli);
 
-			const addCmd = cli.state.ipcCommands.find((c) => c._tag === "AddProject");
+			const addCmd = cli.state.rpcRequests.find((c) => c._tag === "AddProject");
 			expect(addCmd).toBeDefined();
 			assert.exists(addCmd, "expected add command");
 			expect(addCmd.directory).toBe("/tmp/test-project");
-			expect(cli.state.output).toContain("Project added");
+			expect(cli.state.output).toBe("Project added: test-project\n");
 		});
 
 		it("uses cwd when --add has no path", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -683,7 +684,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 			await run(["--remove"], cli);
 
-			const removeCmd = cli.state.ipcCommands.find(
+			const removeCmd = cli.state.rpcRequests.find(
 				(c) => c._tag === "RemoveProject",
 			);
 			expect(removeCmd).toBeDefined();
@@ -694,10 +695,10 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 		it("shows error when cwd is not registered", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
-						return { ok: true, projects: [] };
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
+						return { projects: [] };
 					}
 					return { ok: true };
 				},
@@ -709,11 +710,11 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			expect(cli.state.exitCode).toBe(1);
 		});
 
-		it("shows error when list_projects IPC fails in --remove", async () => {
+		it("shows error when GetProjects RPC fails in --remove", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					return { ok: false, error: "db locked" };
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					throw new Error("db locked");
 				},
 			});
 
@@ -723,20 +724,24 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			expect(cli.state.exitCode).toBe(1);
 		});
 
-		it("shows error when remove_project IPC returns ok: false", async () => {
+		it("shows error when RemoveProject RPC fails", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
 						return {
 							ok: true,
 							projects: [
-								{ slug: "my-project", directory: "/home/user/my-project" },
+								{
+									slug: "my-project",
+									directory: "/home/user/my-project",
+									title: "",
+								},
 							],
 						};
 					}
 					if (cmd._tag === "RemoveProject") {
-						return { ok: false, error: "permission denied" };
+						throw new Error("permission denied");
 					}
 					return { ok: true };
 				},
@@ -750,11 +755,11 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	});
 
 	describe("--list", () => {
-		it("sends list_projects and displays results", async () => {
+		it("sends GetProjects and displays results", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
 						return {
 							ok: true,
 							projects: [
@@ -763,7 +768,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 									directory: "/home/user/proj-a",
 									title: "Project A",
 								},
-								{ slug: "proj-b", directory: "/home/user/proj-b" },
+								{ slug: "proj-b", directory: "/home/user/proj-b", title: "" },
 							],
 						};
 					}
@@ -782,7 +787,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 		it("shows message when no projects", async () => {
 			const cli = createMockCLI({
-				sendIPC: async () => ({ ok: true, projects: [] }),
+				sendRPC: async () => ({ projects: [] }),
 			});
 
 			await run(["--list"], cli);
@@ -792,19 +797,23 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	});
 
 	describe("--title", () => {
-		it("sends list_projects then set_project_title", async () => {
+		it("sends GetProjects then RenameProject", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
 						return {
 							ok: true,
 							projects: [
-								{ slug: "my-project", directory: "/home/user/my-project" },
+								{
+									slug: "my-project",
+									directory: "/home/user/my-project",
+									title: "",
+								},
 							],
 						};
 					}
-					if (cmd._tag === "SetProjectTitle") {
+					if (cmd._tag === "RenameProject") {
 						return { ok: true };
 					}
 					return { ok: true };
@@ -813,8 +822,8 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 			await run(["--title", "New Title"], cli);
 
-			const titleCmd = cli.state.ipcCommands.find(
-				(c) => c._tag === "SetProjectTitle",
+			const titleCmd = cli.state.rpcRequests.find(
+				(c) => c._tag === "RenameProject",
 			);
 			expect(titleCmd).toBeDefined();
 			assert.exists(titleCmd, "expected title command");
@@ -834,10 +843,10 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 		it("shows error when cwd not registered", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
-						return { ok: true, projects: [] };
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
+						return { projects: [] };
 					}
 					return { ok: true };
 				},
@@ -849,11 +858,11 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			expect(cli.state.exitCode).toBe(1);
 		});
 
-		it("shows error when list_projects IPC fails in --title", async () => {
+		it("shows error when GetProjects RPC fails in --title", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					return { ok: false, error: "db locked" };
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					throw new Error("db locked");
 				},
 			});
 
@@ -863,20 +872,24 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			expect(cli.state.exitCode).toBe(1);
 		});
 
-		it("shows error when set_project_title IPC returns ok: false", async () => {
+		it("shows error when RenameProject RPC fails", async () => {
 			const cli = createMockCLI({
-				sendIPC: async (cmd) => {
-					cli.state.ipcCommands.push(cmd);
-					if (cmd._tag === "ListProjects") {
+				sendRPC: async (cmd) => {
+					cli.state.rpcRequests.push(cmd);
+					if (cmd._tag === "GetProjects") {
 						return {
 							ok: true,
 							projects: [
-								{ slug: "my-project", directory: "/home/user/my-project" },
+								{
+									slug: "my-project",
+									directory: "/home/user/my-project",
+									title: "",
+								},
 							],
 						};
 					}
-					if (cmd._tag === "SetProjectTitle") {
-						return { ok: false, error: "title too long" };
+					if (cmd._tag === "RenameProject") {
+						throw new Error("title too long");
 					}
 					return { ok: true };
 				},
@@ -893,9 +906,9 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 describe("T7: --port/--oc-port passed through (AC6)", () => {
 	it("custom port is used in URL", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "AddProject") return { addedSlug: "test" };
 				return { ok: true };
 			},
 		});
@@ -913,9 +926,9 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 				spawnPort = opts?.port;
 				return { pid: 1, port: opts?.port ?? 2633 };
 			},
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				if (cmd._tag === "AddProject") return { ok: true, slug: "test" };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "AddProject") return { addedSlug: "test" };
 				return { ok: true };
 			},
 		});
@@ -959,9 +972,11 @@ describe("T8: Error handling (AC8)", () => {
 		expect(cli.state.exitCode).toBe(1);
 	});
 
-	it("handles IPC error in --status", async () => {
+	it("handles RPC error in --status", async () => {
 		const cli = createMockCLI({
-			sendIPC: async () => ({ ok: false, error: "internal error" }),
+			sendRPC: async () => {
+				throw new WsRpcError({ message: "internal error" });
+			},
 		});
 
 		await run(["--status"], cli);
@@ -970,9 +985,11 @@ describe("T8: Error handling (AC8)", () => {
 		expect(cli.state.exitCode).toBe(1);
 	});
 
-	it("handles IPC error in --add", async () => {
+	it("handles RPC error in --add", async () => {
 		const cli = createMockCLI({
-			sendIPC: async () => ({ ok: false, error: "directory not found" }),
+			sendRPC: async () => {
+				throw new Error("directory not found");
+			},
 		});
 
 		await run(["--add", "/nonexistent"], cli);
@@ -983,7 +1000,9 @@ describe("T8: Error handling (AC8)", () => {
 
 	it("--list failure shows error", async () => {
 		const cli = createMockCLI({
-			sendIPC: async () => ({ ok: false, error: "something broke" }),
+			sendRPC: async () => {
+				throw new Error("something broke");
+			},
 		});
 
 		await run(["--list"], cli);
@@ -1012,137 +1031,6 @@ describe("T9/T10: getNetworkAddress and generateQR", () => {
 	});
 });
 
-describe("T11: sendIpcRequest", () => {
-	it("sendIpcRequest rejects for non-existent socket path", async () => {
-		await expect(
-			sendIpcRequest(
-				"/tmp/nonexistent-cli-test-socket.sock",
-				new GetStatus({}),
-			),
-		).rejects.toThrow();
-	});
-
-	it("sendIpcRequest returns the daemon-style error for a request the daemon would reject", async () => {
-		// Unmanaged with neither url nor port fails the InstanceAdd cross-field
-		// filter; it must come back as { ok: false }, not a thrown ParseError.
-		const response = await sendIpcRequest(
-			"/tmp/nonexistent-cli-test-socket.sock",
-			new InstanceAdd({ name: "work", managed: false }),
-		);
-		expect(response.ok).toBe(false);
-		expect(response.error).toContain(
-			"require either a 'url' or a valid 'port'",
-		);
-	});
-
-	it("sendIpcRequest retries and succeeds when server starts late", async () => {
-		const { createServer } = await import("node:net");
-		const { mkdtempSync } = await import("node:fs");
-		const { tmpdir } = await import("node:os");
-		const { join } = await import("node:path");
-
-		const dir = mkdtempSync(join(tmpdir(), "ipc-retry-"));
-		const sockPath = join(dir, "relay.sock");
-
-		// Start server after 800ms (will be caught by retry)
-		const server = createServer((conn) => {
-			let buf = "";
-			conn.on("data", (d: Buffer) => {
-				buf += d.toString();
-				if (buf.includes("\n")) {
-					conn.write('{"ok":true}\n');
-					conn.destroy();
-				}
-			});
-		});
-
-		const startTimer = setTimeout(() => {
-			server.listen(sockPath);
-		}, 800);
-
-		try {
-			const result = await sendIpcRequest(sockPath, new GetStatus({}));
-			expect(result).toEqual({ ok: true });
-		} finally {
-			clearTimeout(startTimer);
-			server.close();
-		}
-	});
-
-	it("sendIpcRequest serializes commands with _tag request format", async () => {
-		const { createServer } = await import("node:net");
-		const { mkdtempSync } = await import("node:fs");
-		const { tmpdir } = await import("node:os");
-		const { join } = await import("node:path");
-
-		const dir = mkdtempSync(join(tmpdir(), "ipc-rpc-format-"));
-		const sockPath = join(dir, "relay.sock");
-		let received: unknown;
-
-		const server = createServer((conn) => {
-			let buf = "";
-			conn.on("data", (d: Buffer) => {
-				buf += d.toString();
-				if (buf.includes("\n")) {
-					received = JSON.parse(buf.trim());
-					conn.write('{"ok":true}\n');
-					conn.destroy();
-				}
-			});
-		});
-
-		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
-
-		try {
-			const result = await sendIpcRequest(
-				sockPath,
-				new AddProject({
-					directory: "/tmp/conduit-project",
-				}),
-			);
-
-			expect(result).toEqual({ ok: true });
-			expect(received).toEqual({
-				_tag: "AddProject",
-				directory: "/tmp/conduit-project",
-			});
-		} finally {
-			server.close();
-		}
-	});
-
-	it("sendIpcRequest rejects malformed IPC responses", async () => {
-		const { createServer } = await import("node:net");
-		const { mkdtempSync } = await import("node:fs");
-		const { tmpdir } = await import("node:os");
-		const { join } = await import("node:path");
-
-		const dir = mkdtempSync(join(tmpdir(), "ipc-malformed-response-"));
-		const sockPath = join(dir, "relay.sock");
-
-		const server = createServer((conn) => {
-			let buf = "";
-			conn.on("data", (d: Buffer) => {
-				buf += d.toString();
-				if (buf.includes("\n")) {
-					conn.write('{"status":"ok"}\n');
-					conn.destroy();
-				}
-			});
-		});
-
-		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
-
-		try {
-			await expect(sendIpcRequest(sockPath, new GetStatus({}))).rejects.toThrow(
-				"Invalid IPC response",
-			);
-		} finally {
-			server.close();
-		}
-	});
-});
-
 describe("--help shows usage information", () => {
 	it("displays all flags in help text", async () => {
 		const cli = createMockCLI();
@@ -1163,13 +1051,13 @@ describe("--help shows usage information", () => {
 		expect(cli.state.output).toContain("--help");
 	});
 
-	it("does not exit or call IPC", async () => {
+	it("does not exit or call RPC", async () => {
 		const cli = createMockCLI();
 
 		await run(["--help"], cli);
 
 		expect(cli.state.exitCode).toBeNull();
-		expect(cli.state.ipcCommands).toHaveLength(0);
+		expect(cli.state.rpcRequests).toHaveLength(0);
 	});
 
 	it("displays new flags in help text", async () => {
@@ -1240,8 +1128,8 @@ describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () 
 	it("does not error when --dangerously-skip-permissions used with --pin", async () => {
 		// With --pin, the command becomes "pin" and skipPerms validation is skipped
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				return { ok: true };
 			},
 		});
@@ -1296,7 +1184,7 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 		expect(capturedCtx.args.noHttps).toBe(true);
 	});
 
-	it("interactive context has ipcSend, checkDaemon, spawnDaemon", async () => {
+	it("interactive context has rpcSend, checkDaemon, spawnDaemon", async () => {
 		const capturedContexts: InteractiveContext[] = [];
 
 		const cli = createMockCLI({
@@ -1310,7 +1198,7 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 		expect(capturedContexts).toHaveLength(1);
 		const capturedCtx = capturedContexts[0];
 		assert.exists(capturedCtx, "expected CLI context");
-		expect(typeof capturedCtx.ipcSend).toBe("function");
+		expect(typeof capturedCtx.rpcSend).toBe("function");
 		expect(typeof capturedCtx.checkDaemon).toBe("function");
 		expect(typeof capturedCtx.spawnDaemon).toBe("function");
 		expect(typeof capturedCtx.getAddr).toBe("function");
@@ -1323,7 +1211,7 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 			showInteractiveMenu: async () => {
 				interactiveCalled = true;
 			},
-			sendIPC: async () => ({
+			sendRPC: async () => ({
 				ok: true,
 				uptime: 0,
 				port: 2633,
@@ -1356,10 +1244,10 @@ describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)
 		// and does NOT provide stdin, so stdin falls back to process.stdin
 		// which in tests is not a TTY → legacy behavior
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				if (cmd._tag === "AddProject") {
-					return { ok: true, slug: "my-project" };
+					return { addedSlug: "my-project" };
 				}
 				return { ok: true };
 			},
@@ -1483,22 +1371,22 @@ describe("instance subcommands", () => {
 		expect(args.portExplicit).toBeUndefined();
 	});
 
-	it("instance list sends instance_list IPC", async () => {
+	it("instance list sends GetInstances RPC", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				return { ok: true, instances: [] };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				return { instances: [] };
 			},
 		});
 		await run(["--instance", "list"], cli);
-		expect(cli.state.ipcCommands).toContainEqual({ _tag: "InstanceList" });
+		expect(cli.state.rpcRequests).toContainEqual({ _tag: "GetInstances" });
 		expect(cli.state.output).toContain("No instances");
 	});
 
 	it("instance list displays instances", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				return {
 					ok: true,
 					instances: [
@@ -1518,21 +1406,21 @@ describe("instance subcommands", () => {
 		expect(cli.state.output).toContain("Work");
 	});
 
-	it("instance add sends instance_add IPC", async () => {
+	it("instance add sends AddInstance RPC", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				return { ok: true, instance: { id: "work" } };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				return { addedInstanceId: "instance-123", instances: [] };
 			},
 		});
 		await run(
 			["--instance", "add", "work", "--port", "4097", "--managed"],
 			cli,
 		);
-		expect(cli.state.ipcCommands).toContainEqual(
-			expect.objectContaining({ _tag: "InstanceAdd", name: "work" }),
+		expect(cli.state.rpcRequests).toContainEqual(
+			expect.objectContaining({ _tag: "AddInstance", name: "work" }),
 		);
-		expect(cli.state.output).toContain("Instance added");
+		expect(cli.state.output).toBe("Instance added: instance-123\n");
 	});
 
 	it("instance add without name shows error", async () => {
@@ -1543,26 +1431,26 @@ describe("instance subcommands", () => {
 	});
 
 	it.each([
-		["remove", "InstanceRemove"],
-		["start", "InstanceStart"],
-		["stop", "InstanceStop"],
-	] as const)("instance %s sends %s IPC", async (action, expectedTag) => {
+		["remove", "RemoveInstance"],
+		["start", "StartInstance"],
+		["stop", "StopInstance"],
+	] as const)("instance %s sends %s RPC", async (action, expectedTag) => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				return { ok: true };
 			},
 		});
 		await run(["--instance", action, "work"], cli);
-		expect(cli.state.ipcCommands).toContainEqual(
-			expect.objectContaining({ _tag: expectedTag, id: "work" }),
+		expect(cli.state.rpcRequests).toContainEqual(
+			expect.objectContaining({ _tag: expectedTag, instanceId: "work" }),
 		);
 	});
 
-	it("instance status sends instance_status IPC", async () => {
+	it("instance status sends GetInstanceStatus RPC", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
 				return {
 					ok: true,
 					instance: {
@@ -1576,8 +1464,11 @@ describe("instance subcommands", () => {
 			},
 		});
 		await run(["--instance", "status", "work"], cli);
-		expect(cli.state.ipcCommands).toContainEqual(
-			expect.objectContaining({ _tag: "InstanceStatus", id: "work" }),
+		expect(cli.state.rpcRequests).toContainEqual(
+			expect.objectContaining({
+				_tag: "GetInstanceStatus",
+				instanceId: "work",
+			}),
 		);
 		expect(cli.state.output).toContain("Work");
 		expect(cli.state.output).toContain("4097");
@@ -1591,11 +1482,11 @@ describe("instance subcommands", () => {
 		expect(cli.state.exitCode).toBe(1);
 	});
 
-	it("instance add with duplicate name reports error from IPC", async () => {
+	it("instance add with duplicate name reports error from RPC", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				return { ok: false, error: 'Instance "work" already exists' };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				throw new Error('Instance "work" already exists');
 			},
 		});
 		await run(
@@ -1649,17 +1540,17 @@ describe("instance subcommands", () => {
 		expect(args.instanceUrl).toBeUndefined();
 	});
 
-	it("instance add with --url sends url in IPC command", async () => {
+	it("instance add with --url sends url in RPC command", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				return { ok: true, instance: { id: "ext" } };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				return { addedInstanceId: "ext", instances: [] };
 			},
 		});
 		await run(["--instance", "add", "ext", "--url", "http://host:4096"], cli);
-		expect(cli.state.ipcCommands).toContainEqual(
+		expect(cli.state.rpcRequests).toContainEqual(
 			expect.objectContaining({
-				_tag: "InstanceAdd",
+				_tag: "AddInstance",
 				name: "ext",
 				url: "http://host:4096",
 				managed: false,
@@ -1668,18 +1559,18 @@ describe("instance subcommands", () => {
 		expect(cli.state.output).toContain("Instance added");
 	});
 
-	it("instance add without --url sends undefined url in IPC command", async () => {
+	it("instance add without --url sends undefined url in RPC command", async () => {
 		const cli = createMockCLI({
-			sendIPC: async (cmd) => {
-				cli.state.ipcCommands.push(cmd);
-				return { ok: true, instance: { id: "work" } };
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				return { addedInstanceId: "work", instances: [] };
 			},
 		});
 		await run(
 			["--instance", "add", "work", "--port", "4097", "--managed"],
 			cli,
 		);
-		const addCmd = cli.state.ipcCommands.find((c) => c._tag === "InstanceAdd");
+		const addCmd = cli.state.rpcRequests.find((c) => c._tag === "AddInstance");
 		expect(addCmd).toBeDefined();
 		assert.exists(addCmd, "expected add command");
 		expect(addCmd.url).toBeUndefined();

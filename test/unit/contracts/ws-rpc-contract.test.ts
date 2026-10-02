@@ -71,6 +71,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcGroup as FrontendWsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { resolveClaudeSettingsFromDisk } from "../../../src/lib/provider/claude/claude-settings-resolver.js";
+import { daemonOnlyHandlers } from "../../../src/lib/server/ws-rpc/daemon.js";
 import { WsRpcGroup as ServerWsRpcGroup } from "../../../src/lib/server/ws-rpc.js";
 
 type WsRpcTestEnv =
@@ -81,6 +82,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	Effect.scoped(effect).pipe(
 		Effect.provide(
 			WsRpcGroup.toLayer({
+				...daemonOnlyHandlers,
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ ok: true as const }),

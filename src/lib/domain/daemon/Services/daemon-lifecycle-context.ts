@@ -11,8 +11,6 @@ export const makeDaemonLifecycleContext = (
 	httpServer: null,
 	upgradeServer: null,
 	onboardingServer: null,
-	ipcServer: null,
-	ipcClients: new Set(),
 	clientCount: 0,
 	socketPath,
 	router: null,

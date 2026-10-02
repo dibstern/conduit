@@ -1,4 +1,4 @@
-import { GetStatus, SetPin } from "../../../src/lib/contracts/ipc-requests.js";
+import { GetStatus, SetPin } from "../../../src/lib/contracts/ws-rpc.js";
 /**
  * Integration test: Daemon start/stop lifecycle cleans up all async work.
  *
@@ -13,8 +13,8 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendIpcRequest } from "../../../src/bin/cli-utils.js";
 import { hashPin } from "../../../src/lib/auth.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
@@ -88,7 +88,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(typeof statusAfter).toBe("string"); // error code, not a status number
 	}, 15_000);
 
-	it("removes a PIN over IPC immediately and keeps it removed after restart", async () => {
+	it("removes a PIN over RPC immediately and keeps it removed after restart", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-pin-removal-"));
 		const options = {
 			configDir: tmpDir,
@@ -109,7 +109,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(before.status).toBe(302);
 		expect(before.headers.get("location")).toBe("/auth");
 		expect(
-			await sendIpcRequest(options.socketPath, new SetPin({ pin: "1234" })),
+			await sendRpcRequest(options.socketPath, new SetPin({ pin: "1234" })),
 		).toEqual({ ok: true });
 		await expect
 			.poll(() => {
@@ -121,7 +121,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 			.toMatchObject({ pinHash: hashPin("1234") });
 
 		expect(
-			await sendIpcRequest(options.socketPath, new SetPin({ pin: null })),
+			await sendRpcRequest(options.socketPath, new SetPin({ pin: null })),
 		).toEqual({ ok: true });
 
 		const after = await fetch(baseUrl, { redirect: "manual" });
@@ -130,9 +130,8 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(after.headers.get("location")).not.toBe("/auth");
 		expect(await httpStatus(`${baseUrl}/api/projects`)).toBe(200);
 		expect(
-			await sendIpcRequest(options.socketPath, new GetStatus({})),
+			await sendRpcRequest(options.socketPath, new GetStatus({})),
 		).toMatchObject({
-			ok: true,
 			pinEnabled: false,
 		});
 		await expect
@@ -154,9 +153,8 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(restarted.headers.get("location")).not.toBe("/auth");
 		expect(await httpStatus(`${restartedUrl}/api/projects`)).toBe(200);
 		expect(
-			await sendIpcRequest(options.socketPath, new GetStatus({})),
+			await sendRpcRequest(options.socketPath, new GetStatus({})),
 		).toMatchObject({
-			ok: true,
 			pinEnabled: false,
 		});
 	}, 30_000);

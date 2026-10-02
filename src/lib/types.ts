@@ -86,21 +86,6 @@ export interface ModelEntry {
 	provider: string;
 }
 
-export interface IPCResponse {
-	ok: boolean;
-	error?: string;
-	slug?: string;
-	directory?: string;
-	projects?: readonly unknown[];
-	uptime?: number;
-	port?: number;
-	projectCount?: number;
-	clientCount?: number;
-	instances?: readonly unknown[];
-	instance?: unknown;
-	[key: string]: unknown;
-}
-
 export type FrontendDecision = "allow" | "deny" | "allow_always";
 export type OpenCodeDecision = "once" | "always" | "reject";
 

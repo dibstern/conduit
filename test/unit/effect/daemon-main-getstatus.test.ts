@@ -1,13 +1,14 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TlsCerts } from "../../../src/lib/cli/tls.js";
+import { RestartWithConfig } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ForegroundDaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
@@ -43,30 +44,6 @@ async function waitForPersistedConfig(
 		},
 		{ timeout: 1_000 },
 	);
-}
-
-async function sendRestartConfig(
-	socketPath: string,
-	config: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-	return new Promise((resolve, reject) => {
-		const client = createConnection(socketPath);
-		let buffer = "";
-
-		client.on("connect", () => {
-			client.write(
-				`${JSON.stringify({ _tag: "RestartWithConfig", config })}\n`,
-			);
-		});
-		client.on("data", (chunk: Buffer) => {
-			buffer += chunk.toString("utf8");
-			if (!buffer.includes("\n")) return;
-			const line = buffer.slice(0, buffer.indexOf("\n"));
-			client.end();
-			resolve(JSON.parse(line) as Record<string, unknown>);
-		});
-		client.on("error", reject);
-	});
 }
 
 describe("daemon main runtime config status", () => {
@@ -145,10 +122,10 @@ describe("daemon main runtime config status", () => {
 			smartDefault: false,
 		});
 
-		const response = await sendRestartConfig(socketPath, {
-			tls: true,
-			keepAwake: true,
-		});
+		const response = await sendRpcRequest(
+			socketPath,
+			new RestartWithConfig({ config: { tls: true, keepAwake: true } }),
+		);
 
 		expect(response).toEqual({ ok: true });
 		expect(daemon.getStatus().tlsEnabled).toBe(true);

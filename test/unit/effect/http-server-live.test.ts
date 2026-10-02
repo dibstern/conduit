@@ -54,8 +54,6 @@ function makeContext(): DaemonLifecycleContext {
 		httpServer: null,
 		upgradeServer: null,
 		onboardingServer: null,
-		ipcServer: null,
-		ipcClients: new Set(),
 		clientCount: 0,
 		socketPath: "/tmp/conduit-http-server-live.sock",
 		router: null,

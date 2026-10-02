@@ -215,7 +215,7 @@ export async function spawnDaemon(
 		// ignore — fd may already be closed
 	}
 
-	// Wait for daemon to become ready (IPC socket connectable).
+	// Wait for daemon to become ready (RPC socket connectable).
 	// The child needs time to start Node, load modules, bind port, and
 	// create the Unix socket. Poll every 200ms for up to 5 seconds.
 	const POLL_INTERVAL = 200;
@@ -239,6 +239,6 @@ export async function spawnDaemon(
 	}
 
 	// Process is alive but socket not yet ready — return anyway
-	// (caller can retry IPC)
+	// (caller can retry RPC)
 	return { pid, port };
 }

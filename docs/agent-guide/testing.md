@@ -115,5 +115,5 @@ pnpm exec vitest run test/unit/effect/runtime-boundary-grep.test.ts
 Final guardrail expectations as of 2026-05-15:
 
 - `startDaemonProcess`, `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic `concurrency: "unbounded"` have zero production hits under `src`.
-- Runtime entry grep has exactly five accepted hits: standalone HTTP compatibility, OpenCode SDK fetch, Claude SDK permission callback, frontend transport, and relay startup.
+- Runtime entry grep has explicitly accepted hits: standalone HTTP compatibility, OpenCode SDK fetch, Claude SDK permission callback, frontend transport, local CLI RPC, and relay startup.
 - `relay-stack.ts` has zero `Layer.succeed(...)` relay bridge composition hits.
