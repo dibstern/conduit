@@ -110,6 +110,10 @@ export interface UserMessage {
 	 *    `sentDuringEpoch != null && turnEpoch <= sentDuringEpoch`
 	 *  The shimmer clears automatically when `handleDone` increments `turnEpoch`. */
 	sentDuringEpoch?: number;
+	/** Rows show the reply above was still being written after this was sent,
+	 *  and no reply has started below it. Rederived on every render, so it
+	 *  survives a reload, which `sentDuringEpoch` does not. */
+	waitingBehindReply?: true;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
 	modelExecution?: ModelExecution;

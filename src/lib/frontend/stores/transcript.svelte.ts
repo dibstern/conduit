@@ -310,9 +310,7 @@ export function deriveTranscriptMessages(
 	const projected: ChatMessage[] = [];
 	const adoptedUuids = new Set<string>();
 	const carriedAdditions: TranscriptEntry["carriedUsers"] = new Map();
-	// After a reload nothing local remembers a queued send, but the rows do: the
-	// reply above it was still being written after it was sent, and no reply
-	// has started below it.
+	// After a reload nothing local remembers a queued send, but the rows do.
 	const waitingUserIds = new Set<string>();
 	let reply: HistoryMessage | undefined;
 	for (const row of entry.rows) {
@@ -369,12 +367,14 @@ export function deriveTranscriptMessages(
 					!carried &&
 					options.live &&
 					options.active &&
-					(options.newUserIds?.has(row.id) || waitingUserIds.has(row.id))
+					options.newUserIds?.has(row.id)
 				) {
 					carried = { sentDuringEpoch: options.turnEpoch };
 					carriedAdditions.set(row.id, carried);
 				}
 				if (carried) next = { ...next, ...carried };
+				if (waitingUserIds.has(row.id))
+					next = { ...next, waitingBehindReply: true };
 			}
 			projected.push(reuseIfEqual(next, previousByUuid.get(item.uuid)));
 		}

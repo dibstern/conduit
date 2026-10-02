@@ -7,12 +7,11 @@
      `createdAt` — conduit's timestamps come from the event store, never from
      text a hook prepended to the message body.
      When queued, the card is dimmed and shows a shimmering "Queued" label.
-     The queued visual is DERIVED from the immutable `sentDuringEpoch` fact
-     and the live `turnEpoch` — no mutable flags, no clearing needed. -->
+     Queued is derived (utils/turns.ts isQueued), never set and cleared. -->
 
 <script lang="ts">
 	import type { UserMessage } from "../../types.js";
-	import { currentChat } from "../../stores/chat.svelte.js";
+	import { currentChat, isProcessing } from "../../stores/chat.svelte.js";
 	import {
 		discoveryState,
 		getModelDisplayName,
@@ -32,10 +31,9 @@
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
 
-	/** True while the turn that was in-progress when this message was sent
-	 *  hasn't completed yet. Clears automatically when `handleDone`
-	 *  increments `turnEpoch`. */
-	const queued = $derived(isQueued(message, currentChat().turnEpoch));
+	const queued = $derived(
+		isQueued(message, currentChat().turnEpoch, isProcessing()),
+	);
 </script>
 
 <div
