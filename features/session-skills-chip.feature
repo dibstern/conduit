@@ -42,6 +42,36 @@ Examples:
   | loads                                                            | count | rows                                                 | baseline               | threshold |
   | release-notes by you in turn 1; release-notes by agent in turn 3 | 1     | release-notes ×2 (you + agent · turns 1, 3 · 5m ago) | session-skills-popover | 98        |
 
+Scenario Outline: The chip updates and pulses while the agent loads a skill
+  Given the viewport is a phone
+  And the session loaded the skills "<before>"
+  And the conduit app is served with the long-transcript mockup
+  Then the skills chip reads 1 skill used
+  When the agent starts loading a skill, leaving the session with "<during>"
+  Then the skills chip reads <count> skills used
+  And the skills chip pulses
+  When I open the skills chip
+  Then the skills list shows "<rows>"
+  And the screen region visually matches <baseline> at <threshold> percent
+  When the agent finishes loading the skill
+  Then the skills chip does not pulse
+
+Examples:
+  | before                         | during                                                                       | count | rows                                                                         | baseline                 | threshold |
+  | release-notes by you in turn 1 | release-notes by you in turn 1; changelog-style by agent in turn 2, loading | 2     | release-notes (you · turn 1 · 5m ago); changelog-style (agent · turn 2 · loading now) | session-skills-loading | 98        |
+
+Scenario Outline: A skill typed in another tab shows up here
+  Given the viewport is a phone
+  And the session loaded the skills "<before>"
+  And the conduit app is served with the long-transcript mockup
+  Then the skills chip reads 1 skill used
+  When another tab sends "<text>", leaving the session with "<after>"
+  Then the skills chip reads <count> skills used
+
+Examples:
+  | before                         | text                             | after                                                            | count |
+  | release-notes by you in turn 1 | /changelog-style tidy the notes | release-notes by you in turn 1; changelog-style by you in turn 2 | 2     |
+
 Scenario: A session without skills shows no chip
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup

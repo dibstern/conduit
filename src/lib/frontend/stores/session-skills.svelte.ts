@@ -43,6 +43,14 @@ export async function loadSessionSkills(sessionId: string): Promise<void> {
 	}
 }
 
+/** A live hint that the open session's skills may have changed: a skill tool
+ *  ran or finished, a message was sent, or a turn ended. Spare calls are fine;
+ *  the server decides what counts. */
+export function refreshSessionSkills(sessionId: string): void {
+	if (sessionSkillsState.sessionId === sessionId)
+		void loadSessionSkills(sessionId);
+}
+
 /** One row per skill, in first-use order. */
 export function sessionSkillRows(
 	loads: readonly SkillLoad[],

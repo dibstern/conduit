@@ -87,7 +87,10 @@ import {
 	switchToSession,
 } from "./session.svelte.js";
 import { refreshSessionList } from "./session-list.svelte.js";
-import { loadSessionSkills } from "./session-skills.svelte.js";
+import {
+	refreshSessionSkills,
+	sessionSkillsState,
+} from "./session-skills.svelte.js";
 import {
 	handlePtyCreated,
 	handlePtyDeleted,
@@ -228,8 +231,17 @@ function routePerSession(event: PerSessionEvent): void {
 			break;
 		case "tool_executing":
 			handleToolExecuting(activity, messages, event);
+			// Not tool_start: the server names the skill from the input, which
+			// arrives here.
+			if (event.name.toLowerCase() === "skill")
+				refreshSessionSkills(event.sessionId);
+			break;
+		case "user_message":
+			refreshSessionSkills(event.sessionId);
 			break;
 		case "tool_result": {
+			if (sessionSkillsState.loads.some((load) => load.running))
+				refreshSessionSkills(event.sessionId);
 			// If this was a TodoWrite result, also update the todo store.
 			const msgs = getMessages(messages);
 			const toolMsg = msgs.find(
@@ -242,9 +254,7 @@ function routePerSession(event: PerSessionEvent): void {
 		}
 		case "done": {
 			handleDone(activity, messages, event);
-			if (event.sessionId === sessionState.currentId) {
-				void loadSessionSkills(event.sessionId);
-			}
+			refreshSessionSkills(event.sessionId);
 			// Only notify for root agent sessions — subagent completions are
 			// intermediate steps; the parent emits its own done when finished.
 			const doneSession = findSession(event.sessionId);

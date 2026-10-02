@@ -1,31 +1,106 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { mockSessionSkills, requireRpcControl } from "./shared.js";
+import {
+	mockSessionSkills,
+	requireRelayControl,
+	requireRpcControl,
+} from "./shared.js";
 
-const LOAD = /^\s*([\w:-]+) by (you|agent) in turn (\d+)\s*$/;
+const LOAD = /^\s*([\w:-]+) by (you|agent) in turn (\d+)(, loading)?\s*$/;
 const FIVE_MINUTES = 5 * 60_000;
+const SKILL_TOOL_ID = "tool-skill-live";
+
+// e.g. "release-notes by you in turn 1; changelog-style by agent in turn 2, loading"
+const parseLoads = (text: string) =>
+	text.split(";").map((entry, index) => {
+		const parts = LOAD.exec(entry);
+		if (!parts) throw new Error(`unreadable skill load "${entry}"`);
+		return {
+			name: parts[1],
+			invokedBy: parts[2] === "you" ? "user" : "agent",
+			turnOrdinal: Number(parts[3]),
+			// The browser's Date.now is pinned, so ages are read against that.
+			at: PINNED_CLOCK_MS - FIVE_MINUTES,
+			anchor: { messageId: `msg-skill-${index}` },
+			running: parts[4] !== undefined,
+		};
+	});
+
+/** The open session, as the chip last asked the server about it. */
+const openSessionId = async (page: Page) => {
+	const request = await requireRpcControl(page).waitForRequest(
+		(candidate) => candidate.tag === "GetSessionSkills",
+	);
+	return String(request.payload["sessionId"]);
+};
 
 export const sessionSkillsHandlers: StepHandler[] = [
 	{
 		name: "seed session skill loads",
-		// e.g. "release-notes by you in turn 1; changelog-style by agent in turn 1"
 		match: /^the session loaded the skills "(.*)"$/,
 		run: async ({ world, match }) => {
-			const loads = (match[1] ?? "").split(";").map((entry, index) => {
-				const parts = LOAD.exec(entry);
-				if (!parts) throw new Error(`unreadable skill load "${entry}"`);
-				return {
-					name: parts[1],
-					invokedBy: parts[2] === "you" ? "user" : "agent",
-					turnOrdinal: Number(parts[3]),
-					// The browser's Date.now is pinned, so ages are read against that.
-					at: PINNED_CLOCK_MS - FIVE_MINUTES,
-					anchor: { messageId: `msg-skill-${index}` },
-					running: false,
-				};
+			mockSessionSkills.set(world.page, parseLoads(match[1] ?? ""));
+		},
+	},
+	{
+		name: "agent starts a skill load",
+		match:
+			/^the agent starts loading a skill, leaving the session with "(.*)"$/,
+		run: async ({ world, match }) => {
+			const sessionId = await openSessionId(world.page);
+			mockSessionSkills.set(world.page, parseLoads(match[1] ?? ""));
+			requireRelayControl(world.page).sendMessage({
+				type: "tool_executing",
+				sessionId,
+				id: SKILL_TOOL_ID,
+				name: "Skill",
+				input: { skill: "changelog-style" },
 			});
-			mockSessionSkills.set(world.page, loads);
+		},
+	},
+	{
+		name: "another tab sends a message",
+		match: /^another tab sends "(.*)", leaving the session with "(.*)"$/,
+		run: async ({ world, match }) => {
+			const sessionId = await openSessionId(world.page);
+			mockSessionSkills.set(world.page, parseLoads(match[2] ?? ""));
+			requireRelayControl(world.page).sendMessage({
+				type: "user_message",
+				sessionId,
+				text: match[1] ?? "",
+				originId: "another-tab",
+			});
+		},
+	},
+	{
+		name: "agent finishes a skill load",
+		match: /^the agent finishes loading the skill$/,
+		run: async ({ world }) => {
+			const sessionId = await openSessionId(world.page);
+			const loads = (mockSessionSkills.get(world.page) ?? []) as readonly {
+				running: boolean;
+			}[];
+			mockSessionSkills.set(
+				world.page,
+				loads.map((load) => ({ ...load, running: false })),
+			);
+			requireRelayControl(world.page).sendMessage({
+				type: "tool_result",
+				sessionId,
+				id: SKILL_TOOL_ID,
+				content: "Loaded.",
+				is_error: false,
+			});
+		},
+	},
+	{
+		name: "skills chip pulse",
+		match: /^the skills chip (pulses|does not pulse)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("session-skills-chip-pulse"),
+			).toHaveCount(match[1] === "pulses" ? 1 : 0);
 		},
 	},
 	{

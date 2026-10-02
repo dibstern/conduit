@@ -30,12 +30,14 @@
 			? sessionSkillRows(sessionSkillsState.loads)
 			: [],
 	);
+	const loading = $derived(rows.some((row) => row.running));
 	const label = $derived(`${rows.length} ${rows.length === 1 ? "skill" : "skills"} used`);
 
 	function describe(row: SessionSkillRow): string {
 		const who = row.byUser && row.byAgent ? "you + agent" : row.byUser ? "you" : "agent";
 		const turns = `${row.turns.length === 1 ? "turn" : "turns"} ${row.turns.join(", ")}`;
-		return `${who} · ${turns} · ${formatTimeAgo(row.lastAt, new Date(sessionState.now))}`;
+		const when = row.running ? "loading now" : formatTimeAgo(row.lastAt, new Date(sessionState.now));
+		return `${who} · ${turns} · ${when}`;
 	}
 </script>
 
@@ -56,6 +58,14 @@
 				data-testid="session-skills-chip"
 			>
 				{rows.length}
+				{#if loading}
+					<!-- Decorative: the open list says "loading now" in words. -->
+					<span
+						class="pointer-events-none absolute -top-0.5 -right-0.5 size-[7px] rounded-full bg-success ring-2 ring-bg motion-safe:animate-pulse"
+						aria-hidden="true"
+						data-testid="session-skills-chip-pulse"
+					></span>
+				{/if}
 			</Button>
 		{/snippet}
 		<MenuGroup label="Skills used">
