@@ -881,9 +881,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	getResumeSessionIdEffect(
 		sessionId: string,
-	): Effect.Effect<string | undefined> {
+	): Effect.Effect<string | null | undefined> {
 		return getSession(this.stateRef, sessionId).pipe(
-			Effect.map((ctx) => ctx?.resumeSessionId),
+			Effect.map((ctx) => (ctx ? (ctx.resumeSessionId ?? null) : undefined)),
 		);
 	}
 

@@ -346,10 +346,12 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			queryInitializationDelayMs: WARM_DELAY_MS,
 		});
 		const browser = await harness.connect(sessionId);
-		await vi.waitFor(() =>
-			expect(
-				sdkProof(harness).filter((mark) => mark.kind === "query"),
-			).toHaveLength(2),
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).filter((mark) => mark.kind === "query"),
+				).toHaveLength(2),
+			{ timeout: 10_000 },
 		);
 		const candidate = sdkProof(harness).find(
 			(mark) => mark.kind === "query" && mark.pid !== old.pid,
@@ -566,15 +568,17 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await harness.kill();
 		await harness.restart({ buildId: NEW_BUILD });
 		const browser = await harness.connect(sessionId);
-		await vi.waitFor(() =>
-			expect(
-				sdkProof(harness).some(
-					(mark) =>
-						mark.kind === "runner-upgrade" &&
-						mark.phase === "failed" &&
-						mark.oldPid === old.pid,
-				),
-			).toBe(true),
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) =>
+							mark.kind === "runner-upgrade" &&
+							mark.phase === "failed" &&
+							mark.oldPid === old.pid,
+					),
+				).toBe(true),
+			{ timeout: 10_000 },
 		);
 		expect(existsSync(join(harness.root, "fail-next-initialization"))).toBe(
 			false,
@@ -986,12 +990,19 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["replacement"] = replacement;
 	}, 40_000);
 
-	it("merge regression: the actual first upgraded send preserves an interrupted first-turn cursor", async () => {
+	it.each([
+		"live",
+		"incoming",
+	] as const)("merge regression: the actual first upgraded send uses the %s resume cursor", async (cursorSource) => {
 		const {
 			harness,
 			details,
 			browser: initial,
-		} = await start("merge-first-send-cursor");
+		} = await start(
+			cursorSource === "live"
+				? "merge-first-send-cursor"
+				: "incoming-resume-cursor",
+		);
 		const sessionId = await initial.createSession("Actual resumed first send");
 		details["sessionId"] = sessionId;
 		const interrupted = "stall-merge-first-turn";
@@ -1039,6 +1050,18 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const browser = await harness.connect(sessionId);
 		const replacement = await upgraded(harness, sessionId, old.pid);
 		const warmed = queryFor(harness, replacement.pid);
+		const expectedResume =
+			cursorSource === "incoming" ? randomUUID() : originalQuery.sessionId;
+		if (cursorSource === "incoming") {
+			const db = new Database(join(harness.projectDir, ".conduit/events.db"));
+			try {
+				db.prepare(
+					"INSERT INTO provider_state (session_id, key, value) VALUES (?, 'resumeSessionId', ?)",
+				).run(sessionId, expectedResume);
+			} finally {
+				db.close();
+			}
+		}
 		const after = "merge-actual-first-upgraded-send";
 		expect((await browser.send(sessionId, after)).chunks).toEqual(
 			responseChunks(after),
@@ -1048,15 +1071,16 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		if (enqueue?.kind !== "enqueue")
 			throw new Error("Missing actual first-send enqueue");
-		expect(enqueue).toMatchObject({ queryId: warmed.queryId });
+		if (cursorSource === "live") expect(enqueue.queryId).toBe(warmed.queryId);
+		else expect(enqueue.queryId).not.toBe(warmed.queryId);
 		const actualQueryId = enqueue.queryId;
 		const actualQuery = sdkProof(harness).find(
 			(mark) => mark.kind === "query" && mark.queryId === actualQueryId,
 		);
-		expect(actualQuery).toMatchObject({ sessionId: originalQuery.sessionId });
+		expect(actualQuery).toMatchObject({ sessionId: expectedResume });
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
-		).toHaveLength(2);
+		).toHaveLength(cursorSource === "live" ? 2 : 3);
 		expect(
 			sdkProof(harness).filter(
 				(mark) => mark.kind === "enqueue" && mark.prompt === after,
@@ -1072,8 +1096,146 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			{ timeout: 10_000 },
 		);
 		details["originalClaudeSessionId"] = originalQuery.sessionId;
+		details["expectedResumeSessionId"] = expectedResume;
 		details["actualFirstSendQuery"] = actualQuery;
 		details["replacement"] = replacement;
+	}, 40_000);
+
+	it("clears a rejected live cursor after upgrade and retries on a fresh Claude session", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("invalidated-resume-cursor");
+		const sessionId = await initial.createSession("Rejected upgraded cursor");
+		details["sessionId"] = sessionId;
+		const interrupted = "stall-invalidated-resume-first-turn";
+		const pending = initial.send(sessionId, interrupted).catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) => mark.kind === "emit" && mark.prompt === interrupted,
+					),
+				).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const old = runnerFor(harness, sessionId);
+		const original = queryFor(harness, old.pid);
+		await Effect.runPromise(
+			initial.rpc.CancelSession({
+				projectSlug: "process-test",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+		);
+		await pending;
+		await vi.waitFor(
+			() =>
+				expect(
+					persisted(harness, sessionId).commands.map(({ status }) => status),
+				).toEqual(["failed"]),
+			{ timeout: 10_000 },
+		);
+		await harness.kill();
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const replacement = await upgraded(harness, sessionId, old.pid);
+		const warmed = queryFor(harness, replacement.pid);
+		writeFileSync(
+			join(harness.root, "rejected-resume-session-id"),
+			original.sessionId,
+		);
+		const rejected = "invalidated-resume-rejected-send";
+		await Effect.runPromise(
+			browser.rpc.SendMessage({
+				projectSlug: "process-test",
+				sessionId,
+				originId: browser.originId,
+				commandId: randomUUID(),
+				text: rejected,
+			}),
+		);
+		await vi.waitFor(
+			() => {
+				expect(
+					sdkProof(harness).filter((mark) => mark.kind === "resume-rejected"),
+				).toEqual([
+					{
+						kind: "resume-rejected",
+						prompt: rejected,
+						queryId: warmed.queryId,
+						sessionId: original.sessionId,
+					},
+				]);
+				const state = persisted(harness, sessionId);
+				expect(state.commands.map(({ status }) => status)).toEqual([
+					"failed",
+					"failed",
+				]);
+				expect(
+					state.providerState.find(({ key }) => key === "resumeSessionId"),
+				).toBeUndefined();
+			},
+			{ timeout: 10_000 },
+		);
+		details["providerStateAfterRejection"] = persisted(
+			harness,
+			sessionId,
+		).providerState;
+		const retried = "invalidated-resume-fresh-send";
+		const retry = browser.send(sessionId, retried).catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) => mark.kind === "enqueue" && mark.prompt === retried,
+					),
+				).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const enqueue = sdkProof(harness).find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === retried,
+		);
+		if (enqueue?.kind !== "enqueue") throw new Error("Missing retry enqueue");
+		const actualQueryId = enqueue.queryId;
+		const fresh = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.queryId === actualQueryId,
+		);
+		if (fresh?.kind !== "query") throw new Error("Missing retry query");
+		details["originalClaudeSessionId"] = original.sessionId;
+		details["freshClaudeSessionId"] = fresh.sessionId;
+		details["replacement"] = replacement;
+		expect(fresh.sessionId).not.toBe(original.sessionId);
+		expect(fresh.pid).toBe(replacement.pid);
+		expect((await retry)?.chunks).toEqual(responseChunks(retried));
+		expect(
+			sdkProof(harness).filter((mark) => mark.kind === "resume-rejected"),
+		).toHaveLength(1);
+		for (const prompt of [interrupted, rejected, retried])
+			expect(
+				sdkProof(harness).filter(
+					(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+				),
+			).toHaveLength(1);
+		await vi.waitFor(
+			() => {
+				const state = persisted(harness, sessionId);
+				expect(state.commands.map(({ status }) => status)).toEqual([
+					"failed",
+					"failed",
+					"completed",
+				]);
+				expect(
+					state.events.filter((event) => event.type === "turn.completed"),
+				).toHaveLength(1);
+				expect(
+					state.providerState.find(({ key }) => key === "resumeSessionId")
+						?.value,
+				).toBe(fresh.sessionId);
+			},
+			{ timeout: 10_000 },
+		);
 	}, 40_000);
 
 	it("merge regression: recreating an upgraded query replays file settings changed after the switch", async () => {
