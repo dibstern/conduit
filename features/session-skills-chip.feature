@@ -76,3 +76,39 @@ Scenario: A session without skills shows no chip
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup
   Then there is no skills chip
+
+Scenario: An agent skill row reveals the latest tied run across older pages
+  Given the viewport is a phone
+  And the session loaded skills with transcript anchors
+  And the conduit app is served with the skill-navigation mockup
+  Then turn 3 is absent from the first transcript page
+  When I open the skills chip
+  And I tap the skill row "paged-skill"
+  Then two older transcript pages were requested
+  And the Skill step in turn 3 is focused in its expanded activity panel and in the viewport
+  And the skills toggle for turn 3 stays closed
+  When I collapse the activity panel for turn 3
+  And I open the skills chip
+  And I tap the skill row "paged-skill"
+  Then the Skill step in turn 3 is focused in its expanded activity panel and in the viewport
+  And the skills toggle for turn 3 stays closed
+  And two older transcript pages were requested
+
+Scenario: A user skill row brings its prompt into view
+  Given the viewport is a phone
+  And the session loaded skills with transcript anchors
+  And the conduit app is served with the skill-navigation mockup
+  Then the user message in turn 42 is loaded outside the viewport
+  When I open the skills chip
+  And I tap the skill row "user-skill"
+  Then the user message in turn 42 is in the viewport
+
+Scenario: A missing skill run shows a quiet toast without moving the transcript
+  Given the viewport is a phone
+  And the session loaded the skills "missing-skill by agent in turn 1"
+  And the conduit app is served with the long-transcript mockup
+  When I leave the transcript halfway up and remember its position
+  And I open the skills chip
+  And I tap the skill row "missing-skill"
+  Then a quiet toast says "That skill run is no longer in this session"
+  And the transcript has not moved for the skill navigation

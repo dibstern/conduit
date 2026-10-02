@@ -4,6 +4,7 @@
 	skill spends no width on it.
 -->
 <script lang="ts">
+	import { reveal } from "../../stores/reveal.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import {
 		loadSessionSkills,
@@ -11,6 +12,7 @@
 		sessionSkillsState,
 		type SessionSkillRow,
 	} from "../../stores/session-skills.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
@@ -38,6 +40,14 @@
 		const turns = `${row.turns.length === 1 ? "turn" : "turns"} ${row.turns.join(", ")}`;
 		const when = row.running ? "loading now" : formatTimeAgo(row.lastAt, new Date(sessionState.now));
 		return `${who} · ${turns} · ${when}`;
+	}
+
+	async function revealLatest(row: SessionSkillRow): Promise<void> {
+		const latest = row.loads.reduce((previous, load) =>
+			load.at >= previous.at ? load : previous,
+		);
+		if ((await reveal(latest.anchor)) === "missing")
+			showToast("That skill run is no longer in this session");
 	}
 </script>
 
@@ -70,7 +80,7 @@
 		{/snippet}
 		<MenuGroup label="Skills used">
 			{#each rows as row (row.name)}
-				<MenuItem icon="sparkles" data-testid="session-skills-row" data-skill={row.name}>
+				<MenuItem icon="sparkles" data-testid="session-skills-row" data-skill={row.name} onselect={() => void revealLatest(row)}>
 					<span class="flex min-w-0 flex-1 flex-col">
 						<span class="truncate font-medium text-text">{row.name}</span>
 						<span class="truncate text-xs text-text-muted" data-testid="session-skills-row-meta">{describe(row)}</span>

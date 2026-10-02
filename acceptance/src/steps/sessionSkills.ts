@@ -10,6 +10,12 @@ import {
 const LOAD = /^\s*([\w:-]+) by (you|agent) in turn (\d+)(, loading)?\s*$/;
 const FIVE_MINUTES = 5 * 60_000;
 const SKILL_TOOL_ID = "tool-skill-live";
+const navigationScrollTops = new WeakMap<Page, number>();
+
+const activityPanel = (page: Page, turn: string) =>
+	page.locator(
+		`#messages .msg-container:has([data-uuid="msg-skill-nav-user-${turn}/user"]) + div .turn-activity`,
+	);
 
 // e.g. "release-notes by you in turn 1; changelog-style by agent in turn 2, loading"
 const parseLoads = (text: string) =>
@@ -41,6 +47,185 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		match: /^the session loaded the skills "(.*)"$/,
 		run: async ({ world, match }) => {
 			mockSessionSkills.set(world.page, parseLoads(match[1] ?? ""));
+		},
+	},
+	{
+		name: "seed skills with transcript anchors",
+		match: /^the session loaded skills with transcript anchors$/,
+		run: async ({ world }) => {
+			// Turn 3 wins the timestamp tie with turn 1; turn 2 is last but older.
+			const loads = parseLoads(
+				"paged-skill by agent in turn 1; paged-skill by agent in turn 3; paged-skill by agent in turn 2; user-skill by you in turn 42",
+			);
+			mockSessionSkills.set(
+				world.page,
+				loads.map((load) => ({
+					...load,
+					at: PINNED_CLOCK_MS - FIVE_MINUTES * (load.turnOrdinal === 2 ? 2 : 1),
+					anchor: {
+						messageId: `msg-skill-nav-${load.invokedBy === "user" ? "user" : "agent"}-${load.turnOrdinal}`,
+						...(load.invokedBy === "agent"
+							? { partId: `part-skill-nav-skill-${load.turnOrdinal}` }
+							: {}),
+					},
+				})),
+			);
+		},
+	},
+	{
+		name: "turn is absent from first transcript page",
+		match: /^turn ([0-9]+) is absent from the first transcript page$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator("#messages .msg-user")).toHaveCount(25);
+			await expect(
+				world.page.locator(`[data-uuid="msg-skill-nav-user-${match[1]}/user"]`),
+			).toHaveCount(0);
+			await expect(
+				world.page.locator(
+					`[data-part="msg-skill-nav-agent-${match[1]}/part-skill-nav-skill-${match[1]}"]`,
+				),
+			).toHaveCount(0);
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((request) => request.tag === "LoadMoreHistory"),
+			).toHaveLength(0);
+		},
+	},
+	{
+		name: "tap a skill row",
+		match: /^I tap the skill row "([\w:-]+)"$/,
+		run: async ({ world, match }) => {
+			const row = world.page.locator(
+				`[data-testid="session-skills-row"][data-skill="${match[1]}"]`,
+			);
+			await expect(row).toBeVisible();
+			if (navigationScrollTops.has(world.page)) {
+				// Measure the row tap after any chrome changes from opening the menu.
+				const position = await world.page
+					.locator("#messages")
+					.evaluate((el) => el.scrollTop);
+				navigationScrollTops.set(world.page, position);
+			}
+			await row.click();
+		},
+	},
+	{
+		name: "skill navigation paged older history twice",
+		match: /^two older transcript pages were requested$/,
+		run: async ({ world }) => {
+			await expect
+				.poll(() =>
+					requireRpcControl(world.page)
+						.getRequests()
+						.filter((request) => request.tag === "LoadMoreHistory")
+						.map((request) => ({
+							sessionId: request.payload["sessionId"],
+							before: request.payload["before"],
+						})),
+				)
+				.toEqual([
+					{ sessionId: "sess-mockup-001", before: "msg-skill-nav-user-40" },
+					{ sessionId: "sess-mockup-001", before: "msg-skill-nav-user-15" },
+				]);
+		},
+	},
+	{
+		name: "skill navigation reveals its focused activity step",
+		match:
+			/^the Skill step in turn ([0-9]+) is focused in its expanded activity panel and in the viewport$/,
+		run: async ({ world, match }) => {
+			const turn = match[1] ?? "";
+			const panel = activityPanel(world.page, turn);
+			const step = panel.locator(
+				`[data-part="msg-skill-nav-agent-${turn}/part-skill-nav-skill-${turn}"]`,
+			);
+			await expect(panel.locator(".turn-activity-toggle")).toHaveAttribute(
+				"aria-expanded",
+				"true",
+			);
+			await expect(step).toContainText("paged-skill");
+			await expect(step.getByRole("button").first()).toHaveClass(
+				/bg-\[rgba\(var\(--overlay-rgb\),0\.06\)\]/,
+			);
+			await expect(step).toBeInViewport({ ratio: 0.5 });
+		},
+	},
+	{
+		name: "turn skills toggle stays closed",
+		match: /^the skills toggle for turn ([0-9]+) stays closed$/,
+		run: async ({ world, match }) => {
+			await expect(
+				activityPanel(world.page, match[1] ?? "").locator(".skills-toggle"),
+			).toHaveAttribute("aria-expanded", "false");
+		},
+	},
+	{
+		name: "collapse skill activity before revisiting it",
+		match: /^I collapse the activity panel for turn ([0-9]+)$/,
+		run: async ({ world, match }) => {
+			const toggle = activityPanel(world.page, match[1] ?? "").locator(
+				".turn-activity-toggle",
+			);
+			await expect(toggle).toHaveAttribute("aria-expanded", "true");
+			await toggle.click();
+			await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		},
+	},
+	{
+		name: "user skill prompt viewport position",
+		match:
+			/^the user message in turn ([0-9]+) is (loaded outside the viewport|in the viewport)$/,
+		run: async ({ world, match }) => {
+			const message = world.page.locator(
+				`#messages .msg-user[data-uuid="msg-skill-nav-user-${match[1]}/user"]`,
+			);
+			await expect(message).toHaveCount(1);
+			if (match[2] === "loaded outside the viewport")
+				await expect(message).not.toBeInViewport();
+			else await expect(message).toBeInViewport({ ratio: 0.5 });
+		},
+	},
+	{
+		name: "remember position before skill navigation",
+		match: /^I leave the transcript halfway up and remember its position$/,
+		run: async ({ world }) => {
+			const transcript = world.page.locator("#messages");
+			const position = await transcript.evaluate((el) => {
+				const midpoint = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+				if (midpoint <= 0) throw new Error("transcript has no scroll range");
+				el.scrollTo({ top: midpoint, behavior: "instant" });
+				return midpoint;
+			});
+			await expect
+				.poll(() => transcript.evaluate((el) => el.scrollTop))
+				.toBe(position);
+			navigationScrollTops.set(world.page, position);
+		},
+	},
+	{
+		name: "missing skill has a quiet default toast",
+		match: /^a quiet toast says "(.*)"$/,
+		run: async ({ world, match }) => {
+			const toast = world.page.getByRole("status").filter({
+				hasText: match[1] ?? "",
+			});
+			await expect(toast).toHaveText(match[1] ?? "");
+			await expect(toast).toHaveAttribute("aria-live", "polite");
+			await expect(toast).toHaveClass(/\bbg-bg-alt\b/);
+			await expect(toast).toBeVisible();
+		},
+	},
+	{
+		name: "missing skill keeps transcript position",
+		match: /^the transcript has not moved for the skill navigation$/,
+		run: async ({ world }) => {
+			const position = navigationScrollTops.get(world.page);
+			if (position === undefined)
+				throw new Error("transcript position was not remembered");
+			expect(
+				await world.page.locator("#messages").evaluate((el) => el.scrollTop),
+			).toBe(position);
 		},
 	},
 	{
