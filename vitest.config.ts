@@ -11,6 +11,29 @@ export default defineConfig({
 		// Svelte resolves to its client bundle (which provides mount()).
 		// All other tests run in the default node environment.
 		projects: [
+			// Explicit lifecycle invocations run the process harness; the default
+			// unit sweep remains limited to the unit projects below.
+			...(process.argv.some((arg) =>
+				arg.includes(
+					"test/integration/daemon/claude-process-runner-lifecycle.test.ts",
+				),
+			)
+				? [
+						{
+							extends: true as const,
+							test: {
+								name: "runner-lifecycle",
+								include: [
+									"test/integration/daemon/claude-process-runner-lifecycle.test.ts",
+								],
+								environment: "node" as const,
+								pool: "forks" as const,
+								testTimeout: 30_000,
+								hookTimeout: 30_000,
+							},
+						},
+					]
+				: []),
 			{
 				extends: true,
 				test: {

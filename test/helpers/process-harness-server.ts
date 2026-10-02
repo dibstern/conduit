@@ -54,7 +54,8 @@ async function main(): Promise<void> {
 	const activeDaemon = await startForegroundDaemon({
 		port: 0,
 		host: "127.0.0.1",
-		configDir: join(root, "config"),
+		configDir:
+			process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config"),
 		claudeConfigDir: join(root, "claude"),
 		staticDir: dist ? join(dist, "frontend") : join(root, "static"),
 		smartDefault: false,

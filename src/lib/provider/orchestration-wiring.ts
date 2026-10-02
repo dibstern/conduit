@@ -187,6 +187,9 @@ const createOrchestrationComponentsEffect = (
 				? { onBackgroundTask: options.onBackgroundTask }
 				: {}),
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
+			...(options.configDir !== undefined
+				? { daemonConfigDir: options.configDir }
+				: {}),
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
 			materializeSubagents,

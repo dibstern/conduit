@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
+import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
 import type { TurnResult } from "../types.js";
 import type {
@@ -11,7 +12,7 @@ import type {
 	ClaudeSessionOutputReply,
 } from "./claude-session-runner.js";
 
-export const CLAUDE_RUNNER_PROTOCOL_VERSION = 1;
+export const CLAUDE_RUNNER_PROTOCOL_VERSION = 3;
 
 export interface ClaudeRunnerHello {
 	readonly type: "hello";
@@ -40,6 +41,13 @@ type ClaudeRunnerReply =
 
 export type ClaudeRunnerMessage =
 	| ClaudeRunnerHello
+	| { readonly type: "idle-exit" | "idle-exit-ack" }
+	| {
+			readonly type: "command-accepted";
+			readonly commandId: string;
+			readonly sinkId: string;
+	  }
+	| { readonly type: "refused"; readonly failure: ClaudeSessionFailure }
 	| ClaudeRunnerReply
 	| {
 			readonly type: "command";
@@ -51,6 +59,23 @@ export type ClaudeRunnerMessage =
 			readonly outputId: string;
 			readonly output: ClaudeSessionOutput;
 	  };
+
+export function claudeRunnerHelloFailure(
+	hello: ClaudeRunnerHello,
+	peer: "server" | "runner",
+): ClaudeSessionFailure | undefined {
+	if (hello.protocolVersion !== CLAUDE_RUNNER_PROTOCOL_VERSION)
+		return claudeRunnerFailure(
+			"runner hello",
+			`Claude runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${CLAUDE_RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
+		);
+	if (hello.buildId !== BUILD_ID)
+		return claudeRunnerFailure(
+			"runner hello",
+			`Claude runner build mismatch: ${peer} build ${hello.buildId}, expected ${BUILD_ID}`,
+		);
+	return undefined;
+}
 
 export function claudeRunnerFailure(
 	operation: string,
@@ -78,13 +103,25 @@ export function claudeRunnerFailure(
 	};
 }
 
+export const claudeRunnerIdleFailure = (): ClaudeSessionFailure => ({
+	operation: "runner admission",
+	message: "Claude runner is exiting after inactivity",
+	code: "runner_idle_exit",
+	retryable: true,
+});
+
 /** Bidirectional NDJSON, including replies for server-owned output operations. */
 export class ClaudeRunnerSocket {
 	private readonly pending = new Map<
 		string,
-		(reply: ClaudeRunnerReply) => void
+		{
+			reply: (reply: ClaudeRunnerReply) => void;
+			retryOnIdle: boolean;
+			accepted: boolean;
+		}
 	>();
 	private failure: ClaudeSessionFailure | undefined;
+	private idleExiting = false;
 
 	constructor(
 		private readonly socket: Socket,
@@ -95,6 +132,11 @@ export class ClaudeRunnerSocket {
 		lines.on("line", (line) => {
 			try {
 				const message = JSON.parse(line) as ClaudeRunnerMessage;
+				if (message.type === "idle-exit") this.idleExiting = true;
+				if (message.type === "command-accepted") {
+					const pending = this.pending.get(`command:${message.commandId}`);
+					if (pending) pending.accepted = true;
+				}
 				if (
 					message.type === "command-reply" ||
 					message.type === "output-reply"
@@ -103,7 +145,7 @@ export class ClaudeRunnerSocket {
 						message.type === "command-reply"
 							? `command:${message.commandId}`
 							: `output:${message.outputId}`;
-					this.pending.get(key)?.(message);
+					this.pending.get(key)?.reply(message);
 				} else onMessage(message);
 			} catch (cause) {
 				socket.destroy(
@@ -114,8 +156,15 @@ export class ClaudeRunnerSocket {
 		const fail = (cause: unknown) => {
 			if (this.failure) return;
 			this.failure = claudeRunnerFailure("runner socket", cause);
-			for (const reply of this.pending.values())
-				reply({ type: "command-reply", commandId: "", failure: this.failure });
+			for (const pending of this.pending.values())
+				pending.reply({
+					type: "command-reply",
+					commandId: "",
+					failure:
+						this.idleExiting && pending.retryOnIdle && !pending.accepted
+							? claudeRunnerIdleFailure()
+							: this.failure,
+				});
 			this.pending.clear();
 			onClose(this.failure);
 		};
@@ -158,6 +207,12 @@ export class ClaudeRunnerSocket {
 		message: ClaudeRunnerMessage,
 	): Effect.Effect<A, ClaudeSessionFailure> {
 		return Effect.async<A, ClaudeSessionFailure>((resume) => {
+			const retryOnIdle =
+				message.type === "command" && message.command.type === "send-turn";
+			if (this.idleExiting && retryOnIdle) {
+				resume(Effect.fail(claudeRunnerIdleFailure()));
+				return;
+			}
 			if (this.failure || this.socket.destroyed) {
 				resume(
 					Effect.fail(
@@ -167,13 +222,17 @@ export class ClaudeRunnerSocket {
 				);
 				return;
 			}
-			this.pending.set(key, (reply) => {
-				this.pending.delete(key);
-				resume(
-					reply.failure
-						? Effect.fail(reply.failure)
-						: Effect.succeed(reply.result as A),
-				);
+			this.pending.set(key, {
+				retryOnIdle,
+				accepted: false,
+				reply: (reply) => {
+					this.pending.delete(key);
+					resume(
+						reply.failure
+							? Effect.fail(reply.failure)
+							: Effect.succeed(reply.result as A),
+					);
+				},
 			});
 			try {
 				this.write(message);
@@ -189,5 +248,11 @@ export class ClaudeRunnerSocket {
 
 	destroy(): void {
 		this.socket.destroy();
+	}
+
+	refuse(failure: ClaudeSessionFailure): void {
+		// Flush the reason before closing so the peer reports the refusal,
+		// rather than an opaque socket-close error or a startup timeout.
+		this.socket.end(`${JSON.stringify({ type: "refused", failure })}\n`);
 	}
 }
