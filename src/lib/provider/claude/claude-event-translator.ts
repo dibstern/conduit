@@ -83,6 +83,20 @@ function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	};
 }
 
+export function claudeTurnErrorEvent(
+	sessionId: string,
+	messageId: string,
+	cause: unknown,
+	userMessageId?: string,
+): ProviderRuntimeEvent {
+	return makeProviderRuntimeEvent("turn.error", sessionId, {
+		messageId,
+		error: cause instanceof Error ? cause.message : String(cause),
+		code: "provider_error",
+		...(userMessageId ? { userMessageId } : {}),
+	});
+}
+
 type CanonicalItemType =
 	| "assistant_message"
 	| "command_execution"
@@ -245,7 +259,7 @@ export interface ClaudeEventTranslatorDeps {
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
-	) => void;
+	) => void | Effect.Effect<void>;
 	readonly logger?: Logger;
 }
 
@@ -517,11 +531,11 @@ export class ClaudeEventTranslator {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errorMsg));
 				yield* this.push(
 					ctx,
-					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId || "",
-						error: errorMsg,
-						code: "provider_error",
-					}),
+					claudeTurnErrorEvent(
+						ctx.sessionId,
+						this.currentAssistantMessageId || "",
+						cause,
+					),
 				);
 				yield* this.endTurn(ctx);
 			}),
@@ -676,18 +690,19 @@ export class ClaudeEventTranslator {
 				// The full live set, replacing the previous one. Ambient tasks
 				// (watchers, housekeeping) are not activity, per the SDK.
 				case "background_tasks_changed": {
-					this.deps.onBackgroundTask?.({
+					const transition = this.deps.onBackgroundTask?.({
 						sessionId: ctx.sessionId,
 						kind: "snapshot",
-						taskIds: message.tasks
+						taskTypes: message.tasks
 							.filter(
 								(task) =>
 									!task.ambient &&
 									task.task_type !== "plan" &&
 									task.task_type !== "plan_mode",
 							)
-							.map((task) => task.task_id),
+							.map((task) => task.task_type),
 					});
+					if (transition) yield* transition;
 					return;
 				}
 

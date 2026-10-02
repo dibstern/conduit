@@ -1,25 +1,15 @@
-// Shared utilities used by CLI commands: arg parsing, IPC, network, QR, formatting.
+// Shared utilities used by CLI commands: arg parsing, network, QR, formatting.
 
-import { appendFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
-import { Either, Schema } from "effect";
-import {
-	type IpcTaggedRequest,
-	IpcTaggedRequestSchema,
-	isIpcResponse,
-} from "../lib/contracts/ipc-requests.js";
 import {
 	DEFAULT_CONFIG_DIR,
 	DEFAULT_OC_PORT,
 	DEFAULT_PORT,
 	ENV,
 } from "../lib/env.js";
-import { formatErrorDetail } from "../lib/errors.js";
 import type { LogFormat, LogLevel } from "../lib/logger.js";
-import type { IPCResponse } from "../lib/types.js";
 
 export { DEFAULT_CONFIG_DIR, DEFAULT_OC_PORT, DEFAULT_PORT };
 export const DEFAULT_SOCKET_PATH = join(DEFAULT_CONFIG_DIR, "relay.sock");
@@ -27,6 +17,7 @@ export const DEFAULT_SOCKET_PATH = join(DEFAULT_CONFIG_DIR, "relay.sock");
 export interface ParsedArgs {
 	command:
 		| "default"
+		| "doctor"
 		| "daemon"
 		| "foreground"
 		| "status"
@@ -37,6 +28,7 @@ export interface ParsedArgs {
 		| "list"
 		| "title"
 		| "instance"
+		| "service"
 		| "help";
 	cwd: string;
 	port: number;
@@ -53,6 +45,7 @@ export interface ParsedArgs {
 	instancePort?: number;
 	instanceManaged?: boolean;
 	instanceUrl?: string;
+	serviceAction?: string;
 	noUpdate: boolean;
 	debug: boolean;
 	yes: boolean;
@@ -85,6 +78,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		const arg = argv[i];
 
 		switch (arg) {
+			case "service": {
+				result.command = "service";
+				const action = argv[i + 1];
+				if (action && !action.startsWith("-")) {
+					result.serviceAction = action;
+					i++;
+				}
+				break;
+			}
+
+			case "doctor":
+			case "--doctor":
+				result.command = "doctor";
+				break;
+
 			case "--daemon":
 				result.command = "daemon";
 				break;
@@ -296,135 +304,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
 	return result;
 }
 
-/** Single-attempt IPC command with a per-attempt timeout. */
-function sendIPCOnce(
-	socketPath: string,
-	encoded: typeof IpcTaggedRequestSchema.Encoded,
-	timeoutMs: number,
-): Promise<IPCResponse> {
-	return new Promise((resolve, reject) => {
-		const client = connect(socketPath);
-		let buffer = "";
-
-		const timeout = setTimeout(() => {
-			client.destroy();
-			reject(new Error("IPC command timed out"));
-		}, timeoutMs);
-
-		client.on("connect", () => {
-			client.write(`${JSON.stringify(encoded)}\n`);
-		});
-
-		client.on("data", (chunk: Buffer) => {
-			buffer += chunk.toString("utf-8");
-			const newlineIndex = buffer.indexOf("\n");
-			if (newlineIndex !== -1) {
-				clearTimeout(timeout);
-				const line = buffer.slice(0, newlineIndex).trim();
-				client.destroy();
-				try {
-					const parsed = JSON.parse(line);
-					if (!isIpcResponse(parsed)) {
-						reject(new Error(`Invalid IPC response: ${line}`));
-						return;
-					}
-					resolve(parsed);
-				} catch {
-					reject(new Error(`Invalid JSON response: ${line}`));
-				}
-			}
-		});
-
-		client.on("error", (err: Error) => {
-			clearTimeout(timeout);
-			reject(err);
-		});
-	});
-}
-
-/** Error codes that indicate the daemon isn't ready yet (retryable). */
-function isRetryableError(err: unknown): boolean {
-	if (!(err instanceof Error)) return false;
-	const code = (err as NodeJS.ErrnoException).code;
-	return (
-		code === "ENOENT" ||
-		code === "ECONNREFUSED" ||
-		err.message === "IPC command timed out"
-	);
-}
-
-/**
- * Send an IPC command to the daemon with retry on transient connection errors.
- * Retries up to 4 times with 500ms backoff (total budget ~7s) when the daemon
- * socket doesn't exist yet (ENOENT), refuses connections (ECONNREFUSED), or
- * times out — covering the startup race where the CLI proceeds before the
- * daemon's IPC server is listening.
- */
-export async function sendIpcRequest(
-	socketPath: string,
-	request: IpcTaggedRequest,
-): Promise<IPCResponse> {
-	const MAX_RETRIES = 4;
-	const RETRY_DELAY = 500;
-	const PER_ATTEMPT_TIMEOUT = 5000;
-
-	// A request the daemon would reject gets the same { ok: false } reply
-	// locally, so callers keep one error path instead of catching ParseError.
-	const encoded = Schema.encodeEither(IpcTaggedRequestSchema)(request);
-	if (Either.isLeft(encoded)) {
-		return { ok: false, error: formatErrorDetail(encoded.left) };
-	}
-
-	let lastError: Error | undefined;
-	const cmdName = request._tag;
-	const t0 = Date.now();
-	const logPath = join(DEFAULT_CONFIG_DIR, "daemon.log");
-
-	function ipcLog(msg: string): void {
-		const entry = JSON.stringify({
-			level: 30,
-			time: Date.now(),
-			pid: process.pid,
-			component: ["cli", "ipc-client"],
-			msg,
-		});
-		try {
-			appendFileSync(logPath, `${entry}\n`);
-		} catch {
-			// Best-effort — don't crash if log write fails
-		}
-	}
-
-	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		try {
-			const result = await sendIPCOnce(
-				socketPath,
-				encoded.right,
-				PER_ATTEMPT_TIMEOUT,
-			);
-			if (attempt > 0) {
-				ipcLog(
-					`[ipc] ${cmdName} succeeded on attempt ${attempt + 1} after ${Date.now() - t0}ms`,
-				);
-			}
-			return result;
-		} catch (err) {
-			lastError = err instanceof Error ? err : new Error(String(err));
-			const code = (err as NodeJS.ErrnoException).code ?? "";
-			ipcLog(
-				`[ipc] ${cmdName} attempt ${attempt + 1} failed: ${code || lastError.message} (${Date.now() - t0}ms)`,
-			);
-			if (attempt < MAX_RETRIES && isRetryableError(err)) {
-				await new Promise<void>((r) => setTimeout(r, RETRY_DELAY));
-				continue;
-			}
-			break;
-		}
-	}
-
-	throw lastError ?? new Error("IPC command failed");
-}
-
 /** Return the first non-internal IPv4 address, or null. */
 export function getNetworkAddress(): string | null {
 	const interfaces = networkInterfaces();
@@ -469,6 +348,12 @@ export function generateQR(url: string): string {
 export const HELP_TEXT = `Usage: conduit [options]
 
   With no flags, launches the interactive setup wizard and main menu.
+
+Commands:
+  service install       Install a launchd/systemd user service (accepts server options)
+  service uninstall     Stop and remove the user service
+  service status        Show service state, PID and log paths
+  doctor                Check registered projects' shell env and tools locally
 
 Options:
   --status              Show daemon status

@@ -24,11 +24,8 @@
 	} from "../../utils/turns.js";
 	import { isSubagentToolName, subagentSessionId } from "../../utils/subagent-tools.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getSkillContentRpc } from "../../transport/ws-rpc-client.js";
-	import { renderMarkdown } from "../../utils/markdown.js";
-	import hljs from "highlight.js";
 	import { partStyle } from "./activity-style.js";
+	import SkillDoc from "./SkillDoc.svelte";
 
 	let {
 		part,
@@ -44,32 +41,6 @@
 	const childSession = $derived(
 		part.type === "tool" && isSubagentToolName(part.name) ? subagentSessionId(part) : null,
 	);
-
-	// The Skill tool's result is only ever "Launching skill: <name>" — the
-	// instructions themselves are injected into the model's context and never
-	// reach us. Read the file off disk instead, on demand.
-	let skillDoc = $state<string | null>(null);
-	let skillState = $state<"idle" | "loading" | "missing">("idle");
-
-	function loadSkillDoc(name: string) {
-		const slug = getCurrentSlug();
-		// A failed load retries on the next expand: the failure may have been a
-		// dropped socket, not a missing file.
-		if (!slug || !name || skillDoc || skillState === "loading") return;
-		skillState = "loading";
-		void getSkillContentRpc({ projectSlug: slug, name })
-			.then((response) => {
-				// Markdown would read YAML frontmatter as a rule and a heading.
-				skillDoc = response.content.replace(
-					/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/,
-					"```yaml\n$1\n```\n",
-				);
-				skillState = "idle";
-			})
-			.catch(() => {
-				skillState = "missing";
-			});
-	}
 
 	const rowClass =
 		"flex items-center gap-2 w-full py-1 px-2 rounded text-xs text-left cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.04)]";
@@ -96,7 +67,6 @@
 				class="{rowClass} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
 				onclick={() => {
 					expanded = !expanded;
-					if (expanded && isSkill) loadSkillDoc(subject);
 				}}
 			>
 				<span class="shrink-0 {style.text} [&_.lucide]:w-3.5 [&_.lucide]:h-3.5">
@@ -137,18 +107,7 @@
 			{/if}
 		</div>
 		{#if expanded && isSkill}
-			<div class="ml-7 mr-1 my-1 py-2 px-2.5 bg-code-bg border border-border-subtle rounded-lg max-h-[300px] overflow-y-auto">
-				{#if skillDoc}
-					<div
-						class="md-content text-xs leading-[1.6] text-text-secondary"
-						{@attach (el) => el.querySelectorAll<HTMLElement>("pre code").forEach((c) => hljs.highlightElement(c))}
-					>{@html renderMarkdown(skillDoc)}</div>
-				{:else}
-					<span class="font-mono text-xs text-text-muted">
-						{skillState === "loading" ? "Loading skill…" : "This skill's file could not be found on disk."}
-					</span>
-				{/if}
-			</div>
+			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
 		{:else if expanded && (part.result || command)}
 			<div
 				class="ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-all bg-code-bg border rounded-lg max-h-[300px] overflow-y-auto {part.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"

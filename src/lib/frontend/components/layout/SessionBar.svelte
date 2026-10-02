@@ -1,9 +1,10 @@
 <!--
   SessionBar — the session's top bar on phones and desktop (design bar 20).
 
-  One component for both layouts. On phones the expanded form has an identity
-  row and a title/Views row; at the bottom of the transcript it floats as an
-  island outside the layout. Desktop keeps one row regardless of position.
+  One component for both layouts. On phones the expanded form has a row of
+  back, identity and Views, then a title row; at the bottom of the transcript
+  it floats as an island outside the layout. Desktop keeps one row regardless
+  of position: title on the left, identity grouped with the controls on the right.
 
   You collapse by scrolling to the bottom and expand by scrolling up or by
   pressing the chevron. There is deliberately no collapse button: hiding chrome
@@ -51,6 +52,7 @@
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
+	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
@@ -271,8 +273,9 @@
 <!--
 	Where you are. Identity is the first thing to give: it truncates while the
 	back control stays whole, because losing the way out is worse than losing
-	the project's name. On phones it is the first row and is gone when
-	collapsed; on desktop it follows the title. Rendered from one snippet in
+	the project's name. On phones it sits on the first row between back and
+	Views and is gone when collapsed; on desktop it follows the title, pushed
+	right to group with the controls. Rendered from one snippet in
 	either position so DOM order always matches visual order.
 
 	The instance badge sits beside the identity: which instance this project
@@ -283,6 +286,9 @@
 -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
+		<!-- Inside meta on phones so the chip rides the 1fr track beside identity
+		     instead of adding a grid column that costs a gap when it is absent. -->
+		{#if sessionViewState.compact}<SessionSkillsChip presentation="sheet" />{/if}
 		{#if identity}
 			<GitIdentity project={identity} {git} />
 		{/if}
@@ -339,6 +345,33 @@
 	{/if}
 
 	{#if sessionViewState.compact}{@render identityBlock()}{/if}
+
+	<!-- Views ends the phone's first row, after identity, so DOM order matches
+	     visual order. The island has no room for it; Views moves into ⋯ there. -->
+	{#if sessionViewState.compact && !collapsed}
+		<Menu presentation="sheet" ariaLabel="Views" data-testid="session-bar-views-sheet">
+			{#snippet trigger({ props })}
+				<Button
+					{...props}
+					id="session-bar-views-button"
+					variant="secondary"
+					size="sm"
+					icon="panels-top-left"
+					touchTarget
+					class="shrink-0"
+					data-testid="session-bar-views-button"
+				>
+					Views
+					{#if viewBadgeCount > 0}
+						<Badge variant="accent-solid" size="count" shape="pill">{viewBadgeCount}</Badge>
+					{/if}
+				</Button>
+			{/snippet}
+			<MenuGroup label="Views">
+				{@render viewItems("session-bar-view")}
+			</MenuGroup>
+		</Menu>
+	{/if}
 
 	<!-- The session title, and the only string in the bar allowed to ellipse. It
 	     is the page heading on a phone; the global header's <h1> is suppressed at
@@ -447,7 +480,8 @@
 	</div>
 	{/if}
 
-	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
+	<!-- A sibling, not inside meta: desktop meta clips and yields first. -->
+	{#if !sessionViewState.compact}<SessionSkillsChip presentation="popover" />{@render identityBlock()}{/if}
 
 	{#if !sessionViewState.compact && settleVerb}
 		<Tooltip side="bottom">
@@ -478,31 +512,7 @@
 		</div>
 	{/if}
 
-	{#if sessionViewState.compact}
-	{#if !collapsed}
-		<Menu presentation="sheet" ariaLabel="Views" data-testid="session-bar-views-sheet">
-			{#snippet trigger({ props })}
-				<Button
-					{...props}
-					id="session-bar-views-button"
-					variant="secondary"
-					size="sm"
-					icon="panels-top-left"
-					touchTarget
-					class="shrink-0"
-					data-testid="session-bar-views-button"
-				>
-					Views
-					{#if viewBadgeCount > 0}
-						<Badge variant="accent-solid" size="count" shape="pill">{viewBadgeCount}</Badge>
-					{/if}
-				</Button>
-			{/snippet}
-			<MenuGroup label="Views">
-				{@render viewItems("session-bar-view")}
-			</MenuGroup>
-		</Menu>
-	{:else}
+	{#if sessionViewState.compact && collapsed}
 		<!-- Ghost like the ⋯ beside it: the same visual size and a 44px hit target
 		     fit inside the 46px island without a bordered box. -->
 		<Button
@@ -520,7 +530,6 @@
 			data-testid="session-bar-expand"
 			onclick={showControls}
 		/>
-	{/if}
 	{/if}
 
 	{#if collapsed || !sessionViewState.compact}

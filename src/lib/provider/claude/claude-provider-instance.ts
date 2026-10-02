@@ -3,6 +3,7 @@ import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ProviderInstanceFailure } from "../errors.js";
 import type {
 	PermissionDecision,
+	PreWarmSessionInput,
 	ProviderCapabilities,
 	ProviderDriver,
 	ProviderInstance,
@@ -37,6 +38,12 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return this.runtime.sendTurnEffect(input);
+	}
+
+	preWarmSessionEffect(
+		input: PreWarmSessionInput,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.runtime.preWarmSessionEffect(input);
 	}
 
 	interruptTurnEffect(
@@ -84,6 +91,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.runtime.shutdownEffect();
+	}
+
+	recoverEffect() {
+		return this.runtime.recoverEffect;
 	}
 
 	endSessionEffect(

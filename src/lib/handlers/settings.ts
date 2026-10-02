@@ -10,6 +10,13 @@ import type { TodoItem } from "../shared-types.js";
 
 export const MAX_PROJECT_TITLE_LENGTH = 100;
 
+// OpenCode's command list carries no built-in flag: its defaults and the user's
+// config commands both arrive as source "command".
+const OPENCODE_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
+	"init",
+	"review",
+]);
+
 export const normalizeProjectTitle = (title: string): string =>
 	title.trim().slice(0, MAX_PROJECT_TITLE_LENGTH);
 
@@ -50,6 +57,7 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 					name: command.name,
 					...(command.description ? { description: command.description } : {}),
 					...(command.args ? { args: command.args } : {}),
+					...(command.source === "builtin" ? { builtin: true } : {}),
 				}));
 			});
 
@@ -60,7 +68,14 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 		const settingsService = yield* OpenCodeSettingsServiceTag;
 		const openCodeResult = yield* Effect.either(settingsService.listCommands());
 		if (openCodeResult._tag === "Right") {
-			return openCodeResult.right;
+			return openCodeResult.right.map((command) => ({
+				name: command.name,
+				...(command.description ? { description: command.description } : {}),
+				...(command.source === "command" &&
+				OPENCODE_BUILTIN_COMMANDS.has(command.name)
+					? { builtin: true }
+					: {}),
+			}));
 		}
 
 		if (activeProviderId !== "opencode") {
@@ -76,6 +91,31 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 		}
 
 		return yield* Effect.fail(openCodeResult.left);
+	});
+
+export const getSkillNamesForSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const engine = yield* OrchestrationEngineTag;
+		const providerId = yield* engine.getProviderForSessionEffect(sessionId);
+		const commands =
+			providerId === "claude"
+				? (yield* engine.dispatchEffect({
+						type: "discover",
+						providerId: "claude",
+					})).commands
+				: yield* (yield* OpenCodeSettingsServiceTag).listCommands();
+		return new Set(
+			commands
+				.filter(
+					(command) =>
+						!command.name.startsWith("anthropic-skills:") &&
+						(command.source === "user-skill" ||
+							command.source === "project-skill" ||
+							command.source === "plugin-skill" ||
+							command.source === "skill"),
+				)
+				.map((command) => command.name),
+		);
 	});
 
 export const handleGetProjects = (

@@ -13,6 +13,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
@@ -28,6 +29,7 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -148,6 +150,13 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
+		if (process.env["CONDUIT_CLAUDE_RUNNER"] === "process") {
+			const orchestration = yield* getOrchestrationLayer;
+			const instance =
+				yield* orchestration.registry.getInstanceEffect("claude");
+			if (instance instanceof ClaudeProviderInstance)
+				yield* instance.recoverEffect();
+		}
 		const restoredPermissionModes = yield* restoreSessionPermissionModes();
 		if (restoredPermissionModes > 0) {
 			yield* Effect.sync(() =>
@@ -175,7 +184,10 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const runFork = Runtime.runFork(
-			yield* Effect.runtime<SessionManagerServiceTag>(),
+			yield* Effect.runtime<
+				| SessionManagerServiceTag
+				| Effect.Effect.Context<ReturnType<typeof announceBackgroundWork>>
+			>(),
 		);
 		const sessionId = opencodeAvailable
 			? yield* sessionManagerService.initialize(config.sessionTitle)
@@ -442,19 +454,20 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				return {
 					sql,
 					sessionManagerService,
-					broadcastBackgroundSessionLists: () => {
+					// The sidebar follows the stamped row; open session views follow
+					// their family push.
+					announceBackgroundWork: (changedSessionId: string) => {
 						runFork(
-							sessionManagerService
-								.pushViewerFamilies()
-								.pipe(
-									Effect.catchAllCause((cause) =>
-										Effect.sync(() =>
-											log.warn(
-												`Failed to push background viewed families: ${Cause.pretty(cause)}`,
-											),
+							announceBackgroundWork(changedSessionId).pipe(
+								Effect.andThen(sessionManagerService.pushViewerFamilies()),
+								Effect.catchAllCause((cause) =>
+									Effect.sync(() =>
+										log.warn(
+											`Failed to announce background work: ${Cause.pretty(cause)}`,
 										),
 									),
 								),
+							),
 						);
 					},
 					api,

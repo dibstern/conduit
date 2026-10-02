@@ -4,10 +4,19 @@
 // daemon.json to prevent corruption.
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { rename, writeFile } from "node:fs/promises";
+import { chmod, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { Context, Effect, Layer, Option, Schema } from "effect";
+import {
+	type ManagedOpenCodeProcessIdentity,
+	ManagedOpenCodeProcessIdentitySchema,
+} from "../contracts/managed-opencode.js";
+
+import {
+	type ProjectShellEnvConfig,
+	ProjectShellEnvConfigSchema,
+} from "../contracts/project-shell-env.js";
 
 import {
 	defaultInstanceIdForDriver,
@@ -19,6 +28,7 @@ import {
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import type { RecentProject } from "../types.js";
+import { isRecord } from "../utils.js";
 import {
 	addRecent,
 	deserializeRecent,
@@ -53,6 +63,7 @@ export interface DaemonConfig {
 		title?: string;
 		addedAt: number;
 		instanceId?: string;
+		shellEnv?: ProjectShellEnvConfig;
 		/** Cached session count from last run — for instant CLI display. */
 		sessionCount?: number;
 	}>;
@@ -61,6 +72,9 @@ export interface DaemonConfig {
 		name: string;
 		port: number;
 		managed: boolean;
+		pid?: number;
+		version?: string;
+		processIdentity?: ManagedOpenCodeProcessIdentity;
 		env?: Record<string, string>;
 		url?: string;
 		driver?: ProviderDriverKind;
@@ -79,6 +93,7 @@ const DaemonProjectSchema = Schema.Struct({
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
 	instanceId: Schema.optional(Schema.String),
+	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
 	sessionCount: Schema.optional(Schema.Number),
 });
 
@@ -87,6 +102,9 @@ const DaemonInstanceSchema = Schema.Struct({
 	name: Schema.String,
 	port: Schema.Number,
 	managed: Schema.Boolean,
+	pid: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+	version: Schema.optional(Schema.String),
+	processIdentity: Schema.optional(ManagedOpenCodeProcessIdentitySchema),
 	env: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.String }),
 	),
@@ -112,6 +130,64 @@ export const DaemonConfigSchema = Schema.Struct({
 	projects: Schema.Array(DaemonProjectSchema),
 	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
 });
+
+// Process recovery is disposable. A damaged recovery field must not invalidate
+// authentication, project registration, or any other daemon setting.
+export const sanitizeRestartMetadata = (value: unknown): unknown => {
+	if (!isRecord(value) || !Array.isArray(value["instances"])) return value;
+	return {
+		...value,
+		instances: value["instances"].map((instance: unknown) => {
+			if (!isRecord(instance)) return instance;
+			const pid = instance["pid"];
+			const version = instance["version"];
+			const identity = instance["processIdentity"];
+			const env = instance["env"];
+			const invalidAuth =
+				instance["managed"] === true &&
+				instance["driver"] !== "claude" &&
+				isRecord(env) &&
+				["OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].some(
+					(key) => Object.hasOwn(env, key) && typeof env[key] !== "string",
+				);
+			const validIdentity =
+				identity === undefined ||
+				Schema.is(ManagedOpenCodeProcessIdentitySchema)(identity);
+			if (
+				(pid === undefined ||
+					(typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0)) &&
+				(version === undefined || typeof version === "string") &&
+				validIdentity &&
+				!invalidAuth
+			)
+				return instance;
+			const {
+				pid: _pid,
+				version: _version,
+				processIdentity: _identity,
+				...settings
+			} = instance;
+			return {
+				...settings,
+				...(invalidAuth && isRecord(env)
+					? {
+							env: Object.fromEntries(
+								Object.entries(env).filter(
+									([key, entry]) =>
+										(key !== "OPENCODE_SERVER_PASSWORD" &&
+											key !== "OPENCODE_SERVER_USERNAME") ||
+										typeof entry === "string",
+								),
+							),
+						}
+					: {}),
+				...(validIdentity && identity !== undefined
+					? { processIdentity: identity }
+					: {}),
+			};
+		}),
+	};
+};
 
 export class DaemonConfigTag extends Context.Tag("DaemonConfig")<
 	DaemonConfigTag,
@@ -269,7 +345,9 @@ export const ServerConfigLive = (configDir?: string) =>
 			// Cast: Schema.optional produces `T | undefined` but
 			// DaemonConfig uses exact optional properties (key absent, never
 			// undefined). The schema guarantees structural correctness.
-			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(json);
+			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(
+				sanitizeRestartMetadata(json),
+			);
 			return {
 				...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
 				autoSettleAfterDays:
@@ -337,7 +415,7 @@ export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 		const dir = resolveDir(configDir);
 		const data = readFileSync(join(dir, "daemon.json"), "utf-8");
 		const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(
-			JSON.parse(data),
+			sanitizeRestartMetadata(JSON.parse(data)),
 		);
 		return {
 			...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
@@ -360,7 +438,11 @@ export async function saveDaemonConfig(
 	ensureDir(dir);
 	const tmpPath = join(dir, `.daemon.json.tmp.${process.pid}.${Date.now()}`);
 	const finalPath = join(dir, "daemon.json");
-	await writeFile(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+	await writeFile(tmpPath, JSON.stringify(config, null, 2), {
+		encoding: "utf-8",
+		mode: 0o600,
+	});
+	await chmod(tmpPath, 0o600);
 	await rename(tmpPath, finalPath);
 }
 

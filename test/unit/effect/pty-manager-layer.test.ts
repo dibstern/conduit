@@ -17,6 +17,7 @@ import {
 	type LocalPtySession,
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
+	TerminalServiceError,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
@@ -57,8 +58,19 @@ describe("PtyManagerLive", () => {
 					send: vi.fn(),
 					close: vi.fn(),
 					terminate: vi.fn(),
+					detach: vi.fn(),
 				};
+				const createdPtys: LocalPtySession["pty"][] = [];
 				const localPty: LocalPtyService = {
+					list: () => Effect.succeed(createdPtys),
+					attach: (ptyId) =>
+						Effect.fail(
+							new TerminalServiceError({
+								operation: "connect",
+								ptyId,
+								cause: "Not found",
+							}),
+						),
 					create: vi.fn(() => {
 						const session: LocalPtySession = {
 							pty: {
@@ -75,6 +87,7 @@ describe("PtyManagerLive", () => {
 							},
 							onExit: vi.fn(),
 						};
+						createdPtys.push(session.pty);
 						return Effect.succeed(session);
 					}),
 				};
@@ -127,6 +140,8 @@ describe("PtyManagerLive", () => {
 						type: "pty_output",
 						ptyId: "local-pty-1",
 						data: "hello\n",
+						replace: true,
+						restored: true,
 					},
 				});
 
@@ -134,7 +149,8 @@ describe("PtyManagerLive", () => {
 				expect(upstream.send).toHaveBeenCalledWith("ls\n");
 
 				yield* Scope.close(scope, Exit.void);
-				expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
+				expect(upstream.detach).toHaveBeenCalledOnce();
+				expect(upstream.close).not.toHaveBeenCalled();
 			}),
 	);
 });

@@ -21,14 +21,8 @@
 			/** The status word's chrome: a filled pill when the row is blocked on
 			 *  you, bare coloured text otherwise. */
 			pill: string;
-			icon:
-				| "triangle-alert"
-				| "message-square"
-				| "octagon-alert"
-				| "block-grid"
-				| "check"
-				| "circle"
-				| null;
+			/** Blocking states get a line icon; the rest share the dither grid. */
+			glyph: { icon: "triangle-alert" | "message-square" | "octagon-alert" } | { dither: "working" | "monitoring" | "done" | "idle" };
 			emphasis: AttentionEmphasis;
 		}
 	> = {
@@ -37,7 +31,7 @@
 			spoken: "Needs approval",
 			colour: "text-warning",
 			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-amber",
-			icon: "triangle-alert",
+			glyph: { icon: "triangle-alert" },
 			emphasis: "strong",
 		},
 		"needs-reply": {
@@ -45,7 +39,7 @@
 			spoken: "Needs reply",
 			colour: "text-status-indigo",
 			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-indigo",
-			icon: "message-square",
+			glyph: { icon: "message-square" },
 			emphasis: "strong",
 		},
 		error: {
@@ -53,35 +47,44 @@
 			spoken: "Failed",
 			colour: "text-error",
 			pill: "px-[2px] font-medium text-error",
-			icon: "octagon-alert",
+			glyph: { icon: "octagon-alert" },
 			emphasis: "strong",
 		},
 		working: {
-			// No word on purpose: the BlockGrid on the left already says working,
+			// No word on purpose: the twinkling glyph on the left already says working,
 			// and the right column shows elapsed time instead, which is the only
 			// thing that changes while a turn runs. `word` is therefore the
 			// pill's text and its presence is what decides pill-vs-time.
 			word: "",
 			spoken: "Working",
-			colour: "text-accent",
+			colour: "text-session-working",
 			pill: "",
-			icon: "block-grid",
+			glyph: { dither: "working" },
+			emphasis: "normal",
+		},
+		monitoring: {
+			// A word, not elapsed time, because the wait has no expected end.
+			word: "Monitoring",
+			spoken: "Monitoring",
+			colour: "text-session-monitoring",
+			pill: "px-[2px] font-medium text-session-monitoring",
+			glyph: { dither: "monitoring" },
 			emphasis: "normal",
 		},
 		"done-unread": {
 			word: "Done",
 			spoken: "Done, unread",
-			colour: "text-success",
-			pill: "px-[2px] font-medium text-success",
-			icon: "check",
+			colour: "text-session-done",
+			pill: "px-[2px] font-medium text-session-done",
+			glyph: { dither: "done" },
 			emphasis: "strong",
 		},
 		idle: {
 			word: "",
 			spoken: "",
-			colour: "text-text-dimmer",
+			colour: "text-session-idle",
 			pill: "",
-			icon: "circle",
+			glyph: { dither: "idle" },
 			emphasis: "dim",
 		},
 	};
@@ -126,7 +129,7 @@
 	import { sessionAttention } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../ui/Icon.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Button from "../ui/Button.svelte";
 	import SessionRenameInput from "./SessionRenameInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
@@ -616,15 +619,15 @@
 		>
 			<Icon name={selected ? "circle-check" : "circle"} size={18} />
 		</Button>
-	{:else if status.icon}
+	{:else}
 		<span
 			class="session-status-glyph col-start-1 row-start-1 row-span-2 grid place-items-center size-[20px] justify-self-center {status.colour}"
 			aria-hidden="true"
 		>
-			{#if status.icon === "block-grid"}
-				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+			{#if "dither" in status.glyph}
+				<DitherGlyph state={status.glyph.dither} size={shelfRow ? 12 : 16} />
 			{:else}
-				<Icon name={status.icon} size={shelfRow ? 11 : 14} />
+				<Icon name={status.glyph.icon} size={shelfRow ? 11 : 14} />
 			{/if}
 		</span>
 	{/if}

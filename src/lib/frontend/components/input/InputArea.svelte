@@ -3,9 +3,11 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
-	import Textarea from "../ui/Textarea.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
@@ -22,14 +24,15 @@
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
-	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
+	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		discoveryState,
-		extractSlashQuery,
+		extractCommandQuery,
 		filterCommands,
 		getEffectiveInstanceId,
 		getModelDisplayName,
+		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
 	import {
 		buildMentionInsertion,
@@ -50,6 +53,7 @@
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
+	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 
@@ -123,6 +127,10 @@
 			status.turnStartedAt ??= user?.createdAt ?? Date.now();
 		});
 	});
+	$effect(() => {
+		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
+		return () => requestSessionPreWarm(null, null);
+	});
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
@@ -136,7 +144,7 @@
 
 	const inputDrafts = new Map<string, string>();
 	// undefined until the first run, so a fresh load restores its draft too.
-	let previousSessionId: string | null | undefined = undefined;
+	let previousSessionId: string | null | undefined ;
 
 	// The new-session draft has no server-side store, so it lives here to
 	// survive a reload: a half-typed first prompt must not vanish.
@@ -156,6 +164,22 @@
 			// Storage can be unavailable (private mode); the draft just won't persist.
 		}
 	}
+	const reloadRestoredDrafts = new Set<string>();
+	// Extend the existing draft map across a reload, including drafts typed
+	// before a session exists. Session drafts also keep using the server RPC.
+	const reloadDraftKey = "conduit-reload-drafts";
+	try {
+		const saved = sessionStorage.getItem(reloadDraftKey);
+		if (saved) {
+			for (const [id, text] of JSON.parse(saved) as [string, string][]) {
+				inputDrafts.set(id, text);
+				reloadRestoredDrafts.add(id);
+			}
+			sessionStorage.removeItem(reloadDraftKey);
+		}
+	} catch {
+		// A restricted browser can still use the existing server draft sync.
+	}
 
 	$effect(() => {
 		const currentId = sessionState.currentId;
@@ -170,7 +194,7 @@
 					? (inputDrafts.get(currentId) ?? "")
 					: readNewSessionDraft();
 				previousSessionId = currentId;
-				lastLocalEditAt = 0;
+				lastLocalEditAt = reloadRestoredDrafts.delete(currentId ?? "") ? Date.now() : 0;
 				// Cancel any pending outgoing sync from the previous session
 				if (inputSyncTimer) {
 					clearTimeout(inputSyncTimer);
@@ -197,6 +221,7 @@
 	$effect(() => {
 		if (inputSyncState.lastUpdated <= lastSyncApplied) return;
 		lastSyncApplied = inputSyncState.lastUpdated;
+		if (inputSyncState.reloadPending) return;
 		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
 		inputText = inputSyncState.text;
 	});
@@ -210,16 +235,48 @@
 	/** Timer for debounced outgoing input sync. */
 	let inputSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
-	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
-	const commandMenuVisible = $derived(slashQuery !== null);
-	const commandQuery = $derived(slashQuery?.query ?? "");
-	const filteredCommands = $derived(
-		commandMenuVisible ? filterCommands(discoveryState.commands, commandQuery) : [],
+	$effect(() => registerInputDraftPersistence(async () => {
+		if (inputSyncTimer) {
+			clearTimeout(inputSyncTimer);
+			inputSyncTimer = null;
+		}
+		let savedText: string;
+		let savedSessionId: string | null;
+		do {
+			savedText = inputText;
+			savedSessionId = sessionState.currentId;
+			await syncInputDraft(savedText);
+		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
+		// Cancelling the debounce above dropped any pending new-session draft write.
+		if (!sessionState.currentId) storeNewSessionDraft(inputText);
+		// Images live only in this composer. Defer reload until sent or removed.
+		if (pendingImages.length > 0) return false;
+		inputDrafts.set(sessionState.currentId ?? "", inputText);
+		sessionStorage.setItem(reloadDraftKey, JSON.stringify([...inputDrafts]));
+		return true;
+	}));
+
+	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
+	const commandMenuVisible = $derived(commandMatch !== null);
+	const commandQuery = $derived(commandMatch?.query ?? "");
+	/** `$` lists the provider's built-ins; `/` lists everything else. */
+	const menuCommands = $derived(
+		commandMatch
+			? discoveryState.commands.filter(
+					(c) => (c.builtin ?? false) === (commandMatch.trigger === "$"),
+				)
+			: [],
 	);
+	const filteredCommands = $derived(filterCommands(menuCommands, commandQuery));
 	const commandListboxVisible = $derived(filteredCommands.length > 0);
 
-	/** Names of known slash commands/skills, for inline recognition in the composer. */
-	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
+	/** Known `/skill` and `$builtin` names, for inline recognition in the composer. */
+	const commandNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => !c.builtin).map((c) => c.name)),
+	);
+	const builtinNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => c.builtin).map((c) => c.name)),
+	);
 
 	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
 	const fileMenuVisible = $derived(
@@ -314,16 +371,16 @@
 		);
 	}
 
-	function syncInputDraft(text: string) {
+	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
-		void syncInputDraftRpc({
+		if (!sessionId || !projectSlug) return Promise.resolve();
+		return syncInputDraftRpc({
 			projectSlug,
 			sessionId,
 			text,
 			originId: getBrowserClientId(),
-		}).catch(() => undefined);
+		});
 	}
 
 	function handleInput() {
@@ -336,7 +393,7 @@
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
 		inputSyncTimer = setTimeout(() => {
 			inputSyncTimer = null;
-			if (sessionState.currentId) syncInputDraft(inputText);
+			if (sessionState.currentId) void syncInputDraft(inputText).catch(() => undefined);
 			else storeNewSessionDraft(inputText);
 		}, 300);
 	}
@@ -393,7 +450,7 @@
 	let creatingSession = false;
 
 	async function sendMessage(textOverride?: string): Promise<boolean> {
-		const text = textOverride ?? inputText.trim();
+		const text = textOverride ?? toProviderCommands(inputText.trim(), builtinNameSet);
 		if (!text) return false;
 
 		// Parse @references and fetch file contents
@@ -504,7 +561,7 @@
 			clearTimeout(inputSyncTimer);
 			inputSyncTimer = null;
 		}
-		syncInputDraft("");
+		void syncInputDraft("").catch(() => undefined);
 		return true;
 	}
 
@@ -609,13 +666,13 @@
 	}
 
 	function handleCommandSelect(command: string) {
-		// Replace the slash query region with the selected command text (e.g. "/skill ").
+		// Replace the query region with the selected command text (e.g. "/skill " or "$compact ").
 		// User can then type arguments and press Enter to send.
 		let newCursorPos: number;
-		if (slashQuery) {
-			const before = inputText.slice(0, slashQuery.start);
-			const after = inputText.slice(slashQuery.end);
-			newCursorPos = slashQuery.start + command.length;
+		if (commandMatch) {
+			const before = inputText.slice(0, commandMatch.start);
+			const after = inputText.slice(commandMatch.end);
+			newCursorPos = commandMatch.start + command.length;
 			inputText = before + command + after;
 		} else {
 			inputText = command;
@@ -635,9 +692,9 @@
 	}
 
 	function handleCommandClose() {
-		if (slashQuery) {
-			const before = inputText.slice(0, slashQuery.start);
-			const after = inputText.slice(slashQuery.end);
+		if (commandMatch) {
+			const before = inputText.slice(0, commandMatch.start);
+			const after = inputText.slice(commandMatch.end);
 			inputText = before + after;
 		} else {
 			inputText = "";
@@ -711,7 +768,7 @@
 	</div>
 {/if}
 
-<!-- Command Menu (above input when "/" is typed) -->
+<!-- Command Menu (above input when "/" or "$" is typed) -->
 {#if commandMenuVisible}
 	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<CommandMenu
@@ -720,7 +777,8 @@
 			listboxId={commandListboxId}
 			query={commandQuery}
 			visible={commandMenuVisible}
-			commands={[...discoveryState.commands]}
+			commands={[...menuCommands]}
+			trigger={commandMatch?.trigger ?? "/"}
 			onSelect={handleCommandSelect}
 			onClose={handleCommandClose}
 		/>
@@ -734,6 +792,36 @@
 	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
+
+		<!-- Background work outlives the turn; Stop interrupts the whole session. -->
+		{#if currentSession?.backgroundWork && !isProcessing()}
+			<div class="mb-1.5" data-testid="background-work-banner">
+				<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:py-1 max-md:px-3">
+					<span class="shrink-0 text-text-secondary" aria-hidden="true">
+						{#if currentSession.backgroundWork === "monitoring"}
+							<Icon name="eye" size={14} />
+						{:else}
+							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
+						{/if}
+					</span>
+					<span class="flex-1 min-w-0 truncate text-sm text-text-secondary max-md:text-xs">
+						{currentSession.backgroundWork === "monitoring"
+							? "Monitoring, waiting for a watcher to fire"
+							: "Background work running"}
+					</span>
+					<Button
+						variant="secondary"
+						size="sm"
+						icon="square"
+						iconSize={12}
+						type="button"
+						data-testid="background-work-stop"
+						title="Stop the session and its background work"
+						onclick={handleStop}
+					>Stop</Button>
+				</Surface>
+			</div>
+		{/if}
 
 		{#if !sessionState.currentId && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext /></div>
@@ -811,6 +899,7 @@
 							<SkillHighlightBackdrop
 								text={plainText ? "" : inputText}
 								commandNames={commandNameSet}
+								builtinNames={builtinNameSet}
 								dimmed={composing || plainText}
 							/>
 							<!--
@@ -849,6 +938,7 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
+								onfocus={() => requestSessionPreWarm(getCurrentSlug(), sessionState.currentId)}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}

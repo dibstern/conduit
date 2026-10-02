@@ -5,6 +5,8 @@
 
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -124,6 +126,61 @@ test.describe("New session draft", () => {
 			await expect(page.getByTestId("draft-project-chip")).toBeVisible();
 			await expect(page.locator("#session-list")).toBeHidden();
 			await capture(page, testInfo, "phone-draft");
+		});
+
+		// The opening tap ends in a click at the chip's spot, where a sheet row
+		// now sits; it used to pick that row and shut the sheet (or switch
+		// project unasked), so nothing could be chosen.
+		test("tapping the project chip opens the list without choosing from it", async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const projects = [
+				{
+					slug: "e2e-replay",
+					title: "e2e-replay",
+					directory: "/tmp/e2e-replay",
+					git: { branch: "main" },
+				},
+				{
+					slug: "other",
+					title: "other",
+					directory: "/tmp/other",
+					git: { branch: "dev" },
+				},
+			];
+			await mockWsRpc(page, {
+				handlers: {
+					GetProjects: () => ({ projects, current: "e2e-replay" }),
+					ListDaemonSessions: () => ({
+						sessions: [],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
+				},
+			});
+			await mockRelayWebSocket(page, {
+				initMessages: [
+					{ type: "project_list", projects, current: "e2e-replay" },
+					{ type: "shell_snapshot", roots: true, sessions: [] },
+				],
+				responses: new Map(),
+			});
+			await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+			const chip = page.getByTestId("draft-project-chip");
+			await expect(chip).toContainText("e2e-replay");
+
+			await chip.tap();
+
+			const other = page.getByRole("menuitemradio", { name: /other/ });
+			await expect(other).toBeVisible();
+			await expect(page).toHaveURL(/project=e2e-replay/);
+			await capture(page, testInfo, "phone-project-sheet");
+			await expect(page.getByRole("menu")).toBeVisible();
+			await other.tap();
+			await expect(page).toHaveURL(/project=other/);
+			await expect(chip).toContainText("other");
 		});
 	});
 });

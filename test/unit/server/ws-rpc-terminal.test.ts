@@ -104,6 +104,8 @@ describe("WsRpcServerLayer terminal controls", () => {
 				resize: vi.fn(),
 			};
 			const localPty: LocalPtyService = {
+				list: () => Effect.succeed([]),
+				attach: () => Effect.die("Unexpected attach in RPC test"),
 				create: vi.fn(() => {
 					const session: LocalPtySession = {
 						pty: {

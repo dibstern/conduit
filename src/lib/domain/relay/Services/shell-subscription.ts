@@ -28,6 +28,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
+import { BackgroundLivenessTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
@@ -46,16 +47,22 @@ export const subscribeShell = (
 ): Stream.Stream<
 	Envelope<SessionInfo>,
 	ShellSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag
+	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
+			const backgroundWorkOf = yield* BackgroundLivenessTag;
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
-					read: (range) => readQuery.readSessionList({ ...range, roots: true }),
+					read: (range) =>
+						readQuery.readSessionList({
+							...range,
+							roots: true,
+							backgroundWorkOf,
+						}),
 					// A descendant advance can change its root summary. The read
 					// selects affected roots by the highest descendant version.
 					route: (advance) => ({

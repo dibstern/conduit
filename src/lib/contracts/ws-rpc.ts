@@ -137,6 +137,8 @@ export const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
 	args: Schema.optional(Schema.String),
+	/** The provider's own command or bundled skill; the composer offers these under `$`. */
+	builtin: Schema.optional(Schema.Boolean),
 });
 
 export const ProjectInfoSchema = Schema.Struct({
@@ -440,6 +442,49 @@ export const ProjectMutationResponseSchema = Schema.Struct({
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
+	addedInstanceId: Schema.optional(Schema.String),
+});
+
+export const GetInstanceStatusResponseSchema = Schema.Struct({
+	instance: OpenCodeInstanceSchema,
+});
+
+export const GetStatusResponseSchema = Schema.Struct({
+	uptime: Schema.Number,
+	port: Schema.Number,
+	host: Schema.String,
+	tailscaleIP: Schema.optional(Schema.String),
+	lanIP: Schema.optional(Schema.String),
+	projectCount: Schema.Number,
+	sessionCount: Schema.Number,
+	processingCount: Schema.optional(Schema.Number),
+	clientCount: Schema.Number,
+	pinEnabled: Schema.Boolean,
+	tlsEnabled: Schema.Boolean,
+	keepAwake: Schema.Boolean,
+	projects: Schema.Array(
+		Schema.Struct({
+			slug: Schema.String,
+			directory: Schema.String,
+			title: Schema.String,
+			status: Schema.optional(Schema.String),
+			lastUsed: Schema.optional(Schema.Number),
+			sse: Schema.optional(
+				Schema.Struct({
+					connected: Schema.Boolean,
+					lastEventAt: Schema.NullOr(Schema.Number),
+					reconnectCount: Schema.Number,
+					stale: Schema.Boolean,
+				}),
+			),
+		}),
+	),
+});
+
+export const SetKeepAwakeResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	supported: Schema.Boolean,
+	active: Schema.Boolean,
 });
 
 export const ScanNowResponseSchema = Schema.Struct({
@@ -502,6 +547,22 @@ export const GetSkillContentResponseSchema = Schema.Struct({
 	content: Schema.String,
 });
 
+export const GetSessionSkillsResponseSchema = Schema.Struct({
+	loads: Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			invokedBy: Schema.Literal("user", "agent"),
+			turnOrdinal: Schema.Number,
+			at: Schema.Number,
+			anchor: Schema.Struct({
+				messageId: Schema.String,
+				partId: Schema.optional(Schema.String),
+			}),
+			running: Schema.Boolean,
+		}),
+	),
+});
+
 export type AgentInfo = typeof AgentInfoSchema.Type;
 export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
@@ -512,6 +573,10 @@ export type GetProjectsResponse = typeof GetProjectsResponseSchema.Type;
 export type ProjectMutationResponse = typeof ProjectMutationResponseSchema.Type;
 export type OpenCodeInstance = typeof OpenCodeInstanceSchema.Type;
 export type InstanceListResponse = typeof InstanceListResponseSchema.Type;
+export type GetInstanceStatusResponse =
+	typeof GetInstanceStatusResponseSchema.Type;
+export type GetStatusResponse = typeof GetStatusResponseSchema.Type;
+export type SetKeepAwakeResponse = typeof SetKeepAwakeResponseSchema.Type;
 export type ScanNowResponse = typeof ScanNowResponseSchema.Type;
 export type DetectProxyResponse = typeof DetectProxyResponseSchema.Type;
 export type PtyInfo = typeof PtyInfoSchema.Type;
@@ -525,6 +590,8 @@ export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
 export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
 export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
+export type GetSessionSkillsResponse =
+	typeof GetSessionSkillsResponseSchema.Type;
 export type ContextWindowOption = typeof ContextWindowOptionSchema.Type;
 export type ModelInfo = typeof ModelInfoSchema.Type;
 export type ProviderInfo = typeof ProviderInfoSchema.Type;
@@ -563,6 +630,86 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
 }) {}
+
+export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
+	failure: WsRpcError,
+	success: GetStatusResponseSchema,
+	payload: {},
+}) {}
+
+export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {
+		pin: Schema.NullOr(Schema.String.pipe(Schema.pattern(/^\d{4,8}$/))),
+	},
+}) {}
+
+export class SetKeepAwake extends Schema.TaggedRequest<SetKeepAwake>()(
+	"SetKeepAwake",
+	{
+		failure: WsRpcError,
+		success: SetKeepAwakeResponseSchema,
+		payload: { enabled: Schema.Boolean },
+	},
+) {}
+
+export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeCommand>()(
+	"SetKeepAwakeCommand",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			command: NonEmptyString,
+			args: Schema.optionalWith(Schema.Array(Schema.String), {
+				default: () => [],
+			}),
+		},
+	},
+) {}
+
+export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: { preserveManagedInstances: Schema.optional(Schema.Boolean) },
+}) {}
+
+export class SetAgent extends Schema.TaggedRequest<SetAgent>()("SetAgent", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: { slug: Schema.String, agent: Schema.String },
+}) {}
+
+export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()(
+	"RestartWithConfig",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			config: Schema.optional(
+				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+			),
+		},
+	},
+) {}
+
+export class GetInstances extends Schema.TaggedRequest<GetInstances>()(
+	"GetInstances",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class GetInstanceStatus extends Schema.TaggedRequest<GetInstanceStatus>()(
+	"GetInstanceStatus",
+	{
+		failure: WsRpcError,
+		success: GetInstanceStatusResponseSchema,
+		payload: { instanceId: NonEmptyString },
+	},
+) {}
 
 export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
 	failure: WsRpcError,
@@ -725,6 +872,7 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
+			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 			name: Schema.optional(Schema.String),
 			port: Schema.optional(Schema.Number),
 			env: Schema.optional(
@@ -1182,6 +1330,18 @@ export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
 	},
 ) {}
 
+export class GetSessionSkills extends Schema.TaggedRequest<GetSessionSkills>()(
+	"GetSessionSkills",
+	{
+		failure: WsRpcError,
+		success: GetSessionSkillsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	failure: WsRpcError,
 	success: GetModelsResponseSchema,
@@ -1234,6 +1394,18 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
+		},
+	},
+) {}
+
+export class PreWarmSession extends Schema.TaggedRequest<PreWarmSession>()(
+	"PreWarmSession",
+	{
+		failure: WsRpcError,
+		success: Schema.Void,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
 		},
 	},
 ) {}
@@ -1450,6 +1622,15 @@ export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
 ) {}
 
 export const WsRpcRequest = Schema.Union(
+	GetStatus,
+	SetPin,
+	SetKeepAwake,
+	SetKeepAwakeCommand,
+	Shutdown,
+	SetAgent,
+	RestartWithConfig,
+	GetInstances,
+	GetInstanceStatus,
 	AttachProject,
 	ResolveSession,
 	GetGoalDetails,
@@ -1484,6 +1665,7 @@ export const WsRpcRequest = Schema.Union(
 	GetFileContent,
 	GetToolContent,
 	GetSkillContent,
+	GetSessionSkills,
 	GetModels,
 	AddProject,
 	RemoveProject,
@@ -1506,6 +1688,7 @@ export const WsRpcRequest = Schema.Union(
 	ListDaemonSessions,
 	CreateSession,
 	ViewSession,
+	PreWarmSession,
 	DeleteSession,
 	ForkSession,
 	RespondPermission,
@@ -1547,6 +1730,15 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
+	Rpc.fromTaggedRequest(GetStatus),
+	Rpc.fromTaggedRequest(SetPin),
+	Rpc.fromTaggedRequest(SetKeepAwake),
+	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
+	Rpc.fromTaggedRequest(Shutdown),
+	Rpc.fromTaggedRequest(SetAgent),
+	Rpc.fromTaggedRequest(RestartWithConfig),
+	Rpc.fromTaggedRequest(GetInstances),
+	Rpc.fromTaggedRequest(GetInstanceStatus),
 	Rpc.fromTaggedRequest(AttachProject),
 	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetGoalDetails),
@@ -1581,6 +1773,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileContent),
 	Rpc.fromTaggedRequest(GetToolContent),
 	Rpc.fromTaggedRequest(GetSkillContent),
+	Rpc.fromTaggedRequest(GetSessionSkills),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(AddProject),
 	Rpc.fromTaggedRequest(RemoveProject),
@@ -1603,6 +1796,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ListDaemonSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
+	Rpc.fromTaggedRequest(PreWarmSession),
 	Rpc.fromTaggedRequest(DeleteSession),
 	Rpc.fromTaggedRequest(ForkSession),
 	Rpc.fromTaggedRequest(RespondPermission),

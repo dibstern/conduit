@@ -86,21 +86,6 @@ export interface ModelEntry {
 	provider: string;
 }
 
-export interface IPCResponse {
-	ok: boolean;
-	error?: string;
-	slug?: string;
-	directory?: string;
-	projects?: readonly unknown[];
-	uptime?: number;
-	port?: number;
-	projectCount?: number;
-	clientCount?: number;
-	instances?: readonly unknown[];
-	instance?: unknown;
-	[key: string]: unknown;
-}
-
 export type FrontendDecision = "allow" | "deny" | "allow_always";
 export type OpenCodeDecision = "once" | "always" | "reject";
 
@@ -131,6 +116,7 @@ export interface StoredProject {
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
+	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 }
 
 export interface RecentProject {
@@ -148,10 +134,18 @@ export interface FileContentResult {
 
 /** Config for creating a per-project relay that receives attached sockets. */
 export interface ProjectRelayConfig {
+	/** Immediate cached environment snapshot; shell resolution runs in the background. */
+	shellEnv?: (
+		directory: string,
+	) => Readonly<Record<string, string | undefined>>;
+	/** Await the existing shell capture before speculative Claude boot only. */
+	prepareShellEnv?: (directory: string) => Promise<boolean>;
 	/** Shared HTTP server owned by the caller. */
 	httpServer: import("node:http").Server;
 	/** OpenCode server URL (e.g., "http://localhost:4096") */
 	opencodeUrl: string;
+	/** Credentials of the OpenCode instance selected for this relay. */
+	opencodeAuth?: { username: string; password: string };
 	/** Project working directory */
 	projectDir: string;
 	/** URL slug for this project */

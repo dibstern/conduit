@@ -65,6 +65,33 @@ export const composerHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert command menu entries",
+		match: /^the command menu (offers|does not offer) (\S+)$/,
+		run: async ({ world, match }) => {
+			const names = world.page.locator("#command-menu .cmd-name");
+			await names.first().waitFor({ state: "visible" });
+			const offered = (await names.allInnerTexts()).map((name) => name.trim());
+			const expected = match[1] === "offers";
+			if (offered.includes(match[2] ?? "") !== expected) {
+				throw new Error(
+					`Expected command menu to ${match[1]} ${match[2]}; it lists ${offered.join(", ")}`,
+				);
+			}
+		},
+	},
+	{
+		name: "assert sent text",
+		match: /^the relay receives the sent text (.+)$/,
+		run: async ({ world, match }) => {
+			const rpcControl = rpcControls.get(world.page);
+			if (!rpcControl) throw new Error("Mock RPC was not initialised");
+			await rpcControl.waitForRequest(
+				(request) =>
+					request.tag === "SendMessage" && request.payload["text"] === match[1],
+			);
+		},
+	},
+	{
 		name: "replay sent message for selected session",
 		match: /^the mock relay replays the sent message for the selected session$/,
 		run: async ({ world }) => {

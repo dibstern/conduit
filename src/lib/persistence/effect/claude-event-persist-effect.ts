@@ -47,7 +47,7 @@ export interface ClaudeEventPersistEffect {
 	readonly persistUserMessage: (
 		sessionId: string,
 		text: string,
-		options?: { readonly publish?: boolean },
+		options?: { readonly publish?: boolean; readonly messageId?: string },
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistClaudeSubagent: (input: {
@@ -210,7 +210,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const persistUserMessage = (
 		sessionId: string,
 		text: string,
-		options?: { readonly publish?: boolean },
+		options?: { readonly publish?: boolean; readonly messageId?: string },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
 			yield* requireSession(
@@ -220,7 +220,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			);
 
 			const now = Date.now();
-			const userMsgId = crypto.randomUUID();
+			const userMsgId = options?.messageId ?? crypto.randomUUID();
 			yield* commitAndSignal(
 				[
 					canonicalEvent(

@@ -145,8 +145,6 @@ describe("startHttpServer TLS support", () => {
 				httpServer: null,
 				upgradeServer: null,
 				onboardingServer: null,
-				ipcServer: null,
-				ipcClients: new Set(),
 				clientCount: 0,
 				socketPath: "/tmp/unused.sock",
 				router: {
@@ -184,8 +182,6 @@ describe("startHttpServer TLS support", () => {
 				httpServer: null,
 				upgradeServer: null,
 				onboardingServer: null,
-				ipcServer: null,
-				ipcClients: new Set(),
 				clientCount: 0,
 				socketPath: "/tmp/unused.sock",
 				router: {

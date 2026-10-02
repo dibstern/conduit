@@ -222,6 +222,8 @@ export interface TurnCompletedPayload {
 
 export interface TurnErrorPayload {
 	readonly messageId: string;
+	/** Durable turn owner when a process fails before or between messages. */
+	readonly userMessageId?: string;
 	readonly error: string;
 	readonly code?: string;
 }
@@ -738,6 +740,7 @@ const TurnCompletedPayloadSchema = Schema.Struct({
 
 const TurnErrorPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
+	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	error: Schema.String,
 	code: Schema.optionalWith(Schema.String, { exact: true }),
 });

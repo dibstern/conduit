@@ -8,6 +8,8 @@ export const effortOptions = new WeakMap<Page, string[]>();
 export const rejectedEffortSwitches = new WeakSet<Page>();
 export const detailFeeds = new WeakMap<Page, RpcMockControl["detailFeed"]>();
 export const inheritedClaudeCommitAttribution = "Inherited commit attribution";
+/** GetSessionSkills loads served by the mock app; empty unless a scenario seeds them. */
+export const mockSessionSkills = new WeakMap<Page, readonly unknown[]>();
 /** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
  *  so the SettingsPanel editor and the composer rail see consistent state. */
 export const mockInstances = new WeakMap<

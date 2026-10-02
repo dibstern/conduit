@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RawData, WebSocket } from "ws";
+import { BUILD_ID } from "../build-id.js";
 import { makeHeartbeatFiber } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
 	addClient,
@@ -31,6 +32,9 @@ import {
 	parseIncomingMessage,
 	routeMessage,
 } from "./ws-router.js";
+
+// Test override, captured once at process startup rather than per connection.
+const SERVER_BUILD_ID = process.env["CONDUIT_SERVER_BUILD_ID"] ?? BUILD_ID;
 
 type WsEventMap = {
 	client_connected: WsClientConnectedEvent;
@@ -207,6 +211,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 					sendTo(clientId, {
 						type: "protocol_version",
 						version: WS_PROTOCOL_VERSION,
+						buildId: SERVER_BUILD_ID,
 					}),
 				),
 				Effect.tap((clientCount) =>

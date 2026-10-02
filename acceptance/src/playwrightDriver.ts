@@ -38,7 +38,7 @@ export type VisualMatchResult = {
  *  Only `Date.now` is overridden: it is what the app stamps messages with,
  *  and leaving the `Date` constructor alone keeps everything that reads real
  *  time working normally. */
-const PINNED_CLOCK_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
+export const PINNED_CLOCK_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
 
 export const DESKTOP_VIEWPORT: Viewport = {
 	name: "desktop",

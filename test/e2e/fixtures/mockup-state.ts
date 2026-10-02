@@ -121,6 +121,11 @@ export const initMessages: MockMessage[] = [
 			{ name: "code-review", description: "Review the current diff" },
 			{ name: "commit", description: "Create a git commit" },
 			{ name: "test", description: "Run the test suite" },
+			{
+				name: "compact",
+				description: "Free up context by summarizing the conversation",
+				builtin: true,
+			},
 		],
 	},
 ];

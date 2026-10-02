@@ -1,8 +1,10 @@
 import {
+	Cause,
 	Clock,
 	Context,
 	Deferred,
 	Effect,
+	Exit,
 	HashMap,
 	Layer,
 	Option,
@@ -76,22 +78,28 @@ const makeClaudeCapabilitiesServiceWithCache = (
 					ProbeResult,
 					ClaudeBoundaryError
 				>();
-				yield* Ref.update(cacheRef, (cache) =>
+				const result = yield* Ref.update(cacheRef, (cache) =>
 					HashMap.set(cache, workspaceRoot, {
 						expiresAt: 0,
 						inFlight,
 					}),
-				);
-
-				const result = yield* Effect.tryPromise({
-					try: () =>
-						probeClaudeCapabilities({
-							workspaceRoot,
-							...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
+				).pipe(
+					Effect.zipRight(
+						Effect.tryPromise({
+							try: () =>
+								probeClaudeCapabilities({
+									workspaceRoot,
+									...(deps.queryFactory
+										? { queryFactory: deps.queryFactory }
+										: {}),
+								}),
+							catch: (cause) =>
+								new ClaudeBoundaryError({
+									operation: "probeCapabilities",
+									cause,
+								}),
 						}),
-					catch: (cause) =>
-						new ClaudeBoundaryError({ operation: "probeCapabilities", cause }),
-				}).pipe(
+					),
 					Effect.tap((value) =>
 						Ref.update(cacheRef, (cache) =>
 							HashMap.set(cache, workspaceRoot, {
@@ -103,15 +111,26 @@ const makeClaudeCapabilitiesServiceWithCache = (
 					Effect.tap((value) =>
 						Deferred.succeed(inFlight, value).pipe(Effect.ignore),
 					),
-					Effect.catchAll((cause) =>
-						Ref.update(cacheRef, (cache) =>
-							HashMap.remove(cache, workspaceRoot),
-						).pipe(
-							Effect.zipRight(
-								Deferred.fail(inFlight, cause).pipe(Effect.ignore),
-							),
-							Effect.zipRight(Effect.fail(cause)),
-						),
+					Effect.onExit((exit) =>
+						Exit.isFailure(exit)
+							? Effect.gen(function* () {
+									const error = Option.getOrElse(
+										Cause.failureOption(exit.cause),
+										() =>
+											new ClaudeBoundaryError({
+												operation: "probeCapabilities",
+												cause: Cause.squash(exit.cause),
+											}),
+									);
+									yield* Ref.update(cacheRef, (cache) =>
+										Option.getOrUndefined(HashMap.get(cache, workspaceRoot))
+											?.inFlight === inFlight
+											? HashMap.remove(cache, workspaceRoot)
+											: cache,
+									);
+									yield* Deferred.fail(inFlight, error);
+								})
+							: Effect.void,
 					),
 				);
 

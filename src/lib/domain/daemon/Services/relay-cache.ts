@@ -54,10 +54,6 @@ export interface Relay {
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;
-	setDefaultModel?: (model: {
-		readonly providerID: string;
-		readonly modelID: string;
-	}) => Promise<void>;
 	stop: () => void | Promise<void>;
 }
 

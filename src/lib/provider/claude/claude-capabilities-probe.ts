@@ -1,5 +1,6 @@
 import type {
 	SDKControlInitializeResponse,
+	SDKMessage,
 	Options as SDKOptions,
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -50,6 +51,7 @@ interface SDKSlashCommandSubset {
 	readonly name: string;
 	readonly description?: string;
 	readonly argumentHint?: string;
+	readonly builtin?: boolean;
 }
 
 interface SDKAgentInfoSubset {
@@ -67,7 +69,15 @@ interface InitializationResultSubset {
 	readonly agents?: readonly SDKAgentInfoSubset[];
 }
 
-interface CapabilityQuery {
+interface SDKMessageSubset {
+	readonly type: string;
+	readonly subtype?: string;
+	readonly skills?: readonly string[];
+}
+
+// Iterated only until the system init message, whose skills list is the one
+// place the SDK says which commands are skills.
+interface CapabilityQuery extends AsyncIterable<SDKMessageSubset> {
 	initializationResult(): Promise<InitializationResultSubset>;
 }
 
@@ -75,6 +85,10 @@ type AssertExtends<_A extends B, B> = true;
 type _ClaudeSdkInitializationResultFitsConsumedShape = AssertExtends<
 	SDKControlInitializeResponse,
 	InitializationResultSubset
+>;
+type _ClaudeSdkMessageFitsConsumedShape = AssertExtends<
+	SDKMessage,
+	SDKMessageSubset
 >;
 
 export interface ProbeResult {
@@ -237,6 +251,20 @@ export async function probeClaudeCapabilities(
 			options: decodeClaudeSDKOptionsJsonShape(options),
 		});
 		const init = await query.initializationResult();
+		// Not query.reloadSkills(): this zero-turn query closes before answering it.
+		let skillNames: ReadonlySet<string> = new Set();
+		try {
+			for await (const message of query) {
+				if (message.type === "system" && message.subtype === "init") {
+					skillNames = new Set(message.skills ?? []);
+					break;
+				}
+			}
+		} catch (error) {
+			(deps.logger ?? defaultLog).warn(
+				`Claude system init unreadable; keeping SDK command sources: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 		const decoded = decodeInitializationResult(init);
 		if (Either.isLeft(decoded)) {
 			(deps.logger ?? defaultLog).warn(
@@ -251,7 +279,14 @@ export async function probeClaudeCapabilities(
 			name: command.name,
 			...(command.description ? { description: command.description } : {}),
 			...(command.argumentHint ? { args: command.argumentHint } : {}),
-			source: "claude-sdk",
+			// The SDK flags Claude Code's own commands and bundled skills alike, but
+			// not Anthropic's first-party skills plugin, which ships as a plugin.
+			source:
+				command.builtin || command.name.startsWith("anthropic-skills:")
+					? "builtin"
+					: skillNames.has(command.name)
+						? "plugin-skill"
+						: "claude-sdk",
 		}));
 		const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
 			id: agent.name,

@@ -6,7 +6,7 @@ import {
 	choosePermissionMode,
 	clearDiscoveryState,
 	discoveryState,
-	extractSlashQuery,
+	extractCommandQuery,
 	filterCommands,
 	flushPendingPermissionMode,
 	formatAgentLabel,
@@ -126,9 +126,10 @@ describe("filterCommands", () => {
 	});
 });
 
-describe("extractSlashQuery", () => {
+describe("extractCommandQuery", () => {
 	it("extracts query after slash at start of text", () => {
-		expect(extractSlashQuery("/hel", 4)).toEqual({
+		expect(extractCommandQuery("/hel", 4)).toEqual({
+			trigger: "/",
 			query: "hel",
 			start: 0,
 			end: 4,
@@ -136,7 +137,8 @@ describe("extractSlashQuery", () => {
 	});
 
 	it("extracts query after slash preceded by space", () => {
-		expect(extractSlashQuery("text /cmd", 9)).toEqual({
+		expect(extractCommandQuery("text /cmd", 9)).toEqual({
+			trigger: "/",
 			query: "cmd",
 			start: 5,
 			end: 9,
@@ -144,15 +146,20 @@ describe("extractSlashQuery", () => {
 	});
 
 	it("returns empty query for slash with nothing after", () => {
-		expect(extractSlashQuery("/", 1)).toEqual({ query: "", start: 0, end: 1 });
+		expect(extractCommandQuery("/", 1)).toEqual({
+			trigger: "/",
+			query: "",
+			start: 0,
+			end: 1,
+		});
 	});
 
 	it("returns null when no slash found", () => {
-		expect(extractSlashQuery("no slash here", 13)).toBeNull();
+		expect(extractCommandQuery("no slash here", 13)).toBeNull();
 	});
 
 	it("returns null for slash in the middle of a word", () => {
-		expect(extractSlashQuery("http://example", 14)).toBeNull();
+		expect(extractCommandQuery("http://example", 14)).toBeNull();
 	});
 });
 

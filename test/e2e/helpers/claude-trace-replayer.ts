@@ -18,7 +18,11 @@ import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/cla
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
-export type ClaudeTraceName = "pong-thinking-text-turn" | "subagent-task-turn";
+export type ClaudeTraceName =
+	| "background-shell-turn"
+	| "pong-thinking-text-turn"
+	| "skill-loads-turn"
+	| "subagent-task-turn";
 
 export interface ClaudeReplayPlan {
 	/** One committed trace per sent turn, in send order. */
@@ -30,6 +34,12 @@ export interface ClaudeReplayPlan {
 	 * before running a tool, and hold the rest of the turn until it answers.
 	 */
 	readonly askPermissionFor?: string;
+	/**
+	 * Hold whatever a trace carries after a `result` (a background task ending
+	 * after its turn) until release(). Live, real time passes there; replayed,
+	 * the test decides when.
+	 */
+	readonly holdAfterResult?: boolean;
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
 }
@@ -37,6 +47,8 @@ export interface ClaudeReplayPlan {
 export interface ClaudeTraceReplayer {
 	/** Pass as `claudeSdk` to createRelayStack. */
 	readonly sdk: NonNullable<ProjectRelayConfig["claudeSdk"]>;
+	/** Lets a holdAfterResult replay continue past its result. */
+	release(): void;
 	/** Throws unless exactly the planned turns were sent. */
 	assertComplete(): void;
 }
@@ -121,6 +133,10 @@ export function createClaudeTraceReplayer(
 	const sessionId = randomUUID();
 	let sent = 0;
 	let unplannedTurn: Error | undefined;
+	let release = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
 
 	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt, options }) => {
 		let interrupted = false;
@@ -138,10 +154,19 @@ export function createClaudeTraceReplayer(
 				}
 				interrupted = false;
 				aborted = new AbortController();
-				for (const message of freshTurn(trace, sessionId)) {
+				const messages = freshTurn(trace, sessionId);
+				for (const [index, message] of messages.entries()) {
 					if (plan.delayMs) await sleep(plan.delayMs);
 					if (interrupted) break;
 					yield message;
+					if (
+						plan.holdAfterResult &&
+						message.type === "result" &&
+						index < messages.length - 1
+					) {
+						await held;
+						if (interrupted) break;
+					}
 					const tool =
 						message.type === "assistant"
 							? message.message.content.find(
@@ -173,11 +198,13 @@ export function createClaudeTraceReplayer(
 			interrupt: async () => {
 				interrupted = true;
 				aborted.abort();
+				release();
 				return undefined;
 			},
 			close: () => {
 				interrupted = true;
 				aborted.abort();
+				release();
 			},
 			// Settings the runtime syncs before each turn; traces are fixed.
 			setModel: async () => {},
@@ -221,6 +248,7 @@ export function createClaudeTraceReplayer(
 				yield { type: "result", result: "Claude trace replay" };
 			},
 		},
+		release,
 		assertComplete() {
 			if (unplannedTurn) throw unplannedTurn;
 			if (sent < traces.length) {

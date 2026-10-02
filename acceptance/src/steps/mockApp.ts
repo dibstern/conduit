@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	claudeInstanceAgents,
 	dualDriverProviders,
@@ -8,8 +9,10 @@ import {
 	openCodeInstanceAgents,
 	unboundInitMessages,
 } from "../../../test/e2e/fixtures/mockup-state.js";
+import { mockDetailPage } from "../../../test/e2e/helpers/detail-projection-mock.js";
 import { mockWsRpc } from "../../../test/e2e/helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	detailFeeds,
@@ -17,12 +20,84 @@ import {
 	inheritedClaudeCommitAttribution,
 	instanceSlug,
 	mockInstances,
+	mockSessionSkills,
 	rejectedEffortSwitches,
 	relayControls,
 	rpcControls,
 } from "./shared.js";
 
 const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
+
+// The detail mock sends the last 50 messages first. Turn 3 needs two older pages.
+const skillNavigationMessages = Array.from(
+	{ length: 64 },
+	(_, index): HistoryMessage[] => {
+		const turn = index + 1;
+		const userId = `msg-skill-nav-user-${turn}`;
+		const created = PINNED_CLOCK_MS - 5 * 60_000 + turn * 1000;
+		return [
+			{
+				id: userId,
+				role: "user",
+				time: { created },
+				parts: [
+					{
+						id: `part-skill-nav-user-${turn}`,
+						type: "text",
+						text:
+							turn === 42
+								? "/user-skill Check navigation to my prompt"
+								: `Navigation transcript turn ${turn}`,
+					},
+				],
+			},
+			{
+				id: `msg-skill-nav-agent-${turn}`,
+				role: "assistant",
+				parentID: userId,
+				time: { created: created + 1, completed: created + 900 },
+				parts: [
+					...(turn <= 3
+						? [
+								{
+									id: `part-skill-nav-skill-${turn}`,
+									type: "tool" as const,
+									tool: "Skill",
+									callID: `call-skill-nav-${turn}`,
+									state: {
+										status: "completed" as const,
+										input: { tool: "Skill", name: "paged-skill" },
+										output: "Loaded.",
+									},
+									time: { start: created + 1, end: created + 500 },
+								},
+							]
+						: []),
+					{
+						id: `part-skill-nav-reply-${turn}`,
+						type: "text",
+						text: `Reviewed transcript turn ${turn}.`,
+					},
+				],
+				modelExecution: modelExecutionMockups["long-transcript"].modelExecution,
+			},
+		];
+	},
+).flat();
+
+const skillNavigationMockup = {
+	...modelExecutionMockups["long-transcript"],
+	transcriptText: "Navigation transcript turn 64",
+	initMessages: modelExecutionMockups["long-transcript"].initMessages.map(
+		(message) =>
+			message.type === "mock_transcript_snapshot"
+				? {
+						...message,
+						history: { messages: skillNavigationMessages, hasMore: true },
+					}
+				: message,
+	),
+};
 
 export const mockAppHandlers: StepHandler[] = [
 	{
@@ -31,9 +106,13 @@ export const mockAppHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const mockup = match[1];
 			const modelExecutionMockup =
-				mockup != null && mockup in modelExecutionMockups
-					? modelExecutionMockups[mockup as keyof typeof modelExecutionMockups]
-					: undefined;
+				mockup === "skill-navigation"
+					? skillNavigationMockup
+					: mockup != null && mockup in modelExecutionMockups
+						? modelExecutionMockups[
+								mockup as keyof typeof modelExecutionMockups
+							]
+						: undefined;
 			if (mockup !== "connected" && !modelExecutionMockup) {
 				throw new Error(`Unsupported conduit mockup: ${mockup ?? ""}`);
 			}
@@ -57,6 +136,15 @@ export const mockAppHandlers: StepHandler[] = [
 					CreatePty: async () => ({ ok: true }),
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					ViewSession: async () => ({ ok: true }),
+					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
+						projectSlug: String(projectSlug ?? "myapp"),
+						sessionId: String(sessionId ?? ""),
+						...mockDetailPage(
+							page,
+							String(sessionId ?? ""),
+							typeof before === "string" ? before : undefined,
+						),
+					}),
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
@@ -168,6 +256,16 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId: payload["sessionId"],
 					}),
 					SyncInputDraft: async () => undefined,
+					GetSessionSkills: async () => ({
+						loads: mockSessionSkills.get(page) ?? [],
+					}),
+					GetSkillContent: async (payload) => ({
+						projectSlug: String(payload["projectSlug"] ?? "myapp"),
+						name: String(payload["name"] ?? ""),
+						path: ".agents/skills/paged-skill/SKILL.md",
+						content:
+							"---\nname: paged-skill\ndescription: A navigation fixture\n---\n# Skill instructions\n\nReview the earlier runs before continuing.\n",
+					}),
 					SwitchPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],

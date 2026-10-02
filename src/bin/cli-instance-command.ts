@@ -1,11 +1,13 @@
+import type { Request } from "effect/Request";
 import {
-	InstanceAdd,
-	InstanceList,
-	InstanceRemove,
-	InstanceStart,
-	InstanceStatus,
-	InstanceStop,
-} from "../lib/contracts/ipc-requests.js";
+	AddInstance,
+	GetInstanceStatus,
+	GetInstances,
+	RemoveInstance,
+	StartInstance,
+	StopInstance,
+} from "../lib/contracts/ws-rpc.js";
+import { formatErrorDetail } from "../lib/errors.js";
 import type { CommandContext } from "./cli-command-handlers.js";
 
 export async function handleInstance(ctx: CommandContext): Promise<void> {
@@ -21,17 +23,17 @@ export async function handleInstance(ctx: CommandContext): Promise<void> {
 
 	switch (args.instanceAction) {
 		case "list":
-			return handleInstanceList(ctx);
+			return handleGetInstances(ctx);
 		case "add":
-			return handleInstanceAdd(ctx);
+			return handleAddInstance(ctx);
 		case "remove":
-			return handleInstanceRemove(ctx);
+			return handleRemoveInstance(ctx);
 		case "start":
-			return handleInstanceStart(ctx);
+			return handleStartInstance(ctx);
 		case "stop":
-			return handleInstanceStop(ctx);
+			return handleStopInstance(ctx);
 		case "status":
-			return handleInstanceStatus(ctx);
+			return handleGetInstanceStatus(ctx);
 		default:
 			stderr.write(
 				"Unknown instance action. Usage: --instance <list|add|remove|start|stop|status>\n",
@@ -40,24 +42,18 @@ export async function handleInstance(ctx: CommandContext): Promise<void> {
 			return;
 	}
 }
-async function handleInstanceList(ctx: CommandContext): Promise<void> {
-	const { stdout, stderr, exit, ipcSend } = ctx;
+async function handleGetInstances(ctx: CommandContext): Promise<void> {
+	const { stdout, stderr, exit, rpcSend } = ctx;
 
-	const response = await ipcSend(new InstanceList({}));
-	if (!response.ok) {
-		stderr.write(
-			`Failed to list instances: ${response.error ?? "unknown error"}\n`,
-		);
+	let response: Request.Success<GetInstances>;
+	try {
+		response = await rpcSend(new GetInstances({}));
+	} catch (err) {
+		stderr.write(`Failed to list instances: ${formatErrorDetail(err)}\n`);
 		exit(1);
 		return;
 	}
-	const instances = (response.instances ?? []) as Array<{
-		id: string;
-		name: string;
-		port: number;
-		managed: boolean;
-		status: string;
-	}>;
+	const instances = response.instances;
 	if (instances.length === 0) {
 		stdout.write("No instances configured.\n");
 		return;
@@ -71,134 +67,106 @@ async function handleInstanceList(ctx: CommandContext): Promise<void> {
 	return;
 }
 
-async function handleInstanceAdd(ctx: CommandContext): Promise<void> {
-	const { args, stdout, stderr, exit, ipcSend } = ctx;
+async function handleAddInstance(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, rpcSend } = ctx;
 
 	if (!args.instanceName) {
 		stderr.write("Instance name is required. Usage: --instance add <name>\n");
 		exit(1);
 		return;
 	}
-	const response = await ipcSend(
-		new InstanceAdd({
-			name: args.instanceName,
-			managed: args.instanceManaged ?? false,
-			...(args.instancePort != null && { port: args.instancePort }),
-			...(args.instanceUrl != null && { url: args.instanceUrl }),
-		}),
-	);
-	if (response.ok) {
+	try {
+		const response = await rpcSend(
+			new AddInstance({
+				name: args.instanceName,
+				managed: args.instanceManaged ?? false,
+				...(args.instancePort != null && { port: args.instancePort }),
+				...(args.instanceUrl != null && { url: args.instanceUrl }),
+			}),
+		);
 		stdout.write(
-			`Instance added: ${(response.instance as { id: string })?.id ?? args.instanceName}\n`,
+			`Instance added: ${response.addedInstanceId ?? args.instanceName}\n`,
 		);
-	} else {
-		stderr.write(
-			`Failed to add instance: ${response.error ?? "unknown error"}\n`,
-		);
+	} catch (err) {
+		stderr.write(`Failed to add instance: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
-async function handleInstanceRemove(ctx: CommandContext): Promise<void> {
-	const { args, stdout, stderr, exit, ipcSend } = ctx;
+async function handleRemoveInstance(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, rpcSend } = ctx;
 
 	if (!args.instanceName) {
 		stderr.write("Instance id is required. Usage: --instance remove <id>\n");
 		exit(1);
 		return;
 	}
-	const response = await ipcSend(
-		new InstanceRemove({
-			id: args.instanceName,
-		}),
-	);
-	if (response.ok) {
+	try {
+		await rpcSend(new RemoveInstance({ instanceId: args.instanceName }));
 		stdout.write(`Instance removed: ${args.instanceName}\n`);
-	} else {
-		stderr.write(
-			`Failed to remove instance: ${response.error ?? "unknown error"}\n`,
-		);
+	} catch (err) {
+		stderr.write(`Failed to remove instance: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
-async function handleInstanceStart(ctx: CommandContext): Promise<void> {
-	const { args, stdout, stderr, exit, ipcSend } = ctx;
+async function handleStartInstance(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, rpcSend } = ctx;
 
 	if (!args.instanceName) {
 		stderr.write("Instance id is required. Usage: --instance start <id>\n");
 		exit(1);
 		return;
 	}
-	const response = await ipcSend(
-		new InstanceStart({
-			id: args.instanceName,
-		}),
-	);
-	if (response.ok) {
+	try {
+		await rpcSend(new StartInstance({ instanceId: args.instanceName }));
 		stdout.write(`Instance started: ${args.instanceName}\n`);
-	} else {
-		stderr.write(
-			`Failed to start instance: ${response.error ?? "unknown error"}\n`,
-		);
+	} catch (err) {
+		stderr.write(`Failed to start instance: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
-async function handleInstanceStop(ctx: CommandContext): Promise<void> {
-	const { args, stdout, stderr, exit, ipcSend } = ctx;
+async function handleStopInstance(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, rpcSend } = ctx;
 
 	if (!args.instanceName) {
 		stderr.write("Instance id is required. Usage: --instance stop <id>\n");
 		exit(1);
 		return;
 	}
-	const response = await ipcSend(
-		new InstanceStop({
-			id: args.instanceName,
-		}),
-	);
-	if (response.ok) {
+	try {
+		await rpcSend(new StopInstance({ instanceId: args.instanceName }));
 		stdout.write(`Instance stopped: ${args.instanceName}\n`);
-	} else {
-		stderr.write(
-			`Failed to stop instance: ${response.error ?? "unknown error"}\n`,
-		);
+	} catch (err) {
+		stderr.write(`Failed to stop instance: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
-async function handleInstanceStatus(ctx: CommandContext): Promise<void> {
-	const { args, stdout, stderr, exit, ipcSend } = ctx;
+async function handleGetInstanceStatus(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, rpcSend } = ctx;
 
 	if (!args.instanceName) {
 		stderr.write("Instance id is required. Usage: --instance status <id>\n");
 		exit(1);
 		return;
 	}
-	const response = await ipcSend(
-		new InstanceStatus({
-			id: args.instanceName,
-		}),
-	);
-	if (!response.ok) {
-		stderr.write(
-			`Failed to get instance status: ${response.error ?? "unknown error"}\n`,
+	let response: Request.Success<GetInstanceStatus>;
+	try {
+		response = await rpcSend(
+			new GetInstanceStatus({ instanceId: args.instanceName }),
 		);
+	} catch (err) {
+		stderr.write(`Failed to get instance status: ${formatErrorDetail(err)}\n`);
 		exit(1);
 		return;
 	}
-	const inst = response.instance as {
-		id: string;
-		name: string;
-		port: number;
-		managed: boolean;
-		status: string;
-	};
+	const inst = response.instance;
 	stdout.write(`Instance: ${inst.name} (${inst.id})\n`);
 	stdout.write(`  Port:    ${inst.port}\n`);
 	stdout.write(`  Managed: ${inst.managed}\n`);

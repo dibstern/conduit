@@ -126,7 +126,12 @@ export const hasColdAutoSettleCandidate = (
 	Effect.gen(function* () {
 		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
 		const databaseStat = yield* Effect.either(
-			Effect.try(() => statSync(databasePath)),
+			// Keep the raw error: the shorthand form wraps it in UnknownException,
+			// hiding the ENOENT code that marks a project with no store yet.
+			Effect.try({
+				try: () => statSync(databasePath),
+				catch: (cause) => cause,
+			}),
 		);
 		if (Either.isLeft(databaseStat)) {
 			if (isMissingPathError(databaseStat.left)) return false;

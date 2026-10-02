@@ -11,6 +11,15 @@ import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
 type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
+type MockSession = {
+	id: string;
+	title: string;
+	status: string;
+	projectSlug: string;
+	updatedAt: number;
+	messageCount: number;
+	settledAt?: number;
+};
 
 const PROJECT_URL = "/?p=myapp";
 
@@ -34,8 +43,10 @@ async function setupWithProjectManagement(
 	page: Page,
 	baseURL?: string,
 	path = PROJECT_URL,
+	extraSessions: MockSession[] = [],
 ): Promise<ProjectManagementControl> {
-	const sessions = [
+	const sessions: MockSession[] = [
+		...extraSessions,
 		{
 			id: "sess-si-001",
 			title: "Test session",
@@ -53,8 +64,24 @@ async function setupWithProjectManagement(
 			messageCount: 0,
 		},
 	];
+	// The daemon answers AttachProject by announcing the new project on the socket.
+	let relay: WsMockControl | undefined;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			AttachProject: (params) => {
+				rpc.setShellRows(
+					sessions.filter(
+						(session) => session.projectSlug === params["projectSlug"],
+					),
+				);
+				setTimeout(() =>
+					relay?.sendMessage({
+						type: "project_attached",
+						slug: String(params["projectSlug"]),
+					}),
+				);
+				return { ok: true };
+			},
 			ListSessions: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
 				sessions: sessions.filter(
@@ -62,16 +89,30 @@ async function setupWithProjectManagement(
 				),
 				roots: true,
 			}),
-			ListDaemonSessions: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				sessions: sessions.filter(
-					(session) =>
-						!params["scope"] || session.projectSlug === params["scope"],
-				),
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+			ListDaemonSessions: (params) => {
+				const limit = Number(params["limit"] ?? Infinity);
+				const cursor = params["cursor"] as { id: string } | undefined;
+				const scoped = sessions
+					.filter(
+						(session) =>
+							!params["scope"] || session.projectSlug === params["scope"],
+					)
+					.sort((a, b) => b.updatedAt - a.updatedAt);
+				const start = cursor
+					? scoped.findIndex((session) => session.id === cursor.id) + 1
+					: 0;
+				const page = scoped.slice(start, start + limit);
+				const last = page.at(-1);
+				const hasMore = start + limit < scoped.length;
+				return {
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					sessions: page,
+					availability: [],
+					hasMore,
+					nextCursor:
+						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
+				};
+			},
 			ListDirectories: (params) => {
 				const path = String(params["path"] ?? "");
 				return {
@@ -121,7 +162,9 @@ async function setupWithProjectManagement(
 		sessions.filter(
 			(session) =>
 				session.projectSlug ===
-				new URL(path, baseURL ?? "http://localhost:4173").searchParams.get("p"),
+				(new URL(path, baseURL ?? "http://localhost:4173").searchParams.get(
+					"p",
+				) ?? "myapp"),
 		),
 	);
 	const control = await mockRelayWebSocket(page, {
@@ -132,6 +175,7 @@ async function setupWithProjectManagement(
 		initDelay: 0,
 		messageDelay: 0,
 	});
+	relay = control;
 	await page.goto(`${baseURL ?? "http://localhost:4173"}${path}`);
 	await waitForChatReady(page);
 	return Object.assign(control, { rpc });
@@ -263,6 +307,64 @@ test("adds a project through the projects panel", async ({ page, baseURL }) => {
 	await expect(panel.locator('[data-slug="new-project"]')).toContainText(
 		"/src/new-project",
 	);
+});
+
+test("clearing the scope after adding a project lists every project's sessions", async ({
+	page,
+	baseURL,
+}) => {
+	const control = await setupWithProjectManagement(page, baseURL);
+	await openProjectsPanel(page);
+	const panel = page.getByTestId("sidebar-projects-panel");
+	await panel.getByRole("button", { name: "Add project", exact: true }).click();
+	await panel.getByRole("combobox").fill("/src/new-project");
+	await panel.getByRole("button", { name: "Add", exact: true }).click();
+	await control.rpc.waitForRequest(
+		(request) =>
+			request.tag === "AttachProject" &&
+			request.payload["projectSlug"] === "new-project",
+	);
+	await expect(page.getByTestId("session-scope-chip")).toHaveText(
+		"new-project",
+	);
+
+	await page.getByRole("button", { name: "Clear project scope" }).click();
+	const sessions = page.locator("#session-list .session-item");
+	await expect(sessions.filter({ hasText: "Test session" })).toHaveCount(1);
+	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
+});
+
+test("clearing the scope after adding a project pages in every session", async ({
+	page,
+	baseURL,
+}) => {
+	const now = Date.now();
+	// Mostly settled, so the first page leaves few rows on screen.
+	const many = Array.from({ length: 45 }, (_, index) => ({
+		id: `sess-many-${String(index).padStart(2, "0")}`,
+		title: `Many ${index}`,
+		status: "idle",
+		projectSlug: "myapp",
+		updatedAt: now - 1000 - index,
+		messageCount: 0,
+		...(index % 9 === 0 ? {} : { settledAt: now - 500 }),
+	}));
+	await setupWithProjectManagement(page, baseURL, "/", many);
+	const sessions = page.locator("#session-list .session-item");
+	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
+	const before = await sessions.allTextContents();
+
+	await openProjectsPanel(page);
+	const panel = page.getByTestId("sidebar-projects-panel");
+	await panel.getByRole("button", { name: "Add project", exact: true }).click();
+	await panel.getByRole("combobox").fill("/src/new-project");
+	await panel.getByRole("button", { name: "Add", exact: true }).click();
+	await expect(page.getByTestId("session-scope-chip")).toHaveText(
+		"new-project",
+	);
+	await page.getByRole("button", { name: "Clear project scope" }).click();
+	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
+	await expect(sessions).toHaveCount(before.length);
 });
 
 test.describe("Directory Autocomplete", () => {

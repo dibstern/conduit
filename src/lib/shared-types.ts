@@ -192,6 +192,8 @@ export interface CommandInfo {
 	name: string;
 	description?: string;
 	args?: string;
+	/** The provider's own command or bundled skill; the composer offers these under `$`. */
+	builtin?: boolean;
 }
 
 export interface FileEntry {
@@ -214,6 +216,8 @@ export const SESSION_ATTENTION_TIERS = [
 	"needs-reply",
 	"error",
 	"working",
+	// Only watchers (Monitor, background shells) are live: calm, not busy.
+	"monitoring",
 	"done-unread",
 	"idle",
 ] as const;
@@ -221,6 +225,10 @@ export type SessionAttention = (typeof SESSION_ATTENTION_TIERS)[number];
 export const SessionAttentionSchema = Schema.Literal(
 	...SESSION_ATTENTION_TIERS,
 );
+
+/** Live Claude background tasks that outlive their turn, by what they are doing. */
+export const BackgroundWorkSchema = Schema.Literal("working", "monitoring");
+export type BackgroundWork = typeof BackgroundWorkSchema.Type;
 
 export interface SessionGit {
 	branch?: string;
@@ -269,6 +277,8 @@ export const SessionInfoSchema = Schema.Struct({
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
 	attention: Schema.optional(SessionAttentionSchema),
+	/** This session's own background work; unlike attention, not rolled up. */
+	backgroundWork: Schema.optional(BackgroundWorkSchema),
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),
@@ -535,6 +545,7 @@ const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
 	args: Schema.optional(Schema.String),
+	builtin: Schema.optional(Schema.Boolean),
 });
 
 const ProjectInfoSchema = Schema.Struct({
@@ -889,6 +900,8 @@ const PtyOutputSchema = Schema.Struct({
 	type: Schema.Literal("pty_output"),
 	ptyId: Schema.String,
 	data: Schema.String,
+	replace: Schema.optional(Schema.Boolean),
+	restored: Schema.optional(Schema.Boolean),
 });
 
 const PtyExitedSchema = Schema.Struct({
@@ -995,16 +1008,14 @@ const ClientCountSchema = Schema.Struct({
 	count: Schema.Number,
 });
 
-/** Relay wire-protocol version. Bump whenever a message's semantics change
- *  incompatibly (e.g. a mode literal is reinterpreted), so a freshly-loaded
- *  frontend can detect a stale daemon that predates the change. The daemon
- *  sends this to each client on connect; the frontend warns on mismatch —
- *  and on absence, which marks a daemon older than the handshake itself. */
-export const WS_PROTOCOL_VERSION = 2;
+/** Bump on wire-contract changes. The build ID covers behavioural changes
+ *  with the same wire shape. Absence marks a daemon older than the handshake. */
+export const WS_PROTOCOL_VERSION = 3;
 
 const ProtocolVersionSchema = Schema.Struct({
 	type: Schema.Literal("protocol_version"),
 	version: Schema.Number,
+	buildId: Schema.optional(Schema.String),
 });
 
 const InputSyncSchema = Schema.Struct({
@@ -1282,6 +1293,7 @@ export interface OpenCodeInstance {
 	url?: string;
 	status: InstanceStatus;
 	pid?: number;
+	version?: string;
 	env?: Record<string, string>;
 	needsRestart?: boolean;
 	exitCode?: number;
@@ -1294,6 +1306,8 @@ export interface InstanceConfig {
 	name: string;
 	port: number;
 	managed: boolean;
+	pid?: number;
+	version?: string;
 	driver?: ProviderDriverKind;
 	configDir?: string;
 	env?: Record<string, string>;

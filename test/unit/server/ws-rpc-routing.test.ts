@@ -13,6 +13,7 @@ import { expect, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -35,9 +36,10 @@ describe("routed RPC server", () => {
 			for (const slug of ["project-a", "project-b"]) {
 				const bus = makeSessionEventBusLive();
 				const context = yield* Layer.build(
-					Layer.merge(
+					Layer.mergeAll(
 						bus,
 						makePersistenceEffectLayer(":memory:", undefined, bus),
+						Layer.succeed(BackgroundLivenessTag, () => undefined),
 					),
 				);
 				contexts.set(slug, context as Context.Context<unknown>);

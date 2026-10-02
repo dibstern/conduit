@@ -61,7 +61,7 @@ const makeLayer = () => {
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
 		RelayStatusSnapshotLive,
-		Layer.succeed(BackgroundLivenessTag, () => false),
+		Layer.succeed(BackgroundLivenessTag, () => undefined),
 	);
 	return WsRpcServerLayer.pipe(
 		Layer.provideMerge(

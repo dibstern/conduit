@@ -9,6 +9,7 @@ import type {
 	ChatMessage,
 	HistoryMessage,
 } from "../../../src/lib/frontend/types.js";
+import { isQueued } from "../../../src/lib/frontend/utils/turns.js";
 
 vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 	renderMarkdown: (text: string) => text,
@@ -294,6 +295,55 @@ describe("transcript detail reducer", () => {
 		});
 		expect(reconciled).toHaveLength(2);
 		expect(reconciled[1]).toBe(optimistic);
+	});
+
+	// After a reload nothing local remembers the send; the rows still show it.
+	it("restores a queued prompt from a reply still being written above it", () => {
+		const prompt = (id: string, created: number): HistoryMessage => ({
+			id,
+			role: "user",
+			time: { created },
+			parts: [{ id: `${id}-text`, type: "text", text: id }],
+		});
+		const reply = (id: string, created: number, completed?: number) => ({
+			...row(id, created, id),
+			time: { created, ...(completed === undefined ? {} : { completed }) },
+		});
+		// A reload renders while the transcript is still loading, before the busy
+		// status arrives, so the rows alone must carry the fact.
+		const queued = (rows: HistoryMessage[], processing = true) =>
+			deriveTranscriptMessages(
+				applyTranscriptEnvelope(entry(), snapshot(rows, 1)),
+				[],
+				{ live: false, active: false, turnEpoch: 3 },
+			)
+				.filter((message) => message.type === "user")
+				.map((message) => isQueued(message, 3, processing));
+
+		// Claude stamps a row's last write as `completed`; OpenCode omits it mid-run.
+		expect(
+			queued([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)]),
+		).toEqual([false, true]);
+		expect(
+			queued([prompt("one", 1), reply("a", 2), prompt("next", 10)]),
+		).toEqual([false, true]);
+		// The reply had finished before the prompt was sent.
+		expect(
+			queued([prompt("one", 1), reply("a", 2, 5), prompt("next", 10)]),
+		).toEqual([false, false]);
+		// The prompt has started: its own reply is below it.
+		expect(
+			queued([
+				prompt("one", 1),
+				reply("a", 2, 50),
+				prompt("next", 10),
+				reply("b", 60),
+			]),
+		).toEqual([false, false]);
+		// Nothing is running any more.
+		expect(
+			queued([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)], false),
+		).toEqual([false, false]);
 	});
 
 	it("does not adopt a repeated send into an older projected user row", () => {

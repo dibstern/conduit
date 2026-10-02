@@ -26,6 +26,7 @@ import {
 import {
 	getInstance,
 	getInstanceUrl,
+	getManagedOpenCodeProcessEnv,
 	type InstanceManagerStateTag,
 } from "../Services/instance-manager-service.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
@@ -77,10 +78,11 @@ export const prefetchSessionCounts: Effect.Effect<
 		if (opencodeUrl === null) continue;
 
 		// Build auth headers
-		const password =
-			instance.env?.["OPENCODE_SERVER_PASSWORD"] ?? globalPassword;
-		const username =
-			instance.env?.["OPENCODE_SERVER_USERNAME"] ?? globalUsername;
+		const env = instance.managed
+			? ((yield* getManagedOpenCodeProcessEnv(instanceId)) ?? instance.env)
+			: instance.env;
+		const password = env?.["OPENCODE_SERVER_PASSWORD"] ?? globalPassword;
+		const username = env?.["OPENCODE_SERVER_USERNAME"] ?? globalUsername;
 		const headers: Record<string, string> = {
 			"x-opencode-directory": entry.project.directory,
 		};

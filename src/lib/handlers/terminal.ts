@@ -3,7 +3,7 @@ import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-se
 import type { PayloadMap } from "./payloads.js";
 
 export const handlePtyInput = (
-	_clientId: string,
+	clientId: string,
 	payload: PayloadMap["pty_input"],
 ) =>
 	Effect.gen(function* () {
@@ -11,6 +11,6 @@ export const handlePtyInput = (
 
 		const { ptyId, data } = payload;
 		if (ptyId && data) {
-			yield* terminal.sendInput(ptyId, data);
+			yield* terminal.sendInput(ptyId, data, clientId);
 		}
 	});

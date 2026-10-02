@@ -40,8 +40,7 @@ describe("PtyManager", () => {
 		assert.exists(session, "expected PTY session");
 		expect(session.exited).toBe(false);
 		expect(session.exitCode).toBeNull();
-		expect(session.scrollback).toEqual([]);
-		expect(session.scrollbackSize).toBe(0);
+		expect(mgr.getScrollback("pty-1")).toBe("");
 	});
 
 	it("getSession returns undefined for unknown ptyId", () => {
@@ -100,6 +99,19 @@ describe("PtyManager", () => {
 		expect(up2.close).toHaveBeenCalled();
 	});
 
+	it("detachAll disconnects hosted terminals and closes provider upstreams", () => {
+		const mgr = new PtyManager({ log: createSilentLogger() });
+		const hosted = { ...createMockUpstream(), detach: vi.fn() };
+		const provider = createMockUpstream();
+		mgr.registerSession("hosted", hosted, "local");
+		mgr.registerSession("provider", provider);
+		mgr.detachAll();
+		expect(mgr.sessionCount).toBe(0);
+		expect(hosted.detach).toHaveBeenCalledOnce();
+		expect(hosted.close).not.toHaveBeenCalled();
+		expect(provider.close).toHaveBeenCalledWith(1000, "Proxy closed");
+	});
+
 	it("sendInput forwards to upstream if open", () => {
 		const mgr = new PtyManager({ log: createSilentLogger() });
 		const mockUpstream = createMockUpstream({ readyState: 1 });
@@ -140,8 +152,7 @@ describe("PtyManager", () => {
 		mgr.appendScrollback("pty-1", "b".repeat(60));
 		const replay = mgr.getScrollback("pty-1");
 		expect(replay.length).toBeLessThanOrEqual(100);
-		// The first chunk should have been evicted
-		expect(replay).toBe("b".repeat(60));
+		expect(replay).toBe("a".repeat(40) + "b".repeat(60));
 	});
 
 	it("appendScrollback is a no-op for unknown pty", () => {
@@ -185,7 +196,6 @@ describe("PtyManager", () => {
 		mgr.appendScrollback("pty-1", chunk);
 		mgr.appendScrollback("pty-1", chunk);
 		const replay = mgr.getScrollback("pty-1");
-		// Should have evicted the first chunk (total would be 60KB > 50KB)
 		expect(replay.length).toBeLessThanOrEqual(50 * 1024);
 	});
 });

@@ -2,6 +2,7 @@
 // reply segments. The transcript renders one collapsed activity line per segment
 // (summary sentence + duration strip), expandable to the log.
 
+import { skillNameFromTool } from "../../skill-recognition.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -85,11 +86,13 @@ export function appendActivity(segment: OpenSegment, part: ActivityPart): void {
  * back into activity, but only within the same open segment.
  *
  * @param processing whether the session is currently producing output — only
- *   the last turn can be live, according to its last segment's signal.
+ *   the last started turn can be live, according to its last segment's signal.
+ * @param turnEpoch the session's current epoch, to tell queued prompts apart.
  */
 export function segmentTurns(
 	messages: ChatMessage[],
 	processing: boolean,
+	turnEpoch?: number,
 ): Turn[] {
 	const turns: Turn[] = [];
 	for (const msg of messages) {
@@ -136,13 +139,31 @@ export function segmentTurns(
 			};
 		} else appendActivity(segment, msg);
 	}
-	const last = turns.at(-1);
+	// A queued prompt's row sorts below the turn still running, so the live turn
+	// is the last one whose prompt has started.
+	const last = turns
+		.filter((turn) => !turn.user || !isQueued(turn.user, turnEpoch, processing))
+		.at(-1);
 	// A closed segment is the only thing that settles a turn, and a closed
 	// segment can never receive more work — the types see to that. So a result
 	// mid-turn no longer strands the transcript: the next part opens a fresh
 	// segment and the turn reads as live again.
 	if (last) last.live = processing && last.segments.at(-1)?.end === undefined;
 	return turns;
+}
+
+/** Sent while an earlier turn ran, and that turn has not finished yet. */
+export function isQueued(
+	user: UserMessage,
+	turnEpoch: number | undefined,
+	processing: boolean,
+): boolean {
+	return (
+		(user.waitingBehindReply === true && processing) ||
+		(user.sentDuringEpoch !== undefined &&
+			turnEpoch !== undefined &&
+			turnEpoch <= user.sentDuringEpoch)
+	);
 }
 
 /** Latest reported usage remains available even when later work is running. */
@@ -219,13 +240,8 @@ export function toolTags(tool: ToolMessage): readonly string[] {
 	);
 }
 
-/** Which skill a Skill call loaded. Sessions recorded before Skill inputs were
- *  normalized carry the name only in the result text, so recover it from there. */
 export function skillName(tool: ToolMessage): string {
-	const match = tool.result?.match(
-		/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']|^"?Launching skill: ([^"\s]+)/,
-	);
-	return toolSubject(tool) || match?.[1] || match?.[2] || "";
+	return skillNameFromTool(ensureCanonical(tool.name, tool.input), tool.result);
 }
 
 export function toolCommand(tool: ToolMessage): string | undefined {

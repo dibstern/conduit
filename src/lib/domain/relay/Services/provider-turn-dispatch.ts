@@ -128,13 +128,18 @@ const maybePersistClaudeUserMessage = (input: {
 	readonly sessionId: string;
 	readonly text: string;
 	readonly isFirstClaudeMessage: boolean;
+	readonly messageId?: string;
 }) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 
 		const persistResult = yield* Effect.either(
-			persist.persistUserMessage(input.sessionId, input.text),
+			input.messageId
+				? persist.persistUserMessage(input.sessionId, input.text, {
+						messageId: input.messageId,
+					})
+				: persist.persistUserMessage(input.sessionId, input.text),
 		);
 		const titleService = yield* SessionTitleServiceTag;
 		if (input.isFirstClaudeMessage && persistResult._tag === "Right") {
@@ -406,12 +411,18 @@ const prepareEngineTurnInput = (
 			isClaudeDriver(driver) &&
 			priorHistoryResult.loaded &&
 			priorHistory.length === 0;
+		const userMessageId =
+			isClaudeDriver(driver) &&
+			process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
+				? randomUUID()
+				: undefined;
 
 		yield* isClaudeDriver(driver)
 			? maybePersistClaudeUserMessage({
 					sessionId: resolvedInput.sessionId,
 					text: resolvedInput.text,
 					isFirstClaudeMessage,
+					...(userMessageId ? { messageId: userMessageId } : {}),
 				})
 			: Effect.void;
 
@@ -438,6 +449,7 @@ const prepareEngineTurnInput = (
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			turnId: randomUUID(),
+			...(userMessageId ? { userMessageId } : {}),
 			prompt: resolvedInput.text,
 			history: priorHistory,
 			providerState,

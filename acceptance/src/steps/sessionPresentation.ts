@@ -255,6 +255,58 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "phone first row reads back, identity, Views",
+		match:
+			/^the session bar's first row reads back, identity and Views from left to right$/,
+		run: async ({ world }) => {
+			const boxes = await Promise.all(
+				[
+					"[data-testid='session-bar-back']",
+					"#session-bar-meta",
+					"[data-testid='session-bar-views-button']",
+				].map((selector) => world.page.locator(selector).boundingBox()),
+			);
+			const [back, identity, views] = boxes;
+			if (!back || !identity || !views) {
+				throw new Error(
+					`first-row control has no layout box: ${JSON.stringify(boxes)}`,
+				);
+			}
+			const middle = (box: { y: number; height: number }) =>
+				box.y + box.height / 2;
+			const oneRow = [identity, views].every(
+				(box) => Math.abs(middle(box) - middle(back)) < 8,
+			);
+			const ordered =
+				back.x + back.width <= identity.x + 1 &&
+				identity.x + identity.width <= views.x + 1;
+			if (!oneRow || !ordered) {
+				throw new Error(
+					`first row out of order: ${JSON.stringify({ back, identity, views })}`,
+				);
+			}
+		},
+	},
+	{
+		name: "desktop identity sits in the right group",
+		match: /^the desktop identity sits in the right-hand group$/,
+		run: async ({ world }) => {
+			const [bar, identity] = await Promise.all([
+				world.page.getByTestId("session-bar").boundingBox(),
+				world.page.locator("#session-bar-meta").boundingBox(),
+			]);
+			if (
+				!bar ||
+				!identity ||
+				identity.x + identity.width / 2 < bar.x + bar.width / 2
+			) {
+				throw new Error(
+					`desktop identity is not right-aligned: ${JSON.stringify({ bar, identity })}`,
+				);
+			}
+		},
+	},
+	{
 		name: "enable desktop debug action",
 		match: /^I enable the desktop Debug action$/,
 		run: async ({ world }) => {

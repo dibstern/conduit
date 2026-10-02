@@ -19,6 +19,11 @@ interface AllowedPlainThrow {
 
 const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	{
+		path: "src/lib/daemon/daemon-rpc-client.ts",
+		linePattern: /Effect\.runPromise\(/,
+		reason: "local CLI RPC adapter exposes a Promise API",
+	},
+	{
 		path: "src/lib/domain/server/Layers/http-router-layer.ts",
 		linePattern: /Effect\.runSync\($/,
 		reason:
@@ -1342,8 +1347,8 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("does not pass unknown instance IPC operation failures through untyped", () => {
-		const path = "src/lib/domain/daemon/Services/ipc-handlers.ts";
+	it("does not pass unknown daemon RPC operation failures through untyped", () => {
+		const path = "src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const hits = Array.from(
 			source.matchAll(/catch:\s*\((\w+)\)\s*=>\s*\1/g),

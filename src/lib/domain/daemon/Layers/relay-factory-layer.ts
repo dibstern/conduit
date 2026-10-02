@@ -25,6 +25,7 @@ import {
 	Runtime,
 } from "effect";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
+import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -41,6 +42,7 @@ import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
 	getInstances as getEffectInstances,
+	getManagedOpenCodeProcessEnv,
 	InstanceManagerStateTag,
 	PollerFibersTag,
 	persistConfig as persistEffectInstanceConfig,
@@ -52,10 +54,11 @@ import {
 import {
 	broadcastProjectList,
 	broadcastToAll,
-	allProjects as getEffectProjects,
+	projectInfos as getEffectProjectInfos,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
+import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 import { VersionCheckerTag } from "./version-checker-layer.js";
 
 export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
@@ -153,6 +156,9 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
+			const envResolver = Option.getOrUndefined(
+				yield* Effect.serviceOption(ProjectShellEnvTag),
+			);
 			const httpServerRef = yield* HttpServerRefTag;
 			const projectRegistry = yield* ProjectRegistryTag;
 			const instanceState = yield* InstanceManagerStateTag;
@@ -180,7 +186,7 @@ export const RelayFactoryLive = (
 
 			const getProjects = () =>
 				runCallback(
-					getEffectProjects.pipe(
+					getEffectProjectInfos.pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 					),
 				);
@@ -332,6 +338,28 @@ export const RelayFactoryLive = (
 
 						// Read config for any runtime values needed
 						const _config = yield* Ref.get(configRef);
+						const instances = Array.from(
+							yield* getEffectInstances.pipe(
+								Effect.provideService(InstanceManagerStateTag, instanceState),
+							),
+						);
+						const selectedInstance =
+							instances.find(
+								(instance) =>
+									instance.driver !== "claude" &&
+									instance.id === project.instanceId,
+							) ?? instances.find((instance) => instance.driver !== "claude");
+						const opencodeAuth = selectedInstance?.managed
+							? openCodeAuth(
+									yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
+										Effect.provideService(
+											InstanceManagerStateTag,
+											instanceState,
+										),
+									),
+								)
+							: undefined;
+						envResolver?.register(project.directory, project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
 						);
@@ -345,7 +373,13 @@ export const RelayFactoryLive = (
 								createProjectRelay({
 									httpServer,
 									opencodeUrl,
+									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.directory,
+									...(envResolver && {
+										shellEnv: (directory: string) => envResolver.get(directory),
+										prepareShellEnv: (directory: string) =>
+											envResolver.waitUntilReady(directory),
+									}),
 									slug: project.slug,
 									noServer: true,
 									signal: ac.signal,

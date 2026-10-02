@@ -35,7 +35,7 @@ const relayStateTestLayer = RelayStateLive.pipe(
 			configLayer,
 			loggerLayer,
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(BackgroundLivenessTag, () => false),
+			Layer.succeed(BackgroundLivenessTag, () => undefined),
 			OpenCodeInstanceClientsLive.pipe(
 				Layer.provide(Layer.merge(configLayer, loggerLayer)),
 			),

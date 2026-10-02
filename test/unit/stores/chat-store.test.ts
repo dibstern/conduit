@@ -18,6 +18,7 @@ vi.mock("dompurify", () => ({
 import {
 	addSystemMessage,
 	addUserMessage,
+	advanceTurnIfNewMessage,
 	chatState,
 	clearMessages,
 	handleCompaction,
@@ -39,6 +40,7 @@ import type {
 	ResultMessage,
 	UserMessage as UserMsg,
 } from "../../../src/lib/frontend/types.js";
+import { isQueued } from "../../../src/lib/frontend/utils/turns.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 let ta: SessionActivity;
@@ -277,6 +279,17 @@ describe("queued user message (sentDuringEpoch)", () => {
 		const msg = chatState.messages[0];
 		assert.exists(msg, "expected user message");
 		expect((msg as UserMsg).sentDuringEpoch).toBeUndefined();
+	});
+
+	// Claude starts a queued prompt's reply without ending the turn, and a tab
+	// that joined mid-turn never saw the reply that was already running.
+	it("stops being queued once its reply starts, even after joining mid-turn", () => {
+		phaseToProcessing(ta);
+		addUserMessage(ta, tm, "follow-up", undefined, true);
+		const user = tm.messages.at(-1) as UserMsg;
+		expect(isQueued(user, ta.turnEpoch, true)).toBe(true);
+		advanceTurnIfNewMessage(ta, tm, "msg_reply_to_follow_up");
+		expect(isQueued(user, ta.turnEpoch, true)).toBe(false);
 	});
 
 	it("clearMessages resets all state", () => {

@@ -7,18 +7,18 @@
      `createdAt` — conduit's timestamps come from the event store, never from
      text a hook prepended to the message body.
      When queued, the card is dimmed and shows a shimmering "Queued" label.
-     The queued visual is DERIVED from the immutable `sentDuringEpoch` fact
-     and the live `turnEpoch` — no mutable flags, no clearing needed. -->
+     Queued is derived (utils/turns.ts isQueued), never set and cleared. -->
 
 <script lang="ts">
 	import type { UserMessage } from "../../types.js";
-	import { currentChat } from "../../stores/chat.svelte.js";
+	import { currentChat, isProcessing } from "../../stores/chat.svelte.js";
 	import {
 		discoveryState,
 		getModelDisplayName,
 	} from "../../stores/discovery.svelte.js";
 	import { extractDisplayText } from "../../utils/format.js";
-	import { tokenizeSkills } from "../../utils/skill-highlight.js";
+	import { tokenizeSkills } from "../../../skill-recognition.js";
+	import { isQueued } from "../../utils/turns.js";
 	import Surface from "../ui/Surface.svelte";
 	import MessageTime from "./MessageTime.svelte";
 
@@ -31,18 +31,14 @@
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
 
-	/** True while the turn that was in-progress when this message was sent
-	 *  hasn't completed yet. Clears automatically when `handleDone`
-	 *  increments `turnEpoch`. */
-	const isQueued = $derived(
-		message.sentDuringEpoch != null &&
-		currentChat().turnEpoch <= message.sentDuringEpoch,
+	const queued = $derived(
+		isQueued(message, currentChat().turnEpoch, isProcessing()),
 	);
 </script>
 
 <div
 	class="msg-user max-w-[760px] mx-auto mb-3 px-5"
-	class:opacity-50={isQueued}
+	class:opacity-50={queued}
 	data-uuid={message.uuid}
 >
 	<!-- The queued outline rides in `class` rather than on three `class:`
@@ -51,7 +47,7 @@
 	<Surface
 		variant="plain"
 		padding="lg"
-		class="relative glow-brand-a {isQueued
+		class="relative glow-brand-a {queued
 			? 'border border-dashed border-border'
 			: ''}"
 	>
@@ -70,7 +66,7 @@
 				⚠ Ran {getModelDisplayName(message.modelExecution.actualModel)}, not {getModelDisplayName(message.modelExecution.requestedModel)}
 			</div>
 		{/if}
-		{#if isQueued}
+		{#if queued}
 			<div class="flex items-center mt-2">
 				<span class="queued-shimmer text-text-muted text-xs font-mono">Queued</span>
 			</div>

@@ -91,6 +91,7 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	title: project.title ?? project.slug,
 	lastUsed: project.addedAt,
 	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
+	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
 });
 
 const makeInitialProjectState = (
@@ -178,7 +179,21 @@ export const allProjects = Effect.gen(function* () {
 	return projects.sort((a, b) => (b.lastUsed ?? 0) - (a.lastUsed ?? 0));
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
 
-export const projectInfos = allProjects.pipe(Effect.map(withCachedProjectGit));
+export const projectInfos = allProjects.pipe(
+	Effect.map((projects) =>
+		withCachedProjectGit(
+			projects.map((project) => ({
+				slug: project.slug,
+				directory: project.directory,
+				title: project.title,
+				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
+				...(project.instanceId !== undefined && {
+					instanceId: project.instanceId,
+				}),
+			})),
+		),
+	),
+);
 
 export const broadcastProjectList = Effect.gen(function* () {
 	const projects = yield* projectInfos;

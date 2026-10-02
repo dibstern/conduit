@@ -55,6 +55,25 @@ export const markSeen = (sessionId: string, upTo: number) =>
 		[upTo],
 	);
 
+/**
+ * Background work (a backgrounded shell, a detached agent) outlives the turn
+ * that started it, and its liveness lives in memory, not in the row. Nothing
+ * else moves the row when it starts or stops, so stamp it: the advance is what
+ * makes a subscriber re-read the session and its `working` attention.
+ */
+export const announceBackgroundWork = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const commitAndSignal = yield* makeCommitAndSignal;
+		yield* commitAndSignal.write((_project, stamp) =>
+			stamp((version) =>
+				sql<{ id: string }>`
+					UPDATE sessions SET version = ${version} WHERE id = ${sessionId}
+					RETURNING id`.pipe(Effect.map((rows) => rows.map((row) => row.id))),
+			),
+		);
+	});
+
 /** Seen up to just before the latest turn end, so that turn end is unread. */
 export const markUnread = (sessionId: string) =>
 	writeSeen(sessionId, "COALESCE(last_turn_end_version, -1) - 1", []);

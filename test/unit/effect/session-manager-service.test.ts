@@ -370,7 +370,7 @@ const requiredSessionServices = Layer.mergeAll(
 	sessionLoggerLayer,
 	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-	Layer.succeed(BackgroundLivenessTag, () => false),
+	Layer.succeed(BackgroundLivenessTag, () => undefined),
 	RelayStatusSnapshotLive,
 	makeOverridesStateLive(),
 	OpenCodeInstanceClientsLive.pipe(

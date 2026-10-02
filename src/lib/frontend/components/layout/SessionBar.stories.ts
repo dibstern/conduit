@@ -25,6 +25,7 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../stores/session.svelte.js";
+import { sessionSkillsState } from "../../stores/session-skills.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	destroyAll,
@@ -117,6 +118,8 @@ const meta = {
 		sessionViewState.forcedOpen = true;
 		sessionViewState.filesOpen = false;
 		sessionViewState.filesEverOpened = false;
+		sessionSkillsState.sessionId = null;
+		sessionSkillsState.loads = [];
 		destroyAll();
 		return () => {
 			attachedProjectState.slug = null;
@@ -838,6 +841,77 @@ export const DesktopGitIdentity: Story = {
 		await expect(canvas.getByTitle("Uncommitted changes")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+	},
+};
+
+// The chip fetches on mount; seeding the answer for the open session first means
+// the failed story-time fetch keeps it, as a failed refetch does in the app.
+function seedSkills(): void {
+	// The chip measures age against sessionState.now, which other stories pin.
+	const at = sessionState.now - 5 * 60_000;
+	sessionSkillsState.sessionId = mockSession.id;
+	sessionSkillsState.loads = [
+		{
+			name: "release-notes",
+			invokedBy: "user",
+			turnOrdinal: 1,
+			at,
+			anchor: { messageId: "m1" },
+			running: false,
+		},
+		{
+			name: "changelog-style",
+			invokedBy: "agent",
+			turnOrdinal: 1,
+			at,
+			anchor: { messageId: "m2", partId: "p1" },
+			running: false,
+		},
+		{
+			name: "changelog-style",
+			invokedBy: "agent",
+			turnOrdinal: 2,
+			at,
+			anchor: { messageId: "m3", partId: "p2" },
+			running: false,
+		},
+	];
+}
+
+export const WithSkills: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: seedSkills,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const chip = canvas.getByRole("button", { name: "2 skills used" });
+		await expect(chip).toHaveTextContent("2");
+		await userEvent.click(chip);
+		const rows = await within(document.body).findAllByTestId(
+			"session-skills-row",
+		);
+		expect(rows.map((row) => row.dataset["skill"])).toEqual([
+			"release-notes",
+			"changelog-style",
+		]);
+		await expect(rows[1]).toHaveTextContent(/agent · turns 1, 2 · 5m ago.*×2/);
+	},
+};
+
+export const DesktopWithSkills: Story = {
+	tags: ["viewport-capture"],
+	args: { width: 900 },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		seedSkills();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "2 skills used" }),
+		);
+		await expect(
+			within(document.body).getByRole("menu", { name: "Skills used" }),
+		).toBeVisible();
 	},
 };
 

@@ -6,6 +6,7 @@ import {
 	makeRelayCommandGateLive,
 	RelayCommandGateTag,
 } from "../../../src/lib/domain/relay/Services/relay-command-gate.js";
+import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { RelayWsDispatch } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import {
@@ -13,10 +14,7 @@ import {
 	handleRelayWsMessageThroughGate,
 } from "../../../src/lib/relay/ws-message-dispatch-effect.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
-import {
-	makeMockPtyManager,
-	makeTestHandlerLayer,
-} from "../../helpers/mock-factories.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 function mockLogger(): Logger {
 	const logger: Logger = {
@@ -179,25 +177,27 @@ describe("handleRelayWsMessage", () => {
 	);
 
 	it.effect("uses dispatchMessageEffect by default", () => {
-		const ptyManager = makeMockPtyManager();
 		const sendTo = vi.fn<(clientId: string, message: RelayMessage) => void>();
-		const layer = Layer.mergeAll(
-			makeBaseLayer(),
-			makeTestHandlerLayer({ ptyManager }),
-		);
+		const layer = Layer.mergeAll(makeBaseLayer(), makeTestHandlerLayer());
 
-		return handleRelayWsMessage({
-			clientId: "client-1",
-			handler: "pty_input",
-			payload: { ptyId: "pty-1", data: "pwd\n" },
-			sendTo,
-			log: mockLogger(),
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "pwd\n");
-				expect(sendTo).not.toHaveBeenCalled();
-			}),
-		);
+		return Effect.gen(function* () {
+			const terminal = yield* OpenCodeTerminalServiceTag;
+			const sendInput = vi
+				.spyOn(terminal, "sendInput")
+				.mockReturnValue(Effect.void);
+			yield* handleRelayWsMessage({
+				clientId: "client-1",
+				handler: "pty_input",
+				payload: { ptyId: "pty-1", data: "pwd\n" },
+				sendTo,
+				log: mockLogger(),
+			});
+			expect(sendInput).toHaveBeenCalledExactlyOnceWith(
+				"pty-1",
+				"pwd\n",
+				"client-1",
+			);
+			expect(sendTo).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(layer));
 	});
 });

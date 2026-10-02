@@ -23,13 +23,6 @@ import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
-import type {
-	ConfigTag,
-	LoggerTag,
-	OpenCodeModelServiceTag,
-	OrchestrationEngineTag,
-	WebSocketHandlerTag,
-} from "../domain/relay/Services/services.js";
 import type { SessionManagerError } from "../domain/relay/Services/session-manager-error.js";
 import {
 	type OverridesStateTag,
@@ -41,10 +34,8 @@ import {
 } from "../domain/server/Layers/http-router-layer.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
-import { setDefaultModelForRelay } from "../handlers/model.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
-import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -122,6 +113,10 @@ export class RelayCreationInProgressError extends Data.TaggedError(
 		return `Relay for ${this.directory} is still being created`;
 	}
 }
+
+class RelayTestSdkConfigurationError extends Data.TaggedError(
+	"RelayTestSdkConfigurationError",
+)<{ readonly module: string; readonly message: string }> {}
 
 interface StandaloneProjectEntry {
 	slug: string;
@@ -289,11 +284,6 @@ export interface ProjectRelay {
 	isAnySessionProcessing(): boolean;
 	/** Set the relay-wide default agent through the relay-owned Effect runtime. */
 	setDefaultAgent(agent: string): Promise<void>;
-	/** Set the relay-wide default model through the relay-owned Effect runtime. */
-	setDefaultModel(model: {
-		readonly providerID: string;
-		readonly modelID: string;
-	}): Promise<void>;
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
 	/** Gracefully stop relay components (SSE + WebSocket). Does NOT stop the HTTP server. */
@@ -304,22 +294,12 @@ class RelayDefaultCommandQueueClosed extends Data.TaggedError(
 	"RelayDefaultCommandQueueClosed",
 )<Record<never, never>> {}
 
-type RelayDefaultCommand =
-	| {
-			readonly _tag: "SetDefaultAgent";
-			readonly agent: string;
-			readonly resolve: () => void;
-			readonly reject: (cause: unknown) => void;
-	  }
-	| {
-			readonly _tag: "SetDefaultModel";
-			readonly model: {
-				readonly providerID: string;
-				readonly modelID: string;
-			};
-			readonly resolve: () => void;
-			readonly reject: (cause: unknown) => void;
-	  };
+type RelayDefaultCommand = {
+	readonly _tag: "SetDefaultAgent";
+	readonly agent: string;
+	readonly resolve: () => void;
+	readonly reject: (cause: unknown) => void;
+};
 
 type RelayDefaultCommandResume = (
 	effect: Effect.Effect<RelayDefaultCommand, RelayDefaultCommandQueueClosed>,
@@ -334,18 +314,6 @@ class RelayDefaultCommandQueue {
 		return this.enqueue((resolve, reject) => ({
 			_tag: "SetDefaultAgent",
 			agent,
-			resolve,
-			reject,
-		}));
-	}
-
-	setDefaultModel(model: {
-		readonly providerID: string;
-		readonly modelID: string;
-	}): Promise<void> {
-		return this.enqueue((resolve, reject) => ({
-			_tag: "SetDefaultModel",
-			model,
 			resolve,
 			reject,
 		}));
@@ -407,17 +375,7 @@ class RelayDefaultCommandQueue {
 
 const makeRelayDefaultCommandQueueLive = (
 	queue: RelayDefaultCommandQueue,
-): Layer.Layer<
-	never,
-	never,
-	| ConfigTag
-	| LoggerTag
-	| OpenCodeModelServiceTag
-	| OrchestrationEngineTag
-	| ReadQueryEffectTag
-	| OverridesStateTag
-	| WebSocketHandlerTag
-> =>
+): Layer.Layer<never, never, OverridesStateTag> =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const settle = <R>(
@@ -432,21 +390,8 @@ const makeRelayDefaultCommandQueueLive = (
 					}),
 				);
 
-			const runCommand = (command: RelayDefaultCommand) => {
-				switch (command._tag) {
-					case "SetDefaultAgent":
-						return settle(command, setDefaultAgent(command.agent));
-					case "SetDefaultModel":
-						return settle(
-							command,
-							setDefaultModelForRelay({
-								clientId: "ipc",
-								provider: command.model.providerID,
-								model: command.model.modelID,
-							}).pipe(Effect.asVoid),
-						);
-				}
-			};
+			const runCommand = (command: RelayDefaultCommand) =>
+				settle(command, setDefaultAgent(command.agent));
 
 			yield* Effect.addFinalizer(() => Effect.sync(() => queue.close()));
 			yield* Effect.forkScoped(
@@ -537,11 +482,37 @@ export interface RelayStack {
 export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
+	// Child-process tests load their fake at the existing SDK factory seam.
+	// Normal launches never import test code or change provider selection.
+	const testQueryModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
+	let testSendLimit: number | undefined;
+	if (
+		process.env["NODE_ENV"] === "test" &&
+		process.send &&
+		testQueryModule &&
+		!config.claudeSdk
+	) {
+		const { claudeSdk } = (await import(testQueryModule)) as {
+			claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]>;
+		};
+		if (
+			typeof claudeSdk?.query !== "function" ||
+			typeof claudeSdk.titleQuery !== "function"
+		) {
+			throw new RelayTestSdkConfigurationError({
+				module: testQueryModule,
+				message:
+					"Process test module must export Claude query and title factories",
+			});
+		}
+		config = { ...config, claudeSdk };
+		testSendLimit = 10_000;
+	}
 	const log = config.log ?? createLogger("relay");
 	// Background liveness is created before startup supplies its broadcaster.
-	let broadcastBackgroundSessionLists: (() => void) | undefined;
-	const backgroundLiveness = makeSessionBackgroundLiveness(() =>
-		broadcastBackgroundSessionLists?.(),
+	let announceBackgroundWork: ((sessionId: string) => void) | undefined;
+	const backgroundLiveness = makeSessionBackgroundLiveness((sessionId) =>
+		announceBackgroundWork?.(sessionId),
 	);
 	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
@@ -569,6 +540,7 @@ export async function createProjectRelay(
 	const defaultCommandQueue = new RelayDefaultCommandQueue();
 	const layers = createProjectRelayLayers({
 		config,
+		...(testSendLimit !== undefined && { testSendLimit }),
 		backgroundLiveness,
 		getWsHandler: () => wsHandler,
 		defaultCommandQueueLayer:
@@ -588,7 +560,7 @@ export async function createProjectRelay(
 		initialDefaultVariant,
 		layers,
 	});
-	broadcastBackgroundSessionLists = startup.broadcastBackgroundSessionLists;
+	announceBackgroundWork = startup.announceBackgroundWork;
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
 	const {
@@ -612,6 +584,14 @@ export async function createProjectRelay(
 			sse: sseStream.getHealth(),
 		};
 	};
+	if (testSendLimit !== undefined && process.connected) {
+		process.send?.({
+			channel: "conduit-process-test",
+			kind: "fake-sdk-active",
+			module: testQueryModule,
+			projectDir: config.projectDir,
+		});
+	}
 
 	return {
 		settleIdleSessions: (idleWindowMs, now) =>
@@ -647,10 +627,6 @@ export async function createProjectRelay(
 
 		setDefaultAgent(agent: string) {
 			return defaultCommandQueue.setDefaultAgent(agent);
-		},
-
-		setDefaultModel(model) {
-			return defaultCommandQueue.setDefaultModel(model);
 		},
 
 		async stop() {

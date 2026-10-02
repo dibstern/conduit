@@ -1,4 +1,4 @@
-import { Rpc } from "@effect/rpc";
+import { Rpc, type RpcGroup } from "@effect/rpc";
 import { type Context, Effect, type Layer, Stream } from "effect";
 import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
@@ -6,10 +6,12 @@ import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wir
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { getSessionInputDraft } from "../handlers/prompt.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
+import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
 import { modelsHandlers } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
+import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
 import { settingsHandlers } from "./ws-rpc/settings.js";
 import { terminalsHandlers } from "./ws-rpc/terminals.js";
@@ -41,12 +43,19 @@ export {
 	GetFileTree,
 	type GetFileTreeResponse,
 	GetGoalDetails,
+	GetInstanceStatus,
+	type GetInstanceStatusResponse,
+	GetInstances,
 	GetModels,
 	type GetModelsResponse,
 	GetProjects,
 	type GetProjectsResponse,
+	GetSessionSkills,
+	type GetSessionSkillsResponse,
 	GetSkillContent,
 	type GetSkillContentResponse,
+	GetStatus,
+	type GetStatusResponse,
 	GetTodo,
 	type GetTodoResponse,
 	GetToolContent,
@@ -81,21 +90,28 @@ export {
 	type ResolveClaudeSettingsResponse,
 	ResolveSession,
 	RespondPermission,
+	RestartWithConfig,
 	RewindSession,
 	ScanNow,
 	type ScanNowResponse,
 	SendMessage,
 	type SessionInfo,
+	SetAgent,
 	SetClaudeSettings,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
 	SetDefaultPermissionMode,
 	type SetDefaultPermissionModeResponse,
+	SetKeepAwake,
+	SetKeepAwakeCommand,
+	type SetKeepAwakeResponse,
 	SetLogLevel,
+	SetPin,
 	SetProjectInstance,
 	SetSessionAutoSettle,
 	SetSessionPinned,
 	SetSessionSettled,
+	Shutdown,
 	SnoozeSession,
 	StartInstance,
 	StopInstance,
@@ -119,11 +135,13 @@ export {
 } from "../contracts/ws-rpc.js";
 
 const unaryHandlers = {
+	...daemonOnlyHandlers,
 	...projectsHandlers,
 	...instancesHandlers,
 	...settingsHandlers,
 	...terminalsHandlers,
 	...filesHandlers,
+	...sessionSkillsHandlers,
 	...modelsHandlers,
 	...sessionsHandlers,
 	...conversationHandlers,
@@ -182,6 +200,7 @@ export type ReattachDaemonViewSession = (payload: {
 }) => Effect.Effect<boolean, WsRpcError>;
 
 export type DaemonRpcName =
+	| keyof typeof daemonOnlyHandlers
 	| "GetProjects"
 	| "AddProject"
 	| "RemoveProject"
@@ -206,7 +225,9 @@ export type DaemonRpcHandlers = {
 	[K in DaemonRpcName]: (
 		payload: Parameters<(typeof unaryHandlers)[K]>[0],
 	) => Effect.Effect<
-		Effect.Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
+		Rpc.Success<
+			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
+		>,
 		WsRpcError
 	>;
 };
@@ -238,7 +259,8 @@ export const makeRoutedWsRpcServerLayer = (
 		Object.entries({ ...unaryHandlers, ...daemonHandlers }).map(
 			([name, handler]) => [
 				name,
-				daemonHandlers && Object.hasOwn(daemonHandlers, name)
+				(daemonHandlers && Object.hasOwn(daemonHandlers, name)) ||
+				Object.hasOwn(daemonOnlyHandlers, name)
 					? handler
 					: routeHandler<never, unknown, unknown, unknown>(handler),
 			],

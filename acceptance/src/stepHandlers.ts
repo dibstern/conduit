@@ -16,6 +16,7 @@ import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
+import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { visualHandlers } from "./steps/visual.js";
 
@@ -25,6 +26,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,
+	...sessionSkillsHandlers,
 	...mockAppHandlers,
 	...modelDriftHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the

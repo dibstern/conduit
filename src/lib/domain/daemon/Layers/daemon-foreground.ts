@@ -26,6 +26,10 @@ import {
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
+import {
+	type InstanceManagerStateTag,
+	requestManagedOpenCodeShutdown,
+} from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
 import {
 	type DaemonLiveOptions,
@@ -48,16 +52,16 @@ export interface ForegroundDaemonHandle {
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	removeProject(slug: string): Promise<void>;
 	stop(): Promise<void>;
-	/** Settles with stop()'s outcome, whether stop was triggered by a signal, IPC shutdown, or a direct call. */
+	/** Settles with stop()'s outcome, whether stop was triggered by a signal, RPC shutdown, or a direct call. */
 	readonly stopped: Promise<void>;
 }
 
-class ForegroundIpcUnsupportedError extends Error {
+class ForegroundRuntimeUnavailableError extends Error {
 	constructor(operation: string) {
 		super(
-			`Foreground daemon IPC operation "${operation}" is not available until the daemon IPC context is fully Effect-owned`,
+			`Foreground daemon operation "${operation}" is not available until the daemon context is fully Effect-owned`,
 		);
-		this.name = "ForegroundIpcUnsupportedError";
+		this.name = "ForegroundRuntimeUnavailableError";
 	}
 }
 
@@ -143,6 +147,7 @@ type ForegroundRuntimeRequirements =
 	| DaemonHandleTag
 	| ConfigPersistenceTag
 	| DaemonConfigRefTag
+	| InstanceManagerStateTag
 	| ShutdownSignalTag;
 
 export async function startForegroundDaemon(
@@ -175,7 +180,7 @@ export async function startForegroundDaemon(
 
 	const requireRuntime = () => {
 		if (runtime == null || handle == null || stopped) {
-			throw new ForegroundIpcUnsupportedError("runtime unavailable");
+			throw new ForegroundRuntimeUnavailableError("runtime unavailable");
 		}
 		return { runtime, handle };
 	};
@@ -227,7 +232,7 @@ export async function startForegroundDaemon(
 		return result;
 	};
 
-	const stop = async () => {
+	const teardown = async () => {
 		if (stopInFlight != null) return stopInFlight;
 		const currentRuntime = runtime;
 		if (currentRuntime == null || stopped) return;
@@ -255,6 +260,11 @@ export async function startForegroundDaemon(
 		});
 		stopInFlight.then(settleStopped.resolve, settleStopped.reject);
 		return stopInFlight;
+	};
+	const stop = async () => {
+		if (runtime == null || stopped) return stopInFlight ?? undefined;
+		await runRuntimeEffect(runtime, requestManagedOpenCodeShutdown);
+		return teardown();
 	};
 
 	const initialConfig = buildInitialRuntimeConfig(options, configDir);
@@ -285,11 +295,7 @@ export async function startForegroundDaemon(
 					mirrorRuntimeConfig(config);
 				}),
 		},
-		ipcPostResponseActions: {
-			scheduleShutdown: () => {
-				void stop();
-			},
-		},
+
 		...(options.opencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.opencodeUrl,
 		}),
@@ -321,7 +327,7 @@ export async function startForegroundDaemon(
 	// SignalHandlerLayer swallows SIGTERM/SIGINT and only completes this Deferred,
 	// so without a consumer the daemon would ignore both signals.
 	runRuntimeEffect(runtime, Effect.flatMap(ShutdownSignalTag, Deferred.await))
-		.then(() => stop())
+		.then(() => teardown())
 		.catch(() => {
 			// Runtime disposed before a signal arrived, or stop failed (reported via `stopped`).
 		});

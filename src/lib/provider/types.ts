@@ -168,6 +168,12 @@ export interface HistoryMessage {
 }
 
 export interface SendTurnInput {
+	/** Durable outbox identity, forwarded to a process session runner. */
+	readonly commandId?: string;
+	/** Persisted user-message owner for process-runner failure events. */
+	readonly userMessageId?: string;
+	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
+	readonly commandAttempt?: number;
 	readonly sessionId: string;
 	readonly turnId: string;
 	readonly prompt: string;
@@ -193,12 +199,27 @@ export interface SendTurnInput {
 	readonly agent?: string;
 }
 
+/** Launch inputs only: pre-warming never admits a user turn. */
+export type PreWarmSessionInput = Pick<
+	SendTurnInput,
+	| "sessionId"
+	| "workspaceRoot"
+	| "providerState"
+	| "model"
+	| "configDir"
+	| "permissionMode"
+	| "variant"
+	| "contextWindow"
+	| "agent"
+>;
+
 export type CommandSource =
 	| "builtin"
 	| "user-command"
 	| "project-command"
 	| "user-skill"
 	| "project-skill"
+	| "plugin-skill"
 	| "claude-sdk";
 
 export interface CommandInfo {
@@ -254,6 +275,11 @@ export interface ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
+
+	/** Prepare an idle runtime without sending a prompt, when supported. */
+	readonly preWarmSessionEffect?: (
+		input: PreWarmSessionInput,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Interrupt an in-progress turn */
 	interruptTurnEffect(

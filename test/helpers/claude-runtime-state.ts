@@ -13,8 +13,10 @@ function stateRefFor(
 	const runtime = (instance as unknown as { runtime: ClaudeProviderRuntime })
 		.runtime;
 	return (
-		runtime as unknown as { stateRef: Ref.Ref<ClaudeProviderRuntimeState> }
-	).stateRef;
+		runtime as unknown as {
+			runner: { stateRef: Ref.Ref<ClaudeProviderRuntimeState> };
+		}
+	).runner.stateRef;
 }
 
 export function setClaudeRuntimeSessionForTest(
