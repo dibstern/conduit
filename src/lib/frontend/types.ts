@@ -267,6 +267,7 @@ export interface PermissionRequest {
 	permissionTitle?: string;
 	permissionDisplayName?: string;
 	permissionDescription?: string;
+	permissionReason?: string;
 }
 
 export interface QuestionRequest {

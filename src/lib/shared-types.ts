@@ -689,6 +689,7 @@ const PermissionRequestSchema = Schema.Struct({
 	permissionTitle: Schema.optional(Schema.String),
 	permissionDisplayName: Schema.optional(Schema.String),
 	permissionDescription: Schema.optional(Schema.String),
+	permissionReason: Schema.optional(Schema.String),
 });
 
 const PermissionResolvedSchema = Schema.Struct({

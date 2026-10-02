@@ -26,6 +26,9 @@ export interface PermissionRequest {
 	readonly permissionTitle?: string;
 	readonly permissionDisplayName?: string;
 	readonly permissionDescription?: string;
+	/** The provider's own explanation of why it asked, e.g. a safety check
+	 *  that fires even in bypass mode. */
+	readonly permissionReason?: string;
 }
 
 export interface PermissionResponse {

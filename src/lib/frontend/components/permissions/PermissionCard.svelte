@@ -224,6 +224,15 @@
 			</div>
 		{/if}
 
+		<!-- Some provider checks (e.g. Claude's rm-on-empty-variable guard) ask
+		     even under Full access; without the reason the prompt looks like a
+		     broken mode. -->
+		{#if request.permissionReason}
+			<div class="text-xs text-warning mb-2" data-testid="permission-reason">
+				Why it asked: {request.permissionReason}
+			</div>
+		{/if}
+
 		{#if !isPlanApproval}
 			<div class="font-mono text-xs text-accent mb-1 break-all select-text">
 				{toolLabel}

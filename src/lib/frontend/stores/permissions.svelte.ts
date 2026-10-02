@@ -180,6 +180,9 @@ export function handlePermissionRequest(
 		...(msg.permissionDescription != null && {
 			permissionDescription: msg.permissionDescription,
 		}),
+		...(msg.permissionReason != null && {
+			permissionReason: msg.permissionReason,
+		}),
 	};
 
 	permissionsState.pendingPermissions = [

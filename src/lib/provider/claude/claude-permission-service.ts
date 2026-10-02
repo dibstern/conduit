@@ -286,6 +286,9 @@ export class ClaudePermissionService {
 					...(options.description != null
 						? { permissionDescription: options.description }
 						: {}),
+					...(options.decisionReason != null
+						? { permissionReason: options.decisionReason }
+						: {}),
 				})
 				.pipe(
 					Effect.disconnect,

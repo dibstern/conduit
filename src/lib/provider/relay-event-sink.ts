@@ -425,6 +425,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 							...(request.permissionDescription != null
 								? { permissionDescription: request.permissionDescription }
 								: {}),
+							...(request.permissionReason != null
+								? { permissionReason: request.permissionReason }
+								: {}),
 						});
 					});
 					return yield* pending.awaitResponse;
