@@ -70,6 +70,10 @@ import {
 	type ClaudeCapabilitiesService,
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
+import {
+	ClaudeGoalTracker,
+	type ReadClaudeGoalStatus,
+} from "./claude-goal-tracker.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
@@ -156,6 +160,7 @@ const log = createLogger("claude-provider-runtime");
 type EffortLevel = NonNullable<SDKOptions["effort"]>;
 
 export interface ClaudeProviderInstanceDeps {
+	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
@@ -192,6 +197,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentSdk"
 	| "subagentPollTimeoutMs"
 	| "capabilitiesService"
+	| "readGoalStatus"
 > & {
 	readonly materializeSubagents?: boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
@@ -261,6 +267,7 @@ export const makeClaudeProviderRuntime = (
 					: {}),
 				materializeSubagents: deps.materializeSubagents !== undefined,
 				capabilitiesService,
+				...(deps.readGoalStatus ? { readGoalStatus: deps.readGoalStatus } : {}),
 			},
 			(output, sessionId?: string) =>
 				runtime
@@ -1375,6 +1382,31 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		return this.mapProviderFailure(
 			"sendTurn",
 			this.sendTurnLocalEffect(input).pipe(
+				Effect.catchAll((err) =>
+					Effect.gen(this, function* () {
+						const ctx = yield* getSession(this.stateRef, input.sessionId);
+						const tracker = ctx
+							? (ctx.goalTracker ??= new ClaudeGoalTracker(
+									input.sessionId,
+									input.goalState,
+								))
+							: new ClaudeGoalTracker(input.sessionId, input.goalState);
+						const goalChange = tracker.pause(asError(err).message);
+						if (goalChange) {
+							// The pause write must never replace the send's original failure.
+							yield* Effect.suspend(() =>
+								input.eventSink.push(
+									claudeRuntimeEvent(
+										"session.goal_changed",
+										input.sessionId,
+										goalChange,
+									),
+								),
+							).pipe(Effect.exit);
+						}
+						return yield* Effect.fail(err);
+					}),
+				),
 				Effect.annotateLogs(attributes),
 				Effect.withSpan("claude.sendTurn", { attributes }),
 			),
@@ -1540,6 +1572,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const context = {
 					sessionId,
 					workspaceRoot: input.workspaceRoot,
+					...(input.configDir !== undefined
+						? { configDir: input.configDir }
+						: {}),
+					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
+					cumulativeTokens: input.cumulativeTokens ?? 0,
 					startedAt: new Date().toISOString(),
 					promptQueue: queue,
 					turnAdmissionSemaphore,
@@ -1593,6 +1630,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 				const translator = makeClaudeTranslationService({
 					getSink: (ctx) => ctx.eventSink,
+					...(this.deps.readGoalStatus
+						? { readGoalStatus: this.deps.readGoalStatus }
+						: {}),
 					onBackgroundTask: (transition) =>
 						this.recordBackgroundTaskEffect(transition),
 				});
@@ -1863,6 +1903,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							const priorSink = ctx.eventSink;
 							this.retainSink(input.eventSink);
 							ctx.eventSink = input.eventSink;
+							ctx.cumulativeTokens =
+								input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
 							yield* this.releaseSinkEffect(priorSink);
 							// Marks the assistant-message boundary: if the SDK's streaming
 							// turn is still open, no `result` resets the translator, and
@@ -2300,6 +2342,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx.eventSink &&
 				(yield* hasPendingTurn(this.stateRef, ctx.sessionId))
 			) {
+				const goalChange = ctx.goalTracker?.pause("Interrupted");
+				if (goalChange) {
+					yield* ctx.eventSink
+						.push(
+							claudeRuntimeEvent(
+								"session.goal_changed",
+								ctx.sessionId,
+								goalChange,
+							),
+						)
+						.pipe(Effect.ignore);
+				}
 				yield* ctx.eventSink
 					.push(
 						claudeRuntimeEvent("turn.interrupted", ctx.sessionId, {

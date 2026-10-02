@@ -7,6 +7,7 @@
 // notification reducer established.
 
 import type { Stream } from "effect";
+import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
 import { forgetSession } from "../stores/session.svelte.js";
 import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
 import type { SessionInfo } from "../types.js";
@@ -80,8 +81,10 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	const receivedSequence = sessionActivityBridge.observe();
 	// Only accepted shell changes retire activity. A duplicate or stale
 	// envelope must not affect client state independently of the row applier.
-	if (change._tag === "upsert")
+	if (change._tag === "upsert") {
 		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
+		hydrateSessionGoal(change.item);
+	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
 		forgetSession(change.id);
@@ -96,8 +99,10 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 				if (applied.rows.has(id)) forgetSession(id);
 			}
 		}
-		for (const row of next.rows.values())
+		for (const row of next.rows.values()) {
 			sessionActivityBridge.retire(row.id, receivedSequence, "row");
+			hydrateSessionGoal(row);
+		}
 	}
 	applied = next;
 }
@@ -105,6 +110,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 /** Forget the project we were watching. */
 export function resetSessionSubscription(): void {
 	sessionActivityBridge.clear();
+	sessionGoals.clear();
 	applied = emptySubscription();
 	feedStatus = { _tag: "cold" };
 	transportFailureSince = null;

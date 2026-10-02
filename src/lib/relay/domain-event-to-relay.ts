@@ -220,6 +220,9 @@ export function translateDomainEventToRelay(
 		// The SDK owns the live mode, so a change reported mid-session has to
 		// reach the picker; a stale picker is the difference between "Full
 		// access" on screen and an ask the user did not expect.
+		case "session.goal_changed":
+			return emit({ type: "session.goal_changed", ...event.data });
+
 		case "session.permission_mode_changed":
 			return emit({
 				type: "permission_mode_info",

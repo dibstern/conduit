@@ -7,6 +7,7 @@ Background:
 Scenario Outline: selecting a rail instance sets the harness for a new session
   When I open the model picker
   And I select the <instance> instance in the rail
+  And I close the model picker
   And I type <message> into the composer
   And I send the composer message
   Then a session is created on the <harness> harness
@@ -28,6 +29,7 @@ Examples:
 Scenario Outline: the rail is locked once a session exists
   Given a session already exists on the <harness> harness
   When I open the model picker
+  And I view Harness choices in the picker
   Then the <harness> instance in the rail is selected
   And instances of other harnesses in the rail are disabled
 

@@ -130,14 +130,21 @@ function emittedParts(events: readonly ProviderRuntimeEvent[]): Part[] {
 
 /** The assistant text the SDK itself reported, read straight off the trace:
  *  content_block_deltas for the main chain, and snapshot text for frames that
- *  only ever arrive as snapshots (subagents carry a parent_tool_use_id). */
+ *  only ever arrive as snapshots: subagents carry a parent_tool_use_id, and
+ *  local slash-command replies (e.g. "Goal set: ...") carry model "<synthetic>". */
 function streamedParts(rawLines: readonly unknown[]): Part[] {
 	const parts: { kind: Part["kind"]; text: string }[] = [];
 	let open = new Map<number, { kind: Part["kind"]; text: string }>();
 	for (const raw of rawLines) {
 		if (!isRecord(raw)) continue;
-		if (raw["type"] === "assistant" && raw["parent_tool_use_id"] != null) {
-			const message = isRecord(raw["message"]) ? raw["message"] : undefined;
+		const message =
+			raw["type"] === "assistant" && isRecord(raw["message"])
+				? raw["message"]
+				: undefined;
+		if (
+			message &&
+			(raw["parent_tool_use_id"] != null || message["model"] === "<synthetic>")
+		) {
 			const content = message?.["content"];
 			if (!Array.isArray(content)) continue;
 			for (const block of content) {

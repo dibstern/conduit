@@ -40,6 +40,7 @@ describe("Schema Migration", () => {
 				"provider_state",
 				"read_model_counter",
 				"sent_alerts",
+				"session_goal_checks",
 				"session_providers",
 				"sessions",
 				"tool_content",
@@ -138,6 +139,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_provider_command_turns_session",
 					table: "provider_command_turns",
+					unique: false,
+				},
+				{
+					name: "idx_session_goal_checks_session_created",
+					table: "session_goal_checks",
 					unique: false,
 				},
 				{

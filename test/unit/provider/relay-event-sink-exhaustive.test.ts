@@ -35,6 +35,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.provider_changed",
 		"session.provider_cleanup_failed",
 		"session.permission_mode_changed",
+		"session.goal_changed",
 		"session.read",
 		"session.unread",
 		"session.settled",

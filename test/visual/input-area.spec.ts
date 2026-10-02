@@ -1,5 +1,5 @@
 // Playwright tests that navigate to Storybook story iframes and assert
-// component behavior for the input area, attach menu, and context bar.
+// component behavior for the input area, attach menu, and context warning.
 
 import { expect, test } from "@playwright/test";
 
@@ -18,7 +18,11 @@ test.describe("InputArea", () => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const textarea = page.locator("#input");
 		await expect(textarea).toBeVisible();
-		await expect(textarea).toHaveAttribute("placeholder", /Ask anything/);
+		// Phones get the short provider placeholder; wider viewports keep the hint.
+		await expect(textarea).toHaveAttribute(
+			"placeholder",
+			/^Ask (anything\.|Claude…$)/,
+		);
 	});
 
 	test("shows send button", async ({ page }) => {
@@ -97,54 +101,34 @@ test.describe("AttachMenu", () => {
 	});
 });
 
-test.describe("ContextBar", () => {
+test.describe("Context warning", () => {
 	test("not visible when context is 0%", async ({ page }) => {
 		await navigateToStory(page, "input-inputarea--empty");
-		const contextBar = page.locator("#context-mini");
-		await expect(contextBar).toHaveCount(0);
+		await expect(page.getByTestId("composer-context-warning")).toHaveCount(0);
 	});
 
-	test("visible when context > 0%", async ({ page }) => {
+	test("no warning below the default threshold", async ({ page }) => {
 		await navigateToStory(page, "input-inputarea--with-context-bar");
-		const contextBar = page.locator("#context-mini");
-		await expect(contextBar).toBeVisible();
+		await expect(page.getByTestId("composer-context-warning")).toHaveCount(0);
+		const usage = page.getByTestId("composer-word-context-usage");
+		await expect(usage).toHaveText("42%");
+		await expect(usage).not.toHaveAttribute("data-warning", "true");
 	});
 
-	test("shows correct percentage text", async ({ page }) => {
-		await navigateToStory(page, "input-inputarea--with-context-bar");
-		const label = page.locator("#context-mini-label");
-		await expect(label).toHaveText("42%");
-	});
-
-	test("uses brand-b color below 50%", async ({ page }) => {
-		// WithContextBar story has 42% — below the 50% threshold
-		await navigateToStory(page, "input-inputarea--with-context-bar");
-		const fill = page.locator("#context-mini-fill");
-		await expect(fill).toHaveClass(/bg-brand-b/);
-	});
-
-	test("uses warning color at 85%", async ({ page }) => {
-		// HighContext story has 85% — at or above 80%, this uses bg-brand-a
-		// Per ContextBar.svelte: >= 80 → bg-brand-a, >= 50 → bg-warning
-		// 85% >= 80, so it's bg-brand-a (critical), not bg-warning
-		await navigateToStory(page, "input-inputarea--high-context");
-		const fill = page.locator("#context-mini-fill");
-		const label = page.locator("#context-mini-label");
-		await expect(label).toHaveText("85%");
-		await expect(fill).toHaveClass(/bg-brand-a/);
-	});
-
-	test("uses critical color at 97%", async ({ page }) => {
-		await navigateToStory(page, "input-inputarea--critical-context");
-		const fill = page.locator("#context-mini-fill");
-		const label = page.locator("#context-mini-label");
-		await expect(label).toHaveText("97%");
-		await expect(fill).toHaveClass(/bg-brand-a/);
-	});
-
-	test("fill bar width matches percentage", async ({ page }) => {
-		await navigateToStory(page, "input-inputarea--with-context-bar");
-		const fill = page.locator("#context-mini-fill");
-		await expect(fill).toHaveAttribute("style", /width: 42%/);
-	});
+	for (const [story, percent] of [
+		["high-context", 85],
+		["critical-context", 97],
+	] as const) {
+		test(`warns at ${percent}%`, async ({ page }) => {
+			await navigateToStory(page, `input-inputarea--${story}`);
+			const warning = page.getByTestId("composer-context-warning");
+			await expect(warning).toBeVisible();
+			await expect(warning).toHaveText(
+				`Context ${percent}% full. Older turns compact soon.`,
+			);
+			const usage = page.getByTestId("composer-word-context-usage");
+			await expect(usage).toHaveText(`${percent}%`);
+			await expect(usage).toHaveAttribute("data-warning", "true");
+		});
+	}
 });

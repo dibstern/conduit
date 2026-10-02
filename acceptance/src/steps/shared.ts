@@ -4,6 +4,8 @@ import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
 export const relayControls = new WeakMap<Page, WsMockControl>();
 export const rpcControls = new WeakMap<Page, RpcMockControl>();
+export const effortOptions = new WeakMap<Page, string[]>();
+export const rejectedEffortSwitches = new WeakSet<Page>();
 export const detailFeeds = new WeakMap<Page, RpcMockControl["detailFeed"]>();
 export const inheritedClaudeCommitAttribution = "Inherited commit attribution";
 /** GetSessionSkills loads served by the mock app; empty unless a scenario seeds them. */
@@ -41,9 +43,14 @@ export function requireRpcControl(page: Page): RpcMockControl {
 export async function openModelPicker(page: Page): Promise<void> {
 	const picker = page.locator("#model-picker");
 	if ((await picker.count()) === 0) {
-		await page.getByTestId("model-picker-trigger").click();
+		await page
+			.getByTestId(/^(model-picker-trigger|composer-word-model)$/)
+			.click();
 	}
 	await picker.waitFor({ state: "visible", timeout: 5_000 });
+	const back = page.getByTestId("picker-back");
+	if (await back.isVisible()) await back.click();
+	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
 export function exampleValue(

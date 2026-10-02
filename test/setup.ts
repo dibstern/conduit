@@ -89,3 +89,24 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
 	}
 	globalThis.IntersectionObserver = InertIntersectionObserver;
 }
+
+// 5. jsdom has no ResizeObserver or layout engine. Use an inert default for
+//    components that observe their size; tests exercising resize behavior can
+//    stub their own observer, as they do for IntersectionObserver above.
+if (typeof globalThis.ResizeObserver === "undefined") {
+	class InertResizeObserver implements ResizeObserver {
+		observe(): void {}
+		unobserve(): void {}
+		disconnect(): void {}
+	}
+	globalThis.ResizeObserver = InertResizeObserver;
+}
+
+// 6. jsdom does not load fonts or expose document.fonts. An inert event target
+//    lets components register and clean up font-loading listeners.
+if (typeof document !== "undefined" && !document.fonts) {
+	Object.defineProperty(document, "fonts", {
+		configurable: true,
+		value: new EventTarget(),
+	});
+}

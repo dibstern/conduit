@@ -1,4 +1,5 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -45,6 +46,7 @@ export class RpcMockControl {
 	constructor(private readonly page: Page) {}
 	projectSlug = "myapp";
 	private readonly requests: RecordedRpcRequest[] = [];
+	private readonly responseHandlers = new Map<string, RpcHandler>();
 	private readonly streams = new Map<
 		string,
 		{ ws: WebSocketRoute; id: string }
@@ -53,6 +55,14 @@ export class RpcMockControl {
 	private shellSequence = 0;
 	private readonly detailRows = new Map<string, readonly unknown[]>();
 	private readonly detailSequences = new Map<string, number>();
+
+	setResponse(tag: string, value: unknown): void {
+		this.responseHandlers.set(tag, () => value);
+	}
+
+	getResponseHandler(tag: string): RpcHandler | undefined {
+		return this.responseHandlers.get(tag);
+	}
 
 	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
 		const sequence = (this.detailSequences.get(sessionId) ?? 0) + 1;
@@ -278,6 +288,7 @@ async function handleMessage(
 			return;
 		}
 		const handler =
+			control.getResponseHandler(raw.tag) ??
 			handlers[raw.tag] ??
 			(raw.tag === "ResolveSession"
 				? () => ({ projectSlug: control.projectSlug })
@@ -293,6 +304,20 @@ async function handleMessage(
 				exit: { _tag: "Success", value: result },
 			});
 		} catch (error) {
+			if (error instanceof WsRpcError) {
+				sendJson(ws, {
+					_tag: "Exit",
+					requestId: raw.id,
+					exit: {
+						_tag: "Failure",
+						cause: {
+							_tag: "Fail",
+							error: { _tag: "WsRpcError", message: error.message },
+						},
+					},
+				});
+				return;
+			}
 			sendJson(ws, {
 				_tag: "Defect",
 				defect: error instanceof Error ? error.message : String(error),
@@ -310,7 +335,8 @@ async function handleMessage(
 		return;
 	}
 
-	const handler = handlers[raw.method];
+	const handler =
+		control.getResponseHandler(raw.method) ?? handlers[raw.method];
 	if (!handler || raw.id == null) return;
 
 	try {

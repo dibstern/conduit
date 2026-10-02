@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ContextWindowSelector from "../../../src/lib/frontend/components/model/ContextWindowSelector.svelte";
+import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
 	clearDiscoveryState,
 	discoveryState,
@@ -37,7 +37,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		switchContextWindowRpcSpy(input),
 }));
 
-describe("ContextWindowSelector", () => {
+describe("InstanceModelPicker context window", () => {
 	beforeEach(() => {
 		switchContextWindowRpcSpy.mockClear();
 		clearDiscoveryState();
@@ -58,10 +58,10 @@ describe("ContextWindowSelector", () => {
 	});
 
 	it("switches context windows through RPC for the active session", async () => {
-		const { getByTestId } = render(ContextWindowSelector);
+		const { getByTestId } = render(InstanceModelPicker);
 
-		await fireEvent.click(getByTestId("context-window-badge"));
-		await fireEvent.click(getByTestId("context-window-option-1m"));
+		await fireEvent.click(getByTestId("model-picker-trigger"));
+		await fireEvent.click(getByTestId("picker-context-option-1m"));
 
 		await waitFor(() => {
 			expect(switchContextWindowRpcSpy).toHaveBeenCalledWith({
@@ -71,5 +71,8 @@ describe("ContextWindowSelector", () => {
 			});
 		});
 		expect(discoveryState.currentContextWindow).toBe("1m");
+		expect(
+			getByTestId("model-picker-trigger").getAttribute("aria-expanded"),
+		).toBe("true");
 	});
 });

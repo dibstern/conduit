@@ -24,6 +24,14 @@
 	--color-harness-claude: #d97757; /* Claude clay */
 	--color-harness-opencode: #00e5ff; /* OpenCode cyan */
 
+	/* Approval modes, ordered from restrictive to permissive. */
+	--color-p-never: #4fd1c5;
+	--color-p-plan: #5aa9f5;
+	--color-p-ask: #a8afbb;
+	--color-p-edits: #f4b740;
+	--color-p-auto: #ff8a4c;
+	--color-p-full: #f4607a;
+
 	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
 	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
 	--animate-cascade-a-fast: pixel-cascade-a 1.4s ease-in-out infinite;
@@ -219,6 +227,12 @@
 	--color-brand-b: #006d7a;
 	--color-brand-a-glow: rgba(201, 0, 79, 0.15);
 	--color-brand-b-glow: rgba(0, 109, 122, 0.15);
+	--color-p-never: #0b7d74;
+	--color-p-plan: #0f62c0;
+	--color-p-ask: #4b525e;
+	--color-p-edits: #8a5500;
+	--color-p-auto: #c2410c;
+	--color-p-full: #c11d40;
 
 	--color-bg: #f5f6f9;
 	--color-bg-alt: #eef0f5;
@@ -489,10 +503,6 @@
 	animation: spin 0.8s linear infinite;
 }
 
-@utility animate-bounce-bar {
-	animation: bounce-bar 1.5s ease-in-out infinite;
-}
-
 .connect-overlay.hidden {
 	display: none;
 }
@@ -749,20 +759,6 @@ body:has(dialog:modal) {
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
-	}
-}
-
-@keyframes bounce-bar {
-	0%,
-	100% {
-		transform: translateX(0);
-	}
-	50% {
-		/* translateX % is relative to the element's own width, so we compute
-		   (1 - fraction) / fraction * 100% to traverse the full track. */
-		transform: translateX(
-			calc((1 - var(--bounce-width)) / var(--bounce-width) * 100%)
-		);
 	}
 }
 
@@ -1123,11 +1119,6 @@ body:has(dialog:modal) {
 	100% {
 		transform: translateX(100%);
 	}
-}
-
-/* Hidden overrides */
-#context-mini.hidden {
-	display: none;
 }
 
 /* Context color thresholds — @utility blocks */

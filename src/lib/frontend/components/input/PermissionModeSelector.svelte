@@ -1,72 +1,72 @@
-<!-- Permission Mode (Approvals) Picker -->
-<!-- Pill + dropdown for the session's approval mode.                         -->
-<!-- Amber tint when not "ask" so elevated permissions are visibly active.    -->
+<!-- Session approvals: tap to cycle on phones, hold for the ranked menu. -->
 
 <script lang="ts">
-	import Button from "../ui/Button.svelte";
-	import Icon from "../ui/Icon.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import { choosePermissionMode, discoveryState } from "../../stores/discovery.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { switchPermissionModeRpc } from "../../transport/ws-rpc-client.js";
+	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
+	import {
+		approvals,
+		getRankedApprovalOptions,
+	} from "../../stores/composer-settings.svelte.js";
+	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import type { SessionPermissionMode } from "../../types.js";
-	import { PERMISSION_MODES } from "../../permission-modes.js";
 
+	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
+
+	const presentation: Record<
+		SessionPermissionMode,
+		{ microLabel: string; tone: string; glyphClass: string; description: string }
+	> = {
+		dontAsk: {
+			microLabel: "NEVER",
+			tone: "var(--color-p-never)",
+			glyphClass: "text-p-never",
+			description: "Denies anything not pre-approved.",
+		},
+		plan: {
+			microLabel: "PLAN",
+			tone: "var(--color-p-plan)",
+			glyphClass: "text-p-plan",
+			description: "Reads and proposes. No edits.",
+		},
+		ask: {
+			microLabel: "ASK",
+			tone: "var(--color-p-ask)",
+			glyphClass: "text-p-ask",
+			description: "Asks before each edit or command.",
+		},
+		acceptEdits: {
+			microLabel: "EDITS",
+			tone: "var(--color-p-edits)",
+			glyphClass: "text-p-edits",
+			description: "File edits run without asking.",
+		},
+		auto: {
+			microLabel: "AUTO",
+			tone: "var(--color-p-auto)",
+			glyphClass: "text-p-auto",
+			description: "A model approves or denies each action.",
+		},
+		full: {
+			microLabel: "FULL",
+			tone: "var(--color-p-full)",
+			glyphClass: "text-p-full",
+			description: "Everything runs. No prompts.",
+		},
+	};
+
+	let innerWidth = $state(window.innerWidth);
+	const phone = $derived(innerWidth < 768);
+	let open = $state(false);
 	let autoNormalizationProvider: string | null = null;
 
-	const currentMode = $derived(discoveryState.permissionMode);
-	const currentLabel = $derived(
-		PERMISSION_MODES.find((m) => m.mode === currentMode)?.label ?? "Ask",
-	);
-	const availableModes = $derived(
-		PERMISSION_MODES.filter(
-			({ claudeOnly }) =>
-				!claudeOnly || discoveryState.currentProviderId === "claude",
-		),
-	);
-	/** Tint the pill only when approvals are *relaxed*. "Never ask" is more
-	 *  restrictive than "Ask", so flagging it as elevated would invert the
-	 *  signal the amber tint exists to give. */
-	const isElevated = $derived(
-		PERMISSION_MODES.find((m) => m.mode === currentMode)?.elevated === true,
-	);
-
-	/** Always re-assert to the server, even when the pill already shows this
-	 *  mode. The server keeps the mode in memory only, so a daemon restart
-	 *  resets it to "ask" while this client still believes "Full access" — and
-	 *  an equality short-circuit would make clicking "Full access" a silent
-	 *  no-op, with no way back to it short of picking another mode first. The
-	 *  RPC is idempotent, so asserting costs nothing and removes the trap. */
-	function selectMode(mode: SessionPermissionMode) {
-		const undoMode = choosePermissionMode(mode);
-		const projectSlug = getCurrentSlug();
-		const sessionId = sessionState.currentId;
-		if (projectSlug && sessionId) {
-			discoveryState.pendingPermissionMode = null;
-			void switchPermissionModeRpc({ projectSlug, sessionId, mode }).catch(
-				(error: unknown) => {
-					undoMode();
-					// Without this the pill silently snaps back, which reads as a
-					// frontend bug. Show the server's reason rather than guessing:
-					// a stale daemon already gets its own banner (ws-dispatch).
-					const label =
-						PERMISSION_MODES.find((m) => m.mode === mode)?.label ?? mode;
-					const reason =
-						error instanceof Error ? error.message : "the daemon rejected it.";
-					showToast(`Couldn't switch approval mode to "${label}": ${reason}`, {
-						variant: "warn",
-					});
-				},
-			);
-		} else {
-			// No session bound yet: remember the choice until the tab selects one.
-			discoveryState.pendingPermissionMode = mode;
-		}
-	}
+	const currentMode = $derived(approvals.current?.mode ?? "ask");
+	const currentLabel = $derived(approvals.current?.label ?? "Ask");
+	const currentPresentation = $derived(presentation[currentMode]);
+	const availableModes = $derived(getRankedApprovalOptions());
+	const isElevated = $derived(approvals.current?.elevated === true);
 
 	$effect(() => {
 		const providerId = discoveryState.currentProviderId;
@@ -80,59 +80,116 @@
 			autoNormalizationProvider !== providerId
 		) {
 			autoNormalizationProvider = providerId;
-			selectMode("ask");
+			const ask = approvals.options.find((option) => option.mode === "ask");
+			if (ask) approvals.select(ask);
 		}
 	});
 </script>
 
-<!-- ui/Menu rather than a hand-rolled panel: the old markup was four plain
-     buttons in a Surface with a hand-drawn checkmark, so assistive technology
-     heard four unrelated controls and never that exactly one was current. It
-     also carried its own Escape listener, outside-click action and open state,
-     all of which the primitive already owns.
+<svelte:window bind:innerWidth />
 
-     MenuRadioGroup is the honest shape here: "approvals is exactly one of
-     these" is a radio group, and `aria-checked` says what the &#10003; glyph was
-     only drawing. The check moves to the trailing edge because that is where
-     every other radio menu in the app puts it. -->
+{#snippet shield(mode: SessionPermissionMode, size: number, detailed = true, knockout = "var(--color-bg-surface)")}
+	<svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+		<path
+			d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"
+			stroke={detailed && mode === "full" ? "none" : "currentColor"}
+			stroke-width="1.8"
+			stroke-linejoin="round"
+			fill={detailed && mode === "full" ? "currentColor" : "none"}
+		/>
+		{#if detailed}
+			{#if mode === "dontAsk"}
+				<path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+			{:else if mode === "plan"}
+				<path d="M9.3 9.6h5.4M9.3 12.4h5.4M9.3 15.2h3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+			{:else if mode === "ask"}
+				<path d="M10.1 10.2a1.95 1.95 0 113.2 1.5c-.75.55-1.3.95-1.3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none" />
+				<circle cx="12" cy="16.2" r="1" fill="currentColor" />
+			{:else if mode === "acceptEdits"}
+				<path d="M9.4 15.4l.5-2.3 3.9-3.9 1.8 1.8-3.9 3.9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none" />
+			{:else if mode === "auto"}
+				<path d="M12.9 7.9l-3.3 4.6h2.7l-.9 3.6 3.3-4.6h-2.7z" fill="currentColor" />
+			{:else if mode === "full"}
+				<path d="M12 8v4.7" stroke={knockout} stroke-width="2.2" stroke-linecap="round" />
+				<circle cx="12" cy="15.9" r="1.2" fill={knockout} />
+			{/if}
+		{/if}
+	</svg>
+{/snippet}
+
 <Menu
+	bind:open
 	ariaLabel="Approvals"
 	side="top"
 	align="end"
 	sideOffset={4}
-	class="w-40 font-brand"
+	class="w-[272px] font-brand"
 	data-testid="permission-mode-dropdown"
 >
 	{#snippet trigger({ props })}
-		<!-- The elevated state is a whole variant rather than a conditional class
-		     list, because a call-site colour cannot be trusted to beat a variant's:
-		     consumer `class` is additive, and Tailwind's emission order decides the
-		     winner rather than the order you wrote them in. Both pill recipes now
-		     live in ui/Button, so the two states cannot drift apart.
-
-		     `ml-0.5` is the only thing left here: it is this pill's position in the
-		     composer strip, which is the feature's business, not the pill's. -->
-		<Button
-			{...props}
-			variant={isElevated ? "pill-warning" : "pill"}
-			size="content"
-			data-testid="permission-mode-badge"
-			class="ml-0.5 min-w-0"
-			title="Approvals ({currentLabel})"
-		>
-			<span class="min-w-0 truncate">{currentLabel}</span>
-			<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-		</Button>
+		{#if phone || variant === "words"}
+			<!-- Keep Bits' trigger attributes; its activation handlers would open
+			     the menu before the tap/hold control can decide the action. -->
+			<MicroLabelButton
+				{...props}
+				onpointerdown={undefined}
+				onpointerup={undefined}
+				onkeydown={undefined}
+				variant={variant === "words" ? "words" : "micro"}
+				label={variant === "words" ? currentPresentation.microLabel.toLowerCase() : currentPresentation.microLabel}
+				accessibleName="Approvals {currentLabel}. Activate to cycle; hold or Shift+F10 opens options"
+				tone={currentPresentation.tone}
+				tinted={variant === "icons" && isElevated}
+				pending={approvals.pending}
+				pulseKey={currentMode}
+				onTap={approvals.cycle}
+				onHold={() => { open = true; }}
+				data-testid={variant === "words" ? "composer-word-approvals" : "permission-mode-badge"}
+				title="Approvals ({currentLabel})"
+			>
+				{#if variant === "icons"}{@render shield(currentMode, 15, false)}{/if}
+			</MicroLabelButton>
+		{:else}
+			<MicroLabelButton
+				{...props}
+				variant="chip"
+				onpointerdown={undefined}
+				onpointerup={undefined}
+				label={currentLabel}
+				accessibleName="Approvals {currentLabel}. Open options"
+				tone={currentPresentation.tone}
+				pending={approvals.pending}
+				pulseKey={currentMode}
+				onTap={() => { open = true; }}
+				onHold={() => { open = true; }}
+				data-testid="permission-mode-badge"
+				title="Approvals ({currentLabel})"
+			>
+				{@render shield(currentMode, 15, true, "var(--color-input-bg)")}
+			</MicroLabelButton>
+		{/if}
 	{/snippet}
 
 	<MenuRadioGroup value={currentMode}>
-		{#each availableModes as { mode, label } (mode)}
+		{#each availableModes as option (option.mode)}
 			<MenuRadioItem
-				value={mode}
-				data-testid="permission-mode-option-{mode}"
-				onselect={() => selectMode(mode)}
+				value={option.mode}
+				disabled={approvals.pending}
+				data-testid="permission-mode-option-{option.mode}"
+				onselect={() => { approvals.select(option); open = false; }}
 			>
-				{label}
+				<span class="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-x-1.5">
+					<span class="{presentation[option.mode].glyphClass} row-span-2 flex justify-center" aria-hidden="true">
+						{@render shield(option.mode, 19)}
+					</span>
+					<span class="flex items-center gap-1.5 text-[12.5px] font-semibold">
+						{option.label}
+						{#if option.claudeOnly}
+							<Badge variant="neutral" size="xs">Claude</Badge>
+						{/if}
+					</span>
+					<span class="truncate text-[10.5px] leading-[1.3] text-text-muted">{presentation[option.mode].description}</span>
+				</span>
 			</MenuRadioItem>
 		{/each}
 	</MenuRadioGroup>

@@ -18,6 +18,9 @@
 -->
 
 <script lang="ts">
+	import { isProcessing } from "../../stores/chat.svelte.js";
+	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import {
@@ -32,6 +35,7 @@
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
+	import { getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -43,6 +47,7 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
@@ -55,10 +60,99 @@
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
+	let { getGoalDetails = getGoalDetailsRpc }: { getGoalDetails?: typeof getGoalDetailsRpc | undefined } = $props();
+
 	// "New Session" matches session/SessionItem.svelte, so an untitled session
 	// reads the same in the bar as it does in the list it came from.
 	const session = $derived(findSession(sessionState.currentId ?? ""));
 	const title = $derived(session?.title || "New Session");
+	const goalFacts = $derived(discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const goal = $derived(goalView(
+		goalFacts,
+		isProcessing() ? "busy" : session?.status ?? "idle",
+	));
+	const detailsGoal = $derived(goalFacts?.goal ?? goalFacts?.endedGoal);
+	const goalTone = $derived(goal.tone === "amber" ? "text-status-amber" : goal.tone === "success" ? "text-status-green" : "text-status-violet");
+	const goalPhaseLabel = $derived(goal.phase ? {
+		starting: "Starting", pursuing: "Pursuing", checking: "Checking", not_yet: "Not yet", paused: "Paused", met: "Met", cleared: "Cleared",
+	}[goal.phase] : "");
+	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let details: GoalDetails | null = $state(null);
+	let detailsLoading = $state(false);
+	let detailsFailed = $state(false);
+	let detailsNow = $state(Date.now());
+	let detailsProjectSlug: string | null | undefined;
+
+	$effect(() => {
+		const projectSlug = getCurrentSlug();
+		if (detailsProjectSlug !== undefined && projectSlug !== detailsProjectSlug) {
+			goalDetails.open = false;
+		}
+		detailsProjectSlug = projectSlug;
+	});
+
+	$effect(() => {
+		if (!detailsGoal || goal.phase === "cleared" || isGoalMetDismissed(goalFacts)) goalDetails.open = false;
+	});
+
+	$effect(() => {
+		if (!goalDetails.open) return;
+		detailsNow = Date.now();
+		const timer = setInterval(() => { detailsNow = Date.now(); }, 60_000);
+		return () => clearInterval(timer);
+	});
+
+	$effect(() => {
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		const facts = goalFacts;
+		details = null;
+		detailsFailed = false;
+		detailsLoading = false;
+		if (!goalDetails.open || !sessionId || !projectSlug || !facts || (!facts.goal && !facts.endedGoal)) return;
+		let stale = false;
+		detailsLoading = true;
+		void getGoalDetails({ projectSlug, sessionId }).then((result) => {
+			if (!stale) details = result;
+		}).catch(() => {
+			if (!stale) detailsFailed = true;
+		}).finally(() => {
+			if (!stale) detailsLoading = false;
+		});
+		return () => { stale = true; };
+	});
+
+	function goalElapsed(milliseconds: number): string {
+		const minutes = Math.max(1, Math.floor(milliseconds / 60_000));
+		return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
+	}
+
+	function goalTokens(tokens: number): string {
+		if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
+		if (tokens >= 1_000) return `${Number((tokens / 1_000).toFixed(1))}K`;
+		return String(tokens);
+	}
+
+	function closeGoalDetails(returnFocus = false) {
+		goalDetails.open = false;
+		if (returnFocus) goalSubtitleEl?.focus();
+	}
+
+	function handleGoalDetailsKeydown(event: KeyboardEvent) {
+		if (!goalDetails.open || event.key !== "Escape") return;
+		event.preventDefault();
+		event.stopPropagation();
+		closeGoalDetails(true);
+	}
+
+	function runGoalAction(action: GoalComposerAction["action"]) {
+		const sessionId = sessionState.currentId;
+		if (!sessionId || !detailsGoal) return;
+		if (action === "edit" || action === "new") closeGoalDetails();
+		window.dispatchEvent(new CustomEvent<GoalComposerAction>("composer:goal", {
+			detail: { action, sessionId, condition: detailsGoal.condition },
+		}));
+	}
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
 	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
 	const statusTitle = $derived(wsState.statusText || "Connecting");
@@ -85,7 +179,7 @@
 	);
 
 	const activeView = $derived(activeSessionView());
-	const collapsed = $derived(isBarCollapsed() && activeView === "chat");
+	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open);
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
@@ -96,7 +190,7 @@
 	const globalActions = $derived(chromeMenuActions());
 
 	function handleSessionShortcut(event: KeyboardEvent) {
-		if (event.defaultPrevented) return;
+		if (event.defaultPrevented || goalDetails.open) return;
 		const global = (event.metaKey || event.ctrlKey) && event.shiftKey;
 		if (!global) {
 			// Plain letters act on the open session only from the transcript.
@@ -140,7 +234,11 @@
 
 </script>
 
-<svelte:window onkeydown={handleSessionShortcut} />
+<svelte:window onkeydown={handleSessionShortcut} onkeydowncapture={handleGoalDetailsKeydown} />
+
+{#if goalDetails.open && detailsGoal}
+	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => closeGoalDetails(true)} />
+{/if}
 
 {#snippet viewItems(testIdPrefix: string)}
 	<MenuRadioGroup value={activeView} aria-label="Views">
@@ -207,7 +305,7 @@
 	aria-label="Session controls"
 	tabindex="-1"
 	bind:this={barEl}
-	class="shrink-0 bg-bg-surface border-b border-border outline-none"
+	class="relative shrink-0 bg-bg-surface border-b border-border outline-none {goalDetails.open ? 'z-[var(--z-sheet)]' : ''}"
 >
 	<!--
 		Leaving. `size="content"` because this button owns its own box: a 44px
@@ -288,6 +386,7 @@
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
+		<div class="min-w-0">
 		<h1
 			id="session-bar-title"
 			data-testid="session-bar-title"
@@ -299,6 +398,14 @@
 				<SessionRenameInput {session} onend={() => { renaming = false; }} class="font-brand min-h-[44px] md:min-h-0" />
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
+		{#if goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts)}
+			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { goalDetails.open = !goalDetails.open; }}>
+				<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
+				<span class="min-w-0 truncate">{goal.subtitle}</span>
+				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
+			</Button>
+		{/if}
+		</div>
 		{#if !collapsed}
 			<Button
 				variant="ghost"
@@ -509,4 +616,69 @@
 		/>
 	{/if}
 
+	{#if goalDetails.open && detailsGoal && goalFacts}
+		<Surface id="goal-details" data-testid="goal-details" variant="plain" radius="none" elevation="panel" role="region" aria-label="Goal details" class="absolute inset-x-0 top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto rounded-b-[22px] border-b border-border px-[14px] pt-[12px] pb-[8px] text-[12px]">
+			<div class="flex items-center gap-[6px] font-brand text-[11px] font-semibold uppercase tracking-[0.08em] text-status-violet">
+				<Icon name="target" size={13} />Goal
+				<span class="ml-auto rounded-[6px] border border-current/40 px-[6px] text-[10px] normal-case tracking-normal {goalTone}">{goalPhaseLabel}</span>
+			</div>
+			<p data-testid="goal-details-condition" class="mt-[6px] mb-[4px] font-brand text-[14px] font-semibold leading-[1.35] text-text">{detailsGoal.condition}</p>
+			<div data-testid="goal-details-meta" class="text-[11px] text-text-muted">
+				Set {goalElapsed(detailsNow - detailsGoal.setAt)} ago · {detailsGoal.iterations} checks{details?.tokensSinceStart != null && !detailsLoading ? ` · ${goalTokens(details.tokensSinceStart)} tokens` : ""}
+			</div>
+			<div class="mt-[10px] mb-[5px] text-[10px] uppercase tracking-[0.08em] text-text-muted">Check history</div>
+			<ol data-testid="goal-details-history" class="m-0 flex list-none flex-col gap-[5px] p-0">
+				{#each details?.checks ?? [] as check (check.iteration)}
+					<li data-testid="goal-details-check" class="goal-details-check">
+						<Icon name="x" size={13} class="mt-px text-status-amber" />
+						<span class="text-text-muted">{goalElapsed(check.at - detailsGoal.setAt)}</span>
+						<span>Not yet{check.reason ? ` · ${check.reason}` : ""}</span>
+					</li>
+				{/each}
+				{#if goal.phase === "checking"}
+					<li data-testid="goal-details-check" class="goal-details-check">
+						<Icon name="loader-circle" size={13} class="mt-px motion-safe:animate-spin text-status-violet" />
+						<span class="text-text-muted">now</span><span>Checking…</span>
+					</li>
+				{:else if goalFacts.ended === "met"}
+					<li data-testid="goal-details-check" class="goal-details-check">
+						<Icon name="check" size={13} class="mt-px text-status-green" />
+						<span class="text-text-muted">{goalFacts.endedAt === undefined ? "" : goalElapsed(goalFacts.endedAt - detailsGoal.setAt)}</span>
+						<span>Met{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span>
+					</li>
+				{/if}
+				{#if detailsLoading}
+					<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
+				{:else if detailsFailed}
+					<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">Could not load check history.</span></li>
+				{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
+					<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
+				{/if}
+			</ol>
+			<div class="mt-[12px] flex gap-[6px]">
+				{#if goalFacts.goal}
+					<Button variant="secondary" size="content" tone="secondary" class="rounded-[9px] px-[10px] py-[6px] text-[11.5px]" data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
+					<Button variant="secondary" size="content" tone="secondary" class="rounded-[9px] px-[10px] py-[6px] text-[11.5px]" data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
+					<Button variant="secondary" size="content" tone="inherit" class="ml-auto rounded-[9px] px-[10px] py-[6px] text-[11.5px] text-status-red" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
+				{:else if goalFacts.ended === "met"}
+					<Button variant="secondary" size="content" tone="secondary" class="rounded-[9px] px-[10px] py-[6px] text-[11.5px]" data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
+					<Button variant="secondary" size="content" tone="inherit" class="ml-auto rounded-[9px] px-[10px] py-[6px] text-[11.5px] text-status-red" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
+				{/if}
+			</div>
+			<div aria-hidden="true" class="mx-auto mt-[12px] h-[3px] w-[34px] rounded-full bg-text-dimmer/30"></div>
+		</Surface>
+	{/if}
+
 </div>
+
+<style>
+	.goal-details-check {
+		display: grid;
+		grid-template-columns: 14px 32px minmax(0, 1fr);
+		gap: 6px;
+		align-items: start;
+		font-size: 11.5px;
+		line-height: 1.35;
+		color: var(--color-text-secondary);
+	}
+</style>

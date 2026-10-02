@@ -30,6 +30,7 @@ const CLAUDE_PRODUCED_TYPES = [
 	"session.status",
 	"session.compaction",
 	"session.permission_mode_changed",
+	"session.goal_changed", // Goal tracker translates SDK facts and transcript settlement through the event sink
 ] as const satisfies readonly CanonicalEventType[];
 
 /**

@@ -25,6 +25,60 @@ export const SecondSelected: Story = {
 	args: { value: "claude" },
 };
 
+export const Picker: Story = {
+	args: {
+		variant: "picker",
+		value: "high",
+		label: "Effort",
+		options: ["low", "medium", "high", "xhigh", "max"].map((value) => ({
+			value,
+			label: value === "medium" ? "med" : value,
+		})),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("radio", { name: "xhigh" }));
+		await expect(canvas.getByRole("radio", { name: "xhigh" })).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+		await expect(canvas.getByRole("radio", { name: "high" })).toHaveAttribute(
+			"aria-checked",
+			"false",
+		);
+	},
+};
+
+export const PickerDefault: Story = {
+	...Picker,
+	args: { ...Picker.args, value: "" },
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelectorAll('[aria-checked="true"]'),
+		).toHaveLength(0);
+	},
+};
+
+export const PickerContext: Story = {
+	args: {
+		variant: "picker-context",
+		value: "200k",
+		label: "Context window",
+		options: [
+			{ value: "200k", label: "200K" },
+			{ value: "1m", label: "1M" },
+		],
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("radio", { name: "1M" }));
+		await expect(canvas.getByRole("radio", { name: "1M" })).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+	},
+};
+
 /**
  * A value picker, not a tab strip, and specifically a RADIO group rather than a
  * bag of pressed buttons. The distinction is the point of the migration: only

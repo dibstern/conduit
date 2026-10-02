@@ -26,6 +26,7 @@ import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
+import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { createLogger, type Logger } from "../../logger.js";
 import type {
 	CanonicalToolInput,
@@ -38,6 +39,11 @@ import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { EventSink } from "../types.js";
 import { AssistantTextLedger, type Emission } from "./assistant-text-ledger.js";
 import { isSameModelIdentity } from "./claude-api-model-id.js";
+import {
+	ClaudeGoalTracker,
+	type ReadClaudeGoalStatus,
+	readClaudeGoalStatus,
+} from "./claude-goal-tracker.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import { fromSdkPermissionMode } from "./permission-mode-map.js";
 import type {
@@ -250,6 +256,7 @@ function taskCompletionResult(
 
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
+	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void | Effect.Effect<void>;
@@ -401,6 +408,70 @@ export class ClaudeEventTranslator {
 
 	constructor(private readonly deps: ClaudeEventTranslatorDeps) {}
 
+	private pushGoalChange(
+		ctx: ClaudeSessionContext,
+		change: SessionGoalChangedPayload | undefined,
+	): Effect.Effect<void, EventSinkError> {
+		return change
+			? this.push(
+					ctx,
+					makeProviderRuntimeEvent(
+						"session.goal_changed",
+						ctx.sessionId,
+						change,
+					),
+				)
+			: Effect.void;
+	}
+
+	private settleGoal(
+		ctx: ClaudeSessionContext,
+	): Effect.Effect<void, EventSinkError> {
+		return Effect.gen(this, function* () {
+			const tracker = ctx.goalTracker;
+			if (!tracker?.goal) return;
+			const sdkSessionId = ctx.resumeSessionId;
+			const logger = this.deps.logger ?? defaultLog;
+			if (!sdkSessionId) {
+				logger.debug(
+					"Cannot read goal status without a Claude SDK session id",
+					{
+						sessionId: ctx.sessionId,
+					},
+				);
+				return;
+			}
+			const status = yield* Effect.tryPromise({
+				try: () =>
+					(this.deps.readGoalStatus ?? readClaudeGoalStatus)({
+						workspaceRoot: ctx.workspaceRoot,
+						sdkSessionId,
+						...(ctx.configDir !== undefined
+							? { configDir: ctx.configDir }
+							: {}),
+					}),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.catchAll((cause) =>
+					Effect.sync(() => {
+						logger.debug("Unable to read Claude goal status", {
+							sessionId: ctx.sessionId,
+							error: cause instanceof Error ? cause.message : String(cause),
+						});
+						return undefined;
+					}),
+				),
+			);
+			if (!status) {
+				logger.debug("No goal status available in the Claude transcript tail", {
+					sessionId: ctx.sessionId,
+				});
+				return;
+			}
+			yield* this.pushGoalChange(ctx, tracker.settle(status));
+		});
+	}
+
 	translate(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
@@ -419,8 +490,17 @@ export class ClaudeEventTranslator {
 			if ("session_id" in message && typeof message.session_id === "string") {
 				ctx.resumeSessionId = message.session_id;
 			}
+			const tracker = (ctx.goalTracker ??= new ClaudeGoalTracker(
+				ctx.sessionId,
+			));
+			yield* this.pushGoalChange(
+				ctx,
+				tracker.observe(message, ctx.cumulativeTokens ?? 0),
+			);
 
 			switch (message.type) {
+				case "active_goal":
+					return;
 				case "system":
 					return yield* this.translateSystem(ctx, message);
 				case "stream_event":
@@ -447,6 +527,8 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
 			Effect.gen(this, function* () {
+				const errorMsg = cause instanceof Error ? cause.message : String(cause);
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errorMsg));
 				yield* this.push(
 					ctx,
 					claudeTurnErrorEvent(
@@ -1459,7 +1541,9 @@ export class ClaudeEventTranslator {
 		result: SDKResultMessage,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
+			yield* this.settleGoal(ctx);
 			if (isInterruptedResult(result)) {
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.interrupted", ctx.sessionId, {
@@ -1473,6 +1557,7 @@ export class ClaudeEventTranslator {
 
 			if (result.subtype !== "success") {
 				const errors = result.errors.join("; ") || "Unknown error";
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errors));
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
@@ -1496,6 +1581,7 @@ export class ClaudeEventTranslator {
 			// silent empty assistant reply.
 			if (result.is_error) {
 				const errorText = result.result || "Provider returned an error";
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errorText));
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
