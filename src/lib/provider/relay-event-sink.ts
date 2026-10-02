@@ -10,7 +10,10 @@
 import { SqlError } from "@effect/sql/SqlError";
 import { Cause, Effect, Exit, Option } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
-import { PendingInteractionCancelled } from "../domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingInteractionCancelled,
+	type PendingPermissionRequestInput,
+} from "../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
@@ -76,13 +79,9 @@ export interface RelayEventSinkDeps {
 	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
 	/** Effect-owned pending interaction state. Required when permission/question methods are used. */
 	readonly pendingInteractions?: {
-		beginPermissionRequest(entry: {
-			requestId: PermissionId;
-			sessionId: string;
-			toolName: string;
-			toolInput: Record<string, unknown>;
-			always: string[];
-		}): Effect.Effect<{
+		beginPermissionRequest(
+			entry: PendingPermissionRequestInput,
+		): Effect.Effect<{
 			readonly awaitResponse: Effect.Effect<
 				PermissionResponse,
 				PendingInteractionCancelled
@@ -396,6 +395,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						: {}),
 					...(request.permissionDescription != null
 						? { permissionDescription: request.permissionDescription }
+						: {}),
+					...(request.permissionReason != null
+						? { permissionReason: request.permissionReason }
 						: {}),
 				});
 				const ask = Effect.gen(function* () {

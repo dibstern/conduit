@@ -278,14 +278,10 @@ const replayPendingPermissionsEffect = (clientId: string) =>
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
 		const sentPermissionIds = new Set<string>();
-		for (const perm of servicePending) {
-			wsHandler.sendTo(clientId, {
-				type: "permission_request",
-				sessionId: perm.sessionId,
-				requestId: perm.requestId,
-				toolName: perm.toolName,
-				toolInput: perm.toolInput,
-			});
+		for (const { timestamp: _, ...perm } of servicePending) {
+			// Spread, not a field list: a reload must rebuild the same card the
+			// live prompt showed (title, description, reason).
+			wsHandler.sendTo(clientId, { type: "permission_request", ...perm });
 			sentPermissionIds.add(perm.requestId);
 		}
 

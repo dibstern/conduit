@@ -367,6 +367,7 @@ describe("session handlers with Effect-native model service", () => {
 							patterns: ["git *"],
 							metadata: { command: "git status" },
 						},
+						always: [],
 					});
 				}),
 			);

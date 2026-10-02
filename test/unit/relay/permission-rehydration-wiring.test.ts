@@ -15,11 +15,14 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { viewSessionForClient } from "../../../src/lib/handlers/session.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import type { RelayRuntimeServices } from "../../../src/lib/relay/project-relay-layers.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
@@ -279,5 +282,75 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 		});
 
 		await client.close();
+	});
+
+	// A page reload is a fresh socket; the card it rebuilds must say what the
+	// live prompt said, including why the provider asked under Full access.
+	it("replays a provider prompt's title, description and reason after a reload", async () => {
+		const pendingInteractions = await relay.effectRuntime.runtime.runPromise(
+			PendingInteractionServiceTag,
+		);
+		const sink = createRelayEventSink({
+			sessionId: "sess-1",
+			send: () => {},
+			pendingInteractions: {
+				beginPermissionRequest: (entry) =>
+					pendingInteractions.beginPermissionRequest(entry),
+				resolvePermissionRequest: (requestId, response) =>
+					pendingInteractions.resolvePermissionRequest(requestId, response),
+				beginQuestionRequest: (entry) =>
+					pendingInteractions.beginQuestionRequest(entry),
+				resolveQuestionRequest: (requestId, answers) =>
+					pendingInteractions.resolveQuestionRequest(requestId, answers),
+			},
+		});
+		const prompt = {
+			permissionTitle: "Claude wants to run rm",
+			permissionDisplayName: "Bash",
+			permissionDescription: "Clean up worktrees",
+			permissionReason:
+				"Dangerous rm operation on possibly-empty variable path",
+		};
+		const ask = Effect.runFork(
+			sink.requestPermission({
+				requestId: "perm-reload-1",
+				sessionId: "sess-1",
+				turnId: "turn-1",
+				providerItemId: "tool-1",
+				toolName: "Bash",
+				toolInput: { command: "rm $R/$w/node_modules" },
+				...prompt,
+			}),
+		);
+		const replayed = (client: TestWsClient) =>
+			client
+				.getReceivedOfType("permission_request")
+				.filter((msg) => msg["requestId"] === "perm-reload-1");
+
+		const client = new TestWsClient(`ws://127.0.0.1:${relayPort}`);
+		await client.waitForOpen();
+		await vi.waitFor(() => expect(replayed(client)).toHaveLength(1));
+		const onConnect = replayed(client)[0];
+		client.clearReceived();
+		// The ViewSession RPC body; this harness serves the socket, not /rpc.
+		// The relay runtime provides the handler services; its public type
+		// promises only a subset.
+		await relay.effectRuntime.runtime.runPromise(
+			viewSessionForClient({
+				clientId: "perm-rehydrate-client",
+				sessionId: "sess-1",
+			}) as unknown as Effect.Effect<unknown, unknown, RelayRuntimeServices>,
+		);
+		await vi.waitFor(() => expect(replayed(client)).toHaveLength(1));
+
+		expect(onConnect).toMatchObject(prompt);
+		expect(replayed(client)[0]).toMatchObject(prompt);
+		await client.close();
+		await Effect.runPromise(
+			pendingInteractions.resolvePermissionRequest("perm-reload-1", {
+				decision: "reject",
+			}),
+		);
+		await Effect.runPromise(Fiber.join(ask));
 	});
 });

@@ -90,15 +90,11 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 					const bridgePending =
 						yield* pendingInteractions.listPendingPermissions();
 					const sentPermissionIds = new Set<string>();
-					for (const perm of bridgePending) {
+					for (const { timestamp: _, ...perm } of bridgePending) {
 						if (!familyIds.has(perm.sessionId)) continue;
-						wsHandler.sendTo(clientId, {
-							type: "permission_request",
-							sessionId: perm.sessionId,
-							requestId: perm.requestId,
-							toolName: perm.toolName,
-							toolInput: perm.toolInput,
-						});
+						// Spread, not a field list: a reload must rebuild the same card
+						// the live prompt showed (title, description, reason).
+						wsHandler.sendTo(clientId, { type: "permission_request", ...perm });
 						sentPermissionIds.add(perm.requestId);
 					}
 					const apiPermissions = yield* Effect.tryPromise(() =>

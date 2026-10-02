@@ -114,6 +114,7 @@ export interface PendingPermission {
 	permissionTitle?: string;
 	permissionDisplayName?: string;
 	permissionDescription?: string;
+	permissionReason?: string;
 	timestamp: number;
 }
 

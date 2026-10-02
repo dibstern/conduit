@@ -45,6 +45,7 @@ export interface PendingPermissionRequestInput {
 	readonly permissionTitle?: string;
 	readonly permissionDisplayName?: string;
 	readonly permissionDescription?: string;
+	readonly permissionReason?: string;
 }
 
 export interface PendingPermissionRecoveryInput {
@@ -234,6 +235,9 @@ export const makePendingInteractionServiceLive = (
 				...(state.permissionDescription != null
 					? { permissionDescription: state.permissionDescription }
 					: {}),
+				...(state.permissionReason != null
+					? { permissionReason: state.permissionReason }
+					: {}),
 				timestamp: state.timestamp,
 			});
 
@@ -275,6 +279,9 @@ export const makePendingInteractionServiceLive = (
 							: {}),
 						...(input.permissionDescription != null
 							? { permissionDescription: input.permissionDescription }
+							: {}),
+						...(input.permissionReason != null
+							? { permissionReason: input.permissionReason }
 							: {}),
 						timestamp,
 						...(waiter != null ? { waiter } : {}),

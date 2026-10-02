@@ -1184,6 +1184,7 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 			requestId: pid("perm-1"),
 			toolName: "file_write",
 			toolInput: { patterns: ["/tmp/*"], metadata: {} },
+			always: [],
 		});
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "permission_request",
@@ -1191,6 +1192,7 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 			requestId: pid("perm-2"),
 			toolName: "shell_exec",
 			toolInput: { patterns: [], metadata: { command: "rm -rf" } },
+			always: ["shell_exec"],
 		});
 	});
 
@@ -1230,6 +1232,7 @@ describe("handleClientConnectedEffect — pending permissions", () => {
 			requestId: pid("perm-1"),
 			toolName: "Bash",
 			toolInput: { patterns: [], metadata: {} },
+			always: [],
 		});
 	});
 });
@@ -1554,6 +1557,7 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 			requestId: pid("perm-real-1"),
 			toolName: "file_write",
 			toolInput: { patterns: ["/tmp/test.txt"], metadata: { foo: "bar" } },
+			always: ["shell_exec"],
 		});
 	});
 
@@ -1853,6 +1857,7 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 			requestId: pid("per_service"),
 			toolName: "Bash",
 			toolInput: { patterns: [], metadata: {} },
+			always: [],
 		});
 	});
 
