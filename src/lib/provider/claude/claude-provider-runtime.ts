@@ -18,6 +18,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import {
 	type Settings,
 	query as sdkQuery,
@@ -149,6 +151,9 @@ export interface ClaudeProviderInstanceDeps {
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
 	readonly workspaceRoot: string;
+	readonly shellEnv?: (
+		directory: string,
+	) => Readonly<Record<string, string | undefined>>;
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
@@ -167,6 +172,7 @@ export interface ClaudeProviderInstanceDeps {
 export type ClaudeSessionRunnerDeps = Pick<
 	ClaudeProviderInstanceDeps,
 	| "workspaceRoot"
+	| "shellEnv"
 	| "queryFactory"
 	| "subagentSdk"
 	| "subagentPollTimeoutMs"
@@ -214,6 +220,7 @@ export const makeClaudeProviderRuntime = (
 		const runner = yield* makeClaudeSessionRunner(
 			{
 				workspaceRoot: deps.workspaceRoot,
+				...(deps.shellEnv ? { shellEnv: deps.shellEnv } : {}),
 				...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 				...(deps.subagentSdk ? { subagentSdk: deps.subagentSdk } : {}),
 				...(deps.subagentPollTimeoutMs !== undefined
@@ -1302,11 +1309,14 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						validateOptionsJsonShape({
 							cwd: input.workspaceRoot,
 							abortController,
-							env: makeClaudeSdkEnv(
-								input.configDir !== undefined
-									? { configDir: input.configDir }
-									: undefined,
-							),
+							env: makeClaudeSdkEnv({
+								configDir:
+									input.configDir ??
+									(typeof input.providerState["claudeConfigDir"] === "string"
+										? input.providerState["claudeConfigDir"]
+										: undefined),
+								baseEnv: this.deps.shellEnv?.(input.workspaceRoot),
+							}),
 							includePartialMessages: true,
 							forwardSubagentText: true,
 							settings: buildClaudeFlagSettings(
@@ -1343,7 +1353,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				ctx = { ...context, query };
+				ctx = {
+					...context,
+					query,
+					configDir: resolve(
+						input.workspaceRoot,
+						options.env?.["CLAUDE_CONFIG_DIR"] ??
+							join(options.env?.["HOME"] ?? homedir(), ".claude"),
+					),
+				};
 
 				this.retainSink(ctx.eventSink);
 				this.retainSink(input.eventSink);

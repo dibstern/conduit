@@ -850,12 +850,12 @@ describe("service CLI route", () => {
 			.spyOn(service, "handleService")
 			.mockResolvedValue(undefined);
 		const checkDaemon = vi.fn(async () => false);
-		const sendIPC = vi.fn();
+		const sendRPC = vi.fn();
 		const spawnDaemon = vi.fn();
 		await run(["service", "install", "--port", "7777"], {
 			cwd,
 			isDaemonRunning: checkDaemon,
-			sendIPC,
+			sendRPC,
 			spawnDaemon,
 		});
 		expect(handler).toHaveBeenCalledWith(
@@ -866,7 +866,7 @@ describe("service CLI route", () => {
 			}),
 		);
 		expect(checkDaemon).not.toHaveBeenCalled();
-		expect(sendIPC).not.toHaveBeenCalled();
+		expect(sendRPC).not.toHaveBeenCalled();
 		expect(spawnDaemon).not.toHaveBeenCalled();
 	});
 

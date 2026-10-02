@@ -125,6 +125,7 @@ export function createProjectRelayLayers({
 	const hasInstanceManagement = hasInstanceManagementConfig(config);
 	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
+		...(config.shellEnv && { shellEnv: config.shellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		...(config.claudeSdk != null && {
 			claudeQueryFactory: config.claudeSdk.query,

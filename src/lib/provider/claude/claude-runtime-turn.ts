@@ -174,6 +174,9 @@ export function sdkResultToTurnResult(
 				}
 			: {}),
 		providerStateUpdates: [
+			...(ctx.configDir
+				? [{ key: "claudeConfigDir", value: ctx.configDir }]
+				: []),
 			...(ctx.resumeSessionId
 				? [
 						{

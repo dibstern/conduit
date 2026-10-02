@@ -10,6 +10,11 @@ import { join } from "node:path";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 
 import {
+	type ProjectShellEnvConfig,
+	ProjectShellEnvConfigSchema,
+} from "../contracts/project-shell-env.js";
+
+import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
 	migrateLegacyDefaultOpencodeInstanceId,
@@ -53,6 +58,7 @@ export interface DaemonConfig {
 		title?: string;
 		addedAt: number;
 		instanceId?: string;
+		shellEnv?: ProjectShellEnvConfig;
 		/** Cached session count from last run — for instant CLI display. */
 		sessionCount?: number;
 	}>;
@@ -79,6 +85,7 @@ const DaemonProjectSchema = Schema.Struct({
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
 	instanceId: Schema.optional(Schema.String),
+	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
 	sessionCount: Schema.optional(Schema.Number),
 });
 

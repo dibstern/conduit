@@ -17,6 +17,7 @@ export const DEFAULT_SOCKET_PATH = join(DEFAULT_CONFIG_DIR, "relay.sock");
 export interface ParsedArgs {
 	command:
 		| "default"
+		| "doctor"
 		| "daemon"
 		| "foreground"
 		| "status"
@@ -86,6 +87,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
 				}
 				break;
 			}
+
+			case "doctor":
+			case "--doctor":
+				result.command = "doctor";
+				break;
 
 			case "--daemon":
 				result.command = "daemon";
@@ -347,6 +353,7 @@ Commands:
   service install       Install a launchd/systemd user service (accepts server options)
   service uninstall     Stop and remove the user service
   service status        Show service state, PID and log paths
+  doctor                Check registered projects' shell env and tools locally
 
 Options:
   --status              Show daemon status

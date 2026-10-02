@@ -29,6 +29,7 @@ import {
 	handleTitle,
 } from "./cli-command-handlers.js";
 import { handleDefault } from "./cli-default-command.js";
+import { handleDoctor } from "./cli-doctor.js";
 import { handleInstance } from "./cli-instance-command.js";
 import { handleService } from "./cli-service.js";
 import {
@@ -48,6 +49,8 @@ export {
 } from "./cli-utils.js";
 
 export interface CLIOptions {
+	/** Config directory for local diagnostics. */
+	configDir?: string;
 	cwd?: string;
 	stdin?: NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
 	stdout?: { write(s: string): void };
@@ -143,6 +146,11 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	switch (args.command) {
 		case "service":
 			return handleService(context);
+		case "doctor":
+			return handleDoctor({
+				stdout,
+				...(options?.configDir && { configDir: options.configDir }),
+			});
 		case "daemon":
 			return handleDaemon(context);
 		case "foreground":
