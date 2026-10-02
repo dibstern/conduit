@@ -83,8 +83,8 @@ export interface BrowserFrame {
 }
 
 export class ProcessHarness {
-	readonly root = mkdtempSync("/tmp/conduit-process-");
-	readonly projectDir = join(this.root, "project");
+	readonly root: string;
+	readonly projectDir: string;
 	readonly configDir: string;
 	readonly marks: ProcessMark[] = [];
 	readonly generations: Generation[] = [];
@@ -131,7 +131,10 @@ export class ProcessHarness {
 		private buildId?: string,
 		private readonly upgradeSinkProof = false,
 		private readonly subagentPollTimeoutMs?: number,
+		rootPrefix = "/tmp/conduit-process-",
 	) {
+		this.root = mkdtempSync(rootPrefix);
+		this.projectDir = join(this.root, "project");
 		this.configDir = join(
 			this.root,
 			runnerLifecycle?.nonDefaultConfigDir ? "active-config" : "config",
@@ -235,6 +238,7 @@ export class ProcessHarness {
 			buildId?: string;
 			upgradeSinkProof?: boolean;
 			subagentPollTimeoutMs?: number;
+			rootPrefix?: string;
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -259,6 +263,7 @@ export class ProcessHarness {
 			options.buildId,
 			options.upgradeSinkProof,
 			options.subagentPollTimeoutMs,
+			options.rootPrefix,
 		);
 		try {
 			await harness.restart();

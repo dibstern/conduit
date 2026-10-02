@@ -1,15 +1,19 @@
 import { createHash } from "node:crypto";
 import {
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { isRecord } from "../../utils.js";
+import { ClaudeRuntimeError } from "../event-sink-errors.js";
 
 export interface ClaudeRunnerRegistration {
 	readonly runnerId: string;
@@ -20,15 +24,56 @@ export interface ClaudeRunnerRegistration {
 	readonly role?: "candidate" | "retiring";
 }
 
-export function claudeRunnerDirectory(
+function claudeRunnerTargetDirectory(
 	workspaceRoot: string,
-	configDir = DEFAULT_CONFIG_DIR,
+	configDir: string,
 ): string {
 	const project = createHash("sha256")
 		.update(resolve(workspaceRoot))
 		.digest("hex")
 		.slice(0, 12);
 	return join(resolve(configDir), "r", project);
+}
+
+export function claudeRunnerDirectory(
+	workspaceRoot: string,
+	configDir = DEFAULT_CONFIG_DIR,
+): string {
+	const directory = claudeRunnerTargetDirectory(workspaceRoot, configDir);
+	// Budget the separator and 12-character runner ID within Darwin's 103
+	// usable socket-path bytes. The alias keeps runner files in the config dir.
+	if (Buffer.byteLength(directory) + 1 + 12 < 104) return directory;
+	const hash = createHash("sha256")
+		.update(directory)
+		.digest("hex")
+		.slice(0, 16);
+	return `/tmp/conduit-claude-${process.getuid?.() ?? "user"}-${hash}`;
+}
+
+export function prepareClaudeRunnerDirectory(
+	workspaceRoot: string,
+	configDir = DEFAULT_CONFIG_DIR,
+): string {
+	const target = claudeRunnerTargetDirectory(workspaceRoot, configDir);
+	mkdirSync(target, { recursive: true, mode: 0o700 });
+	const directory = claudeRunnerDirectory(workspaceRoot, configDir);
+	if (directory !== target) {
+		try {
+			symlinkSync(target, directory);
+		} catch (error) {
+			if (!isRecord(error) || error["code"] !== "EEXIST") throw error;
+			if (
+				!lstatSync(directory).isSymbolicLink() ||
+				readlinkSync(directory) !== target ||
+				lstatSync(directory).uid !== process.getuid?.()
+			) {
+				throw new ClaudeRuntimeError({
+					message: `Unsafe Claude runner socket alias: ${directory}`,
+				});
+			}
+		}
+	}
+	return directory;
 }
 
 export function registerClaudeRunner(entry: ClaudeRunnerRegistration): void {
@@ -56,8 +101,7 @@ export function discoverClaudeRunners(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
 ): ClaudeRunnerRegistration[] {
-	const directory = claudeRunnerDirectory(workspaceRoot, configDir);
-	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	const directory = prepareClaudeRunnerDirectory(workspaceRoot, configDir);
 	const entries: ClaudeRunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;

@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { CLAUDE_RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/claude/claude-runner-protocol.js";
-import type { ClaudeRunnerRegistration } from "../../src/lib/provider/claude/claude-runner-registry.js";
+import {
+	type ClaudeRunnerRegistration,
+	prepareClaudeRunnerDirectory,
+} from "../../src/lib/provider/claude/claude-runner-registry.js";
 import { isRecord } from "../../src/lib/utils.js";
 
 export function testRunnerAlive(pid: number): boolean {
@@ -15,39 +18,41 @@ export function testRunnerAlive(pid: number): boolean {
 	}
 }
 
-function registrations(configDir: string): ClaudeRunnerRegistration[] {
-	const directory = join(configDir, "r");
-	if (!existsSync(directory)) return [];
+function registrations(
+	root: string,
+	configDir: string,
+): ClaudeRunnerRegistration[] {
+	const directory = prepareClaudeRunnerDirectory(
+		join(root, "project"),
+		configDir,
+	);
 	const entries: ClaudeRunnerRegistration[] = [];
-	for (const project of readdirSync(directory, { withFileTypes: true })) {
-		if (!project.isDirectory()) continue;
-		for (const filename of readdirSync(join(directory, project.name))) {
-			if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
-			const socketPath = join(directory, project.name, filename.slice(0, -5));
-			let value: unknown;
-			try {
-				value = JSON.parse(readFileSync(`${socketPath}.json`, "utf8"));
-			} catch {
-				continue;
-			}
-			if (
-				isRecord(value) &&
-				value["socketPath"] === socketPath &&
-				value["runnerId"] === filename.slice(0, -5) &&
-				typeof value["sessionId"] === "string" &&
-				typeof value["buildId"] === "string" &&
-				typeof value["pid"] === "number" &&
-				Number.isSafeInteger(value["pid"]) &&
-				value["pid"] > 0
-			)
-				entries.push({
-					socketPath,
-					runnerId: value["runnerId"],
-					sessionId: value["sessionId"],
-					buildId: value["buildId"],
-					pid: value["pid"],
-				});
+	for (const filename of readdirSync(directory)) {
+		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
+		const socketPath = join(directory, filename.slice(0, -5));
+		let value: unknown;
+		try {
+			value = JSON.parse(readFileSync(`${socketPath}.json`, "utf8"));
+		} catch {
+			continue;
 		}
+		if (
+			isRecord(value) &&
+			value["socketPath"] === socketPath &&
+			value["runnerId"] === filename.slice(0, -5) &&
+			typeof value["sessionId"] === "string" &&
+			typeof value["buildId"] === "string" &&
+			typeof value["pid"] === "number" &&
+			Number.isSafeInteger(value["pid"]) &&
+			value["pid"] > 0
+		)
+			entries.push({
+				socketPath,
+				runnerId: value["runnerId"],
+				sessionId: value["sessionId"],
+				buildId: value["buildId"],
+				pid: value["pid"],
+			});
 	}
 	return entries;
 }
@@ -134,7 +139,7 @@ export async function cleanupTestClaudeRunners(
 	knownPids: readonly number[],
 	configDir = join(root, "config"),
 ) {
-	const entries = registrations(configDir);
+	const entries = registrations(root, configDir);
 	const pids = [
 		...new Set([...knownPids, ...entries.map((entry) => entry.pid)]),
 	];

@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
@@ -22,6 +22,7 @@ import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
 import {
 	claudeRunnerDirectory,
 	discoverClaudeRunners,
+	prepareClaudeRunnerDirectory,
 	removeClaudeRunner,
 	runnerPidAlive,
 } from "./claude-runner-registry.js";
@@ -549,10 +550,7 @@ export const makeProcessClaudeSessionRunner = (
 					);
 				const child = yield* Effect.try({
 					try: () => {
-						mkdirSync(claudeRunnerDirectory(deps.workspaceRoot, configDir), {
-							recursive: true,
-							mode: 0o700,
-						});
+						prepareClaudeRunnerDirectory(deps.workspaceRoot, configDir);
 						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
 						return spawn(
 							process.execPath,
