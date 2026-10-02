@@ -627,22 +627,17 @@ export function advanceTurnIfNewMessage(
 	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
 	// during the previous turn (sentDuringEpoch < turnEpoch).
 	// A terminal event may already have released the previous turn's queue.
-	// Only infer a missing boundary when it has not been applied yet.
-	const prevId = activity.currentMessageId;
-	if (prevId != null && !previousTurnAlreadyEnded) {
+	// Only infer a missing boundary when it has not been applied yet. Do not
+	// require having seen the previous reply: a tab that joined mid-turn never
+	// did, and Claude starts a queued prompt's reply without ending the turn.
+	if (!previousTurnAlreadyEnded) {
 		activity.turnEpoch++;
 		log.debug(
 			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
 			messageId,
-			prevId,
+			activity.currentMessageId,
 			activity.turnEpoch,
 			activity.phase,
-		);
-	} else {
-		log.debug(
-			"advanceTurn FIRST messageId=%s (no bump, turnEpoch=%d)",
-			messageId,
-			activity.turnEpoch,
 		);
 	}
 
