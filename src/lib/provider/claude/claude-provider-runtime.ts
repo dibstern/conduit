@@ -185,6 +185,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "workspaceRoot"
 	| "daemonConfigDir"
 	| "shellEnv"
+	| "claudeSettingsOverrides"
 	| "queryFactory"
 	| "subagentSdk"
 	| "subagentPollTimeoutMs"
@@ -248,6 +249,9 @@ export const makeClaudeProviderRuntime = (
 					? { daemonConfigDir: deps.daemonConfigDir }
 					: {}),
 				...(deps.shellEnv ? { shellEnv: deps.shellEnv } : {}),
+				...(deps.claudeSettingsOverrides
+					? { claudeSettingsOverrides: deps.claudeSettingsOverrides }
+					: {}),
 				...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 				...(deps.subagentSdk ? { subagentSdk: deps.subagentSdk } : {}),
 				...(deps.subagentPollTimeoutMs !== undefined

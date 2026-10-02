@@ -123,7 +123,8 @@ export class ProcessHarness {
 		private readonly holdRunnerAck = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
-			| "answer-permission",
+			| "answer-permission"
+			| "send-turn",
 		private readonly runnerReattachGraceMs?: number,
 	) {
 		this.configDir = join(
@@ -212,7 +213,10 @@ export class ProcessHarness {
 			capabilityModels?: readonly ModelInfo[];
 			restartProof?: boolean;
 			holdRunnerAck?: boolean;
-			holdRunnerOutput?: "permission-request" | "answer-permission";
+			holdRunnerOutput?:
+				| "permission-request"
+				| "answer-permission"
+				| "send-turn";
 			runnerReattachGraceMs?: number;
 		} = {},
 	): Promise<ProcessHarness> {

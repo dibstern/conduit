@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type {
 	Options,
 	Query,
@@ -27,6 +28,7 @@ export type ProcessMark =
 	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
+	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
 	| {
 			kind:
 				| "initialization-ready"
@@ -180,6 +182,15 @@ function query(params: {
 				queryId,
 				promptIndex: ++promptIndex,
 			});
+			if (prompt === "fail-before-assistant-restart") {
+				const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+				if (!proof) throw new Error("Missing pre-assistant failure gate");
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				const release = join(dirname(proof), "release-before-assistant");
+				while (!existsSync(release))
+					await new Promise<void>((done) => setTimeout(done, 20));
+				throw new Error("Harness failure before assistant message");
+			}
 			if (promptIndex === 1) {
 				mark({
 					kind: "system-init",
