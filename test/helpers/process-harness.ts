@@ -125,6 +125,9 @@ export class ProcessHarness {
 			| "permission-request"
 			| "answer-permission",
 		private readonly runnerReattachGraceMs?: number,
+		private buildId?: string,
+		private readonly upgradeSinkProof = false,
+		private readonly subagentPollTimeoutMs?: number,
 	) {
 		this.configDir = join(
 			this.root,
@@ -214,6 +217,9 @@ export class ProcessHarness {
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?: "permission-request" | "answer-permission";
 			runnerReattachGraceMs?: number;
+			buildId?: string;
+			upgradeSinkProof?: boolean;
+			subagentPollTimeoutMs?: number;
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -235,6 +241,9 @@ export class ProcessHarness {
 			options.holdRunnerAck,
 			options.holdRunnerOutput,
 			options.runnerReattachGraceMs,
+			options.buildId,
+			options.upgradeSinkProof,
+			options.subagentPollTimeoutMs,
 		);
 		try {
 			await harness.restart();
@@ -245,10 +254,17 @@ export class ProcessHarness {
 		}
 	}
 
-	async restart(options: { skipBrowserProbe?: boolean } = {}): Promise<void> {
+	async restart(
+		options: {
+			skipBrowserProbe?: boolean;
+			buildId?: string;
+			queryInitializationDelayMs?: number;
+		} = {},
+	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
+		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
 		const fakeModule = pathToFileURL(
 			fileURLToPath(new URL("./fake-claude-process-sdk.ts", import.meta.url)),
@@ -329,8 +345,20 @@ export class ProcessHarness {
 							}
 						: {}),
 					CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS: String(
-						this.queryInitializationDelayMs,
+						options.queryInitializationDelayMs ??
+							this.queryInitializationDelayMs,
 					),
+					...(this.buildId ? { CONDUIT_TEST_BUILD_ID: this.buildId } : {}),
+					...(this.upgradeSinkProof
+						? { CONDUIT_TEST_UPGRADE_SINK_PROOF: "1" }
+						: {}),
+					...(this.subagentPollTimeoutMs !== undefined
+						? {
+								CONDUIT_TEST_SUBAGENT_POLL_TIMEOUT_MS: String(
+									this.subagentPollTimeoutMs,
+								),
+							}
+						: {}),
 					CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES: String(
 						this.queryInitializationFailures,
 					),

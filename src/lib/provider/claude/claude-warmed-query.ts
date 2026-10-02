@@ -34,6 +34,7 @@ interface PendingWarmedQuery {
 	readonly resource: WarmedClaudeQuery;
 	readonly ready: Deferred.Deferred<WarmedClaudeQuery, ClaudeAdapterError>;
 	readonly inheritedSettings: string | undefined;
+	readonly inheritedSettingsFrozen: boolean;
 }
 
 export interface ClaudeWarmedQueryOwner {
@@ -42,6 +43,7 @@ export interface ClaudeWarmedQueryOwner {
 		settings: Settings | undefined,
 		shellEnv: Readonly<Record<string, string | undefined>> | undefined,
 		bridge: ClaudePermissionBridge,
+		inheritedSettingsFrozen?: boolean,
 	): Effect.Effect<void, ClaudeAdapterError>;
 	takeEffect(
 		sessionId: string,
@@ -61,7 +63,9 @@ function immutableOptions(options: SDKOptions) {
 }
 
 /** File metadata is cheap to recheck once, without resolving settings on a send. */
-function inheritedSettingsFingerprint(options: SDKOptions): string | undefined {
+export function inheritedSettingsFingerprint(
+	options: SDKOptions,
+): string | undefined {
 	try {
 		const cwd = resolve(options.cwd ?? process.cwd());
 		const configDir = resolve(
@@ -145,7 +149,13 @@ export const makeClaudeWarmedQueryOwner = (
 				yield* close(entry);
 			}).pipe(Effect.uninterruptible);
 		const owner: ClaudeWarmedQueryOwner = {
-			preWarmEffect: (input, settings, shellEnv, bridge) =>
+			preWarmEffect: (
+				input,
+				settings,
+				shellEnv,
+				bridge,
+				inheritedSettingsFrozen = false,
+			) =>
 				Effect.gen(function* () {
 					const entry = yield* lock.withPermits(1)(
 						Effect.gen(function* () {
@@ -204,6 +214,7 @@ export const makeClaudeWarmedQueryOwner = (
 							const created: PendingWarmedQuery = {
 								resource,
 								inheritedSettings,
+								inheritedSettingsFrozen,
 								ready: yield* Deferred.make<
 									WarmedClaudeQuery,
 									ClaudeAdapterError
@@ -271,8 +282,9 @@ export const makeClaudeWarmedQueryOwner = (
 					);
 					if (!resource || pending.get(sessionId) !== entry) return;
 					if (
-						entry.inheritedSettings === undefined ||
-						entry.inheritedSettings !== inheritedSettingsFingerprint(options)
+						!entry.inheritedSettingsFrozen &&
+						(entry.inheritedSettings === undefined ||
+							entry.inheritedSettings !== inheritedSettingsFingerprint(options))
 					) {
 						yield* discardEntry(sessionId, entry);
 						return;

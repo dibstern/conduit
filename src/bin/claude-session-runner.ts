@@ -1,9 +1,15 @@
 #!/usr/bin/env node
-import { chmodSync } from "node:fs";
+import { appendFileSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import {
+	query as sdkQuery,
+	resolveSettings as sdkResolveSettings,
+} from "@anthropic-ai/claude-agent-sdk";
 import { NodeRuntime } from "@effect/platform-node";
-import { Cause, Deferred, Effect, FiberSet, Scope } from "effect";
-import { BUILD_ID } from "../lib/build-id.js";
+import { Cause, Deferred, Effect, Exit, FiberSet, Scope } from "effect";
 import { createLogger } from "../lib/logger.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -13,6 +19,7 @@ import { makeClaudeRunnerIdleExit } from "../lib/provider/claude/claude-runner-i
 import {
 	CLAUDE_RUNNER_PROTOCOL_VERSION,
 	ClaudeRunnerSocket,
+	claudeRunnerBuildId,
 	claudeRunnerFailure,
 	claudeRunnerHelloFailure,
 	claudeRunnerIdleFailure,
@@ -22,12 +29,27 @@ import {
 	registerClaudeRunner,
 	removeClaudeRunner,
 } from "../lib/provider/claude/claude-runner-registry.js";
+import {
+	type ClaudeRunnerFileSettings,
+	captureClaudeRunnerFileSettings,
+	claudeRunnerFileSettingsFingerprint,
+	replayClaudeRunnerFileSettings,
+} from "../lib/provider/claude/claude-runner-settings.js";
 import { ClaudeRunnerSpool } from "../lib/provider/claude/claude-runner-spool.js";
+import type {
+	ClaudeRunnerLiveQueryConfiguration,
+	ClaudeRunnerSettingsSnapshot,
+	ClaudeRunnerUpgradeState,
+} from "../lib/provider/claude/claude-runner-upgrade.js";
+import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
+import { buildClaudeFlagSettings } from "../lib/provider/claude/claude-sdk-settings.js";
 import type {
 	ClaudeSessionFailure,
 	ClaudeSessionRunner,
 } from "../lib/provider/claude/claude-session-runner.js";
-import type { TurnResult } from "../lib/provider/types.js";
+import { fromSdkPermissionMode } from "../lib/provider/claude/permission-mode-map.js";
+import type { Options } from "../lib/provider/claude/types.js";
+import type { PreWarmSessionInput, TurnResult } from "../lib/provider/types.js";
 
 const log = createLogger("claude-session-runner");
 
@@ -41,6 +63,10 @@ const main = Effect.gen(function* () {
 		);
 	const testModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
 	let queryFactory: ClaudeSessionRunnerDeps["queryFactory"];
+	let subagentSdk: ClaudeSessionRunnerDeps["subagentSdk"];
+	let testSubagentPollTimeoutMs: number | undefined;
+	let settingsResolver: typeof sdkResolveSettings | undefined =
+		sdkResolveSettings;
 	if (process.env["NODE_ENV"] === "test" && testModule) {
 		const module = yield* Effect.tryPromise(
 			() =>
@@ -48,6 +74,8 @@ const main = Effect.gen(function* () {
 					claudeSdk: {
 						query: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]>;
 					};
+					claudeSubagentSdk?: ClaudeSessionRunnerDeps["subagentSdk"];
+					resolveSettings?: typeof sdkResolveSettings;
 				}>,
 		);
 		if (typeof module.claudeSdk?.query !== "function")
@@ -55,6 +83,13 @@ const main = Effect.gen(function* () {
 				"Process test module must export a Claude query factory",
 			);
 		queryFactory = module.claudeSdk.query;
+		subagentSdk = module.claudeSubagentSdk;
+		const pollTimeout = Number(
+			process.env["CONDUIT_TEST_SUBAGENT_POLL_TIMEOUT_MS"],
+		);
+		if (Number.isFinite(pollTimeout) && pollTimeout > 0)
+			testSubagentPollTimeoutMs = pollTimeout;
+		settingsResolver = module.resolveSettings;
 		const { __setProbeOverrideForTesting } = yield* Effect.tryPromise(
 			() => import("../lib/provider/claude/claude-capabilities-probe.js"),
 		);
@@ -69,6 +104,18 @@ const main = Effect.gen(function* () {
 	const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 	let attached = false;
 	let exiting = false;
+	let retiring = false;
+	let role: "candidate" | "retiring" | undefined =
+		process.argv[5] === "upgrade" ? "candidate" : undefined;
+	const register = () =>
+		registerClaudeRunner({
+			socketPath,
+			sessionId,
+			runnerId,
+			buildId: claudeRunnerBuildId(),
+			pid: process.pid,
+			...(role ? { role } : {}),
+		});
 	let connection: ClaudeRunnerSocket | undefined;
 	let idle: ReturnType<typeof makeClaudeRunnerIdleExit> | undefined;
 	let exitDeadline: ReturnType<typeof setTimeout> | undefined;
@@ -108,6 +155,186 @@ const main = Effect.gen(function* () {
 	let shellEnv: Readonly<Record<string, string | undefined>> = process.env;
 	let initializing = false;
 	const spool = new ClaudeRunnerSpool(`${socketPath}.spool`);
+	let snapshot: ClaudeRunnerSettingsSnapshot | undefined;
+	let frozenSnapshot: ClaudeRunnerSettingsSnapshot | undefined;
+	let fileSettings: ClaudeRunnerFileSettings | undefined;
+	let fileSettingsPreparation: Promise<void> | undefined;
+	let replayedSettings:
+		| Pick<Options, "settings" | "settingSources">
+		| undefined;
+	let launchInput: PreWarmSessionInput | undefined;
+	let launchSettings: ClaudeRunnerSettingsSnapshot["claudeSettingsOverrides"];
+	let resumeSessionId: string | undefined;
+	let liveConfiguration: ClaudeRunnerLiveQueryConfiguration | undefined;
+	let activeCommands = 0;
+	let activeOutputs = 0;
+	let revision = 0;
+	let reportedQuiescent: boolean | undefined;
+	let reportedSnapshot: ClaudeRunnerSettingsSnapshot | undefined;
+	let reportedResume: string | undefined;
+	let reportedConfiguration: ClaudeRunnerLiveQueryConfiguration | undefined;
+	const quiescent = () =>
+		!exiting &&
+		!retiring &&
+		activeCommands === 0 &&
+		activeOutputs === 0 &&
+		!runner?.hasPendingSubagentFinalizers?.(sessionId) &&
+		idle?.quiescent === true;
+	const upgradeState = (): ClaudeRunnerUpgradeState => ({
+		quiescent: quiescent(),
+		revision,
+		...(snapshot ? { snapshot } : {}),
+		...(resumeSessionId ? { resumeSessionId } : {}),
+		...(liveConfiguration ? { liveConfiguration } : {}),
+		...(frozenSnapshot ? { frozen: true } : {}),
+	});
+	const reportUpgradeState = () => {
+		const quiet = quiescent();
+		if (
+			quiet === reportedQuiescent &&
+			snapshot === reportedSnapshot &&
+			resumeSessionId === reportedResume &&
+			liveConfiguration === reportedConfiguration
+		)
+			return;
+		reportedQuiescent = quiet;
+		const changedSnapshot = snapshot !== reportedSnapshot;
+		reportedSnapshot = snapshot;
+		reportedResume = resumeSessionId;
+		reportedConfiguration = liveConfiguration;
+		revision++;
+		if (attached)
+			connection?.write({
+				type: "upgrade-state",
+				state: {
+					quiescent: quiet,
+					revision,
+					...(changedSnapshot && snapshot ? { snapshot } : {}),
+					...(resumeSessionId ? { resumeSessionId } : {}),
+					...(liveConfiguration ? { liveConfiguration } : {}),
+					...(frozenSnapshot ? { frozen: true } : {}),
+				},
+			});
+	};
+	const createQuery: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]> = (
+		params,
+	) => {
+		const options = params.options;
+		if (!options || !launchInput)
+			throw new Error("Claude runner launch input is missing");
+		const { abortController, canUseTool, resume, ...launch } = options;
+		const restoring = frozenSnapshot !== undefined && snapshot === undefined;
+		const frozenLaunch: Options | undefined = frozenSnapshot
+			? {
+					...frozenSnapshot.options,
+					...(options.model ? { model: options.model } : {}),
+					...(options.effort ? { effort: options.effort } : {}),
+					...(options.permissionMode
+						? { permissionMode: options.permissionMode }
+						: {}),
+				}
+			: undefined;
+		if (frozenLaunch && !options.effort) delete frozenLaunch.effort;
+		if (frozenLaunch && !options.permissionMode)
+			delete frozenLaunch.permissionMode;
+		const effectiveOptions =
+			restoring && frozenSnapshot
+				? {
+						...frozenLaunch,
+						...(abortController ? { abortController } : {}),
+						...(canUseTool ? { canUseTool } : {}),
+						...(resume ? { resume } : {}),
+					}
+				: frozenSnapshot
+					? {
+							...options,
+							...(frozenSnapshot.options.settings !== undefined
+								? { settings: frozenSnapshot.options.settings }
+								: {}),
+							...(frozenSnapshot.options.env
+								? { env: frozenSnapshot.options.env }
+								: {}),
+						}
+					: options;
+		const queryOptions = { ...effectiveOptions, ...replayedSettings };
+		const query = (queryFactory ?? sdkQuery)({
+			...params,
+			options: queryOptions,
+		});
+		const {
+			abortController: _abort,
+			canUseTool: _tool,
+			resume: _resume,
+			...effectiveLaunch
+		} = queryOptions;
+		const retainedFiles = frozenSnapshot?.fileSettings ?? fileSettings;
+		const capturedFiles =
+			retainedFiles &&
+			(queryOptions.settingSources?.length === 0 ||
+				(retainedFiles.fingerprint !== undefined &&
+					retainedFiles.fingerprint ===
+						claudeRunnerFileSettingsFingerprint(queryOptions)))
+				? retainedFiles
+				: undefined;
+		snapshot =
+			(restoring ? frozenSnapshot : undefined) ??
+			(JSON.parse(
+				JSON.stringify({
+					input: launchInput,
+					...((frozenSnapshot?.claudeSettingsOverrides ?? launchSettings)
+						? {
+								claudeSettingsOverrides:
+									frozenSnapshot?.claudeSettingsOverrides ?? launchSettings,
+							}
+						: {}),
+					options: frozenSnapshot ? effectiveLaunch : launch,
+					...(capturedFiles ? { fileSettings: capturedFiles } : {}),
+				}),
+			) as ClaudeRunnerSettingsSnapshot);
+		if (
+			!restoring &&
+			queryOptions.settingSources?.length !== 0 &&
+			snapshot.fileSettings
+		) {
+			// Validate at SDK readiness, before the foreground turn can change files.
+			// A completed control command cannot settle another query's capture.
+			const captured = snapshot;
+			void query.initializationResult().then(
+				() => {
+					if (snapshot !== captured) return;
+					if (
+						captured.fileSettings?.fingerprint !==
+						claudeRunnerFileSettingsFingerprint(queryOptions)
+					) {
+						const { fileSettings: _files, ...launch } = captured;
+						snapshot = launch;
+					}
+					reportUpgradeState();
+				},
+				() => {
+					if (snapshot !== captured) return;
+					const { fileSettings: _files, ...launch } = captured;
+					snapshot = launch;
+					reportUpgradeState();
+				},
+			);
+		}
+		if (resume) resumeSessionId = resume;
+		if (process.env["NODE_ENV"] === "test") {
+			const mark = {
+				channel: "conduit-process-test",
+				kind: "runner-snapshot",
+				pid: process.pid,
+				sessionId,
+				snapshotJson: JSON.stringify(snapshot),
+			};
+			const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+			if (proof) appendFileSync(proof, `${JSON.stringify(mark)}\n`);
+			if (process.connected) process.send?.(mark);
+		}
+		reportUpgradeState();
+		return query;
+	};
 	const bindings = new Map<string, { sessionId: string; commandId?: string }>();
 	const commands = new Map<
 		string,
@@ -155,11 +382,25 @@ const main = Effect.gen(function* () {
 									{
 										...config,
 										shellEnv: () => shellEnv,
-										...(queryFactory ? { queryFactory } : {}),
+										queryFactory: createQuery,
+										...(subagentSdk ? { subagentSdk } : {}),
+										...(testSubagentPollTimeoutMs !== undefined
+											? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
+											: {}),
+										onSubagentFinalizationComplete: reportUpgradeState,
 									},
 									(output) => {
 										idle?.activity(output);
-										return spool.emit(output);
+										activeOutputs++;
+										reportUpgradeState();
+										return spool.emit(output).pipe(
+											Effect.ensuring(
+												Effect.sync(() => {
+													activeOutputs--;
+													reportUpgradeState();
+												}),
+											),
+										);
 									},
 								).pipe(Effect.provideService(Scope.Scope, scope));
 								const testIdle =
@@ -178,7 +419,13 @@ const main = Effect.gen(function* () {
 										? Number(process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"])
 										: undefined,
 									config.daemonConfigDir,
-									() => spool.hasHeldWork,
+									() =>
+										retiring ||
+										activeCommands > 0 ||
+										activeOutputs > 0 ||
+										runner?.hasPendingSubagentFinalizers?.(sessionId) ===
+											true ||
+										spool.hasHeldWork,
 								);
 							}
 							if (
@@ -203,7 +450,7 @@ const main = Effect.gen(function* () {
 									process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"]
 										? Number(process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"])
 										: CLAUDE_RUNNER_PROTOCOL_VERSION,
-								buildId: BUILD_ID,
+								buildId: claudeRunnerBuildId(),
 								runnerId,
 								sessionId,
 								pid: process.pid,
@@ -213,6 +460,7 @@ const main = Effect.gen(function* () {
 								})),
 								pendingOutputs: spool.pendingOutputs,
 								completedCommands: [...completedCommands.values()],
+								upgradeState: upgradeState(),
 							});
 							initializing = false;
 						}),
@@ -227,10 +475,39 @@ const main = Effect.gen(function* () {
 						return;
 					}
 					attached = true;
+					if (retiring && !message.preserveRole) {
+						retiring = false;
+						role = undefined;
+						register();
+					}
 					grace.reattached();
 					spool.attach(peer, message.acknowledgedSequence);
+					reportedQuiescent = undefined;
+					reportUpgradeState();
 				} else if (message.type === "output-reply") {
 					spool.reply(message);
+					reportUpgradeState();
+				} else if (message.type === "upgrade-retire") {
+					const ready =
+						greeted && attached && message.revision === revision && quiescent();
+					if (ready) {
+						retiring = true;
+						role = "retiring";
+						register();
+					}
+					peer.write({
+						type: "upgrade-reply",
+						requestId: message.requestId,
+						result: ready,
+					});
+				} else if (message.type === "upgrade-cancel") {
+					retiring = false;
+					role = undefined;
+					register();
+					reportUpgradeState();
+				} else if (message.type === "upgrade-activate") {
+					role = undefined;
+					register();
 				} else if (message.type === "command" && runner) {
 					const command = message.command;
 					if (exiting) {
@@ -241,6 +518,13 @@ const main = Effect.gen(function* () {
 						});
 						return;
 					}
+					// Retirement is a reservation until the server commits its route.
+					// A command selected on the old route cancels it without waiting.
+					if (retiring && command.type !== "shutdown") {
+						retiring = false;
+						role = undefined;
+						register();
+					}
 					if (command.type === "send-turn") {
 						peer.write({
 							type: "command-accepted",
@@ -250,9 +534,41 @@ const main = Effect.gen(function* () {
 						idle?.beginTurn();
 					}
 					idle?.activity();
+					activeCommands++;
 					const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}`;
 					if (command.type === "send-turn" || command.type === "pre-warm")
 						shellEnv = command.shellEnv ?? process.env;
+					if (command.type === "send-turn" || command.type === "pre-warm") {
+						if (command.type === "pre-warm" && command.settingsSnapshot)
+							frozenSnapshot = command.settingsSnapshot;
+						const input = command.input;
+						launchInput = {
+							sessionId: input.sessionId,
+							workspaceRoot: input.workspaceRoot,
+							providerState: input.providerState,
+							...(input.model ? { model: input.model } : {}),
+							...(input.configDir ? { configDir: input.configDir } : {}),
+							...(input.permissionMode
+								? { permissionMode: input.permissionMode }
+								: {}),
+							...(input.variant ? { variant: input.variant } : {}),
+							...(input.contextWindow
+								? { contextWindow: input.contextWindow }
+								: {}),
+							...(input.agent ? { agent: input.agent } : {}),
+						};
+						launchSettings = command.claudeSettingsOverrides;
+						liveConfiguration = {
+							...(input.model ? { model: input.model } : {}),
+							...(input.contextWindow
+								? { contextWindow: input.contextWindow }
+								: {}),
+							...(input.variant ? { variant: input.variant } : {}),
+							...(input.permissionMode
+								? { permissionMode: input.permissionMode }
+								: {}),
+						};
+					}
 					if (command.type === "send-turn") {
 						bindings.set(command.sinkId, {
 							sessionId: command.input.sessionId,
@@ -261,6 +577,7 @@ const main = Effect.gen(function* () {
 								: {}),
 						});
 					}
+					reportUpgradeState();
 					if (process.env["NODE_ENV"] === "test" && process.connected)
 						process.send?.({
 							channel: "conduit-process-test",
@@ -279,13 +596,171 @@ const main = Effect.gen(function* () {
 							commands.set(deduplicationKey, result);
 							if (!runner)
 								return yield* Effect.die("Claude runner is not initialized");
-							const exit = yield* Effect.exit(runner.executeEffect(command));
+							if (
+								(command.type === "pre-warm" || command.type === "send-turn") &&
+								settingsResolver &&
+								(!resumeSessionId || (frozenSnapshot && !replayedSettings))
+							) {
+								const resolver = settingsResolver;
+								const input = command.input;
+								const options: Options = frozenSnapshot?.options ?? {
+									cwd: input.workspaceRoot,
+									settingSources: ["user", "project", "local"],
+									settings: buildClaudeFlagSettings(
+										command.claudeSettingsOverrides,
+									),
+									env: makeClaudeSdkEnv({
+										configDir:
+											input.configDir ??
+											(typeof input.providerState["claudeConfigDir"] ===
+											"string"
+												? input.providerState["claudeConfigDir"]
+												: undefined),
+										baseEnv: shellEnv,
+									}),
+								};
+								if (!fileSettingsPreparation)
+									fileSettingsPreparation = (async () => {
+										try {
+											// The public resolver has no env parameter. Preserve the
+											// SDK's distinction between explicit and default config roots.
+											const configDir = options.env?.["CLAUDE_CONFIG_DIR"];
+											if (configDir)
+												process.env["CLAUDE_CONFIG_DIR"] = resolve(
+													options.cwd ?? process.cwd(),
+													configDir,
+												);
+											else {
+												delete process.env["CLAUDE_CONFIG_DIR"];
+												if (
+													options.env?.["HOME"] &&
+													resolve(options.env["HOME"]) !== resolve(homedir())
+												)
+													throw new Error(
+														"Claude settings HOME cannot match the SDK resolver; retaining the old runner",
+													);
+											}
+											if (frozenSnapshot)
+												replayedSettings = await replayClaudeRunnerFileSettings(
+													frozenSnapshot.fileSettings,
+													options,
+													resolver,
+												);
+											else
+												fileSettings = await captureClaudeRunnerFileSettings(
+													options,
+													resolver,
+												);
+										} catch (cause) {
+											if (frozenSnapshot) throw cause;
+											log.warn(
+												"Unable to capture Claude file settings for runner upgrade",
+												cause,
+											);
+										}
+									})();
+								const preparation = fileSettingsPreparation;
+								yield* Effect.tryPromise({
+									try: () => preparation,
+									catch: (cause) =>
+										claudeRunnerFailure("prepare runner settings", cause),
+								}).pipe(
+									Effect.ensuring(
+										Effect.sync(() => {
+											fileSettingsPreparation = undefined;
+										}),
+									),
+								);
+							}
+							const exit = yield* Effect.exit(
+								runner.executeEffect(command).pipe(
+									Effect.tap(() => {
+										const frozen = frozenSnapshot;
+										const resolver = settingsResolver;
+										if (
+											command.type !== "pre-warm" ||
+											!frozen ||
+											!resolver ||
+											replayedSettings?.settingSources?.length === 0
+										)
+											return Effect.void;
+										// Native sources must remain unchanged through SDK readiness.
+										return Effect.tryPromise({
+											try: async () => {
+												const current = await captureClaudeRunnerFileSettings(
+													frozen.options,
+													resolver,
+												);
+												if (
+													!frozen.fileSettings ||
+													current.fingerprint !==
+														frozen.fileSettings.fingerprint ||
+													!isDeepStrictEqual(
+														current.resolved,
+														frozen.fileSettings.resolved,
+													)
+												)
+													throw new Error(
+														"Claude settings changed while warming; retaining the old runner",
+													);
+											},
+											catch: (cause) =>
+												claudeRunnerFailure("verify runner settings", cause),
+										});
+									}),
+								),
+							);
+							if (
+								Exit.isSuccess(exit) &&
+								command.type === "apply-live-settings"
+							) {
+								const {
+									contextWindow: _window,
+									variant: _variant,
+									...current
+								} = liveConfiguration ?? {};
+								liveConfiguration = {
+									...current,
+									...(command.settings.modelId
+										? {
+												model: {
+													providerId: "claude",
+													modelId: command.settings.modelId,
+												},
+											}
+										: {}),
+									...(command.settings.contextWindow
+										? { contextWindow: command.settings.contextWindow }
+										: {}),
+									...(command.settings.variant
+										? { variant: command.settings.variant }
+										: {}),
+								};
+							}
+							if (
+								Exit.isSuccess(exit) &&
+								command.type === "set-permission-mode"
+							) {
+								const mode = fromSdkPermissionMode(command.mode);
+								if (mode)
+									liveConfiguration = {
+										...liveConfiguration,
+										permissionMode: mode,
+									};
+							}
 							yield* Deferred.done(result, exit);
 							return yield* Deferred.await(result);
 						}).pipe(
 							Effect.ensuring(
-								Effect.sync(() => {
+								Effect.gen(function* () {
+									// Interrupts can finish before an SDK result carries updates.
+									const cursor = yield* runner?.getResumeSessionIdEffect?.(
+										sessionId,
+									) ?? Effect.succeed(undefined);
+									if (cursor) resumeSessionId = cursor;
 									if (command.type === "send-turn") idle?.endTurn();
+									activeCommands--;
+									reportUpgradeState();
 								}),
 							),
 							Effect.matchCauseEffect({
@@ -317,6 +792,12 @@ const main = Effect.gen(function* () {
 											commandId: message.commandId,
 											...(result ? { result } : {}),
 										});
+										const resumed = result?.providerStateUpdates.find(
+											(update) => update.key === "resumeSessionId",
+										);
+										if (typeof resumed?.value === "string")
+											resumeSessionId = resumed.value;
+										reportUpgradeState();
 										connection?.write({
 											type: "command-reply",
 											commandId: message.commandId,
@@ -367,13 +848,7 @@ const main = Effect.gen(function* () {
 				});
 			}),
 	);
-	registerClaudeRunner({
-		socketPath,
-		sessionId,
-		runnerId,
-		buildId: BUILD_ID,
-		pid: process.pid,
-	});
+	register();
 	process.send({ channel: "conduit-claude-runner", type: "listening" });
 	yield* Deferred.await(stopped);
 });

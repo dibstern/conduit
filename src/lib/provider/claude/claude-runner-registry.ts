@@ -17,6 +17,7 @@ export interface ClaudeRunnerRegistration {
 	readonly socketPath: string;
 	readonly buildId: string;
 	readonly pid: number;
+	readonly role?: "candidate" | "retiring";
 }
 
 export function claudeRunnerDirectory(
@@ -85,10 +86,17 @@ export function discoverClaudeRunners(
 				sessionId: value["sessionId"],
 				buildId: value["buildId"],
 				pid: value["pid"],
+				...(value["role"] === "candidate" || value["role"] === "retiring"
+					? { role: value["role"] }
+					: {}),
 			});
 		} catch {
 			removeClaudeRunner(socketPath);
 		}
 	}
-	return entries;
+	return entries.sort(
+		(a, b) =>
+			(a.role === "candidate" ? 2 : a.role === "retiring" ? 1 : 0) -
+			(b.role === "candidate" ? 2 : b.role === "retiring" ? 1 : 0),
+	);
 }

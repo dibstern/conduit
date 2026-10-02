@@ -38,6 +38,9 @@ export function makeClaudeRunnerIdleExit(
 		Math.min(60_000, Math.max(1, testIdleWindowMs ?? dayMs)),
 	);
 	return {
+		get quiescent() {
+			return turns === 0 && !backgroundWork && !hasHeldWork?.();
+		},
 		beginTurn() {
 			turns++;
 			lastActivityAt = Date.now();

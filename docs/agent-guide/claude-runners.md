@@ -83,7 +83,49 @@ grace deadline still applies even while work is held. Both deadlines enter one
 exit state and refuse new commands before acceptance, so a racing send retries
 on a fresh runner. Pre-warm counts as activity without admitting a turn, including
 after adoption, and becomes a no-op when racing exit or end-session.
-Runners with a mismatched build or protocol are not adopted by this recovery path.
+Protocol mismatches still refuse adoption. A different build with the same
+protocol is adopted and scheduled for upgrade after a turn ends. An adopted idle
+runner upgrades without waiting for another prompt.
+
+## Runner upgrades
+
+Upgrades reuse the ordinary spawn and pre-warm paths. The old runner keeps serving
+while the replacement resolves its launch environment and initializes its SDK
+query. A send during warming invalidates that attempt, uses the old query, and
+schedules another attempt at the following turn end. Replacement warm failures
+are logged without failing the user's turn; retries at later turn boundaries use
+bounded backoff.
+
+The runner reports quiescence only after its turns, background work, subagent
+finalizers, approval waiters, and unacknowledged outputs settle. Before the server
+swaps its session route, the old runner atomically verifies that state and its
+activity revision. Retirement then uses the existing stop path. Shutdown notices from the retired
+query cannot clear the replacement's state; sink-specific releases still reach
+the server and dispose their retained sinks, abort fibers and history.
+
+The original launch input, SDK query options and resolved file settings form
+the session's in-memory Effective Settings Snapshot. Re-adoption recovers it
+from the live runner, and replacement passes it unchanged. Mutable model,
+effort and permission mode travel separately so replacement warming matches
+the next send. The resume cursor comes from live context, including an
+interrupted first turn. Snapshots are never written to registrations or the
+event store.
+
+SDK 0.3.280 exposes `resolveSettings`, but cannot replay individual trust tiers.
+When files are unchanged, replacement retains native sources and merge rules.
+Changed ordinary settings (the displayable settings, thinking summaries and
+hooks) can be replayed with file sources disabled in a settings-only workspace.
+Their object/array merging retains Conduit's original flag overrides. Managed,
+unknown or trust-sensitive settings, once hooks, repositories/worktrees,
+unreadable files, global configuration files, and filesystem customization or
+instruction assets prevent this fallback. The old runner keeps serving and the upgrade is deferred; security
+settings are never promoted to the flag tier or filesystem discovery silently
+removed. This conservative limitation remains until the SDK supports replaying
+the original source tiers.
+
+Registrations distinguish warming candidates and retiring runners. After a
+server crash during replacement, recovery prefers the active runner and stops
+abandoned candidates only after verifying their socket identity.
 
 ## Repeatable verification
 

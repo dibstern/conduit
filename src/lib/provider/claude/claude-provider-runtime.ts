@@ -189,7 +189,10 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentSdk"
 	| "subagentPollTimeoutMs"
 	| "capabilitiesService"
-> & { readonly materializeSubagents?: boolean };
+> & {
+	readonly materializeSubagents?: boolean;
+	readonly onSubagentFinalizationComplete?: () => void;
+};
 
 export interface ClaudeProviderRuntimeState {
 	readonly sessions: HashMap.HashMap<string, ClaudeSessionContext>;
@@ -458,6 +461,7 @@ export class ClaudeProviderRuntime {
 						)
 					: randomUUID();
 			this.sinks.set(sinkId, eventSink);
+			this.reportSinkForTesting("allocated", sinkId, input.sessionId);
 			const aborted = Effect.async<void>((resume) => {
 				const onAbort = () => resume(Effect.void);
 				if (abortSignal.aborted) onAbort();
@@ -634,6 +638,26 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
+	private reportSinkForTesting(
+		phase: "allocated" | "released",
+		sinkId: string,
+		sessionId: string | undefined,
+	): void {
+		if (
+			process.env["NODE_ENV"] === "test" &&
+			process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+			process.connected
+		)
+			process.send?.({
+				channel: "conduit-process-test",
+				kind: "runtime-sink",
+				phase,
+				sinkId,
+				sessionId,
+				activeSinks: this.sinks.size,
+			});
+	}
+
 	handleOutputEffect(
 		output: ClaudeSessionOutput,
 		recoveredSessionId?: string,
@@ -648,6 +672,11 @@ export class ClaudeProviderRuntime {
 				sink = this.recoveredSink(recoveredSessionId);
 				this.sinks.set(output.sinkId, sink);
 				this.recoveredSinkIds.add(output.sinkId);
+				this.reportSinkForTesting(
+					"allocated",
+					output.sinkId,
+					recoveredSessionId,
+				);
 			}
 			if (!sink) return;
 			switch (output.type) {
@@ -756,6 +785,11 @@ export class ClaudeProviderRuntime {
 					this.sinks.delete(output.sinkId);
 					this.recoveredSinkIds.delete(output.sinkId);
 					yield* FiberMap.remove(this.abortFibers, output.sinkId);
+					this.reportSinkForTesting(
+						"released",
+						output.sinkId,
+						recoveredSessionId,
+					);
 					return;
 				case "materialize-subagents":
 					return yield* this.deps
@@ -843,6 +877,20 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
 	}
 
+	hasPendingSubagentFinalizers(sessionId: string): boolean {
+		return Array.from(this.subagentFinalizationFibers).some(
+			([key]) => key.sessionId === sessionId,
+		);
+	}
+
+	getResumeSessionIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined> {
+		return getSession(this.stateRef, sessionId).pipe(
+			Effect.map((ctx) => ctx?.resumeSessionId),
+		);
+	}
+
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -868,6 +916,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						command.claudeSettingsOverrides,
 						this.deps.shellEnv?.(command.input.workspaceRoot),
 						this.getPermissionBridge(),
+						command.settingsSnapshot !== undefined,
 					);
 					return;
 				case "send-turn": {
@@ -2034,7 +2083,17 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx,
 				result,
 			).pipe(Effect.ensuring(this.releaseSinkEffect(ctx.eventSink))),
-		).pipe(Effect.asVoid);
+		).pipe(
+			Effect.tap((fiber) =>
+				Effect.sync(() => {
+					// Effect observers run in reverse registration order. Report after
+					// FiberMap's observer has removed the completed finalizer.
+					const complete = this.deps.onSubagentFinalizationComplete;
+					if (complete) fiber.addObserver(() => queueMicrotask(complete));
+				}),
+			),
+			Effect.asVoid,
+		);
 	}
 
 	private interruptSubagentFinalizersForSession(

@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+import type {
+	ResolvedSettings,
+	ResolveSettingsOptions,
+	Settings,
+} from "@anthropic-ai/claude-agent-sdk";
+import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,
 	Query,
@@ -24,11 +31,24 @@ export type ProcessMark =
 			at: string;
 			queryId: string;
 			promptIndex: number;
+			liveOptions: {
+				model?: string;
+				effort?: Options["effort"];
+				permissionMode?: Options["permissionMode"];
+			};
 	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
 	| {
+			kind: "background-work";
+			phase: "started" | "completed";
+			queryId: string;
+			pid: number;
+			at: string;
+	  }
+	| {
 			kind:
+				| "initialization-held"
 				| "initialization-ready"
 				| "initialization-failed"
 				| "query-closed"
@@ -42,6 +62,8 @@ export type ProcessMark =
 			at: string;
 			sessionId: string;
 			pid: number;
+			optionsJson: string;
+			effectiveSettingsJson: string;
 			options: {
 				model?: string;
 				effort?: Options["effort"];
@@ -59,6 +81,47 @@ export type ProcessMark =
 			protocolVersion: number;
 	  }
 	| { kind: "runner-command"; commandId: string; type: string }
+	| {
+			kind: "runner-upgrade";
+			phase: "warming" | "cancelled" | "failed" | "switched";
+			sessionId: string;
+			oldPid: number;
+			newPid?: number;
+			at: string;
+	  }
+	| {
+			kind: "runner-snapshot";
+			pid: number;
+			sessionId: string;
+			snapshotJson: string;
+	  }
+	| {
+			kind: "runtime-sink";
+			phase: "allocated" | "released";
+			sinkId: string;
+			sessionId: string;
+			activeSinks: number;
+	  }
+	| {
+			kind: "subagent-finalizer";
+			phase: "started" | "completed";
+			pid: number;
+			parentClaudeSessionId: string;
+			sdkSubagentId: string;
+			at: string;
+	  }
+	| {
+			kind: "settings-resolved";
+			pid: number;
+			effectiveSettingsJson: string;
+	  }
+	| {
+			kind: "query-update";
+			queryId: string;
+			model?: string;
+			effort?: Options["effort"];
+			permissionMode?: Options["permissionMode"];
+	  }
 	| { kind: "runner-spawned"; pid: number; socketPath: string };
 
 export function responseChunks(prompt: string): string[] {
@@ -90,6 +153,107 @@ function stream(sessionId: string, event: Record<string, unknown>): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+function mergeSettings(
+	base: Record<string, unknown>,
+	settings: Record<string, unknown>,
+): Record<string, unknown> {
+	const merged = { ...base };
+	for (const [key, value] of Object.entries(settings)) {
+		const previous = merged[key];
+		merged[key] =
+			previous &&
+			value &&
+			typeof previous === "object" &&
+			typeof value === "object" &&
+			!Array.isArray(previous) &&
+			!Array.isArray(value)
+				? mergeSettings(
+						previous as Record<string, unknown>,
+						value as Record<string, unknown>,
+					)
+				: value;
+	}
+	return merged;
+}
+
+function fileSettings(
+	options: ResolveSettingsOptions = {},
+	configDir = process.env["CLAUDE_CONFIG_DIR"],
+): ResolvedSettings {
+	const cwd = options.cwd ?? process.cwd();
+	const paths = {
+		user: configDir ? join(configDir, "settings.json") : undefined,
+		project: join(cwd, ".claude/settings.json"),
+		local: join(cwd, ".claude/settings.local.json"),
+	};
+	let effective: Record<string, unknown> = {};
+	const sources: ResolvedSettings["sources"] = [];
+	const provenance: Record<string, { source: string; path: string }> = {};
+	for (const source of options.settingSources ?? ["user", "project", "local"]) {
+		const path = paths[source];
+		if (!path || !existsSync(path)) continue;
+		const settings = JSON.parse(readFileSync(path, "utf8")) as Settings;
+		sources.push({ source, settings, path });
+		effective = mergeSettings(effective, settings);
+		for (const key of Object.keys(settings)) provenance[key] = { source, path };
+	}
+	return {
+		effective: effective as Settings,
+		sources,
+		provenance: provenance as ResolvedSettings["provenance"],
+	};
+}
+
+export const resolveSettings: typeof import("@anthropic-ai/claude-agent-sdk").resolveSettings =
+	async (options) => {
+		const resolved = fileSettings(options);
+		mark({
+			kind: "settings-resolved",
+			pid: process.pid,
+			effectiveSettingsJson: JSON.stringify(resolved.effective),
+		});
+		return resolved;
+	};
+
+export const claudeSubagentSdk: ClaudeSubagentSdk = {
+	listSubagents: async () => [],
+	getSubagentMessages: async (parentClaudeSessionId, sdkSubagentId) => {
+		const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+		if (!proof || sdkSubagentId !== "review-finalizer-task") return [];
+		mark({
+			kind: "subagent-finalizer",
+			phase: "started",
+			pid: process.pid,
+			parentClaudeSessionId,
+			sdkSubagentId,
+			at: process.hrtime.bigint().toString(),
+		});
+		while (!existsSync(join(dirname(proof), "release-subagent-finalizer")))
+			await new Promise<void>((done) => setTimeout(done, 20));
+		mark({
+			kind: "subagent-finalizer",
+			phase: "completed",
+			pid: process.pid,
+			parentClaudeSessionId,
+			sdkSubagentId,
+			at: process.hrtime.bigint().toString(),
+		});
+		return [
+			{
+				type: "assistant",
+				uuid: "review-finalizer-message",
+				session_id: sdkSubagentId,
+				parent_tool_use_id: "review-finalizer-tool",
+				parent_agent_id: null,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "late child finalizer result" }],
+				},
+			},
+		];
+	},
+};
+
 let initializationAttempts = 0;
 
 function query(params: {
@@ -98,24 +262,72 @@ function query(params: {
 }): Query {
 	const sessionId = params.options?.resume ?? randomUUID();
 	const queryId = randomUUID();
+	let liveModel = params.options?.model;
+	let liveEffort = params.options?.effort;
+	let livePermissionMode = params.options?.permissionMode;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
 	let rejectInitialization: (error: Error) => void = () => {};
+	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+	const consumeMarker = (name: string): boolean => {
+		if (!proof) return false;
+		try {
+			unlinkSync(join(dirname(proof), name));
+			return true;
+		} catch (error) {
+			if (
+				!(error instanceof Error) ||
+				!("code" in error) ||
+				error.code !== "ENOENT"
+			)
+				throw error;
+			return false;
+		}
+	};
+	const failNext = consumeMarker("fail-next-initialization");
+	const holdNext = consumeMarker("hold-next-initialization");
 	const fails =
 		++initializationAttempts <=
-		Number(process.env["CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES"] ?? 0);
+			Number(process.env["CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES"] ?? 0) ||
+		failNext;
 	const delayMs = Number(
 		process.env["CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS"] ?? 0,
 	);
 	let initializationTimer: ReturnType<typeof setTimeout> | undefined;
 	const settings = params.options?.settings;
+	const flagSettings =
+		typeof settings === "string"
+			? (JSON.parse(readFileSync(settings, "utf8")) as Settings)
+			: (settings ?? {});
+	const effectiveSettings = mergeSettings(
+		fileSettings(
+			{
+				...(params.options?.cwd === undefined
+					? {}
+					: { cwd: params.options.cwd }),
+				...(params.options?.settingSources === undefined
+					? {}
+					: { settingSources: params.options.settingSources }),
+			},
+			params.options?.env?.["CLAUDE_CONFIG_DIR"],
+		).effective,
+		flagSettings,
+	);
 	mark({
 		kind: "query",
 		queryId,
 		at: process.hrtime.bigint().toString(),
 		sessionId,
 		pid: process.pid,
+		effectiveSettingsJson: JSON.stringify(effectiveSettings),
+		optionsJson: JSON.stringify(
+			Object.fromEntries(
+				Object.entries(params.options ?? {}).filter(
+					([key]) => !["abortController", "canUseTool", "resume"].includes(key),
+				),
+			),
+		),
 		options: {
 			...(params.options?.model ? { model: params.options.model } : {}),
 			...(params.options?.effort ? { effort: params.options.effort } : {}),
@@ -144,8 +356,22 @@ function query(params: {
 	// public system/init message remains a first-prompt event, not readiness.
 	const initialization = new Promise<Record<string, never>>((done, fail) => {
 		rejectInitialization = fail;
+		if (holdNext)
+			mark({
+				kind: "initialization-held",
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
 		const finish = () => {
 			if (initializationFinished) return;
+			if (
+				holdNext &&
+				proof &&
+				!existsSync(join(dirname(proof), "release-held-initialization"))
+			) {
+				initializationTimer = setTimeout(finish, 20);
+				return;
+			}
 			initializationFinished = true;
 			mark({
 				kind: fails ? "initialization-failed" : "initialization-ready",
@@ -179,6 +405,13 @@ function query(params: {
 				at,
 				queryId,
 				promptIndex: ++promptIndex,
+				liveOptions: {
+					...(liveModel === undefined ? {} : { model: liveModel }),
+					...(liveEffort === undefined ? {} : { effort: liveEffort }),
+					...(livePermissionMode === undefined
+						? {}
+						: { permissionMode: livePermissionMode }),
+				},
 			});
 			if (promptIndex === 1) {
 				mark({
@@ -214,7 +447,13 @@ function query(params: {
 				index: 0,
 				content_block: { type: "text", text: "" },
 			});
-			for (const text of responseChunks(prompt)) {
+			for (const [index, text] of responseChunks(prompt).entries()) {
+				if (prompt === "upgrade-long-turn" && index === 1 && proof) {
+					const release = join(dirname(proof), "release-upgrade-turn");
+					while (!existsSync(release) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed) return;
+				}
 				if (prompt.startsWith("restart-"))
 					await new Promise<void>((done) => setTimeout(done, 120));
 				const event = stream(sessionId, {
@@ -339,6 +578,54 @@ function query(params: {
 				prompt.startsWith("approval-failure-")
 			)
 				throw new Error("Harness adapter failure");
+			if (prompt === "upgrade-background-work") {
+				mark({
+					kind: "background-work",
+					phase: "started",
+					queryId,
+					pid: process.pid,
+					at: process.hrtime.bigint().toString(),
+				});
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: [
+						{
+							task_id: "upgrade-background-task",
+							task_type: "local_bash",
+							description: "Live background task",
+							ambient: false,
+						},
+					],
+				} as unknown as SDKMessage;
+			}
+			if (prompt === "review-subagent-finalizer") {
+				yield {
+					type: "system",
+					subtype: "task_started",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					task_id: "review-finalizer-task",
+					tool_use_id: "review-finalizer-tool",
+					description: "Finalizer child",
+					task_type: "local_agent",
+				} as unknown as SDKMessage;
+				yield {
+					type: "system",
+					subtype: "task_notification",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					task_id: "review-finalizer-task",
+					tool_use_id: "review-finalizer-tool",
+					status: "completed",
+					output_file: proof
+						? join(dirname(proof), "review-finalizer-task.output")
+						: "review-finalizer-task.output",
+					summary: "Task complete; transcript catch-up pending",
+				} as unknown as SDKMessage;
+			}
 			yield {
 				type: "assistant",
 				uuid: messageId,
@@ -371,6 +658,26 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
+			if (prompt === "upgrade-background-work" && proof) {
+				const release = join(dirname(proof), "release-upgrade-background");
+				while (!existsSync(release) && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: [],
+				} as unknown as SDKMessage;
+				mark({
+					kind: "background-work",
+					phase: "completed",
+					queryId,
+					pid: process.pid,
+					at: process.hrtime.bigint().toString(),
+				});
+			}
 			if (prompt === "ambient-idle") {
 				while (!closed) {
 					await new Promise<void>((done) => setTimeout(done, 50));
@@ -413,9 +720,32 @@ function query(params: {
 			});
 		},
 		interrupt: async () => {},
-		setModel: async () => {},
-		setPermissionMode: async () => {},
-		applyFlagSettings: async () => {},
+		setModel: async (model?: string) => {
+			liveModel = model;
+			mark({
+				kind: "query-update",
+				queryId,
+				...(model === undefined ? {} : { model }),
+			});
+		},
+		setPermissionMode: async (permissionMode: Options["permissionMode"]) => {
+			livePermissionMode = permissionMode;
+			mark({
+				kind: "query-update",
+				queryId,
+				...(permissionMode === undefined ? {} : { permissionMode }),
+			});
+		},
+		applyFlagSettings: async (settings: {
+			effortLevel?: Options["effort"];
+		}) => {
+			liveEffort = settings.effortLevel;
+			mark({
+				kind: "query-update",
+				queryId,
+				...(liveEffort === undefined ? {} : { effort: liveEffort }),
+			});
+		},
 	}) as unknown as Query;
 }
 
