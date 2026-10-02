@@ -301,5 +301,9 @@
 	"src/lib/frontend/components/session/SessionListHeader.svelte :: bg-bg-surface,gap-0.5,justify-between,px-2,session-list-header-actions,text-text-dimmer,tracking-[0.5px],uppercase": "The uppercase SESSIONS label row duplicated the sidebar header's title and is gone; Select moved to the desktop header (phone keeps ⋯ Select). The select-mode header drops its surface fill so it sits on the phone list's black.",
 	"src/lib/frontend/components/session/SessionSearchField.svelte :: h-5,w-5": "The scope clear ✕ now sits inside the chip as a removable token, sized in literal px (16px) to fit the pill.",
 	"src/lib/frontend/components/session/SessionContextMenu.svelte :: pb-3": "Phone sheet header takes the design's .sh-h.rich vertical padding (8px top, 11px bottom) in literal px; it had no top padding, so the title crowded the sheet's top edge.",
-	"src/lib/frontend/components/ui/Menu.svelte :: h-1,mb-2,mt-2": "Sheet grab handle matches the design's .sheet/.grab (8px above, 4px bar, 6px below). The old -mb-2 pulled content up under the handle."
+	"src/lib/frontend/components/ui/Menu.svelte :: h-1,mb-2,mt-2": "Sheet grab handle matches the design's .sheet/.grab (8px above, 4px bar, 6px below). The old -mb-2 pulled content up under the handle.",
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: gap-3,justify-between,text-xs": {
+		"movedTo": "src/lib/frontend/components/session/ProjectScopeItem.svelte",
+		"reason": "The project row's name/token layout moved verbatim into ProjectScopeItem, which adds the remove affordances."
+	}
 }

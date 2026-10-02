@@ -208,7 +208,7 @@ async function openSettingsPanel(page: Page): Promise<void> {
 	await page.getByTestId("overflow-settings").click();
 }
 
-/** Open project management from the desktop sidebar or phone list bar. */
+/** Open project management from the scope menu or phone list bar. */
 async function openProjectsPanel(page: Page): Promise<void> {
 	await showSessionListOnMobile(page);
 	const overflow = page.getByTestId("list-bar-overflow");
@@ -216,7 +216,8 @@ async function openProjectsPanel(page: Page): Promise<void> {
 		await overflow.click();
 		await page.getByTestId("list-overflow-projects").click();
 	} else {
-		await page.locator("#sidebar-projects-btn").click();
+		await page.getByTestId("session-scope-chip").click();
+		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 	}
 	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
 }

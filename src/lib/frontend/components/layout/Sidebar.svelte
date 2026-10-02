@@ -32,10 +32,6 @@
 	let listMenuOpen = $state(false);
 	let projectContextMenuOpen = $state(false);
 
-	function toggleProjectsPanel() {
-		projectsOpen = !projectsOpen;
-	}
-
 	function handleCloseSidebar() {
 		collapseSidebar();
 	}
@@ -201,23 +197,6 @@
 				ariaLabel="New session"
 				loading={newSessionPending}
 				onclick={handleNewSession}
-			/>
-			<Button
-				id="sidebar-projects-btn"
-				variant="ghost"
-				size="content"
-				tone="muted"
-				hoverFill="alt"
-				iconOnly
-				icon="ellipsis"
-				iconSize={18}
-				class="p-1 rounded-md"
-				title="Projects"
-				ariaLabel="Projects"
-				aria-haspopup="true"
-				aria-expanded={projectsOpen}
-				aria-controls={projectsOpen ? "sidebar-projects-panel" : undefined}
-				onclick={toggleProjectsPanel}
 			/>
 			<!--
 				`tone="muted"` and `hoverFill="alt"` reproduce this button's two colour

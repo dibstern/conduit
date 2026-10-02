@@ -21,10 +21,10 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
 }));
 vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
 	applyProjectMutationResponse: vi.fn(),
+	confirmRemoveProjects: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	addProjectRpc: (input: { directory: string }) => addProjectRpcSpy(input),
-	removeProjectRpc: vi.fn(),
 	renameProjectRpc: vi.fn(),
 	listDirectoriesRpc: vi.fn(),
 }));

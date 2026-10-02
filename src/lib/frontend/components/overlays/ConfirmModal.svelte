@@ -20,7 +20,20 @@
   function handleAction(): void {
     resolveConfirm(true);
   }
+
+  // Enter confirms while focus rests on the dialog itself (where Dialog puts
+  // it). A focused button keeps its own Enter, and the keystroke that opened
+  // the dialog never counts: its target is the opener, not the dialog.
+  function handleKeydown(event: KeyboardEvent): void {
+    const target = event.target;
+    if (event.key !== "Enter" || event.isComposing) return;
+    if (!(target instanceof HTMLDialogElement) || !target.querySelector("#confirm-modal")) return;
+    event.preventDefault();
+    handleAction();
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <Dialog
   open={uiState.confirmDialog !== null}

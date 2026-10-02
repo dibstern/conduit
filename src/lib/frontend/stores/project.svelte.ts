@@ -4,12 +4,15 @@ import type {
 	GetProjectsResponse,
 	ProjectMutationResponse,
 } from "../transport/ws-rpc.js";
+import { removeProjectRpc } from "../transport/ws-rpc-client.js";
 import type { ProjectInfo, RelayMessage } from "../types.js";
 import {
 	attachedProjectState,
+	getCurrentSlug,
 	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
+import { confirm } from "./ui.svelte.js";
 
 // This store has no client half: the project list and the current slug both
 // come from `project_list`, and `handleProjectList` below is the only writer.
@@ -64,6 +67,42 @@ export function applyProjectMutationResponse(
 		...(response.current != null ? { current: response.current } : {}),
 		...(response.addedSlug != null ? { addedSlug: response.addedSlug } : {}),
 	});
+}
+
+/** Asks once for all of them, then removes; resolves whether the user confirmed. */
+export async function confirmRemoveProjects(
+	slugs: readonly string[],
+	returnFocus?: () => HTMLElement | null,
+): Promise<boolean> {
+	const [first] = slugs;
+	if (first === undefined) return false;
+	const title =
+		projectState.projects.find((project) => project.slug === first)?.title ||
+		first;
+	const confirmed = await confirm(
+		slugs.length === 1
+			? `Remove project '${title}' from conduit?`
+			: `Remove ${slugs.length} projects from conduit?`,
+		"Remove",
+		returnFocus,
+	);
+	if (!confirmed) return false;
+	// Each RPC routes through a project's relay, so prefer one that survives;
+	// only when every project goes does a removal route through itself.
+	const router = [
+		getCurrentSlug(),
+		...projectState.projects.map((project) => project.slug),
+	].find((slug) => slug != null && !slugs.includes(slug));
+	// One at a time: each reply carries the whole project list, so concurrent
+	// replies could land out of order and resurrect a removed project.
+	void (async () => {
+		for (const slug of slugs) {
+			applyProjectMutationResponse(
+				await removeProjectRpc({ projectSlug: router ?? slug, slug }),
+			);
+		}
+	})().catch(() => undefined);
+	return true;
 }
 
 const toProjectInfoList = (

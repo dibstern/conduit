@@ -189,14 +189,15 @@ function getMockDirectories(path: string): string[] {
 	return [];
 }
 
-/** Open project management from the desktop sidebar or phone list bar. */
+/** Open project management from the scope menu or phone list bar. */
 async function openProjectsPanel(page: Page): Promise<void> {
 	const overflow = page.getByTestId("list-bar-overflow");
 	if (await overflow.isVisible()) {
 		await overflow.click();
 		await page.getByTestId("list-overflow-projects").click();
 	} else {
-		await page.locator("#sidebar-projects-btn").click();
+		await page.getByTestId("session-scope-chip").click();
+		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 	}
 	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
 }

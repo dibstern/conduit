@@ -3,10 +3,9 @@
 	import type { ProjectInfo } from "../../types.js";
 	import { ADD_PROJECT_TIMEOUT_MS } from "../../ui-constants.js";
 	import { onProject } from "../../stores/ws.svelte.js";
-	import { applyProjectMutationResponse } from "../../stores/project.svelte.js";
+	import { applyProjectMutationResponse, confirmRemoveProjects } from "../../stores/project.svelte.js";
 	import {
 		addProjectRpc,
-		removeProjectRpc,
 		renameProjectRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import {
@@ -15,7 +14,6 @@
 		getHealthyInstances,
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
-	import { confirm } from "../../stores/ui.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Select from "../ui/Select.svelte";
@@ -141,20 +139,6 @@
 		renamingSlug = slug;
 		const project = projects.find((candidate) => candidate.slug === slug);
 		renameValue = project?.title ?? slug;
-	}
-
-	async function handleCtxDelete(slug: string, title: string) {
-		const confirmed = await confirm(
-			`Remove project '${title}' from conduit?`,
-			"Remove",
-		);
-		if (confirmed) {
-			const projectSlug = getRpcProjectSlug(slug);
-			if (projectSlug == null) return;
-			void removeProjectRpc({ projectSlug, slug })
-				.then(applyProjectMutationResponse)
-				.catch(() => undefined);
-		}
 	}
 
 	function commitProjectRename(slug: string) {
@@ -409,7 +393,7 @@
 		project={ctxMenuProject}
 		anchor={ctxMenuAnchor}
 		onrename={handleCtxRename}
-		ondelete={handleCtxDelete}
+		ondelete={(slug) => void confirmRemoveProjects([slug])}
 		onclose={handleCloseContextMenu}
 	/>
 {/if}

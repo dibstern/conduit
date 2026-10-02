@@ -370,3 +370,22 @@ export const ScopePickerOpen: Story = {
 		await expect(menu.getByText("project:acme")).toBeVisible();
 	},
 };
+
+export const ScopePickerSelecting: Story = {
+	beforeEach: () => {
+		seedSessions([...mockSessionsAllGroups]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-scope-chip"));
+		const menu = within(canvasElement.ownerDocument.body);
+		await userEvent.click(await menu.findByTestId("session-scope-select"));
+		const row = await menu.findByRole("menuitemcheckbox", { name: /conduit/ });
+		await userEvent.click(row);
+		// The menu stays open in select mode, so a pick only toggles the row.
+		await expect(row).toHaveAttribute("aria-checked", "true");
+		await expect(
+			menu.getByTestId("session-scope-remove-selected"),
+		).toHaveTextContent("Remove 1 project");
+	},
+};

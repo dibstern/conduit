@@ -3,7 +3,7 @@
 <!-- same chip. Both write ?p=<slug> in the URL (stores/session-scope.ts).      -->
 
 <script lang="ts">
-	import { projectState } from "../../stores/project.svelte.js";
+	import { confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
 	import {
 		getSessionScope,
 		setSessionScope,
@@ -12,10 +12,12 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
+	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import ProjectScopeItem from "./ProjectScopeItem.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
@@ -35,7 +37,12 @@
 	const ALL_PROJECTS = "";
 
 	let input: HTMLInputElement | undefined = $state();
+	let scopeChip: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let pickerOpen = $state(false);
+	// Select mode swaps the scope radios for checkboxes, for removing several
+	// projects at once. It lasts only while the menu stays open.
+	let selecting = $state(false);
+	let selected: readonly string[] = $state([]);
 	// Focusing or typing in the input raises the suggestions; they stay up while
 	// focus is anywhere in the field, and Escape hides them without leaving it.
 	let focused = $state(false);
@@ -94,6 +101,21 @@
 		if (text === value) return;
 		if (input) input.value = text;
 		oninput(text);
+	}
+
+	function setPickerOpen(open: boolean) {
+		pickerOpen = open;
+		if (open) return;
+		selecting = false;
+		selected = [];
+	}
+
+	// The menu closes first so the confirm opens over the list, not the menu.
+	async function removeProjects(slugs: readonly string[]) {
+		setPickerOpen(false);
+		const removed = await confirmRemoveProjects(slugs, () => scopeChip ?? null);
+		const current = getSessionScope();
+		if (removed && current !== null && slugs.includes(current)) setSessionScope(null);
 	}
 
 	function handleFocusOut(event: FocusEvent) {
@@ -162,10 +184,11 @@
 	<!-- One pill: "All projects ▾" at rest, a removable "conduit ✕" token once
 	     scoped, the same thing `project:conduit` compiles to. -->
 	<span class="flex max-w-[60%] shrink-0 items-center rounded-full border border-border-chip bg-bg-alt">
-	<Menu bind:open={pickerOpen} ariaLabel="Project scope">
+	<Menu bind:open={() => pickerOpen, setPickerOpen} ariaLabel="Project scope">
 		{#snippet trigger({ props })}
 			<Button
 				{...props}
+				bind:element={scopeChip}
 				variant="ghost"
 				size="content"
 				tone="default"
@@ -179,24 +202,67 @@
 			</Button>
 		{/snippet}
 
-		<MenuRadioGroup
-			value={scope ?? ALL_PROJECTS}
-			onvaluechange={(next) => setSessionScope(next === ALL_PROJECTS ? null : next)}
-		>
-			<MenuRadioItem value={ALL_PROJECTS} class="min-h-[44px] md:min-h-0">All projects</MenuRadioItem>
+		{#if selecting}
 			{#each projectState.projects as project (project.slug)}
-				<MenuRadioItem value={project.slug} class="min-h-[44px] md:min-h-0">
-					<!-- The token beside each name teaches the typed form by use. -->
-					<span class="flex min-w-0 items-center justify-between gap-3">
-						<span class="truncate">{project.title || project.slug}</span>
-						<span class="shrink-0 font-mono text-xs text-text-dimmer">project:{project.slug}</span>
-					</span>
-				</MenuRadioItem>
+				<MenuCheckboxItem
+					class="min-h-[44px] md:min-h-0"
+					closeOnSelect={false}
+					data-testid="session-scope-select-item"
+					bind:checked={
+						() => selected.includes(project.slug),
+						(on) => {
+							selected = on
+								? [...selected, project.slug]
+								: selected.filter((slug) => slug !== project.slug);
+						}
+					}
+				>
+					{project.title || project.slug}
+				</MenuCheckboxItem>
 			{/each}
-		</MenuRadioGroup>
-		{#if onaddproject}
 			<MenuSeparator />
-			<MenuItem class="min-h-[44px] md:min-h-0" onselect={onaddproject}>Add a project…</MenuItem>
+			<MenuItem
+				variant="danger"
+				class="min-h-[44px] md:min-h-0"
+				disabled={selected.length === 0}
+				data-testid="session-scope-remove-selected"
+				onselect={() => void removeProjects(selected)}
+			>
+				{selected.length === 0
+					? "Remove projects"
+					: `Remove ${selected.length} project${selected.length === 1 ? "" : "s"}`}
+			</MenuItem>
+			<MenuItem
+				class="min-h-[44px] md:min-h-0"
+				closeOnSelect={false}
+				onselect={() => { selecting = false; selected = []; }}
+			>
+				Cancel
+			</MenuItem>
+		{:else}
+			<MenuRadioGroup
+				value={scope ?? ALL_PROJECTS}
+				onvaluechange={(next) => setSessionScope(next === ALL_PROJECTS ? null : next)}
+			>
+				<MenuRadioItem value={ALL_PROJECTS} class="min-h-[44px] md:min-h-0">All projects</MenuRadioItem>
+				{#each projectState.projects as project (project.slug)}
+					<ProjectScopeItem {project} onremove={(slug) => void removeProjects([slug])} />
+				{/each}
+			</MenuRadioGroup>
+			{#if projectState.projects.length > 0 || onaddproject}<MenuSeparator />{/if}
+			{#if projectState.projects.length > 0}
+				<MenuItem
+					class="min-h-[44px] md:min-h-0"
+					closeOnSelect={false}
+					data-testid="session-scope-select"
+					onselect={() => { selecting = true; }}
+				>
+					Select projects…
+				</MenuItem>
+			{/if}
+			{#if onaddproject}
+				<MenuItem class="min-h-[44px] md:min-h-0" onselect={onaddproject}>Add a project…</MenuItem>
+			{/if}
 		{/if}
 	</Menu>
 	{#if scope !== null}
