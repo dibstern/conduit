@@ -42,6 +42,12 @@ export type ProcessMark =
 	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
 	| { kind: "assistant-held"; prompt: string; queryId: string }
 	| {
+			kind: "resume-rejected";
+			prompt: string;
+			queryId: string;
+			sessionId: string;
+	  }
+	| {
 			kind: "background-work";
 			phase: "started" | "completed";
 			queryId: string;
@@ -269,6 +275,7 @@ function query(params: {
 	let livePermissionMode = params.options?.permissionMode;
 	let closed = false;
 	let promptIndex = 0;
+	let rejectedPrompt: string | undefined;
 	let initializationFinished = false;
 	let rejectInitialization: (error: Error) => void = () => {};
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
@@ -415,6 +422,16 @@ function query(params: {
 						: { permissionMode: livePermissionMode }),
 				},
 			});
+			const rejectedResume = proof
+				? join(dirname(proof), "rejected-resume-session-id")
+				: undefined;
+			if (
+				params.options?.resume &&
+				rejectedResume &&
+				existsSync(rejectedResume) &&
+				readFileSync(rejectedResume, "utf8") === params.options.resume
+			)
+				rejectedPrompt = prompt;
 			if (prompt === "fail-before-assistant-restart") {
 				const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 				if (!proof) throw new Error("Missing pre-assistant failure gate");
@@ -718,6 +735,23 @@ function query(params: {
 	// The adapter consumes the iterable and these control methods; the full SDK
 	// interface also contains unrelated account/MCP methods that this fake never uses.
 	return Object.assign(messages, {
+		[Symbol.asyncIterator]: () => ({
+			next: () => {
+				if (rejectedPrompt) {
+					mark({
+						kind: "resume-rejected",
+						prompt: rejectedPrompt,
+						queryId,
+						sessionId,
+					});
+					return Promise.reject(
+						new Error(`Claude session not found: ${sessionId}`),
+					);
+				}
+				return messages.next();
+			},
+			return: () => messages.return(undefined),
+		}),
 		initializationResult: () => initialization,
 		close: () => {
 			if (closed) return;

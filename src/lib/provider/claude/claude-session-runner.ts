@@ -172,9 +172,10 @@ export interface ClaudeSessionRunner {
 	readonly recoverEffect?: Effect.Effect<void, ClaudeSessionFailure>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
+	/** Undefined means no runtime session; null means its cursor is cleared. */
 	getResumeSessionIdEffect?(
 		sessionId: string,
-	): Effect.Effect<string | undefined>;
+	): Effect.Effect<string | null | undefined>;
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;

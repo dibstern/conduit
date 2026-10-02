@@ -530,7 +530,9 @@ const main = Effect.gen(function* () {
 					const command =
 						message.command.type === "send-turn" &&
 						frozenSnapshot &&
-						resumeSessionId
+						resumeSessionId &&
+						typeof message.command.input.providerState["resumeSessionId"] !==
+							"string"
 							? {
 									...message.command,
 									input: {
@@ -789,7 +791,8 @@ const main = Effect.gen(function* () {
 									const cursor = yield* runner?.getResumeSessionIdEffect?.(
 										sessionId,
 									) ?? Effect.succeed(undefined);
-									if (cursor) resumeSessionId = cursor;
+									if (cursor !== undefined)
+										resumeSessionId = cursor ?? undefined;
 									if (command.type === "send-turn") idle?.endTurn();
 									activeCommands--;
 									reportUpgradeState();
