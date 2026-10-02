@@ -137,6 +137,8 @@ export const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
 	args: Schema.optional(Schema.String),
+	/** The provider's own command or bundled skill; the composer offers these under `$`. */
+	builtin: Schema.optional(Schema.Boolean),
 });
 
 export const ProjectInfoSchema = Schema.Struct({

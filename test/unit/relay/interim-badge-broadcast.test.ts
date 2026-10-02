@@ -31,7 +31,7 @@ it("publishes committed permission counts through the root subscription", async 
 		runtime.runFork(
 			Stream.runForEach(
 				subscribeShell().pipe(
-					Stream.provideService(BackgroundLivenessTag, () => false),
+					Stream.provideService(BackgroundLivenessTag, () => undefined),
 				),
 				(envelope) =>
 					Effect.sync(() => {

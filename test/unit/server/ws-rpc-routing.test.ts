@@ -39,7 +39,7 @@ describe("routed RPC server", () => {
 					Layer.mergeAll(
 						bus,
 						makePersistenceEffectLayer(":memory:", undefined, bus),
-						Layer.succeed(BackgroundLivenessTag, () => false),
+						Layer.succeed(BackgroundLivenessTag, () => undefined),
 					),
 				);
 				contexts.set(slug, context as Context.Context<unknown>);

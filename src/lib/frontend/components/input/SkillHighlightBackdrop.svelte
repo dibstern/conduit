@@ -2,7 +2,7 @@
 	Highlight backdrop for the composer textarea.
 
 	The textarea renders its text transparent (caret only); this mirror sits behind
-	it and paints the same text, styling recognised `/skill` tokens as soft pills and
+	it and paints the same text, styling recognised `/skill` and `$builtin` tokens as soft pills and
 	unknown ones as red underlines. Both wear `composer-text-metrics`, which is the
 	single definition of the layout that decides where a glyph lands.
 
@@ -22,11 +22,12 @@
 	interface Props {
 		text: string;
 		commandNames: ReadonlySet<string>;
+		builtinNames?: ReadonlySet<string>;
 		dimmed?: boolean;
 	}
-	let { text, commandNames, dimmed = false }: Props = $props();
+	let { text, commandNames, builtinNames, dimmed = false }: Props = $props();
 
-	const segments = $derived(tokenizeSkills(text, commandNames));
+	const segments = $derived(tokenizeSkills(text, commandNames, builtinNames));
 </script>
 
 <div

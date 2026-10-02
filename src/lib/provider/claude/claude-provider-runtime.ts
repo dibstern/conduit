@@ -1973,6 +1973,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 			log.info(`Interrupting turn for session ${sessionId}`);
 			yield* this.cleanupSessionEffect(ctx, "Turn interrupted", false);
+			// Stop means the whole session. interrupt() alone leaves the CLI alive
+			// for up to 10 minutes while Monitor tasks and agents are armed, and the
+			// next turn starts a new process anyway, so their results could never
+			// arrive. Closing kills them now; the stream end then clears liveness.
+			yield* Effect.try({
+				try: () => ctx.query.close(),
+				catch: (cause) =>
+					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
+			}).pipe(Effect.ignore);
 			yield* settleQueuedTurnDeferredsEffect(this.stateRef, ctx.sessionId, {
 				status: "interrupted",
 				cost: 0,

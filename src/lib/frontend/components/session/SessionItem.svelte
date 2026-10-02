@@ -25,7 +25,8 @@
 				| "triangle-alert"
 				| "message-square"
 				| "octagon-alert"
-				| "block-grid"
+				| "slide-puzzle"
+				| "eye"
 				| "check"
 				| "circle"
 				| null;
@@ -57,7 +58,7 @@
 			emphasis: "strong",
 		},
 		working: {
-			// No word on purpose: the BlockGrid on the left already says working,
+			// No word on purpose: the slide puzzle on the left already says working,
 			// and the right column shows elapsed time instead, which is the only
 			// thing that changes while a turn runs. `word` is therefore the
 			// pill's text and its presence is what decides pill-vs-time.
@@ -65,7 +66,18 @@
 			spoken: "Working",
 			colour: "text-accent",
 			pill: "",
-			icon: "block-grid",
+			icon: "slide-puzzle",
+			emphasis: "normal",
+		},
+		monitoring: {
+			// Calm on purpose: only watchers are live, so nothing is happening
+			// until one fires. A word, not elapsed time, because the wait has no
+			// expected end.
+			word: "Monitoring",
+			spoken: "Monitoring",
+			colour: "text-text-secondary",
+			pill: "px-[2px] font-medium text-text-secondary",
+			icon: "eye",
 			emphasis: "normal",
 		},
 		"done-unread": {
@@ -126,7 +138,7 @@
 	import { sessionAttention } from "../../stores/session.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Icon from "../ui/Icon.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import SlidePuzzle from "../ui/SlidePuzzle.svelte";
 	import Button from "../ui/Button.svelte";
 	import SessionRenameInput from "./SessionRenameInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
@@ -621,8 +633,8 @@
 			class="session-status-glyph col-start-1 row-start-1 row-span-2 grid place-items-center size-[20px] justify-self-center {status.colour}"
 			aria-hidden="true"
 		>
-			{#if status.icon === "block-grid"}
-				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+			{#if status.icon === "slide-puzzle"}
+				<SlidePuzzle />
 			{:else}
 				<Icon name={status.icon} size={shelfRow ? 11 : 14} />
 			{/if}

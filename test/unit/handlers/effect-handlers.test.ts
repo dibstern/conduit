@@ -3399,7 +3399,7 @@ describe("sendMessageToSession", () => {
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, ws),
-						Layer.succeed(BackgroundLivenessTag, () => false),
+						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
 						OpenCodeInstanceClientsLive.pipe(Layer.provide(Layer.merge(configLayer, loggerLayer))),

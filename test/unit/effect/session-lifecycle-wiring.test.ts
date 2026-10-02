@@ -143,7 +143,7 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 
 	const baseLayer = Layer.mergeAll(
 		Layer.succeed(ConfigTag, makeMockConfig()),
-		Layer.succeed(BackgroundLivenessTag, () => false),
+		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
 		OpenCodeInstanceClientsLive.pipe(

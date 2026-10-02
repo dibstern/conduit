@@ -9,6 +9,7 @@ import type {
 	ChatMessage,
 	HistoryMessage,
 } from "../../../src/lib/frontend/types.js";
+import { isQueued } from "../../../src/lib/frontend/utils/turns.js";
 
 vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 	renderMarkdown: (text: string) => text,
@@ -308,45 +309,41 @@ describe("transcript detail reducer", () => {
 			...row(id, created, id),
 			time: { created, ...(completed === undefined ? {} : { completed }) },
 		});
-		const queuedEpochs = (
-			rows: HistoryMessage[],
-			options = { live: true, active: true },
-		) =>
+		// A reload renders while the transcript is still loading, before the busy
+		// status arrives, so the rows alone must carry the fact.
+		const queued = (rows: HistoryMessage[], processing = true) =>
 			deriveTranscriptMessages(
 				applyTranscriptEnvelope(entry(), snapshot(rows, 1)),
 				[],
-				{ ...options, turnEpoch: 3 },
+				{ live: false, active: false, turnEpoch: 3 },
 			)
 				.filter((message) => message.type === "user")
-				.map((message) => message.sentDuringEpoch);
+				.map((message) => isQueued(message, 3, processing));
 
 		// Claude stamps a row's last write as `completed`; OpenCode omits it mid-run.
 		expect(
-			queuedEpochs([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)]),
-		).toEqual([undefined, 3]);
+			queued([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)]),
+		).toEqual([false, true]);
 		expect(
-			queuedEpochs([prompt("one", 1), reply("a", 2), prompt("next", 10)]),
-		).toEqual([undefined, 3]);
+			queued([prompt("one", 1), reply("a", 2), prompt("next", 10)]),
+		).toEqual([false, true]);
 		// The reply had finished before the prompt was sent.
 		expect(
-			queuedEpochs([prompt("one", 1), reply("a", 2, 5), prompt("next", 10)]),
-		).toEqual([undefined, undefined]);
+			queued([prompt("one", 1), reply("a", 2, 5), prompt("next", 10)]),
+		).toEqual([false, false]);
 		// The prompt has started: its own reply is below it.
 		expect(
-			queuedEpochs([
+			queued([
 				prompt("one", 1),
 				reply("a", 2, 50),
 				prompt("next", 10),
 				reply("b", 60),
 			]),
-		).toEqual([undefined, undefined]);
+		).toEqual([false, false]);
 		// Nothing is running any more.
 		expect(
-			queuedEpochs([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)], {
-				live: true,
-				active: false,
-			}),
-		).toEqual([undefined, undefined]);
+			queued([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)], false),
+		).toEqual([false, false]);
 	});
 
 	it("does not adopt a repeated send into an older projected user row", () => {

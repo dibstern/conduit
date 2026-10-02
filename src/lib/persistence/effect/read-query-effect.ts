@@ -1,7 +1,11 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
-import type { SessionAttention, SessionInfo } from "../../shared-types.js";
+import type {
+	BackgroundWork,
+	SessionAttention,
+	SessionInfo,
+} from "../../shared-types.js";
 import type {
 	MessagePartRow,
 	MessageRow,
@@ -66,13 +70,16 @@ export const sessionRowsToSessionInfoList = (
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
-		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
+		readonly backgroundWorkOf?: (
+			sessionId: string,
+		) => BackgroundWork | undefined;
 	} = {},
 ): Array<SessionInfo & { readonly updatedAt: number }> => {
 	const subtree = new Map<
 		string,
 		{
 			processing: boolean;
+			monitoring: boolean;
 			unread: boolean;
 			questions: number;
 			permissions: number;
@@ -92,15 +99,16 @@ export const sessionRowsToSessionInfoList = (
 			}
 			const state = subtree.get(root) ?? {
 				processing: false,
+				monitoring: false,
 				unread: false,
 				questions: 0,
 				permissions: 0,
 			};
 			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
+			const work = opts.backgroundWorkOf?.(id);
 			state.processing ||=
-				status === "busy" ||
-				status === "retry" ||
-				opts.hasLiveBackgroundWork?.(id) === true;
+				status === "busy" || status === "retry" || work === "working";
+			state.monitoring ||= work === "monitoring";
 			state.unread ||= opts.unreadSessionIds?.has(id) === true;
 			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
 			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
@@ -116,16 +124,19 @@ export const sessionRowsToSessionInfoList = (
 			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
 		const unread = row.unread === 1;
 		const status = opts.statuses?.[row.id]?.type ?? row.status;
+		const backgroundWork = opts.backgroundWorkOf?.(row.id);
 		const processing =
 			state?.processing ||
 			status === "busy" ||
 			status === "retry" ||
-			opts.hasLiveBackgroundWork?.(row.id) === true;
+			backgroundWork === "working";
+		const monitoring = state?.monitoring || backgroundWork === "monitoring";
 		let attention: SessionAttention = "idle";
 		if ((pendingPermissionCount ?? 0) > 0) attention = "needs-approval";
 		else if ((pendingQuestionCount ?? 0) > 0) attention = "needs-reply";
 		else if (row.last_turn_error_at !== null) attention = "error";
 		else if (processing) attention = "working";
+		else if (monitoring) attention = "monitoring";
 		else if (state?.unread || unread) attention = "done-unread";
 		return {
 			id: row.id,
@@ -146,6 +157,7 @@ export const sessionRowsToSessionInfoList = (
 				? { forkPointMessageId: row.fork_point_message_id }
 				: {}),
 			...(processing ? { processing: true } : {}),
+			...(backgroundWork ? { backgroundWork } : {}),
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),
@@ -218,7 +230,7 @@ export interface ReadQueryEffect {
 		titleQuery?: string;
 		before?: { updatedAt: number; id: string };
 		statuses?: Readonly<Record<string, { type: string }>>;
-		hasLiveBackgroundWork?: (sessionId: string) => boolean;
+		backgroundWorkOf?: (sessionId: string) => BackgroundWork | undefined;
 	}) => Effect.Effect<
 		readonly (SessionInfo & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
@@ -291,7 +303,9 @@ export interface ReadQueryEffect {
 		readonly through?: number;
 		readonly roots?: boolean;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
-		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
+		readonly backgroundWorkOf?: (
+			sessionId: string,
+		) => BackgroundWork | undefined;
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -631,8 +645,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
-				...(opts?.hasLiveBackgroundWork && {
-					hasLiveBackgroundWork: opts.hasLiveBackgroundWork,
+				...(opts?.backgroundWorkOf && {
+					backgroundWorkOf: opts.backgroundWorkOf,
 				}),
 			});
 		});
@@ -819,7 +833,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly after?: number;
 		readonly through?: number;
 		readonly roots?: boolean;
-		readonly hasLiveBackgroundWork?: (sessionId: string) => boolean;
+		readonly backgroundWorkOf?: (
+			sessionId: string,
+		) => BackgroundWork | undefined;
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -879,8 +895,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
-						...(range?.hasLiveBackgroundWork && {
-							hasLiveBackgroundWork: range.hasLiveBackgroundWork,
+						...(range?.backgroundWorkOf && {
+							backgroundWorkOf: range.backgroundWorkOf,
 						}),
 					});
 					return {

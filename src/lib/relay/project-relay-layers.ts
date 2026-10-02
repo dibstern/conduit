@@ -285,7 +285,7 @@ export function createProjectRelayLayers({
 		toolContentServiceLayer,
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
-		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.hasLiveWork),
+		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundWork),
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,

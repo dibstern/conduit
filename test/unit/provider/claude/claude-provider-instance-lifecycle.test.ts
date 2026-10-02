@@ -254,7 +254,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("interruptTurnEffect()", () => {
-		it("closes prompt queue and interrupts query", async () => {
+		it("closes prompt queue, interrupts and closes query", async () => {
 			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: workspace,
 			});
@@ -265,6 +265,8 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.interrupt).toHaveBeenCalled();
+			// The process goes too, or armed Monitor tasks outlive the Stop.
+			expect(ctx.query.close).toHaveBeenCalled();
 			expect(ctx.stopped).toBe(true);
 		});
 

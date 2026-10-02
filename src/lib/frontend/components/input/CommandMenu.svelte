@@ -1,4 +1,4 @@
-<!-- Slash-command autocomplete popup. Filters commands by prefix match, supports -->
+<!-- Command autocomplete popup for `/skill` and `$builtin`. Filters by prefix match, supports -->
 <!-- keyboard navigation (ArrowUp/Down, Enter, Escape) and mouse selection. -->
 <!-- Preserves #command-menu wrapper ID for E2E compatibility. -->
 
@@ -12,6 +12,7 @@
 		query,
 		visible,
 		commands,
+		trigger = "/",
 		onSelect,
 		onClose,
 		activeIndex = $bindable(0),
@@ -20,6 +21,7 @@
 		query: string;
 		visible: boolean;
 		commands: CommandInfo[];
+		trigger?: "/" | "$";
 		onSelect: (command: string) => void;
 		onClose: () => void;
 		activeIndex?: number | undefined;
@@ -84,7 +86,7 @@
 	}
 
 	function selectCommand(cmd: CommandInfo): void {
-		onSelect(`/${cmd.name} `);
+		onSelect(`${trigger}${cmd.name} `);
 	}
 
 	// Resolved by option id rather than a descendant class query: the old lookup
@@ -104,7 +106,7 @@
 	{#if isVisible}
 		<DetachedListbox
 			id={listboxId}
-			ariaLabel="Slash commands"
+			ariaLabel={trigger === "$" ? "Built-in commands" : "Slash commands"}
 			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto"
 		>
 			{#each filtered as cmd, i}
@@ -126,7 +128,7 @@
 					<span
 						class="cmd-name shrink-0 font-mono text-base font-medium text-accent whitespace-nowrap max-sm:text-xs"
 					>
-					/{cmd.name}
+					{trigger}{cmd.name}
 					{#if cmd.args}
 						<span class="cmd-args font-normal text-text-muted"
 							>{cmd.args}</span

@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conduit · sidebar loading indicators</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root {
+	--a: #fe3781; --b: #00e5ff;
+	--a-glow: rgba(254, 55, 129, .55); --b-glow: rgba(0, 229, 255, .55);
+	--bg: #0d0e11; --surface: #141619; --alt: #1b1e24; --active: #20242b;
+	--border: #2d323b; --border-subtle: #20242b;
+	--text: #eceef2; --text2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--success: #3fd69a; --warning: #f4b740;
+	--z: 6;
+	color-scheme: dark;
+}
+:root.light {
+	--a: #c9004f; --b: #006d7a;
+	--a-glow: rgba(201, 0, 79, .35); --b-glow: rgba(0, 109, 122, .35);
+	--bg: #f5f6f9; --surface: #ffffff; --alt: #eef0f4; --active: #e4e8ef;
+	--border: #d5dae2; --border-subtle: #e4e8ef;
+	--text: #14171c; --text2: #3d434d; --muted: #626975; --dim: #7a818c;
+	--success: #0f8a5f; --warning: #a66a00;
+	color-scheme: light;
+}
+* { box-sizing: border-box; }
+body {
+	margin: 0; background: var(--bg); color: var(--text);
+	font: 13px/1.5 "Chakra Petch", system-ui, sans-serif;
+}
+header { padding: 18px 24px 0; }
+.controls {
+	position: sticky; top: 0; z-index: 10;
+	display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
+	padding: 10px 24px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+	backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-subtle);
+}
+header h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+header h1 span { color: var(--muted); font-weight: 400; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button {
+	font: inherit; font-size: 12px; color: var(--text2); background: transparent;
+	border: 0; padding: 5px 11px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--active); color: var(--text); }
+.layout { display: grid; grid-template-columns: 1fr 300px; gap: 28px; padding: 24px; align-items: start; }
+@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } aside { order: -1; } }
+main section + section { margin-top: 36px; }
+h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .08em; color: var(--text2); }
+.lede { color: var(--muted); margin: 0 0 14px; max-width: 70ch; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.card {
+	background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 12px;
+	overflow: hidden; cursor: pointer; transition: border-color .15s;
+	display: flex; flex-direction: column;
+}
+.card:hover { border-color: var(--border); }
+.card.selected { border-color: var(--a); box-shadow: 0 0 0 1px var(--a); }
+.stage {
+	height: 168px; display: grid; place-items: center; position: relative;
+	background:
+		linear-gradient(var(--border-subtle) 1px, transparent 1px) 0 0 / 12px 12px,
+		linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px) 0 0 / 12px 12px;
+	border-bottom: 1px solid var(--border-subtle);
+	overflow: hidden;
+}
+.stage .zoom { zoom: var(--z); display: grid; place-items: center; width: 20px; height: 20px; outline: .5px dashed color-mix(in srgb, var(--muted) 35%, transparent); outline-offset: 0; }
+.stage .num {
+	position: absolute; top: 8px; left: 10px; font-size: 11px; color: var(--muted);
+	font-family: "JetBrains Mono", monospace;
+}
+.stage .size {
+	position: absolute; top: 8px; right: 10px; font-size: 10px; color: var(--dim);
+	font-family: "JetBrains Mono", monospace;
+}
+.meta { padding: 10px 12px 4px; }
+.meta h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.meta p { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.ctx { padding: 6px 6px 8px; background: var(--surface); }
+.ctx .row + .row { margin-top: 2px; }
+
+/* Mock session row, matched to SessionItem: 20px glyph slot, 15px title, 12px context. */
+.row {
+	display: grid; grid-template-columns: 20px 1fr auto; column-gap: 8px;
+	align-items: center; padding: 6px 10px; border-radius: 8px;
+	font-family: "Chakra Petch", sans-serif;
+}
+.row.active { background: var(--active); }
+.row .glyph { grid-row: span 2; display: grid; place-items: center; width: 20px; height: 20px; }
+.row .t { font-size: 15px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .time { font-size: 11px; color: var(--dim); }
+.row .c { grid-column: 2 / 4; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row.settled { opacity: .55; }
+.row .done { width: 14px; height: 14px; color: var(--success); }
+
+aside {
+	background: var(--surface); border: 1px solid var(--border-subtle);
+	border-radius: 12px; overflow: hidden;
+}
+aside .head { padding: 12px 14px 8px; border-bottom: 1px solid var(--border-subtle); }
+aside .head b { font-size: 13px; }
+aside .head div { color: var(--muted); font-size: 12px; }
+aside .list { padding: 6px; }
+aside .sec { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding: 10px 10px 4px; }
+.footnote { color: var(--dim); font-size: 12px; margin-top: 40px; }
+
+/* ---------- Shared keyframes ---------- */
+/* The two production keyframes, copied verbatim from style.css. */
+@keyframes pixel-cascade-a { 0%{opacity:.15} 20%{opacity:1} 40%{opacity:.3} 60%{opacity:.8} 80%{opacity:.15} 100%{opacity:.5} }
+@keyframes pixel-cascade-b { 0%{opacity:.5} 25%{opacity:.15} 50%{opacity:1} 75%{opacity:.3} 100%{opacity:.15} }
+
+.blk { display: block; }
+
+/* 6 helix */
+@keyframes helix { 0%,100% { transform: translateY(0); opacity: 1; } 50% { transform: translateY(var(--travel)); opacity: .3; } }
+
+/* 11 orbit */
+.orbit { position: relative; width: 16px; height: 16px; animation: spin 1.1s linear infinite; }
+.orbit::before { content: ""; position: absolute; inset: 2px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent); }
+.orbit i { position: absolute; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; }
+.orbit i:first-child { top: 0; background: var(--a); box-shadow: 0 0 3px var(--a-glow); }
+.orbit i:last-child { bottom: 0; background: var(--b); box-shadow: 0 0 3px var(--b-glow); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 12 gradient arc */
+.arc {
+	width: 15px; height: 15px; border-radius: 50%;
+	background: conic-gradient(from 0deg, transparent 0 8%, var(--b) 45%, var(--a) 92%, transparent 92%);
+	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.25px), #000 calc(100% - 2px));
+	mask: radial-gradient(farthest-side, transparent calc(100% - 2.25px), #000 calc(100% - 2px));
+	animation: spin .9s linear infinite;
+}
+
+/* 13 conduit pipe */
+.pipe { position: relative; width: 19px; height: 5px; border-radius: 3px; overflow: hidden;
+	background: color-mix(in srgb, var(--muted) 18%, transparent); }
+.pipe i { position: absolute; top: 0; height: 5px; width: 8px; border-radius: 3px; }
+.pipe i:first-child { left: 0; background: linear-gradient(90deg, transparent, var(--a)); animation: pipe-r 1.3s cubic-bezier(.5,0,.5,1) infinite; }
+.pipe i:last-child { right: 0; background: linear-gradient(270deg, transparent, var(--b)); animation: pipe-l 1.3s cubic-bezier(.5,0,.5,1) infinite; animation-delay: -.65s; }
+@keyframes pipe-r { from { transform: translateX(-9px); } to { transform: translateX(20px); } }
+@keyframes pipe-l { from { transform: translateX(9px); } to { transform: translateX(-20px); } }
+
+/* 14 heartbeat */
+.beat { position: relative; width: 16px; height: 16px; display: grid; place-items: center; }
+.beat i { width: 6px; height: 6px; border-radius: 50%; background: var(--a); animation: lubdub 1.4s ease-in-out infinite; }
+.beat::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--b); animation: halo 1.4s ease-out infinite; }
+@keyframes lubdub { 0%,40%,100% { transform: scale(.8); } 10% { transform: scale(1.25); } 22% { transform: scale(.95); } 30% { transform: scale(1.15); } }
+@keyframes halo { 0%,8% { transform: scale(.35); opacity: 0; } 12% { opacity: .9; } 70%,100% { transform: scale(1); opacity: 0; } }
+
+/* 15 dots */
+.dots { display: flex; gap: 2px; align-items: center; height: 10px; }
+.dots i { width: 3.5px; height: 3.5px; border-radius: 50%; animation: hop 1.1s ease-in-out infinite; }
+.dots i:nth-child(1) { background: var(--a); }
+.dots i:nth-child(2) { background: color-mix(in oklab, var(--a), var(--b)); animation-delay: .14s; }
+.dots i:nth-child(3) { background: var(--b); animation-delay: .28s; }
+@keyframes hop { 0%,60%,100% { transform: translateY(1.5px); opacity: .45; } 30% { transform: translateY(-2.5px); opacity: 1; } }
+
+/* 16 waveform */
+.wave {
+	width: 18px; height: 10px; background: linear-gradient(90deg, var(--a), var(--b));
+	--w: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='10'%3E%3Cpath d='M0 5 Q3 0.5 6 5 T12 5' fill='none' stroke='%23000' stroke-width='1.6'/%3E%3C/svg%3E");
+	-webkit-mask: var(--w) 0 0 / 12px 10px repeat-x; mask: var(--w) 0 0 / 12px 10px repeat-x;
+	animation: wave .8s linear infinite;
+}
+@keyframes wave { to { -webkit-mask-position: -12px 0; mask-position: -12px 0; } }
+
+/* 17 morph */
+.morph { width: 10px; height: 10px; background: var(--a); animation: morph 1.6s ease-in-out infinite; }
+@keyframes morph {
+	0% { border-radius: 1.5px; transform: rotate(0); background: var(--a); }
+	50% { border-radius: 50%; transform: rotate(90deg) scale(.8); background: var(--b); }
+	100% { border-radius: 1.5px; transform: rotate(180deg); background: var(--a); }
+}
+
+/* 19 infinity */
+.inf { width: 20px; height: 10px; overflow: visible; }
+.inf path { fill: none; stroke-linecap: round; }
+.inf .track { stroke: color-mix(in srgb, var(--muted) 25%, transparent); stroke-width: 1; }
+.inf .comet { stroke-width: 1.8; stroke-dasharray: 14 86; animation: dash 1.8s linear infinite; }
+.inf .comet.a { stroke: var(--a); }
+.inf .comet.b { stroke: var(--b); animation-delay: -.9s; }
+@keyframes dash { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+/* 20 ripple */
+.ripple { position: relative; width: 17px; height: 17px; }
+.ripple i { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid var(--a); animation: ripple 1.6s cubic-bezier(.2,.6,.4,1) infinite; }
+.ripple i:last-child { border-color: var(--b); animation-delay: -.8s; }
+@keyframes ripple { from { transform: scale(.15); opacity: 1; } to { transform: scale(1); opacity: 0; } }
+
+/* 23 checker */
+@keyframes swap { 0%,100% { background: var(--a); } 50% { background: var(--b); } }
+
+/* 31 cube */
+.cube-wrap { perspective: 60px; width: 14px; height: 14px; display: grid; place-items: center; }
+.cube { position: relative; width: 8px; height: 8px; transform-style: preserve-3d; animation: cube 2.4s linear infinite; }
+.cube i { position: absolute; inset: 0; border-radius: 1px; }
+.cube i:nth-child(1) { background: var(--a); transform: translateZ(4px); }
+.cube i:nth-child(2) { background: var(--a); transform: rotateY(180deg) translateZ(4px); }
+.cube i:nth-child(3) { background: var(--b); transform: rotateY(90deg) translateZ(4px); }
+.cube i:nth-child(4) { background: var(--b); transform: rotateY(-90deg) translateZ(4px); }
+.cube i:nth-child(5) { background: color-mix(in oklab, var(--a), var(--b)); transform: rotateX(90deg) translateZ(4px); }
+.cube i:nth-child(6) { background: color-mix(in oklab, var(--a), var(--b)); transform: rotateX(-90deg) translateZ(4px); }
+@keyframes cube { from { transform: rotateX(-30deg) rotateY(0); } to { transform: rotateX(-30deg) rotateY(360deg); } }
+
+/* 32 cradle */
+.cradle { display: flex; gap: .5px; }
+.cradle i { width: 3.5px; height: 3.5px; border-radius: 50%; background: var(--muted); }
+.cradle i:first-child { background: var(--a); animation: swing-l 1.2s infinite; }
+.cradle i:last-child { background: var(--b); animation: swing-r 1.2s infinite; }
+@keyframes swing-l {
+	0% { transform: translate(0,0); animation-timing-function: ease-out; }
+	25% { transform: translate(-3.5px,-1px); animation-timing-function: ease-in; }
+	50%,100% { transform: translate(0,0); }
+}
+@keyframes swing-r {
+	0%,50% { transform: translate(0,0); animation-timing-function: ease-out; }
+	75% { transform: translate(3.5px,-1px); animation-timing-function: ease-in; }
+	100% { transform: translate(0,0); }
+}
+
+/* 33 flip */
+.flip { position: relative; width: 10px; height: 10px; transform-style: preserve-3d; animation: flip 2.4s ease-in-out infinite; }
+.flip i { position: absolute; inset: 0; border-radius: 1.5px; -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+.flip i:first-child { background: var(--a); }
+.flip i:last-child { background: var(--b); transform: rotateY(180deg); }
+@keyframes flip {
+	0% { transform: perspective(40px) rotateX(0) rotateY(0); }
+	25% { transform: perspective(40px) rotateX(-180deg) rotateY(0); }
+	50% { transform: perspective(40px) rotateX(-180deg) rotateY(-180deg); }
+	75% { transform: perspective(40px) rotateX(0) rotateY(-180deg); }
+	100% { transform: perspective(40px) rotateX(0) rotateY(0); }
+}
+
+/* 34 gyro */
+.gyro circle { fill: none; stroke-width: 1.6; stroke-linecap: round; transform-box: fill-box; transform-origin: center; }
+.gyro .o { stroke: var(--a); stroke-dasharray: 8 4; animation: spin 2.4s linear infinite; }
+.gyro .i { stroke: var(--b); stroke-dasharray: 6 4; animation: spin 1.6s linear infinite reverse; }
+
+/* 35 capsule bars */
+.bars { display: flex; gap: 1.5px; align-items: center; height: 14px; }
+.bars i { width: 2.5px; height: 14px; border-radius: 2px; animation: bar 1s ease-in-out infinite; }
+@keyframes bar { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+
+/* 36 clock */
+.clock { position: relative; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--b) 75%, transparent); }
+.clock i { position: absolute; left: 50%; bottom: 50%; width: 1.5px; margin-left: -.75px; border-radius: 1px; transform-origin: 50% 100%; }
+.clock i:first-child { height: 5px; background: var(--a); animation: spin 1.2s linear infinite; }
+.clock i:last-child { height: 3.5px; background: var(--muted); animation: spin 14.4s linear infinite; }
+
+/* 37 bounce */
+.bounce { position: relative; width: 14px; height: 14px; }
+.bounce::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 1.5px; border-radius: 1px; background: var(--b); }
+.bounce i { position: absolute; left: 4.5px; bottom: 1.5px; width: 5px; height: 5px; border-radius: 50%; background: var(--a); transform-origin: 50% 100%; animation: ball .9s infinite; }
+@keyframes ball {
+	0% { transform: translateY(-7.5px) scale(.9,1.1); animation-timing-function: cubic-bezier(.55,0,1,.45); }
+	42% { transform: translateY(0) scale(.9,1.1); animation-timing-function: ease-out; }
+	50% { transform: translateY(0) scale(1.35,.65); animation-timing-function: ease-in; }
+	58% { transform: translateY(0) scale(1); animation-timing-function: cubic-bezier(0,.55,.45,1); }
+	100% { transform: translateY(-7.5px) scale(.9,1.1); }
+}
+
+/* 38 skeleton */
+.skel { display: grid; gap: 2px; width: 16px; }
+.skel i {
+	height: 2.5px; border-radius: 2px; background-size: 300% 100%; animation: skel 1.4s linear infinite;
+	background-image: linear-gradient(90deg, color-mix(in srgb, var(--muted) 28%, transparent) 30%, var(--a) 45%, var(--b) 55%, color-mix(in srgb, var(--muted) 28%, transparent) 70%);
+}
+@keyframes skel { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* 39 atom */
+.atom ellipse { fill: none; stroke-linecap: round; }
+.atom .track { stroke: color-mix(in srgb, var(--muted) 22%, transparent); stroke-width: .8; }
+.atom .comet { stroke-width: 1.6; stroke-dasharray: 10 90; animation: dash 1.5s linear infinite; }
+
+/* 40 goo */
+.goo { position: relative; width: 19px; height: 8px; filter: url(#goo); }
+.goo i { position: absolute; top: 1.5px; left: 7px; width: 5px; height: 5px; border-radius: 50%; }
+.goo i:first-child { background: var(--a); animation: goo-l 1.6s ease-in-out infinite; }
+.goo i:last-child { background: var(--b); animation: goo-r 1.6s ease-in-out infinite; }
+@keyframes goo-l { 0%,100% { transform: translateX(-5.5px); } 50% { transform: translateX(-1.5px); } }
+@keyframes goo-r { 0%,100% { transform: translateX(5.5px); } 50% { transform: translateX(1.5px); } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="goo"><feGaussianBlur stdDeviation="1"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -7"/></filter></svg>
+<header>
+	<h1>Sidebar loading indicators <span>· 40 options for the session row's working glyph</span></h1>
+</header>
+<div class="controls">
+		<div class="seg" id="theme">
+			<button data-v="dark" aria-pressed="true">Dark</button>
+			<button data-v="light" aria-pressed="false">Light</button>
+		</div>
+		<div class="seg" id="zoom">
+			<button data-v="4" aria-pressed="false">4×</button>
+			<button data-v="6" aria-pressed="true">6×</button>
+			<button data-v="10" aria-pressed="false">10×</button>
+		</div>
+</div>
+
+<div class="layout">
+	<main>
+		<section>
+			<h2>Baseline</h2>
+			<p class="lede"><b style="color:var(--text)">Chosen (2026-10-02): #30 Slide puzzle.</b> It is preselected in the mock sidebar.</p>
+			<p class="lede">What ships today: <code>&lt;BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5}&gt;</code>, a 9.5 × 3.5 px glyph inside the row's 20 px slot (dashed outline in the magnified view). Click any card to try it in the mock sidebar.</p>
+			<div class="cards" id="baseline"></div>
+		</section>
+		<section>
+			<h2>A · Inspired by the current one</h2>
+			<p class="lede">Same pixel-block vocabulary and the pink-over-cyan pairing. 1 and 2 are straight scale-ups of the existing component; 3 to 10 rearrange or re-time the blocks.</p>
+			<div class="cards" id="inspired"></div>
+		</section>
+		<section>
+			<h2>B · New directions</h2>
+			<p class="lede">Different shapes, still in the brand pair and still sized for the 20 px slot.</p>
+			<div class="cards" id="novel"></div>
+		</section>
+		<section>
+			<h2>C · More from the block grid</h2>
+			<p class="lede">Ten more in the pixel-block style. These play with paths, trails and timing rather than layout.</p>
+			<div class="cards" id="inspired2"></div>
+		</section>
+		<section>
+			<h2>D · More new directions</h2>
+			<p class="lede">Ten more shapes from outside the grid.</p>
+			<div class="cards" id="novel2"></div>
+		</section>
+		<p class="footnote">All CSS or inline SVG, no JS at runtime beyond building this page. Colours are the real conduit tokens for each theme; the row mock uses the real 20 px slot, 15 px title and 12 px context sizes.</p>
+	</main>
+
+	<aside>
+		<div class="head"><b id="pick-name">Current</b><div>in a mock sidebar, true size</div></div>
+		<div class="list" id="sidebar"></div>
+	</aside>
+</div>
+
+<script>
+const PINK = "var(--a)", CYAN = "var(--b)";
+let styleSheet = "";
+let kfId = 0;
+
+// Keyframes sampled from a function of phase (0..1) -> opacity. Lets the
+// block patterns below say exactly when each block lights without hand-writing
+// a keyframe per block.
+function sampled(fn, samples = 48) {
+	const name = `k${kfId++}`;
+	const stops = [];
+	for (let s = 0; s <= samples; s++) {
+		const p = s / samples;
+		stops.push(`${(p * 100).toFixed(2)}%{opacity:${fn(p).toFixed(3)}}`);
+	}
+	styleSheet += `@keyframes ${name}{${stops.join("")}}\n`;
+	return name;
+}
+
+// A grid of square blocks. cell(col, row) returns the block's inline style, or null for an empty cell.
+function grid({ cols, rows, size, gap, cell, radius = Math.max(0.5, size / 4) }) {
+	let html = `<div style="display:inline-grid;grid-template-columns:repeat(${cols},${size}px);grid-template-rows:repeat(${rows},${size}px);gap:${gap}px">`;
+	for (let r = 0; r < rows; r++)
+		for (let c = 0; c < cols; c++) {
+			const s = cell(c, r);
+			html += s == null ? "<span></span>" : `<span class="blk" style="width:${size}px;height:${size}px;border-radius:${radius}px;${s}"></span>`;
+		}
+	return html + "</div>";
+}
+
+// The production BlockGrid, parameterised.
+function cascade({ cols = 5, size, gap, glow = false, duration = 1.4 }) {
+	const step = 1.0 / (cols - 1);
+	return grid({
+		cols, rows: 2, size, gap,
+		cell: (c, r) => {
+			const colour = r === 0 ? PINK : CYAN;
+			const delay = (r === 0 ? c : cols - 1 - c) * step;
+			const shadow = glow ? `filter:drop-shadow(0 0 ${size / 2}px ${r === 0 ? "var(--a-glow)" : "var(--b-glow)"});` : "";
+			return `background:${colour};animation:pixel-cascade-${r === 0 ? "a" : "b"} ${duration}s ease-in-out infinite;animation-delay:${delay.toFixed(3)}s;${shadow}`;
+		},
+	});
+}
+
+// Opacity of a block that is "hit" at the given phases and decays afterwards.
+function decayFrom(hits, tail, lo = 0.12) {
+	return (p) => {
+		let best = 0;
+		for (const h of hits) {
+			const d = (p - h + 1) % 1;
+			best = Math.max(best, Math.exp(-d / tail));
+		}
+		return lo + (1 - lo) * best;
+	};
+}
+
+const mix = (t) => `color-mix(in oklab, var(--a) ${Math.round((1 - t) * 100)}%, var(--b))`;
+
+const baseline = [
+	{ name: "Current · BlockGrid 5×2", size: "9.5×3.5", note: "Pink row cascades left to right, cyan right to left, 1.4 s.",
+		html: () => cascade({ size: 1.5, gap: 0.5 }) },
+];
+
+const inspired = [
+	{ name: "Cascade ×1.5", size: "14.3×5.3", note: "The exact current animation at 1.5× scale. Smallest change that still reads at a glance.",
+		html: () => cascade({ size: 2.25, gap: 0.75 }) },
+	{ name: "Cascade ×2", size: "19×7", note: "2× scale, filling the slot's width. Same timing, blocks now clearly distinct pixels.",
+		html: () => cascade({ size: 3, gap: 1 }) },
+	{ name: "Upright cascade", size: "6×16.5", note: "Rotated 90°: pink falls down the left column, cyan rises up the right. Fills the slot's height, not width.",
+		html: () => grid({ cols: 2, rows: 5, size: 2.5, gap: 1,
+			cell: (c, r) => c === 0
+				? `background:${PINK};animation:pixel-cascade-a 1.4s ease-in-out infinite;animation-delay:${(r * 0.25).toFixed(2)}s`
+				: `background:${CYAN};animation:pixel-cascade-b 1.4s ease-in-out infinite;animation-delay:${((4 - r) * 0.25).toFixed(2)}s` }) },
+	{ name: "Woven tile 4×4", size: "15×15", note: "Four alternating rows, each cascading opposite its neighbour, so the square looks woven.",
+		html: () => grid({ cols: 4, rows: 4, size: 3, gap: 1,
+			cell: (c, r) => {
+				const pink = r % 2 === 0;
+				const pos = pink ? c : 3 - c;
+				return `background:${pink ? PINK : CYAN};animation:pixel-cascade-${pink ? "a" : "b"} 1.4s ease-in-out infinite;animation-delay:${(pos * 0.33 + r * 0.12).toFixed(2)}s`;
+			} }) },
+	{ name: "Pixel scanner", size: "17×5", note: "One lit block per row with a fading trail, bouncing end to end. Pink and cyan cross in the middle.",
+		html: () => {
+			const n = 6, ticks = 2 * (n - 1);
+			const kfs = Array.from({ length: n }, (_, i) =>
+				sampled(decayFrom(i === 0 || i === n - 1 ? [i / ticks] : [i / ticks, (ticks - i) / ticks], 0.07), 60));
+			return grid({ cols: n, rows: 2, size: 2, gap: 1,
+				cell: (c, r) => `background:${r === 0 ? PINK : CYAN};animation:${kfs[c]} 1.2s linear infinite;animation-delay:${r === 0 ? 0 : -0.6}s` });
+		} },
+	{ name: "Block helix", size: "20×8", note: "Each column's pink and cyan block swap rows in turn, like a pixel DNA strand turning.",
+		html: () => {
+			let h = `<div style="display:flex;gap:1px;height:8px;--travel:6px">`;
+			for (let c = 0; c < 7; c++) {
+				const d = (-c * 0.2).toFixed(2);
+				h += `<div style="position:relative;width:2px;height:8px">
+					<span class="blk" style="position:absolute;top:0;width:2px;height:2px;border-radius:.5px;background:${PINK};animation:helix 1.4s ease-in-out infinite;animation-delay:${d}s"></span>
+					<span class="blk" style="position:absolute;top:0;width:2px;height:2px;border-radius:.5px;background:${CYAN};animation:helix 1.4s ease-in-out infinite;animation-delay:${(d - 0.7).toFixed(2)}s"></span>
+				</div>`;
+			}
+			return h + "</div>";
+		} },
+	{ name: "Block equaliser", size: "16.5×13.5", note: "Five columns of blocks rising and falling at different rates. Cyan base, pink peaks.",
+		html: () => {
+			const freq = [1, 2, 1, 3, 2], phase = [0, 0.3, 0.55, 0.15, 0.8];
+			const rows = 4;
+			return grid({ cols: 5, rows, size: 2.5, gap: 1,
+				cell: (c, r) => {
+					const height = rows - r; // 1 at the bottom row
+					const kf = sampled((p) => {
+						const level = 2.4 + 1.7 * Math.sin(2 * Math.PI * (freq[c] * p + phase[c]));
+						return Math.max(0.12, Math.min(1, level - height + 1));
+					}, 72);
+					return `background:${r < 2 ? PINK : CYAN};animation:${kf} 2.4s linear infinite`;
+				} });
+		} },
+	{ name: "Perimeter chase", size: "13×13", note: "A pink comet runs around a 3×3 ring while the centre cyan block breathes.",
+		html: () => {
+			const ring = [[0,0],[1,0],[2,0],[2,1],[2,2],[1,2],[0,2],[0,1]];
+			return grid({ cols: 3, rows: 3, size: 3.5, gap: 1.25,
+				cell: (c, r) => {
+					const k = ring.findIndex(([x, y]) => x === c && y === r);
+					if (k === -1) return `background:${CYAN};animation:pixel-cascade-b 1.4s ease-in-out infinite`;
+					const kf = sampled(decayFrom([k / 8], 0.16, 0.1), 64);
+					return `background:${PINK};animation:${kf} 1.1s linear infinite`;
+				} });
+		} },
+	{ name: "Diagonal shimmer", size: "15×15", note: "A 4×4 tile shaded pink to cyan corner to corner, with the cascade running along the diagonal.",
+		html: () => grid({ cols: 4, rows: 4, size: 3, gap: 1,
+			cell: (c, r) => `background:${mix((c + r) / 6)};animation:pixel-cascade-a 1.6s ease-in-out infinite;animation-delay:${((c + r) * 0.14).toFixed(2)}s` }) },
+	{ name: "Fill and clear", size: "19×7", note: "Blocks light one at a time, pink row out and cyan row back, hold full, then clear. Reads as progress.",
+		html: () => {
+			const order = (c, r) => (r === 0 ? c : 9 - c);
+			return grid({ cols: 5, rows: 2, size: 3, gap: 1,
+				cell: (c, r) => {
+					const on = order(c, r) * 0.06;
+					const kf = sampled((p) => {
+						if (p < on) return 0.12;
+						if (p < on + 0.04) return 0.12 + 0.88 * (p - on) / 0.04;
+						if (p < 0.8) return 1;
+						if (p < 0.9) return 1 - 0.88 * (p - 0.8) / 0.1;
+						return 0.12;
+					}, 100);
+					return `background:${r === 0 ? PINK : CYAN};animation:${kf} 2s linear infinite`;
+				} });
+		} },
+];
+
+const novel = [
+	{ name: "Binary orbit", size: "16×16", note: "Pink and cyan dots circling each other on a faint track. The brand pair as two bodies.",
+		html: () => `<div class="orbit"><i></i><i></i></div>` },
+	{ name: "Gradient arc", size: "15×15", note: "Classic ring spinner with a cyan-to-pink tail. Most familiar, least distinctive.",
+		html: () => `<div class="arc"></div>` },
+	{ name: "Conduit pipe", size: "19×5", note: "Two packets travelling a pipe in opposite directions. Literal take on the name: traffic both ways.",
+		html: () => `<div class="pipe"><i></i><i></i></div>` },
+	{ name: "Heartbeat", size: "16×16", note: "Pink core with a lub-dub pulse, each beat throwing a cyan halo. Reads as alive, not busy.",
+		html: () => `<div class="beat"><i></i></div>` },
+	{ name: "Typing dots", size: "14.5×10", note: "Three hopping dots fading pink to cyan. Borrowed from chat, says the agent is composing.",
+		html: () => `<div class="dots"><i></i><i></i><i></i></div>` },
+	{ name: "Signal wave", size: "18×10", note: "A sine wave scrolling left under a pink-to-cyan gradient. Like a live signal trace.",
+		html: () => `<div class="wave"></div>` },
+	{ name: "Morph", size: "10×10", note: "A block that rotates into a dot and back, shifting pink to cyan as it turns.",
+		html: () => `<div class="morph"></div>` },
+	{ name: "Braille spinner", size: "5×12", note: "The terminal spinner from CLI agents, drawn as a 2×4 dot cell so it renders the same everywhere. Steps, not glides.",
+		html: () => {
+			const ring = [[0,0],[1,0],[1,1],[1,2],[1,3],[0,3],[0,2],[0,1]];
+			return grid({ cols: 2, rows: 4, size: 2, gap: 1, radius: 1,
+				cell: (c, r) => {
+					const k = ring.findIndex(([x, y]) => x === c && y === r);
+					// A three-dot snake: lit for the three ticks after the head passes.
+					const kf = sampled((p) => ((Math.round(p * 8) - k + 8) % 8 < 3 ? 1 : 0.15), 8);
+					return `background:${mix(r / 3)};animation:${kf} .8s step-end infinite`;
+				} });
+		} },
+	{ name: "Infinity loop", size: "20×10", note: "Two comets chasing around a figure-eight. Smooth and continuous, good for long turns.",
+		html: () => `<svg class="inf" viewBox="0 0 24 12"><path class="track" d="M12 6C14 3.5 20 2.5 20 6S14 8.5 12 6 4 2.5 4 6 10 8.5 12 6"/><path class="comet a" pathLength="100" d="M12 6C14 3.5 20 2.5 20 6S14 8.5 12 6 4 2.5 4 6 10 8.5 12 6"/><path class="comet b" pathLength="100" d="M12 6C14 3.5 20 2.5 20 6S14 8.5 12 6 4 2.5 4 6 10 8.5 12 6"/></svg>` },
+	{ name: "Ripple", size: "17×17", note: "Pink and cyan rings expanding out of the centre, alternating. Quiet; works at low contrast.",
+		html: () => `<div class="ripple"><i></i><i></i></div>` },
+];
+
+
+// A comet walking a path of cells, one cell per tick; null entries are pauses.
+// look(d) maps "ticks since the head was here" to CSS, so a trail can fade and
+// shift colour. Stepped rather than eased, like a pixel display.
+function walk({ cols, rows, size, gap, path, duration, look, idle, radius }) {
+	const n = path.length;
+	return grid({ cols, rows, size, gap, radius,
+		cell: (c, r) => {
+			const visits = path.flatMap((p, t) => (p && p[0] === c && p[1] === r ? [t] : []));
+			if (!visits.length) return idle ? idle(c, r) : null;
+			const name = `k${kfId++}`;
+			const stops = [];
+			for (let t = 0; t <= n; t++) {
+				const d = Math.min(...visits.map((v) => (t - v + n) % n));
+				stops.push(`${((t / n) * 100).toFixed(2)}%{${look(d)}}`);
+			}
+			styleSheet += `@keyframes ${name}{${stops.join("")}}\n`;
+			return `animation:${name} ${duration}s step-end infinite`;
+		} });
+}
+const trail = (len, lo = 0.12) => (d) => d < len
+	? `background:${mix(d / Math.max(1, len - 1))};opacity:${(1 - d * (0.6 / len)).toFixed(2)}`
+	: `background:var(--b);opacity:${lo}`;
+const pause = (k) => Array(k).fill(null);
+
+const inspired2 = [
+	{ name: "Cascade 5×3", size: "16.5×9.5", note: "The current cascade with a third row in the blended colour, lagging half a beat so the two directions meet in the middle.",
+		html: () => grid({ cols: 5, rows: 3, size: 2.5, gap: 1,
+			cell: (c, r) => r === 2
+				? `background:${CYAN};animation:pixel-cascade-b 1.4s ease-in-out infinite;animation-delay:${((4 - c) * 0.25).toFixed(2)}s`
+				: `background:${r === 0 ? PINK : mix(0.5)};animation:pixel-cascade-a 1.4s ease-in-out infinite;animation-delay:${(c * 0.25 + r * 0.5).toFixed(2)}s` }) },
+	{ name: "Pixel rain", size: "16.5×16.5", note: "Drops falling down five columns at staggered times, pink at the top turning cyan as they land.",
+		html: () => {
+			const offset = [0, 0.45, 0.2, 0.7, 0.35];
+			return grid({ cols: 5, rows: 5, size: 2.5, gap: 1,
+				cell: (c, r) => `background:${mix(r / 4)};animation:${sampled(decayFrom([(offset[c] + r * 0.08) % 1], 0.06, 0.08), 80)} 1.5s linear infinite` });
+		} },
+	{ name: "Checker flip", size: "15×15", note: "A 4×4 checkerboard where every cell cross-fades pink to cyan, in a wave from one corner.",
+		html: () => grid({ cols: 4, rows: 4, size: 3, gap: 1,
+			cell: (c, r) => `background:${PINK};animation:swap 1.8s ease-in-out infinite;animation-delay:${((c + r) * 0.12 - ((c + r) % 2) * 0.9).toFixed(2)}s` }) },
+	{ name: "Pixel spiral", size: "15×15", note: "A comet spiralling into the centre of a 4×4 grid, then pausing. The trail cools from pink to cyan.",
+		html: () => walk({ cols: 4, rows: 4, size: 3, gap: 1, duration: 1.6, look: trail(5),
+			path: [[0,0],[1,0],[2,0],[3,0],[3,1],[3,2],[3,3],[2,3],[1,3],[0,3],[0,2],[0,1],[1,1],[2,1],[2,2],[1,2], ...pause(4)] }) },
+	{ name: "Pixel pong", size: "18.5×12", note: "A ball bouncing between a pink and a cyan paddle. Playful; reads as back-and-forth with the agent.",
+		html: () => walk({ cols: 6, rows: 4, size: 2.25, gap: 1, duration: 1.2,
+			path: [[1,1],[2,2],[3,3],[4,2],[3,1],[2,0]],
+			look: (d) => `background:var(--text);opacity:${d === 0 ? 1 : d === 1 ? 0.3 : 0}`,
+			idle: (c, r) => (r === 1 || r === 2) && (c === 0 || c === 5) ? `background:${c === 0 ? PINK : CYAN}` : null }) },
+	{ name: "Pixel snake", size: "15×15", note: "A five-block snake winding a loop through every cell of a 4×4 grid. Never pauses.",
+		html: () => walk({ cols: 4, rows: 4, size: 3, gap: 1, duration: 1.6, look: trail(5, 0.1),
+			path: [[0,0],[1,0],[2,0],[3,0],[3,1],[2,1],[1,1],[1,2],[2,2],[3,2],[3,3],[2,3],[1,3],[0,3],[0,2],[0,1]] }) },
+	{ name: "Pixel pulse trace", size: "19.8×10.8", note: "A heartbeat trace drawn in blocks, left to right, over its own faint ghost. Reads as monitoring.",
+		html: () => {
+			const y = [2, 1, 2, 3, 0, 4, 2, 1, 2];
+			return walk({ cols: 9, rows: 5, size: 1.75, gap: 0.5, duration: 1.4, look: trail(4, 0.1),
+				path: [...y.map((r, c) => [c, r]), ...pause(4)] });
+		} },
+	{ name: "Pixel progress bar", size: "19.5×2", note: "An indeterminate progress bar made of eight blocks: a short segment sweeps through and wraps.",
+		html: () => walk({ cols: 8, rows: 1, size: 2, gap: 0.5, duration: 1.1, look: trail(3, 0.15),
+			path: [...Array.from({ length: 8 }, (_, c) => [c, 0]), ...pause(3)] }) },
+	{ name: "Pixel ripple", size: "16.5×16.5", note: "A diamond of blocks rippling out from the centre, pink core to cyan edge.",
+		html: () => grid({ cols: 5, rows: 5, size: 2.5, gap: 1,
+			cell: (c, r) => {
+				const d = Math.abs(c - 2) + Math.abs(r - 2);
+				if (d > 2) return null;
+				return `background:${mix(d / 2)};animation:${sampled(decayFrom([d * 0.13], 0.09, 0.1), 80)} 1.4s linear infinite`;
+			} }) },
+	{ name: "Slide puzzle", size: "11.5×11.5", note: "Three blocks in a 2×2 frame, sliding one at a time into the empty slot. Calm and clearly mechanical.",
+		html: () => {
+			const d = 6.5, pos = [[0,0],[d,0],[d,d],[0,d]];
+			// Each block moves every third step, so exactly one is sliding at any time.
+			const blocks = [{ start: 0, phase: 0, bg: PINK }, { start: 1, phase: 2, bg: mix(0.5) }, { start: 2, phase: 1, bg: CYAN }];
+			let h = `<div style="position:relative;width:11.5px;height:11.5px">`;
+			for (const b of blocks) {
+				const name = `k${kfId++}`;
+				const stops = [];
+				let at = b.start;
+				const xy = () => `transform:translate(${pos[at % 4][0]}px,${pos[at % 4][1]}px)`;
+				for (let j = 1; j <= 12; j++) {
+					const t0 = (j - 1) / 12;
+					stops.push(`${(t0 * 100).toFixed(2)}%{${xy()}}`);
+					if (j % 3 === b.phase) at++;
+					stops.push(`${((t0 + 0.6 / 12) * 100).toFixed(2)}%{${xy()}}`);
+				}
+				stops.push(`100%{${xy()}}`);
+				styleSheet += `@keyframes ${name}{${stops.join("")}}\n`;
+				h += `<span class="blk" style="position:absolute;left:0;top:0;width:5px;height:5px;border-radius:1.25px;background:${b.bg};animation:${name} 3s ease-in-out infinite"></span>`;
+			}
+			return h + "</div>";
+		} },
+];
+
+const atomOrbit = (angle, colour, dur) =>
+	`<g transform="rotate(${angle} 10 10)"><ellipse class="track" cx="10" cy="10" rx="8.5" ry="3.2"/><ellipse class="comet" pathLength="100" cx="10" cy="10" rx="8.5" ry="3.2" style="stroke:${colour};animation-duration:${dur}s"/></g>`;
+
+const novel2 = [
+	{ name: "Spinning cube", size: "≈12×12", note: "A small 3D cube turning on its axis, pink and cyan faces. The most dimensional option here.",
+		html: () => `<div class="cube-wrap"><div class="cube">${"<i></i>".repeat(6)}</div></div>` },
+	{ name: "Newton's cradle", size: "15.5×3.5", note: "Four balls; the pink end swings out, then the cyan end answers. Steady, rhythmic, a little playful.",
+		html: () => `<div class="cradle">${"<i></i>".repeat(4)}</div>` },
+	{ name: "Flip tile", size: "10×10", note: "A tile flipping over on alternating axes, pink face then cyan. Reads as turns being taken.",
+		html: () => `<div class="flip"><i></i><i></i></div>` },
+	{ name: "Gyroscope", size: "18×18", note: "Two dashed rings counter-rotating, pink outside and cyan inside. Busy in a precise, mechanical way.",
+		html: () => `<svg class="gyro" viewBox="0 0 20 20" width="18" height="18"><circle class="o" pathLength="60" cx="10" cy="10" r="8"/><circle class="i" pathLength="30" cx="10" cy="10" r="4.5"/></svg>` },
+	{ name: "Capsule bars", size: "14.5×14", note: "Four rounded bars breathing up and down in a wave. The smooth cousin of the block equaliser (#7).",
+		html: () => `<div class="bars">${[0, 1, 2, 3].map((i) => `<i style="background:${mix(i / 3)};animation-delay:${(i * 0.12).toFixed(2)}s"></i>`).join("")}</div>` },
+	{ name: "Stopwatch", size: "15×15", note: "A pink second hand sweeping a cyan dial, with a slow hour hand. Says time is passing.",
+		html: () => `<div class="clock"><i></i><i></i></div>` },
+	{ name: "Bouncing ball", size: "14×14", note: "A pink ball bouncing on a cyan floor, squashing on impact. The most characterful one.",
+		html: () => `<div class="bounce"><i></i></div>` },
+	{ name: "Skeleton shimmer", size: "16×11.5", note: "Three placeholder text lines with a pink-cyan shimmer passing through. Says a reply is being written.",
+		html: () => `<div class="skel"><i></i><i style="width:70%;animation-delay:.1s"></i><i style="width:85%;animation-delay:.2s"></i></div>` },
+	{ name: "Atom", size: "19×19", note: "Three tilted orbits, each with its own comet at a different speed. Busiest of the set; better large than small.",
+		html: () => `<svg class="atom" viewBox="0 0 20 20" width="19" height="19">${atomOrbit(0, "var(--a)", 1.2)}${atomOrbit(60, mix(0.5), 1.5)}${atomOrbit(120, "var(--b)", 1.8)}<circle cx="10" cy="10" r="1.4" fill="var(--text)"/></svg>` },
+	{ name: "Goo merge", size: "19×8", note: "A pink and a cyan drop that pull apart and melt back together. Organic, unlike everything else here.",
+		html: () => `<div class="goo"><i></i><i></i></div>` },
+];
+
+const all = [...baseline, ...inspired, ...novel, ...inspired2, ...novel2];
+all.forEach((d) => (d.markup = d.html()));
+document.head.insertAdjacentHTML("beforeend", `<style>${styleSheet}</style>`);
+
+const check = `<svg class="done" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="m5.5 8.2 1.8 1.8 3.4-3.6"/></svg>`;
+const row = (glyph, title, ctx, time, cls = "") =>
+	`<div class="row ${cls}"><span class="glyph">${glyph}</span><span class="t">${title}</span><span class="time">${time}</span><span class="c">${ctx}</span></div>`;
+
+function card(d, label) {
+	return `<article class="card" data-i="${all.indexOf(d)}">
+		<div class="stage"><span class="num">${label}</span><span class="size">${d.size} px</span><div class="zoom">${d.markup}</div></div>
+		<div class="meta"><h3>${d.name}</h3><p>${d.note}</p></div>
+		<div class="ctx">
+			${row(d.markup, "Refactor auth middleware", "conduit · feat/auth", "now")}
+			${row(d.markup, "Fix flaky daemon IPC test", "conduit · main", "now", "active")}
+		</div>
+	</article>`;
+}
+
+document.getElementById("baseline").innerHTML = baseline.map((d) => card(d, "now")).join("");
+document.getElementById("inspired").innerHTML = inspired.map((d, i) => card(d, `#${i + 1}`)).join("");
+document.getElementById("novel").innerHTML = novel.map((d, i) => card(d, `#${i + 11}`)).join("");
+document.getElementById("inspired2").innerHTML = inspired2.map((d, i) => card(d, `#${i + 21}`)).join("");
+document.getElementById("novel2").innerHTML = novel2.map((d, i) => card(d, `#${i + 31}`)).join("");
+
+function renderSidebar(d, label) {
+	document.getElementById("pick-name").textContent = `${label} · ${d.name}`;
+	document.getElementById("sidebar").innerHTML =
+		`<div class="sec">Working</div>` +
+		row(d.markup, "Refactor auth middleware", "conduit · feat/auth", "now", "active") +
+		row(d.markup, "Port relay pollers to Effect", "conduit · effect-relay", "now") +
+		row(d.markup, "Investigate slow cold start", "dotfiles · main", "now") +
+		`<div class="sec">Done</div>` +
+		row(check, "Add Storybook baselines", "conduit · main", "12m", "settled") +
+		row(check, "Bump bits-ui to 2.18", "conduit · deps", "1h", "settled");
+}
+{
+	// Open on the chosen design so a revisit shows the decision first.
+	const chosen = document.querySelector('#inspired2 .card:last-child');
+	chosen.classList.add("selected");
+	renderSidebar(all[+chosen.dataset.i], "#30");
+}
+
+document.addEventListener("click", (e) => {
+	const c = e.target.closest(".card");
+	if (!c) return;
+	document.querySelectorAll(".card.selected").forEach((x) => x.classList.remove("selected"));
+	c.classList.add("selected");
+	renderSidebar(all[+c.dataset.i], c.querySelector(".num").textContent);
+});
+
+function seg(id, apply) {
+	const el = document.getElementById(id);
+	el.addEventListener("click", (e) => {
+		const b = e.target.closest("button");
+		if (!b) return;
+		el.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+		apply(b.dataset.v);
+	});
+}
+seg("theme", (v) => document.documentElement.classList.toggle("light", v === "light"));
+seg("zoom", (v) => document.documentElement.style.setProperty("--z", v));
+</script>
+</body>
+</html>

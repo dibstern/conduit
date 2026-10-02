@@ -7,6 +7,7 @@
 	import { onDestroy, onMount } from "svelte";
 	import { currentSearchQuery, sessionList } from "../../stores/session-list.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 
 	let {
 		sentinelEl,
@@ -28,6 +29,18 @@
 			// the time the sentinel would have been reached.
 			{ rootMargin: "200px" },
 		);
+		observer.observe(sentinelEl);
+	});
+
+	// The observer reports only changes. A page that leaves the sentinel on
+	// screen (few rows, or most of them in a collapsed shelf) would never ask
+	// for the next one, so re-observe whenever a cursor moves: that re-reports
+	// whether the sentinel is still in view.
+	$effect(() => {
+		void sessionState.daemonCursor;
+		void sessionState.searchCursor;
+		if (!observer || !sentinelEl) return;
+		observer.unobserve(sentinelEl);
 		observer.observe(sentinelEl);
 	});
 

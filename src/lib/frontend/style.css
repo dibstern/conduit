@@ -705,6 +705,11 @@ body:has(dialog:modal) {
 	pointer-events: none;
 }
 
+/* The phone session list is bg-bg, not the session bar's bg-surface. */
+#layout.layout-compact.phone-list-screen #compact-top-edge {
+	background: var(--color-bg);
+}
+
 #layout.layout-compact.phone-list-screen #sidebar {
 	display: flex;
 	width: 100%;

@@ -141,7 +141,7 @@ export function segmentTurns(
 	// A queued prompt's row sorts below the turn still running, so the live turn
 	// is the last one whose prompt has started.
 	const last = turns
-		.filter((turn) => !turn.user || !isQueued(turn.user, turnEpoch))
+		.filter((turn) => !turn.user || !isQueued(turn.user, turnEpoch, processing))
 		.at(-1);
 	// A closed segment is the only thing that settles a turn, and a closed
 	// segment can never receive more work — the types see to that. So a result
@@ -155,11 +155,13 @@ export function segmentTurns(
 export function isQueued(
 	user: UserMessage,
 	turnEpoch: number | undefined,
+	processing: boolean,
 ): boolean {
 	return (
-		user.sentDuringEpoch !== undefined &&
-		turnEpoch !== undefined &&
-		turnEpoch <= user.sentDuringEpoch
+		(user.waitingBehindReply === true && processing) ||
+		(user.sentDuringEpoch !== undefined &&
+			turnEpoch !== undefined &&
+			turnEpoch <= user.sentDuringEpoch)
 	);
 }
 

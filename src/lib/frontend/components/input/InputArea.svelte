@@ -3,7 +3,10 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
@@ -22,10 +25,11 @@
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
 	import {
 		discoveryState,
-		extractSlashQuery,
+		extractCommandQuery,
 		filterCommands,
 		getEffectiveInstanceId,
 		getModelDisplayName,
+		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
 	import {
 		buildMentionInsertion,
@@ -72,7 +76,7 @@
 
 	const inputDrafts = new Map<string, string>();
 	// undefined until the first run, so a fresh load restores its draft too.
-	let previousSessionId: string | null | undefined = undefined;
+	let previousSessionId: string | null | undefined ;
 
 	// The new-session draft has no server-side store, so it lives here to
 	// survive a reload: a half-typed first prompt must not vanish.
@@ -184,16 +188,27 @@
 		return true;
 	}));
 
-	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
-	const commandMenuVisible = $derived(slashQuery !== null);
-	const commandQuery = $derived(slashQuery?.query ?? "");
-	const filteredCommands = $derived(
-		commandMenuVisible ? filterCommands(discoveryState.commands, commandQuery) : [],
+	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
+	const commandMenuVisible = $derived(commandMatch !== null);
+	const commandQuery = $derived(commandMatch?.query ?? "");
+	/** `$` lists the provider's built-ins; `/` lists everything else. */
+	const menuCommands = $derived(
+		commandMatch
+			? discoveryState.commands.filter(
+					(c) => (c.builtin ?? false) === (commandMatch.trigger === "$"),
+				)
+			: [],
 	);
+	const filteredCommands = $derived(filterCommands(menuCommands, commandQuery));
 	const commandListboxVisible = $derived(filteredCommands.length > 0);
 
-	/** Names of known slash commands/skills, for inline recognition in the composer. */
-	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
+	/** Known `/skill` and `$builtin` names, for inline recognition in the composer. */
+	const commandNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => !c.builtin).map((c) => c.name)),
+	);
+	const builtinNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => c.builtin).map((c) => c.name)),
+	);
 
 	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
 	const fileMenuVisible = $derived(
@@ -359,7 +374,7 @@
 	let creatingSession = false;
 
 	async function sendMessage() {
-		const text = inputText.trim();
+		const text = toProviderCommands(inputText.trim(), builtinNameSet);
 		if (!text) return;
 
 		// Parse @references and fetch file contents
@@ -539,13 +554,13 @@
 	}
 
 	function handleCommandSelect(command: string) {
-		// Replace the slash query region with the selected command text (e.g. "/skill ").
+		// Replace the query region with the selected command text (e.g. "/skill " or "$compact ").
 		// User can then type arguments and press Enter to send.
 		let newCursorPos: number;
-		if (slashQuery) {
-			const before = inputText.slice(0, slashQuery.start);
-			const after = inputText.slice(slashQuery.end);
-			newCursorPos = slashQuery.start + command.length;
+		if (commandMatch) {
+			const before = inputText.slice(0, commandMatch.start);
+			const after = inputText.slice(commandMatch.end);
+			newCursorPos = commandMatch.start + command.length;
 			inputText = before + command + after;
 		} else {
 			inputText = command;
@@ -565,9 +580,9 @@
 	}
 
 	function handleCommandClose() {
-		if (slashQuery) {
-			const before = inputText.slice(0, slashQuery.start);
-			const after = inputText.slice(slashQuery.end);
+		if (commandMatch) {
+			const before = inputText.slice(0, commandMatch.start);
+			const after = inputText.slice(commandMatch.end);
 			inputText = before + after;
 		} else {
 			inputText = "";
@@ -641,7 +656,7 @@
 	</div>
 {/if}
 
-<!-- Command Menu (above input when "/" is typed) -->
+<!-- Command Menu (above input when "/" or "$" is typed) -->
 {#if commandMenuVisible}
 	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<CommandMenu
@@ -650,7 +665,8 @@
 			listboxId={commandListboxId}
 			query={commandQuery}
 			visible={commandMenuVisible}
-			commands={[...discoveryState.commands]}
+			commands={[...menuCommands]}
+			trigger={commandMatch?.trigger ?? "/"}
 			onSelect={handleCommandSelect}
 			onClose={handleCommandClose}
 		/>
@@ -668,6 +684,36 @@
 		<!-- Context usage bar (above input) -->
 		{#if showContextMini}
 			<ContextBar percent={currentChat().contextPercent} />
+		{/if}
+
+		<!-- Background work outlives the turn; Stop interrupts the whole session. -->
+		{#if currentSession?.backgroundWork && !isProcessing()}
+			<div class="mb-1.5" data-testid="background-work-banner">
+				<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:py-1 max-md:px-3">
+					<span class="shrink-0 text-text-secondary" aria-hidden="true">
+						{#if currentSession.backgroundWork === "monitoring"}
+							<Icon name="eye" size={14} />
+						{:else}
+							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
+						{/if}
+					</span>
+					<span class="flex-1 min-w-0 truncate text-sm text-text-secondary max-md:text-xs">
+						{currentSession.backgroundWork === "monitoring"
+							? "Monitoring, waiting for a watcher to fire"
+							: "Background work running"}
+					</span>
+					<Button
+						variant="secondary"
+						size="sm"
+						icon="square"
+						iconSize={12}
+						type="button"
+						data-testid="background-work-stop"
+						title="Stop the session and its background work"
+						onclick={handleStop}
+					>Stop</Button>
+				</Surface>
+			</div>
 		{/if}
 
 		<!-- Processing indicator: animated bounce bar aligned with context mini bar -->
@@ -713,6 +759,7 @@
 					<SkillHighlightBackdrop
 						text={plainText ? "" : inputText}
 						commandNames={commandNameSet}
+						builtinNames={builtinNameSet}
 						dimmed={composing || plainText}
 					/>
 					<!--

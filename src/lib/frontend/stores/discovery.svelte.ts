@@ -485,27 +485,44 @@ export function filterCommands(
 	return commands.filter((c) => c.name.toLowerCase().startsWith(lower));
 }
 
-export interface SlashQuery {
+export interface CommandQuery {
+	/** `$` opens the provider's built-ins, `/` the user's skills and commands. */
+	trigger: "/" | "$";
 	query: string;
 	start: number;
 	end: number;
 }
 
-/** Extract slash command query from input text at cursor position. */
-export function extractSlashQuery(
+/** Extract a `/skill` or `$builtin` query from input text at cursor position. */
+export function extractCommandQuery(
 	text: string,
 	cursorPos: number,
-): SlashQuery | null {
-	// Look backwards from cursor for a '/' at the start of the line or after whitespace
+): CommandQuery | null {
+	// Look backwards from cursor for a trigger at the start of the line or after whitespace
 	const before = text.slice(0, cursorPos);
-	const match = before.match(/(?:^|[\s\n])\/(\S*)$/);
+	const match = before.match(/(?:^|\s)([/$])(\S*)$/);
 	if (!match) return null;
 
-	const query = match[1] ?? "";
-	const matchStart = before.length - match[0].length;
-	const slashStart = match[0].startsWith("/") ? matchStart : matchStart + 1;
+	const trigger = match[1] === "$" ? "$" : "/";
+	const query = match[2] ?? "";
+	const start = before.length - query.length - 1;
 
-	return { query, start: slashStart, end: cursorPos };
+	return { trigger, query, start, end: cursorPos };
+}
+
+/**
+ * Providers only understand `/name`, so rewrite each `$builtin` in command
+ * position before sending. Unknown `$tokens` (prices, shell vars) pass through.
+ */
+export function toProviderCommands(
+	text: string,
+	builtinNames: ReadonlySet<string>,
+): string {
+	return text.replace(
+		/(^|\s)\$([A-Za-z0-9][A-Za-z0-9_:-]*)(?![\w:/-])/g,
+		(token, lead: string, name: string) =>
+			builtinNames.has(name) ? `${lead}/${name}` : token,
+	);
 }
 
 export function handleAgentList(
@@ -627,6 +644,7 @@ export function applyGetCommandsResponse(response: GetCommandsResponse): void {
 				? { description: command.description }
 				: {}),
 			...(command.args != null ? { args: command.args } : {}),
+			...(command.builtin ? { builtin: true } : {}),
 		})),
 	});
 }
