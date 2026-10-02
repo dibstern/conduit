@@ -154,6 +154,7 @@ export class ClaudeRunnerSocket {
 		private readonly socket: Socket,
 		onMessage: (message: ClaudeRunnerMessage) => void,
 		onClose: (failure: ClaudeSessionFailure) => void,
+		private readonly beforeCommandFailure?: () => Effect.Effect<void>,
 	) {
 		const lines = createInterface({ input: socket, crlfDelay: Infinity });
 		lines.on("line", (line) => {
@@ -263,9 +264,16 @@ export class ClaudeRunnerSocket {
 				accepted: false,
 				reply: (reply) => {
 					this.pending.delete(key);
+					// Capture the output boundary when the failed reply arrives.
+					const precedingOutputs =
+						reply.failure && message.type === "command"
+							? (this.beforeCommandFailure?.() ?? Effect.void)
+							: Effect.void;
 					resume(
 						reply.failure
-							? Effect.fail(reply.failure)
+							? precedingOutputs.pipe(
+									Effect.zipRight(Effect.fail(reply.failure)),
+								)
 							: Effect.succeed(reply.result as A),
 					);
 				},

@@ -29,6 +29,7 @@ export type ProcessMark =
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
 	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
+	| { kind: "assistant-held"; prompt: string; queryId: string }
 	| {
 			kind:
 				| "initialization-ready"
@@ -361,6 +362,11 @@ function query(params: {
 					content: [{ type: "text", text: responseChunks(prompt).join("") }],
 				},
 			} as unknown as SDKMessage;
+			if (prompt === "terminal-replay-interrupt") {
+				mark({ kind: "assistant-held", prompt, queryId });
+				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
+				return;
+			}
 			yield {
 				type: "result",
 				subtype: "success",
