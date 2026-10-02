@@ -367,6 +367,7 @@ export class ProviderSideEffectReactor {
 				const payload = yield* this.parseSendTurnPayload(row);
 				return yield* instance.sendTurnEffect({
 					...payload,
+					commandId: row.command_id,
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
 				});
