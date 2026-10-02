@@ -259,7 +259,7 @@ export const addWithoutRelay = (
 	);
 
 /**
- * Transition a project to Ready state. Publishes InstanceStatusChanged.
+ * Transition a project to Ready state. Publishes InstanceStatusChanged only on transition.
  * Fails with ProjectNotFound if not registered.
  */
 export const markReady = (slug: string) =>
@@ -267,20 +267,26 @@ export const markReady = (slug: string) =>
 		const ref = yield* ProjectRegistryTag;
 		const bus = yield* DaemonEventBusTag;
 
-		const notFound = yield* Ref.modify(ref, (state) => {
+		const result = yield* Ref.modify(ref, (state) => {
 			const existing = HashMap.get(state, slug);
 			if (Option.isNone(existing)) {
-				return [true, state] as const;
+				return ["NotFound", state] as const;
+			}
+			if (existing.value._tag === "Ready") {
+				return ["AlreadyReady", state] as const;
 			}
 			const entry: ProjectReady = {
 				_tag: "Ready",
 				project: existing.value.project,
 			};
-			return [false, HashMap.set(state, slug, entry)] as const;
+			return ["Ready", HashMap.set(state, slug, entry)] as const;
 		});
 
-		if (notFound) {
+		if (result === "NotFound") {
 			return yield* new ProjectNotFound({ slug });
+		}
+		if (result === "AlreadyReady") {
+			return;
 		}
 
 		yield* PubSub.publish(
@@ -288,7 +294,6 @@ export const markReady = (slug: string) =>
 			DaemonEvent.InstanceStatusChanged({ instanceId: slug }),
 		);
 
-		yield* requestConfigSave;
 		yield* Effect.logInfo("Project relay ready");
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
@@ -538,18 +543,19 @@ export const broadcastToAll = (message: unknown) =>
  */
 export const waitForRelay = (slug: string, timeoutMs: number) =>
 	Effect.gen(function* () {
-		// Check if already ready
+		// Subscribe before checking: markReady publishes only on a real
+		// transition, so one landing between check and subscribe would be lost.
+		const bus = yield* DaemonEventBusTag;
+		const sub = yield* PubSub.subscribe(bus);
+
 		const entry = yield* getEntry(slug);
 		if (Option.isNone(entry)) {
 			return yield* new ProjectNotFound({ slug });
 		}
 		if (entry.value._tag === "Ready") {
-			return; // Already ready
+			return;
 		}
 
-		// Subscribe to events and wait for InstanceStatusChanged with this slug
-		const bus = yield* DaemonEventBusTag;
-		const sub = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(sub).pipe(
 			Stream.filter(
 				(e) => e._tag === "InstanceStatusChanged" && e.instanceId === slug,

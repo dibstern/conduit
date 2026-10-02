@@ -10,8 +10,9 @@ import {
 	Queue,
 	Ref,
 } from "effect";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
@@ -157,17 +158,50 @@ describe("ProjectRegistry Effect - markReady", () => {
 		}).pipe(Effect.provide(TestLayer)),
 	);
 
-	it.scoped("publishes InstanceStatusChanged", () =>
+	it.scoped("publishes once across five calls without requesting a save", () =>
 		Effect.gen(function* () {
 			yield* addWithoutRelay(makeProject("alpha"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
 
+			const requestSave = vi.fn(() => {});
+			yield* Effect.gen(function* () {
+				for (let index = 0; index < 5; index++) {
+					yield* markReady("alpha");
+				}
+			}).pipe(
+				Effect.provideService(ConfigPersistenceTag, {
+					requestSave: Effect.sync(requestSave),
+					flush: Effect.void,
+				}),
+			);
+
+			const events = yield* Queue.takeAll(sub);
+			expect(Array.from(events)).toEqual([
+				{ _tag: "InstanceStatusChanged", instanceId: "alpha" },
+			]);
+			expect(requestSave).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.scoped("publishes again when an Error project becomes Ready", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markReady("alpha");
+			yield* markError("alpha", "relay failed");
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
 			yield* markReady("alpha");
 
-			const msg = yield* Queue.take(sub);
-			expect(msg._tag).toBe("InstanceStatusChanged");
+			expect(Option.getOrThrow(yield* getEntry("alpha"))).toEqual({
+				_tag: "Ready",
+				project: yield* getProject("alpha"),
+			});
+			expect(Array.from(yield* Queue.takeAll(sub))).toEqual([
+				{ _tag: "InstanceStatusChanged", instanceId: "alpha" },
+			]);
 		}).pipe(Effect.provide(TestLayer)),
 	);
 
