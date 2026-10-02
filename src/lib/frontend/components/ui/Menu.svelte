@@ -10,6 +10,7 @@
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
+	import { dragToDismiss } from "./actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FLOATING_POSITIONING_DEFAULTS,
@@ -93,6 +94,7 @@
 	const contentId = $props.id();
 	let contentNode = $state<HTMLElement | null>(null);
 	let scrimInteractive = $state(false);
+	let scrimFade = $state({ progress: 0, settling: false });
 	let touchClickDeadline = 0;
 
 	// bits-ui 2.18.1 DropdownMenuTrigger opens on touch pointerup, then its
@@ -141,6 +143,7 @@
 	$effect(() => {
 		if (!open || presentation !== "sheet") {
 			scrimInteractive = false;
+			scrimFade = { progress: 0, settling: false };
 			return;
 		}
 		// Bits opens on pointerdown and installs outside dismissal after mount.
@@ -202,7 +205,7 @@
 		loop: true,
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
 		class: [
-			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",
+			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",
 			className,
 		].filter(Boolean).join(" "),
 	});
@@ -217,7 +220,7 @@
 
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} use:exemptFromBackgroundInert></div>{/if}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- A long sheet scrolls on short phones, and every item is tabindex -1 (roving
@@ -225,7 +228,7 @@
 					     scrollable-region-focusable fails. Bits intercepts Tab inside the menu, so
 					     this adds no stray tab stop. Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} use:exemptFromBackgroundInert>
+					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<div class="mx-auto mt-[8px] mb-[6px] h-[4px] w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
 						{@render children()}
 					</div>
