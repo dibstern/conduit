@@ -82,6 +82,14 @@
 	--color-status-violet: #c0a8ff;
 	--color-status-pink: #ff9dc2;
 
+	/* === SESSION STATE GLYPHS ===
+	   The sidebar's dither glyph and its status word. Brighter than status ink
+	   because the glyph sits on its own 14% tint of the colour. */
+	--color-session-working: #ff4d94;
+	--color-session-monitoring: #33b5ff;
+	--color-session-done: #4ade80;
+	--color-session-idle: #8b93a0;
+
 	/* === STATUS FILLS (theme-invariant) ===
 	   A saturated fill is the same colour in both themes; only what you read ON
 	   a surface changes. Pair with --color-on-fill, which is the fixed ink these
@@ -252,6 +260,11 @@
 	--color-status-indigo: #5344d4;
 	--color-status-violet: #6a3ed4;
 	--color-status-pink: #c4004f;
+
+	--color-session-working: #e0006f;
+	--color-session-monitoring: #1d5df5;
+	--color-session-done: #3d9a0f;
+	--color-session-idle: #6b7280;
 
 	--color-inverse-bg: #1b1e24;
 	--color-inverse-text: #f2f4f8;
