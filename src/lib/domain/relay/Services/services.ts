@@ -154,8 +154,10 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		return {
-			list: (path: string) => Effect.tryPromise(() => client.file.list(path)),
-			read: (path: string) => Effect.tryPromise(() => client.file.read(path)),
+			list: (path: string) =>
+				Effect.tryPromise((signal) => client.file.list(path, { signal })),
+			read: (path: string) =>
+				Effect.tryPromise((signal) => client.file.read(path, { signal })),
 		};
 	}),
 );

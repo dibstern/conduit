@@ -681,11 +681,18 @@ class FileNamespace {
 
 	async list(
 		path: string,
+		options?: { signal?: AbortSignal },
 	): Promise<Array<{ name: string; type: string; size?: number }>> {
 		const entries = await this.api.sdk(
 			"file.list",
 			decodeOpenCodeFileEntryListResponse,
-			() => call(this.api._sdk.file.list({ query: { path } })),
+			() =>
+				call(
+					this.api._sdk.file.list({
+						query: { path },
+						...(options?.signal ? { signal: options.signal } : {}),
+					}),
+				),
 		);
 		return entries.map((entry) => ({
 			name: entry.name,
@@ -693,11 +700,20 @@ class FileNamespace {
 		}));
 	}
 
-	async read(path: string): Promise<{ content: string; binary?: boolean }> {
+	async read(
+		path: string,
+		options?: { signal?: AbortSignal },
+	): Promise<{ content: string; binary?: boolean }> {
 		const file = await this.api.sdk(
 			"file.read",
 			decodeOpenCodeFileReadResponse,
-			() => call(this.api._sdk.file.read({ query: { path } })),
+			() =>
+				call(
+					this.api._sdk.file.read({
+						query: { path },
+						...(options?.signal ? { signal: options.signal } : {}),
+					}),
+				),
 		);
 		return {
 			content: file.content,

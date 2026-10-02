@@ -461,7 +461,7 @@ describe("handleGetFileContent", () => {
 		return handleGetFileContent("client-1", { path: "README.md" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(client.file.read).toHaveBeenCalledWith("README.md");
+				expect(client.file.read).toHaveBeenCalledWith("README.md", expect.anything());
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "file_content",
 					path: "README.md",
