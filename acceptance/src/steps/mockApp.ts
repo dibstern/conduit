@@ -15,6 +15,7 @@ import {
 	inheritedClaudeCommitAttribution,
 	instanceSlug,
 	mockInstances,
+	mockSessionSkills,
 	relayControls,
 	rpcControls,
 } from "./shared.js";
@@ -165,6 +166,9 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId: payload["sessionId"],
 					}),
 					SyncInputDraft: async () => undefined,
+					GetSessionSkills: async () => ({
+						loads: mockSessionSkills.get(page) ?? [],
+					}),
 					SwitchPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],

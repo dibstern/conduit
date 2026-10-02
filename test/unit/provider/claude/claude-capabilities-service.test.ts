@@ -68,6 +68,9 @@ describe("ClaudeCapabilitiesService", () => {
 	it.effect("does not share cached probes across fresh service layers", () =>
 		Effect.gen(function* () {
 			const firstQueryFactory = vi.fn(() => ({
+				async *[Symbol.asyncIterator]() {
+					yield* [];
+				},
 				initializationResult: vi.fn(async () => ({
 					models: [
 						{
@@ -80,6 +83,9 @@ describe("ClaudeCapabilitiesService", () => {
 				})),
 			}));
 			const secondQueryFactory = vi.fn(() => ({
+				async *[Symbol.asyncIterator]() {
+					yield* [];
+				},
 				initializationResult: vi.fn(async () => ({
 					models: [
 						{

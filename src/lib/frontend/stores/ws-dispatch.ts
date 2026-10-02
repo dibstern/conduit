@@ -87,6 +87,7 @@ import {
 	switchToSession,
 } from "./session.svelte.js";
 import { refreshSessionList } from "./session-list.svelte.js";
+import { loadSessionSkills } from "./session-skills.svelte.js";
 import {
 	handlePtyCreated,
 	handlePtyDeleted,
@@ -241,6 +242,9 @@ function routePerSession(event: PerSessionEvent): void {
 		}
 		case "done": {
 			handleDone(activity, messages, event);
+			if (event.sessionId === sessionState.currentId) {
+				void loadSessionSkills(event.sessionId);
+			}
 			// Only notify for root agent sessions — subagent completions are
 			// intermediate steps; the parent emits its own done when finished.
 			const doneSession = findSession(event.sessionId);

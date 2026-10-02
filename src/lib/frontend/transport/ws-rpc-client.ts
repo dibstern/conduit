@@ -1,7 +1,10 @@
 import { Effect } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
-import type { GetSkillContentResponse } from "../../contracts/ws-rpc.js";
+import type {
+	GetSessionSkillsResponse,
+	GetSkillContentResponse,
+} from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
@@ -246,6 +249,11 @@ export interface GetToolContentRpcInput {
 export interface GetSkillContentRpcInput {
 	readonly projectSlug: string;
 	readonly name: string;
+}
+
+export interface GetSessionSkillsRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
 }
 
 export interface ListDirectoriesRpcInput {
@@ -630,6 +638,9 @@ const callGetToolContent = (input: GetToolContentRpcInput) =>
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetSkillContent(input));
+
+const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
+	callControl(input.projectSlug, (client) => client.GetSessionSkills(input));
 
 const callListDirectories = (input: ListDirectoriesRpcInput) =>
 	callControl(input.projectSlug, (client) => client.ListDirectories(input));
@@ -1037,6 +1048,12 @@ export async function getSkillContentRpc(
 	input: GetSkillContentRpcInput,
 ): Promise<GetSkillContentResponse> {
 	return await runTransportEffect(callGetSkillContent(input));
+}
+
+export async function getSessionSkillsRpc(
+	input: GetSessionSkillsRpcInput,
+): Promise<GetSessionSkillsResponse> {
+	return await runTransportEffect(callGetSessionSkills(input));
 }
 
 export async function listDirectoriesRpc(

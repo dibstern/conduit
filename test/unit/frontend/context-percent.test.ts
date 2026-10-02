@@ -157,6 +157,9 @@ describe("claude capability probe — fable family limits", () => {
 		const result = await probeClaudeCapabilities({
 			workspaceRoot: "/tmp",
 			queryFactory: () => ({
+				async *[Symbol.asyncIterator]() {
+					yield* [];
+				},
 				initializationResult: async () => ({
 					models: [{ value: "claude-fable-5", displayName: "Claude Fable 5" }],
 					commands: [],

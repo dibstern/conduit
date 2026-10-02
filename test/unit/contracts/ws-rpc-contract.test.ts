@@ -22,6 +22,7 @@ import {
 	GetModels,
 	GetModelsResponseSchema,
 	GetProjects,
+	GetSessionSkills,
 	GetSkillContent,
 	GetTodo,
 	GetToolContent,
@@ -478,6 +479,19 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						path: "/project/.claude/skills/review/SKILL.md",
 						content: "Review instructions",
 					}),
+				GetSessionSkills: () =>
+					Effect.succeed({
+						loads: [
+							{
+								name: "review",
+								invokedBy: "agent" as const,
+								turnOrdinal: 1,
+								at: 100,
+								anchor: { messageId: "message-1", partId: "part-1" },
+								running: true,
+							},
+						],
+					}),
 				LoadMoreHistory: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -791,6 +805,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetFileContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetToolContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetSkillContent")).toBe(true);
+		expect(WsRpcGroup.requests.has("GetSessionSkills")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(false);
 		expect(WsRpcGroup.requests.has("LoadMoreHistory")).toBe(true);
 		expect(WsRpcGroup.requests.has("RewindSession")).toBe(true);
@@ -1168,6 +1183,24 @@ describe("browser WebSocket RPC contract", () => {
 					content: "Review instructions",
 				});
 
+				expect(
+					yield* client.GetSessionSkills({
+						projectSlug: "demo",
+						sessionId: "session-1",
+					}),
+				).toEqual({
+					loads: [
+						{
+							name: "review",
+							invokedBy: "agent",
+							turnOrdinal: 1,
+							at: 100,
+							anchor: { messageId: "message-1", partId: "part-1" },
+							running: true,
+						},
+					],
+				});
+
 				const created = yield* client.CreateSession({
 					projectSlug: "demo",
 					originId: "browser-tab-a",
@@ -1528,6 +1561,12 @@ describe("browser WebSocket RPC contract", () => {
 		expect(
 			new GetSkillContent({ projectSlug: "demo", name: "review" })._tag,
 		).toBe("GetSkillContent");
+		expect(
+			new GetSessionSkills({
+				projectSlug: "demo",
+				sessionId: "session-1",
+			})._tag,
+		).toBe("GetSessionSkills");
 		expect(
 			new LoadMoreHistory({
 				projectSlug: "demo",

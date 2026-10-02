@@ -547,6 +547,22 @@ export const GetSkillContentResponseSchema = Schema.Struct({
 	content: Schema.String,
 });
 
+export const GetSessionSkillsResponseSchema = Schema.Struct({
+	loads: Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			invokedBy: Schema.Literal("user", "agent"),
+			turnOrdinal: Schema.Number,
+			at: Schema.Number,
+			anchor: Schema.Struct({
+				messageId: Schema.String,
+				partId: Schema.optional(Schema.String),
+			}),
+			running: Schema.Boolean,
+		}),
+	),
+});
+
 export type AgentInfo = typeof AgentInfoSchema.Type;
 export type AgentProviderScope = typeof AgentProviderScopeSchema.Type;
 export type GetAgentsResponse = typeof GetAgentsResponseSchema.Type;
@@ -574,6 +590,8 @@ export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
 export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
 export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
+export type GetSessionSkillsResponse =
+	typeof GetSessionSkillsResponseSchema.Type;
 export type ContextWindowOption = typeof ContextWindowOptionSchema.Type;
 export type ModelInfo = typeof ModelInfoSchema.Type;
 export type ProviderInfo = typeof ProviderInfoSchema.Type;
@@ -1312,6 +1330,18 @@ export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
 	},
 ) {}
 
+export class GetSessionSkills extends Schema.TaggedRequest<GetSessionSkills>()(
+	"GetSessionSkills",
+	{
+		failure: WsRpcError,
+		success: GetSessionSkillsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	failure: WsRpcError,
 	success: GetModelsResponseSchema,
@@ -1598,6 +1628,7 @@ export const WsRpcRequest = Schema.Union(
 	GetFileContent,
 	GetToolContent,
 	GetSkillContent,
+	GetSessionSkills,
 	GetModels,
 	AddProject,
 	RemoveProject,
@@ -1703,6 +1734,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileContent),
 	Rpc.fromTaggedRequest(GetToolContent),
 	Rpc.fromTaggedRequest(GetSkillContent),
+	Rpc.fromTaggedRequest(GetSessionSkills),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(AddProject),
 	Rpc.fromTaggedRequest(RemoveProject),

@@ -641,6 +641,10 @@ body:has(dialog:modal) {
 	/* Yield first, but keep a readable stub of the branch; the narrowest
 	   container query hides it outright rather than squeezing it to nothing. */
 	min-width: 96px;
+	/* A floor for yielding, never padding: a shorter identity keeps its own
+	   width so the skills chip before it sits flush. Browsers without
+	   calc-size() keep the plain floor and show a gap instead. */
+	min-width: calc-size(max-content, min(size, 96px));
 	overflow: hidden;
 }
 #session-bar[data-compact="false"] #session-bar-settle {

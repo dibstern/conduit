@@ -18,6 +18,7 @@ describe("probeClaudeCapabilities", () => {
 				name: string;
 				description?: string;
 				argumentHint?: string;
+				builtin?: boolean;
 			}>;
 			agents?: Array<{
 				name: string;
@@ -26,12 +27,22 @@ describe("probeClaudeCapabilities", () => {
 			}>;
 		};
 		throwOnInit?: Error;
+		/** The stream's system init skills, or an error the stream throws. */
+		initSkills?: readonly string[] | Error;
 	}) {
 		return vi.fn().mockReturnValue({
 			initializationResult: vi.fn().mockImplementation(async () => {
 				if (opts.throwOnInit) throw opts.throwOnInit;
 				return opts.initResult ?? { models: [] };
 			}),
+			async *[Symbol.asyncIterator]() {
+				if (opts.initSkills instanceof Error) throw opts.initSkills;
+				yield {
+					type: "system",
+					subtype: "init",
+					skills: opts.initSkills ?? [],
+				};
+			},
 		});
 	}
 
@@ -180,6 +191,63 @@ describe("probeClaudeCapabilities", () => {
 				source: "claude-sdk",
 			},
 		]);
+	});
+
+	it("distinguishes plugin skills from plugin commands and preserves builtins", async () => {
+		const result = await probeClaudeCapabilities({
+			workspaceRoot,
+			queryFactory: makeFakeQuery({
+				initResult: {
+					models: [],
+					commands: [
+						{
+							name: "my-plugin:my-skill",
+							description: "Plugin skill",
+							argumentHint: "[path]",
+						},
+						{ name: "my-plugin:my-command" },
+						{ name: "compact", builtin: true },
+					],
+				},
+				initSkills: ["my-plugin:my-skill", "compact"],
+			}),
+		});
+		expect(result.commands).toEqual([
+			{
+				name: "my-plugin:my-skill",
+				description: "Plugin skill",
+				args: "[path]",
+				source: "plugin-skill",
+			},
+			{ name: "my-plugin:my-command", source: "claude-sdk" },
+			{ name: "compact", source: "builtin" },
+		]);
+	});
+
+	it("warns and keeps existing command sources when the init stream throws", async () => {
+		const logger = createTestLogger();
+		logger.warn = vi.fn();
+		const result = await probeClaudeCapabilities({
+			workspaceRoot,
+			logger,
+			queryFactory: makeFakeQuery({
+				initResult: {
+					models: [],
+					commands: [
+						{ name: "my-plugin:my-skill" },
+						{ name: "my-plugin:my-command" },
+					],
+				},
+				initSkills: new Error("stream closed early"),
+			}),
+		});
+		expect(result.commands).toEqual([
+			{ name: "my-plugin:my-skill", source: "claude-sdk" },
+			{ name: "my-plugin:my-command", source: "claude-sdk" },
+		]);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining("stream closed early"),
+		);
 	});
 
 	it("captures agents from init", async () => {
@@ -678,7 +746,9 @@ describe("probeClaudeCapabilities", () => {
 		it("warns but still returns catalogs when init drifts — never fail-closes", async () => {
 			const logger = loggerSpy();
 			// commands/agents/account absent → drift from the SDK's required shape
-			const queryFactory = makeFakeQuery({ initResult: { models: [] } });
+			const queryFactory = makeFakeQuery({
+				initResult: { models: [] },
+			});
 			const result = await probeClaudeCapabilities({
 				queryFactory,
 				workspaceRoot,

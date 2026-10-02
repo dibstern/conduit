@@ -47,6 +47,7 @@
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
+	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
@@ -187,6 +188,9 @@
 -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
+		<!-- Inside meta on phones so the chip rides the 1fr track beside identity
+		     instead of adding a grid column that costs a gap when it is absent. -->
+		{#if sessionViewState.compact}<SessionSkillsChip presentation="sheet" />{/if}
 		{#if identity}
 			<GitIdentity project={identity} {git} />
 		{/if}
@@ -369,7 +373,8 @@
 	</div>
 	{/if}
 
-	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
+	<!-- A sibling, not inside meta: desktop meta clips and yields first. -->
+	{#if !sessionViewState.compact}<SessionSkillsChip presentation="popover" />{@render identityBlock()}{/if}
 
 	{#if !sessionViewState.compact && settleVerb}
 		<Tooltip side="bottom">
