@@ -269,15 +269,18 @@
 			return `text-base font-normal ${active ? "text-text" : "text-text-secondary"}`;
 		return `text-lg ${active && status.emphasis !== "strong" ? "text-text font-normal" : emphasis.title}`;
 	});
+	// A picked row reads at full strength whatever its status, so the selection
+	// is legible from the list itself and not only from the header count.
+	const picked = $derived(selectMode && selected);
 	const rowOpacityClass = $derived.by(() => {
-		if (active) return "";
+		if (active || picked) return "";
 		if (shelfRow) return "opacity-50";
 		if (woken) return "";
 		return emphasis.row;
 	});
 	const selectionControlClass = $derived.by(() => {
 		if (active) return selected ? "text-brand-a" : "text-text-muted";
-		return selected ? "text-accent" : "text-text-dimmer";
+		return selected ? "text-accent" : "text-text-muted";
 	});
 
 	// Status first, per the design reference. A screen reader user scanning the
@@ -307,7 +310,9 @@
 				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
 				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
 		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
-			(active
+			(picked
+				? " bg-accent-bg text-text"
+				: active
 				? " active bg-bg-alt text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
 	);
@@ -561,7 +566,7 @@
 	bind:this={rowEl}
 	href={href || undefined}
 	class="{itemClass} no-underline {offset !== 0 && !active ? 'bg-sidebar-bg' : ''} {dragging ? 'transition-none' : 'transition-[color,background-color,transform] duration-150 motion-reduce:transition-none'}"
-	style="touch-action: pan-y; -webkit-touch-callout: none; user-select: none; transform: translateX({offset}px); {active ? 'box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);' : ''}"
+	style="touch-action: pan-y; -webkit-touch-callout: none; user-select: none; transform: translateX({offset}px); {picked ? 'box-shadow: inset 3px 0 0 var(--color-accent);' : active ? 'box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgba(255,45,123,0.1);' : ''}"
 	data-session-id={session.id}
 	aria-label={ariaLabel}
 	onclick={handleClick}

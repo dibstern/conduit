@@ -39,6 +39,7 @@
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Banners from "../overlays/Banners.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import SessionListHeader from "./SessionListHeader.svelte";
 	import SessionListFilters from "./SessionListFilters.svelte";
 	import SessionListRows from "./SessionListRows.svelte";
@@ -453,6 +454,12 @@
 	<SessionListFilters {localSearchValue} {live} {searchSummary} onsearchinput={handleSearchInput} onclearsearch={clearSearch} {onaddproject} />
 	{#if feedStale}
 		<div class="px-3.5 py-1 text-xs text-text-dimmer font-brand" data-testid="session-list-stale">May be out of date</div>
+	{/if}
+	{#if selectMode && selectionCount === 0}
+		<div class="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-dashed border-accent px-2.5 py-2 text-xs text-text-secondary font-brand" data-testid="select-hint">
+			<Icon name="circle-check" size={15} class="shrink-0 text-accent" />
+			Pick sessions to act on, then choose an action below.
+		</div>
 	{/if}
 	<SessionListRows {arrangement} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerLoading} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenameend={handleRenameEnd} />
 	{#if selectMode}
