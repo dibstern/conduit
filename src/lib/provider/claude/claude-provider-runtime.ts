@@ -195,6 +195,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 > & {
 	readonly materializeSubagents?: boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
+	readonly prepareQuery?: () => Promise<void>;
 };
 
 export interface ClaudeProviderRuntimeState {
@@ -303,6 +304,7 @@ export const makeClaudeSessionRunner = (
 		const warmedQueries = yield* makeClaudeWarmedQueryOwner(
 			deps.queryFactory ??
 				(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>),
+			deps.prepareQuery,
 		);
 		const runner = new InProcessClaudeSessionRunner(
 			{ ...deps, capabilitiesService },
@@ -1511,6 +1513,12 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					sessionId,
 					launchOptions,
 				);
+				if (!warmed && this.deps.prepareQuery)
+					yield* Effect.tryPromise({
+						try: this.deps.prepareQuery,
+						catch: (cause) =>
+							new ClaudeBoundaryError({ operation: "prepareQuery", cause }),
+					});
 				activeQuery = warmed?.query;
 				const queue = warmed?.promptQueue ?? (yield* makeEffectPromptQueue());
 				promptQueue = queue;

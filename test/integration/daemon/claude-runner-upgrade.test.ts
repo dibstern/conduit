@@ -55,6 +55,9 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 					"SELECT command_id, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId) as Array<{ command_id: string; status: string }>,
+			providerState: db
+				.prepare("SELECT key, value FROM provider_state WHERE session_id = ?")
+				.all(sessionId) as Array<{ key: string; value: string }>,
 		};
 	} finally {
 		db.close();
@@ -980,6 +983,394 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 				),
 			).toHaveLength(1);
 		details["originalClaudeSessionId"] = originalQuery.sessionId;
+		details["replacement"] = replacement;
+	}, 40_000);
+
+	it("merge regression: the actual first upgraded send preserves an interrupted first-turn cursor", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("merge-first-send-cursor");
+		const sessionId = await initial.createSession("Actual resumed first send");
+		details["sessionId"] = sessionId;
+		const interrupted = "stall-merge-first-turn";
+		const pending = initial.send(sessionId, interrupted).catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) => mark.kind === "emit" && mark.prompt === interrupted,
+					),
+				).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const old = runnerFor(harness, sessionId);
+		const originalQuery = queryFor(harness, old.pid);
+		await Effect.runPromise(
+			initial.rpc.CancelSession({
+				projectSlug: "process-test",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+		);
+		await pending;
+		await vi.waitFor(
+			() => {
+				const state = persisted(harness, sessionId);
+				expect(state.commands.map((command) => command.status)).toEqual([
+					"failed",
+				]);
+				expect(
+					state.events.filter((event) => event.type === "turn.interrupted"),
+				).toHaveLength(1);
+				expect(
+					state.providerState.find(({ key }) => key === "resumeSessionId"),
+				).toBeUndefined();
+			},
+			{ timeout: 10_000 },
+		);
+		details["providerStateBeforeUpgrade"] = persisted(
+			harness,
+			sessionId,
+		).providerState;
+		await harness.kill();
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const replacement = await upgraded(harness, sessionId, old.pid);
+		const warmed = queryFor(harness, replacement.pid);
+		const after = "merge-actual-first-upgraded-send";
+		expect((await browser.send(sessionId, after)).chunks).toEqual(
+			responseChunks(after),
+		);
+		const enqueue = sdkProof(harness).find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === after,
+		);
+		if (enqueue?.kind !== "enqueue")
+			throw new Error("Missing actual first-send enqueue");
+		expect(enqueue).toMatchObject({ queryId: warmed.queryId });
+		const actualQueryId = enqueue.queryId;
+		const actualQuery = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.queryId === actualQueryId,
+		);
+		expect(actualQuery).toMatchObject({ sessionId: originalQuery.sessionId });
+		expect(
+			sdkProof(harness).filter((mark) => mark.kind === "query"),
+		).toHaveLength(2);
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "enqueue" && mark.prompt === after,
+			),
+		).toHaveLength(1);
+		await vi.waitFor(
+			() =>
+				expect(
+					persisted(harness, sessionId).commands.map(
+						(command) => command.status,
+					),
+				).toEqual(["failed", "completed"]),
+			{ timeout: 10_000 },
+		);
+		details["originalClaudeSessionId"] = originalQuery.sessionId;
+		details["actualFirstSendQuery"] = actualQuery;
+		details["replacement"] = replacement;
+	}, 40_000);
+
+	it("merge regression: recreating an upgraded query replays file settings changed after the switch", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("merge-file-settings-recreation");
+		const settingsFile = join(harness.root, "claude/settings.json");
+		writeFileSync(
+			settingsFile,
+			JSON.stringify({
+				autoCompactEnabled: false,
+				cleanupPeriodDays: 9,
+			}),
+		);
+		const sessionId = await initial.createSession(
+			"Frozen later query generations",
+		);
+		details["sessionId"] = sessionId;
+		const before = "merge-settings-before-switch";
+		await initial.send(sessionId, before);
+		const old = runnerFor(harness, sessionId);
+		const original = queryFor(harness, old.pid);
+		await completed(harness, sessionId, [before]);
+		await harness.kill();
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const replacement = await upgraded(harness, sessionId, old.pid);
+		const warmed = queryFor(harness, replacement.pid);
+		expect(JSON.parse(warmed.optionsJson)["settingSources"]).toEqual([
+			"user",
+			"project",
+			"local",
+		]);
+		expect(warmed.effectiveSettingsJson).toBe(original.effectiveSettingsJson);
+		const firstWarmSend = "merge-settings-first-warm-send";
+		await browser.send(sessionId, firstWarmSend);
+		expect(
+			sdkProof(harness).find(
+				(mark) => mark.kind === "enqueue" && mark.prompt === firstWarmSend,
+			),
+		).toMatchObject({ queryId: warmed.queryId });
+		await completed(harness, sessionId, [before, firstWarmSend]);
+		const unsupportedEdits = {
+			autoCompactEnabled: true,
+			cleanupPeriodDays: 99,
+			permissions: { allow: ["Bash(printf merge-healthy*)"] },
+		};
+		writeFileSync(settingsFile, JSON.stringify(unsupportedEdits));
+		const healthy = "merge-settings-healthy-query-after-unsupported-edit";
+		expect((await browser.send(sessionId, healthy)).chunks).toEqual(
+			responseChunks(healthy),
+		);
+		expect(
+			sdkProof(harness).find(
+				(mark) => mark.kind === "enqueue" && mark.prompt === healthy,
+			),
+		).toMatchObject({ queryId: warmed.queryId });
+		expect(
+			sdkProof(harness).filter((mark) => mark.kind === "query"),
+		).toHaveLength(2);
+		await completed(harness, sessionId, [before, firstWarmSend, healthy]);
+		details["unsupportedEditsWhileQueryHealthy"] = unsupportedEdits;
+		details["healthyQueryAfterUnsupportedEdit"] = warmed.queryId;
+		writeFileSync(
+			settingsFile,
+			JSON.stringify({
+				autoCompactEnabled: true,
+				cleanupPeriodDays: 99,
+			}),
+		);
+		const interrupted = "stall-merge-settings-recreate";
+		const pending = browser.send(sessionId, interrupted).catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).find(
+						(mark) => mark.kind === "enqueue" && mark.prompt === interrupted,
+					),
+				).toMatchObject({ queryId: warmed.queryId }),
+			{ timeout: 10_000 },
+		);
+		await Effect.runPromise(
+			browser.rpc.CancelSession({
+				projectSlug: "process-test",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+		);
+		await pending;
+		await vi.waitFor(
+			() =>
+				expect(
+					persisted(harness, sessionId).events.filter(
+						(event) => event.type === "turn.interrupted",
+					),
+				).toHaveLength(1),
+			{ timeout: 10_000 },
+		);
+		const after = "merge-settings-after-query-recreation";
+		expect((await browser.send(sessionId, after)).chunks).toEqual(
+			responseChunks(after),
+		);
+		const enqueue = sdkProof(harness).find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === after,
+		);
+		if (enqueue?.kind !== "enqueue")
+			throw new Error("Missing recreated query enqueue");
+		const recreatedQueryId = enqueue.queryId;
+		const recreated = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.queryId === recreatedQueryId,
+		);
+		if (recreated?.kind !== "query")
+			throw new Error("Missing recreated SDK query");
+		expect(recreated.queryId).not.toBe(warmed.queryId);
+		expect(recreated.pid).toBe(replacement.pid);
+		expect(recreated.sessionId).toBe(original.sessionId);
+		expect(recreated.effectiveSettingsJson).toBe(
+			original.effectiveSettingsJson,
+		);
+		expect(JSON.parse(recreated.effectiveSettingsJson)).toMatchObject({
+			autoCompactEnabled: false,
+			cleanupPeriodDays: 9,
+		});
+		expect(
+			sdkProof(harness).filter((mark) => mark.kind === "query"),
+		).toHaveLength(3);
+		await vi.waitFor(
+			() =>
+				expect(
+					persisted(harness, sessionId).commands.map(
+						(command) => command.status,
+					),
+				).toEqual([
+					"completed",
+					"completed",
+					"completed",
+					"failed",
+					"completed",
+				]),
+			{ timeout: 10_000 },
+		);
+		details["frozenEffectiveSettingsJson"] = original.effectiveSettingsJson;
+		details["mutatedSettingsFile"] = JSON.parse(
+			readFileSync(settingsFile, "utf8"),
+		) as unknown;
+		details["actualRecreatedQuery"] = recreated;
+		details["replacement"] = replacement;
+	}, 40_000);
+
+	it("merge regression: live controls invalidate a replacement still warming", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("merge-live-controls-warming");
+		const sessionId = await initial.createSession(
+			"Control changes during warming",
+		);
+		details["sessionId"] = sessionId;
+		const before = "merge-controls-before-restart";
+		await initial.send(sessionId, before);
+		const old = runnerFor(harness, sessionId);
+		const original = queryFor(harness, old.pid);
+		await completed(harness, sessionId, [before]);
+		writeFileSync(join(harness.root, "hold-next-initialization"), "hold once");
+		await harness.kill();
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).filter((mark) => mark.kind === "query"),
+				).toHaveLength(2),
+			{ timeout: 10_000 },
+		);
+		const stale = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.pid !== old.pid,
+		);
+		if (stale?.kind !== "query")
+			throw new Error("Missing held control-race candidate");
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).find(
+						(mark) =>
+							mark.kind === "initialization-held" &&
+							mark.queryId === stale.queryId,
+					),
+				).toBeDefined(),
+			{ timeout: 10_000 },
+		);
+		const modelId =
+			original.options.model === "claude-opus-4"
+				? "claude-sonnet-4"
+				: "claude-opus-4";
+		const payload = {
+			projectSlug: "process-test",
+			sessionId,
+			originId: browser.originId,
+		};
+		await Effect.runPromise(
+			browser.rpc.SwitchModel({ ...payload, providerId: "claude", modelId }),
+		);
+		await Effect.runPromise(
+			browser.rpc.SwitchVariant({ ...payload, variant: "high" }),
+		);
+		await Effect.runPromise(
+			browser.rpc.SwitchPermissionMode({ ...payload, mode: "full" }),
+		);
+		await vi.waitFor(
+			() => {
+				const updates = sdkProof(harness).filter(
+					(mark) =>
+						mark.kind === "query-update" && mark.queryId === original.queryId,
+				);
+				expect(updates).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ model: modelId }),
+						expect.objectContaining({ effort: "high" }),
+						expect.objectContaining({ permissionMode: "bypassPermissions" }),
+					]),
+				);
+			},
+			{ timeout: 10_000 },
+		);
+		expect(existsSync(join(harness.root, "release-held-initialization"))).toBe(
+			false,
+		);
+		writeFileSync(join(harness.root, "release-held-initialization"), "release");
+		await vi.waitFor(
+			() => {
+				expect(
+					sdkProof(harness).find(
+						(mark) =>
+							mark.kind === "runner-upgrade" &&
+							mark.phase === "cancelled" &&
+							mark.newPid === stale.pid,
+					),
+				).toBeDefined();
+				expect(() => process.kill(stale.pid, 0)).toThrow();
+			},
+			{ timeout: 10_000 },
+		);
+		const replacement = await upgraded(harness, sessionId, old.pid);
+		expect(replacement.pid).not.toBe(stale.pid);
+		const warmed = queryFor(harness, replacement.pid);
+		const desiredControls = {
+			model: modelId,
+			effort: "high",
+			permissionMode: "bypassPermissions",
+		};
+		expect(warmed.options).toMatchObject(desiredControls);
+		expect(
+			sdkProof(harness).filter(
+				(mark) =>
+					mark.kind === "runner-upgrade" &&
+					mark.phase === "switched" &&
+					mark.newPid === stale.pid,
+			),
+		).toEqual([]);
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "enqueue" && mark.queryId === stale.queryId,
+			),
+		).toEqual([]);
+		const queryCount = sdkProof(harness).filter(
+			(mark) => mark.kind === "query",
+		).length;
+		expect(queryCount).toBe(3);
+		const boundary = "merge-controls-retry-boundary";
+		expect((await browser.send(sessionId, boundary)).chunks).toEqual(
+			responseChunks(boundary),
+		);
+		expect(
+			sdkProof(harness).find(
+				(mark) => mark.kind === "enqueue" && mark.prompt === boundary,
+			),
+		).toMatchObject({ queryId: warmed.queryId, liveOptions: desiredControls });
+		const after = "merge-controls-actual-warm-send";
+		expect((await browser.send(sessionId, after)).chunks).toEqual(
+			responseChunks(after),
+		);
+		expect(
+			sdkProof(harness).find(
+				(mark) => mark.kind === "enqueue" && mark.prompt === after,
+			),
+		).toMatchObject({ queryId: warmed.queryId, liveOptions: desiredControls });
+		expect(
+			sdkProof(harness).filter((mark) => mark.kind === "query"),
+		).toHaveLength(queryCount);
+		await completed(harness, sessionId, [before, boundary, after]);
+		details["discardedCandidate"] = stale;
+		details["desiredControls"] = desiredControls;
+		details["actualWarmedQuery"] = warmed;
+		details["queryCountAfterActualSend"] = queryCount;
 		details["replacement"] = replacement;
 	}, 40_000);
 
