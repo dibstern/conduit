@@ -5,11 +5,7 @@ import {
 	previousHistoryEntryIsSessionList,
 } from "../stores/router.svelte.js";
 import { isSessionSnoozed, sessionState } from "../stores/session.svelte.js";
-import {
-	currentSearchQuery,
-	refreshSessionList,
-	sessionList,
-} from "../stores/session-list.svelte.js";
+import { refreshListedSessions } from "../stores/session-list.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
 import { showToast } from "../stores/ui.svelte.js";
 import {
@@ -32,10 +28,6 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 	const projectSlug = session.projectSlug ?? getCurrentSlug();
 	if (!projectSlug) return;
 	const foreign = projectSlug !== getCurrentSlug();
-	const refreshForeign = () =>
-		currentSearchQuery() === null
-			? refreshSessionList()
-			: sessionList.search(sessionState.searchQuery).ready;
 	const input = {
 		projectSlug,
 		sessionId: session.id,
@@ -50,7 +42,7 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 		await (markUnread
 			? markSessionUnreadRpc(input)
 			: markSessionReadRpc(input));
-		if (foreign) await refreshForeign();
+		if (foreign) await refreshListedSessions();
 		if (
 			markUnread &&
 			sessionViewState.compact &&
@@ -71,7 +63,7 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 								: markSessionUnreadRpc(input)
 						)
 							.then(async () => {
-								if (foreign) await refreshForeign();
+								if (foreign) await refreshListedSessions();
 							})
 							.catch(() => {
 								showToast("Couldn't undo", { variant: "error" });

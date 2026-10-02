@@ -165,7 +165,6 @@
 		heldSessionId,
 		onholdchange,
 		menuOpen = false,
-		markOnly = false,
 		onrenameend,
 	}: {
 		session: SessionInfo;
@@ -188,7 +187,6 @@
 		pinned?: boolean;
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
-		markOnly?: boolean;
 		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement, trigger?: "touch") => void;
 		onsettle?: (id: string, next: boolean) => void;
 		onmarkread?: (id: string) => void;
@@ -364,7 +362,6 @@
 	}
 
 	function canSwipe(direction: "settle" | "snooze") {
-		if (markOnly) return false;
 		return direction === "settle"
 			? actions.settleDisabledReason == null || canMarkRead
 			: actions.snoozeVisible && (actions.snoozed || actions.snoozeDisabledReason == null);
@@ -478,7 +475,7 @@
 	}
 
 	function handleDblClick(e: MouseEvent) {
-		if (selectMode || markOnly || !onrenameend) return;
+		if (selectMode || !onrenameend) return;
 		e.preventDefault();
 		e.stopPropagation();
 		startRename();
@@ -714,38 +711,36 @@
 							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onmarkread?.(session.id); }}
 						><Icon name={session.unread ? "circle" : "circle-dot"} size={16} /></Button>
 					{/if}
-					{#if !markOnly}
-					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-						data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
-						ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
-						title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle (s)" : "Settle (s)")}
-						disabled={actions.settleDisabledReason != null}
-						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
-					><Icon name={settled || actions.settled ? "undo" : "check"} size={16} /></Button>
-					{#if actions.snoozeVisible}
-						{#if snoozed || actions.snoozed}
-							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-								data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze (z)"
-								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
-							><Icon name="undo" size={16} /></Button>
-						{:else}
-							<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-								class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-								data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
-								title={actions.snoozeDisabledReason ?? "Snooze (z)"} disabled={actions.snoozeDisabledReason != null}
-								onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
-							><Icon name="moon" size={16} /></Button>
-						{/if}
+				<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+					class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+					data-testid={settled || actions.settled ? "session-act-unsettle" : "session-act-settle"}
+					ariaLabel="{settled || actions.settled ? 'Un-settle' : 'Settle'} {displayTitle}"
+					title={actions.settleDisabledReason ?? (settled || actions.settled ? "Un-settle (s)" : "Settle (s)")}
+					disabled={actions.settleDisabledReason != null}
+					onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsettle?.(session.id, !(settled || actions.settled)); }}
+				><Icon name={settled || actions.settled ? "undo" : "check"} size={16} /></Button>
+				{#if actions.snoozeVisible}
+					{#if snoozed || actions.snoozed}
+						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+							data-testid="session-act-unsnooze" ariaLabel="Unsnooze {displayTitle}" title="Unsnooze (z)"
+							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onunsnooze?.(session.id); }}
+						><Icon name="undo" size={16} /></Button>
+					{:else}
+						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+							data-testid="session-act-snooze" ariaLabel="Snooze {displayTitle}"
+							title={actions.snoozeDisabledReason ?? "Snooze (z)"} disabled={actions.snoozeDisabledReason != null}
+							onclick={(event) => { event.preventDefault(); event.stopPropagation(); onsnooze?.(session.id); }}
+						><Icon name="moon" size={16} /></Button>
 					{/if}
-					<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
-						class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
-						data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
-						ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
-						onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
-						><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
-					{/if}
+				{/if}
+				<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
+					class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
+					data-testid={actions.pinned ? "session-act-unpin" : "session-act-pin"}
+					ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
+					onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
+					><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
 					<Button
 					bind:element={moreBtnEl}
 					variant="ghost"

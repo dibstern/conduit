@@ -12,7 +12,7 @@
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
-	import { isForeignSession, sessionVerbActions } from "./session-verbs.js";
+	import { sessionVerbActions } from "./session-verbs.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import Button from "../ui/Button.svelte";
@@ -67,63 +67,36 @@
 	{#snippet sessionRow(s: SessionInfo)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
-		{#if isForeignSession(s)}
-			<!-- Rename, most context-menu verbs and select-mode selection all
-			     RPC the relay this socket is attached to, so handing them a session
-			     owned by another project would act on the wrong relay. Withholding
-			     the handlers is what makes the row inert instead of wrong. The menu
-			     keeps only Mark read/unread (markOnly), which carries the row's
-			     own projectSlug. -->
-			<SessionItem
-				session={s}
-				pinned={s.pinnedAt != null}
-				{settled}
-				{snoozed}
-				settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
-				snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
-				now={sessionState.now}
-				href={getSessionHref(s.id)}
-				projectLabel={getProjectLabel(s)}
-				projectAccent={getProjectAccent(s)}
-				branch={s.git?.branch}
-				onswitchsession={() => handleSwitchSession(s)}
-				{oncontextmenu}
-				menuOpen={menuOpenId === s.id}
-				onmarkread={() => { void toggleSessionRead(s); }}
-				markOnly
-			/>
-		{:else}
-			<SessionItem
-				session={s}
-				pinned={s.pinnedAt != null}
-				{settled}
-				{snoozed}
-				settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
-				snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
-				now={sessionState.now}
-				href={getSessionHref(s.id)}
-				projectLabel={getProjectLabel(s)}
-				projectAccent={getProjectAccent(s)}
-				branch={s.git?.branch}
-				active={s.id === sessionState.currentId}
-				renaming={s.id === renamingSessionId}
-				{selectMode}
-				selected={selectedSessionIds.has(s.id)}
-				heldSessionId={heldSessionId}
-				menuOpen={menuOpenId === s.id}
-				onholdchange={(id) => { heldSessionId = id; }}
-				onswitchsession={() => handleSwitchSession(s)}
-				{ontoggleselection}
-				{oncontextmenu}
-				onsettle={(_id, next) => { void sessionVerbActions.settle(s, next); }}
-				onmarkread={(_id) => { void toggleSessionRead(s); }}
-				onpin={(_id, next) => { void sessionVerbActions.pin(s, next); }}
-				onsnooze={() => openSnoozePicker(s, "center")}
-				onunsnooze={() => { void sessionVerbActions.unsnooze(s); }}
-				oncommitsnooze={() => sessionVerbActions.commitTomorrow(s)}
-				{onrenameend}
-			/>
-		{/if}
+		<SessionItem
+			session={s}
+			pinned={s.pinnedAt != null}
+			{settled}
+			{snoozed}
+			settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
+			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
+			now={sessionState.now}
+			href={getSessionHref(s.id)}
+			projectLabel={getProjectLabel(s)}
+			projectAccent={getProjectAccent(s)}
+			branch={s.git?.branch}
+			active={s.id === sessionState.currentId}
+			renaming={s.id === renamingSessionId}
+			{selectMode}
+			selected={selectedSessionIds.has(s.id)}
+			heldSessionId={heldSessionId}
+			menuOpen={menuOpenId === s.id}
+			onholdchange={(id) => { heldSessionId = id; }}
+			onswitchsession={() => handleSwitchSession(s)}
+			{ontoggleselection}
+			{oncontextmenu}
+			onsettle={(_id, next) => { void sessionVerbActions.settle(s, next); }}
+			onmarkread={(_id) => { void toggleSessionRead(s); }}
+			onpin={(_id, next) => { void sessionVerbActions.pin(s, next); }}
+			onsnooze={() => openSnoozePicker(s, "center")}
+			onunsnooze={() => { void sessionVerbActions.unsnooze(s); }}
+			oncommitsnooze={() => sessionVerbActions.commitTomorrow(s)}
+			{onrenameend}
+		/>
 	{/snippet}
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->

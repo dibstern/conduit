@@ -443,7 +443,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("limits another project's row menu to Mark read/unread", async () => {
+	it("acts on another project's row in that project", async () => {
 		seedDaemonSessions([
 			{
 				id: "foreign",
@@ -456,14 +456,14 @@ describe("session triage list", () => {
 		const row = screen.getByText("Foreign work").closest("a");
 		if (!row) throw new Error("Missing foreign row");
 		await fireEvent.contextMenu(row);
-		const menu = screen.getByRole("menu");
-		expect(
-			[...menu.querySelectorAll("[role^='menuitem']")].map((item) =>
-				item.getAttribute("data-testid"),
-			),
-		).toEqual(["session-ctx-mark-unread"]);
-		expect(setSessionPinnedRpc).not.toHaveBeenCalled();
-		expect(setSessionSettledRpc).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
+		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "other-project",
+				sessionId: "foreign",
+				pinned: false,
+			}),
+		);
 	});
 
 	it("snoozes through the sheet and Undo unsnoozes the same project", async () => {

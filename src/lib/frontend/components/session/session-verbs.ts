@@ -5,6 +5,7 @@ import {
 	sessionState,
 	switchToSession,
 } from "../../stores/session.svelte.js";
+import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { confirm, showToast } from "../../stores/ui.svelte.js";
 import { WsRpcError } from "../../transport/ws-rpc.js";
@@ -115,17 +116,26 @@ export function runSessionVerbShortcut(
 	else verb.run(() => (origin instanceof HTMLElement ? origin : null));
 }
 
-export function isForeignSession(session: SessionInfo): boolean {
+function isForeignSession(session: SessionInfo): boolean {
 	return (
 		session.projectSlug != null && session.projectSlug !== getCurrentSlug()
 	);
 }
 
+// The server routes each call to the project named in it, so a session from
+// another project is changed in place.
 function rpcInput(session: SessionInfo) {
 	const projectSlug = session.projectSlug ?? getCurrentSlug();
-	return projectSlug && !isForeignSession(session)
+	return projectSlug
 		? { projectSlug, sessionId: session.id, originId: getBrowserClientId() }
 		: null;
+}
+
+// This socket only hears live updates for its own project.
+function refreshIfForeign(session: SessionInfo): Promise<void> {
+	return isForeignSession(session)
+		? refreshListedSessions()
+		: Promise.resolve();
 }
 
 async function settle(session: SessionInfo, settled: boolean) {
@@ -133,15 +143,16 @@ async function settle(session: SessionInfo, settled: boolean) {
 	if (!input) return;
 	try {
 		await setSessionSettledRpc({ ...input, settled });
+		await refreshIfForeign(session);
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
 				duration: 5000,
 				action: {
 					label: "Undo",
 					run: () => {
-						void setSessionSettledRpc({ ...input, settled: false }).catch(() =>
-							showToast("Couldn't undo", { variant: "error" }),
-						);
+						void setSessionSettledRpc({ ...input, settled: false })
+							.then(() => refreshIfForeign(session))
+							.catch(() => showToast("Couldn't undo", { variant: "error" }));
 					},
 				},
 			});
@@ -155,15 +166,16 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	if (!input) return;
 	try {
 		await setSessionPinnedRpc({ ...input, pinned });
+		await refreshIfForeign(session);
 		if (pinned)
 			showToast(`Pinned “${session.title || "New Session"}” to the top`, {
 				duration: 5000,
 				action: {
 					label: "Undo",
 					run: () => {
-						void setSessionPinnedRpc({ ...input, pinned: false }).catch(() =>
-							showToast("Couldn't undo", { variant: "error" }),
-						);
+						void setSessionPinnedRpc({ ...input, pinned: false })
+							.then(() => refreshIfForeign(session))
+							.catch(() => showToast("Couldn't undo", { variant: "error" }));
 					},
 				},
 			});
@@ -177,6 +189,7 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 	if (!input) return;
 	try {
 		await setSessionAutoSettleRpc({ ...input, disabled });
+		await refreshIfForeign(session);
 	} catch {
 		showToast("Couldn't change auto-settle", { variant: "error" });
 	}
@@ -191,6 +204,7 @@ async function rename(session: SessionInfo, title: string) {
 			sessionId: input.sessionId,
 			title,
 		});
+		await refreshIfForeign(session);
 	} catch {
 		showToast("Couldn't rename session", { variant: "error" });
 	}
@@ -203,6 +217,7 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 	const previousUntil = session.snoozedUntil ?? null;
 	try {
 		await snoozeSessionRpc({ ...input, until });
+		await refreshIfForeign(session);
 		showToast(
 			until === null
 				? `Snoozed “${session.title || "New Session"}” until something happens`
@@ -215,9 +230,9 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 						const undo = wasSnoozed
 							? snoozeSessionRpc({ ...input, until: previousUntil })
 							: unsnoozeSessionRpc(input);
-						void undo.catch(() =>
-							showToast("Couldn't undo", { variant: "error" }),
-						);
+						void undo
+							.then(() => refreshIfForeign(session))
+							.catch(() => showToast("Couldn't undo", { variant: "error" }));
 					},
 				},
 			},
@@ -235,6 +250,7 @@ async function unsnooze(session: SessionInfo) {
 	if (!input) return;
 	try {
 		await unsnoozeSessionRpc(input);
+		await refreshIfForeign(session);
 	} catch (error) {
 		showToast(
 			error instanceof WsRpcError ? error.message : "Couldn't unsnooze session",
@@ -256,9 +272,9 @@ async function remove(
 	if (!confirmed) return;
 	const input = rpcInput(session);
 	if (!input) return;
-	void deleteSessionRpc(input).catch(() =>
-		showToast(`Couldn't delete "${title}"`, { variant: "warn" }),
-	);
+	void deleteSessionRpc(input)
+		.then(() => refreshIfForeign(session))
+		.catch(() => showToast(`Couldn't delete "${title}"`, { variant: "warn" }));
 }
 
 function fork(session: SessionInfo) {
@@ -299,11 +315,7 @@ export const sessionVerbActions = {
 	markRead: toggleSessionRead,
 };
 
-export function getSettleVerb(
-	session: SessionInfo,
-	now: number,
-): SessionVerb | undefined {
-	if (isForeignSession(session)) return undefined;
+export function getSettleVerb(session: SessionInfo, now: number): SessionVerb {
 	const actions = getSessionActionState(session, now);
 	return {
 		testId:
@@ -325,50 +337,45 @@ export function getSessionVerbs(
 	snoozePlacement: "center" | "sheet",
 ): SessionVerbEntry[] {
 	const actions = getSessionActionState(session, now);
-	const settleVerb = getSettleVerb(session, now);
-	const markOnly = settleVerb === undefined;
 	const items: SessionVerbEntry[] = [];
-	if (settleVerb) {
-		items.push(settleVerb, {
-			testId: "session-ctx-auto-settle",
-			label: "Auto-settle when idle",
-			checked: session.autoSettleDisabled !== true,
-			run: () => {
-				void autoSettle(session, session.autoSettleDisabled !== true);
-			},
-		});
-		if (actions.snoozeVisible) {
-			items.push({
-				testId: "session-ctx-snooze",
-				label: actions.snoozed ? "Change snooze…" : "Snooze…",
-				icon: "moon",
-				...(actions.snoozed ? {} : { keys: sessionVerbKeys.snooze }),
-				disabledReason: actions.snoozeDisabledReason,
-				run: (returnFocus) =>
-					openSnoozePicker(session, snoozePlacement, returnFocus),
-			});
-			if (actions.snoozed)
-				items.push({
-					testId: "session-ctx-unsnooze",
-					label: "Unsnooze",
-					icon: "undo",
-					keys: sessionVerbKeys.snooze,
-					run: () => {
-						void unsnooze(session);
-					},
-				});
-		}
+	items.push(getSettleVerb(session, now), {
+		testId: "session-ctx-auto-settle",
+		label: "Auto-settle when idle",
+		checked: session.autoSettleDisabled !== true,
+		run: () => {
+			void autoSettle(session, session.autoSettleDisabled !== true);
+		},
+	});
+	if (actions.snoozeVisible) {
 		items.push({
-			testId:
-				session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin",
-			label: session.pinnedAt != null ? "Unpin" : "Pin to top",
-			icon: session.pinnedAt != null ? "star-off" : "star",
-			keys: sessionVerbKeys.pin,
-			run: () => {
-				void pin(session, !actions.pinned);
-			},
+			testId: "session-ctx-snooze",
+			label: actions.snoozed ? "Change snooze…" : "Snooze…",
+			icon: "moon",
+			...(actions.snoozed ? {} : { keys: sessionVerbKeys.snooze }),
+			disabledReason: actions.snoozeDisabledReason,
+			run: (returnFocus) =>
+				openSnoozePicker(session, snoozePlacement, returnFocus),
 		});
+		if (actions.snoozed)
+			items.push({
+				testId: "session-ctx-unsnooze",
+				label: "Unsnooze",
+				icon: "undo",
+				keys: sessionVerbKeys.snooze,
+				run: () => {
+					void unsnooze(session);
+				},
+			});
 	}
+	items.push({
+		testId: session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin",
+		label: session.pinnedAt != null ? "Unpin" : "Pin to top",
+		icon: session.pinnedAt != null ? "star-off" : "star",
+		keys: sessionVerbKeys.pin,
+		run: () => {
+			void pin(session, !actions.pinned);
+		},
+	});
 	if (!actions.settled && !actions.snoozed)
 		items.push({
 			testId: session.unread
@@ -381,49 +388,48 @@ export function getSessionVerbs(
 				void toggleSessionRead(session);
 			},
 		});
-	if (!markOnly)
-		items.push(
-			{ divider: true },
-			...(host.select
-				? [
-						{
-							testId: "session-ctx-select",
-							label: "Select",
-							icon: "circle-check" as const,
-							run: host.select,
-						},
-					]
-				: []),
-			{
-				testId: "session-ctx-rename",
-				label: "Rename",
-				icon: "pencil",
-				keys: sessionVerbKeys.rename,
-				run: host.rename,
+	items.push(
+		{ divider: true },
+		...(host.select
+			? [
+					{
+						testId: "session-ctx-select",
+						label: "Select",
+						icon: "circle-check" as const,
+						run: host.select,
+					},
+				]
+			: []),
+		{
+			testId: "session-ctx-rename",
+			label: "Rename",
+			icon: "pencil",
+			keys: sessionVerbKeys.rename,
+			run: host.rename,
+		},
+		{
+			testId: "session-ctx-fork",
+			label: "Fork",
+			icon: "git-fork",
+			run: () => fork(session),
+		},
+		{
+			testId: "session-ctx-copy-resume",
+			label: "Copy resume command",
+			icon: "copy",
+			run: () => {
+				void copyResume(session);
 			},
-			{
-				testId: "session-ctx-fork",
-				label: "Fork",
-				icon: "git-fork",
-				run: () => fork(session),
+		},
+		{ divider: true },
+		{
+			testId: "session-ctx-delete",
+			label: "Delete",
+			danger: true,
+			run: (returnFocus) => {
+				void remove(session, returnFocus);
 			},
-			{
-				testId: "session-ctx-copy-resume",
-				label: "Copy resume command",
-				icon: "copy",
-				run: () => {
-					void copyResume(session);
-				},
-			},
-			{ divider: true },
-			{
-				testId: "session-ctx-delete",
-				label: "Delete",
-				danger: true,
-				run: (returnFocus) => {
-					void remove(session, returnFocus);
-				},
-			},
-		);
+		},
+	);
 	return items;
 }

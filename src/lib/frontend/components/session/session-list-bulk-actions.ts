@@ -1,6 +1,7 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
 import { isSessionSnoozed } from "../../stores/session.svelte.js";
+import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
 import {
 	setSessionPinnedRpc,
@@ -39,6 +40,7 @@ export async function runBulkChange(
 	const changed = input.filter(
 		(_, index) => results[index]?.status === "fulfilled",
 	);
+	void refreshListedSessions();
 	oncomplete();
 	const count = changed.length;
 	let verb = "Unpinned";
@@ -65,6 +67,7 @@ export async function runBulkChange(
 										: setSessionPinnedRpc({ ...session, pinned: !pinned }),
 								),
 							).then((undoResults) => {
+								void refreshListedSessions();
 								if (undoResults.some((result) => result.status === "rejected"))
 									showToast("Couldn't undo", { variant: "error" });
 							});
@@ -101,6 +104,7 @@ export async function runBulkSnooze(
 	const changed = input.filter(
 		(_, index) => results[index]?.status === "fulfilled",
 	);
+	void refreshListedSessions();
 	oncomplete();
 	const count = changed.length;
 	const completedSessionLabel = count === 1 ? "session" : "sessions";
@@ -141,6 +145,7 @@ export async function runBulkSnooze(
 											}),
 								),
 							).then((undoResults) => {
+								void refreshListedSessions();
 								if (undoResults.some((result) => result.status === "rejected"))
 									showToast("Couldn't undo", { variant: "error" });
 							});

@@ -11,7 +11,7 @@
 		isSessionSnoozed,
 		setSearchQuery,
 	} from "../../stores/session.svelte.js";
-	import { currentSearchQuery, refreshSessionList, sessionList } from "../../stores/session-list.svelte.js";
+	import { currentSearchQuery, refreshListedSessions, refreshSessionList, sessionList } from "../../stores/session-list.svelte.js";
 	import {
 		getSessionGrouping,
 		getSessionScope,
@@ -35,7 +35,7 @@
 	} from "../../stores/ui.svelte.js";
 	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
-	import { getSessionVerbs, isForeignSession, runSessionVerbShortcut, type SessionVerbHost } from "./session-verbs.js";
+	import { getSessionVerbs, runSessionVerbShortcut, type SessionVerbHost } from "./session-verbs.js";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Banners from "../overlays/Banners.svelte";
@@ -111,7 +111,7 @@
 	]);
 	const selectCandidates = $derived.by(() => {
 		const shown = new Set(visibleRowIds);
-		return matching.filter((session) => shown.has(session.id) && !isForeignSession(session));
+		return matching.filter((session) => shown.has(session.id));
 	});
 
 	const scope = $derived(getSessionScope());
@@ -422,6 +422,7 @@
 			const results = await Promise.allSettled(
 				targets.map((target) => deleteSessionRpc({ ...target, originId: getBrowserClientId() })),
 			);
+			void refreshListedSessions();
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {
 				showToast(

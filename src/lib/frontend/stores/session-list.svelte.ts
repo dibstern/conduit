@@ -166,3 +166,11 @@ export function refreshSessionList(): Promise<void> {
 export function currentSearchQuery(): SearchQuery | null {
 	return sessionState.searchResults === null ? null : searchQuery;
 }
+
+/** Re-fetches whichever list is on screen. Other projects' rows get no live
+ *  updates on this socket, so a change made to one must be re-read to show. */
+export function refreshListedSessions(): Promise<void> {
+	return currentSearchQuery() === null
+		? refreshSessionList()
+		: sessionList.search(sessionState.searchQuery).ready;
+}

@@ -70,10 +70,10 @@ describe("session verb shortcuts", () => {
 			expect(press(open, event)).toBeUndefined();
 	});
 
-	it("offers a foreign session only the verbs its menu offers", () => {
+	it("gives a session from another project the same keys", () => {
 		const foreign = { ...open, projectSlug: "elsewhere" };
 		expect(press(foreign, { key: "u" })).toBe("session-ctx-mark-unread");
-		expect(press(foreign, { key: "s" })).toBeUndefined();
+		expect(press(foreign, { key: "s" })).toBe("session-ctx-settle");
 	});
 
 	it("shows the same keys it matches", () => {

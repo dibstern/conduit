@@ -87,7 +87,7 @@ describe("SessionList daemon sessions", () => {
 
 		expect(foreignRow.getAttribute("href")).toBe("/s/foreign-session");
 		expect(within(foreignRow).getByText("unlisted-project")).toBeDefined();
-		// A foreign row keeps its menu; the triage suite pins that menu to read state.
+		// A foreign row is as actionable as a local one; the triage suite covers its menu.
 		expect(
 			within(foreignRow).getByRole("button", { name: /More options/ }),
 		).toBeDefined();
@@ -96,21 +96,22 @@ describe("SessionList daemon sessions", () => {
 		).toBeDefined();
 
 		await fireEvent.dblClick(within(foreignRow).getByText("Foreign session"));
-		expect(within(foreignRow).queryByRole("textbox")).toBeNull();
+		expect(within(foreignRow).getByRole("textbox")).toBeDefined();
 
 		// The sidebar header's Select button and the phone ⋯ Select both just
 		// switch the list into select mode.
 		uiState.selectMode = true;
 		await tick();
-		expect(within(foreignRow).queryByRole("checkbox")).toBeNull();
-		expect(
-			within(localRow).getByRole("checkbox").getAttribute("aria-checked"),
-		).toBe("false");
+		for (const row of [foreignRow, localRow])
+			expect(
+				within(row).getByRole("checkbox").getAttribute("aria-checked"),
+			).toBe("false");
 
 		await fireEvent.click(view.getByRole("button", { name: "All" }));
-		expect(
-			within(localRow).getByRole("checkbox").getAttribute("aria-checked"),
-		).toBe("true");
+		for (const row of [foreignRow, localRow])
+			expect(
+				within(row).getByRole("checkbox").getAttribute("aria-checked"),
+			).toBe("true");
 	});
 
 	// The merged list is ambiguous if only foreign rows are named: an unlabelled
