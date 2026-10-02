@@ -66,6 +66,7 @@ import {
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
+import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
 import {
 	discoverCapabilitiesEffect,
 	expectedApiModelIdEffect,
@@ -217,7 +218,11 @@ export const makeClaudeProviderRuntime = (
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
 		let runtime: ClaudeProviderRuntime | undefined;
-		const runner = yield* makeClaudeSessionRunner(
+		const runner = yield* (
+			process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
+				? makeProcessClaudeSessionRunner
+				: makeClaudeSessionRunner
+		)(
 			{
 				workspaceRoot: deps.workspaceRoot,
 				...(deps.shellEnv ? { shellEnv: deps.shellEnv } : {}),
@@ -622,6 +627,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			readonly sessionId: string;
 			readonly finished: Deferred.Deferred<void>;
 			readonly claudeSettingsOverrides: Settings | undefined;
+			readonly historyOnDemand: boolean;
 			readonly sink: EventSink;
 			readonly abortController: AbortController;
 			readonly permissions: Map<
@@ -685,6 +691,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						command.input.sessionId,
 						finished,
 						command.claudeSettingsOverrides,
+						command.historyOnDemand ?? false,
 					);
 					const controller = this.sinkBindings.get(
 						command.sinkId,
@@ -857,6 +864,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		sessionId: string,
 		finished: Deferred.Deferred<void>,
 		claudeSettingsOverrides: Settings | undefined,
+		historyOnDemand: boolean,
 	): EventSink {
 		const permissions = new Map<
 			string,
@@ -969,6 +977,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			sessionId,
 			finished,
 			claudeSettingsOverrides,
+			historyOnDemand,
 			sink,
 			abortController: new AbortController(),
 			permissions,
@@ -1693,7 +1702,20 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 			const providerState = { ...input.providerState };
 			delete providerState["resumeSessionId"];
-			const transcript = serializePriorConversation(input.history);
+			const sinkId = this.sinkId(input.eventSink);
+			const history =
+				sinkId && this.sinkBindings.get(sinkId)?.historyOnDemand
+					? ((yield* this.emit({ type: "read-turn-history", sinkId }).pipe(
+							Effect.mapError(
+								(cause) =>
+									new ClaudeBoundaryError({
+										operation: "readTurnHistory",
+										cause,
+									}),
+							),
+						)).history ?? [])
+					: input.history;
+			const transcript = serializePriorConversation(history);
 			const prompt =
 				transcript.length > 0
 					? `${transcript}\n\n${input.prompt}`

@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -54,6 +54,8 @@ export class ProcessHarness {
 	private constructor(
 		private readonly dist?: string,
 		private readonly enqueueMarkDelayMs = 0,
+		private readonly claudeRunner?: "process",
+		private readonly shellEnvProof = false,
 	) {
 		for (const directory of [
 			"home",
@@ -65,14 +67,26 @@ export class ProcessHarness {
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
+		if (shellEnvProof)
+			writeFileSync(
+				join(this.root, "home/.zprofile"),
+				'export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n',
+			);
 	}
 
 	static async start(
-		options: { dist?: string; enqueueMarkDelayMs?: number } = {},
+		options: {
+			dist?: string;
+			enqueueMarkDelayMs?: number;
+			claudeRunner?: "process";
+			shellEnvProof?: boolean;
+		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
 			options.dist ? resolve(options.dist) : undefined,
 			options.enqueueMarkDelayMs,
+			options.claudeRunner,
+			options.shellEnvProof,
 		);
 		try {
 			await harness.restart();
@@ -111,6 +125,12 @@ export class ProcessHarness {
 					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
+					...(this.claudeRunner
+						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
+						: {}),
+					...(this.shellEnvProof
+						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
+						: {}),
 					NODE_ENV: "test",
 					LOG_LEVEL: "error",
 				},
@@ -346,11 +366,12 @@ export class ProcessBrowser {
 		return this.runtime.runPromise(effect.pipe(Effect.timeout(TIMEOUT_MS)));
 	}
 
-	async createSession(): Promise<string> {
+	async createSession(title?: string): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
 				projectSlug: "process-test",
 				providerId: "claude",
+				...(title !== undefined ? { title } : {}),
 				originId: this.originId,
 			}),
 		);
@@ -415,6 +436,31 @@ export class ProcessBrowser {
 				this.rpc.LoadMoreHistory({ projectSlug: "process-test", sessionId }),
 			)
 		).messages;
+	}
+
+	async shutdown(): Promise<void> {
+		await this.run(this.rpc.Shutdown({}));
+	}
+
+	async deleteSession(sessionId: string): Promise<void> {
+		await this.run(
+			this.rpc.DeleteSession({
+				projectSlug: "process-test",
+				sessionId,
+				originId: this.originId,
+			}),
+		);
+	}
+
+	async switchAgent(sessionId: string, agentId: string): Promise<void> {
+		await this.run(
+			this.rpc.SwitchAgent({
+				projectSlug: "process-test",
+				sessionId,
+				agentId,
+				originId: this.originId,
+			}),
+		);
 	}
 
 	waitFor(
