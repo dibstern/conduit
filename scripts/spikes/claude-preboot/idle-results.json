@@ -1,0 +1,95 @@
+{
+	"date": "2026-10-02T02:54:04.918Z",
+	"node": "v26.10.0",
+	"platform": "darwin-arm64",
+	"requestedModel": "sonnet",
+	"runs": [
+		{
+			"round": 1,
+			"mode": "fresh",
+			"sessionId": "cbb79970-a104-44af-884c-d411cee78eb1",
+			"model": "claude-sonnet-5",
+			"pid": 85094,
+			"queryReturnedMs": 9.91474999999997,
+			"spawnCalledMs": 3.0066249999999854,
+			"spawnEventMs": 10.111207999999976,
+			"initializeMs": 929.285875,
+			"enqueuedMs": 60930.463665999996,
+			"idleMs": 60000,
+			"systemInitMs": 60947.587875,
+			"systemInitBeforePrompt": false,
+			"preInputEvents": [],
+			"firstTokenFromQueryMs": 61856.630874999995,
+			"firstTokenFromEnqueueMs": 926.1672089999993,
+			"resultMs": 61887.096416,
+			"reply": "ok",
+			"usage": {
+				"input_tokens": 569,
+				"cache_creation_input_tokens": 0,
+				"cache_read_input_tokens": 0,
+				"output_tokens": 4,
+				"output_tokens_details": {
+					"thinking_tokens": 0
+				},
+				"server_tool_use": {
+					"web_search_requests": 0,
+					"web_fetch_requests": 0
+				},
+				"service_tier": "standard",
+				"cache_creation": {
+					"ephemeral_1h_input_tokens": 0,
+					"ephemeral_5m_input_tokens": 0
+				},
+				"inference_geo": "not_available",
+				"iterations": [],
+				"speed": "standard"
+			},
+			"costEstimateUsd": 0.0011779999999999998
+		},
+		{
+			"round": 1,
+			"mode": "resume",
+			"sessionId": "cbb79970-a104-44af-884c-d411cee78eb1",
+			"model": "claude-sonnet-5",
+			"pid": 97895,
+			"queryReturnedMs": 1.5500000000029104,
+			"spawnCalledMs": 0.30316700000548735,
+			"spawnEventMs": 1.583959000003233,
+			"initializeMs": 208.73266700000386,
+			"enqueuedMs": 60209.82529200001,
+			"idleMs": 60000,
+			"systemInitMs": 60238.944667,
+			"systemInitBeforePrompt": false,
+			"preInputEvents": [],
+			"firstTokenFromQueryMs": 61987.24925000001,
+			"firstTokenFromEnqueueMs": 1777.4239579999994,
+			"resultMs": 62008.409875,
+			"reply": "ok",
+			"usage": {
+				"input_tokens": 620,
+				"cache_creation_input_tokens": 0,
+				"cache_read_input_tokens": 0,
+				"output_tokens": 4,
+				"output_tokens_details": {
+					"thinking_tokens": 0
+				},
+				"server_tool_use": {
+					"web_search_requests": 0,
+					"web_fetch_requests": 0
+				},
+				"service_tier": "standard",
+				"cache_creation": {
+					"ephemeral_1h_input_tokens": 0,
+					"ephemeral_5m_input_tokens": 0
+				},
+				"inference_geo": "not_available",
+				"iterations": [],
+				"speed": "standard"
+			},
+			"costEstimateUsd": 0.0024579999999999997
+		}
+	],
+	"credentialUnavailable": false,
+	"spawnedPids": [85094, 97895],
+	"allChildrenTerminated": true
+}
