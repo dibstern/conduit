@@ -29,6 +29,8 @@
     Square,
     Check,
     CircleDot,
+    Target,
+    Pause,
     Circle,
     Loader,
     CircleArrowUp,
@@ -91,6 +93,8 @@
     Moon,
     PanelsTopLeft,
   } from '@lucide/svelte';
+  import ClaudeMark from './marks/ClaudeMark.svelte';
+  import OpenCodeMark from './marks/OpenCodeMark.svelte';
 
   // Map of kebab-case icon name to Svelte component.
   // Keys match the names used in data-lucide="..." attributes in the vanilla HTML.
@@ -124,6 +128,8 @@
     'square': Square,
     'check': Check,
     'circle-dot': CircleDot,
+    'target': Target,
+    'pause': Pause,
     'circle': Circle,
     'loader': Loader,
     'circle-arrow-up': CircleArrowUp,
@@ -193,6 +199,10 @@
     'star-off': StarOff,
     'brain': Brain,
     'panels-top-left': PanelsTopLeft,
+
+    // Harness brand marks (not lucide).
+    'claude': ClaudeMark,
+    'opencode': OpenCodeMark,
   };
 
   let {

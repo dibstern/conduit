@@ -102,7 +102,7 @@ test.describe("Variant badge visibility", () => {
 		const badge = page.locator("[data-testid='variant-badge']");
 		await expect(badge).toBeVisible();
 		// Should show "default" when no variant is selected
-		await expect(badge).toContainText("default");
+		await expect(badge).toContainText("Default");
 	});
 
 	test("hides variant badge when model has no variants", async ({
@@ -194,14 +194,14 @@ test.describe("Variant selection updates UI", () => {
 		await setupWithVariants(page, baseURL);
 
 		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toContainText("default");
+		await expect(badge).toContainText("Default");
 
 		// Open dropdown and select "high"
 		await badge.click();
 		await page.locator("[data-testid='variant-option-high']").click();
 
 		// Badge should now show "high"
-		await expect(badge).toContainText("high");
+		await expect(badge).toContainText("High");
 	});
 
 	test("selecting default clears the variant", async ({ page, baseURL }) => {
@@ -212,12 +212,12 @@ test.describe("Variant selection updates UI", () => {
 		// Select "max" first
 		await badge.click();
 		await page.locator("[data-testid='variant-option-max']").click();
-		await expect(badge).toContainText("max");
+		await expect(badge).toContainText("Max");
 
 		// Now select "default" to clear
 		await badge.click();
 		await page.locator("[data-testid='variant-option-default']").click();
-		await expect(badge).toContainText("default");
+		await expect(badge).toContainText("Default");
 	});
 });
 
@@ -284,7 +284,7 @@ test.describe("Server-pushed variant updates", () => {
 		const control = await setupWithVariants(page, baseURL);
 
 		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toContainText("default");
+		await expect(badge).toContainText("Default");
 
 		// Server pushes a variant change
 		control.sendMessage({
@@ -293,7 +293,7 @@ test.describe("Server-pushed variant updates", () => {
 			variants: ["low", "medium", "high", "max"],
 		});
 
-		await expect(badge).toContainText("medium");
+		await expect(badge).toContainText("Medium");
 	});
 });
 
@@ -302,11 +302,11 @@ test.describe("Ctrl+T keyboard shortcut", () => {
 		const control = await setupWithVariants(page, baseURL);
 
 		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toContainText("default");
+		await expect(badge).toContainText("Default");
 
 		// First Ctrl+T: default → low
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("low");
+		await expect(badge).toContainText("Low");
 
 		await expect
 			.poll(() => control.rpcCalls.find((call) => call["variant"] === "low"))
@@ -318,18 +318,18 @@ test.describe("Ctrl+T keyboard shortcut", () => {
 
 		// Second Ctrl+T: low → medium
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("medium");
+		await expect(badge).toContainText("Medium");
 
 		// Third: medium → high
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("high");
+		await expect(badge).toContainText("High");
 
 		// Fourth: high → max
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("max");
+		await expect(badge).toContainText("Max");
 
-		// Fifth: max → back to default (wraps around)
+		// Fifth: max → low (wraps without selecting default)
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("default");
+		await expect(badge).toContainText("Low");
 	});
 });

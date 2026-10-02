@@ -70,6 +70,8 @@ export const sessionViewState = $state({
 	/** Published by MessageList from its scroll controller. Loading
 	 *  counts as at-bottom while the transcript is hydrating. */
 	atBottom: true,
+	/** Composer requests; MessageList owns following and scroll placement. */
+	followRequest: 0,
 
 	/** The chevron's override: the bar stays expanded even at the bottom. Starts
 	 *  true so a fresh load arrives with the full bar on screen. */
@@ -113,6 +115,10 @@ export function publishAtBottom(next: boolean): void {
 	if (next && !lastAtBottom) sessionViewState.forcedOpen = false;
 	lastAtBottom = next;
 	sessionViewState.atBottom = next;
+}
+
+export function requestTranscriptFollow(): void {
+	sessionViewState.followRequest++;
 }
 
 /** The chevron. Expands the bar without moving the transcript. */

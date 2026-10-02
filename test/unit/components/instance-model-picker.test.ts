@@ -53,10 +53,6 @@ vi.mock(
 	"../../../src/lib/frontend/components/model/ModelVariant.svelte",
 	closeableEmptyComponent,
 );
-vi.mock(
-	"../../../src/lib/frontend/components/model/ContextWindowSelector.svelte",
-	closeableEmptyComponent,
-);
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
 	wsSend: (...args: unknown[]) => wsSendSpy(...args),
 }));
@@ -153,8 +149,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("refreshes active-provider agents after switching model", async () => {
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"]',
 		);
@@ -182,8 +179,9 @@ describe("InstanceModelPicker", () => {
 	it("keeps a successful model switch when the follow-up agent refresh fails", async () => {
 		getAgentsRpcSpy.mockRejectedValueOnce(new Error("agent discovery failed"));
 
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"][data-provider-id="claude"]',
 		);
@@ -212,8 +210,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("sets the default model through RPC", async () => {
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		const opus = container.querySelector<HTMLButtonElement>(
 			'[data-model-id="claude-opus-4-7"]',
 		);
@@ -237,8 +236,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("renders screen-reader text for the default model star", async () => {
-		const { getByText, getByTitle } = render(InstanceModelPicker);
+		const { getByText, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 
 		const defaultModelText = getByText("Default model");
 		expect(defaultModelText.classList.contains("sr-only")).toBe(true);
@@ -246,8 +246,9 @@ describe("InstanceModelPicker", () => {
 	});
 
 	it("reloads provider session through RPC", async () => {
-		const { getByTitle } = render(InstanceModelPicker);
+		const { getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
 
 		await waitFor(() => {
@@ -263,7 +264,7 @@ describe("InstanceModelPicker", () => {
 		});
 	});
 
-	it("locks the rail to the bound harness for an existing session", async () => {
+	it("locks the harness to the bound instance for an existing session", async () => {
 		handleModelList({
 			type: "model_list",
 			providers: [
@@ -283,8 +284,9 @@ describe("InstanceModelPicker", () => {
 			],
 		});
 
-		const { container, getByTitle } = render(InstanceModelPicker);
+		const { container, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
+		await fireEvent.click(getByTestId("picker-row-harness"));
 
 		const claudeRail = container.querySelector<HTMLButtonElement>(
 			'[data-testid="picker-instance-claude"]',
@@ -295,10 +297,11 @@ describe("InstanceModelPicker", () => {
 		expect(claudeRail?.getAttribute("aria-pressed")).toBe("true");
 		expect(opencodeRail?.getAttribute("aria-disabled")).toBe("true");
 
-		// Clicking a disabled (non-bound) instance is a no-op: the model list
-		// stays scoped to the bound harness.
+		// A disabled instance cannot change the bound harness or model scope.
 		await fireEvent.click(opencodeRail as HTMLButtonElement);
 		expect(claudeRail?.getAttribute("aria-pressed")).toBe("true");
+		await fireEvent.click(getByTestId("picker-back"));
+		await fireEvent.click(getByTestId("picker-row-model"));
 		expect(
 			container.querySelector('[data-model-id="claude-sonnet-4"]'),
 		).toBeNull();

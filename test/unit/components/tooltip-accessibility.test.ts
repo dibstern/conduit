@@ -13,6 +13,10 @@ vi.mock(
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	createPtyRpc: vi.fn(async () => undefined),
+	getGoalDetailsRpc: vi.fn(async () => ({
+		checks: [],
+		tokensSinceStart: null,
+	})),
 	setProjectInstanceRpc: vi.fn(async () => undefined),
 	startInstanceRpc: vi.fn(async () => undefined),
 }));

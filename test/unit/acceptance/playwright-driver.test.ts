@@ -37,6 +37,7 @@ test.each([
 	const root = await mkdtemp(join(tmpdir(), "conduit-viewport-"));
 	vi.spyOn(process, "cwd").mockReturnValue(root);
 	const page = partialFake<Page>({
+		evaluate: vi.fn<Page["evaluate"]>().mockResolvedValue(undefined),
 		setViewportSize: vi.fn<Page["setViewportSize"]>(),
 		locator: vi.fn<Page["locator"]>(() =>
 			partialFake<Locator>({ waitFor: vi.fn<Locator["waitFor"]>() }),

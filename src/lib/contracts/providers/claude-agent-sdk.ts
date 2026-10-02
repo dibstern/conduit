@@ -1,5 +1,6 @@
 import type {
 	Options as ClaudeSDKOptions,
+	SDKActiveGoalMessage,
 	SDKAPIRetryMessage,
 	SDKAssistantMessage,
 	SDKAuthStatusMessage,
@@ -878,7 +879,22 @@ export const ClaudeSDKConversationResetMessageSchema = Schema.Struct({
 	...ClaudeUuidSessionFields,
 });
 
+export const ClaudeSDKActiveGoalMessageSchema = Schema.Struct({
+	type: Schema.Literal("active_goal"),
+	value: Schema.NullOr(
+		Schema.Struct({
+			condition: Schema.String,
+			iterations: Schema.Number,
+			set_at: Schema.Number,
+			tokens_at_start: Schema.Number,
+			last_reason: Schema.optional(Schema.String),
+		}),
+	),
+	...ClaudeUuidSessionFields,
+});
+
 export const ClaudeSDKMessageSchema = Schema.Union(
+	ClaudeSDKActiveGoalMessageSchema,
 	ClaudeSDKAssistantMessageSchema,
 	ClaudeSDKInboundUserMessageSchema,
 	ClaudeSDKResultMessageSchema,
@@ -901,6 +917,10 @@ export type ClaudeSDKMessage = Schema.Schema.Type<
 // to a runtime-validated string. Fully normalized options are checked in both
 // directions below.
 type _ClaudeSdkMessageFitsSchema = AssertExtends<SDKMessage, ClaudeSDKMessage>;
+type _ClaudeSdkActiveGoalFitsSchema = AssertExtends<
+	SDKActiveGoalMessage,
+	Schema.Schema.Type<typeof ClaudeSDKActiveGoalMessageSchema>
+>;
 type _ClaudeSdkApiRetryFitsSchema = AssertExtends<
 	SDKAPIRetryMessage,
 	Schema.Schema.Type<typeof ClaudeSDKAPIRetryMessageSchema>
@@ -1181,10 +1201,14 @@ const decodeClaudeSDKOptionsJsonShapeEnvelope = Schema.decodeUnknownSync(
 	ClaudeSDKOptionsJsonShapeSchema,
 );
 
-export function decodeClaudeSDKMessage(raw: unknown): SDKMessage {
+export function decodeClaudeSDKMessage(
+	raw: unknown,
+): SDKMessage | SDKActiveGoalMessage {
 	// The schema validates the SDK envelope fields Conduit consumes while
 	// intentionally leaving nested provider-owned payloads opaque.
-	return decodeClaudeSDKMessageEnvelope(raw) as SDKMessage;
+	return decodeClaudeSDKMessageEnvelope(raw) as
+		| SDKMessage
+		| SDKActiveGoalMessage;
 }
 
 export function decodeClaudeSDKUserMessage(raw: unknown): SDKUserMessage {

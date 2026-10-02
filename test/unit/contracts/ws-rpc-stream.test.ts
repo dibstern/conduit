@@ -99,6 +99,8 @@ const makeLayer = (options: {
 					getToolContent: () => Effect.succeed(undefined),
 					getSessionStatus: () => Effect.succeed(undefined),
 					getSession: () => Effect.succeed(undefined),
+					getGoalDetails: () =>
+						Effect.succeed({ checks: [], tokensSinceStart: null }),
 					getAllSessionStatuses: () => Effect.succeed({}),
 					listSessions: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),

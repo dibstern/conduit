@@ -4,12 +4,14 @@ import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type {
 	GetSessionSkillsResponse,
 	GetSkillContentResponse,
+	GoalDetails,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
+export type { GoalDetails } from "../../contracts/ws-rpc.js";
 // Keep the public URL helper available to existing callers.
 export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
@@ -864,6 +866,15 @@ export async function getModelsRpc(
 	input: GetModelsRpcInput,
 ): Promise<GetModelsResponse> {
 	return await runTransportEffect(callGetModels(input));
+}
+
+export async function getGoalDetailsRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<GoalDetails> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.GetGoalDetails(input)),
+	);
 }
 
 export async function getAgentsRpc(

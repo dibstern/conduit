@@ -9,7 +9,10 @@ import {
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import {
+	ReadQueryEffectTag,
+	sessionGoalState,
+} from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
@@ -390,6 +393,20 @@ const prepareEngineTurnInput = (
 			? yield* loadClaudeHistory(resolvedInput.sessionId)
 			: { history: [], loaded: false };
 		const priorHistory = priorHistoryResult.history;
+		const readQuery = yield* ReadQueryEffectTag;
+		const goalRow = isClaudeDriver(driver)
+			? yield* readQuery.getSession(resolvedInput.sessionId).pipe(
+					Effect.catchAll((cause) =>
+						Effect.gen(function* () {
+							const log = yield* LoggerTag;
+							log.debug(
+								`Failed to restore goal for ${resolvedInput.sessionId}: ${cause}`,
+							);
+							return undefined;
+						}),
+					),
+				)
+			: undefined;
 		const isFirstClaudeMessage =
 			isClaudeDriver(driver) &&
 			priorHistoryResult.loaded &&
@@ -446,6 +463,20 @@ const prepareEngineTurnInput = (
 				: {}),
 			workspaceRoot: config.projectDir ?? "",
 			...(claudeConfigDir === undefined ? {} : { configDir: claudeConfigDir }),
+			...(goalRow ? { goalState: sessionGoalState(goalRow) } : {}),
+			...(isClaudeDriver(driver)
+				? {
+						cumulativeTokens: priorHistory.reduce(
+							(total, message) =>
+								total +
+								(message.tokens?.input ?? 0) +
+								(message.tokens?.output ?? 0) +
+								(message.tokens?.cache?.read ?? 0) +
+								(message.tokens?.cache?.write ?? 0),
+							0,
+						),
+					}
+				: {}),
 			eventSink,
 			abortSignal: new AbortController().signal,
 			permissionMode: yield* getPermissionMode(resolvedInput.sessionId),

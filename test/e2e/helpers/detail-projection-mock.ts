@@ -236,6 +236,29 @@ export function projectLegacyRelayMessage(
 		);
 		return;
 	}
+	if (event.type === "tool_executing" && typeof event["id"] === "string") {
+		for (const message of state.rows.values()) {
+			const part = message.parts?.find(
+				(candidate) =>
+					candidate.callID === event["id"] || candidate.id === event["id"],
+			);
+			if (!part) continue;
+			upsert(
+				page,
+				sessionId,
+				replacePart(message, {
+					...part,
+					state: {
+						...part.state,
+						status: "running",
+						...(event["input"] !== undefined ? { input: event["input"] } : {}),
+					},
+				}),
+			);
+			break;
+		}
+		return;
+	}
 	if (event.type === "tool_result" && typeof event["id"] === "string") {
 		for (const message of state.rows.values()) {
 			const part = message.parts?.find(

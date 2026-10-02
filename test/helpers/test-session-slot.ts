@@ -36,6 +36,7 @@ export function testActivity(sessionId?: string): SessionActivity {
 	const id = sessionId ?? sessionState.currentId ?? TEST_SESSION_ID;
 	const a: SessionActivity = {
 		phase: "idle",
+		turnStartedAt: null,
 		turnEpoch: 0,
 		turnGeneration: 0,
 		endedGeneration: -1,

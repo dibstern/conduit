@@ -43,6 +43,20 @@ type SegmentedRecipe = {
 };
 
 export const SEGMENTED_VARIANTS = {
+	/** P2 effort choices, with a neutral selected fill in both themes. */
+	picker: {
+		list: "flex flex-1 min-w-0 gap-[3px]",
+		item: "flex-1 min-w-0 rounded-[7px] py-1.5 px-0.5 text-xs cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
+		selected: "bg-text text-bg font-semibold",
+		unselected: "bg-border-subtle text-text-muted hover:text-text",
+	},
+	/** Context windows keep their content width within the same picker row. */
+	"picker-context": {
+		list: "flex flex-1 min-w-0 flex-wrap gap-0.5",
+		item: "rounded-[7px] py-0.5 px-2 text-xs cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
+		selected: "bg-text text-bg font-semibold",
+		unselected: "text-text-muted hover:text-text",
+	},
 	/**
 	 * overlays/SettingsPanel's five-tab header. An underline drawn with a
 	 * bottom border that is pulled up over the strip's own rule by `-mb-px`.

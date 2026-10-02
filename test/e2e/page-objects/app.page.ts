@@ -29,7 +29,6 @@ export class AppPage {
 	readonly input: Locator;
 	readonly sendBtn: Locator;
 	readonly attachBtn: Locator;
-	readonly contextMini: Locator;
 
 	// Messages
 	readonly messages: Locator;
@@ -60,7 +59,6 @@ export class AppPage {
 		this.input = page.locator("#input");
 		this.sendBtn = page.locator("#send");
 		this.attachBtn = page.locator("#attach-btn");
-		this.contextMini = page.locator("#context-mini");
 		this.messages = page.locator("#messages");
 		this.scrollBtn = page.locator("#scroll-btn");
 		this.todoSticky = page.locator("#todo-sticky");
