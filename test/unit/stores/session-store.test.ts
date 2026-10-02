@@ -1,4 +1,4 @@
-import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSessionChatState,
 	currentChat,
@@ -10,7 +10,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	applyGetAgentsResponse,
-	chooseModel,
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -22,20 +21,12 @@ import {
 import {
 	applyListDaemonSessionsResponse,
 	clearSessionState,
-	completeNewSession,
-	ERROR_DISPLAY_MS,
-	failNewSession,
 	getFilteredSessions,
 	groupSessionsByAttention,
 	groupSessionsByDate,
 	handleSessionFamily,
 	isSessionSnoozed,
 	isSessionWoken,
-	NEW_SESSION_TIMEOUT_MS,
-	requestNewSession,
-	resetSessionCreation,
-	sendNewSession,
-	sessionCreation,
 	sessionState,
 	setCurrentSession,
 	setSearchQuery,
@@ -48,8 +39,6 @@ import {
 	applySessionChange,
 	sessionSubscription,
 } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
-import type { CreateSessionResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
-import type { CreateSessionRpcInput } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import * as sessionRpc from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import { createToolMessage } from "../../../src/lib/frontend/utils/tool-message-factory.js";
@@ -669,275 +658,5 @@ describe("getFilteredSessions root view", () => {
 			"a",
 		]);
 		expect(sessionState.sessions.has("b")).toBe(false);
-	});
-});
-
-describe("SessionCreationStatus state machine", () => {
-	beforeEach(() => {
-		resetSessionCreation();
-	});
-
-	it("starts in idle phase", () => {
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	it("transitions idle -> creating with requestId", () => {
-		const requestId = requestNewSession();
-		expect(requestId).toMatch(/^[0-9a-f-]+$/); // UUID format
-		expect(sessionCreation.value.phase).toBe("creating");
-		if (sessionCreation.value.phase === "creating") {
-			expect(sessionCreation.value.requestId).toBe(requestId);
-			expect(sessionCreation.value.startedAt).toBeGreaterThan(0);
-		}
-	});
-
-	it("rejects requestNewSession when not idle", () => {
-		requestNewSession();
-		const second = requestNewSession();
-		expect(second).toBeNull(); // Guard: already creating
-	});
-
-	it("transitions creating -> idle on completeNewSession with matching requestId", () => {
-		const requestId = requestNewSession();
-		assert.exists(requestId, "expected session request ID");
-		completeNewSession(requestId);
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	it("ignores completeNewSession with non-matching requestId", () => {
-		requestNewSession();
-		completeNewSession("wrong-id");
-		expect(sessionCreation.value.phase).toBe("creating"); // Still creating
-	});
-
-	it("transitions creating -> error on failNewSession", () => {
-		const requestId = requestNewSession();
-		assert.exists(requestId, "expected session request ID");
-		failNewSession(requestId, "API timeout");
-		expect(sessionCreation.value.phase).toBe("error");
-		if (sessionCreation.value.phase === "error") {
-			expect(sessionCreation.value.message).toBe("API timeout");
-		}
-	});
-
-	it("transitions error -> idle on resetSessionCreation", () => {
-		const requestId = requestNewSession();
-		assert.exists(requestId, "expected session request ID");
-		failNewSession(requestId, "fail");
-		expect(sessionCreation.value.phase).toBe("error");
-		resetSessionCreation();
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	// Edge cases (no-ops)
-
-	it("completeNewSession is a no-op when phase is idle", () => {
-		completeNewSession("any-id");
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	it("completeNewSession is a no-op when phase is error", () => {
-		const requestId = requestNewSession();
-		assert.exists(requestId, "expected session request ID");
-		failNewSession(requestId, "fail");
-		completeNewSession(requestId);
-		expect(sessionCreation.value.phase).toBe("error"); // Still error
-	});
-
-	it("failNewSession is a no-op when phase is idle", () => {
-		failNewSession("any-id", "shouldn't matter");
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	it("failNewSession is a no-op with wrong requestId", () => {
-		const requestId = requestNewSession();
-		assert.exists(requestId, "expected session request ID");
-		failNewSession("wrong-id", "shouldn't matter");
-		expect(sessionCreation.value.phase).toBe("creating");
-		if (sessionCreation.value.phase === "creating") {
-			expect(sessionCreation.value.requestId).toBe(requestId);
-		}
-	});
-
-	it("supports re-entrant create/complete cycles", () => {
-		const id1 = requestNewSession();
-		assert.exists(id1, "expected first session request ID");
-		completeNewSession(id1);
-		expect(sessionCreation.value.phase).toBe("idle");
-
-		const id2 = requestNewSession();
-		assert.exists(id2, "expected second session request ID");
-		expect(id2).not.toBe(id1);
-		expect(sessionCreation.value.phase).toBe("creating");
-		completeNewSession(id2);
-		expect(sessionCreation.value.phase).toBe("idle");
-	});
-
-	// Timeout (store-level, using exported constants)
-
-	it("auto-fails after timeout", () => {
-		vi.useFakeTimers();
-		requestNewSession();
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		vi.advanceTimersByTime(NEW_SESSION_TIMEOUT_MS);
-		expect(sessionCreation.value.phase).toBe("error");
-		if (sessionCreation.value.phase === "error") {
-			expect(sessionCreation.value.message).toContain("timed out");
-		}
-
-		// Auto-resets to idle after ERROR_DISPLAY_MS
-		vi.advanceTimersByTime(ERROR_DISPLAY_MS);
-		expect(sessionCreation.value.phase).toBe("idle");
-
-		vi.useRealTimers();
-	});
-
-	it("timeout is cancelled when session completes before deadline", () => {
-		vi.useFakeTimers();
-		const requestId = requestNewSession();
-		assert.exists(requestId, "expected session request ID");
-
-		vi.advanceTimersByTime(1000); // Not yet timed out
-		completeNewSession(requestId);
-		expect(sessionCreation.value.phase).toBe("idle");
-
-		vi.advanceTimersByTime(NEW_SESSION_TIMEOUT_MS); // Past the original deadline
-		expect(sessionCreation.value.phase).toBe("idle"); // Should stay idle
-
-		vi.useRealTimers();
-	});
-
-	// clearSessionState integration (project switch safety)
-
-	it("clearSessionState resets creation state (project switch cancels in-flight creation)", () => {
-		vi.useFakeTimers();
-		requestNewSession();
-		expect(sessionCreation.value.phase).toBe("creating");
-
-		clearSessionState();
-		expect(sessionCreation.value.phase).toBe("idle");
-
-		// Timeout timer should also be cancelled — advancing past deadline
-		// should NOT transition to error
-		vi.advanceTimersByTime(NEW_SESSION_TIMEOUT_MS + 1000);
-		expect(sessionCreation.value.phase).toBe("idle");
-
-		vi.useRealTimers();
-	});
-});
-
-// sendNewSession (centralized guard + send)
-
-describe("sendNewSession", () => {
-	let sent: CreateSessionRpcInput[];
-	const mockStart = (data: CreateSessionRpcInput) => {
-		sent.push(data);
-		return new Promise<CreateSessionResponse>(() => {});
-	};
-
-	beforeEach(() => {
-		sent = [];
-		resetSessionCreation();
-		discoveryState.selectedInstanceId = null;
-	});
-
-	it("sends CreateSession input and returns a local requestId", () => {
-		const requestId = sendNewSession(mockStart);
-		expect(requestId).not.toBeNull();
-		expect(sent).toHaveLength(1);
-		expect(sent[0]).toEqual({
-			projectSlug: "project-a",
-			originId: expect.any(String),
-			instanceId: expect.any(String),
-		});
-	});
-
-	it("binds the session to the harness derived from the active provider", () => {
-		discoveryState.selectedInstanceId = null;
-		chooseModel({ modelId: "claude-sonnet-4-5", providerId: "claude" });
-
-		const requestId = sendNewSession(mockStart);
-
-		expect(requestId).not.toBeNull();
-		expect(sent).toEqual([
-			{
-				projectSlug: "project-a",
-				originId: expect.any(String),
-				instanceId: "claude",
-			},
-		]);
-	});
-
-	it("binds the session to the selected harness instance draft", () => {
-		discoveryState.selectedInstanceId = "opencode";
-		chooseModel({ modelId: "", providerId: "claude" });
-
-		const requestId = sendNewSession(mockStart);
-
-		expect(requestId).not.toBeNull();
-		expect(sent).toEqual([
-			{
-				projectSlug: "project-a",
-				originId: expect.any(String),
-				instanceId: "opencode",
-			},
-		]);
-	});
-
-	it("transitions to creating phase", () => {
-		sendNewSession(mockStart);
-		expect(sessionCreation.value.phase).toBe("creating");
-	});
-
-	it("completes creation and selects the session returned by the callback", async () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		try {
-			let finish: (response: CreateSessionResponse) => void = () => {};
-			const start = vi.fn(
-				() =>
-					new Promise<CreateSessionResponse>((resolve) => {
-						finish = resolve;
-					}),
-			);
-			const requestId = sendNewSession(start);
-			expect(requestId).not.toBeNull();
-			finish({ sessionId: "created", projectSlug: "project-a" });
-			await Promise.resolve();
-			expect(sessionCreation.value.phase).toBe("idle");
-			expect(sessionState.currentId).toBe("created");
-			expect(routerState.path).toBe("/s/created");
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-
-	it("returns null and sends nothing when already creating", () => {
-		sendNewSession(mockStart);
-		sent = [];
-		const result = sendNewSession(mockStart);
-		expect(result).toBeNull();
-		expect(sent).toHaveLength(0);
-	});
-
-	// Component guard lifecycle (mirrors Sidebar/SessionList)
-
-	it("mirrors Sidebar button guard: disabled when creating, re-enabled after complete", () => {
-		// First click — succeeds, button should be disabled
-		const requestId = sendNewSession(mockStart);
-		assert.exists(requestId, "expected session request ID");
-		expect(sessionCreation.value.phase === "creating").toBe(true);
-
-		// Second click while creating — guard blocks
-		expect(sendNewSession(mockStart)).toBeNull();
-
-		// Server responds — button should re-enable
-		completeNewSession(requestId);
-		expect(sessionCreation.value.phase === "creating").toBe(false);
-
-		// Third click — succeeds again
-		sent = [];
-		expect(sendNewSession(mockStart)).not.toBeNull();
-		expect(sent).toHaveLength(1);
 	});
 });

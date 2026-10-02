@@ -33,8 +33,22 @@ export class SidebarPage {
 		await this.sessionList.locator(`[data-session-id="${id}"]`).click();
 	}
 
-	async createNewSession(): Promise<void> {
+	/** `+` opens a draft; the session exists once its first message is sent. */
+	async createNewSession(text = "New session"): Promise<void> {
 		await this.newSessionBtn.click();
+		await expect(this.page).toHaveURL(/\/new\?/);
+		await this.page.locator("#input").fill(text);
+		await this.page.locator("#send").click();
+		await expect(this.page).toHaveURL(/\/s\/[^/?]+(?:\?.*)?$/);
+		// The reply leaves the row done-unread, and the first touch on it later
+		// regroups it under the caller. Settle it now, the way a user does, by
+		// picking the row (only reachable where the list shares the screen).
+		const id = new URL(this.page.url()).pathname.split("/").pop();
+		const row = this.sessionList.locator(`[data-session-id="${id}"]`);
+		await expect(row).toHaveAttribute("aria-label", /^Done/);
+		if (!(await row.isVisible())) return;
+		await row.click();
+		await expect(row).not.toHaveAttribute("aria-label", /^Done/);
 	}
 
 	async searchSessions(query: string): Promise<void> {

@@ -12,6 +12,7 @@
 	import ContextBar from "./ContextBar.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
+	import NewSessionContext from "./NewSessionContext.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
@@ -35,7 +36,8 @@
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { findSession, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -69,7 +71,27 @@
 	// current draft and restores the target session's draft (or empty string).
 
 	const inputDrafts = new Map<string, string>();
-	let previousSessionId: string | null = null;
+	// undefined until the first run, so a fresh load restores its draft too.
+	let previousSessionId: string | null | undefined = undefined;
+
+	// The new-session draft has no server-side store, so it lives here to
+	// survive a reload: a half-typed first prompt must not vanish.
+	const NEW_SESSION_DRAFT_KEY = "conduit:new-session-draft";
+	function readNewSessionDraft(): string {
+		try {
+			return localStorage.getItem(NEW_SESSION_DRAFT_KEY) ?? "";
+		} catch {
+			return "";
+		}
+	}
+	function storeNewSessionDraft(text: string) {
+		try {
+			if (text) localStorage.setItem(NEW_SESSION_DRAFT_KEY, text);
+			else localStorage.removeItem(NEW_SESSION_DRAFT_KEY);
+		} catch {
+			// Storage can be unavailable (private mode); the draft just won't persist.
+		}
+	}
 
 	$effect(() => {
 		const currentId = sessionState.currentId;
@@ -80,7 +102,9 @@
 					inputDrafts.set(previousSessionId, inputText);
 				}
 				// Restore draft for the session we're entering
-				inputText = inputDrafts.get(currentId ?? "") ?? "";
+				inputText = currentId
+					? (inputDrafts.get(currentId) ?? "")
+					: readNewSessionDraft();
 				previousSessionId = currentId;
 				lastLocalEditAt = 0;
 				// Cancel any pending outgoing sync from the previous session
@@ -111,6 +135,12 @@
 		lastSyncApplied = inputSyncState.lastUpdated;
 		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
 		inputText = inputSyncState.text;
+	});
+
+	// + opens a draft ready to type into.
+	$effect(() => {
+		const route = getCurrentRoute();
+		if (route.page === "chat" && route.draft) untrack(() => textareaEl?.focus());
 	});
 
 	/** Timer for debounced outgoing input sync. */
@@ -234,7 +264,8 @@
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
 		inputSyncTimer = setTimeout(() => {
 			inputSyncTimer = null;
-			syncInputDraft(inputText);
+			if (sessionState.currentId) syncInputDraft(inputText);
+			else storeNewSessionDraft(inputText);
 		}, 300);
 	}
 
@@ -287,6 +318,8 @@
 		}
 	}
 
+	let creatingSession = false;
+
 	async function sendMessage() {
 		const text = inputText.trim();
 		if (!text) return;
@@ -333,15 +366,20 @@
 		// Always send immediately — OpenCode queues server-side when busy.
 		// When the LLM is processing, `sentDuringEpoch` is recorded so the
 		// UI can derive the "Queued" shimmer reactively.
-		const projectSlug = getCurrentSlug();
+		let sid = sessionState.currentId;
+		// A draft is created in the project its chip names, which can differ
+		// from the attached one until the attach round trip lands.
+		const projectSlug = sid ? getCurrentSlug() : getDraftProject();
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
 			return;
 		}
-		let sid = sessionState.currentId;
 		if (!sid) {
 			// First send with no active session: create one bound to the selected
 			// harness instance (the picker's pre-creation draft), then send into it.
+			// A second Enter before the create lands would make a second session.
+			if (creatingSession) return;
+			creatingSession = true;
 			try {
 				const created = await createSessionRpc({
 					projectSlug,
@@ -349,10 +387,14 @@
 					instanceId: getEffectiveInstanceId(),
 				});
 				sid = created.sessionId;
-				switchToSession(sid);
+				storeNewSessionDraft("");
+				// Don't yank someone who opened another session while this one was created.
+				if (!sessionState.currentId) switchToSession(sid, projectSlug);
 			} catch {
 				showToast("Failed to create session", { variant: "error" });
 				return;
+			} finally {
+				creatingSession = false;
 			}
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
@@ -606,6 +648,10 @@
 			</div>
 		{/if}
 
+		{#if !sessionState.currentId && sessionViewState.compact}
+			<div class="pb-1.5"><NewSessionContext /></div>
+		{/if}
+
 		<div
 			id="input-row"
 			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
@@ -760,5 +806,8 @@
 				</div>
 			</div>
 		</div>
+		{#if !sessionState.currentId && !sessionViewState.compact}
+			<div class="pt-2"><NewSessionContext /></div>
+		{/if}
 	</div>
 </div>

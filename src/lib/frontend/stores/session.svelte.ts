@@ -7,8 +7,6 @@ import {
 } from "../transport/session-subscription.svelte.js";
 import type { ListDaemonSessionsResponse } from "../transport/ws-rpc.js";
 import {
-	type CreateSessionRpcInput,
-	createSessionRpc,
 	getAgentsRpc,
 	getCommandsRpc,
 	getModelsRpc,
@@ -22,7 +20,6 @@ import type {
 	DateGroups,
 	Immutable,
 	RelayMessage,
-	RequestId,
 	SessionAttention,
 	SessionInfo,
 } from "../types.js";
@@ -39,7 +36,6 @@ import {
 	applyGetCommandsResponse,
 	applyGetModelsResponse,
 	flushPendingPermissionMode,
-	getEffectiveInstanceId,
 } from "./discovery.svelte.js";
 import {
 	getCurrentSessionId,
@@ -220,161 +216,7 @@ export const sessionState = {
 	},
 };
 
-// Guards the new-session flow with typed phases. Prevents double-clicks,
-// tracks in-flight creation for button state, and handles timeout.
-//
-// Uses a { value: T } wrapper because Svelte 5's $state creates a reactive
-// proxy — you can't reassign a top-level $state variable, only mutate its
-// properties. The wrapper lets us swap the entire discriminated union cleanly
-// without Object.assign/delete hacks.
-
-/** Exported for tests — avoids magic numbers. */
-export const NEW_SESSION_TIMEOUT_MS = 5000;
-/** Exported for tests — avoids magic numbers. */
-export const ERROR_DISPLAY_MS = 2000;
-
-export type SessionCreationStatus =
-	| { phase: "idle" }
-	| { phase: "creating"; requestId: RequestId; startedAt: number }
-	| { phase: "error"; message: string; requestId: RequestId };
-
-export const sessionCreation = $state<{ value: SessionCreationStatus }>({
-	value: { phase: "idle" },
-});
-
-/** Active timeout timer — cleared on completion or reset. */
-let _creationTimer: ReturnType<typeof setTimeout> | null = null;
-let _errorResetTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearTimers(): void {
-	if (_creationTimer) {
-		clearTimeout(_creationTimer);
-		_creationTimer = null;
-	}
-	if (_errorResetTimer) {
-		clearTimeout(_errorResetTimer);
-		_errorResetTimer = null;
-	}
-}
-
-/**
- * Create a branded RequestId from crypto.randomUUID().
- * Frontend-only correlation for the creation state machine.
- */
-function createRequestId(): RequestId {
-	return crypto.randomUUID() as RequestId;
-}
-
 let selectionGeneration = 0;
-
-/**
- * Transition idle -> creating. Returns the requestId, or null if not idle.
- * Starts a timeout that auto-fails after NEW_SESSION_TIMEOUT_MS.
- */
-export function requestNewSession(): RequestId | null {
-	if (sessionCreation.value.phase !== "idle") return null;
-	const requestId = createRequestId();
-	selectionGeneration++;
-	sessionCreation.value = {
-		phase: "creating",
-		requestId,
-		startedAt: Date.now(),
-	};
-
-	// Timeout: auto-fail if server doesn't respond.
-	// Lives in the store (not a component $effect) so it works regardless
-	// of which UI panel is visible.
-	clearTimers();
-	_creationTimer = setTimeout(() => {
-		_creationTimer = null;
-		if (
-			sessionCreation.value.phase === "creating" &&
-			sessionCreation.value.requestId === requestId
-		) {
-			failNewSession(requestId, "Session creation timed out");
-		}
-	}, NEW_SESSION_TIMEOUT_MS);
-
-	return requestId;
-}
-
-/**
- * Transition creating -> idle when requestId matches (server confirmed).
- */
-export function completeNewSession(requestId: string): void {
-	if (sessionCreation.value.phase !== "creating") return;
-	if (sessionCreation.value.requestId !== requestId) return;
-	clearTimers();
-	sessionCreation.value = { phase: "idle" };
-}
-
-/**
- * Transition creating -> error. Auto-resets to idle after ERROR_DISPLAY_MS.
- */
-export function failNewSession(requestId: string, message: string): void {
-	if (sessionCreation.value.phase !== "creating") return;
-	if (sessionCreation.value.requestId !== requestId) return;
-	clearTimers();
-	sessionCreation.value = {
-		phase: "error",
-		message,
-		requestId: requestId as RequestId,
-	};
-
-	// Auto-reset to idle after the error is displayed
-	_errorResetTimer = setTimeout(() => {
-		_errorResetTimer = null;
-		if (sessionCreation.value.phase === "error") {
-			sessionCreation.value = { phase: "idle" };
-		}
-	}, ERROR_DISPLAY_MS);
-}
-
-/**
- * Reset to idle from any phase. Clears all timers.
- */
-export function resetSessionCreation(): void {
-	clearTimers();
-	sessionCreation.value = { phase: "idle" };
-}
-
-/**
- * Guard + send in one call. Returns the requestId, or null if already creating.
- * Both Sidebar and SessionList call this — centralizes the guard and payload
- * shape so they can't diverge.
- */
-export function sendNewSession(
-	start?: (input: CreateSessionRpcInput) => ReturnType<typeof createSessionRpc>,
-): RequestId | null {
-	const requestId = requestNewSession();
-	if (!requestId) return null;
-	const generation = selectionGeneration;
-	const projectSlug = getCurrentSlug();
-	if (!projectSlug) {
-		failNewSession(requestId, "No active project");
-		return requestId;
-	}
-	const input: CreateSessionRpcInput = {
-		projectSlug,
-		originId: getBrowserClientId(),
-		// Bind the session to the selected harness instance (replaces the
-		// legacy implicit default-model-provider derivation).
-		instanceId: getEffectiveInstanceId(),
-	};
-	void (start ?? createSessionRpc)(input)
-		.then((response) => {
-			completeNewSession(requestId);
-			if (generation !== selectionGeneration) return;
-			switchToSession(response.sessionId, response.projectSlug);
-		})
-		.catch((error: unknown) =>
-			failNewSession(
-				requestId,
-				error instanceof Error ? error.message : String(error),
-			),
-		);
-	return requestId;
-}
 
 /** Prune separate cross-project and search reads after a deletion notice. */
 export function pruneSessionLists(id: string): void {
@@ -1097,7 +939,6 @@ export function switchToSession(
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
 	selectionGeneration++;
-	resetSessionCreation(); // Cancel any in-flight creation (project switch safety)
 	const held = [...serverSessions.keys()];
 	resetSessionSubscription();
 	for (const id of held) forgetSession(id);

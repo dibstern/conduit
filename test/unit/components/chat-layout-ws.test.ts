@@ -153,7 +153,6 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	findSession: vi.fn(),
 	loadDaemonSessions: vi.fn(async () => {}),
 	switchToSession: vi.fn(),
-	sessionCreation: { value: { state: "idle" } },
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
@@ -210,6 +209,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 
 vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
 	applyGetProjectsResponse: vi.fn(),
+	projectState: { projects: [] },
 }));
 
 vi.mock("../../../src/lib/frontend/stores/version.svelte.js", () => ({

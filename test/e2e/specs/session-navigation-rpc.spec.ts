@@ -59,7 +59,7 @@ async function setup(page: import("@playwright/test").Page) {
 	return { rpc, relay };
 }
 
-test("CreateSession response selects the new session and restores its draft", async ({
+test("a draft's first send creates the session in its project and sends into it", async ({
 	page,
 	harness,
 }) => {
@@ -67,9 +67,28 @@ test("CreateSession response selects the new session and restores its draft", as
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#new-session-btn").click();
-	await rpc.waitForRequest((request) => request.tag === "CreateSession");
-	await expect(page).toHaveURL(new RegExp(`/s/${created}$`));
-	await expect(page.locator("#input")).toHaveValue(`Draft for ${created}`);
+	await expect(page).toHaveURL(
+		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
+	);
+	await expect(page.locator("#input")).toHaveValue("");
+	expect(
+		rpc.getRequests().some((request) => request.tag === "CreateSession"),
+	).toBe(false);
+
+	await page.locator("#input").fill("Hello");
+	await page.locator("#send").click();
+	const create = await rpc.waitForRequest(
+		(request) => request.tag === "CreateSession",
+	);
+	expect(create.payload["projectSlug"]).toBe(projectSlug);
+	const send = await rpc.waitForRequest(
+		(request) => request.tag === "SendMessage",
+	);
+	expect(send.payload).toMatchObject({
+		projectSlug,
+		sessionId: created,
+		text: "Hello",
+	});
 });
 
 test("ForkSession response selects the fork and restores its draft", async ({

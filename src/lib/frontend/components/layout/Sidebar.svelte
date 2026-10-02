@@ -13,9 +13,9 @@
 		collapseSidebar,
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
+	import { switchToSession } from "../../stores/session.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 	import Menu from "../ui/Menu.svelte";
@@ -36,7 +36,6 @@
 		collapseSidebar();
 	}
 
-	const newSessionPending = $derived(sessionCreation.value.phase === "creating");
 	// Settled sessions are never counted: that set only grows.
 	const openCount = $derived(
 		sessionList.groups.reduce(
@@ -45,8 +44,12 @@
 		),
 	);
 
+	// Opens a draft; the session is created by its first send.
 	function handleNewSession() {
-		sendNewSession();
+		const params = getCurrentSearchParams();
+		const project = getCurrentSlug() ?? projectState.projects.find((p) => !p.missing)?.slug;
+		if (project) params.set(DRAFT_PROJECT_PARAM, project);
+		navigate(`/new?${params}`);
 	}
 
 	function handleResumeSession() {
@@ -195,7 +198,6 @@
 				class="p-1 rounded-md"
 				title="New session"
 				ariaLabel="New session"
-				loading={newSessionPending}
 				onclick={handleNewSession}
 			/>
 			<!--
@@ -270,7 +272,6 @@
 				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
 				title="New session"
 				ariaLabel="New session"
-				loading={newSessionPending}
 				onclick={handleNewSession}
 			/>
 		{/if}

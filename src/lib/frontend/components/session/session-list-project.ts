@@ -14,10 +14,13 @@ export function getProjectLabel(session: SessionInfo): string | undefined {
 	return slug ? projectDisplayName(slug) : undefined;
 }
 
-export function getProjectAccent(session: SessionInfo): number {
-	const slug = session.projectSlug ?? getCurrentSlug();
+export function projectAccent(slug: string | null): number {
 	const index = projectState.projects.findIndex(
 		(project) => project.slug === slug,
 	);
 	return (Math.max(index, 0) % 6) + 1;
+}
+
+export function getProjectAccent(session: SessionInfo): number {
+	return projectAccent(session.projectSlug ?? getCurrentSlug());
 }

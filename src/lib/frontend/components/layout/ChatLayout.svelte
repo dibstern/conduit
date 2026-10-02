@@ -12,6 +12,8 @@
 	import { activeSessionView, matchSessionViewShortcut } from "./session-views.js";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
+	import ProjectSquare from "../session/ProjectSquare.svelte";
+	import { projectAccent, projectDisplayName } from "../session/session-list-project.js";
 	import MessageList from "../chat/MessageList.svelte";
 	import ConnectOverlay from "../overlays/ConnectOverlay.svelte";
 	import Banners from "../overlays/Banners.svelte";
@@ -48,7 +50,7 @@
 		onPlanMode,
 		wsSend,
 	} from "../../stores/ws.svelte.js";
-	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
@@ -105,12 +107,15 @@
 	// On a phone the terminal is a whole view, never a split under the transcript.
 	const mobileMaximized = $derived(phoneView === "terminal");
 
+	const draftSlug = $derived(getDraftProject());
+
 	const phoneListScreen = $derived.by(() => {
 		const route = getCurrentRoute();
 		return (
 			sessionViewState.compact &&
 			route.page === "chat" &&
 			!route.sessionId &&
+			!route.draft &&
 			!uiState.fileViewerOpen &&
 			!mobileMaximized
 		);
@@ -446,7 +451,9 @@
 	});
 	$effect(() => {
 		const route = getCurrentRoute();
-		const projectHint = getCurrentSearchParams().get("p");
+		// A draft attaches the project it will be created in, so models and
+		// commands match it before the first send.
+		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : getCurrentSearchParams().get("p");
 		const attachedSlug = attachedProjectState.slug;
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
@@ -702,6 +709,13 @@
 					<!-- Touches here clear the unread dot (conduit-test-hk9m.4). -->
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 						<MessageList {topClearance} />
+						{#if !sessionState.currentId}
+							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-brand" data-testid="draft-empty">
+								{#if draftSlug}<ProjectSquare large label={projectDisplayName(draftSlug)} accent={projectAccent(draftSlug)} />{/if}
+								<b class="text-[16px] font-semibold text-text">What should happen{draftSlug ? ` in ${projectDisplayName(draftSlug)}` : ""}?</b>
+								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>
+							</div>
+						{/if}
 						<InputArea />
 					</div>
 					{#if sessionViewState.compact && sessionViewState.filesEverOpened}

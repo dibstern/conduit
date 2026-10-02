@@ -1,9 +1,9 @@
-// Routes: /auth, /setup, / (session list), /s/:sessionId.
+// Routes: /auth, /setup, / (session list), /new (draft session), /s/:sessionId.
 
 export type Route =
 	| { page: "auth" }
 	| { page: "setup" }
-	| { page: "chat"; sessionId?: string };
+	| { page: "chat"; sessionId?: string; draft?: true };
 
 export interface RouteTransition {
 	from: string;
@@ -30,6 +30,8 @@ function splitPath(path: string): { pathname: string; search: string } {
 /** The sidebar's project scope (`?p=<slug>`). Read and written through
  *  stores/session-scope.ts; declared here because navigation has to carry it. */
 export const SCOPE_PARAM = "p";
+/** The project a draft (/new) will be created in; separate from the list scope. */
+export const DRAFT_PROJECT_PARAM = "project";
 export const STATUS_PARAM = "status";
 export const GROUP_PARAM = "group";
 
@@ -101,6 +103,11 @@ export function getCurrentRoute(): Route {
 		return { page: "setup" };
 	}
 
+	// A draft is a session that does not exist yet: created on first send.
+	if (path === "/new" || path === "/new/") {
+		return { page: "chat", draft: true };
+	}
+
 	// Legacy session links remain readable until App normalizes the address.
 	const sessionMatch = path.match(/^(?:\/p\/[^/]+)?\/s\/([^/]+)\/?$/);
 	if (sessionMatch) {
@@ -130,7 +137,7 @@ export function normalizeRoute(): void {
 		replaceRoute(`/?${params}`);
 		return;
 	}
-	if (!/^\/(?:s\/[^/]+\/?|auth\/?|setup\/?)?$/.test(path)) {
+	if (!/^\/(?:s\/[^/]+\/?|new\/?|auth\/?|setup\/?)?$/.test(path)) {
 		replaceRoute(`/${routerState.search}`);
 	}
 }
@@ -139,6 +146,11 @@ export function normalizeRoute(): void {
 export function getCurrentSlug(): string | null {
 	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
 	return getCurrentSearchParams().get(SCOPE_PARAM);
+}
+
+/** The project a draft will be created in: its own choice, else the current one. */
+export function getDraftProject(): string | null {
+	return getCurrentSearchParams().get(DRAFT_PROJECT_PARAM) ?? getCurrentSlug();
 }
 
 /** Get the current session ID from the URL (null if not present). */

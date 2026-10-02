@@ -44,8 +44,6 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
-	sendNewSession,
-	sessionCreation,
 	sessionState,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -148,21 +146,6 @@ it("ignores a draft returned after the selection moves on", async () => {
 	expect(sessionState.currentId).toBe("B");
 	expect(routerState.path).toBe("/s/B");
 	expect(inputSyncState.text).toBe("B draft");
-});
-
-it("completes creation without moving a newer selection", async () => {
-	const creation = deferred<{
-		readonly sessionId: string;
-		readonly projectSlug: string;
-	}>();
-	const requestId = sendNewSession(() => creation.promise);
-	expect(requestId).not.toBeNull();
-	select("B");
-	creation.resolve({ sessionId: "late-create", projectSlug: "project-a" });
-	await Promise.resolve();
-	expect(sessionState.currentId).toBe("B");
-	expect(routerState.path).toBe("/s/B");
-	expect(sessionCreation.value.phase).toBe("idle");
 });
 
 it("keeps B's model when A's model metadata arrives last", () => {
