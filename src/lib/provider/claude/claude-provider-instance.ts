@@ -93,6 +93,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		return this.runtime.shutdownEffect();
 	}
 
+	recoverEffect() {
+		return this.runtime.recoverEffect;
+	}
+
 	endSessionEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {

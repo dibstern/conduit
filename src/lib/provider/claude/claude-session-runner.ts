@@ -167,6 +167,7 @@ export interface ClaudeSessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface ClaudeSessionRunner {
+	readonly recoverEffect?: Effect.Effect<void, ClaudeSessionFailure>;
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;

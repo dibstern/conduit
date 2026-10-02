@@ -171,6 +171,8 @@ export interface SendTurnInput {
 	readonly commandId?: string;
 	/** Persisted user-message owner for process-runner failure events. */
 	readonly userMessageId?: string;
+	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
+	readonly commandAttempt?: number;
 	readonly sessionId: string;
 	readonly turnId: string;
 	readonly prompt: string;

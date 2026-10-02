@@ -29,6 +29,10 @@ import type { ModelInfo } from "../../src/lib/provider/types.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
+import {
+	cleanupTestClaudeRunners,
+	testRunnerAlive,
+} from "./claude-runner-cleanup.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 
 export { responseChunks };
@@ -79,7 +83,7 @@ export interface BrowserFrame {
 export class ProcessHarness {
 	readonly root = mkdtempSync("/tmp/conduit-process-");
 	readonly projectDir = join(this.root, "project");
-	readonly configDir = join(this.root, "config");
+	readonly configDir: string;
 	readonly marks: ProcessMark[] = [];
 	readonly generations: Generation[] = [];
 	readonly browsers: ProcessBrowser[] = [];
@@ -89,6 +93,9 @@ export class ProcessHarness {
 	private port = 0;
 	private disposed = false;
 	private readonly ownedOpenCode = new Map<string, ManagedOpenCodeRecord>();
+	private runnerCleanup:
+		| Awaited<ReturnType<typeof cleanupTestClaudeRunners>>
+		| undefined;
 
 	private constructor(
 		private readonly dist?: string,
@@ -112,7 +119,17 @@ export class ProcessHarness {
 		private readonly queryInitializationFailures = 0,
 		private readonly blockCapabilitiesProbe = false,
 		capabilityModels?: readonly ModelInfo[],
+		private readonly restartProof = false,
+		private readonly holdRunnerAck = false,
+		private readonly holdRunnerOutput?:
+			| "permission-request"
+			| "answer-permission",
+		private readonly runnerReattachGraceMs?: number,
 	) {
+		this.configDir = join(
+			this.root,
+			runnerLifecycle?.nonDefaultConfigDir ? "active-config" : "config",
+		);
 		for (const directory of [
 			"home",
 			"config",
@@ -146,7 +163,7 @@ export class ProcessHarness {
 			);
 			chmodSync(executable, 0o755);
 			writeFileSync(
-				join(this.root, "config", "daemon.json"),
+				join(this.configDir, "daemon.json"),
 				JSON.stringify({
 					pid: 0,
 					port: 0,
@@ -193,10 +210,16 @@ export class ProcessHarness {
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
+			restartProof?: boolean;
+			holdRunnerAck?: boolean;
+			holdRunnerOutput?: "permission-request" | "answer-permission";
+			runnerReattachGraceMs?: number;
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
-			options.dist ? resolve(options.dist) : undefined,
+			(options.dist ?? process.env["CONDUIT_TEST_DIST"])
+				? resolve(options.dist ?? process.env["CONDUIT_TEST_DIST"] ?? "dist")
+				: undefined,
 			options.enqueueMarkDelayMs,
 			options.claudeRunner,
 			options.shellEnvProof,
@@ -208,6 +231,10 @@ export class ProcessHarness {
 			options.queryInitializationFailures,
 			options.blockCapabilitiesProbe,
 			options.capabilityModels,
+			options.restartProof,
+			options.holdRunnerAck,
+			options.holdRunnerOutput,
+			options.runnerReattachGraceMs,
 		);
 		try {
 			await harness.restart();
@@ -270,10 +297,7 @@ export class ProcessHarness {
 					),
 					...(this.runnerLifecycle?.nonDefaultConfigDir
 						? {
-								CONDUIT_TEST_DAEMON_CONFIG_DIR: join(
-									this.root,
-									"active-config",
-								),
+								CONDUIT_TEST_DAEMON_CONFIG_DIR: this.configDir,
 							}
 						: {}),
 					...(this.runnerLifecycle?.failureCleanupDelayMs !== undefined
@@ -310,8 +334,26 @@ export class ProcessHarness {
 					CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES: String(
 						this.queryInitializationFailures,
 					),
+					...(this.restartProof
+						? {
+								CONDUIT_TEST_PROCESS_PROOF: join(this.root, "sdk-proof.ndjson"),
+							}
+						: {}),
+					...(this.holdRunnerAck
+						? { CONDUIT_TEST_HOLD_RUNNER_ACK: "text.delta" }
+						: {}),
+					...(this.holdRunnerOutput && this.generations.length === 0
+						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
+						: {}),
 					...(this.claudeRunner
 						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
+						: {}),
+					...(this.runnerReattachGraceMs !== undefined
+						? {
+								CONDUIT_CLAUDE_RUNNER_REATTACH_GRACE_MS: String(
+									this.runnerReattachGraceMs,
+								),
+							}
 						: {}),
 					...(this.shellEnvProof
 						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
@@ -435,10 +477,7 @@ export class ProcessHarness {
 
 	async shutdown(): Promise<void> {
 		if (!this.child) return;
-		await sendRpcRequest(
-			join(this.root, "config", "relay.sock"),
-			new Shutdown({}),
-		);
+		await sendRpcRequest(join(this.configDir, "relay.sock"), new Shutdown({}));
 		for (const connected of this.browsers) await connected.close();
 		const child = this.child;
 		const force = setTimeout(() => child?.kill("SIGKILL"), 5000);
@@ -451,17 +490,15 @@ export class ProcessHarness {
 		for (const connected of this.browsers) await connected.close();
 	}
 
-	async disconnectParent(): Promise<void> {
-		const child = this.child;
-		if (!child) throw new Error("No server child to disconnect");
-		child.disconnect();
+	async waitForExit(): Promise<void> {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
+			for (const browser of this.browsers) await browser.close();
 			await Promise.race([
 				this.exit,
 				new Promise<never>((_done, fail) => {
 					timer = setTimeout(
-						() => fail(new Error("Child did not exit after parent disconnect")),
+						() => fail(new Error("Server did not stop")),
 						5000,
 					);
 				}),
@@ -473,10 +510,38 @@ export class ProcessHarness {
 		}
 	}
 
-	private async stop(signal: NodeJS.Signals, timeoutMs = 3000): Promise<void> {
+	async disconnectParent(): Promise<void> {
+		const child = this.child;
+		if (!child) throw new Error("No server child to disconnect");
+		for (const browser of this.browsers) await browser.close();
+		child.disconnect();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				this.exit,
+				new Promise<never>((_done, fail) => {
+					timer = setTimeout(
+						() => fail(new Error("Child did not exit after parent disconnect")),
+						8000,
+					);
+				}),
+			]);
+			this.child = undefined;
+			for (const browser of this.browsers) await browser.close();
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	private async stop(signal: NodeJS.Signals, timeoutMs = 6000): Promise<void> {
 		const child = this.child;
 		if (!child) return;
+		// Close clients before graceful disposal: RPC scopes can otherwise hold
+		// the server open until the harness deadline kills it before runner cleanup.
+		if (signal !== "SIGKILL")
+			for (const browser of this.browsers) await browser.close();
 		child.kill(signal);
+		// The runner gets 1s to reply and 3s to terminate before its own force-kill.
 		const force = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
 		try {
 			await this.exit;
@@ -490,7 +555,9 @@ export class ProcessHarness {
 	proof(): unknown {
 		return {
 			root: this.root,
+			configDir: this.configDir,
 			disposed: this.disposed,
+			runnerCleanup: this.runnerCleanup,
 			generations: this.generations,
 			marks: this.marks,
 			frames: this.browsers.map((browser) =>
@@ -505,7 +572,7 @@ export class ProcessHarness {
 
 	private rememberManagedOpenCode(): void {
 		if (!this.managedOpenCode) return;
-		const config = loadDaemonConfig(join(this.root, "config"));
+		const config = loadDaemonConfig(this.configDir);
 		for (const instance of config?.instances ?? []) {
 			if (
 				instance.managed &&
@@ -517,86 +584,171 @@ export class ProcessHarness {
 		}
 	}
 
+	runnerPids(): number[] {
+		const serverPids = new Set(
+			this.generations.map((generation) => generation.pid),
+		);
+		return [
+			...new Set([
+				...this.marks.flatMap((mark) =>
+					(mark.kind === "runner-started" ||
+						mark.kind === "runner-spawned" ||
+						mark.kind === "query") &&
+					Number.isSafeInteger(mark.pid) &&
+					mark.pid > 0 &&
+					!serverPids.has(mark.pid)
+						? [mark.pid]
+						: [],
+				),
+				...(this.runnerCleanup?.runnerPids ?? []),
+			]),
+		];
+	}
+
+	remainingRunnerPids(): number[] {
+		return this.runnerPids().filter(testRunnerAlive);
+	}
+
+	assertNoRunners(): void {
+		const remaining = this.remainingRunnerPids();
+		if (remaining.length > 0)
+			throw new Error(
+				`Claude runners still alive for ${this.configDir}: ${remaining.join(", ")}`,
+			);
+	}
+
 	async dispose(): Promise<void> {
-		if (this.disposed) return;
-		if (this.blockCapabilitiesProbe)
-			writeFileSync(join(this.root, "capabilities-probe-release"), "release");
-		this.rememberManagedOpenCode();
-		let cleanupFailure: Error | undefined;
+		if (this.disposed) {
+			this.assertNoRunners();
+			return;
+		}
+		const failures: unknown[] = [];
+		try {
+			if (this.blockCapabilitiesProbe)
+				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
+			this.rememberManagedOpenCode();
+		} catch (cause) {
+			failures.push(cause);
+		}
 		try {
 			if (this.managedOpenCode) await this.shutdown();
 			else await this.stop("SIGTERM");
-		} finally {
+		} catch (cause) {
+			failures.push(cause);
+		}
+		try {
 			await this.stop("SIGKILL");
+		} catch (cause) {
+			failures.push(cause);
+		}
+		try {
 			this.rememberManagedOpenCode();
-			// Retain authenticated ownership across deliberately corrupted configs.
-			// Historical numeric IDs in the fixture ledger can be reused.
-			for (const record of this.ownedOpenCode.values()) {
-				try {
-					const owned = await inspectManagedOpenCodeProcess(
-						record.processIdentity,
-					);
-					const stopped = owned
-						? await stopManagedOpenCode({ ...record, pid: owned.pid })
-						: false;
-					if (
-						!stopped &&
-						record.processIdentity &&
-						isProcessAlive(record.processIdentity.supervisorPid)
-					)
-						cleanupFailure ??= new Error(
+		} catch (cause) {
+			failures.push(cause);
+		}
+		// Retain authenticated ownership across deliberately corrupted configs.
+		// Historical numeric IDs in the fixture ledger can be reused.
+		for (const record of this.ownedOpenCode.values()) {
+			try {
+				const owned = await inspectManagedOpenCodeProcess(
+					record.processIdentity,
+				);
+				const stopped = owned
+					? await stopManagedOpenCode({ ...record, pid: owned.pid })
+					: false;
+				if (
+					!stopped &&
+					record.processIdentity &&
+					isProcessAlive(record.processIdentity.supervisorPid)
+				)
+					failures.push(
+						new Error(
 							`Cannot verify managed fixture cleanup; recovery retained at ${this.root}`,
-						);
-				} catch (cause) {
-					cleanupFailure ??= new Error(
+						),
+					);
+			} catch (cause) {
+				failures.push(
+					new Error(
 						`Cannot verify managed fixture cleanup; recovery retained at ${this.root}`,
 						{ cause },
-					);
-				}
+					),
+				);
 			}
 		}
 		const runnerPids = new Set(
 			this.marks.flatMap((mark) =>
-				mark.kind === "runner-spawned" || mark.kind === "runner-started"
+				(mark.kind === "runner-spawned" || mark.kind === "runner-started") &&
+				Number.isSafeInteger(mark.pid) &&
+				mark.pid > 0 &&
+				!this.generations.some((generation) => generation.pid === mark.pid)
 					? [mark.pid]
 					: [],
 			),
 		);
 		for (const pid of runnerPids) {
 			try {
-				process.kill(pid, 0);
-			} catch (cause) {
-				if (isRecord(cause) && cause["code"] === "ESRCH") continue;
-				throw cause;
-			}
-			// Only reap an exact PID reported by this harness's child process.
-			try {
-				process.kill(pid, "SIGKILL");
-			} catch (cause) {
-				if (isRecord(cause) && cause["code"] === "ESRCH") continue;
-				throw cause;
-			}
-			const deadline = Date.now() + 3000;
-			while (true) {
 				try {
 					process.kill(pid, 0);
 				} catch (cause) {
-					if (isRecord(cause) && cause["code"] === "ESRCH") break;
+					if (isRecord(cause) && cause["code"] === "ESRCH") continue;
 					throw cause;
 				}
-				if (Date.now() >= deadline)
-					throw new Error(`Harness runner ${pid} did not exit`);
-				await new Promise<void>((done) => setTimeout(done, 25));
+				// Only reap an exact PID reported by this harness's child process.
+				try {
+					process.kill(pid, "SIGKILL");
+				} catch (cause) {
+					if (isRecord(cause) && cause["code"] === "ESRCH") continue;
+					throw cause;
+				}
+				const deadline = Date.now() + 3000;
+				while (true) {
+					try {
+						process.kill(pid, 0);
+					} catch (cause) {
+						if (isRecord(cause) && cause["code"] === "ESRCH") break;
+						throw cause;
+					}
+					if (Date.now() >= deadline)
+						throw new Error(`Harness runner ${pid} did not exit`);
+					await new Promise<void>((done) => setTimeout(done, 25));
+				}
+			} catch (cause) {
+				failures.push(cause);
 			}
 		}
-		const hostClient = this.dist
-			? ((await import(
-					pathToFileURL(join(this.dist, "src/lib/terminal/pty-host-client.js"))
-						.href
-				)) as typeof import("../../src/lib/terminal/pty-host-client.js"))
-			: { stopPtyHost };
-		await hostClient.stopPtyHost({ configDir: this.configDir, force: true });
-		if (cleanupFailure) throw cleanupFailure;
+		try {
+			this.runnerCleanup = await cleanupTestClaudeRunners(
+				this.root,
+				this.runnerPids(),
+				this.configDir,
+			);
+		} catch (cause) {
+			failures.push(cause);
+		}
+		try {
+			this.assertNoRunners();
+		} catch (cause) {
+			failures.push(cause);
+		}
+		try {
+			const hostClient = this.dist
+				? ((await import(
+						pathToFileURL(
+							join(this.dist, "src/lib/terminal/pty-host-client.js"),
+						).href
+					)) as typeof import("../../src/lib/terminal/pty-host-client.js"))
+				: { stopPtyHost };
+			await hostClient.stopPtyHost({ configDir: this.configDir, force: true });
+		} catch (cause) {
+			failures.push(cause);
+		}
+		if (failures.length === 1) throw failures[0];
+		if (failures.length > 1)
+			throw new AggregateError(
+				failures,
+				`Harness cleanup failed; recovery retained at ${this.root}`,
+			);
+		// Keep registration/socket evidence if cleanup cannot prove termination.
 		rmSync(this.root, { recursive: true, force: true });
 		this.disposed = true;
 	}
@@ -832,7 +984,7 @@ export class ProcessBrowser {
 
 	async answerApproval(
 		request: Record<string, unknown>,
-		decision: "allow" | "deny",
+		decision: "allow" | "allow_always" | "deny",
 	): Promise<void> {
 		await this.run(
 			this.rpc.RespondPermission({
@@ -841,6 +993,9 @@ export class ProcessBrowser {
 				commandId: randomUUID(),
 				requestId: String(request["requestId"]),
 				decision,
+				...(decision === "allow_always"
+					? { permissionDestination: "session" as const }
+					: {}),
 			}),
 		);
 	}
@@ -857,6 +1012,10 @@ export class ProcessBrowser {
 		await this.run(
 			this.rpc.SetAutoSettleSetting({ autoSettleAfterDays: days }),
 		);
+	}
+
+	async restartServer(): Promise<void> {
+		await this.run(this.rpc.RestartWithConfig({ config: {} }));
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {

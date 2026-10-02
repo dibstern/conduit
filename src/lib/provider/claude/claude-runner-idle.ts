@@ -10,15 +10,17 @@ export function makeClaudeRunnerIdleExit(
 	onIdle: () => void,
 	testIdleWindowMs?: number | null,
 	dayMs = 86_400_000,
+	configDir = DEFAULT_CONFIG_DIR,
+	hasHeldWork?: () => boolean,
 ) {
 	let lastActivityAt = Date.now();
 	let turns = 0;
 	let backgroundWork = false;
 	const timer = setInterval(
 		() => {
-			if (turns > 0 || backgroundWork) return;
+			if (turns > 0 || backgroundWork || hasHeldWork?.()) return;
 			// Resolve configuration on the background sweep, never on send or output.
-			const days = loadDaemonConfig(DEFAULT_CONFIG_DIR)?.autoSettleAfterDays;
+			const days = loadDaemonConfig(configDir)?.autoSettleAfterDays;
 			const idleWindowMs =
 				testIdleWindowMs !== undefined
 					? testIdleWindowMs

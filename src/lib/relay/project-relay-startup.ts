@@ -29,6 +29,7 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -149,6 +150,13 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
+		if (process.env["CONDUIT_CLAUDE_RUNNER"] === "process") {
+			const orchestration = yield* getOrchestrationLayer;
+			const instance =
+				yield* orchestration.registry.getInstanceEffect("claude");
+			if (instance instanceof ClaudeProviderInstance)
+				yield* instance.recoverEffect();
+		}
 		const restoredPermissionModes = yield* restoreSessionPermissionModes();
 		if (restoredPermissionModes > 0) {
 			yield* Effect.sync(() =>

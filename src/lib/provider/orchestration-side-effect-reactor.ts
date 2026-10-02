@@ -208,11 +208,11 @@ export class ProviderSideEffectReactor {
 			// If it changes no rows another executor already claimed this row, so
 			// do NOT run the provider effect; surface the durable outcome instead.
 			const claimed = yield* this.markRunning(row, startedAt);
-			if (claimed === 0) {
+			if (claimed === undefined) {
 				return yield* this.durableOutcome(row.command_id);
 			}
 			const result = yield* Effect.either(
-				this.runProviderEffect(row, interactions),
+				this.runProviderEffect(row, claimed, interactions),
 			);
 			if (result._tag === "Left") {
 				const failedAt = yield* this.currentTimeMillis();
@@ -322,13 +322,12 @@ export class ProviderSideEffectReactor {
 		);
 	}
 
-	/** Returns the number of rows updated: 1 when this fiber won the exclusive
-	 * `pending -> running` claim, 0 when another executor already claimed it. */
+	/** Returns the claimed attempt, or undefined when another executor won. */
 	private markRunning(
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
-	): Effect.Effect<number, ProviderCommandStoreFailure> {
-		return this.options.sql`
+	): Effect.Effect<number | undefined, ProviderCommandStoreFailure> {
+		return this.options.sql<{ attempt_count: number }>`
 			UPDATE provider_command_outbox
 			SET status = 'running',
 			    attempt_count = attempt_count + 1,
@@ -336,14 +335,15 @@ export class ProviderSideEffectReactor {
 			    updated_at = ${updatedAt}
 			WHERE request_sequence = ${row.request_sequence}
 			  AND status IN ('pending', 'retryable_failed')
-			RETURNING request_sequence`.pipe(
-			Effect.map((rows) => rows.length),
+			RETURNING attempt_count`.pipe(
+			Effect.map((rows) => rows[0]?.attempt_count),
 			Effect.mapError(storeFailure("markRunning")),
 		);
 	}
 
 	private runProviderEffect(
 		row: ProviderCommandOutboxRow,
+		commandAttempt: number,
 		interactions?: EventSink,
 	): Effect.Effect<
 		TurnResult,
@@ -368,6 +368,10 @@ export class ProviderSideEffectReactor {
 				return yield* instance.sendTurnEffect({
 					...payload,
 					commandId: row.command_id,
+					...(driver === "claude" &&
+					process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
+						? { commandAttempt }
+						: {}),
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
 				});

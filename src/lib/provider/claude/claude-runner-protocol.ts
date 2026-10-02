@@ -12,14 +12,37 @@ import type {
 	ClaudeSessionOutputReply,
 } from "./claude-session-runner.js";
 
-export const CLAUDE_RUNNER_PROTOCOL_VERSION = 4;
+export const CLAUDE_RUNNER_PROTOCOL_VERSION = 5;
+
+/** Cleanup from an old attempt must never release a newer attempt's sink. */
+export const claudeRunnerSinkId = (commandId: string, attempt = 0): string =>
+	`${commandId}:${attempt}`;
 
 export interface ClaudeRunnerHello {
 	readonly type: "hello";
 	readonly protocolVersion: number;
 	readonly buildId: string;
+	readonly runnerId?: string;
+	readonly sessionId?: string;
+	readonly pid?: number;
+	readonly acknowledgedSequence?: number;
+	readonly bindings?: readonly {
+		readonly sinkId: string;
+		readonly sessionId: string;
+		readonly commandId?: string;
+	}[];
+	readonly pendingOutputs?: readonly {
+		readonly sequence: number;
+		readonly output: ClaudeSessionOutput;
+	}[];
+	readonly completedCommands?: readonly {
+		readonly commandId: string;
+		readonly result?: TurnResult;
+		readonly failure?: ClaudeSessionFailure;
+	}[];
 	readonly config?: {
 		readonly workspaceRoot: string;
+		readonly daemonConfigDir?: string;
 		readonly materializeSubagents: boolean;
 		readonly subagentPollTimeoutMs?: number;
 	};
@@ -35,6 +58,7 @@ type ClaudeRunnerReply =
 	| {
 			readonly type: "output-reply";
 			readonly outputId: string;
+			readonly sequence?: number | undefined;
 			readonly result?: ClaudeSessionOutputReply;
 			readonly failure?: ClaudeSessionFailure;
 	  };
@@ -53,12 +77,15 @@ export type ClaudeRunnerMessage =
 			readonly type: "command";
 			readonly commandId: string;
 			readonly command: ClaudeSessionCommand;
+			readonly attempt?: number;
 	  }
 	| {
 			readonly type: "output";
 			readonly outputId: string;
+			readonly sequence?: number;
 			readonly output: ClaudeSessionOutput;
-	  };
+	  }
+	| { readonly type: "replay"; readonly acknowledgedSequence: number };
 
 export function claudeRunnerHelloFailure(
 	hello: ClaudeRunnerHello,
@@ -145,7 +172,9 @@ export class ClaudeRunnerSocket {
 						message.type === "command-reply"
 							? `command:${message.commandId}`
 							: `output:${message.outputId}`;
-					this.pending.get(key)?.reply(message);
+					const reply = this.pending.get(key);
+					if (reply) reply.reply(message);
+					else onMessage(message);
 				} else onMessage(message);
 			} catch (cause) {
 				socket.destroy(
@@ -168,6 +197,7 @@ export class ClaudeRunnerSocket {
 			this.pending.clear();
 			onClose(this.failure);
 		};
+		lines.on("error", fail);
 		socket.on("error", fail);
 		socket.on("close", () => {
 			lines.close();
@@ -180,14 +210,20 @@ export class ClaudeRunnerSocket {
 			this.socket.write(`${JSON.stringify(message)}\n`);
 	}
 
+	get closed(): boolean {
+		return this.failure !== undefined || this.socket.destroyed;
+	}
+
 	commandEffect(
 		commandId: string,
 		command: ClaudeSessionCommand,
+		attempt?: number,
 	): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure> {
 		return this.requestEffect(`command:${commandId}`, {
 			type: "command",
 			commandId,
 			command,
+			...(attempt !== undefined ? { attempt } : {}),
 		});
 	}
 

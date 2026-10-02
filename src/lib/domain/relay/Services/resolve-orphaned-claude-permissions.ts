@@ -4,6 +4,7 @@ import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-sign
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 
 /**
  * Reject the Claude permissions a crash left pending.
@@ -49,7 +50,19 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 					AND e.provider = 'claude'
 					AND json_extract(e.data, '$.id') = pa.id
 			)`;
-	if (orphans.length === 0) return 0;
+	const pending = yield* Effect.serviceOption(PendingInteractionServiceTag);
+	const liveRequests =
+		process.env["CONDUIT_CLAUDE_RUNNER"] === "process" && Option.isSome(pending)
+			? new Set(
+					(yield* pending.value.listPendingPermissions()).map(
+						(request) => `${request.sessionId}:${request.requestId}`,
+					),
+				)
+			: new Set<string>();
+	const stale = orphans.filter(
+		(row) => !liveRequests.has(`${row.session_id}:${row.id}`),
+	);
+	if (stale.length === 0) return 0;
 
 	const commitAndSignal = yield* makeCommitAndSignal.pipe(
 		Effect.provideService(SqlClient.SqlClient, sql.value),
@@ -57,7 +70,7 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 		Effect.provideService(ProjectionRunnerEffectTag, projectionRunner.value),
 	);
 	yield* commitAndSignal(
-		orphans.map((row) =>
+		stale.map((row) =>
 			canonicalEvent(
 				"permission.resolved",
 				row.session_id,
@@ -66,5 +79,5 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 			),
 		),
 	);
-	return orphans.length;
+	return stale.length;
 });
