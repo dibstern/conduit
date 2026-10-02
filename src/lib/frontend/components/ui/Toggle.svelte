@@ -56,7 +56,7 @@
 	</div>
 	<span
 		class="relative w-9 h-5 rounded-full shrink-0 transition-[background,box-shadow] {checked ? 'bg-brand-a' : 'bg-text-dimmer'}"
-		style={checked ? "box-shadow: 0 0 8px rgba(255,45,123,0.4);" : ""}
+		style={checked ? "box-shadow: 0 0 8px rgb(from var(--color-brand-a) r g b / 0.4);" : ""}
 	>
 		<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm pointer-events-none transition-transform {checked ? 'translate-x-4' : ''}"></span>
 	</span>

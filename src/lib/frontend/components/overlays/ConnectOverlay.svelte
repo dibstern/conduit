@@ -153,7 +153,7 @@
 		style="opacity: {fadeOut ? '0' : '1'}; transition: opacity 600ms ease; pointer-events: {fadeOut ? 'none' : 'auto'};"
 	>
 		<!-- Radial glow orb -->
-		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgba(255,45,123,0.08) 0%, rgba(0,229,255,0.05) 40%, transparent 70%);"></div>
+		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgb(from var(--color-brand-a) r g b / 0.08) 0%, rgb(from var(--color-brand-b) r g b / 0.05) 40%, transparent 70%);"></div>
 
 		<div class="flex flex-col items-center gap-3 relative z-10">
 			<!-- Conduit logo with animated block grid -->

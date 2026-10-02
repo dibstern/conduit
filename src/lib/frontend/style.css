@@ -301,8 +301,8 @@
 }
 @utility glow-brand-b-strong {
 	box-shadow:
-		0 0 8px rgba(0, 229, 255, 0.4),
-		0 0 24px rgba(0, 229, 255, 0.15);
+		0 0 8px rgb(from var(--color-brand-b) r g b / 0.4),
+		0 0 24px rgb(from var(--color-brand-b) r g b / 0.15);
 }
 @utility glow-tool-running {
 	box-shadow:
