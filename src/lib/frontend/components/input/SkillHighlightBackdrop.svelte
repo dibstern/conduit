@@ -17,7 +17,7 @@
 	must show its own (pre-commit) text instead.
 -->
 <script lang="ts">
-	import { tokenizeSkills } from "../../utils/skill-highlight.js";
+	import { tokenizeSkills } from "../../../skill-recognition.js";
 
 	interface Props {
 		text: string;
