@@ -100,7 +100,7 @@ const main = Effect.gen(function* () {
 					);
 				} else if (message.type === "command" && runner) {
 					const command = message.command;
-					if (command.type === "send-turn")
+					if (command.type === "send-turn" || command.type === "pre-warm")
 						shellEnv = command.shellEnv ?? process.env;
 					if (process.env["NODE_ENV"] === "test" && process.connected)
 						process.send?.({

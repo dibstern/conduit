@@ -316,6 +316,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				CreatePty: () => Effect.succeed({ ok: true as const }),
 				ResizePty: () => Effect.succeed({ ok: true as const }),
 				ClosePty: () => Effect.succeed({ ok: true as const }),
+				PreWarmSession: () => Effect.void,
 				CreateSession: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

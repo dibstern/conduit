@@ -21,9 +21,14 @@ import {
 	unsnoozeSessionForClient,
 	viewSessionForClient,
 } from "../../handlers/session.js";
+import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
+	PreWarmSession: (request) =>
+		preWarmSession(request.sessionId).pipe(
+			Effect.catchAll(mapRpcFailure("PreWarmSession")),
+		),
 	ResolveSession: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -299,6 +304,7 @@ export const sessionsHandlers = {
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "PreWarmSession"
 	| "ResolveSession"
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"

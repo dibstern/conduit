@@ -48,6 +48,7 @@ const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
 	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
+	readonly prepareShellEnv?: ClaudeProviderInstanceDeps["prepareShellEnv"];
 	readonly onBackgroundTask?: (
 		input: import("../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
@@ -62,6 +63,7 @@ export interface OrchestrationLayerOptions {
 
 export interface OrchestrationRuntimeLayerOptions {
 	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
+	readonly prepareShellEnv?: ClaudeProviderInstanceDeps["prepareShellEnv"];
 	readonly onBackgroundTask?: (
 		input: import("../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
@@ -169,6 +171,7 @@ const createOrchestrationComponentsEffect = (
 			persist,
 		});
 		let shellEnv = options.shellEnv;
+		let prepareShellEnv = options.prepareShellEnv;
 		if (!shellEnv) {
 			const resolver = yield* Effect.acquireRelease(
 				Effect.sync(() => new ProjectShellEnvResolver()),
@@ -180,9 +183,11 @@ const createOrchestrationComponentsEffect = (
 			);
 			resolver.register(directory, config?.shellEnv);
 			shellEnv = (projectDir) => resolver.get(projectDir);
+			prepareShellEnv = (projectDir) => resolver.waitUntilReady(projectDir);
 		}
 		const claudeInstance = yield* ClaudeDriver.create({
 			shellEnv,
+			...(prepareShellEnv ? { prepareShellEnv } : {}),
 			...(options.onBackgroundTask
 				? { onBackgroundTask: options.onBackgroundTask }
 				: {}),
@@ -285,6 +290,9 @@ export const makeOrchestrationRuntimeLayer = (
 			const components = yield* createOrchestrationComponentsEffect({
 				client,
 				...(options.shellEnv && { shellEnv: options.shellEnv }),
+				...(options.prepareShellEnv && {
+					prepareShellEnv: options.prepareShellEnv,
+				}),
 				...(options.onBackgroundTask
 					? { onBackgroundTask: options.onBackgroundTask }
 					: {}),

@@ -188,6 +188,22 @@ export class ProjectShellEnvResolver {
 		return entry?.env ?? { ...this.baseEnv, ...entry?.config.overrides };
 	}
 
+	/** Pre-warming waits for a current capture; sends keep reading the cache. */
+	async waitUntilReady(directory: string): Promise<boolean> {
+		if (this.closed) return false;
+		const key = resolve(directory);
+		this.get(key);
+		const entry = this.entries.get(key);
+		if (!entry || entry.closed) return false;
+		await entry.pending;
+		return (
+			!this.closed &&
+			!entry.closed &&
+			this.entries.get(key) === entry &&
+			entry.env !== undefined
+		);
+	}
+
 	snapshot(directory: string): {
 		sources: readonly EnvSource[];
 		resolvedAt: number | null;

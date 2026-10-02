@@ -995,7 +995,7 @@ const ClientCountSchema = Schema.Struct({
 
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
-export const WS_PROTOCOL_VERSION = 2;
+export const WS_PROTOCOL_VERSION = 3;
 
 const ProtocolVersionSchema = Schema.Struct({
 	type: Schema.Literal("protocol_version"),

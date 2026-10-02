@@ -356,7 +356,11 @@ export const makeProcessClaudeSessionRunner = (
 					const entry = yield* lock.withPermits(1)(
 						Effect.gen(function* () {
 							const existing = children.get(sessionId);
-							if (existing || command.type !== "send-turn") return existing;
+							if (
+								existing ||
+								(command.type !== "send-turn" && command.type !== "pre-warm")
+							)
+								return existing;
 							const created: RunnerChild = {
 								ready: yield* Deferred.make<
 									ClaudeRunnerSocket,
@@ -407,7 +411,14 @@ export const makeProcessClaudeSessionRunner = (
 										...process.env,
 									},
 								}
-							: command;
+							: command.type === "pre-warm"
+								? {
+										...command,
+										shellEnv: deps.shellEnv?.(command.input.workspaceRoot) ?? {
+											...process.env,
+										},
+									}
+								: command;
 					const commandId =
 						command.type === "send-turn"
 							? (command.input.commandId ?? randomUUID())

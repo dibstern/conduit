@@ -11,7 +11,7 @@ import type {
 	ClaudeSessionOutputReply,
 } from "./claude-session-runner.js";
 
-export const CLAUDE_RUNNER_PROTOCOL_VERSION = 1;
+export const CLAUDE_RUNNER_PROTOCOL_VERSION = 2;
 
 export interface ClaudeRunnerHello {
 	readonly type: "hello";

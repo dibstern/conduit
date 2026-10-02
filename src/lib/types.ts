@@ -138,6 +138,8 @@ export interface ProjectRelayConfig {
 	shellEnv?: (
 		directory: string,
 	) => Readonly<Record<string, string | undefined>>;
+	/** Await the existing shell capture before speculative Claude boot only. */
+	prepareShellEnv?: (directory: string) => Promise<boolean>;
 	/** Shared HTTP server owned by the caller. */
 	httpServer: import("node:http").Server;
 	/** OpenCode server URL (e.g., "http://localhost:4096") */

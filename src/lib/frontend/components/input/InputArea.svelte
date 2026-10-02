@@ -43,6 +43,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
+	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 
@@ -61,6 +62,10 @@
 	let cursorPos = $state(0);
 	let composing = $state(false);
 	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
+	$effect(() => {
+		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
+		return () => requestSessionPreWarm(null, null);
+	});
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
@@ -751,6 +756,7 @@
 						bind:value={inputText}
 						bind:element={textareaEl}
 						oninput={handleInput}
+						onfocus={() => requestSessionPreWarm(getCurrentSlug(), sessionState.currentId)}
 						onkeydown={handleKeydown}
 						onkeyup={handleKeyup}
 						onclick={handleClick}

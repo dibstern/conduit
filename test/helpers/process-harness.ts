@@ -8,7 +8,9 @@ import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
+import { ProviderInstanceIdSchema } from "../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
+import type { ModelInfo } from "../../src/lib/provider/types.js";
 import { isRecord } from "../../src/lib/utils.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 
@@ -56,6 +58,10 @@ export class ProcessHarness {
 		private readonly enqueueMarkDelayMs = 0,
 		private readonly claudeRunner?: "process",
 		private readonly shellEnvProof = false,
+		private readonly queryInitializationDelayMs = 0,
+		private readonly queryInitializationFailures = 0,
+		private readonly blockCapabilitiesProbe = false,
+		capabilityModels?: readonly ModelInfo[],
 	) {
 		for (const directory of [
 			"home",
@@ -67,6 +73,13 @@ export class ProcessHarness {
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
+		if (blockCapabilitiesProbe)
+			writeFileSync(join(this.root, "capabilities-probe-gated"), "hold");
+		if (capabilityModels)
+			writeFileSync(
+				join(this.root, "capabilities-probe-result.json"),
+				JSON.stringify({ models: capabilityModels, agents: [], commands: [] }),
+			);
 		if (shellEnvProof)
 			writeFileSync(
 				join(this.root, "home/.zprofile"),
@@ -80,6 +93,10 @@ export class ProcessHarness {
 			enqueueMarkDelayMs?: number;
 			claudeRunner?: "process";
 			shellEnvProof?: boolean;
+			queryInitializationDelayMs?: number;
+			queryInitializationFailures?: number;
+			blockCapabilitiesProbe?: boolean;
+			capabilityModels?: readonly ModelInfo[];
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -87,6 +104,10 @@ export class ProcessHarness {
 			options.enqueueMarkDelayMs,
 			options.claudeRunner,
 			options.shellEnvProof,
+			options.queryInitializationDelayMs,
+			options.queryInitializationFailures,
+			options.blockCapabilitiesProbe,
+			options.capabilityModels,
 		);
 		try {
 			await harness.restart();
@@ -125,6 +146,12 @@ export class ProcessHarness {
 					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
+					CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS: String(
+						this.queryInitializationDelayMs,
+					),
+					CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES: String(
+						this.queryInitializationFailures,
+					),
 					...(this.claudeRunner
 						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
 						: {}),
@@ -271,6 +298,8 @@ export class ProcessHarness {
 
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
+		if (this.blockCapabilitiesProbe)
+			writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 		await this.stop("SIGTERM");
 		rmSync(this.root, { recursive: true, force: true });
 		this.disposed = true;
@@ -366,11 +395,14 @@ export class ProcessBrowser {
 		return this.runtime.runPromise(effect.pipe(Effect.timeout(TIMEOUT_MS)));
 	}
 
-	async createSession(title?: string): Promise<string> {
+	async createSession(title?: string, instanceId?: string): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
 				projectSlug: "process-test",
 				providerId: "claude",
+				...(instanceId
+					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
+					: {}),
 				...(title !== undefined ? { title } : {}),
 				originId: this.originId,
 			}),
@@ -386,6 +418,12 @@ export class ProcessBrowser {
 				sessionId,
 				originId: this.originId,
 			}),
+		);
+	}
+
+	async preWarmSession(sessionId: string): Promise<void> {
+		await this.run(
+			this.rpc.PreWarmSession({ projectSlug: "process-test", sessionId }),
 		);
 	}
 
