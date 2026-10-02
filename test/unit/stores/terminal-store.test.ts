@@ -112,6 +112,61 @@ describe("handlePtyOutput", () => {
 		expect(received).toEqual(["hello"]);
 	});
 
+	it("replaces restored history and then appends live output", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		const output = vi.fn();
+		onOutput("pty1", output);
+		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "marker\n" });
+		handlePtyOutput(
+			msg({
+				type: "pty_output",
+				ptyId: "pty1",
+				data: "marker\nwhile disconnected\n",
+				replace: true,
+			}),
+		);
+		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "live\n" });
+		expect(getScrollback("pty1")).toEqual([
+			"marker\nwhile disconnected\n",
+			"live\n",
+		]);
+		expect(output.mock.calls).toEqual([
+			["marker\n"],
+			["marker\nwhile disconnected\n", true],
+			["live\n"],
+		]);
+	});
+
+	it("clears old history and signals mounted listeners for an empty replay", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "stale\n" });
+		const output = vi.fn();
+		onOutput("pty1", output);
+		handlePtyOutput(
+			msg({ type: "pty_output", ptyId: "pty1", data: "", replace: true }),
+		);
+		expect(getScrollback("pty1")).toEqual([]);
+		expect(getScrollbackSize("pty1")).toBe(0);
+		expect(output).toHaveBeenCalledExactlyOnceWith("", true);
+	});
+
+	it("does not revive an exited terminal without confirmed restoration replay", () => {
+		const ptyId = "local-pty1";
+		handlePtyCreated(ptyCreatedMsg(ptyId));
+		handlePtyExited({ type: "pty_exited", ptyId, exitCode: -1 });
+		handlePtyOutput({
+			type: "pty_output",
+			ptyId,
+			data: "history",
+			replace: true,
+		});
+		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
+		handlePtyOutput(
+			msg({ type: "pty_output", ptyId, data: "live", restored: true }),
+		);
+		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
+	});
+
 	it("ignores output with missing ptyId", () => {
 		handlePtyOutput(msg({ type: "pty_output", data: "orphan" }));
 		// Should not throw
@@ -130,8 +185,57 @@ describe("handlePtyOutput", () => {
 		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: bigChunk });
 		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: bigChunk });
 		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: bigChunk });
-		// 3 x 20KB = 60KB, should trim first chunk
-		expect(getScrollbackSize("pty1")).toBeLessThanOrEqual(50 * 1024);
+		expect(getScrollback("pty1")).toEqual([
+			"x".repeat(10 * 1024),
+			bigChunk,
+			bigChunk,
+		]);
+		expect(getScrollbackSize("pty1")).toBe(50 * 1024);
+	});
+
+	it("retains the tail of a full replay when the next live chunk arrives", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		const snapshot = "a".repeat(50 * 1024);
+		handlePtyOutput(
+			msg({
+				type: "pty_output",
+				ptyId: "pty1",
+				data: snapshot,
+				replace: true,
+			}),
+		);
+		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "b" });
+		expect(getScrollback("pty1")).toEqual([snapshot.slice(1), "b"]);
+		expect(getScrollbackSize("pty1")).toBe(50 * 1024);
+	});
+
+	it("bounds a single oversized UTF-8 chunk without splitting a character", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyOutput({
+			type: "pty_output",
+			ptyId: "pty1",
+			data: "€".repeat(20_000),
+		});
+		expect(getScrollback("pty1")).toEqual(["€".repeat(17_066)]);
+		expect(getScrollbackSize("pty1")).toBe(51_198);
+	});
+
+	it("trims UTF-8 at code point boundaries after a full emoji snapshot", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyOutput({
+			type: "pty_output",
+			ptyId: "pty1",
+			data: "🚀".repeat(12_800),
+		});
+		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "a" });
+		expect(getScrollback("pty1")).toEqual(["🚀".repeat(12_799), "a"]);
+		expect(getScrollbackSize("pty1")).toBe(51_197);
+	});
+
+	it("reports UTF-8 bytes rather than UTF-16 code units", () => {
+		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "🚀é" });
+		expect(getScrollbackSize("pty1")).toBe(6);
 	});
 });
 
@@ -588,6 +692,77 @@ describe("applying server rows never touches the client half", () => {
 			title: "build",
 			exited: true,
 		});
+	});
+
+	it.each([
+		"local-pty1",
+		"pty-opencode",
+	])("keeps %s exited when an older ListPtys response arrives after its exit", (ptyId) => {
+		const olderResponse = { projectSlug: "demo", ptys: [ptyRow(ptyId)] };
+		applyPtyListResponse(olderResponse);
+		handlePtyExited({ type: "pty_exited", ptyId, exitCode: 0 });
+
+		applyPtyListResponse(olderResponse);
+
+		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
+	});
+
+	it("requires confirmed host replay to restore running status without replacing client state", () => {
+		const ptyId = "local-pty1";
+		handlePtyCreated(ptyCreatedMsg(ptyId));
+		handlePtyCreated(ptyCreatedMsg("pty2"));
+		renameTab(ptyId, "build");
+		switchTab(ptyId);
+		openPanel();
+		handlePtyOutput({ type: "pty_output", ptyId, data: "retained\n" });
+		const scrollback = getScrollback(ptyId);
+		const output = vi.fn();
+		onOutput(ptyId, output);
+		handlePtyExited({ type: "pty_exited", ptyId, exitCode: -1 });
+		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
+
+		handlePtyList({ type: "pty_list", ptys: [ptyRow(ptyId), ptyRow("pty2")] });
+		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
+		handlePtyOutput(
+			msg({
+				type: "pty_output",
+				ptyId,
+				data: "retained\n",
+				replace: true,
+				restored: true,
+			}),
+		);
+
+		expect(terminalState.tabs.get(ptyId)).toEqual({
+			ptyId,
+			title: "build",
+			exited: false,
+		});
+		expect(terminalState.activeTabId).toBe(ptyId);
+		expect(terminalState.panelOpen).toBe(true);
+		expect(getScrollback(ptyId)).toBe(scrollback);
+		expect(scrollback).toEqual(["retained\n"]);
+		handlePtyOutput({ type: "pty_output", ptyId, data: "live\n" });
+		expect(output.mock.calls).toEqual([["retained\n", true], ["live\n"]]);
+		expect(scrollback).toEqual(["retained\n", "live\n"]);
+	});
+
+	it("restores a running host terminal when its confirmed snapshot is empty", () => {
+		const ptyId = "local-pty1";
+		handlePtyCreated(ptyCreatedMsg(ptyId));
+		handlePtyOutput({ type: "pty_output", ptyId, data: "stale" });
+		handlePtyExited({ type: "pty_exited", ptyId, exitCode: -1 });
+		handlePtyOutput(
+			msg({
+				type: "pty_output",
+				ptyId,
+				data: "",
+				replace: true,
+				restored: true,
+			}),
+		);
+		expect(terminalState.tabs.get(ptyId)?.exited).toBe(false);
+		expect(getScrollback(ptyId)).toEqual([]);
 	});
 
 	it("drops the label when the server drops the pty, freeing its number", () => {

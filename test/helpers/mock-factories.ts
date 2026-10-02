@@ -883,6 +883,8 @@ export function makeTestHandlerLayer(
 	const sessionTitleService =
 		opts?.sessionTitleService ?? makeMockSessionTitleService();
 	const localPty: LocalPtyService = opts?.localPty ?? {
+		list: () => Effect.succeed([]),
+		attach: () => Effect.die("Unexpected attach in mock PTY service"),
 		create: vi.fn(() => {
 			const session: LocalPtySession = {
 				pty: {

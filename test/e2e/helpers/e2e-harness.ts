@@ -20,6 +20,7 @@ import {
 	createRelayStack,
 	type RelayStack,
 } from "../../../src/lib/relay/relay-stack.js";
+import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
 	isOpenCodeRunning,
@@ -63,6 +64,7 @@ async function switchToFreeModel(relayPort: number): Promise<void> {
 /** Create a relay pointed at real OpenCode, serving the built frontend */
 export async function createE2EHarness(opts?: {
 	opencodeUrl?: string;
+	projectDir?: string;
 }): Promise<E2EHarness> {
 	const opencodeUrl = opts?.opencodeUrl ?? OPENCODE_URL;
 
@@ -74,10 +76,11 @@ export async function createE2EHarness(opts?: {
 			port,
 			host: "127.0.0.1",
 			opencodeUrl,
-			projectDir: process.cwd(),
+			projectDir: opts?.projectDir ?? process.cwd(),
 			slug: "e2e-test",
 			sessionTitle: "E2E Test Session",
 			staticDir,
+			configDir: dbDir,
 			persistenceDbPath: path.join(dbDir, "events.db"),
 			log: createSilentLogger(),
 		});
@@ -107,7 +110,11 @@ export async function createE2EHarness(opts?: {
 					// Best-effort cleanup
 				}
 			}
-			await stack.stop();
+			try {
+				await stack.stop();
+			} finally {
+				await stopPtyHost({ configDir: dbDir, force: true });
+			}
 			rmSync(dbDir, { recursive: true, force: true });
 		},
 		trackSession(id: string): void {
@@ -172,6 +179,7 @@ async function createClaudeSession(relayPort: number): Promise<string> {
 export async function createReplayHarness(
 	recordingName: string,
 	options: {
+		projectDir?: string;
 		/** Claude lane: open a Claude session whose SDK turns replay these
 		 *  committed traces. No live model call is possible. */
 		claudeReplay?: ClaudeReplayPlan;
@@ -224,7 +232,7 @@ export async function createReplayHarness(
 			port,
 			host: "127.0.0.1",
 			opencodeUrl: mock.url,
-			projectDir: process.cwd(),
+			projectDir: options.projectDir ?? process.cwd(),
 			slug: "e2e-replay",
 			sessionTitle: "E2E Replay Session",
 			staticDir,
@@ -297,9 +305,13 @@ export async function createReplayHarness(
 			stack = await startStack(relayPort);
 		},
 		async stop(): Promise<void> {
-			await stack.stop();
-			await mock.stop();
-			if (claudeReplayer) __setProbeOverrideForTesting(undefined);
+			try {
+				await stack.stop();
+				await mock.stop();
+			} finally {
+				if (claudeReplayer) __setProbeOverrideForTesting(undefined);
+				await stopPtyHost({ configDir, force: true });
+			}
 			rmSync(configDir, { recursive: true, force: true });
 		},
 	};

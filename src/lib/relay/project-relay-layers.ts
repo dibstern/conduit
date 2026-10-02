@@ -255,7 +255,9 @@ export function createProjectRelayLayers({
 				loggerLayer,
 				configLayer,
 				ptyRuntimeLayer,
-				LocalPtyServiceLive,
+				LocalPtyServiceLive.pipe(
+					Layer.provide(Layer.merge(configLayer, loggerLayer)),
+				),
 			),
 		),
 	);

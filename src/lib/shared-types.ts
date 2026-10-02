@@ -898,6 +898,8 @@ const PtyOutputSchema = Schema.Struct({
 	type: Schema.Literal("pty_output"),
 	ptyId: Schema.String,
 	data: Schema.String,
+	replace: Schema.optional(Schema.Boolean),
+	restored: Schema.optional(Schema.Boolean),
 });
 
 const PtyExitedSchema = Schema.Struct({
