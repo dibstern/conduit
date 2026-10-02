@@ -37,6 +37,7 @@ export interface ParsedArgs {
 		| "list"
 		| "title"
 		| "instance"
+		| "service"
 		| "help";
 	cwd: string;
 	port: number;
@@ -53,6 +54,7 @@ export interface ParsedArgs {
 	instancePort?: number;
 	instanceManaged?: boolean;
 	instanceUrl?: string;
+	serviceAction?: string;
 	noUpdate: boolean;
 	debug: boolean;
 	yes: boolean;
@@ -85,6 +87,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		const arg = argv[i];
 
 		switch (arg) {
+			case "service": {
+				result.command = "service";
+				const action = argv[i + 1];
+				if (action && !action.startsWith("-")) {
+					result.serviceAction = action;
+					i++;
+				}
+				break;
+			}
+
 			case "--daemon":
 				result.command = "daemon";
 				break;
@@ -469,6 +481,11 @@ export function generateQR(url: string): string {
 export const HELP_TEXT = `Usage: conduit [options]
 
   With no flags, launches the interactive setup wizard and main menu.
+
+Commands:
+  service install       Install a launchd/systemd user service (accepts server options)
+  service uninstall     Stop and remove the user service
+  service status        Show service state, PID and log paths
 
 Options:
   --status              Show daemon status
