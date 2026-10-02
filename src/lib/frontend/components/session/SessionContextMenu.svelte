@@ -80,7 +80,7 @@
 
 {#snippet header(sheet: boolean)}
 	{#if sheet}
-		<div data-testid="session-sheet-header" class="flex items-start gap-3 border-b border-border px-4 pb-3 font-brand">
+		<div data-testid="session-sheet-header" class="flex items-start gap-3 border-b border-border px-4 pt-[8px] pb-[11px] font-brand">
 			{#if status.icon}<span class="mt-0.5 grid size-[20px] shrink-0 place-items-center {status.colour}" aria-hidden="true"><Icon name={status.icon} size={14} /></span>{/if}
 			<div class="min-w-0 flex-1">
 				<div class="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-text">{session.title || "New Session"}</div>

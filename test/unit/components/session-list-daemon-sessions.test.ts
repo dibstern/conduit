@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, within } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
@@ -11,6 +12,7 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import {
 	clearSessionSearch,
 	seedDaemonSessions,
@@ -52,6 +54,7 @@ describe("SessionList daemon sessions", () => {
 
 	afterEach(() => {
 		cleanup();
+		uiState.selectMode = false;
 	});
 
 	it("renders a foreign row as a session link with a project label", async () => {
@@ -95,9 +98,10 @@ describe("SessionList daemon sessions", () => {
 		await fireEvent.dblClick(within(foreignRow).getByText("Foreign session"));
 		expect(within(foreignRow).queryByRole("textbox")).toBeNull();
 
-		await fireEvent.click(
-			view.getByRole("button", { name: "Select sessions" }),
-		);
+		// The sidebar header's Select button and the phone ⋯ Select both just
+		// switch the list into select mode.
+		uiState.selectMode = true;
+		await tick();
 		expect(within(foreignRow).queryByRole("checkbox")).toBeNull();
 		expect(
 			within(localRow).getByRole("checkbox").getAttribute("aria-checked"),

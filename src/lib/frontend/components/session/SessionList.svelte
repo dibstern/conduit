@@ -448,7 +448,7 @@
 			ondismiss={() => { routerState.sessionNotFound = false; }}
 		/>
 	{/if}
-	<SessionListHeader {selectMode} {selectionCount} {allSelected} onselectall={handleToggleSelectAll} ondone={resetSelectMode} onenterselect={() => handleEnterSelect()} />
+	<SessionListHeader {selectMode} {selectionCount} {allSelected} onselectall={handleToggleSelectAll} ondone={resetSelectMode} />
 	<SessionListFilters {localSearchValue} {live} {searchSummary} onsearchinput={handleSearchInput} onclearsearch={clearSearch} {onaddproject} />
 	{#if feedStale}
 		<div class="px-3.5 py-1 text-xs text-text-dimmer font-brand" data-testid="session-list-stale">May be out of date</div>

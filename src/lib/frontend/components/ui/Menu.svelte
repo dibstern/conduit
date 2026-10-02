@@ -220,8 +220,13 @@
 			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
-					<div {...props} id={contentId} bind:this={contentNode} use:exemptFromBackgroundInert>
-						<div class="mx-auto mt-2 -mb-2 h-1 w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
+					<!-- A long sheet scrolls on short phones, and every item is tabindex -1 (roving
+					     focus), so the sheet itself must be focusable or axe's
+					     scrollable-region-focusable fails. Bits intercepts Tab inside the menu, so
+					     this adds no stray tab stop. Svelte cannot see role="menu" through the spread. -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} use:exemptFromBackgroundInert>
+						<div class="mx-auto mt-[8px] mb-[6px] h-[4px] w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
 						{@render children()}
 					</div>
 				{/snippet}

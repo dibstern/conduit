@@ -1063,7 +1063,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await page.keyboard.press("Escape");
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("sidebar-projects-panel")).toHaveCount(0);
-		await page.getByRole("button", { name: "Select sessions" }).click();
+		await page.getByTestId("list-bar-overflow").click();
+		await page.getByTestId("list-overflow-select").click();
 		await expect(
 			page
 				.locator("#session-list .session-list-header")
@@ -1108,6 +1109,62 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await measure("#sidebar");
 
 		expect(failures, failures.join("\n")).toEqual([]);
+	});
+
+	test("mobile: list bar titles the list once, with its unsettled count", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		await expect(
+			page.locator("#session-list .session-item").first(),
+		).toBeVisible();
+
+		await expect(page.getByTestId("list-bar-title")).toHaveText(
+			/^Sessions\s*\d+$/,
+		);
+		await expect(page.locator("#sidebar").getByText(/^sessions$/i)).toHaveCount(
+			0,
+		);
+	});
+
+	test("mobile: focusing search suggests the project scopes and their tokens", async ({
+		page,
+		relayUrl,
+	}) => {
+		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		const search = page.getByRole("textbox", { name: "Search sessions" });
+		const suggestions = page.getByTestId("session-scope-suggestions");
+
+		await search.focus();
+		await expect(suggestions).toBeVisible();
+		await expect(
+			suggestions.getByRole("button", { name: "All projects" }),
+		).toBeVisible();
+
+		// A half-typed token narrows the suggestions; picking one finishes it.
+		await search.fill("project:e2e");
+		await expect(
+			suggestions.getByRole("button", { name: "All projects" }),
+		).toBeHidden();
+		await suggestions
+			.getByRole("button", { name: /project:e2e-replay/ })
+			.click();
+		await expect(page).toHaveURL(/[?&]p=e2e-replay/);
+		await expect(search).toHaveValue("");
+		await expect(search).toBeFocused();
+		await expect(
+			page.getByRole("button", { name: "Clear project scope" }),
+		).toBeVisible();
+
+		// A plain search is not a scope question.
+		await search.fill("auth");
+		await expect(suggestions).toBeHidden();
+		await search.fill("");
+		await expect(suggestions).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(suggestions).toBeHidden();
+		await expect(search).toBeFocused();
 	});
 
 	test("mobile: root route shows the session list full screen", async ({

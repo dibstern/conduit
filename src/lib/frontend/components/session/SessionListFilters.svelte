@@ -29,10 +29,12 @@
 	const CHIP_CLASSES =
 		"shrink-0 gap-[6px] rounded-full border px-[11px] py-[8px] md:px-[9px] md:py-[5px] text-[12.5px] md:text-[11.5px] leading-none font-brand";
 
-	function filterSurfaceClass(needsAttention: boolean, active: boolean): string {
-		if (needsAttention) return "border-accent/55 bg-accent/14 text-status-pink";
-		if (active) return "border-border-chip bg-bg-alt text-text";
-		return "border-border text-text-secondary";
+	// A selected chip takes the design's brand tint (.chip.brand), the only
+	// coloured chip it draws; a neutral selected state vanished on dark.
+	function filterSurfaceClass(coloured: boolean): string {
+		return coloured
+			? "border-accent/55 bg-accent/14 text-status-pink"
+			: "border-border text-text-secondary";
 	}
 </script>
 
@@ -54,7 +56,7 @@
 						size="content"
 						tone="inherit"
 						touchTarget
-						class="{CHIP_CLASSES} {filterSurfaceClass(false, true)}"
+						class="{CHIP_CLASSES} {filterSurfaceClass(true)}"
 						data-testid="session-group-chip"
 						onclick={() => setSessionGrouping("status")}
 					>
@@ -70,7 +72,7 @@
 						size="content"
 						tone="inherit"
 						touchTarget
-						class="{CHIP_CLASSES} {filterSurfaceClass(needsAttention, active)}"
+						class="{CHIP_CLASSES} {filterSurfaceClass(needsAttention || active)}"
 						aria-pressed={active}
 						data-testid={`session-filter-chip-${chip.value}`}
 						onclick={() => setSessionStatusFilter(active ? null : chip.value)}

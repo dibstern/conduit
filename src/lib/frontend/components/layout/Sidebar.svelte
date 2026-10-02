@@ -2,7 +2,6 @@
 <!-- Desktop: collapsible via toggle. Phone: full-screen list route. -->
 
 <script lang="ts">
-	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionList from "../session/SessionList.svelte";
@@ -14,9 +13,10 @@
 		collapseSidebar,
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { navigate, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { sendNewSession, sessionCreation, switchToSession } from "../../stores/session.svelte.js";
+	import { sessionList } from "../../stores/session-list.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
@@ -41,6 +41,13 @@
 	}
 
 	const newSessionPending = $derived(sessionCreation.value.phase === "creating");
+	// Settled sessions are never counted: that set only grows.
+	const openCount = $derived(
+		sessionList.groups.reduce(
+			(total, group) => total + group.rows.filter((row) => row.settledAt == null).length,
+			0,
+		),
+	);
 
 	function handleNewSession() {
 		sendNewSession();
@@ -53,11 +60,6 @@
 		}
 	}
 
-	function handleLogoClick(e: MouseEvent) {
-		e.preventDefault();
-		navigate("/");
-	}
-
 	// Sidebar width: collapsed → 0, otherwise user-set width.
 	// Sets a CSS custom property that the stylesheet references.
 	const sidebarStyle = $derived(
@@ -66,16 +68,24 @@
 
 </script>
 
+{#snippet title(titleSize: string, countSize: string)}
+	<h1 class="m-0 flex min-w-0 items-baseline gap-[5px] {titleSize} font-semibold tracking-[-0.01em] text-text font-brand" data-testid="list-bar-title">
+		Sessions
+		<span class="{countSize} font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
+	</h1>
+{/snippet}
+
 <!-- Sidebar -->
 <div
 	id="sidebar"
-	class="bg-bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
+	class="{sessionViewState.compact ? 'bg-bg' : 'bg-bg-surface'} border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
 	style={sidebarStyle}
 >
-	<!-- Sidebar header: logo + toggle -->
+	<!-- Sidebar header: title + count, then actions. Literal px per the design:
+	     phone bar 40px under 2px, desktop 34px under 10px. -->
 	<div
 		id="sidebar-header"
-		class="relative flex items-center justify-between px-3 pt-2.5 pb-2 shrink-0"
+		class="relative box-content flex shrink-0 items-center {sessionViewState.compact ? 'h-[40px] gap-[10px] px-[12px] pt-[2px]' : 'h-[34px] gap-[2px] px-[10px] pt-[10px]'}"
 		use:dismiss={{
 			enabled: projectsOpen && !projectContextMenuOpen,
 			escape: false,
@@ -92,7 +102,7 @@
 				this menu with multi-select. Literal px keeps touch targets at 44px
 				despite the 12px root font size.
 			-->
-			<h1 class="m-0 text-[19px] font-semibold tracking-[-0.01em] text-text" data-testid="list-bar-title">Sessions</h1>
+			{@render title("text-[19px]", "text-[13px]")}
 			<span class="flex-1"></span>
 			{#if listScreen}<InstanceBadgeMenu />{/if}
 			<SessionGroupMenu compact />
@@ -162,15 +172,21 @@
 				{/if}
 			</Menu>
 		{:else}
-			<a
-				href="/"
-				class="sidebar-logo flex items-center gap-2 no-underline"
-				onclick={handleLogoClick}
-			>
-				<span class="text-sm font-medium tracking-[0.14em] text-text font-brand">conduit</span>
-				<BlockGrid cols={10} mode="static" blockSize={2} gap={1} />
-			</a>
+			{@render title("text-[15px]", "text-[12px]")}
 			<span class="flex-1"></span>
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="alt"
+				iconOnly
+				icon="circle-check"
+				iconSize={16}
+				class="p-1 rounded-md"
+				title="Select sessions"
+				ariaLabel="Select sessions"
+				onclick={() => { uiState.selectMode = true; }}
+			/>
 			<Button
 				id="new-session-btn"
 				variant="ghost"

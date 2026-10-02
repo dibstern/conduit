@@ -16,6 +16,7 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
 	let {
@@ -35,6 +36,26 @@
 
 	let input: HTMLInputElement | undefined = $state();
 	let pickerOpen = $state(false);
+	// Focusing or typing in the input raises the suggestions; they stay up while
+	// focus is anywhere in the field, and Escape hides them without leaving it.
+	let focused = $state(false);
+
+	// What the field is suggesting for: "" on an empty field, the typed part of
+	// a trailing `project:` token, or null once the text is a plain search.
+	const scopeQuery = $derived.by(() => {
+		if (value.trim() === "") return "";
+		return /(?:^|\s)project:(\S*)$/i.exec(value)?.[1]?.toLowerCase() ?? null;
+	});
+	const scopeOptions = $derived(
+		scopeQuery === null
+			? []
+			: projectState.projects.filter(
+					(project) =>
+						project.slug.toLowerCase().includes(scopeQuery) ||
+						project.title.toLowerCase().includes(scopeQuery),
+				),
+	);
+	const suggesting = $derived(focused && !pickerOpen && scopeQuery !== null);
 
 	const scope = $derived(getSessionScope());
 	const scopeLabel = $derived(
@@ -65,6 +86,23 @@
 		oninput(token.text);
 	}
 
+	// Picking a suggestion is the same as finishing the typed token: the chip
+	// takes the scope and any half-typed `project:` leaves the text.
+	function pickScope(slug: string | null) {
+		setSessionScope(slug);
+		const text = value.replace(/(^|\s)project:\S*$/i, "$1");
+		if (text === value) return;
+		if (input) input.value = text;
+		oninput(text);
+	}
+
+	function handleFocusOut(event: FocusEvent) {
+		const next = event.relatedTarget;
+		if (!(next instanceof Node && (event.currentTarget as HTMLElement).contains(next))) {
+			focused = false;
+		}
+	}
+
 	function handleKeydown(event: KeyboardEvent) {
 		const field = event.currentTarget as HTMLInputElement;
 		if (event.key === "Enter") {
@@ -72,7 +110,8 @@
 			applyText(field.value, true);
 		} else if (event.key === "Escape") {
 			event.preventDefault();
-			onescape();
+			if (suggesting) focused = false;
+			else onescape();
 		} else if (
 			event.key === "Backspace" &&
 			scope !== null &&
@@ -116,9 +155,13 @@
 <svelte:window onkeydown={handleShortcut} />
 
 <div
-	class="flex h-[38px] md:h-[32px] items-center gap-[8px] rounded-[11px] border border-border-subtle bg-bg-surface pl-[6px] md:pl-[7px] pr-[11px] text-[13.5px] md:text-[12.5px] focus-within:border-border-chip focus-within:bg-bg-alt"
+	class="relative flex h-[38px] md:h-[32px] items-center gap-[8px] rounded-[11px] border border-border-subtle bg-bg-surface pl-[6px] md:pl-[7px] pr-[11px] text-[13.5px] md:text-[12.5px] focus-within:border-border-chip focus-within:bg-bg-alt"
 	data-testid="session-search-field"
+	onfocusout={handleFocusOut}
 >
+	<!-- One pill: "All projects ▾" at rest, a removable "conduit ✕" token once
+	     scoped, the same thing `project:conduit` compiles to. -->
+	<span class="flex max-w-[60%] shrink-0 items-center rounded-full border border-border-chip bg-bg-alt">
 	<Menu bind:open={pickerOpen} ariaLabel="Project scope">
 		{#snippet trigger({ props })}
 			<Button
@@ -127,12 +170,12 @@
 				size="content"
 				tone="default"
 				touchTarget
-				class="max-w-[60%] shrink-0 gap-1 rounded-full border border-border-chip bg-bg-alt px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand"
+				class="min-w-0 gap-1 rounded-full px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand"
 				title="Project scope (⌘P)"
 				data-testid="session-scope-chip"
 			>
 				<span class="truncate">{scopeLabel}</span>
-				<Icon name="chevron-down" size={12} />
+				{#if scope === null}<Icon name="chevron-down" size={12} />{/if}
 			</Button>
 		{/snippet}
 
@@ -161,15 +204,16 @@
 			variant="toolbar"
 			size="content"
 			touchTarget
-			class="h-5 w-5 shrink-0 rounded-full"
+			class="-ml-[3px] mr-[3px] h-[16px] w-[16px] shrink-0 rounded-full"
 			iconOnly
 			icon="x"
-			iconSize={12}
+			iconSize={11}
 			title="Show all projects"
 			ariaLabel="Clear project scope"
 			onclick={() => setSessionScope(null)}
 		/>
 	{/if}
+	</span>
 	<Icon name="search" size={13} class="shrink-0 text-text-dimmer" />
 	<!-- The field paints 38px tall; the negative margin lets the transparent
 	     input overhang its border to keep a 44px tap target on phones. -->
@@ -184,7 +228,53 @@
 		autocomplete="off"
 		spellcheck={false}
 		{value}
-		oninput={(event) => applyText(event.currentTarget.value, false)}
+		onfocus={() => { focused = true; }}
+		oninput={(event) => {
+			focused = true;
+			applyText(event.currentTarget.value, false);
+		}}
 		onkeydown={handleKeydown}
 	/>
+	{#if suggesting}
+		<!-- The scope filters you can use, each with the token that types it.
+		     Press events are cancelled so a tap never blurs the input first. -->
+		<Surface
+			variant="card"
+			radius="panel"
+			elevation="dropdown"
+			class="absolute left-[-1px] right-[-1px] top-full z-[var(--z-dropdown)] mt-[6px] max-h-[60vh] overflow-y-auto py-[6px] font-brand"
+			data-testid="session-scope-suggestions"
+		>
+			<div class="px-[14px] pt-[6px] pb-[5px] font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.1em] text-text-dimmer">Scope</div>
+			{#if scopeQuery === ""}
+				{@render option(null, "All projects", null)}
+			{/if}
+			{#each scopeOptions as project (project.slug)}
+				{@render option(project.slug, project.title || project.slug, `project:${project.slug}`)}
+			{:else}
+				{#if scopeQuery !== ""}
+					<div class="px-[14px] py-[8px] text-[12.5px] text-text-dimmer">No project matches “{scopeQuery}”</div>
+				{/if}
+			{/each}
+		</Surface>
+	{/if}
 </div>
+
+{#snippet option(slug: string | null, label: string, token: string | null)}
+	<Button
+		variant="ghost"
+		size="content"
+		tone="inherit"
+		hoverFill="alt"
+		class="flex min-h-[44px] w-full items-center gap-[12px] px-[14px] text-left text-[13.5px] md:min-h-[32px] md:text-[12.5px] {scope === slug ? 'text-text' : 'text-text-secondary'}"
+		aria-pressed={scope === slug}
+		data-testid="session-scope-option"
+		onpointerdown={(event: PointerEvent) => event.preventDefault()}
+		onmousedown={(event: MouseEvent) => event.preventDefault()}
+		onclick={() => pickScope(slug)}
+	>
+		<span class="min-w-0 flex-1 truncate">{label}</span>
+		{#if token}<span class="shrink-0 font-mono text-[11px] text-text-dimmer">{token}</span>{/if}
+		{#if scope === slug}<Icon name="check" size={13} class="shrink-0 text-accent" />{/if}
+	</Button>
+{/snippet}
