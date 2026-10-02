@@ -126,6 +126,10 @@ describe("ProviderRuntimeEvent contracts", () => {
 		);
 
 		expect(missingRuntimeTypes).toEqual([]);
+		// Goal facts originate at the provider, so they must stay in the runtime union.
+		expect(ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES).toContain(
+			"session.goal_changed",
+		);
 	});
 
 	it("decodes turn.model_resolved evidence without changing its ids", () => {

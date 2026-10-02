@@ -10,6 +10,7 @@
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
+	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
 	import InstancesSettingsTab from "./InstancesSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
@@ -54,6 +55,7 @@
 	const SETTINGS_TABS = [
 		{ value: "notifications", label: "Alerts", testId: "settings-tab-notifications" },
 		{ value: "appearance", label: "Theme", testId: "settings-tab-appearance" },
+		{ value: "composer", label: "Composer", testId: "settings-tab-composer" },
 		{ value: "visibility", label: "Agents & Models", testId: "settings-tab-visibility" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
 		{ value: "instances", label: "Instances", testId: "settings-tab-instances" },
@@ -92,6 +94,15 @@
 		} else {
 			clearClaudeSettingEdits();
 		}
+	});
+
+	// Banners open settings straight onto Instances, which sits past the
+	// scrolling strip's edge on narrow panels.
+	$effect(() => {
+		if (!visible) return;
+		document
+			.querySelector(`[data-testid="settings-tab-${activeTab}"]`)
+			?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	});
 
 	$effect(() => {
@@ -136,13 +147,14 @@
 			<!-- Tabs.
 			     shrink-0 is load-bearing: the strip scrolls horizontally, which makes
 			     this flex item's automatic minimum height zero rather than content
-			     height, so without it a tall tab squeezes the bar down to a sliver. -->
+			     height, so without it a tall tab squeezes the bar down to a sliver.
+			     nowrap stops tabs shrinking into stacked words instead of scrolling. -->
 			<Tabs
 				bind:value={activeTab}
 				variant="underline"
 				label="Settings sections"
 				options={SETTINGS_TABS}
-				class="shrink-0"
+				class="shrink-0 overflow-x-auto whitespace-nowrap"
 			/>
 
 			<!-- Tab content -->
@@ -154,6 +166,8 @@
 				<!-- ═══ Appearance ═══ -->
 				{:else if activeTab === "appearance"}
 					<AppearanceSettingsTab bind:state={appearanceState} />
+				{:else if activeTab === "composer"}
+					<ComposerSettingsTab />
 				<!-- ═══ Agents & Models ═══ -->
 				{:else if activeTab === "visibility"}
 					<VisibilitySettingsTab {visible} bind:state={visibilityState} />

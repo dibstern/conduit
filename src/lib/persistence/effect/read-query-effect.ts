@@ -1,6 +1,11 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect } from "effect";
+import { Context, Data, Effect, Schema } from "effect";
+import {
+	type SessionGoalChangedPayload,
+	SessionGoalChangedPayloadSchema,
+} from "../../contracts/stored-event.js";
+import type { GoalDetails } from "../../contracts/ws-rpc.js";
 import type { SessionAttention, SessionInfo } from "../../shared-types.js";
 import type {
 	MessagePartRow,
@@ -12,6 +17,18 @@ import type {
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
 import { sessionFamilyQuery } from "../session-family-query.js";
+import { messageRowsToHistory } from "../session-history-adapter.js";
+
+const decodeGoalState = Schema.decodeUnknownSync(
+	Schema.parseJson(SessionGoalChangedPayloadSchema),
+);
+
+export const sessionGoalState = (
+	row: Pick<SessionRow, "id" | "goal_state">,
+): SessionGoalChangedPayload =>
+	row.goal_state
+		? decodeGoalState(row.goal_state)
+		: { sessionId: row.id, goal: null };
 
 /**
  * What `sessionColumns` selects: the single session type with SQLite's NULLs
@@ -137,6 +154,7 @@ export const sessionRowsToSessionInfoList = (
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 			messageCount: 0,
+			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
 			...(parentID ? { parentID } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null
@@ -192,6 +210,10 @@ export interface ReadQueryEffect {
 	readonly getSession: (
 		sessionId: string,
 	) => Effect.Effect<SessionRow | undefined, ReadQueryEffectError | SqlError>;
+
+	readonly getGoalDetails: (
+		sessionId: string,
+	) => Effect.Effect<GoalDetails, ReadQueryEffectError | SqlError>;
 
 	readonly getAllSessionStatuses: () => Effect.Effect<
 		Record<string, string>,
@@ -719,6 +741,50 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getGoalDetails = (sessionId: string) =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const row = yield* getSession(sessionId);
+					const facts = row
+						? yield* Effect.try(() => sessionGoalState(row))
+						: undefined;
+					const goal = facts?.goal ?? facts?.endedGoal;
+					if (!goal) return { checks: [], tokensSinceStart: null };
+
+					const checks = yield* sql<GoalDetails["checks"][number]>`
+					SELECT iterations AS iteration, created_at AS at, reason
+					FROM session_goal_checks
+					WHERE session_id = ${sessionId} AND set_at = ${goal.setAt}
+					ORDER BY iterations ASC`;
+					const rows = yield* getSessionMessagesWithParts(sessionId);
+					const history = yield* Effect.try(
+						() =>
+							messageRowsToHistory(rows, { pageSize: Number.MAX_SAFE_INTEGER })
+								.messages,
+					);
+					return {
+						checks,
+						tokensSinceStart:
+							history.reduce(
+								(total, message) =>
+									total +
+									(message.tokens?.input ?? 0) +
+									(message.tokens?.output ?? 0) +
+									(message.tokens?.cache?.read ?? 0) +
+									(message.tokens?.cache?.write ?? 0),
+								0,
+							) - goal.tokensAtStart,
+					};
+				}),
+			)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({ operation: "getGoalDetails", cause }),
+				),
+			);
+
 	// One query per source serves cold start, resume catch-up and every live
 	// advance. `version` is the read-model counter, read FIRST inside the
 	// transaction so the rows that follow are from the same consistent state:
@@ -1003,6 +1069,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getToolContent,
 		getSessionStatus,
 		getSession,
+		getGoalDetails,
 		getAllSessionStatuses,
 		listSessions,
 		listSessionInfos,

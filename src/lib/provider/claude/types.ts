@@ -17,6 +17,7 @@ import type { Effect } from "effect";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
+import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
 // Imported from the real Claude Agent SDK and re-exported so that internal
@@ -29,10 +30,8 @@ export type {
 	PermissionResult,
 	PermissionUpdate,
 	PermissionUpdateDestination,
-	Query,
 	SDKAPIRetryMessage,
 	SDKAssistantMessage,
-	SDKMessage,
 	SDKPartialAssistantMessage,
 	SDKResultError,
 	SDKResultMessage,
@@ -45,11 +44,24 @@ export type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type {
-	Query,
+	SDKActiveGoalMessage,
 	SDKPartialAssistantMessage,
+	Query as SDKQuery,
+	SDKMessage as SDKStreamMessage,
 	SDKUserMessage,
 	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+
+// active_goal is declared by the SDK separately from its iterator's union.
+// Accept it if a future CLI forwards this currently internal envelope.
+export type SDKMessage = SDKStreamMessage | SDKActiveGoalMessage;
+
+// Keep SDK query controls while allowing the wire vocabulary accepted above.
+export type Query = Omit<
+	SDKQuery,
+	keyof AsyncGenerator<SDKStreamMessage, void, unknown>
+> &
+	AsyncGenerator<SDKMessage, void, unknown>;
 
 // BetaRawMessageStreamEvent is not directly exported by the SDK, but we
 // can extract it from SDKPartialAssistantMessage. This is a discriminated
@@ -151,6 +163,9 @@ export interface ClaudeSubagentLivePoller {
 export interface ClaudeSessionContext {
 	readonly sessionId: string;
 	readonly workspaceRoot: string;
+	readonly configDir?: string;
+	goalTracker?: ClaudeGoalTracker;
+	cumulativeTokens?: number;
 	readonly startedAt: string;
 	readonly promptQueue: PromptQueueController;
 	readonly query: Query;

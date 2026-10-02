@@ -1,3 +1,4 @@
+import { Either, Schema } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	type CanonicalEvent,
@@ -11,6 +12,7 @@ import {
 	type PermissionDecision,
 	SESSION_PERMISSION_MODES,
 	type SessionCreatedPayload,
+	SessionGoalChangedPayloadSchema,
 	type SessionPermissionModeValue,
 	type SessionStatusValue,
 	type TurnCompletedPayload,
@@ -354,6 +356,17 @@ export function translateProviderRuntimeEventToDomain(
 				actualModel: stringField(data["actualModel"]) ?? "",
 			} satisfies TurnModelResolvedPayload;
 			return singleEvent(event, state, "turn.model_resolved", payload);
+		}
+
+		case "session.goal_changed": {
+			const decoded = Schema.decodeUnknownEither(
+				SessionGoalChangedPayloadSchema,
+			)({
+				...data,
+				sessionId: event.sessionId,
+			});
+			if (Either.isLeft(decoded)) return { events: [], state };
+			return singleEvent(event, state, "session.goal_changed", decoded.right);
 		}
 
 		case "session.permission_mode_changed": {

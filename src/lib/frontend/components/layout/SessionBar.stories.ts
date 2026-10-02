@@ -1,6 +1,20 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
+import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
+import {
+	getOrCreateSessionActivity,
+	phaseToIdle,
+} from "../../stores/chat.svelte.js";
+import {
+	discoveryState,
+	handleModelInfo,
+} from "../../stores/discovery.svelte.js";
+import {
+	goalDetails,
+	handleGoalChanged,
+	sessionGoals,
+} from "../../stores/goal.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import {
@@ -20,6 +34,10 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type {
+	GoalDetails,
+	getGoalDetailsRpc,
+} from "../../transport/ws-rpc-client.js";
 import type { OpenCodeInstance, SessionInfo } from "../../types.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
 
@@ -40,6 +58,30 @@ function seedSessions(rows: readonly Row[]): void {
 	applySessionChange({ _tag: "synchronized" });
 }
 
+const goalCheckFixtures = [
+	{ minutes: 8, reason: "29/38 pass. Three baselines are stale." },
+	{ minutes: 19, reason: "33/38. Focus ring regressed." },
+	{ minutes: 31, reason: "35/38. jump-to-live fails." },
+	{ minutes: 36, reason: "38/38 once. Needs a second run." },
+];
+
+const getGoalDetails = fn<typeof getGoalDetailsRpc>(
+	async ({ sessionId }): Promise<GoalDetails> => {
+		const facts = sessionGoals.get(sessionId);
+		const goal = facts?.goal ?? facts?.endedGoal;
+		if (!goal) return { checks: [], tokensSinceStart: null };
+		const count = facts?.ended === "met" ? 4 : Math.min(goal.iterations, 3);
+		return {
+			checks: goalCheckFixtures.slice(0, count).map((check, index) => ({
+				iteration: index + 1,
+				at: goal.setAt + check.minutes * 60_000,
+				reason: check.reason,
+			})),
+			tokensSinceStart: goal.iterations === 0 ? 0 : 1_240_000,
+		};
+	},
+);
+
 // Rendered through a phone-width frame; see the fixture for why.
 const meta = {
 	title: "Layout/SessionBar",
@@ -49,7 +91,12 @@ const meta = {
 	// chrome of a phone session, so an axe regression here has nowhere else to
 	// be caught: gate it.
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
+	args: { getGoalDetails },
 	beforeEach: () => {
+		const detailsOpen = goalDetails.open;
+		const now = sessionState.now;
+		goalDetails.open = false;
+		getGoalDetails.mockClear();
 		clearSessionState();
 		// Layout/Header seeds this same module-level store, and Storybook shares
 		// it across story files. Reset or the badge appears in every story.
@@ -73,6 +120,9 @@ const meta = {
 		destroyAll();
 		return () => {
 			attachedProjectState.slug = null;
+			goalDetails.open = detailsOpen;
+			sessionState.now = now;
+			getGoalDetails.mockClear();
 		};
 	},
 } satisfies Meta<typeof SessionBarPhoneFrame>;
@@ -103,6 +153,332 @@ export const Default: Story = {
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
 		expect(canvas.queryByTestId("instance-badge")).toBeNull();
 	},
+};
+
+// 30s of slack: each story bumps setAt by 1ms to stay unique, and under the
+// pinned visual clock that drift would otherwise floor the age to 40m.
+let goalStorySetAt = Date.now() - 41 * 60_000 - 30_000;
+
+function setupGoal(
+	state: "checking" | "not_yet" | "paused" | "met" | "cleared",
+) {
+	const previous = sessionGoals.get(mockSession.id);
+	const model = discoveryState.currentModelId;
+	const provider = discoveryState.currentProviderId;
+	handleModelInfo({ type: "model_info", model, provider: "claude" });
+	phaseToIdle(getOrCreateSessionActivity(mockSession.id));
+	goalStorySetAt = Math.max(
+		goalStorySetAt + 1,
+		Date.now() - 41 * 60_000 - 30_000,
+	);
+	const activeGoal = {
+		condition: "All 38 scenarios pass",
+		iterations: 2,
+		setAt: goalStorySetAt,
+		tokensAtStart: 0,
+	};
+	const facts: SessionGoalChangedPayload =
+		state === "met" || state === "cleared"
+			? {
+					sessionId: mockSession.id,
+					goal: null,
+					ended: state,
+					endedGoal: { ...activeGoal, iterations: 7 },
+					endedAt: activeGoal.setAt + 41 * 60_000,
+				}
+			: {
+					sessionId: mockSession.id,
+					goal: {
+						...activeGoal,
+						...(state === "not_yet"
+							? { lastReason: "35 of 38 scenarios pass" }
+							: {}),
+					},
+					...(state === "paused"
+						? { pausedReason: "Goal check interrupted" }
+						: {}),
+				};
+	seedSessions([{ ...mockSession, status: "idle" }]);
+	handleGoalChanged(facts);
+	return () => {
+		if (previous) handleGoalChanged(previous);
+		else sessionGoals.delete(mockSession.id);
+		handleModelInfo({ type: "model_info", model, provider });
+	};
+}
+
+async function assertGoalSubtitle(
+	canvasElement: HTMLElement,
+	text: string,
+	token: string,
+) {
+	const subtitle = within(canvasElement).getByTestId("session-goal-subtitle");
+	await expect(subtitle).toHaveTextContent(text);
+	await expect(subtitle.querySelector("svg")).toBeVisible();
+	const style = getComputedStyle(subtitle);
+	const expected = new Option().style;
+	// Tailwind publishes these theme tokens on the component's inherited style.
+	expected.color = style.getPropertyValue(token);
+	await expect(style.color).toBe(expected.color);
+	return subtitle;
+}
+
+export const GoalChecking: Story = {
+	beforeEach: () => setupGoal("checking"),
+	play: async ({ canvasElement }) => {
+		const subtitle = await assertGoalSubtitle(
+			canvasElement,
+			"Checking goal · check 3",
+			"--color-status-violet",
+		);
+		const spinner = subtitle.querySelector("svg");
+		if (!spinner) throw new Error("Checking spinner is missing");
+		await expect(getComputedStyle(spinner).animationName).toBe("spin");
+	},
+};
+
+export const GoalNotYet: Story = {
+	beforeEach: () => setupGoal("not_yet"),
+	play: async ({ canvasElement }) => {
+		await assertGoalSubtitle(
+			canvasElement,
+			"Not yet · 35 of 38 scenarios pass · check 2",
+			"--color-status-amber",
+		);
+	},
+};
+
+export const GoalPaused: Story = {
+	beforeEach: () => setupGoal("paused"),
+	play: async ({ canvasElement }) => {
+		const subtitle = await assertGoalSubtitle(
+			canvasElement,
+			"Goal paused · All 38 scenarios pass",
+			"--color-status-violet",
+		);
+		await expect(subtitle).toHaveAttribute(
+			"title",
+			expect.stringContaining("Goal check interrupted"),
+		);
+	},
+};
+
+export const GoalMet: Story = {
+	beforeEach: () => setupGoal("met"),
+	play: async ({ canvasElement }) => {
+		await assertGoalSubtitle(
+			canvasElement,
+			"Goal met · 7 checks · 41m",
+			"--color-status-green",
+		);
+	},
+};
+
+export const GoalCleared: Story = {
+	beforeEach: () => setupGoal("cleared"),
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).queryByTestId("session-goal-subtitle"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const GoalCheckingLight: Story = {
+	...GoalChecking,
+	globals: { theme: "light" },
+};
+export const GoalNotYetLight: Story = {
+	...GoalNotYet,
+	globals: { theme: "light" },
+};
+export const GoalPausedLight: Story = {
+	...GoalPaused,
+	globals: { theme: "light" },
+};
+export const GoalMetLight: Story = { ...GoalMet, globals: { theme: "light" } };
+export const GoalClearedLight: Story = {
+	...GoalCleared,
+	globals: { theme: "light" },
+};
+
+function setupGoalDetails(
+	state: "not_yet" | "checking" | "paused" | "met" | "starting",
+) {
+	const cleanup = setupGoal(state === "starting" ? "checking" : state);
+	const facts = sessionGoals.get(mockSession.id);
+	const currentGoal = facts?.goal ?? facts?.endedGoal;
+	if (!facts || !currentGoal) {
+		expect(currentGoal).toBeDefined();
+		return cleanup;
+	}
+	const goal = {
+		...currentGoal,
+		iterations: state === "starting" ? 0 : state === "met" ? 5 : 3,
+		...(state === "not_yet"
+			? { lastReason: "35/38. jump-to-live fails." }
+			: state === "met"
+				? { lastReason: "38/38 on two runs in a row." }
+				: {}),
+	};
+	if (state === "starting") {
+		seedSessions([{ ...mockSession, status: "busy" }]);
+	}
+	handleGoalChanged({
+		...facts,
+		...(state === "met" ? { endedGoal: goal } : { goal }),
+	});
+	sessionState.now = goal.setAt + 41 * 60_000;
+	goalDetails.open = true;
+	return cleanup;
+}
+
+async function assertGoalDetails(
+	canvasElement: HTMLElement,
+	phase: string,
+	checkCount: number,
+) {
+	const canvas = within(canvasElement);
+	const details = await canvas.findByTestId("goal-details");
+	await expect(details).toBeVisible();
+	await expect(canvas.getByTestId("session-goal-subtitle")).toHaveAttribute(
+		"aria-expanded",
+		"true",
+	);
+	await expect(getGoalDetails).toHaveBeenCalledWith({
+		projectSlug: "conduit",
+		sessionId: mockSession.id,
+	});
+	const panel = within(details);
+	await expect(panel.getByTestId("goal-details-condition")).toHaveTextContent(
+		"All 38 scenarios pass",
+	);
+	await expect(details).toHaveTextContent(phase);
+	const history = within(panel.getByTestId("goal-details-history"));
+	await waitFor(() =>
+		expect(history.queryAllByTestId("goal-details-check")).toHaveLength(
+			checkCount,
+		),
+	);
+	const checks = history.queryAllByTestId("goal-details-check");
+	for (const [index, fixture] of goalCheckFixtures
+		.slice(0, Math.min(checkCount, 3))
+		.entries()) {
+		await expect(checks[index]).toHaveTextContent(`${fixture.minutes}m`);
+		await expect(checks[index]).toHaveTextContent(fixture.reason);
+	}
+	return { panel, checks };
+}
+
+export const GoalDetailsOpen: Story = {
+	tags: ["viewport-capture"],
+	parameters: { docs: { story: { inline: false } } },
+	beforeEach: () => setupGoalDetails("not_yet"),
+	play: async ({ canvasElement }) => {
+		const { panel } = await assertGoalDetails(canvasElement, "Not yet", 3);
+		await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
+			"Set 41m ago · 3 checks · 1.24M tokens",
+		);
+		await expect(panel.getByTestId("goal-details-pause")).toBeVisible();
+		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
+		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
+	},
+};
+
+export const GoalDetailsChecking: Story = {
+	...GoalDetailsOpen,
+	tags: ["viewport-capture"],
+	beforeEach: () => setupGoalDetails("checking"),
+	play: async ({ canvasElement }) => {
+		const { checks } = await assertGoalDetails(canvasElement, "Checking", 4);
+		await expect(checks[3]).toHaveTextContent("now");
+		await expect(checks[3]).toHaveTextContent("Checking…");
+		const spinner = checks[3]?.querySelector("svg");
+		await expect(spinner).toBeVisible();
+		if (!spinner) return;
+		await expect(getComputedStyle(spinner).animationName).toBe("spin");
+	},
+};
+
+export const GoalDetailsPaused: Story = {
+	...GoalDetailsOpen,
+	tags: ["viewport-capture"],
+	beforeEach: () => setupGoalDetails("paused"),
+	play: async ({ canvasElement }) => {
+		const { panel } = await assertGoalDetails(canvasElement, "Paused", 3);
+		await expect(panel.getByTestId("goal-details-resume")).toBeVisible();
+		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
+		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
+		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
+	},
+};
+
+export const GoalDetailsMet: Story = {
+	...GoalDetailsOpen,
+	tags: ["viewport-capture"],
+	beforeEach: () => setupGoalDetails("met"),
+	play: async ({ canvasElement }) => {
+		const { panel, checks } = await assertGoalDetails(canvasElement, "Met", 5);
+		await expect(checks[3]).toHaveTextContent("36m");
+		await expect(checks[3]).toHaveTextContent(
+			"38/38 once. Needs a second run.",
+		);
+		await expect(checks[4]).toHaveTextContent("41m");
+		await expect(checks[4]).toHaveTextContent("38/38 on two runs in a row.");
+		const icon = checks[4]?.querySelector("svg");
+		await expect(icon).toBeVisible();
+		if (!icon) return;
+		const expected = new Option().style;
+		expected.color = getComputedStyle(icon).getPropertyValue(
+			"--color-status-green",
+		);
+		await expect(getComputedStyle(icon).color).toBe(expected.color);
+		await expect(panel.getByTestId("goal-details-new")).toBeVisible();
+		await expect(panel.getByTestId("goal-details-dismiss")).toBeVisible();
+		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
+		await expect(panel.queryByTestId("goal-details-edit")).toBeNull();
+		await expect(panel.queryByTestId("goal-details-clear")).toBeNull();
+	},
+};
+
+export const GoalDetailsEmpty: Story = {
+	...GoalDetailsOpen,
+	tags: ["viewport-capture"],
+	beforeEach: () => setupGoalDetails("starting"),
+	play: async ({ canvasElement }) => {
+		const { panel } = await assertGoalDetails(canvasElement, "Starting", 0);
+		await expect(panel.getByTestId("goal-details-history")).toHaveTextContent(
+			"No checks yet. The first runs when Claude finishes a turn.",
+		);
+		await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
+			"0 checks",
+		);
+	},
+};
+
+export const GoalDetailsOpenLight: Story = {
+	...GoalDetailsOpen,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const GoalDetailsCheckingLight: Story = {
+	...GoalDetailsChecking,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const GoalDetailsPausedLight: Story = {
+	...GoalDetailsPaused,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const GoalDetailsMetLight: Story = {
+	...GoalDetailsMet,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const GoalDetailsEmptyLight: Story = {
+	...GoalDetailsEmpty,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
 };
 
 export const ViewsSheetOpen: Story = {

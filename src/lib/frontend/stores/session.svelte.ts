@@ -37,6 +37,7 @@ import {
 	applyGetModelsResponse,
 	flushPendingPermissionMode,
 } from "./discovery.svelte.js";
+import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import {
 	getCurrentSessionId,
 	getCurrentSlug,
@@ -143,6 +144,15 @@ const clientSession = $state({
 	now: Date.now(),
 });
 
+$effect.root(() => {
+	let previousId: string | null | undefined;
+	$effect(() => {
+		const id = clientSession.currentId;
+		if (previousId !== undefined && id !== previousId) goalDetails.open = false;
+		previousId = id;
+	});
+});
+
 /** Read view over both halves. The server half is read-only by type; the
  *  client half is a plain setting. */
 export const sessionState = {
@@ -232,6 +242,7 @@ export function pruneSessionLists(id: string): void {
 /** Drop the state this tab keeps for a session the map no longer holds. */
 export function forgetSession(id: string): void {
 	clearSessionChatState(id);
+	sessionGoals.delete(id);
 	// A session that is gone cannot still be the one we are looking at. The
 	// selection is what makes a session routable before its row arrives, so
 	// leaving it behind lets a late event rebuild the chat state we just threw

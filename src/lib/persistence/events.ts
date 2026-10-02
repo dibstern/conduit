@@ -64,6 +64,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
 	"session.provider_cleanup_failed": ["sessionId", "provider", "reason"],
 	"session.permission_mode_changed": ["sessionId", "mode"],
+	"session.goal_changed": ["sessionId", "goal"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"message.removed": ["messageId"],
 	"message.part.removed": ["messageId", "partId"],

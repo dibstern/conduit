@@ -2,10 +2,19 @@ import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { composerHandlers } from "./steps/composer.js";
+import { composerContextWarningHandlers } from "./steps/composerContextWarning.js";
+import { composerEffortHandlers } from "./steps/composerEffort.js";
+import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
+import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
+import { composerPickerHandlers } from "./steps/composerPicker.js";
+import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
+import { composerWordsHandlers } from "./steps/composerWords.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { sessionGoalHandlers } from "./steps/sessionGoal.js";
+import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { visualHandlers } from "./steps/visual.js";
@@ -14,12 +23,21 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
+	...sessionGoalDetailsHandlers,
+	...sessionGoalHandlers,
 	...mockAppHandlers,
 	...modelDriftHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".
 	...transcriptFeedHandlers,
+	...composerFieldWidthHandlers,
+	...composerLiveStatusHandlers,
+	...composerPickerHandlers,
+	...composerWordsHandlers,
+	...composerContextWarningHandlers,
 	...composerHandlers,
+	...composerEffortHandlers,
+	...composerSetGoalHandlers,
 	...harnessHandlers,
 	...visualHandlers,
 	...claudeSettingsHandlers,

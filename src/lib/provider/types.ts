@@ -5,6 +5,7 @@
 
 import type { Effect, Scope } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
+import type { SessionGoalChangedPayload } from "../contracts/stored-event.js";
 import type {
 	ProviderPermissionUpdate,
 	SessionPermissionMode,
@@ -180,6 +181,9 @@ export interface SendTurnInput {
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;
 	readonly configDir?: string;
+	/** Projected Claude goal facts and cumulative usage seed a reopened SDK query. */
+	readonly goalState?: SessionGoalChangedPayload;
+	readonly cumulativeTokens?: number;
 	readonly eventSink: EventSink;
 	readonly abortSignal: AbortSignal;
 	readonly permissionMode?: SessionPermissionMode;

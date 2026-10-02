@@ -22,6 +22,7 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_GOALS_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
@@ -358,6 +359,7 @@ const postBaselineTableNames = new Set<string>([
 	"read_model_counter", // 0013
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
+	"session_goal_checks", // 0030
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -442,6 +444,7 @@ const appendedSessionColumns = [
 	"marked_unread_at",
 	"last_turn_end_version",
 	"seen_version",
+	"goal_state",
 ] as const;
 
 function sameStrings(
@@ -986,6 +989,12 @@ export const effectMigrationEntries = {
 	"0029_message_tombstones": executeSqlStatements(
 		readMigrationSql(MESSAGE_TOMBSTONES_MIGRATION),
 	),
+	"0030_session_goals": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "goal_state")) return;
+		yield* executeSqlStatements(readMigrationSql(SESSION_GOALS_MIGRATION));
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

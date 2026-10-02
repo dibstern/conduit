@@ -3,6 +3,7 @@
 
 import { ClaudeSettingsOverridesSchema } from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
+import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -256,6 +257,7 @@ export const SessionInfoSchema = Schema.Struct({
 	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
+	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
 	/** Parent session ID — set when this session was forked from another. */
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
@@ -1059,6 +1061,11 @@ const PermissionModeInfoSchema = Schema.Struct({
 	mode: SessionPermissionModeSchema,
 });
 
+const SessionGoalChangedSchema = Schema.Struct({
+	type: Schema.Literal("session.goal_changed"),
+	...SessionGoalChangedPayloadSchema.fields,
+});
+
 const ProxyDetectedSchema = Schema.Struct({
 	type: Schema.Literal("proxy_detected"),
 	found: Schema.Boolean,
@@ -1169,6 +1176,7 @@ export const RelayMessageSchema = Schema.Union(
 	VariantInfoSchema,
 	ContextWindowInfoSchema,
 	PermissionModeInfoSchema,
+	SessionGoalChangedSchema,
 	ProxyDetectedSchema,
 	ScanResultSchema,
 	// Cross-session notifications
@@ -1188,6 +1196,7 @@ export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 // sessionId) from global events (which never do).
 
 export type PerSessionEventType =
+	| "session.goal_changed"
 	| "delta"
 	| "thinking_start"
 	| "thinking_delta"

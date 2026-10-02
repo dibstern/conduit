@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
 import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
@@ -7,14 +8,23 @@ import {
 	phaseToProcessing,
 } from "../../stores/chat.svelte.js";
 import {
+	composerPreferences,
+	setComposerPreferences,
+} from "../../stores/composer-preferences.svelte.js";
+import {
+	clearDiscoveryState,
 	discoveryState,
 	handleAgentList,
 	handleCommandList,
+	handleContextWindowInfo,
+	handleDefaultModelInfo,
 	handleModelInfo,
 	handleModelList,
 	handleVariantInfo,
 } from "../../stores/discovery.svelte.js";
 import { fileTreeState } from "../../stores/file-tree.svelte.js";
+import { handleGoalChanged, sessionGoals } from "../../stores/goal.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import InputArea from "./InputArea.svelte";
 
@@ -129,6 +139,7 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
+		setComposerPreferences({ controls: "icons", contextWarning: 80 });
 		sessionState.currentId = testId;
 		phaseToIdle(getOrCreateSessionActivity(testId));
 		getOrCreateSessionMessages(testId).contextPercent = 0;
@@ -181,6 +192,151 @@ const STRICT_ARIA = {
 
 export const Empty: Story = {};
 
+function setupWords(phone: boolean) {
+	const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
+	const path = routerState.path;
+	const root = document.getElementById("storybook-root");
+	const style = root?.getAttribute("style");
+	Object.defineProperty(window, "innerWidth", {
+		configurable: true,
+		value: phone ? 393 : 1440,
+	});
+	window.dispatchEvent(new Event("resize"));
+	root?.setAttribute(
+		"style",
+		`display:flex;flex-direction:column;justify-content:flex-end;min-height:100vh;max-width:${phone ? "393px" : "none"}`,
+	);
+	routerState.path = "/";
+	clearDiscoveryState();
+	const contextWindowOptions = [
+		{ value: "200k", label: "200K", isDefault: true },
+		{ value: "1m", label: "1M" },
+	];
+	handleModelList({
+		type: "model_list",
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{
+						id: "claude-sonnet-5",
+						name: "Sonnet 5",
+						provider: "claude",
+						contextWindowOptions,
+					},
+				],
+			},
+		],
+	});
+	handleModelInfo({
+		type: "model_info",
+		model: "claude-sonnet-5",
+		provider: "claude",
+	});
+	handleDefaultModelInfo({
+		type: "default_model_info",
+		model: "claude-sonnet-5",
+		provider: "claude",
+		variant: "",
+	});
+	handleContextWindowInfo({
+		type: "context_window_info",
+		contextWindow: "200k",
+		options: contextWindowOptions,
+	});
+	handleVariantInfo({
+		type: "variant_info",
+		variant: "high",
+		variants: ["low", "medium", "high", "xhigh", "max"],
+	});
+	getOrCreateSessionMessages(testId).contextPercent = 42;
+	setComposerPreferences({ controls: "words" });
+	return () => {
+		setComposerPreferences({ controls: "icons" });
+		clearDiscoveryState();
+		routerState.path = path;
+		if (width) Object.defineProperty(window, "innerWidth", width);
+		else Reflect.deleteProperty(window, "innerWidth");
+		window.dispatchEvent(new Event("resize"));
+		if (style != null) root?.setAttribute("style", style);
+		else root?.removeAttribute("style");
+	};
+}
+
+export const WordsDesktop: Story = {
+	tags: ["autodocs"],
+	globals: { theme: "dark" },
+	beforeEach: () => setupWords(false),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const row = canvas.getByTestId("composer-words-row");
+		await expect(row).toBeVisible();
+		await expect(row.querySelector(".glyph")).toBeNull();
+		await expect(canvas.getByTestId("composer-word-model")).toHaveTextContent(
+			"Sonnet 5",
+		);
+		await expect(canvas.getByTestId("composer-word-context")).toHaveTextContent(
+			"200K",
+		);
+		await expect(canvas.getByTestId("composer-word-effort")).toHaveTextContent(
+			"high",
+		);
+		await expect(
+			canvas.getByTestId("composer-word-approvals"),
+		).toHaveTextContent("ask");
+		await expect(
+			canvas.getByTestId("composer-word-context-usage"),
+		).toHaveTextContent("42%");
+		await expect(canvas.queryByTestId("model-picker-trigger")).toBeNull();
+		await expect(canvas.queryByTestId("variant-badge")).toBeNull();
+		await expect(canvas.queryByTestId("permission-mode-badge")).toBeNull();
+		const composer = canvasElement.querySelector("#input-row");
+		if (!composer) throw new Error("Composer is missing");
+		await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			composer.getBoundingClientRect().bottom,
+		);
+		await userEvent.click(canvas.getByTestId("composer-word-effort"));
+		await expect(canvas.getByTestId("composer-word-effort")).toHaveTextContent(
+			"xhigh",
+		);
+		await expect(body.queryByTestId("variant-dropdown")).toBeNull();
+		await userEvent.click(canvas.getByTestId("composer-word-model"));
+		await expect(await body.findByTestId("model-picker")).toBeVisible();
+		await expect(body.getByTestId("picker-row-model")).toHaveTextContent(
+			"Sonnet 5",
+		);
+		// The phone sheet is a native <dialog>: a real Escape fires its cancel
+		// event, but a synthetic keypress never reaches the browser's handler.
+		const sheet = canvasElement.ownerDocument.querySelector("dialog[open]");
+		if (sheet) sheet.dispatchEvent(new Event("cancel", { cancelable: true }));
+		else await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(body.queryByTestId("model-picker")).toBeNull());
+		await expect(composerPreferences.controls).toBe("words");
+	},
+};
+
+export const WordsDesktopLight: Story = {
+	...WordsDesktop,
+	tags: ["autodocs"],
+	globals: { theme: "light" },
+};
+
+export const WordsPhone: Story = {
+	...WordsDesktop,
+	tags: ["autodocs"],
+	parameters: { phone: true },
+	beforeEach: () => setupWords(true),
+};
+
+export const WordsPhoneLight: Story = {
+	...WordsPhone,
+	tags: ["autodocs"],
+	globals: { theme: "light" },
+};
+
 export const Processing: Story = {
 	beforeEach: () => {
 		phaseToProcessing(getOrCreateSessionActivity(testId));
@@ -189,20 +345,203 @@ export const Processing: Story = {
 	},
 };
 
+let goalStorySetAt = Date.now() - 41 * 60_000;
+
+function setupGoal(
+	state: "checking" | "not_yet" | "not_yet_idle" | "paused" | "met" | "cleared",
+) {
+	const previous = sessionGoals.get(testId);
+	const model = discoveryState.currentModelId;
+	const provider = discoveryState.currentProviderId;
+	handleModelInfo({ type: "model_info", model, provider: "claude" });
+	goalStorySetAt = Math.max(goalStorySetAt + 1, Date.now() - 41 * 60_000);
+	const activeGoal = {
+		condition: "All 38 scenarios pass",
+		iterations: 2,
+		setAt: goalStorySetAt,
+		tokensAtStart: 0,
+	};
+	const facts: SessionGoalChangedPayload =
+		state === "met" || state === "cleared"
+			? {
+					sessionId: testId,
+					goal: null,
+					ended: state,
+					endedAt:
+						state === "met" ? activeGoal.setAt + 41 * 60_000 : Date.now(),
+					endedGoal: {
+						...activeGoal,
+						iterations: 7,
+						lastReason: "38 of 38 scenarios pass",
+					},
+				}
+			: {
+					sessionId: testId,
+					goal: {
+						...activeGoal,
+						...(state === "not_yet" || state === "not_yet_idle"
+							? { lastReason: "35 of 38 scenarios pass" }
+							: {}),
+					},
+					...(state === "paused"
+						? { pausedReason: "Goal check interrupted" }
+						: {}),
+				};
+	handleGoalChanged(facts);
+	if (state === "not_yet")
+		phaseToProcessing(getOrCreateSessionActivity(testId));
+	else phaseToIdle(getOrCreateSessionActivity(testId));
+	return () => {
+		if (previous) handleGoalChanged(previous);
+		else sessionGoals.delete(testId);
+		handleModelInfo({ type: "model_info", model, provider });
+		localStorage.removeItem(
+			`conduit:goal-met-dismissed:${testId}:${activeGoal.setAt}`,
+		);
+	};
+}
+
+export const GoalChecking: Story = {
+	beforeEach: () => setupGoal("checking"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("composer-status-header"),
+		).toHaveTextContent("Checking goal · check 3");
+		await expect(
+			canvas.queryByTestId("composer-status-elapsed"),
+		).not.toBeInTheDocument();
+		const row = canvasElement.querySelector("#input-row");
+		if (!row) throw new Error("Composer is missing");
+		const style = getComputedStyle(row);
+		const expected = new Option().style;
+		expected.color = style.getPropertyValue("--color-status-violet");
+		await expect(style.borderColor).toBe(expected.color);
+		await expect(style.borderStyle).toBe("solid");
+	},
+};
+
+export const GoalNotYetWorking: Story = {
+	beforeEach: () => setupGoal("not_yet"),
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("composer-status-goal-reason"),
+		).toHaveTextContent("Not yet: 35 of 38 scenarios pass. Continuing.");
+	},
+};
+
+export const GoalNotYetIdle: Story = {
+	beforeEach: () => setupGoal("not_yet_idle"),
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).queryByTestId("composer-status-header"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const GoalPaused: Story = {
+	beforeEach: () => setupGoal("paused"),
+	play: async ({ canvasElement }) => {
+		const row = canvasElement.querySelector("#input-row");
+		if (!row) throw new Error("Composer is missing");
+		await expect(getComputedStyle(row).borderStyle).toBe("dashed");
+		await expect(getComputedStyle(row).boxShadow).toBe("none");
+		await expect(
+			within(canvasElement).queryByTestId("composer-status-header"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const GoalMet: Story = {
+	beforeEach: () => setupGoal("met"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("composer-goal-met");
+		await expect(bar).toHaveTextContent(
+			"Goal met · 38 of 38 scenarios pass · 7 checks · 41m",
+		);
+		await expect(
+			within(bar).getByTestId("composer-goal-met-details"),
+		).toBeEnabled();
+		await expect(
+			within(bar).getByRole("button", { name: "Dismiss" }),
+		).toBeEnabled();
+	},
+};
+
+export const GoalMetDismissed: Story = {
+	beforeEach: () => setupGoal("met"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("composer-goal-met");
+		await userEvent.click(within(bar).getByRole("button", { name: "Dismiss" }));
+		await expect(
+			canvas.queryByTestId("composer-goal-met"),
+		).not.toBeInTheDocument();
+		const facts = sessionGoals.get(testId);
+		if (!facts?.endedGoal) throw new Error("Ended goal is missing");
+		await expect(
+			localStorage.getItem(
+				`conduit:goal-met-dismissed:${testId}:${facts.endedGoal.setAt}`,
+			),
+		).toBe("true");
+	},
+};
+
+export const GoalCleared: Story = {
+	beforeEach: () => setupGoal("cleared"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("composer-goal-cleared")).toHaveTextContent(
+			"Goal cleared",
+		);
+		await expect(canvas.getByRole("button", { name: "Undo" })).toBeEnabled();
+	},
+};
+
+export const GoalCheckingLight: Story = {
+	...GoalChecking,
+	globals: { theme: "light" },
+};
+export const GoalNotYetWorkingLight: Story = {
+	...GoalNotYetWorking,
+	globals: { theme: "light" },
+};
+export const GoalNotYetIdleLight: Story = {
+	...GoalNotYetIdle,
+	globals: { theme: "light" },
+};
+export const GoalPausedLight: Story = {
+	...GoalPaused,
+	globals: { theme: "light" },
+};
+export const GoalMetLight: Story = { ...GoalMet, globals: { theme: "light" } };
+export const GoalMetDismissedLight: Story = {
+	...GoalMetDismissed,
+	globals: { theme: "light" },
+};
+export const GoalClearedLight: Story = {
+	...GoalCleared,
+	globals: { theme: "light" },
+};
+
 export const WithContextBar: Story = {
 	beforeEach: () => {
+		setComposerPreferences({ controls: "words" });
 		getOrCreateSessionMessages(testId).contextPercent = 42;
 	},
 };
 
 export const HighContext: Story = {
 	beforeEach: () => {
+		setComposerPreferences({ controls: "words" });
 		getOrCreateSessionMessages(testId).contextPercent = 85;
 	},
 };
 
 export const CriticalContext: Story = {
 	beforeEach: () => {
+		setComposerPreferences({ controls: "words" });
 		getOrCreateSessionMessages(testId).contextPercent = 97;
 	},
 };

@@ -219,6 +219,8 @@ describe("session handlers with Effect-native model service", () => {
 					updated_at: 11,
 				}),
 			),
+			getGoalDetails: () =>
+				Effect.succeed({ checks: [], tokensSinceStart: null }),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),

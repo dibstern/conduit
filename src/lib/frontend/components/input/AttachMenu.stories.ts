@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { fn } from "storybook/test";
+import { expect, fn, within } from "storybook/test";
+import { handleModelInfo } from "../../stores/discovery.svelte.js";
 import AttachMenu from "./AttachMenu.svelte";
 
 const meta = {
@@ -7,10 +8,14 @@ const meta = {
 	component: AttachMenu,
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
+	beforeEach: () => {
+		handleModelInfo({ type: "model_info", model: "", provider: "opencode" });
+	},
 	args: {
 		open: false,
 		onCamera: fn(),
 		onPhotos: fn(),
+		onSetGoal: fn(),
 	},
 } satisfies Meta<typeof AttachMenu>;
 
@@ -22,6 +27,32 @@ export const Default: Story = {};
 export const Open: Story = {
 	tags: ["viewport-capture"],
 	args: { open: true },
+};
+
+export const Claude: Story = {
+	tags: ["viewport-capture"],
+	args: { open: true },
+	beforeEach: () => {
+		handleModelInfo({ type: "model_info", model: "", provider: "claude" });
+	},
+	play: async () => {
+		const entry = within(document.body).getByTestId("attach-set-goal");
+		await expect(entry).not.toHaveAttribute("aria-disabled", "true");
+		await expect(entry).not.toHaveAttribute("data-disabled");
+		await expect(entry).toHaveTextContent("Set goal");
+	},
+};
+
+export const OpenCode: Story = {
+	tags: ["viewport-capture"],
+	args: { open: true },
+	play: async () => {
+		const entry = within(document.body).getByTestId("attach-set-goal");
+		await expect(entry).toHaveAttribute("aria-disabled", "true");
+		await expect(entry).toHaveAttribute("data-disabled");
+		await expect(within(entry).getByText("Goal")).toBeVisible();
+		await expect(within(entry).getByText("Claude only")).toBeVisible();
+	},
 };
 
 export const Hover: Story = {

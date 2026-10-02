@@ -85,6 +85,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeSessionDetail: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ ok: true as const }),
 				ResolveSession: () => Effect.succeed({ projectSlug: null }),
+				GetGoalDetails: () =>
+					Effect.succeed({ checks: [], tokensSinceStart: null }),
 				GetModels: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

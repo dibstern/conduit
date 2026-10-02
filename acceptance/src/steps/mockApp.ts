@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	claudeInstanceAgents,
 	dualDriverProviders,
@@ -12,9 +13,11 @@ import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	detailFeeds,
+	effortOptions,
 	inheritedClaudeCommitAttribution,
 	instanceSlug,
 	mockInstances,
+	rejectedEffortSwitches,
 	relayControls,
 	rpcControls,
 } from "./shared.js";
@@ -169,6 +172,18 @@ export const mockAppHandlers: StepHandler[] = [
 						projectSlug: "myapp",
 						mode: payload["mode"],
 					}),
+					SwitchVariant: async (payload) => {
+						if (rejectedEffortSwitches.delete(page)) {
+							throw new WsRpcError({
+								message: "Effort switch rejected by the provider",
+							});
+						}
+						return {
+							projectSlug: "myapp",
+							variant: payload["variant"],
+							variants: effortOptions.get(page) ?? [],
+						};
+					},
 					CreateSession: async (payload) => {
 						createdSessionInstance =
 							typeof payload["instanceId"] === "string"

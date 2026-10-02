@@ -171,6 +171,19 @@ export class PlaywrightDriver {
 		await waitForFonts(page);
 		await waitForIcons(page);
 		await freezeAnimations(page);
+		// The CSS freeze only affects transitions that start after it, and never
+		// Svelte's Web Animations: finish whatever finite animation is already in
+		// flight, so a colour fade cannot land half-way in a baseline.
+		await page.evaluate(() => {
+			for (const animation of document.getAnimations()) {
+				if (animation.effect?.getTiming().iterations !== Infinity) {
+					animation.finish();
+				}
+			}
+			return new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+		});
 
 		const locator = page.locator(selector);
 		await locator.waitFor({ state: "visible", timeout: 10_000 });

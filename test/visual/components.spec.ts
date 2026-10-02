@@ -28,6 +28,8 @@ const VIEWPORT_CAPTURE_TAG = "viewport-capture";
 const POINTER_HOVER_TAG = "visual-pointer-hover";
 
 const LIGHT_STORY_IDS = new Set([
+	// The OpenCode mark is drawn from the text colour and must stay legible.
+	"ui-icon--open-code-mark",
 	// The sidebar and the file browser expose the main navigation palette.
 	"layout-sidebar--default",
 	"file-sidebarfilepanel--expanded-directory",

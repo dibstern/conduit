@@ -17,7 +17,10 @@ import {
 	clearSession as clearEffectOverrideSession,
 	hasActiveProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import {
+	ReadQueryEffectTag,
+	sessionGoalState,
+} from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import type { PermissionId } from "../shared-types.js";
 import { getSessionInputDraft } from "./prompt.js";
@@ -60,6 +63,12 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 			id,
 			...family.sessions.map((session) => session.id),
 		]);
+		const readQuery = yield* ReadQueryEffectTag;
+		const row = yield* readQuery.getSession(id);
+		wsHandler.sendTo(clientId, {
+			type: "session.goal_changed",
+			...(row ? sessionGoalState(row) : { sessionId: id, goal: null }),
+		});
 
 		// Run all metadata sends concurrently, catching errors individually
 		yield* Effect.all(

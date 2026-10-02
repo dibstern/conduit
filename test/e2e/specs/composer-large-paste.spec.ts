@@ -36,7 +36,7 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 
 	// A small draft is mirrored: the textarea's own text stays transparent.
 	await textarea.fill("/commit the fix");
-	const mirror = page.locator("#input-row div[aria-hidden='true']");
+	const mirror = page.locator("#input-row div.mirror");
 	await expect(mirror).toHaveText("/commit the fix");
 	await expect(textarea).toHaveClass(/text-transparent/);
 

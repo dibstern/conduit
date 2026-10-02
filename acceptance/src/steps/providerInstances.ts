@@ -158,7 +158,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const name = (match[1] ?? "").trim();
 			await openModelPicker(world.page);
-			// Rail buttons are icon-only and keyed by the instance's slug id.
+			await world.page.getByTestId("picker-row-harness").click();
+			// Harness buttons keep the instance's slug id across picker views.
 			const railButton = world.page.getByTestId(
 				`picker-instance-${instanceSlug(name)}`,
 			);

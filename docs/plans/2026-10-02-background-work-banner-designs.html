@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Composer · background work designs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Same tokens and primitives as 2026-10-02-composer-final-designs.html. */
+[data-theme=dark] {
+	--bg:#0d0e11; --bg-alt:#1b1e24; --surface:#141619; --text:#eceef2; --text2:#a8afbb; --muted:#838b98; --dim:#676e79;
+	--accent:#fe3781; --border:#2d323b; --bsub:#20242b; --chip:#3a414c; --input:#1b1e24; --user:#262a32;
+	--err:#f4607a; --ok:#3fd69a; --warn:#f4b740; --tool:#5aa9f5; --violet:#c0a8ff; --p-ask:#a8afbb;
+	--home:#4a4f58; --send-off-bg:#4a2233; --send-off:#b98a9c; --scrim:rgba(0,0,0,.5); --shadow:0 12px 32px rgba(0,0,0,.55); color-scheme: dark;
+}
+[data-theme=light] {
+	--bg:#f5f6f9; --bg-alt:#eef0f5; --surface:#ffffff; --text:#14171c; --text2:#4b525e; --muted:#626975; --dim:#7e8591;
+	--accent:#c9004f; --border:#ccd2dc; --bsub:#e2e6ec; --chip:#b7c0cc; --input:#eef0f5; --user:#e4e8ef;
+	--err:#c11d40; --ok:#0c7750; --warn:#8a5500; --tool:#0f62c0; --violet:#6a3ed4; --p-ask:#4b525e;
+	--home:#14171c; --send-off-bg:#f0cddb; --send-off:#a0607a; --scrim:rgba(20,23,28,.28); --shadow:0 12px 28px rgba(20,23,28,.16); color-scheme: light;
+}
+:root { --brand:'Chakra Petch', sans-serif; --mono:'JetBrains Mono', ui-monospace, monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 var(--mono); -webkit-text-size-adjust: 100%; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+svg { width: 16px; height: 16px; flex: none; }
+code { font-family: var(--mono); font-size: .92em; background: var(--bg-alt); border: 1px solid var(--bsub); border-radius: 5px; padding: 0 5px; }
+a { color: var(--accent); }
+
+/* page chrome */
+header.pg { padding: 26px 24px 8px; max-width: 1900px; margin: 0 auto; }
+header.pg h1 { font: 700 26px/1.2 var(--brand); margin: 0 0 6px; }
+header.pg p { color: var(--text2); max-width: 900px; margin: 4px 0; }
+nav.jump { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; }
+.opts { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 8px 24px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.og { display: flex; align-items: center; gap: 6px; }
+.og > span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { font: 600 11.5px var(--brand); padding: 3px 9px; border-radius: 7px; color: var(--text2); }
+.seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+.copy { margin-left: auto; font: 600 12px var(--brand); padding: 6px 12px; border-radius: 9px; background: var(--text); color: var(--bg); }
+.sec { padding: 28px 24px 30px; border-bottom: 1px solid var(--bsub); max-width: 1900px; margin: 0 auto; }
+.sec h2 { font: 700 20px/1.25 var(--brand); margin: 0 0 6px; }
+.lede { color: var(--text2); max-width: 900px; margin: 4px 0; }
+.stage { display: flex; flex-wrap: wrap; gap: 30px 26px; align-items: flex-start; margin: 20px 0; }
+.tw { color: var(--text); }
+.both .tw { background: var(--bg); border: 1px solid var(--bsub); border-radius: 18px; padding: 10px 14px 16px; }
+.pair { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.opt { display: flex; flex-direction: column; gap: 4px; }
+.opt-h { display: flex; align-items: baseline; gap: 8px; min-height: 26px; }
+.opt-h b { font: 700 15px var(--brand); }
+.rec { color: var(--ok); font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.pros { font-size: 11.5px; color: var(--text2); margin: 8px 2px 0; max-width: 700px; }
+.pros.con { color: var(--muted); margin-top: 2px; }
+dl.spec { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; max-width: 980px; margin: 4px 0 16px; font-size: 12px; }
+dl.spec dt { color: var(--muted); } dl.spec dd { margin: 0; color: var(--text2); } dl.spec dd b { color: var(--text); }
+.flag { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 12px; padding: 10px 14px; max-width: 900px; font-size: 12px; color: var(--text2); margin: 12px 0; }
+.flag b { color: var(--warn); }
+.note { display: block; width: 100%; max-width: 900px; min-height: 64px; background: var(--input); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font: 12.5px/1.5 var(--mono); resize: vertical; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; width: min(720px, 92vw); }
+dialog textarea { width: 100%; height: 50vh; background: var(--input); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: 12px var(--mono); padding: 10px; }
+
+/* phone */
+.ph { margin: 0; width: 340px; flex: none; }
+.ph > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 0 6px 7px; display: flex; justify-content: space-between; gap: 8px; }
+.ph > figcaption small { font-size: 10px; text-transform: none; letter-spacing: 0; color: var(--dim); text-align: right; }
+.scr { height: var(--h, 620px); border: 1px solid var(--border); border-radius: 40px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 0 0 6px #07080a, 0 0 0 7px var(--bsub); }
+.crop .scr { border-radius: 0 0 40px 40px; border-top: 1px dashed var(--border); box-shadow: 6px 0 0 #07080a, -6px 0 0 #07080a, 0 6px 0 #07080a, 0 7px 0 var(--bsub); }
+.crop .tx { mask-image: linear-gradient(transparent, #000 70px); -webkit-mask-image: linear-gradient(transparent, #000 70px); }
+.sbar { height: 30px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 4px 28px 0; font: 600 12px var(--brand); background: var(--surface); }
+.sbar span { letter-spacing: 1px; font-size: 9px; }
+.topw { position: relative; z-index: 11; flex: none; }
+.top { display: flex; align-items: center; gap: 6px; padding: 3px 8px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.tb { width: 30px; height: 30px; display: grid; place-items: center; color: var(--text2); border-radius: 8px; flex: none; }
+.tt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ttl { font: 600 14px/1.35 var(--brand); display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.cv { width: 11px; height: 11px; color: var(--dim); }
+.gs { display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 1.5; min-width: 0; color: var(--bc); padding: 1px 0 2px; }
+.gs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs svg { width: 12px; height: 12px; }
+.sstate { width: 30px; height: 30px; display: grid; place-items: center; flex: none; border-radius: 8px; color: var(--bc); }
+.sstate svg { width: 17px; height: 17px; }
+.sstate.on { background: color-mix(in srgb, var(--bc) 14%, transparent); }
+.t-v { --bc: var(--violet); } .t-w { --bc: var(--warn); } .t-m { --bc: var(--muted); } .t-b { --bc: var(--tool); }
+.tx { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; padding: 12px 14px 8px; font-size: 12px; }
+.msg.u { align-self: flex-end; background: var(--user); padding: 7px 11px; border-radius: 14px 14px 4px 14px; max-width: 82%; }
+.sys { font-size: 11px; color: var(--violet); display: flex; gap: 6px; align-items: center; }
+.sys.m { color: var(--muted); }
+.sys svg { width: 12px; height: 12px; }
+.tool { font-size: 11px; color: var(--muted); border: 1px solid var(--bsub); border-radius: 8px; padding: 5px 8px; display: flex; gap: 6px; }
+.tool span { color: var(--tool); } .tool em { margin-left: auto; font-style: normal; color: var(--text2); }
+.dock { flex: none; position: relative; z-index: 3; padding: 6px 10px 30px; background: var(--bg); }
+.dock.hasw { padding-bottom: 16px; }
+.home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 118px; height: 5px; border-radius: 3px; background: var(--home); z-index: 4; pointer-events: none; }
+.scrim { position: absolute; inset: 0; z-index: 9; background: var(--scrim); animation: fade .2s; }
+
+/* composer */
+.cmp { border: 1px solid var(--border); background: var(--input); border-radius: 20px; }
+.cmp.goal { border-color: var(--violet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 16%, transparent); }
+.row { display: flex; align-items: flex-end; gap: 1px; padding: 5px; }
+.fld { flex: 1; min-width: 0; padding: 6px 6px; min-height: 32px; font-size: 13px; line-height: 1.45; }
+.phd { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib { width: 32px; height: 32px; border-radius: 10px; display: inline-grid; place-items: center; color: var(--text2); flex: none; }
+.ib svg { width: 18px; height: 18px; }
+.hm { width: auto; padding: 0 5px; display: inline-flex; align-items: center; gap: 3px; }
+.hm svg { width: 17px; height: 17px; }
+.hm i { font: 700 10px var(--brand); font-style: normal; color: var(--text2); }
+.send, .stop { width: 32px; height: 32px; border-radius: 10px; display: inline-grid; place-items: center; flex: none; }
+.send { background: var(--accent); color: #fff; }
+.send svg { width: 17px; height: 17px; }
+.send.off { background: var(--send-off-bg); color: var(--send-off); }
+.stop { background: var(--text); color: var(--bg); margin-left: 3px; }
+.stop.soft { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.stop i { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.meter { display: inline-flex; gap: 2px; align-items: flex-end; height: 13px; }
+.meter i { width: 2.5px; border-radius: 1px; background: var(--chip); }
+.meter i:nth-child(1) { height: 4px; } .meter i:nth-child(2) { height: 6.25px; } .meter i:nth-child(3) { height: 8.5px; } .meter i:nth-child(4) { height: 10.75px; } .meter i:nth-child(5) { height: 13px; }
+.meter[data-l="4"] i:nth-child(-n+4) { background: currentColor; }
+.sh { display: inline-grid; place-items: center; color: var(--pc); grid-template-rows: 15px auto; }
+.sh svg { width: 15px; height: 15px; }
+.sh .meter { height: 13px; margin-bottom: 1px; }
+.sh b { font: 700 7.5px/1 var(--brand); letter-spacing: .03em; text-transform: uppercase; margin-top: 1px; }
+.cyc { width: auto; min-width: 32px; padding: 0 2px; }
+.hd { padding: 7px 12px 6px; border-bottom: 1px solid var(--bsub); font-size: 11.5px; color: var(--muted); }
+.hd .l1 { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.hd b { color: var(--text2); font-weight: 600; }
+.hd .x { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hd .r { margin-left: auto; color: var(--text2); flex: none; }
+.hd.bgw b, .hd.bgw .gl { color: var(--bc); }
+.hd.bgw.t-m b { color: var(--text2); }
+.hd .gl svg { width: 13px; height: 13px; display: block; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; animation: pu 1.4s ease-in-out infinite; }
+.bar { display: flex; align-items: center; gap: 7px; font-size: 11.5px; line-height: 1.35; padding: 7px 10px; border-radius: 12px; margin-bottom: 6px; color: var(--text2); border: 1px solid color-mix(in srgb, var(--bc) 38%, transparent); background: color-mix(in srgb, var(--bc) 10%, transparent); }
+.bar > svg, .bar > .bgd { color: var(--bc); }
+.bar > svg { width: 14px; height: 14px; }
+.bar b { color: var(--bc); font-weight: 600; } .bar.t-m b { color: var(--text); }
+.bar > span:not(.bgd) { flex: 1; min-width: 0; }
+.bar em { font-style: normal; color: var(--bc); font-weight: 600; flex: none; cursor: pointer; }
+.bar.t-m em { color: var(--text); }
+.words { display: flex; align-items: center; gap: 1px; padding: 3px 6px 0; height: 24px; font-size: 11.5px; color: var(--muted); white-space: nowrap; position: relative; }
+.w { display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px; border-radius: 6px; }
+.w u { text-decoration: none; border-bottom: 1px dotted var(--chip); }
+.w .lg { width: 13px; height: 13px; }
+.words s { text-decoration: none; color: var(--chip); }
+.words .sp { flex: 1; }
+.w.bgc { color: var(--bc); background: color-mix(in srgb, var(--bc) 12%, transparent); }
+.w.bgc.t-m { color: var(--text2); }
+.w.bgc svg { width: 13px; height: 13px; }
+
+/* main's current card (before) */
+.card0 { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding: 4px 12px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; color: var(--text2); }
+.card0 > span:not(.gl) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card0 svg { width: 14px; height: 14px; }
+.card0 button { display: inline-flex; align-items: center; gap: 5px; font: 600 11.5px var(--brand); padding: 4px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-alt); color: var(--text); }
+.card0 button i { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+
+/* background-work glyphs: eye for watchers, BlockGrid for tasks */
+.bgd { display: inline-grid; grid-template-columns: repeat(5, 2px); grid-auto-rows: 2px; gap: 1px; flex: none; color: inherit; }
+.bgd i { background: currentColor; border-radius: .5px; animation: bk 1.1s steps(2) infinite; }
+.bgd i:nth-child(3n) { animation-delay: -.35s; } .bgd i:nth-child(4n+1) { animation-delay: -.7s; } .bgd i:nth-child(5n+2) { animation-delay: -.2s; }
+
+/* C: header status + pull-down */
+.pd { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 0 0 22px 22px; padding: 12px 14px 12px; box-shadow: var(--shadow); animation: down .24s ease-out; font-size: 12px; }
+.pd .k { display: flex; align-items: center; gap: 6px; color: var(--bc); font: 600 11px var(--brand); text-transform: uppercase; letter-spacing: .08em; }
+.pd.t-m .k { color: var(--text2); }
+.pd .k svg { width: 13px; height: 13px; }
+.pd p { margin: 6px 0 0; color: var(--text2); line-height: 1.45; }
+.pd p b { color: var(--text); font: 600 14px/1.35 var(--brand); display: block; margin-bottom: 2px; }
+.acts { display: flex; gap: 6px; margin-top: 12px; }
+.acts button { padding: 6px 10px; border-radius: 9px; border: 1px solid var(--border); font-size: 11.5px; color: var(--text2); display: inline-flex; align-items: center; gap: 6px; }
+.acts .danger { color: var(--err); margin-left: auto; }
+.acts .danger i { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.grab { width: 36px; height: 4px; border-radius: 2px; background: var(--chip); margin: 12px auto 0; }
+
+/* D: chip menu */
+.menu { position: absolute; bottom: calc(100% + 4px); right: 4px; z-index: 8; width: 272px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 10px 12px; white-space: normal; animation: up2 .18s ease-out; font-size: 11.5px; color: var(--text2); line-height: 1.45; }
+.menu b { color: var(--text); font: 600 12.5px var(--brand); display: flex; align-items: center; gap: 6px; }
+.menu b svg { width: 13px; height: 13px; }
+.menu .acts { margin-top: 8px; } .menu .acts .danger { margin-left: 0; }
+
+/* E: transcript tail */
+.tail { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text2); border: 1px dashed color-mix(in srgb, var(--bc) 50%, var(--border)); border-radius: 10px; padding: 6px 8px 6px 10px; }
+.tail > svg, .tail > .bgd { color: var(--bc); } .tail > svg { width: 13px; height: 13px; }
+.tail b { color: var(--text); font-weight: 600; }
+.tail > span:not(.bgd) { flex: 1; min-width: 0; }
+.tail button { font: 600 11px var(--brand); color: var(--err); padding: 2px 6px; border-radius: 7px; }
+
+/* desktop */
+.dk { width: 880px; }
+.dscr { height: 470px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.dk .top { padding: 8px 14px; }
+.dk .tx { padding: 16px 0 10px; width: 700px; margin: 0 auto; }
+.dk .dock { padding: 8px 0 18px; }
+.dwrap { width: 700px; margin: 0 auto; }
+.dc { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border-radius: 9px; font: 600 12px var(--brand); color: var(--text2); flex: none; }
+.dc .lg { width: 15px; height: 15px; }
+.dc .sh svg { width: 15px; height: 15px; }
+
+@keyframes pu { 50% { opacity: .35; } }
+@keyframes bk { 50% { opacity: .25; } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes down { from { transform: translateY(-14px); opacity: 0; } }
+@keyframes up2 { from { transform: translateY(6px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+@media (max-width: 760px) { .opts { padding: 8px 12px; } .sec, header.pg { padding-left: 14px; padding-right: 14px; } .copy { margin-left: 0; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="claude" viewBox="0 0 24 24"><g fill="#d97757"><rect x="11" y="1.5" width="2" height="8.5" rx="1"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(40 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(78 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(118 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(160 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(200 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(242 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(282 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(322 12 12)"/></g></symbol>
+		<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-shield-o" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></symbol>
+		<symbol id="i-window" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M3.5 9.5h17" stroke="currentColor" stroke-width="1.8"/></symbol>
+		<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+		<symbol id="i-square" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></symbol>
+	</defs>
+</svg>
+
+<header class="pg">
+	<h1>Composer · background work</h1>
+	<p>When a turn ends but Claude leaves something running, the session isn't really idle. Two cases: a <b>watcher</b> (the Monitor tool waits for a log line, a file, a build), or <b>background tasks</b> (a shell or subagent still going). Main shows a card above the composer with an eye or a block grid, the copy, and Stop. <b>Stop ends the Claude process</b>, so watchers and tasks die. Your conversation stays.</p>
+	<p>This page fits that into the new composer, next to the goal bars, the context warning and the live status header. <b>Every phone is live:</b> tap Stop, the header icon (C), or the chip (D).</p>
+	<nav class="jump"><a href="#before">Today</a><a href="#variants">Five options</a><a href="#life">Lifecycle</a><a href="#desk">Desktop</a><a href="#picks">Picks</a></nav>
+</header>
+
+<div class="opts" id="opts">
+	<div class="og"><span>Theme</span><div class="seg"><button data-opt="theme:dark">Dark</button><button data-opt="theme:light">Light</button><button data-opt="theme:both">Both</button></div></div>
+	<div class="og"><span>Running</span><div class="seg"><button data-opt="st:monitoring">Watcher</button><button data-opt="st:working">Tasks</button></div></div>
+	<div class="og"><span>Tone</span><div class="seg"><button data-opt="tone:m">Grey</button><button data-opt="tone:b">Tool blue</button></div></div>
+	<button class="copy" id="copy">Copy feedback</button>
+</div>
+
+<section class="sec" id="before">
+	<h2>Today on main · a card above the composer</h2>
+	<p class="lede">It works, but it's the one notice that doesn't use the bar pattern, and its full Button gives Stop more weight than anything else above the field. Stacked with a goal and the context warning, it's a third shape in the same column.</p>
+	<div class="stage" data-sec="before"></div>
+</section>
+
+<section class="sec" id="variants">
+	<h2>Five ways to show it</h2>
+	<p class="lede">Each option shows the watcher alone, then the busy case: a goal in progress and context at 84%. Switch <b>Running</b> above to see background tasks, and <b>Tone</b> for grey vs the blue that tool calls use in the transcript.</p>
+	<div class="stage" data-sec="variants"></div>
+	<textarea class="note" data-note="variants" data-title="Options A–E" placeholder="Which option? Grey or blue? Anything in the copy?"></textarea>
+</section>
+
+<section class="sec" id="life">
+	<h2>Lifecycle · option B</h2>
+	<p class="lede">The status header already says "Working" during a turn. B lets it keep talking after the turn ends, so the composer tells one continuous story. Sending a message is allowed throughout. It starts a new turn, which is why the send button stays live next to Stop.</p>
+	<div class="stage" data-sec="life"></div>
+	<textarea class="note" data-note="life" data-title="Lifecycle (B)" placeholder="Does the hand-off between Working and Monitoring read clearly?"></textarea>
+</section>
+
+<section class="sec" id="desk">
+	<h2>Desktop · A and B</h2>
+	<p class="lede">Same parts, wider column. Both shown with the context warning, so you can see how much space each one takes.</p>
+	<div class="stage" data-sec="desk"></div>
+	<textarea class="note" data-note="desk" data-title="Desktop" placeholder="Notes on desktop."></textarea>
+</section>
+
+<section class="sec" id="picks">
+	<h2>Picks</h2>
+	<dl class="spec">
+		<dt>My pick</dt><dd><b>B, status header, in grey.</b> It adds no new chrome. Stop sits where it always sits, and the header already means "something is running". It doesn't stack, so a goal plus a context warning still leaves the transcript room on a phone. Grey matches the sidebar's Monitoring row. Blue reads as "a tool is running", which is accurate but louder than a quiet wait needs.</dd>
+		<dt>Runner-up</dt><dd><b>A, a bar.</b> It's the most consistent with the other notices, and Stop as a text action is gentle. The cost is height: three bars plus the composer is about 40% of a phone screen.</dd>
+		<dt>Avoid</dt><dd><b>D</b> hides a button that kills the process behind a chip near the home-bar swipe zone. <b>E</b> scrolls away as soon as you read back.</dd>
+		<dt>Build note</dt><dd>B is a third mode for <code>ComposerStatusHeader</code>: show it when <code>backgroundWork &amp;&amp; !isProcessing()</code>, glyph from the kind, plus a soft Stop beside send that calls the existing <code>handleStop</code>. No elapsed time: <code>SessionInfo</code> has no start time for background work, so adding one would mean server changes.</dd>
+	</dl>
+	<div class="flag"><b>Stop is final.</b> It closes the Claude process, so a watcher won't fire later. The soft Stop (grey, not the solid one used mid-turn) and its tooltip "Stop background work" should make that clear without a confirm step.</div>
+	<textarea class="note" data-note="picks" data-title="Picks" placeholder="Anything else before I spec it?"></textarea>
+</section>
+
+<dialog id="dlg"><p>Copy this and paste it back to me:</p><textarea readonly></textarea><p><button class="copy" onclick="this.closest('dialog').close()">Close</button></p></dialog>
+
+<script>
+const ic = (id, cls = '') => `<svg class="${cls}"><use href="#${id}"/></svg>`;
+const OPTS = { theme: 'dark', st: 'monitoring', tone: 'm', ...JSON.parse(localStorage.getItem('bwd-opts') || '{}') };
+const C = new Map();
+let N = 0;
+
+const grid = () => `<span class="bgd" aria-hidden="true">${'<i></i>'.repeat(10)}</span>`;
+const tone = () => OPTS.tone === 'b' ? 't-b' : 't-m';
+const bgKind = c => c.stopped ? null : c.bg === undefined ? OPTS.st : c.bg;
+const glyph = c => bgKind(c) === 'monitoring' ? ic('i-eye') : grid();
+const copy = c => bgKind(c) === 'monitoring' ? ['Monitoring', 'waiting for a watcher to fire'] : ['Background work running', 'tasks are still going'];
+const shown = c => bgKind(c) && !c.turn;
+const meter = l => `<span class="meter" data-l="${l}"><i></i><i></i><i></i><i></i><i></i></span>`;
+
+function topbar(c) {
+	const goal = c.goal ? `<button class="gs t-v">${ic('i-target')}<span>All 38 scenarios pass · 3 checks</span>${ic('i-chev', 'cv')}</button>` : '';
+	const st = c.v === 'C' && shown(c)
+		? `<button class="sstate ${tone()}${c.open ? ' on' : ''}" data-act="open" aria-label="Background work" aria-expanded="${!!c.open}">${glyph(c)}</button>`
+		: `<span class="sstate">${c.turn ? '<span class="pulse"></span>' : ''}</span>`;
+	return `<div class="top"><span class="tb">${ic('i-menu')}</span>
+		<div class="tt"><span class="ttl">Watch the dev build${ic('i-chev', 'cv')}</span>${goal}</div>${st}</div>`;
+}
+
+function pulldown(c) {
+	const [b, d] = copy(c), mon = bgKind(c) === 'monitoring';
+	return `<div class="pd ${tone()}"><div class="k">${glyph(c)}Background work</div>
+		<p><b>${b}</b>${mon ? 'Claude set a watcher on <code>build.log</code> and will start a turn when it fires.' : 'Claude left a task running after the turn ended.'}</p>
+		<div class="acts"><button class="danger" data-act="stop"><i></i>Stop ${mon ? 'watching' : 'background work'}</button></div><div class="grab" data-act="open"></div></div>`;
+}
+
+function tx(c) {
+	let h = `<div class="msg u">Start the dev server and tell me if the build breaks.</div>`;
+	if (c.goal) h += `<div class="sys">${ic('i-target')}Goal set · All 38 acceptance scenarios pass</div>`;
+	h += `<div>Dev server is up on :5173. I'm watching the build output and will jump in if it fails.</div>`;
+	h += `<div class="tool"><span>Monitor</span> tail -f build.log <em>${c.stopped ? 'ended' : 'watching'}</em></div>`;
+	if (c.fired) h += `<div class="tool"><span>Monitor</span> fired · error TS2322 in router.ts <em>1 match</em></div>`;
+	if (c.stopped) h += `<div class="sys m">${ic('i-square')}Stopped · background work ended</div>`;
+	if (c.v === 'E' && shown(c)) { const [b, d] = copy(c); h += `<div class="tail ${tone()}">${glyph(c)}<span><b>${b}</b> · ${d}</span><button data-act="stop">Stop</button></div>`; }
+	return h;
+}
+
+function bars(c) {
+	let h = '';
+	if (c.warn) h += `<div class="bar t-w">${ic('i-window')}<span><b>Context 84% full.</b> Older turns compact soon.</span><em>Compact</em></div>`;
+	if (!shown(c)) return h;
+	const [b, d] = copy(c);
+	if (c.v === 'A') h += `<div class="bar ${tone()}">${glyph(c)}<span><b>${b}</b> · ${d}</span><em data-act="stop">Stop</em></div>`;
+	if (c.v === 'main') h += `<div class="card0"><span class="gl">${glyph(c)}</span><span>${bgKind(c) === 'monitoring' ? 'Monitoring, waiting for a watcher to fire' : 'Background work running'}</span><button data-act="stop"><i></i>Stop</button></div>`;
+	return h;
+}
+
+function header(c) {
+	if (c.turn) return `<div class="hd"><div class="l1"><span class="pulse"></span><b>Working ${c.fired ? '0:03' : '1:12'}</b><span class="x">· ${c.fired ? 'Reading the build error' : 'Starting the dev server'}</span><span class="r">↓ live</span></div></div>`;
+	if (c.v !== 'B' || !shown(c)) return '';
+	const [b, d] = copy(c);
+	return `<div class="hd bgw ${tone()}"><div class="l1"><span class="gl">${glyph(c)}</span><b>${b}</b><span class="x">· ${d}</span></div></div>`;
+}
+
+function sendBtns(c) {
+	const send = `<button class="send off" aria-label="Send">${ic('i-up')}</button>`;
+	if (c.turn) return `<button class="stop" aria-label="Stop"><i></i></button>`;
+	if (c.v === 'B' && shown(c)) return send + `<button class="stop soft" data-act="stop" aria-label="Stop background work" title="Stop background work"><i></i></button>`;
+	return send;
+}
+
+function words(c) {
+	const chip = c.v === 'D' && shown(c) ? `<button class="w bgc ${tone()}" data-act="open">${glyph(c)}${bgKind(c) === 'monitoring' ? 'watching' : 'running'}</button>` : '';
+	const [b] = copy(c);
+	const menu = c.v === 'D' && c.open && shown(c) ? `<div class="menu"><b>${glyph(c)}${b}</b>${bgKind(c) === 'monitoring' ? 'Claude starts a turn when the watcher on build.log fires.' : 'A task is still running after the turn ended.'}<div class="acts"><button class="danger" data-act="stop"><i></i>Stop</button></div></div>` : '';
+	return `<div class="words">${menu}<span class="w">${ic('claude', 'lg')}<u>opus-5</u></span><s>·</s><span class="w"><u>1M</u></span><s>·</s><span class="w"><u>xhigh</u></span><s>·</s><span class="w" style="color:var(--p-ask)"><u>ask</u></span><span class="sp"></span>${chip}<span class="w" style="${c.warn ? 'color:var(--warn)' : ''}">${c.warn ? 84 : 42}%</span></div>`;
+}
+
+function composer(c) {
+	const v3 = c.v === 'D', cap = v3 ? '' : `<button class="ib hm">${ic('claude')}<i>O5</i></button><button class="ib cyc"><span class="sh" style="--pc:var(--text2)">${meter(4)}<b>xhigh</b></span></button><button class="ib cyc"><span class="sh" style="--pc:var(--p-ask)">${ic('i-shield-o')}<b>Ask</b></span></button>`;
+	return `<div class="cmp${c.goal ? ' goal' : ''}">${header(c)}<div class="row"><button class="ib" aria-label="Attach">${ic('i-plus')}</button>
+		<div class="fld"><span class="phd">${c.turn ? 'Reply to steer…' : 'Ask Claude…'}</span></div>${cap}${sendBtns(c)}</div></div>${v3 ? words(c) : ''}`;
+}
+
+function phone(c) {
+	if (c.desk) return desk(c);
+	const pd = c.v === 'C' && c.open && shown(c);
+	return `<figure class="ph${c.crop ? ' crop' : ''}" id="${c.id}"><figcaption><span>${c.cap || ''}</span><small>${c.sub || ''}</small></figcaption>
+		<div class="scr" style="${c.h ? `--h:${c.h}px` : ''}">
+		${c.crop ? '' : `<div class="sbar"><b>9:41</b><span>●●● ▮</span></div><div class="topw">${topbar(c)}${pd ? pulldown(c) : ''}</div>${pd ? '<div class="scrim" data-act="open"></div>' : ''}`}
+		<div class="tx">${tx(c)}</div>
+		<div class="dock${c.v === 'D' ? ' hasw' : ''}">${bars(c)}${composer(c)}</div><div class="home"></div></div></figure>`;
+}
+
+function desk(c) {
+	return `<figure class="ph dk" id="${c.id}"><figcaption><span>${c.cap}</span><small>${c.sub || ''}</small></figcaption><div class="dscr">
+		<div class="topw">${topbar(c)}</div><div class="tx">${tx(c)}</div>
+		<div class="dock"><div class="dwrap">${bars(c)}<div class="cmp${c.goal ? ' goal' : ''}">${header(c)}<div class="row">
+			<button class="ib" aria-label="Attach">${ic('i-plus')}</button><div class="fld"><span class="phd">Ask Claude…</span></div>
+			<button class="dc">${ic('claude', 'lg')}Opus 5 · 1M${ic('i-chev', 'cv')}</button>
+			<button class="dc">${meter(4)}Extra high</button>
+			<button class="dc" style="color:var(--p-ask)"><span class="sh">${ic('i-shield-o')}</span>Ask</button>
+			${sendBtns(c)}</div></div></div></div></div></figure>`;
+}
+
+function frame(o) {
+	const themes = OPTS.theme === 'both' ? ['dark', 'light'] : [OPTS.theme];
+	return `<div class="pair">${themes.map(t => { const c = { ...o, id: 'p' + N++ }; C.set(c.id, c); return `<div class="tw" data-theme="${t}">${phone(c)}</div>`; }).join('')}</div>`;
+}
+
+const VARIANTS = [
+	['A', 'Bar', 'A bar in the stack above the composer, same shape as the goal and context bars. Stop is a text action, like Compact.', 'Three bars on a busy session take real height on a phone.'],
+	['B', 'Status header', 'The composer\'s live header keeps going after the turn: "Monitoring · waiting…". A soft Stop sits beside send, where Stop always is.', 'The header usually means "busy", so the placeholder has to switch back to "Ask Claude…" to show you can still talk.', true],
+	['C', 'Top bar icon', 'An eye (or grid) in the top bar\'s status slot. Tap it for a pull-down that explains what\'s running, with Stop.', 'Stop is two taps away and up at the top, far from your thumb.'],
+	['D', 'Words row chip', 'A small "watching" chip next to the context %. Tap it for a menu with Stop. Smallest footprint.', 'Easy to miss, and it sits in the home-bar swipe zone. Icons mode has no words row, so it would crowd the capsule.'],
+	['E', 'Transcript tail', 'A live row pinned under the last message, next to the Monitor call it belongs to.', 'Scrolls away as soon as you read back, and it looks like part of the conversation.'],
+];
+
+function render() {
+	N = 0; C.clear();
+	document.documentElement.dataset.theme = OPTS.theme === 'light' ? 'light' : 'dark';
+	document.body.classList.toggle('both', OPTS.theme === 'both');
+	const sec = s => document.querySelector(`[data-sec="${s}"]`);
+	sec('before').innerHTML = frame({ v: 'main', cap: 'Main · alone' }) + frame({ v: 'main', goal: 1, warn: 1, cap: 'Main · goal + context 84%' });
+	sec('variants').innerHTML = VARIANTS.map(([k, n, pro, con, rec]) => `<div class="opt"><div class="opt-h"><b>${k} · ${n}</b>${rec ? '<span class="rec">My pick</span>' : ''}</div>
+		<div class="pair">${frame({ v: k, cap: `${k} · alone` })}${frame({ v: k, goal: 1, warn: 1, open: k === 'C' || k === 'D', cap: `${k} · goal + context`, sub: k === 'C' || k === 'D' ? 'opened' : '' })}</div>
+		<p class="pros">${pro}</p><p class="pros con">${con}</p></div>`).join('');
+	sec('life').innerHTML = [
+		{ turn: 1, bg: null, cap: '1 · Turn running', sub: 'header as today' },
+		{ cap: '2 · Turn ends', sub: 'watcher armed' },
+		{ turn: 1, fired: 1, bg: null, cap: '3 · Watcher fires', sub: 'Claude starts a new turn' },
+		{ stopped: 1, cap: '4 · You pressed Stop', sub: 'process closed' },
+	].map(o => frame({ v: 'B', crop: 1, h: 330, ...o })).join('');
+	sec('desk').innerHTML = frame({ v: 'A', desk: 1, warn: 1, cap: 'A · Bar' }) + frame({ v: 'B', desk: 1, warn: 1, cap: 'B · Status header', sub: 'my pick' });
+	document.querySelectorAll('[data-opt]').forEach(b => { const [k, v] = b.dataset.opt.split(':'); b.setAttribute('aria-pressed', OPTS[k] === v); });
+}
+
+document.addEventListener('click', e => {
+	const opt = e.target.closest('[data-opt]');
+	if (opt) { const [k, v] = opt.dataset.opt.split(':'); OPTS[k] = v; localStorage.setItem('bwd-opts', JSON.stringify(OPTS)); render(); return; }
+	const act = e.target.closest('[data-act]'), fig = e.target.closest('figure');
+	if (!act || !fig) return;
+	const c = C.get(fig.id);
+	if (act.dataset.act === 'stop') Object.assign(c, { stopped: true, open: false });
+	if (act.dataset.act === 'open') c.open = !c.open;
+	fig.outerHTML = phone(c);
+});
+
+document.querySelectorAll('.note').forEach(t => {
+	t.value = localStorage.getItem('bwd-note-' + t.dataset.note) || '';
+	t.addEventListener('input', () => localStorage.setItem('bwd-note-' + t.dataset.note, t.value));
+});
+document.getElementById('copy').addEventListener('click', () => {
+	const notes = [...document.querySelectorAll('.note')].filter(t => t.value.trim()).map(t => `## ${t.dataset.title}\n${t.value.trim()}`);
+	const d = document.getElementById('dlg');
+	d.querySelector('textarea').value = [`Background work designs · running: ${OPTS.st}, tone: ${OPTS.tone === 'b' ? 'blue' : 'grey'}`, ...notes].join('\n\n');
+	d.showModal();
+});
+render();
+</script>
+</body>
+</html>

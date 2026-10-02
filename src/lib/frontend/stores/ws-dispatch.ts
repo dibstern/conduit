@@ -47,6 +47,7 @@ import {
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
 import { handleFileTree } from "./file-tree.svelte.js";
+import { handleGoalChanged } from "./goal.svelte.js";
 import {
 	clearScanInFlight,
 	handleInstanceList,
@@ -141,6 +142,7 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"session_forked",
 		"provider_session_reloaded",
 		"session_deleted",
+		"session.goal_changed",
 	]);
 
 /** Runtime guard: does this message carry a per-session event type? */
@@ -180,6 +182,9 @@ function routePerSession(event: PerSessionEvent): void {
 	// resolutions are broadcast to every client, and a slot per unrelated
 	// session would evict cached transcripts from the LRU.
 	switch (event.type) {
+		case "session.goal_changed":
+			handleGoalChanged(event);
+			return;
 		case "permission_request":
 			handlePermissionRequest(event, wsSend);
 			triggerNotifications(event);

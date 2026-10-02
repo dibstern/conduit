@@ -5,11 +5,14 @@
 	import { untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
 	import Textarea from "../ui/Textarea.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
+	import ComposerStatusHeader from "./ComposerStatusHeader.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
 	import CommandMenu from "./CommandMenu.svelte";
-	import ContextBar from "./ContextBar.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
 	import NewSessionContext from "./NewSessionContext.svelte";
@@ -20,6 +23,7 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing } from "../../stores/chat.svelte.js";
+	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		discoveryState,
 		extractSlashQuery,
@@ -37,10 +41,13 @@
 	import { findSession, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
+	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
+	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -51,6 +58,7 @@
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 
 	let inputText = $state("");
+	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
@@ -61,10 +69,66 @@
 	let cursorPos = $state(0);
 	let composing = $state(false);
 	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
+	const goalFacts = $derived(discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const goal = $derived(goalView(
+		goalFacts,
+		isProcessing() ? "busy" : currentSession?.status ?? "idle",
+	));
+	let goalNow = $state(Date.now());
+	let undoneClearKey = $state<string | null>(null);
+	const clearKey = $derived(goalFacts ? `${goalFacts.sessionId}:${goalFacts.endedAt}` : null);
+	const showClearedGoal = $derived(goal.phase === "cleared" && goalFacts?.endedAt !== undefined && goalNow - goalFacts.endedAt < 10_000 && clearKey !== undoneClearKey);
+	$effect(() => {
+		const endedAt = goal.phase === "cleared" ? goalFacts?.endedAt : undefined;
+		const now = Date.now();
+		goalNow = now;
+		if (endedAt === undefined || now - endedAt >= 10_000) return;
+		const timer = setTimeout(() => { goalNow = Date.now(); }, endedAt + 10_000 - now + 1);
+		return () => clearTimeout(timer);
+	});
+	const working = $derived(isProcessing() || Boolean(currentSession && sessionAttention(currentSession) === "working"));
+	const activity = $derived.by(() => {
+		const chat = currentChat();
+		for (let i = chat.messages.length - 1; i >= 0; i--) {
+			const part = chat.messages[i];
+			if (!part) continue;
+			if (part.type === "user") {
+				// A queued steering message doesn't end the current activity.
+				if (part.sentDuringEpoch != null && part.sentDuringEpoch >= chat.turnEpoch) continue;
+				return "";
+			}
+			if (part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
+			if (part.type === "thinking" && !part.done) return "Thinking";
+			// Projected rows report every ordinary tool as completed, so the
+			// missing result is what marks the tool still in flight.
+			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
+				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
+				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
+			}
+		}
+		return "";
+	});
+	$effect(() => {
+		const sessionId = sessionState.currentId;
+		const active = working;
+		if (!sessionId) return;
+		untrack(() => {
+			// A shell row can announce a working session before a status event.
+			const { activity: status, messages } = getOrCreateSessionSlot(sessionId);
+			if (!active) {
+				if (status.phase === "idle") status.turnStartedAt = null;
+				return;
+			}
+			const user = [...messages.messages].reverse().find((part) => part.type === "user");
+			status.turnStartedAt ??= user?.createdAt ?? Date.now();
+		});
+	});
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		"Ask anything. / to use skills, @ to mention files",
+		!sessionViewState.compact ? "Ask anything. / to use skills, @ to mention files" :
+		isProcessing() ? "Reply to steer…" :
+		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -217,7 +281,15 @@
 				? "Queue message"
 				: "Send message",
 	);
-	const showContextMini = $derived(currentChat().contextPercent > 0);
+	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
+	const compacting = $derived.by(() => {
+		const messages = currentChat().messages;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message?.type === "system" && message.compaction) return message.compaction === "started";
+		}
+		return false;
+	});
 	/** Drift is only reportable with complete mismatch evidence. */
 	const modelDrift = $derived.by(() => {
 		const execution = discoveryState.modelExecution;
@@ -320,12 +392,12 @@
 
 	let creatingSession = false;
 
-	async function sendMessage() {
-		const text = inputText.trim();
-		if (!text) return;
+	async function sendMessage(textOverride?: string): Promise<boolean> {
+		const text = textOverride ?? inputText.trim();
+		if (!text) return false;
 
 		// Parse @references and fetch file contents
-		const refs = parseAtReferences(text);
+		const refs = textOverride === undefined ? parseAtReferences(text) : [];
 		let messageText = text;
 
 		if (refs.length > 0) {
@@ -359,7 +431,7 @@
 		}
 
 		// Collect image data URLs from pending images
-		const imageUrls = pendingImages.length > 0
+		const imageUrls = textOverride === undefined && pendingImages.length > 0
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
@@ -372,13 +444,13 @@
 		const projectSlug = sid ? getCurrentSlug() : getDraftProject();
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
-			return;
+			return false;
 		}
 		if (!sid) {
 			// First send with no active session: create one bound to the selected
 			// harness instance (the picker's pre-creation draft), then send into it.
 			// A second Enter before the create lands would make a second session.
-			if (creatingSession) return;
+			if (creatingSession) return false;
 			creatingSession = true;
 			try {
 				const created = await createSessionRpc({
@@ -392,7 +464,7 @@
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
 			} catch {
 				showToast("Failed to create session", { variant: "error" });
-				return;
+				return false;
 			} finally {
 				creatingSession = false;
 			}
@@ -415,6 +487,7 @@
 				showToast("Failed to send message", { variant: "error" });
 			});
 		});
+		if (textOverride !== undefined) return true;
 
 		// Clear pending images
 		pendingImages = [];
@@ -432,6 +505,14 @@
 			inputSyncTimer = null;
 		}
 		syncInputDraft("");
+		return true;
+	}
+
+	async function undoGoalClear() {
+		const facts = goalFacts;
+		const key = clearKey;
+		if (facts?.ended !== "cleared" || !facts.endedGoal || facts.sessionId !== sessionState.currentId) return;
+		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
 	function handleStop() {
@@ -468,6 +549,33 @@
 		fileInput.onchange = () => processSelectedFiles(fileInput.files);
 		fileInput.click();
 	}
+
+	function handleAttachSetGoal(condition = "") {
+		if (discoveryState.currentProviderId !== "claude") return;
+		inputText = `/goal ${condition}`;
+		cursorPos = inputText.length;
+		requestAnimationFrame(() => {
+			textareaEl?.focus();
+			textareaEl?.setSelectionRange(inputText.length, inputText.length);
+			handleInput();
+		});
+	}
+
+	$effect(() => {
+		function handleGoalAction(event: CustomEvent<GoalComposerAction>) {
+			const { action, sessionId, condition } = event.detail;
+			if (discoveryState.currentProviderId !== "claude" || sessionId !== sessionState.currentId) return;
+			switch (action) {
+				case "pause": handleStop(); break;
+				case "resume": void sendMessage("Continue."); break;
+				case "clear": void sendMessage("/goal clear"); break;
+				case "edit": handleAttachSetGoal(condition); break;
+				case "new": handleAttachSetGoal(); break;
+			}
+		}
+		window.addEventListener("composer:goal", handleGoalAction);
+		return () => window.removeEventListener("composer:goal", handleGoalAction);
+	});
 
 	/** Read selected files from a file input, auto-resizing if they exceed the API limit. */
 	function processSelectedFiles(files: FileList | null) {
@@ -627,144 +735,179 @@
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-		<!-- Context usage bar (above input) -->
-		{#if showContextMini}
-			<ContextBar percent={currentChat().contextPercent} />
-		{/if}
-
-		<!-- Processing indicator: animated bounce bar aligned with context mini bar -->
-		{#if isProcessing() || (currentSession && sessionAttention(currentSession) === "working")}
-			<div class="flex items-center gap-2 pb-1.5 px-2">
-				<div class="min-w-6"></div>
-				<div
-					class="flex-1 h-[3px] rounded-full overflow-hidden bg-bg-alt"
-					style="--bounce-width: 0.3;"
-				>
-					<div
-						class="h-full rounded-full bg-accent animate-bounce-bar"
-						style="width: calc(var(--bounce-width) * 100%);"
-					></div>
-				</div>
-			</div>
-		{/if}
-
 		{#if !sessionState.currentId && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext /></div>
 		{/if}
 
+		{#if isGoalCommand}
+			<div
+				data-testid="composer-goal-hint"
+				class="composer-goal-hint flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary"
+			>
+				<Icon name="target" size={14} class="shrink-0 text-status-violet" />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-violet">/goal</b> sets a goal. Claude keeps working, and checks itself after each turn, until it's met.</span>
+			</div>
+		{/if}
+
+		{#if goal.phase === "met" && goalFacts && !isGoalMetDismissed(goalFacts)}
+			<div data-testid="composer-goal-met" class="composer-goal-met flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
+				<Icon name="check" size={14} class="shrink-0 text-status-green" />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-green">Goal met</b>{goalFacts.endedGoal?.lastReason ? ` · ${goalFacts.endedGoal.lastReason}` : ""}{goal.subtitle.slice("Goal met".length)}</span>
+				<TextButton tone="inherit" data-testid="composer-goal-met-details" class="shrink-0 font-semibold" onclick={() => { goalDetails.open = true; }}>Details</TextButton>
+				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); }} />
+			</div>
+		{:else if showClearedGoal}
+			<div data-testid="composer-goal-cleared" class="composer-goal-cleared flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-muted">
+				<Icon name="target" size={14} class="shrink-0" />
+				<span class="flex-1 min-w-0">Goal cleared</span>
+				<TextButton tone="inherit" class="shrink-0 font-semibold" disabled={!goalFacts?.endedGoal} onclick={undoGoalClear}>Undo</TextButton>
+			</div>
+		{/if}
+
+		{#if contextWarning && !compacting}
+			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
+				<Icon name="panels-top-left" size={14} class="shrink-0 text-status-amber" />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Context {Math.round(currentChat().contextPercent)}% full.</b> Older turns compact soon.</span>
+				{#if discoveryState.currentProviderId === "claude"}
+					<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
+				{/if}
+			</div>
+		{/if}
+
 		<div
 			id="input-row"
+			class:goal={goal.border === "solid"}
+			class:paused={goal.border === "dashed"}
 			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
-
-			<!-- Textarea row.
-			     The composer grows with its text and then scrolls, and both of those
-			     are CSS here rather than JS: the mirror sizes the row, this container
-			     caps and scrolls it, and the textarea is stretched over the mirror at
-			     the full content height so it never scrolls on its own. One scroll
-			     position for the whole composer means the caret cannot end up on a
-			     different line from the text it sits in.
-			     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
-			     the textarea but not the mirror, which would wrap them differently. -->
-			<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable]">
-				<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
-				     longer size the row: pin the row to the cap and let the textarea
-				     scroll itself. Safe only because the mirror is blank in that mode,
-				     so there is still just one scroll position in play. -->
-				<div class="relative min-h-6 {plainText ? 'h-[120px]' : ''}">
-					<SkillHighlightBackdrop
-						text={plainText ? "" : inputText}
-						commandNames={commandNameSet}
-						dimmed={composing || plainText}
-					/>
-					<!--
-						`chrome="bare"` + `size="content"`: the affordance is
-						`#input-row` above, which owns the border and the focus ring,
-						so the field itself paints nothing and sizes itself. Dropped
-						from the class list: `bg-transparent` and `border-none`, both
-						of which Tailwind v4's preflight already does on a textarea
-						and which only squatted on their utility group.
-						`outline-none` is load-bearing and now comes from `bare`.
-
-						The text colour moved from two `class:` directives into the
-						class string because Svelte has no `class:` directive on a
-						COMPONENT tag. That is also why `bare` emits no text colour:
-						this swap and a primitive `text-text` would be two utilities
-						in one Tailwind group, resolved by stylesheet order, and the
-						call site would lose.
-					-->
-					<Textarea
-						id="input"
-						aria-label="Message"
-						aria-autocomplete="list"
-						aria-haspopup="listbox"
-						aria-controls={activeListboxId}
-						aria-activedescendant={activeOptionId}
-						chrome="bare"
-						size="content"
-						{placeholder}
-						autocomplete="off"
-						enterkeyhint={isMobile() ? "enter" : "send"}
-						class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText
-							? 'overflow-y-auto'
-							: 'overflow-hidden'} {composing || plainText
-							? 'text-text'
-							: 'text-transparent'}"
-						bind:value={inputText}
-						bind:element={textareaEl}
-						oninput={handleInput}
-						onkeydown={handleKeydown}
-						onkeyup={handleKeyup}
-						onclick={handleClick}
-						oncompositionstart={handleCompositionStart}
-						oncompositionend={handleCompositionEnd}
-					/>
-					<div class="sr-only" role="status" data-testid="composer-menu-status">
-						{listboxStatusText}
-					</div>
-				</div>
-			</div>
-
-						<!-- Pending image previews -->
-			{#if pendingImages.length > 0}
-				<PastePreview images={pendingImages} onRemove={removePendingImage} />
+			{#if working || goal.phase === "checking"}
+				<ComposerStatusHeader
+					startedAt={currentChat().turnStartedAt}
+					{activity}
+					{goal}
+					goalReason={working ? goalFacts?.goal?.lastReason : undefined}
+					following={sessionViewState.atBottom}
+					onlive={requestTranscriptFollow}
+					class="-mx-1.5 -mt-1.5 mb-1.5"
+				/>
 			{/if}
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout">
+				{#snippet field()}
+					<!-- Textarea row.
+					     The composer grows with its text and then scrolls, and both of those
+					     are CSS here rather than JS: the mirror sizes the row, this container
+					     caps and scrolls it, and the textarea is stretched over the mirror at
+					     the full content height so it never scrolls on its own. One scroll
+					     position for the whole composer means the caret cannot end up on a
+					     different line from the text it sits in.
+					     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
+					     the textarea but not the mirror, which would wrap them differently. -->
+					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]">
+						<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
+						     longer size the row: pin the row to the cap and let the textarea
+						     scroll itself. Safe only because the mirror is blank in that mode,
+						     so there is still just one scroll position in play. -->
+						<div class="relative min-h-6 {plainText ? 'h-[120px]' : ''}" style:min-height="var(--composer-placeholder-height,1.5rem)">
+							<SkillHighlightBackdrop
+								text={plainText ? "" : inputText}
+								commandNames={commandNameSet}
+								dimmed={composing || plainText}
+							/>
+							<!--
+								`chrome="bare"` + `size="content"`: the affordance is
+								`#input-row` above, which owns the border and the focus ring,
+								so the field itself paints nothing and sizes itself. Dropped
+								from the class list: `bg-transparent` and `border-none`, both
+								of which Tailwind v4's preflight already does on a textarea
+								and which only squatted on their utility group.
+								`outline-none` is load-bearing and now comes from `bare`.
 
-			<!-- Model drift notice: own row, so it never crowds the controls below -->
-			{#if modelDrift}
-				<div
-					data-testid="current-model-drift"
-					class="mx-1 mb-1 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
-				>
-					⚠ Running {getModelDisplayName(modelDrift.actualModel)} — you selected {getModelDisplayName(modelDrift.requestedModel)}
-				</div>
-			{/if}
-
-			<!-- Bottom row: attach + agent + model + send -->
-			<div id="input-bottom" class="flex min-w-0 items-center justify-between gap-1">
-				<div
-					id="input-bottom-left"
-					class="flex items-center gap-1 min-w-0"
-				>
-					<!-- Attach button + menu -->
-					<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} />
-
-					<!-- Agent selector -->
-					<div id="agent-selector-wrap" class="min-w-0">
-						<AgentSelector />
+								The text colour moved from two `class:` directives into the
+								class string because Svelte has no `class:` directive on a
+								COMPONENT tag. That is also why `bare` emits no text colour:
+								this swap and a primitive `text-text` would be two utilities
+								in one Tailwind group, resolved by stylesheet order, and the
+								call site would lose.
+							-->
+							<Textarea
+								id="input"
+								aria-label="Message"
+								aria-autocomplete="list"
+								aria-haspopup="listbox"
+								aria-controls={activeListboxId}
+								aria-activedescendant={activeOptionId}
+								chrome="bare"
+								size="content"
+								{placeholder}
+								autocomplete="off"
+								enterkeyhint={isMobile() ? "enter" : "send"}
+								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText
+									? 'overflow-y-auto'
+									: 'overflow-hidden'} {composing || plainText
+									? 'text-text'
+									: 'text-transparent'}"
+								bind:value={inputText}
+								bind:element={textareaEl}
+								oninput={handleInput}
+								onkeydown={handleKeydown}
+								onkeyup={handleKeyup}
+								onclick={handleClick}
+								oncompositionstart={handleCompositionStart}
+								oncompositionend={handleCompositionEnd}
+							/>
+							<div class="sr-only" role="status" data-testid="composer-menu-status">
+								{listboxStatusText}
+							</div>
+						</div>
 					</div>
-				</div>
 
-				<div
-					id="input-bottom-right"
-					class="flex items-center gap-1 min-w-0"
-				>
-					<!-- Harness instance + model picker -->
-					<InstanceModelPicker />
+								<!-- Pending image previews -->
+					{#if pendingImages.length > 0}
+						<PastePreview images={pendingImages} onRemove={removePendingImage} />
+					{/if}
 
-					<!-- Approvals (permission mode) selector -->
-					<PermissionModeSelector />
+					<!-- Model drift notice: own row, so it never crowds the controls below -->
+					{#if modelDrift}
+						<div
+							data-testid="current-model-drift"
+							class="mx-1 mb-1 rounded-lg border border-warning/30 bg-warning-bg px-2 py-1 text-[11px] leading-[1.3] font-medium text-warning"
+						>
+							⚠ Running {getModelDisplayName(modelDrift.actualModel)} — you selected {getModelDisplayName(modelDrift.requestedModel)}
+						</div>
+					{/if}
 
+				{/snippet}
+				{#snippet leading()}
+					<div
+						id="input-bottom-left"
+						class="flex items-center gap-1 min-w-0"
+					>
+						<!-- Attach button + menu -->
+						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onSetGoal={() => handleAttachSetGoal()} />
+
+						<!-- Agent selector -->
+						{#if composerPreferences.controls === "icons"}
+							<div id="agent-selector-wrap" class="min-w-0">
+								<AgentSelector />
+							</div>
+						{/if}
+					</div>
+				{/snippet}
+				{#snippet controls()}
+					{#if composerPreferences.controls === "icons"}
+						<div
+							id="input-bottom-right"
+							class="flex items-center gap-1 min-w-0"
+						>
+							<!-- Harness instance + model picker -->
+							<InstanceModelPicker />
+
+							<!-- Approvals (permission mode) selector -->
+							<PermissionModeSelector />
+						</div>
+					{/if}
+				{/snippet}
+				{#snippet send()}
 					<!-- Send / Stop buttons -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
 					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
@@ -775,14 +918,15 @@
 						hoverFill="none"
 						disabledStyle="ghosted"
 						iconOnly
-						icon="arrow-up"
+						icon={isGoalCommand ? "target" : "arrow-up"}
 						iconSize={18}
 						id="send"
+						data-goal={isGoalCommand ? "true" : "false"}
 						type="button"
 						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
 						disabled={!canSend}
-						title={sendButtonLabel}
-						ariaLabel={sendButtonLabel}
+						title={isGoalCommand ? "Set goal" : sendButtonLabel}
+						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
 						onclick={handleSendClick}
 					/>
 					{#if isProcessing()}
@@ -803,11 +947,60 @@
 							onclick={handleStop}
 						/>
 					{/if}
-				</div>
-			</div>
+				{/snippet}
+			</TwoRowComposerLayout>
 		</div>
+		{#if composerPreferences.controls === "words"}
+			<div
+				data-testid="composer-words-row"
+				class="flex h-[24px] items-center gap-px px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
+			>
+				<InstanceModelPicker variant="words" />
+				<span aria-hidden="true" class="text-border-chip">·</span>
+				<PermissionModeSelector variant="words" />
+				<span class="flex-1"></span>
+				{#if currentChat().contextPercent > 0}
+					<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 px-[5px] py-[2px]">{Math.round(currentChat().contextPercent)}%</span>
+				{/if}
+			</div>
+		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext /></div>
 		{/if}
 	</div>
 </div>
+
+<style>
+	:global(#send[data-goal="true"]) {
+		background: var(--color-status-violet);
+		color: var(--color-bg);
+	}
+
+	.composer-goal-hint, .composer-goal-met, .composer-goal-cleared {
+		border-color: color-mix(in srgb, var(--goal-bar-color, var(--color-status-violet)) 38%, transparent);
+		background: color-mix(in srgb, var(--goal-bar-color, var(--color-status-violet)) 10%, transparent);
+	}
+
+	.composer-goal-met {
+		--goal-bar-color: var(--color-status-green);
+	}
+
+	.composer-goal-cleared {
+		--goal-bar-color: var(--color-text-muted);
+	}
+
+	.composer-context-warning {
+		border-color: color-mix(in srgb, var(--color-status-amber) 38%, transparent);
+		background: color-mix(in srgb, var(--color-status-amber) 10%, transparent);
+	}
+
+	#input-row.goal {
+		border-color: var(--color-status-violet);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-violet) 16%, transparent);
+	}
+
+	#input-row.paused {
+		border: 1px dashed color-mix(in srgb, var(--color-status-violet) 60%, var(--color-border));
+		box-shadow: none;
+	}
+</style>

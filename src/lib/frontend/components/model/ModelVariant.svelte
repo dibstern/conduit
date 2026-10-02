@@ -1,73 +1,47 @@
-<!-- Thinking level badge + dropdown for cycling model variants. -->
-<!-- Uses the shared menu and keeps the Ctrl+T shortcut. -->
-
 <script lang="ts">
-	import Button from "../ui/Button.svelte";
-	import Icon from "../ui/Icon.svelte";
+	import EffortMeter from "../ui/EffortMeter.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import {
-		applyVariantSwitched,
-		chooseVariant,
-		discoveryState,
-		getActiveModelVariants,
-	} from "../../stores/discovery.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
-	import { switchVariantRpc } from "../../transport/ws-rpc-client.js";
+	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
+	import { effort } from "../../stores/composer-settings.svelte.js";
 
-	let { onOpen }: { onOpen?: (() => void) | undefined } = $props();
-
+	let { onOpen, variant = "icons" }: {
+		onOpen?: (() => void) | undefined;
+		variant?: "icons" | "words" | undefined;
+	} = $props();
 
 	let open = $state(false);
+	let innerWidth = $state(window.innerWidth);
+	const phone = $derived(innerWidth < 768);
+	const variants = $derived(effort.options);
+	const currentVariant = $derived(effort.current ?? "");
+	const filled = $derived(currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
 
-	/** Available variants for the active model. */
-	const variants = $derived(getActiveModelVariants());
-
-	/** Current variant label. */
-	const currentVariant = $derived(discoveryState.currentVariant);
-
-	/** Display label for the variant badge. */
-	const variantLabel = $derived(currentVariant || "default");
-
-	function switchVariant(variant: string) {
-		const undoVariant = chooseVariant(variant);
-		const projectSlug = getCurrentSlug();
-		const sessionId = sessionState.currentId;
-		if (projectSlug && sessionId) {
-			void switchVariantRpc({
-				projectSlug,
-				sessionId,
-				variant,
-			})
-				.then(applyVariantSwitched)
-				.catch(undoVariant);
-		}
-	}
-
-	function cycleVariant() {
-		// Cycle: default → low → medium → high → max → default
-		const cycle = ["", ...variants];
-		const currentIdx = cycle.indexOf(currentVariant);
-		const nextIdx = (currentIdx + 1) % cycle.length;
-		const next = cycle[nextIdx];
-		if (next !== undefined) switchVariant(next);
-	}
+	const knownLevels = [
+		{ value: "low", name: "Low", label: "LOW", description: "Quick, light reasoning" },
+		{ value: "medium", name: "Medium", label: "MED", description: "Balanced" },
+		{ value: "high", name: "High", label: "HIGH", description: "Thinks harder, slower" },
+		{ value: "xhigh", name: "Extra high", label: "XHIGH", description: "Deeper still, for hard problems" },
+		{ value: "max", name: "Max", label: "MAX", description: "Most thorough, slowest" },
+	];
+	const currentLevel = $derived(knownLevels.find((level) => level.value === currentVariant));
+	const levelName = $derived(currentLevel?.name ?? (currentVariant || "Default"));
+	const microLabel = $derived(
+		currentLevel?.label ?? (currentVariant ? currentVariant.slice(0, 5).toUpperCase() : "DEF"),
+	);
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "t" && e.ctrlKey && variants.length > 0) {
+		if (e.key.toLowerCase() === "t" && e.ctrlKey && variants.length > 0) {
 			e.preventDefault();
-			cycleVariant();
+			if (!effort.pending) effort.cycle();
 		}
 	}
 
-	$effect(() => {
-		document.addEventListener("keydown", handleKeydown);
-		return () => {
-			document.removeEventListener("keydown", handleKeydown);
-		};
-	});
+	function openMenu() {
+		onOpen?.();
+		open = true;
+	}
 
 	/** Close the dropdown (called by parent for mutual exclusion). */
 	export function close() {
@@ -75,49 +49,86 @@
 	}
 </script>
 
+<svelte:window bind:innerWidth onkeydown={handleKeydown} />
+
 {#if variants.length > 0}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
+		ariaLabel="Reasoning effort"
 		side="top"
 		align="end"
+		class="w-[236px]"
 		data-testid="variant-dropdown"
 	>
 		{#snippet trigger({ props })}
-			<Button
-				{...props}
-				variant="pill"
-				size="content"
-				class="ml-0.5 min-w-0"
-				data-testid="variant-badge"
-				title="Thinking level ({variantLabel}) — Ctrl+T to cycle"
-			>
-				<span class="min-w-0 truncate">{variantLabel}</span>
-				<Icon name="chevron-down" size={8} class="shrink-0 opacity-50" />
-			</Button>
+			{#if phone || variant === "words"}
+				<!-- Keep Bits' trigger attributes and ref; MicroLabelButton owns tap,
+				     hold and keyboard activation instead of Bits' eager menu handlers. -->
+				<MicroLabelButton
+					{...props}
+					onpointerdown={undefined}
+					onpointerup={undefined}
+					onkeydown={undefined}
+					variant={variant === "words" ? "words" : "micro"}
+					label={variant === "words" && currentVariant ? microLabel.toLowerCase() : microLabel}
+					tone={variant === "words" ? "var(--color-text-muted)" : "var(--color-text-secondary)"}
+					accessibleName="Effort {levelName}. Tap or Ctrl+T to cycle; hold or Shift+F10 for options"
+					pending={effort.pending}
+					pulseKey={currentVariant}
+					onTap={() => effort.cycle()}
+					onHold={openMenu}
+					data-testid={variant === "words" ? "composer-word-effort" : "variant-badge"}
+					title="Effort {levelName}. Ctrl+T to cycle"
+				>
+					{#if variant === "icons"}<EffortMeter levels={variants.length} {filled} />{/if}
+				</MicroLabelButton>
+			{:else}
+				<MicroLabelButton
+					{...props}
+					onpointerdown={undefined}
+					onpointerup={undefined}
+					variant="chip"
+					label={levelName}
+					accessibleName="Effort {levelName}"
+					pending={effort.pending}
+					onTap={openMenu}
+					data-testid="variant-badge"
+					title="Effort {levelName}. Ctrl+T to cycle"
+				>
+					<EffortMeter levels={variants.length} {filled} />
+				</MicroLabelButton>
+			{/if}
 		{/snippet}
 
 		<MenuRadioGroup value={currentVariant}>
 			<MenuRadioItem
 				value=""
+				disabled={effort.pending}
 				data-testid="variant-option-default"
-				onselect={() => switchVariant("")}
+				onselect={() => { effort.select(null); open = false; }}
 			>
-				default
+				<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
+					<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={0} /></span>
+					<span class="font-brand font-semibold">Default</span>
+					<span class="text-xs text-text-muted">Use the model default</span>
+				</span>
 			</MenuRadioItem>
-			{#each variants as v (v)}
+			{#each variants as v, index (v)}
+				{@const level = knownLevels.find((known) => known.value === v)}
 				<MenuRadioItem
 					value={v}
+					disabled={effort.pending}
 					data-testid="variant-option-{v}"
-					onselect={() => switchVariant(v)}
+					onselect={() => { effort.select(v); open = false; }}
 				>
-					{v}
+					<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
+						<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={index + 1} /></span>
+						<span class="font-brand font-semibold">{level?.name ?? v}</span>
+						<span class="text-xs text-text-muted">{level?.description ?? "Custom reasoning effort"}</span>
+					</span>
 				</MenuRadioItem>
 			{/each}
 		</MenuRadioGroup>
-
-		<div class="border-t border-border mt-1 pt-1 px-3 pb-1 text-xs text-text-dimmer">
-			Ctrl+T to cycle
-		</div>
 	</Menu>
 {/if}

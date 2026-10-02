@@ -24,9 +24,11 @@ function instanceIdForLabel(label: string): string {
 
 async function selectRailInstance(page: Page, label: string): Promise<void> {
 	await openModelPicker(page);
+	await page.getByTestId("picker-row-harness").click();
 	await page
 		.getByTestId(`picker-instance-${instanceIdForLabel(label)}`)
 		.click();
+	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
 async function ensureAgentDropdownOpen(page: Page): Promise<void> {
