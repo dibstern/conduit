@@ -1,14 +1,23 @@
+import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	renameSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { createConnection, createServer, type Socket } from "node:net";
+import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	type ClaudeRunnerHello,
+	type ClaudeRunnerMessage,
+	ClaudeRunnerSocket,
+} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type { ClaudeSessionTurn } from "../../../src/lib/provider/claude/claude-session-runner.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -415,6 +424,291 @@ describe("Claude runners survive server replacement through built dist", () => {
 			),
 		);
 	}, 60_000);
+
+	it("drains an interrupted terminal replay before acting on a cached failed send receipt", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			claudeRunner: "process",
+			restartProof: true,
+		});
+		harnesses.push(harness);
+		const before = await harness.connect();
+		const sessionId = await before.createSession("Terminal replay ordering");
+		const prompt = "terminal-replay-interrupt";
+		const pending = before.send(sessionId, prompt).catch(() => undefined);
+		await vi.waitFor(
+			() => {
+				expect(existsSync(join(harness.root, "sdk-proof.ndjson"))).toBe(true);
+				expect(
+					sdkProof(harness).some((mark) => mark["kind"] === "assistant-held"),
+				).toBe(true);
+			},
+			{ timeout: 15_000 },
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing verified runner");
+		const db = new Database(join(harness.projectDir, ".conduit/events.db"));
+		const command = db
+			.prepare(
+				"SELECT command_id, payload_json, attempt_count FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+			)
+			.get(sessionId) as {
+			command_id: string;
+			payload_json: string;
+			attempt_count: number;
+		};
+		const upstreamPath = `${runner.socketPath}.upstream`;
+		const sockets = new Set<Socket>();
+		const held: string[] = [];
+		const wire: Array<{ direction: string; message: ClaudeRunnerMessage }> = [];
+		let cachedReceived: (socket: Socket) => void = () => {};
+		const cachedReady = new Promise<Socket>((resolve) => {
+			cachedReceived = resolve;
+		});
+		let retriesReceived = () => {};
+		const retryBarrier = new Promise<void>((resolve) => {
+			retriesReceived = resolve;
+		});
+		let retries = 0;
+		let released = false;
+		const proxy = createServer((client) => {
+			const upstream = createConnection(upstreamPath);
+			for (const socket of [client, upstream]) {
+				sockets.add(socket);
+				socket.once("close", () => sockets.delete(socket));
+				socket.on("error", () => {
+					client.destroy();
+					upstream.destroy();
+				});
+			}
+			client.once("close", () => upstream.destroy());
+			upstream.once("close", () => client.destroy());
+			let incoming = "";
+			client.on("data", (chunk: Buffer) => {
+				incoming += chunk.toString();
+				while (incoming.includes("\n")) {
+					const boundary = incoming.indexOf("\n");
+					const line = incoming.slice(0, boundary);
+					incoming = incoming.slice(boundary + 1);
+					const message = JSON.parse(line) as ClaudeRunnerMessage;
+					wire.push({ direction: "server-to-runner", message });
+					if (released && message.type === "replay" && ++retries >= 2)
+						retriesReceived();
+					upstream.write(`${line}\n`);
+				}
+			});
+			let outgoing = "";
+			upstream.on("data", (chunk: Buffer) => {
+				outgoing += chunk.toString();
+				while (outgoing.includes("\n")) {
+					const boundary = outgoing.indexOf("\n");
+					const line = outgoing.slice(0, boundary);
+					outgoing = outgoing.slice(boundary + 1);
+					const message = JSON.parse(line) as ClaudeRunnerMessage;
+					wire.push({ direction: "runner-to-server", message });
+					if (message.type === "hello" || released) client.write(`${line}\n`);
+					else held.push(`${line}\n`);
+					if (
+						message.type === "command-reply" &&
+						message.commandId === command.command_id &&
+						message.failure
+					)
+						cachedReceived(client);
+				}
+			});
+		});
+		let direct: ClaudeRunnerSocket | undefined;
+		let directHello: ClaudeRunnerHello | undefined;
+		let cachedFailure: unknown;
+		let blockedState: ReturnType<typeof persisted> | undefined;
+		let burst: ClaudeRunnerMessage[] = [];
+		try {
+			await harness.kill();
+			await pending;
+			const socket = createConnection(runner.socketPath);
+			const greeted = new Promise<{
+				hello: ClaudeRunnerHello;
+				peer: ClaudeRunnerSocket;
+			}>((resolve, reject) => {
+				const peer = new ClaudeRunnerSocket(
+					socket,
+					(message) => {
+						if (message.type === "hello") resolve({ hello: message, peer });
+					},
+					(failure) => reject(new Error(failure.message)),
+				);
+				direct = peer;
+				socket.once("connect", () =>
+					peer.write({
+						type: "hello",
+						protocolVersion: runner.protocolVersion,
+						buildId: runner.buildId,
+						config: {
+							workspaceRoot: harness.projectDir,
+							daemonConfigDir: harness.configDir,
+							materializeSubagents: false,
+						},
+					}),
+				);
+			});
+			const greeting = await Effect.runPromise(
+				Effect.tryPromise(() => greeted).pipe(Effect.timeout("15 seconds")),
+			);
+			directHello = greeting.hello;
+			direct = greeting.peer;
+			expect(directHello).toMatchObject({
+				pid: runner.pid,
+				runnerId: basename(runner.socketPath),
+				sessionId,
+			});
+			const binding = directHello.bindings?.find(
+				(candidate) => candidate.commandId === command.command_id,
+			);
+			if (!binding) throw new Error("Missing original runner binding");
+			// No replay attachment: terminal output stays spooled while the send
+			// settles, reproducing a server that missed the runner's final reply.
+			await Effect.runPromise(
+				direct
+					.commandEffect(randomUUID(), { type: "end-session", sessionId })
+					.pipe(Effect.timeout("15 seconds")),
+			);
+			cachedFailure = await Effect.runPromise(
+				Effect.either(
+					direct.commandEffect(
+						command.command_id,
+						{
+							type: "send-turn",
+							sinkId: binding.sinkId,
+							aborted: false,
+							input: {
+								...(JSON.parse(command.payload_json) as ClaudeSessionTurn),
+								commandId: command.command_id,
+								commandAttempt: command.attempt_count,
+							},
+						},
+						command.attempt_count,
+					),
+				).pipe(Effect.timeout("15 seconds")),
+			);
+			expect(cachedFailure).toMatchObject({ _tag: "Left" });
+			await new Promise<void>((resolve) => {
+				socket.once("close", resolve);
+				direct?.destroy();
+			});
+			renameSync(runner.socketPath, upstreamPath);
+			await new Promise<void>((resolve, reject) => {
+				proxy.once("error", reject);
+				proxy.listen(runner.socketPath, resolve);
+			});
+			db.exec(`CREATE TRIGGER hold_terminal_replay BEFORE INSERT ON events
+				WHEN NEW.type = 'turn.interrupted'
+				BEGIN SELECT RAISE(FAIL, 'Held terminal replay'); END`);
+			await harness.restart();
+			const after = await harness.connect(sessionId);
+			await after.view(sessionId);
+			const downstream = await Effect.runPromise(
+				Effect.promise(() => cachedReady).pipe(Effect.timeout("15 seconds")),
+			);
+			burst = held.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+			const terminalIndex = burst.findIndex(
+				(message) =>
+					message.type === "output" &&
+					message.output.type === "event" &&
+					message.output.event.type === "turn.interrupted",
+			);
+			const failedReplyIndex = burst.findIndex(
+				(message) =>
+					message.type === "command-reply" &&
+					message.commandId === command.command_id &&
+					message.failure !== undefined,
+			);
+			expect(terminalIndex).toBeGreaterThanOrEqual(0);
+			expect(failedReplyIndex).toBeGreaterThan(terminalIndex);
+			expect(
+				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
+			).toMatchObject({ pid: runner.pid, socketPath: runner.socketPath });
+			released = true;
+			downstream.write(held.join(""));
+			held.length = 0;
+			await Effect.runPromise(
+				Effect.promise(() => retryBarrier).pipe(Effect.timeout("15 seconds")),
+			);
+			blockedState = persisted(harness, sessionId);
+			expect(
+				blockedState.events.filter((event) =>
+					["turn.completed", "turn.error", "turn.interrupted"].includes(
+						event.type,
+					),
+				),
+			).toEqual([]);
+			expect(blockedState.turns).toMatchObject([{ state: "running" }]);
+			expect(
+				after.frames.filter(({ message }) => message["type"] === "done"),
+			).toEqual([]);
+			db.exec("DROP TRIGGER hold_terminal_replay");
+			await vi.waitFor(
+				() => {
+					const state = persisted(harness, sessionId);
+					expect(state).toMatchObject({
+						session: { status: "idle" },
+						turns: [{ state: "interrupted" }],
+						commands: [
+							{ status: "failed", receipt_status: "side_effect_failed" },
+						],
+					});
+					expect(
+						state.events.filter((event) =>
+							["turn.completed", "turn.error", "turn.interrupted"].includes(
+								event.type,
+							),
+						),
+					).toEqual([expect.objectContaining({ type: "turn.interrupted" })]);
+				},
+				{ timeout: 15_000 },
+			);
+			await after.waitFor((message) => message["type"] === "done");
+			await vi.waitFor(() =>
+				expect(statSync(`${runner.socketPath}.spool`).size).toBe(0),
+			);
+			expect(
+				after.frames.filter(({ message }) => message["type"] === "done"),
+			).toHaveLength(1);
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "query"),
+			).toHaveLength(1);
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "enqueue"),
+			).toHaveLength(1);
+		} finally {
+			const evidence = {
+				runner,
+				directHello,
+				cachedFailure,
+				burst,
+				retries,
+				blockedState,
+				persisted: persisted(harness, sessionId),
+				sdk: sdkProof(harness),
+				wire,
+				process: harness.proof(),
+			};
+			db.exec("DROP TRIGGER IF EXISTS hold_terminal_replay");
+			db.close();
+			direct?.destroy();
+			await harness.kill();
+			for (const socket of sockets) socket.destroy();
+			await new Promise<void>((resolve) => proxy.close(() => resolve()));
+			if (existsSync(upstreamPath)) renameSync(upstreamPath, runner.socketPath);
+			await harness.dispose();
+			expect(harness.remainingRunnerPids()).toEqual([]);
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/85kb-terminal-replay-interrupted.json",
+				JSON.stringify({ ...evidence, cleanup: harness.proof() }, null, 2),
+			);
+		}
+	}, 75_000);
 
 	it("recovers an admitted command absent from runner hello with its launch environment and settings", async () => {
 		const harness = await ProcessHarness.start({

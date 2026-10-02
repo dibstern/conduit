@@ -292,6 +292,11 @@ export const makeProcessClaudeSessionRunner = (
 				deps: { ...deps, daemonConfigDir: configDir },
 				...(receipts ? { receipts } : {}),
 				runFork,
+				onOutputCommitted: (output) =>
+					observeClaudeRunnerTurn(
+						output,
+						"sinkId" in output ? sinks.get(output.sinkId) : undefined,
+					),
 				emit: (received) => {
 					const operation = Effect.suspend(() => {
 						const binding =
