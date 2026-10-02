@@ -149,7 +149,7 @@ describe("in-process Claude session runner", () => {
 						transition: {
 							sessionId: "session-1",
 							kind: "snapshot",
-							taskIds: ["background-1"],
+							taskTypes: ["local_bash"],
 						},
 					});
 					yield* runner.executeEffect({

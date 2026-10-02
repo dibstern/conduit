@@ -320,7 +320,7 @@ describe("SessionManager read-your-writes parity", () => {
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-						Layer.succeed(BackgroundLivenessTag, () => false),
+						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
 						OpenCodeInstanceClientsLive.pipe(

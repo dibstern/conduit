@@ -57,7 +57,7 @@ describe("typed session row derivations", () => {
 				const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
 				const converted = sessionRowsToSessionInfoList(rows, {
 					parentMap: new Map([["child", "root"]]),
-					hasLiveBackgroundWork: (id) => id === "child",
+					backgroundWorkOf: (id) => (id === "child" ? "working" : undefined),
 				});
 				for (const item of converted) {
 					expect(item).toMatchObject({
@@ -67,7 +67,7 @@ describe("typed session row derivations", () => {
 					});
 				}
 				const priority = sessionRowsToSessionInfoList(rows, {
-					hasLiveBackgroundWork: () => true,
+					backgroundWorkOf: () => "working",
 					pendingPermissionCounts: new Map([["child", 1]]),
 				});
 				expect(priority.find((item) => item.id === "child")).toMatchObject({

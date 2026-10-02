@@ -213,6 +213,8 @@ export const SESSION_ATTENTION_TIERS = [
 	"needs-reply",
 	"error",
 	"working",
+	// Only watchers (Monitor, background shells) are live: calm, not busy.
+	"monitoring",
 	"done-unread",
 	"idle",
 ] as const;
@@ -220,6 +222,10 @@ export type SessionAttention = (typeof SESSION_ATTENTION_TIERS)[number];
 export const SessionAttentionSchema = Schema.Literal(
 	...SESSION_ATTENTION_TIERS,
 );
+
+/** Live Claude background tasks that outlive their turn, by what they are doing. */
+export const BackgroundWorkSchema = Schema.Literal("working", "monitoring");
+export type BackgroundWork = typeof BackgroundWorkSchema.Type;
 
 export interface SessionGit {
 	branch?: string;
@@ -267,6 +273,8 @@ export const SessionInfoSchema = Schema.Struct({
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
 	attention: Schema.optional(SessionAttentionSchema),
+	/** This session's own background work; unlike attention, not rolled up. */
+	backgroundWork: Schema.optional(BackgroundWorkSchema),
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),

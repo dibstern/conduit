@@ -26,6 +26,7 @@
 				| "message-square"
 				| "octagon-alert"
 				| "block-grid"
+				| "eye"
 				| "check"
 				| "circle"
 				| null;
@@ -66,6 +67,17 @@
 			colour: "text-accent",
 			pill: "",
 			icon: "block-grid",
+			emphasis: "normal",
+		},
+		monitoring: {
+			// Calm on purpose: only watchers are live, so nothing is happening
+			// until one fires. A word, not elapsed time, because the wait has no
+			// expected end.
+			word: "Monitoring",
+			spoken: "Monitoring",
+			colour: "text-text-secondary",
+			pill: "px-[2px] font-medium text-text-secondary",
+			icon: "eye",
 			emphasis: "normal",
 		},
 		"done-unread": {

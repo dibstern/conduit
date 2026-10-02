@@ -3,7 +3,10 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
@@ -72,7 +75,7 @@
 
 	const inputDrafts = new Map<string, string>();
 	// undefined until the first run, so a fresh load restores its draft too.
-	let previousSessionId: string | null | undefined = undefined;
+	let previousSessionId: string | null | undefined ;
 
 	// The new-session draft has no server-side store, so it lives here to
 	// survive a reload: a half-typed first prompt must not vanish.
@@ -668,6 +671,36 @@
 		<!-- Context usage bar (above input) -->
 		{#if showContextMini}
 			<ContextBar percent={currentChat().contextPercent} />
+		{/if}
+
+		<!-- Background work outlives the turn; Stop interrupts the whole session. -->
+		{#if currentSession?.backgroundWork && !isProcessing()}
+			<div class="mb-1.5" data-testid="background-work-banner">
+				<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:py-1 max-md:px-3">
+					<span class="shrink-0 text-text-secondary" aria-hidden="true">
+						{#if currentSession.backgroundWork === "monitoring"}
+							<Icon name="eye" size={14} />
+						{:else}
+							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
+						{/if}
+					</span>
+					<span class="flex-1 min-w-0 truncate text-sm text-text-secondary max-md:text-xs">
+						{currentSession.backgroundWork === "monitoring"
+							? "Monitoring, waiting for a watcher to fire"
+							: "Background work running"}
+					</span>
+					<Button
+						variant="secondary"
+						size="sm"
+						icon="square"
+						iconSize={12}
+						type="button"
+						data-testid="background-work-stop"
+						title="Stop the session and its background work"
+						onclick={handleStop}
+					>Stop</Button>
+				</Surface>
+			</div>
 		{/if}
 
 		<!-- Processing indicator: animated bounce bar aligned with context mini bar -->

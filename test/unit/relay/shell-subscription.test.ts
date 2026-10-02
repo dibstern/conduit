@@ -116,7 +116,7 @@ const makeShellTestLayer = (
 			OrchestrationEngineTag,
 			withDispatchEffect({ dispatch: async () => undefined }),
 		),
-		Layer.succeed(BackgroundLivenessTag, () => false),
+		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
 		Layer.succeed(LoggerTag, makeMockLogger()),
 		cleanup,
@@ -1111,9 +1111,9 @@ describe("subscribeShell", () => {
 				const { q } = yield* openShell();
 				yield* takeN(q, 2);
 
-				const attentionAfter = (taskIds: string[]) =>
+				const attentionAfter = (taskTypes: string[]) =>
 					Effect.gen(function* () {
-						liveness.record({ sessionId: SID, kind: "snapshot", taskIds });
+						liveness.record({ sessionId: SID, kind: "snapshot", taskTypes });
 						yield* announceBackgroundWork(SID);
 						yield* Effect.yieldNow();
 						const delta = yield* Queue.take(q).pipe(
@@ -1122,11 +1122,12 @@ describe("subscribeShell", () => {
 						if (delta._tag !== "upsert") throw new Error("expected upsert");
 						return delta.item.attention;
 					});
-				expect(yield* attentionAfter(["task-1"])).toBe("working");
+				expect(yield* attentionAfter(["local_agent"])).toBe("working");
+				expect(yield* attentionAfter(["local_bash"])).toBe("monitoring");
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(
-				Effect.provideService(BackgroundLivenessTag, liveness.hasLiveWork),
+				Effect.provideService(BackgroundLivenessTag, liveness.backgroundWork),
 				Effect.provide(makeShellTestLayer()),
 			);
 		},

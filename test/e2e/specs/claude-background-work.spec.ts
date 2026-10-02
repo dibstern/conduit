@@ -1,7 +1,8 @@
 // A Claude session whose turn has ended while a backgrounded shell still runs
-// reads as working in the sidebar until the shell ends. Bug: it read as done,
+// reads as monitoring in the sidebar until the shell ends, with a banner over
+// the composer whose Stop ends the whole session. Bug: it read as done,
 // because the shell's liveness lives in memory and nothing re-sent the row.
-// Spec: conduit-test-0mmk.
+// Specs: conduit-test-0mmk, conduit-test-nvv6, conduit-test-od8e.
 //
 // Replays a captured trace (no model call): Bash `sleep 8` with
 // run_in_background, the turn's result, then the shell ending and the SDK's
@@ -30,7 +31,7 @@ test.describe("Claude background work", () => {
 		);
 	});
 
-	test("keeps the session working until its background shell ends", async ({
+	test("keeps the session monitoring until its background shell ends", async ({
 		page,
 		browser,
 		relayUrl,
@@ -96,9 +97,21 @@ test.describe("Claude background work", () => {
 			await expect(row).toHaveAttribute("aria-label", /Background shell/);
 			await expect(
 				row,
-				"the turn ended but the sidebar stopped saying working while its background shell ran",
-			).toHaveAttribute("aria-label", /^Working/);
+				"the turn ended but the sidebar stopped saying monitoring while its background shell ran",
+			).toHaveAttribute("aria-label", /^Monitoring/);
+			await expect(page.getByTestId("background-work-banner")).toContainText(
+				"Monitoring",
+			);
 			await record("turn-ended-shell-running");
+			const composer = testInfo.outputPath("composer-monitoring.png");
+			await page.locator("#input-area").screenshot({
+				path: composer,
+				animations: "disabled",
+			});
+			await testInfo.attach("composer-monitoring.png", {
+				path: composer,
+				contentType: "image/png",
+			});
 
 			// The shell ending wakes the SDK into a turn of its own. Read the row
 			// once that has settled too, not in the gap before it starts.
@@ -108,6 +121,7 @@ test.describe("Claude background work", () => {
 				row,
 				"the background shell ended but the sidebar still says working",
 			).toHaveAttribute("aria-label", /^Done, unread/);
+			await expect(page.getByTestId("background-work-banner")).toBeHidden();
 			await record("shell-ended");
 		} finally {
 			const path = testInfo.outputPath("background-work-report.json");
@@ -117,5 +131,36 @@ test.describe("Claude background work", () => {
 				contentType: "application/json",
 			});
 		}
+	});
+
+	test("Stop on the banner ends the session and its background shell", async ({
+		page,
+		harness,
+		relayUrl,
+	}, testInfo) => {
+		const sessionId = decodeURIComponent(
+			harness.projectUrl.slice("/s/".length),
+		);
+		const app = new AppPage(page);
+		await app.goto(relayUrl);
+		await app.sendMessage("Run sleep 8 in the background");
+
+		const banner = page.getByTestId("background-work-banner");
+		const row = page.locator(`#session-list [data-session-id="${sessionId}"]`);
+		await expect(banner).toContainText("Monitoring");
+		await expect(row).toHaveAttribute("aria-label", /^Monitoring/);
+
+		await page.getByTestId("background-work-stop").click();
+		await expect(
+			banner,
+			"Stop left the background work banner up",
+		).toBeHidden();
+		await expect(
+			row,
+			"Stop ended the session but the sidebar still says monitoring",
+		).not.toHaveAttribute("aria-label", /^Monitoring/);
+		const path = testInfo.outputPath("after-stop.png");
+		await page.screenshot({ path, animations: "disabled" });
+		await testInfo.attach("after-stop.png", { path, contentType: "image/png" });
 	});
 });

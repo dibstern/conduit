@@ -335,6 +335,7 @@ export function groupSessionsByAttention(
 				groups.needsYou.push(s);
 				break;
 			case "working":
+			case "monitoring":
 				groups.running.push(s);
 				break;
 			case "done-unread":
@@ -453,7 +454,7 @@ export function sessionMatchesStatus(
 				attention === "error"
 			);
 		case "running":
-			return attention === "working";
+			return attention === "working" || attention === "monitoring";
 		case "unread":
 			return attention === "done-unread";
 	}

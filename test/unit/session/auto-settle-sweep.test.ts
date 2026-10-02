@@ -60,7 +60,7 @@ describe("relay automatic settlement sweep", () => {
 					loggerLayer,
 					configLayer,
 					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-					Layer.succeed(BackgroundLivenessTag, () => false),
+					Layer.succeed(BackgroundLivenessTag, () => undefined),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
 					OpenCodeInstanceClientsLive.pipe(
@@ -124,7 +124,7 @@ describe("relay automatic settlement sweep", () => {
 				background.record({
 					sessionId: "background",
 					kind: "snapshot",
-					taskIds: ["task1"],
+					taskTypes: ["task1"],
 				});
 				const broadcast = vi.fn(() => service.pushViewerFamilies());
 				const ports = {
@@ -165,7 +165,7 @@ describe("relay automatic settlement sweep", () => {
 				background.record({
 					sessionId: "background",
 					kind: "snapshot",
-					taskIds: [],
+					taskTypes: [],
 				});
 				viewers.clear();
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(2);
