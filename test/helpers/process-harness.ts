@@ -6,10 +6,11 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
@@ -146,6 +147,15 @@ export class ProcessHarness {
 			"active-config",
 		]) {
 			mkdirSync(join(this.root, directory));
+		}
+		// macOS resolves the login Keychain under HOME, so an isolated HOME hides
+		// the Claude login. Link only the Keychains dir for real-SDK runs.
+		if (realSdk && process.platform === "darwin") {
+			mkdirSync(join(this.root, "home", "Library"));
+			symlinkSync(
+				join(homedir(), "Library", "Keychains"),
+				join(this.root, "home", "Library", "Keychains"),
+			);
 		}
 		if (blockCapabilitiesProbe)
 			writeFileSync(join(this.root, "capabilities-probe-gated"), "hold");
@@ -308,6 +318,8 @@ export class ProcessHarness {
 					// An explicit config path must keep the login's original Keychain service.
 					...(this.realSdk
 						? {
+								// Claude reads its Keychain login with USER as the account name.
+								USER: userInfo().username,
 								CLAUDE_SECURESTORAGE_CONFIG_DIR:
 									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
 									process.env["CLAUDE_CONFIG_DIR"] ??
