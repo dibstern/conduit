@@ -17,6 +17,25 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 
 describe("DaemonConfigSchema", () => {
+	it("ignores dismissedPaths from older daemon.json files", () => {
+		const result = Schema.decodeUnknownEither(DaemonConfigSchema)({
+			pid: 1,
+			port: 2633,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [{ path: "/app", slug: "app", addedAt: 1 }],
+			dismissedPaths: ["/removed"],
+		});
+		expect(Either.isRight(result)).toBe(true);
+		if (Either.isRight(result)) {
+			expect(result.right.projects).toHaveLength(1);
+			expect(result.right).not.toHaveProperty("dismissedPaths");
+		}
+	});
+
 	it("validates a minimal config", () => {
 		const raw = {
 			pid: 1,
@@ -63,7 +82,6 @@ describe("DaemonConfigSchema", () => {
 					url: "http://localhost:4096",
 				},
 			],
-			dismissedPaths: ["/tmp/old-project"],
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
 		expect(Either.isRight(result)).toBe(true);
@@ -105,7 +123,7 @@ describe("DaemonConfigSchema", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("accepts config without optional instances/dismissedPaths", () => {
+	it("accepts config without optional instances", () => {
 		const raw = {
 			pid: 1,
 			port: 2633,
@@ -120,7 +138,6 @@ describe("DaemonConfigSchema", () => {
 		expect(Either.isRight(result)).toBe(true);
 		if (Either.isRight(result)) {
 			expect(result.right.instances).toBeUndefined();
-			expect(result.right.dismissedPaths).toBeUndefined();
 		}
 	});
 

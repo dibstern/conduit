@@ -79,52 +79,30 @@ describe("ProjectManagementServiceLive", () => {
 				expect(
 					projects.find((project) => project.slug === "uncached"),
 				).not.toHaveProperty("git");
+				expect(
+					projects.find((project) => project.slug === "cached"),
+				).toHaveProperty("missing", false);
+				expect(
+					projects.find((project) => project.slug === "uncached"),
+				).toHaveProperty("missing", true);
 			}).pipe(Effect.provide(makeLayer(config)));
 		},
 	);
 
-	it.effect(
-		"lists config-backed projects before falling back to OpenCode",
-		() => {
-			const settingsService = makeSettingsService({
-				listProjects: vi.fn(() => Effect.succeed([])),
-			});
-			const config = makeMockConfig({
-				getProjects: () => [
-					{
-						slug: "proj-1",
-						title: "Project 1",
-						directory: "/work/proj-1",
-						instanceId: "inst-1",
-					},
-				],
-			});
-			const layer = makeLayer(config, settingsService);
-
-			return Effect.gen(function* () {
-				const service = yield* ProjectManagementServiceTag;
-				const projects = yield* service.list();
-
-				expect(projects).toEqual([
-					{
-						slug: "proj-1",
-						title: "Project 1",
-						directory: "/work/proj-1",
-						instanceId: "inst-1",
-					},
-				]);
-				expect(settingsService.listProjects).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect("maps OpenCode fallback projects into conduit project info", () => {
+	it.effect("lists only config-backed projects", () => {
 		const settingsService = makeSettingsService({
-			listProjects: vi.fn(() =>
-				Effect.succeed([{ id: "p1", name: "Proj 1", path: "/proj1" }]),
-			),
+			listProjects: vi.fn(() => Effect.succeed([])),
 		});
-		const config = makeMockConfig();
+		const config = makeMockConfig({
+			getProjects: () => [
+				{
+					slug: "proj-1",
+					title: "Project 1",
+					directory: "/work/proj-1",
+					instanceId: "inst-1",
+				},
+			],
+		});
 		const layer = makeLayer(config, settingsService);
 
 		return Effect.gen(function* () {
@@ -132,34 +110,38 @@ describe("ProjectManagementServiceLive", () => {
 			const projects = yield* service.list();
 
 			expect(projects).toEqual([
-				{ slug: "p1", title: "Proj 1", directory: "/proj1" },
+				{
+					slug: "proj-1",
+					title: "Project 1",
+					directory: "/work/proj-1",
+					instanceId: "inst-1",
+					missing: true,
+				},
 			]);
+			expect(settingsService.listProjects).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.effect("enriches an OpenCode fallback project from cached git", () => {
-		const directory = mkdtempSync(
-			join(tmpdir(), "conduit-opencode-project-git-"),
-		);
-		fixtureDirs.push(directory);
-		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
-			cwd: directory,
-		});
-		const settingsService = makeSettingsService({
-			listProjects: vi.fn(() =>
-				Effect.succeed([{ id: "p1", name: "Proj 1", path: directory }]),
-			),
-		});
-		return Effect.gen(function* () {
-			const git = yield* Effect.promise(() =>
-				daemonSessionGitCache.refresh(directory),
-			);
-			const service = yield* ProjectManagementServiceTag;
-			expect(yield* service.list()).toEqual([
-				{ slug: "p1", title: "Proj 1", directory, git },
-			]);
-		}).pipe(Effect.provide(makeLayer(makeMockConfig(), settingsService)));
-	});
+	it.effect(
+		"does not import OpenCode projects without a registry getter",
+		() => {
+			const settingsService = makeSettingsService({
+				listProjects: vi.fn(() =>
+					Effect.succeed([{ id: "p1", name: "Proj 1", path: "/proj1" }]),
+				),
+			});
+			const config = makeMockConfig();
+			const layer = makeLayer(config, settingsService);
+
+			return Effect.gen(function* () {
+				const service = yield* ProjectManagementServiceTag;
+				const projects = yield* service.list();
+
+				expect(projects).toEqual([]);
+				expect(settingsService.listProjects).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect("reports unsupported project additions as typed errors", () => {
 		const settingsService = makeSettingsService();
@@ -233,6 +215,7 @@ describe("ProjectManagementServiceLive", () => {
 					slug: "proj-1",
 					title: "New Title",
 					directory: "/work/proj-1",
+					missing: true,
 				},
 			]);
 		}).pipe(Effect.provide(layer));
@@ -294,6 +277,7 @@ describe("ProjectManagementServiceLive", () => {
 						title: "Project 1",
 						directory: "/work/proj-1",
 						instanceId: "inst-2",
+						missing: true,
 					},
 				]);
 			}).pipe(Effect.provide(layer));

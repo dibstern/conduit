@@ -2,16 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Cause,
-	Deferred,
-	Effect,
-	Exit,
-	Layer,
-	Option,
-	Ref,
-	Scope,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
 import { expect } from "vitest";
 import {
 	DaemonLifecycleLayerError,
@@ -21,10 +12,7 @@ import {
 	SignalHandlerLayer,
 } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
-import {
-	DaemonConfigRefLive,
-	DaemonConfigRefTag,
-} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonConfigRefLive } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	DaemonHandleLive,
 	DaemonHandleTag,
@@ -223,7 +211,6 @@ describe("DaemonHandleTag", () => {
 					keepAwakeArgs: undefined,
 					claudeConfigDir: undefined,
 					shuttingDown: false,
-					dismissedPaths: new Set(["/tmp/new-project"]),
 					startTime: Date.now() - 1_000,
 					hostExplicit: false,
 					persistedSessionCounts: new Map([["existing", 2]]),
@@ -266,7 +253,6 @@ describe("DaemonHandleTag", () => {
 
 			return Effect.gen(function* () {
 				const handle = yield* DaemonHandleTag;
-				const configRef = yield* DaemonConfigRefTag;
 
 				const initialStatus = yield* handle.getStatus();
 				const initialOnboardingPort = yield* handle.onboardingPort;
@@ -292,7 +278,6 @@ describe("DaemonHandleTag", () => {
 				).not.toHaveProperty("sse");
 				expect(initialOnboardingPort).toBeNull();
 				expect(instances.map((instance) => instance.id)).toEqual(["default"]);
-				expect(typeof handle.discoverProjects).toBe("function");
 
 				const added = yield* handle.addProject(
 					"/tmp/new-project",
@@ -308,10 +293,6 @@ describe("DaemonHandleTag", () => {
 					"second",
 					"uncached",
 				]);
-				const configAfterAdd = yield* Ref.get(configRef);
-				expect(configAfterAdd.dismissedPaths.has("/tmp/new-project")).toBe(
-					false,
-				);
 
 				yield* handle.removeProject("existing");
 				const afterRemove = yield* handle.getStatus();
@@ -321,10 +302,6 @@ describe("DaemonHandleTag", () => {
 					"second",
 					"uncached",
 				]);
-				const configAfterRemove = yield* Ref.get(configRef);
-				expect(configAfterRemove.dismissedPaths.has("/tmp/existing")).toBe(
-					true,
-				);
 
 				const missingExit = yield* Effect.exit(handle.removeProject("missing"));
 				expect(Exit.isFailure(missingExit)).toBe(true);

@@ -20,7 +20,6 @@ export interface DaemonRuntimeConfig {
 	readonly keepAwakeArgs: string[] | undefined;
 	readonly claudeConfigDir: string | undefined;
 	readonly shuttingDown: boolean;
-	readonly dismissedPaths: ReadonlySet<string>;
 	readonly startTime: number;
 	readonly hostExplicit: boolean;
 	readonly persistedSessionCounts: ReadonlyMap<string, number>;
@@ -72,7 +71,6 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
 	claudeConfigDir?: string;
-	dismissedPaths?: string[];
 	startTime?: number;
 	persistedSessionCounts?: ReadonlyMap<string, number>;
 }): DaemonRuntimeConfig => ({
@@ -89,7 +87,6 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwakeArgs: options.keepAwakeArgs,
 	claudeConfigDir: options.claudeConfigDir,
 	shuttingDown: false,
-	dismissedPaths: new Set(options.dismissedPaths ?? []),
 	startTime: options.startTime ?? Date.now(),
 	hostExplicit: options.hostExplicit ?? false,
 	persistedSessionCounts: new Map(options.persistedSessionCounts ?? []),

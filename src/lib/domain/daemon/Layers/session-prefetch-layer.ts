@@ -7,7 +7,7 @@
 //   4. Updates persistedSessionCounts in DaemonConfigRefTag
 //
 // Dependencies:
-//   - DaemonConfigRefTag — for persistedSessionCounts, dismissed paths
+//   - DaemonConfigRefTag — for persistedSessionCounts
 //   - InstanceManagerStateTag — for resolving instance URLs and credentials
 //   - ProjectRegistryTag — for iterating registered projects
 //
@@ -17,6 +17,7 @@
 //
 // (AP-33)
 
+import { existsSync } from "node:fs";
 import { Effect, HashMap, Layer, Ref } from "effect";
 import {
 	commitDaemonRuntimeConfig,
@@ -58,6 +59,7 @@ export const prefetchSessionCounts: Effect.Effect<
 	let fetched = 0;
 
 	for (const [slug, entry] of HashMap.entries(registryState)) {
+		if (!existsSync(entry.project.directory)) continue;
 		// Skip if we already have persisted counts
 		if (config.persistedSessionCounts.has(slug)) continue;
 

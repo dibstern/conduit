@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -186,9 +186,8 @@ describe("daemon main runtime config status", () => {
 		expect(persisted?.keepAwakeArgs).toEqual(["awake"]);
 	});
 
-	it("keeps rehydrated dismissed paths and session counts in runtime-backed reads and persistence", async () => {
+	it("keeps rehydrated session counts in runtime-backed reads and persistence", async () => {
 		const projectPath = join(tmpDir, "persisted-project");
-		const dismissedPath = join(tmpDir, "dismissed-project");
 
 		await saveDaemonConfig(
 			{
@@ -209,7 +208,6 @@ describe("daemon main runtime config status", () => {
 					},
 				],
 				instances: [],
-				dismissedPaths: [dismissedPath],
 			},
 			tmpDir,
 		);
@@ -231,12 +229,44 @@ describe("daemon main runtime config status", () => {
 		daemon = null;
 
 		const persisted = loadDaemonConfig(tmpDir);
-		expect(persisted?.dismissedPaths).toContain(dismissedPath);
+		expect(persisted).not.toHaveProperty("dismissedPaths");
 		expect(persisted?.projects).toContainEqual(
 			expect.objectContaining({
 				slug: "persisted-project",
 				sessionCount: 7,
 			}),
 		);
+	});
+
+	it("keeps a removed project removed across restart and accepts an explicit re-add", async () => {
+		const projectPath = join(tmpDir, "project");
+		await mkdir(projectPath);
+		const options = {
+			configDir: tmpDir,
+			socketPath: join(tmpDir, "relay.sock"),
+			pidPath: join(tmpDir, "daemon.pid"),
+			staticDir: tmpDir,
+			port: 0,
+			tlsEnabled: false,
+			smartDefault: false,
+		};
+		daemon = await startForegroundDaemon(options);
+		const project = await daemon.addProject(projectPath);
+		expect(daemon.getProjects().map((entry) => entry.directory)).toEqual([
+			projectPath,
+		]);
+		await daemon.removeProject(project.slug);
+		await daemon.stop();
+		expect(loadDaemonConfig(tmpDir)?.projects).toEqual([]);
+		daemon = await startForegroundDaemon(options);
+		expect(daemon.getProjects()).toEqual([]);
+		const added = await daemon.addProject(projectPath);
+		expect(added.directory).toBe(projectPath);
+		expect(daemon.getProjects()).toEqual([added]);
+		await daemon.stop();
+		daemon = null;
+		expect(loadDaemonConfig(tmpDir)?.projects).toEqual([
+			expect.objectContaining({ path: projectPath, slug: added.slug }),
+		]);
 	});
 });

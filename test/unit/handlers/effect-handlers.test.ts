@@ -404,7 +404,7 @@ describe("handleGetProjects", () => {
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "project_list",
-					projects,
+					projects: [{ ...projects[0], missing: true }],
 					current: "test-project",
 				});
 			}),
@@ -412,7 +412,7 @@ describe("handleGetProjects", () => {
 	});
 
 	it.effect(
-		"falls back to client.app.projects when getProjects is not available",
+		"returns an empty list without querying OpenCode when no registry getter is available",
 		() => {
 			const ws = mockWsHandler();
 			const config = mockConfig();
@@ -432,10 +432,10 @@ describe("handleGetProjects", () => {
 			return handleGetProjects("client-1", {}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(client.app.projects).toHaveBeenCalledOnce();
+					expect(client.app.projects).not.toHaveBeenCalled();
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "project_list",
-						projects: [{ slug: "p1", title: "Proj 1", directory: "/proj1" }],
+						projects: [],
 						current: "test-project",
 					});
 				}),

@@ -69,7 +69,6 @@ const makeMockConfigRef = () => {
 		keepAwakeArgs: undefined,
 		claudeConfigDir: undefined,
 		shuttingDown: false,
-		dismissedPaths: new Set<string>(),
 		startTime: Date.now(),
 		hostExplicit: false,
 		persistedSessionCounts: new Map<string, number>(),

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -151,6 +151,44 @@ describe("RelayFactoryTag", () => {
 				expect(error.reason).toBe("HTTP server not started");
 			}
 		}).pipe(Effect.provide(Layer.fresh(factoryLayer))),
+	);
+
+	it.effect(
+		"does not recreate a missing directory or start its relay workers",
+		() => {
+			const directory = mkdtempSync(join(tmpdir(), "conduit-relay-missing-"));
+			const missingDirectory = join(directory, "missing");
+			const server = createServer();
+			return Effect.gen(function* () {
+				const factory = yield* RelayFactoryTag;
+				const serverRef = yield* HttpServerRefTag;
+				yield* Ref.set(serverRef, server);
+				createProjectRelayMock.mockClear();
+				const result = yield* factory
+					.create(
+						{
+							slug: "missing",
+							title: "Missing",
+							directory: missingDirectory,
+						},
+						"http://localhost:4096",
+					)
+					.pipe(Effect.either);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left")
+					expect(result.left.reason).toContain("directory does not exist");
+				expect(existsSync(missingDirectory)).toBe(false);
+				expect(createProjectRelayMock).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						server.close();
+						rmSync(directory, { recursive: true, force: true });
+					}),
+				),
+				Effect.provide(Layer.fresh(factoryLayer)),
+			);
+		},
 	);
 
 	it.effect("broadcasts project_list only when refreshed git changes", () => {

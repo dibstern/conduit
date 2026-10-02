@@ -1,4 +1,4 @@
-import { InstanceMgmtTag, ProjectMgmtTag } from "./management-service.js";
+import { InstanceMgmtTag } from "./management-service.js";
 // Effect-based startup sequence for the daemon. Handles crash counting,
 // instance rehydration, instance probing, smart default detection, and
 // auto-start. Each step uses error isolation — expected tagged errors are
@@ -246,25 +246,6 @@ export const autoStartManagedDefault: Effect.Effect<
 		{ concurrency: 1, discard: true },
 	);
 }).pipe(Effect.withSpan("autoStartManagedDefault"));
-
-/**
- * Discover projects from the ProjectMgmt service.
- *
- * This startup-era task is deliberately lightweight: the full OpenCode
- * project-list discovery lives in project-discovery-service.ts.
- */
-export const projectDiscovery: Effect.Effect<void, never, ProjectMgmtTag> =
-	Effect.gen(function* () {
-		const mgmt = yield* ProjectMgmtTag;
-		yield* Effect.try(() => mgmt.getProjects());
-		yield* Effect.logInfo("Project discovery complete");
-	}).pipe(
-		Effect.catchAll((e) =>
-			Effect.logWarning("Project discovery failed", { error: String(e) }),
-		),
-		Effect.annotateLogs("task", "projectDiscovery"),
-		Effect.withSpan("projectDiscovery"),
-	);
 
 /**
  * Orchestrator Effect that runs the full startup sequence.

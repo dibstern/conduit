@@ -53,7 +53,7 @@ describe("settings handlers with Effect-native settings service", () => {
 	);
 
 	it.effect(
-		"loads OpenCode fallback projects without requiring the Promise OpenCode API tag",
+		"returns no projects without a registry getter and does not query OpenCode",
 		() => {
 			const wsHandler = makeMockWebSocketHandler();
 			const settingsService = {
@@ -84,10 +84,10 @@ describe("settings handlers with Effect-native settings service", () => {
 			return handleGetProjects("client-1", {}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(settingsService.listProjects).toHaveBeenCalledOnce();
+					expect(settingsService.listProjects).not.toHaveBeenCalled();
 					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "project_list",
-						projects: [{ slug: "p1", title: "Proj 1", directory: "/proj1" }],
+						projects: [],
 						current: "test-project",
 					});
 				}),

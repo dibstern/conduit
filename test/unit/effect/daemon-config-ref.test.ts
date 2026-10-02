@@ -19,7 +19,6 @@ describe("DaemonConfigRef", () => {
 		keepAwakeArgs: undefined,
 		claudeConfigDir: undefined,
 		shuttingDown: false,
-		dismissedPaths: new Set(),
 		startTime: Date.now(),
 		hostExplicit: false,
 		persistedSessionCounts: new Map(),
@@ -91,16 +90,4 @@ describe("DaemonConfigRef", () => {
 		const c3 = makeDaemonConfigFromOptions({ host: "0.0.0.0" });
 		expect(c3.hostExplicit).toBe(false);
 	});
-
-	it.effect("dismissedPaths is an independent Set per instance", () =>
-		Effect.gen(function* () {
-			const ref = yield* DaemonConfigRefTag;
-			yield* Ref.update(ref, (c) => ({
-				...c,
-				dismissedPaths: new Set([...c.dismissedPaths, "/foo"]),
-			}));
-			const config = yield* Ref.get(ref);
-			expect(config.dismissedPaths.has("/foo")).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
 });

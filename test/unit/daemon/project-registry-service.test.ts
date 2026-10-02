@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -11,13 +11,16 @@ import {
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
+	addProjectToEffectRegistry,
 	addWithoutRelay,
+	allProjects,
 	broadcastToAll,
 	evictOldestSessions,
 	isStarting,
 	makeProjectRegistryLive,
 	markReady,
 	projectInfos,
+	removeProjectFromEffectRegistry,
 	waitForRelay,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
@@ -63,6 +66,36 @@ const testLayer = Layer.mergeAll(
 );
 
 describe("projectInfos", () => {
+	it.effect("keeps missing projects and computes missing at list time", () => {
+		const directory = mkdtempSync(join(tmpdir(), "conduit-registry-missing-"));
+		fixtureDirs.push(directory);
+		const missingDirectory = join(directory, "missing");
+		return Effect.gen(function* () {
+			yield* addWithoutRelay({ ...testProject, directory });
+			yield* addWithoutRelay({
+				...testProject,
+				slug: "missing",
+				directory: missingDirectory,
+			});
+			const projects = yield* projectInfos;
+			expect(projects).toHaveLength(2);
+			expect(
+				projects.find((project) => project.slug === testProject.slug),
+			).toHaveProperty("missing", false);
+			expect(
+				projects.find((project) => project.slug === "missing"),
+			).toHaveProperty("missing", true);
+			mkdirSync(missingDirectory);
+			expect(
+				(yield* projectInfos).find((project) => project.slug === "missing"),
+			).toHaveProperty("missing", false);
+			rmSync(directory, { recursive: true });
+			expect((yield* projectInfos).every((project) => project.missing)).toBe(
+				true,
+			);
+		}).pipe(Effect.provide(Layer.fresh(testLayer)));
+	});
+
 	it.effect(
 		"includes cached git for a project and omits it for an uncached one",
 		() => {
@@ -109,6 +142,19 @@ describe("projectInfos", () => {
 				).not.toHaveProperty("git");
 			}).pipe(Effect.provide(Layer.fresh(testLayer)));
 		},
+	);
+});
+
+describe("explicit project registration", () => {
+	it.effect("can add the same directory after removal", () =>
+		Effect.gen(function* () {
+			const first = yield* addProjectToEffectRegistry(testProject.directory);
+			yield* removeProjectFromEffectRegistry(first.slug);
+			expect(yield* allProjects).toEqual([]);
+			const added = yield* addProjectToEffectRegistry(testProject.directory);
+			expect(added.directory).toBe(testProject.directory);
+			expect(yield* allProjects).toEqual([added]);
+		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });
 

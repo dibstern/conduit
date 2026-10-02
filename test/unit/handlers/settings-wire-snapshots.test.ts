@@ -137,7 +137,7 @@ describe("settings handler wire snapshots", () => {
 		expect(calls).toEqual(readSnapshots()["get_projects_config_success"]);
 	});
 
-	it("keeps the OpenCode fallback get_projects envelope stable", async () => {
+	it("returns an empty get_projects envelope without a registry getter", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const api = makeSettingsApi({
 			projects: vi.fn(async () => [
@@ -146,9 +146,8 @@ describe("settings handler wire snapshots", () => {
 		});
 
 		await runSettingsHandler(handleGetProjects("client-1", {}), api, wsHandler);
+		expect(api.app.projects).not.toHaveBeenCalled();
 
-		expect(calls).toEqual(
-			readSnapshots()["get_projects_opencode_fallback_success"],
-		);
+		expect(calls).toEqual(readSnapshots()["get_projects_without_registry"]);
 	});
 });

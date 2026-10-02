@@ -83,7 +83,6 @@ describe("daemon-config-persistence", () => {
 					makeTestLayers(testFs, {
 						port: 9999,
 						pinHash: "test-hash",
-						dismissedPaths: new Set(["/a", "/b"]),
 						projects: [
 							{
 								path: "/app",
@@ -109,8 +108,7 @@ describe("daemon-config-persistence", () => {
 			const parsed = JSON.parse(written ?? "{}");
 			expect(parsed.port).toBe(9999);
 			expect(parsed.pinHash).toBe("test-hash");
-			// dismissedPaths serialized as array
-			expect(parsed.dismissedPaths).toEqual(["/a", "/b"]);
+			expect(parsed).not.toHaveProperty("dismissedPaths");
 			expect(parsed.projects).toHaveLength(1);
 			expect(parsed.projects[0].slug).toBe("app");
 		}),
@@ -157,11 +155,7 @@ describe("daemon-config-persistence", () => {
 			expect(state.keepAwakeArgs).toEqual(["--what=idle"]);
 			expect(state.projects).toHaveLength(1);
 			expect(state.instances).toHaveLength(1);
-			// dismissedPaths deserialized as Set
-			expect(state.dismissedPaths).toBeInstanceOf(Set);
-			expect(state.dismissedPaths.size).toBe(2);
-			expect(state.dismissedPaths.has("/old-path")).toBe(true);
-			expect(state.dismissedPaths.has("/another")).toBe(true);
+			expect(state).not.toHaveProperty("dismissedPaths");
 		}),
 	);
 
@@ -230,7 +224,6 @@ describe("daemon-config-persistence", () => {
 			expect(state.pinHash).toBeNull();
 			expect(state.projects).toEqual([]);
 			expect(state.instances).toEqual([]);
-			expect(state.dismissedPaths.size).toBe(0);
 			expect(state.keepAwake).toBe(false);
 			expect(state.debug).toBe(false);
 		}),
@@ -253,7 +246,6 @@ describe("daemon-config-persistence", () => {
 			const defaults = emptyDaemonState();
 			expect(state.port).toBe(defaults.port);
 			expect(state.pinHash).toBeNull();
-			expect(state.dismissedPaths.size).toBe(0);
 		}),
 	);
 

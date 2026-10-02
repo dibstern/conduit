@@ -21,7 +21,6 @@ import {
 	type CrashCounter,
 	CrashCounterTag,
 	CrashLimitExceeded,
-	projectDiscovery,
 	runStartupSequence,
 } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
@@ -186,49 +185,6 @@ describe("daemon-main", () => {
 
 				expect(result).toBeInstanceOf(CrashLimitExceeded);
 				expect((result as CrashLimitExceeded).count).toBe(5);
-			}),
-		);
-	});
-
-	describe("projectDiscovery", () => {
-		it.effect("calls getProjects and completes", () =>
-			Effect.gen(function* () {
-				const getProjects = vi
-					.fn()
-					.mockReturnValue([
-						{ slug: "proj-1", title: "Project 1", directory: "/tmp/p1" },
-					]);
-
-				yield* projectDiscovery.pipe(
-					Effect.provide(
-						Layer.succeed(ProjectMgmtTag, {
-							getProjects,
-							setProjectInstance: vi.fn(),
-						}),
-					),
-				);
-
-				expect(getProjects).toHaveBeenCalledOnce();
-			}),
-		);
-
-		it.effect("catches errors and does not propagate", () =>
-			Effect.gen(function* () {
-				const getProjects = vi.fn().mockImplementation(() => {
-					throw new Error("discovery failed");
-				});
-
-				// Should NOT throw — projectDiscovery catches expected errors
-				yield* projectDiscovery.pipe(
-					Effect.provide(
-						Layer.succeed(ProjectMgmtTag, {
-							getProjects,
-							setProjectInstance: vi.fn(),
-						}),
-					),
-				);
-
-				expect(getProjects).toHaveBeenCalledOnce();
 			}),
 		);
 	});

@@ -34,7 +34,6 @@ interface DaemonConfigOnDisk {
 	dangerouslySkipPermissions: boolean;
 	projects: DaemonProject[];
 	instances: DaemonInstanceConfig[];
-	dismissedPaths: string[];
 }
 
 /** Serialize persisted fields of DaemonState to a JSON-safe object. */
@@ -58,18 +57,12 @@ function serializeState(state: DaemonState): DaemonConfigOnDisk {
 		dangerouslySkipPermissions: state.dangerouslySkipPermissions,
 		projects: state.projects,
 		instances: state.instances,
-		dismissedPaths: Array.from(state.dismissedPaths),
 	};
 }
 
 /** Deserialize a parsed JSON object into a DaemonState, merged with defaults. */
 function deserializeConfig(raw: Record<string, unknown>): DaemonState {
 	const defaults = emptyDaemonState();
-
-	// Extract dismissedPaths, converting Array to Set
-	const dismissedArr = Array.isArray(raw["dismissedPaths"])
-		? (raw["dismissedPaths"] as string[])
-		: [];
 
 	const state: DaemonState = {
 		...defaults,
@@ -106,7 +99,6 @@ function deserializeConfig(raw: Record<string, unknown>): DaemonState {
 		...(Array.isArray(raw["instances"]) && {
 			instances: raw["instances"] as DaemonInstanceConfig[],
 		}),
-		dismissedPaths: new Set(dismissedArr),
 	};
 
 	// Normalize a pre-driver-model legacy default OpenCode instance id to the

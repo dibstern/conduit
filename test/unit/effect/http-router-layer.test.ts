@@ -53,7 +53,6 @@ const baseConfig = {
 	keepAwakeArgs: undefined,
 	claudeConfigDir: undefined,
 	shuttingDown: false,
-	dismissedPaths: new Set<string>(),
 	startTime: Date.now(),
 	hostExplicit: false,
 	persistedSessionCounts: new Map<string, number>(),
@@ -99,7 +98,6 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 	port: Effect.succeed(2633),
 	onboardingPort: Effect.succeed(null),
 	addProject: () => Effect.die("unused"),
-	discoverProjects: () => Effect.succeed(0),
 	removeProject: (slug: string) => Effect.fail(new ProjectNotFound({ slug })),
 	getStatus: () =>
 		Effect.succeed({

@@ -121,9 +121,6 @@ export async function handleForeground(ctx: CommandContext): Promise<void> {
 
 	await daemon.addProject(cwd);
 
-	// Discover projects from OpenCode's project registry
-	await daemon.discoverProjects();
-
 	const fgStatus = daemon.getStatus();
 	const fgScheme = fgStatus.tlsEnabled ? "https" : "http";
 	const fgHost = fgStatus.host ?? "localhost";

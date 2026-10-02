@@ -1,9 +1,10 @@
-// Tests for WebSocketRoutingLive, ProjectDiscoveryLive, SessionPrefetchLive.
-// Covers P0 gaps: API failure graceful degradation, dismissed paths,
-// duplicate detection, error-state reset, mock fetch session prefetch,
-// scoped fiber lifecycle, and finalizer verification.
+// Tests for WebSocketRoutingLive and SessionPrefetchLive.
+// Covers session prefetch, missing directories, and scoped fiber lifecycle.
 
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
@@ -15,10 +16,8 @@ import {
 	Ref,
 	Scope,
 } from "effect";
-import { afterEach, expect, vi } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
-import { ProjectDiscoveryLive } from "../../../src/lib/domain/daemon/Layers/project-discovery-layer.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
 	prefetchSessionCounts,
@@ -29,9 +28,7 @@ import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import {
 	type InstanceManagerState,
 	InstanceManagerStateTag,
@@ -39,7 +36,6 @@ import {
 	makeInstanceManagerStateLive,
 	PollerFibersTag,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { discoverProjectsEffect } from "../../../src/lib/domain/daemon/Services/project-discovery-service.js";
 import {
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
@@ -85,8 +81,6 @@ const httpServerRefWithServerLayer = Layer.effect(
 
 const registryLayer = makeProjectRegistryLive();
 const instanceLayer = makeInstanceManagerStateLive();
-const eventBusLayer = Layer.merge(DaemonEventBusLive, InstanceHealthCheckLive);
-const persistenceLayer = ConfigPersistenceNoopLive;
 
 const makeInstance = (
 	id: string,
@@ -162,128 +156,50 @@ describe("WebSocketRoutingLive", () => {
 	);
 });
 
-describe("ProjectDiscoveryLive", () => {
-	const discoveryLayer = ProjectDiscoveryLive.pipe(
-		Layer.provide(configRefLayer),
-		Layer.provide(instanceLayer),
-		Layer.provide(registryLayer),
-		Layer.provide(eventBusLayer),
-		Layer.provide(persistenceLayer),
-	);
+// prefetchSessionCounts (direct invocation)
 
-	it.scoped("builds without error", () =>
-		Effect.sync(() => {
-			expect(true).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(discoveryLayer))),
-	);
-});
+describe("prefetchSessionCounts", () => {
+	let directory: string;
+	beforeEach(() => {
+		directory = mkdtempSync(join(tmpdir(), "conduit-prefetch-"));
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		rmSync(directory, { recursive: true, force: true });
+	});
 
-// discoverProjectsEffect (direct invocation)
-
-describe("discoverProjectsEffect", () => {
-	const directLayer = Layer.mergeAll(
-		configRefLayer,
-		instanceLayer,
-		registryLayer,
-		eventBusLayer,
-		persistenceLayer,
-	);
-
-	it.scoped("returns 0 when no instances available", () =>
+	it.scoped("does not fetch sessions for a missing project directory", () =>
 		Effect.gen(function* () {
-			const count = yield* discoverProjectsEffect;
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(0);
-		}).pipe(Effect.provide(Layer.fresh(directLayer))),
-	);
-
-	it.scoped(
-		"returns 0 and does not crash when instance exists but API is unreachable",
-		() =>
-			Effect.gen(function* () {
-				const count = yield* discoverProjectsEffect;
-				expect(count).toBe(0);
-			}).pipe(
-				Effect.provide(
-					Layer.fresh(
-						Layer.mergeAll(
-							configRefLayer,
-							makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
-							registryLayer,
-							eventBusLayer,
-							persistenceLayer,
-						),
-					),
-				),
-			),
-	);
-
-	it.scoped("does not crash with error-state entries in registry", () =>
-		Effect.gen(function* () {
-			const count = yield* discoverProjectsEffect;
-			expect(count).toBe(0);
+			expect(fetchMock.mock.calls.length).toBe(0);
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(
 					Layer.mergeAll(
 						configRefLayer,
-						makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
+						makeSeededInstanceLayer([{ id: "i1", port: 3456 }]),
 						makeSeededRegistryLayer([
 							[
-								"errored-project",
+								"missing",
 								{
-									_tag: "Error" as const,
+									_tag: "Registering",
 									project: {
-										slug: "errored-project",
-										directory: "/tmp/errored",
-										title: "Errored",
-										lastUsed: Date.now(),
+										slug: "missing",
+										title: "Missing",
+										directory: join(directory, "missing"),
+										instanceId: "i1",
 									},
-									error: "previous failure",
 								},
 							],
 						]),
-						eventBusLayer,
-						persistenceLayer,
 					),
 				),
 			),
 		),
 	);
-
-	it.scoped("dismissed paths are not re-discovered", () =>
-		Effect.gen(function* () {
-			// Config with dismissed path — even if API returned a project at that
-			// path, it should be skipped. Since the API is unreachable in tests,
-			// we verify the config is read by checking no crash.
-			const count = yield* discoverProjectsEffect;
-			expect(count).toBe(0);
-		}).pipe(
-			Effect.provide(
-				Layer.fresh(
-					Layer.mergeAll(
-						DaemonConfigRefLive(
-							makeDaemonConfigFromOptions({
-								port: 2633,
-								dismissedPaths: ["/tmp/dismissed"],
-							}),
-						),
-						makeSeededInstanceLayer([{ id: "i1", port: 19999 }]),
-						registryLayer,
-						eventBusLayer,
-						persistenceLayer,
-					),
-				),
-			),
-		),
-	);
-});
-
-// prefetchSessionCounts (direct invocation)
-
-describe("prefetchSessionCounts", () => {
-	afterEach(() => {
-		vi.unstubAllGlobals();
-	});
 
 	it.scoped("returns 0 when no projects registered", () =>
 		Effect.gen(function* () {
@@ -320,7 +236,7 @@ describe("prefetchSessionCounts", () => {
 									_tag: "Ready" as const,
 									project: {
 										slug: "my-project",
-										directory: "/tmp/my-project",
+										directory,
 										title: "My Project",
 										lastUsed: Date.now(),
 										instanceId: "i1",
@@ -351,7 +267,7 @@ describe("prefetchSessionCounts", () => {
 									_tag: "Ready" as const,
 									project: {
 										slug: "orphan",
-										directory: "/tmp/orphan",
+										directory,
 										title: "Orphan",
 										lastUsed: Date.now(),
 										instanceId: "nonexistent",
@@ -394,7 +310,7 @@ describe("prefetchSessionCounts", () => {
 										_tag: "Ready" as const,
 										project: {
 											slug: "my-project",
-											directory: "/tmp/my-project",
+											directory,
 											title: "My Project",
 											lastUsed: Date.now(),
 											instanceId: "i1",
@@ -423,7 +339,7 @@ describe("prefetchSessionCounts", () => {
 				"http://localhost:4567/session?limit=10000",
 				expect.objectContaining({
 					headers: expect.objectContaining({
-						"x-opencode-directory": "/tmp/seeded-project",
+						"x-opencode-directory": directory,
 					}),
 				}),
 			);
@@ -444,7 +360,7 @@ describe("prefetchSessionCounts", () => {
 								projects: [
 									{
 										slug: "seeded-project",
-										path: "/tmp/seeded-project",
+										path: directory,
 										title: "Seeded Project",
 										addedAt: 1,
 										instanceId: "default",
@@ -502,7 +418,7 @@ describe("prefetchSessionCounts", () => {
 											_tag: "Ready" as const,
 											project: {
 												slug: "proj-a",
-												directory: "/tmp/proj-a",
+												directory,
 												title: "Project A",
 												lastUsed: Date.now(),
 												instanceId: "i1",
@@ -515,7 +431,7 @@ describe("prefetchSessionCounts", () => {
 											_tag: "Ready" as const,
 											project: {
 												slug: "proj-b",
-												directory: "/tmp/proj-b",
+												directory,
 												title: "Project B",
 												lastUsed: Date.now(),
 												instanceId: "i2",
@@ -555,7 +471,7 @@ describe("prefetchSessionCounts", () => {
 										_tag: "Ready" as const,
 										project: {
 											slug: "proj",
-											directory: "/tmp/proj",
+											directory,
 											title: "Proj",
 											lastUsed: Date.now(),
 											instanceId: "i1",
@@ -612,24 +528,6 @@ describe("Scoped fiber lifecycle", () => {
 
 			// After Effect.scoped completes, fiber was interrupted
 			expect(yield* Deferred.isDone(wasInterrupted)).toBe(true);
-		}),
-	);
-
-	it.scoped("ProjectDiscoveryLive scope close tears down cleanly", () =>
-		Effect.gen(function* () {
-			const layer = Layer.fresh(
-				ProjectDiscoveryLive.pipe(
-					Layer.provide(configRefLayer),
-					Layer.provide(instanceLayer),
-					Layer.provide(registryLayer),
-					Layer.provide(eventBusLayer),
-					Layer.provide(persistenceLayer),
-				),
-			);
-			const scope = yield* Scope.make();
-			yield* Layer.buildWithScope(layer, scope);
-			// Should not hang — forked fiber is interrupted
-			yield* Scope.close(scope, Exit.void);
 		}),
 	);
 

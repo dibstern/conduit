@@ -150,7 +150,6 @@ describe("makeDaemonLive wiring", () => {
 					keepAwake: true,
 					keepAwakeCommand: "printf",
 					keepAwakeArgs: ["awake"],
-					dismissedPaths: ["/tmp/dismissed"],
 					persistedSessionCounts: new Map([["persisted", 3]]),
 				}),
 			} satisfies DaemonLiveOptions;
@@ -165,7 +164,6 @@ describe("makeDaemonLive wiring", () => {
 				expect(config.keepAwake).toBe(true);
 				expect(config.keepAwakeCommand).toBe("printf");
 				expect(config.keepAwakeArgs).toEqual(["awake"]);
-				expect(config.dismissedPaths.has("/tmp/dismissed")).toBe(true);
 				expect(config.persistedSessionCounts.get("persisted")).toBe(3);
 			}).pipe(Effect.provide(Layer.fresh(makeDaemonLive(options))));
 		},

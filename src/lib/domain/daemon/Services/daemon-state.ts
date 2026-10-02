@@ -57,7 +57,6 @@ export interface DaemonState {
 	dangerouslySkipPermissions: boolean;
 	projects: DaemonProject[];
 	instances: DaemonInstanceConfig[];
-	dismissedPaths: Set<string>;
 
 	clientCount: number;
 	shuttingDown: boolean;
@@ -87,7 +86,6 @@ export function emptyDaemonState(): DaemonState {
 		dangerouslySkipPermissions: false,
 		projects: [],
 		instances: [],
-		dismissedPaths: new Set<string>(),
 
 		// Runtime-observable
 		clientCount: 0,

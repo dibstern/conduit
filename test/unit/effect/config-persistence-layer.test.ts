@@ -45,7 +45,6 @@ describe("ConfigPersistenceLive", () => {
 		keepAwakeArgs: undefined,
 		claudeConfigDir: undefined,
 		shuttingDown: false,
-		dismissedPaths: new Set(),
 		startTime: Date.now(),
 		hostExplicit: false,
 		persistedSessionCounts: new Map(),
@@ -175,7 +174,6 @@ describe("ConfigPersistenceLive", () => {
 						keepAwake: true,
 						keepAwakeCommand: "caffeinate",
 						keepAwakeArgs: ["-dims"],
-						dismissedPaths: new Set(["/tmp/ignored"]),
 						persistedSessionCounts: new Map([["alpha", 3]]),
 					}),
 					DaemonEventBusLive,
@@ -234,7 +232,6 @@ describe("ConfigPersistenceLive", () => {
 							url: "https://opencode.example.test",
 						},
 					],
-					dismissedPaths: ["/tmp/ignored"],
 				});
 			}),
 	);

@@ -66,8 +66,6 @@ export interface DaemonConfig {
 		driver?: ProviderDriverKind;
 		configDir?: string;
 	}>;
-	/** Directories the user explicitly removed — skip in auto-discovery. */
-	dismissedPaths?: string[];
 }
 
 export interface CrashInfo {
@@ -113,7 +111,6 @@ export const DaemonConfigSchema = Schema.Struct({
 	claudeConfigDir: Schema.optional(Schema.String),
 	projects: Schema.Array(DaemonProjectSchema),
 	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
-	dismissedPaths: Schema.optional(Schema.Array(Schema.String)),
 });
 
 export class DaemonConfigTag extends Context.Tag("DaemonConfig")<

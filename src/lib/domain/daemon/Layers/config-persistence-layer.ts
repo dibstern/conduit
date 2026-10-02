@@ -99,9 +99,6 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			};
 		}),
 		instances,
-		...(runtime.dismissedPaths.size > 0 && {
-			dismissedPaths: Array.from(runtime.dismissedPaths),
-		}),
 	} satisfies DaemonConfig;
 }).pipe(Effect.withSpan("configPersistence.buildSnapshot"));
 

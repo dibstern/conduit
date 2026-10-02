@@ -7,18 +7,13 @@ import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
-import {
-	commitDaemonRuntimeConfig,
-	DaemonConfigRefTag,
-	type DaemonRuntimeConfig,
-} from "./daemon-config-ref.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
 import { DaemonEventBusTag } from "./daemon-pubsub.js";
 import {
 	getInstances as getEffectInstances,
 	InstanceManagerStateTag,
 } from "./instance-manager-service.js";
-import { discoverProjectsEffect } from "./project-discovery-service.js";
 import {
 	addWithoutRelay,
 	allProjects,
@@ -39,7 +34,6 @@ export interface EffectDaemonHandle {
 		slug?: string,
 		instanceId?: string,
 	) => Effect.Effect<StoredProject, ProjectAlreadyExists>;
-	readonly discoverProjects: () => Effect.Effect<number>;
 	readonly removeProject: (
 		slug: string,
 	) => Effect.Effect<void, ProjectNotFound>;
@@ -102,13 +96,6 @@ export const DaemonHandleLive: Layer.Layer<
 		const onboardingPort = Effect.sync(() =>
 			getOnboardingPort(lifecycleContext.onboardingServer),
 		);
-		const commitConfig = (
-			update: (config: DaemonRuntimeConfig) => DaemonRuntimeConfig,
-		) =>
-			commitDaemonRuntimeConfig(update).pipe(
-				Effect.provideService(DaemonConfigRefTag, configRef),
-			);
-
 		const addProject = (
 			directory: string,
 			slug?: string,
@@ -116,16 +103,6 @@ export const DaemonHandleLive: Layer.Layer<
 		) =>
 			Effect.gen(function* () {
 				const normalizedDirectory = normalizeProjectDirectory(directory);
-				yield* commitConfig((config) => {
-					if (!config.dismissedPaths.has(normalizedDirectory)) return config;
-					const dismissedPaths = new Set(config.dismissedPaths);
-					dismissedPaths.delete(normalizedDirectory);
-					return {
-						...config,
-						dismissedPaths,
-					};
-				});
-
 				const existing = yield* findByDirectory(normalizedDirectory).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
 				);
@@ -177,7 +154,6 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(RelayCacheTag, relayCache),
 					Effect.provideService(ConfigPersistenceTag, persistence),
-					Effect.provideService(DaemonConfigRefTag, configRef),
 				);
 			}).pipe(Effect.withSpan("daemonHandle.removeProject"));
 
@@ -185,16 +161,6 @@ export const DaemonHandleLive: Layer.Layer<
 			allProjects.pipe(
 				Effect.provideService(ProjectRegistryTag, projectRef),
 				Effect.withSpan("daemonHandle.getProjects"),
-			);
-
-		const discoverProjects = () =>
-			discoverProjectsEffect.pipe(
-				Effect.provideService(DaemonConfigRefTag, configRef),
-				Effect.provideService(DaemonEventBusTag, bus),
-				Effect.provideService(ConfigPersistenceTag, persistence),
-				Effect.provideService(InstanceManagerStateTag, instanceState),
-				Effect.provideService(ProjectRegistryTag, projectRef),
-				Effect.withSpan("daemonHandle.discoverProjects"),
 			);
 
 		const getInstances = () =>
@@ -257,7 +223,6 @@ export const DaemonHandleLive: Layer.Layer<
 			port,
 			onboardingPort,
 			addProject,
-			discoverProjects,
 			removeProject,
 			getStatus,
 			getProjects,

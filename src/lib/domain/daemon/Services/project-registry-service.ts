@@ -28,7 +28,6 @@ import { withCachedProjectGit } from "../../../git/session-git.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { requestConfigSave } from "./config-persistence-service.js";
-import { commitDaemonRuntimeConfig } from "./daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { RelayCacheTag } from "./relay-cache.js";
@@ -661,16 +660,6 @@ export const addProjectToEffectRegistry = (
 ) =>
 	Effect.gen(function* () {
 		const normalizedDirectory = normalizeProjectDirectory(directory);
-		yield* commitDaemonRuntimeConfig((config) => {
-			if (!config.dismissedPaths.has(normalizedDirectory)) return config;
-			const dismissedPaths = new Set(config.dismissedPaths);
-			dismissedPaths.delete(normalizedDirectory);
-			return {
-				...config,
-				dismissedPaths,
-			};
-		});
-
 		const existing = yield* findByDirectory(normalizedDirectory);
 		if (Option.isSome(existing)) {
 			return existing.value.project;
@@ -689,19 +678,5 @@ export const addProjectToEffectRegistry = (
 		return project;
 	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));
 
-/**
- * Remove a project the user asked to drop, and dismiss its directory so
- * OpenCode project discovery does not re-register it on the next start.
- */
-export const removeProjectFromEffectRegistry = (slug: string) =>
-	Effect.gen(function* () {
-		const entry = yield* getEntry(slug);
-		if (Option.isNone(entry)) return;
-		const { directory } = entry.value.project;
-		yield* remove(slug);
-		yield* commitDaemonRuntimeConfig((config) => ({
-			...config,
-			dismissedPaths: new Set([...config.dismissedPaths, directory]),
-		}));
-		yield* requestConfigSave;
-	}).pipe(Effect.withSpan("projectRegistry.removeAndDismiss"));
+/** Remove a project from Conduit's persisted registry. */
+export const removeProjectFromEffectRegistry = remove;

@@ -1,7 +1,7 @@
 import { Context, Data, Effect, Layer } from "effect";
 import { withCachedProjectGit } from "../../../git/session-git.js";
 import type { ProjectInfo } from "../../../shared-types.js";
-import { ConfigTag, OpenCodeSettingsServiceTag } from "./services.js";
+import { ConfigTag } from "./services.js";
 
 type ProjectOperation = "list" | "add" | "remove" | "rename" | "setInstance";
 
@@ -71,12 +71,11 @@ const toError =
 export const ProjectManagementServiceLive: Layer.Layer<
 	ProjectManagementServiceTag,
 	never,
-	ConfigTag | OpenCodeSettingsServiceTag
+	ConfigTag
 > = Layer.effect(
 	ProjectManagementServiceTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const settingsService = yield* OpenCodeSettingsServiceTag;
 
 		const listConfigProjects = (): Effect.Effect<
 			ReadonlyArray<ProjectInfo> | undefined,
@@ -89,25 +88,11 @@ export const ProjectManagementServiceLive: Layer.Layer<
 				catch: toError("list"),
 			}).pipe(Effect.map(withCachedProjectGit));
 		};
-		const listProjects = () =>
-			Effect.gen(function* () {
-				const configProjects = yield* listConfigProjects();
-				if (configProjects != null) return configProjects;
-				const ocProjects = yield* settingsService
-					.listProjects()
-					.pipe(Effect.mapError(toError("list")));
-				return withCachedProjectGit(
-					ocProjects.map((project) => ({
-						slug: project.id ?? "unknown",
-						title: project.name ?? project.id ?? "Unknown",
-						directory: project.path ?? "",
-					})),
-				);
-			});
 
 		return {
 			currentSlug: () => Effect.succeed(config.slug),
-			list: listProjects,
+			list: () =>
+				listConfigProjects().pipe(Effect.map((projects) => projects ?? [])),
 			add: (directory, instanceId) =>
 				Effect.gen(function* () {
 					const addProject = config.addProject;
@@ -121,7 +106,8 @@ export const ProjectManagementServiceLive: Layer.Layer<
 						try: () => addProject(directory, instanceId),
 						catch: toError("add"),
 					});
-					const projects = (yield* listConfigProjects()) ?? [project];
+					const projects =
+						(yield* listConfigProjects()) ?? withCachedProjectGit([project]);
 					return { project, projects };
 				}),
 			remove: (slug) =>

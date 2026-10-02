@@ -1,19 +1,11 @@
 import type { CrashCounterTag } from "../Services/daemon-startup.js";
 import type { DaemonStateTag } from "../Services/daemon-state.js";
-import type {
-	InstanceMgmtTag,
-	ProjectMgmtTag,
-} from "../Services/management-service.js";
+import type { InstanceMgmtTag } from "../Services/management-service.js";
 // Top-level Effect program that replaces the Daemon class's start() method.
-// Creates a Layer that runs the startup sequence, forks background tasks
-// under supervision, and keeps alive until interrupted (SIGINT/SIGTERM).
-//
-// Only projectDiscovery is forked. Session prefetch and push init
-// remain stubs.
+// Creates a scoped Layer that runs startup and keeps alive until interrupted.
 //
 // Design points:
 //   - Layer.scopedDiscard — side-effect-only Layer (no output service)
-//   - Effect.forkScoped — fibers tied to enclosing scope, interrupted on shutdown
 //   - Effect.tapDefect — logs defects without swallowing them
 //   - Effect.never — keeps the fiber alive until SIGINT/SIGTERM
 //   - Layer.provide(daemonLayer) — provides all deps to the program
@@ -31,7 +23,6 @@ import {
 } from "effect";
 import {
 	type CrashLimitExceeded,
-	projectDiscovery,
 	runStartupSequence,
 } from "../Services/daemon-startup.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
@@ -60,11 +51,7 @@ export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
 // Minimal: lists only the Tags used by the current startup sequence.
 // Do not import Tags for background tasks that are still stubs.
 
-export type DaemonDeps =
-	| DaemonStateTag
-	| CrashCounterTag
-	| InstanceMgmtTag
-	| ProjectMgmtTag;
+export type DaemonDeps = DaemonStateTag | CrashCounterTag | InstanceMgmtTag;
 
 /** Exponential backoff with 3 retries for startup. */
 export const startupRetry = Schedule.exponential("1 second").pipe(
@@ -103,23 +90,6 @@ export const makeDaemonProgramLayer = (
 					Effect.logError(
 						`Daemon aborting: crash limit exceeded (${e.count} consecutive crashes)`,
 					).pipe(Effect.andThen(Effect.die(e))),
-				),
-			);
-
-			// Fork background tasks under supervision (supervisor from context)
-			const supervisor = yield* SupervisorTag;
-			yield* Effect.supervised(
-				Effect.gen(function* () {
-					yield* Effect.forkScoped(projectDiscovery);
-					// yield* Effect.forkScoped(sessionPrefetch);
-					// yield* Effect.forkScoped(pushInit);
-				}),
-				supervisor,
-			).pipe(
-				Effect.tapDefect((defect) =>
-					Effect.logError("DEFECT in background task — this is a bug", {
-						defect,
-					}),
 				),
 			);
 

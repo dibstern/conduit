@@ -11,14 +11,12 @@ const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 		const mockAddProject = vi
 			.fn()
 			.mockResolvedValue({ slug: "test-project", directory: "/test/project" });
-		const mockDiscoverProjects = vi.fn().mockResolvedValue(undefined);
 
 		const mockStartForegroundDaemon = vi
 			.fn()
 			.mockImplementation((opts: { port?: number }) =>
 				Promise.resolve({
 					addProject: mockAddProject,
-					discoverProjects: mockDiscoverProjects,
 					stopped: new Promise<void>(() => {}),
 					getStatus: vi
 						.fn()

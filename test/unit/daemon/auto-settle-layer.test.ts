@@ -2,7 +2,16 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Option, Scope, TestClock } from "effect";
+import {
+	Effect,
+	Exit,
+	Layer,
+	Logger,
+	LogLevel,
+	Option,
+	Scope,
+	TestClock,
+} from "effect";
 import { expect, vi } from "vitest";
 import { AutoSettleLive } from "../../../src/lib/domain/daemon/Layers/auto-settle-layer.js";
 import {
@@ -37,6 +46,68 @@ function fakeRelay(
 }
 
 describe("daemon automatic settlement layer", () => {
+	it.scoped(
+		"skips missing projects on every sweep and logs once at debug level",
+		() =>
+			Effect.gen(function* () {
+				const directory = mkdtempSync(join(tmpdir(), "conduit-auto-missing-"));
+				const missingDirectory = join(directory, "missing");
+				const sweep = vi.fn(() => Effect.succeed(1));
+				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
+				const logs: Array<{ level: string; message: unknown }> = [];
+				const logger = Logger.make(({ logLevel, message }) => {
+					logs.push({ level: logLevel.label, message });
+				});
+				const layer = AutoSettleLive.pipe(
+					Layer.provide(
+						Layer.mergeAll(
+							DaemonConfigRefLive(
+								makeDaemonConfigFromOptions({ autoSettleAfterDays: 3 }),
+							),
+							makeProjectRegistryLive([
+								{
+									slug: "running",
+									title: "Running",
+									directory: missingDirectory,
+								},
+								{ slug: "cold", title: "Cold", directory: missingDirectory },
+							]),
+							Layer.succeed(RelayCacheTag, {
+								peek: (slug) =>
+									Effect.succeed(
+										slug === "running"
+											? Option.some(fakeRelay(slug, sweep))
+											: Option.none<Relay>(),
+									),
+								get,
+								invalidate: () => Effect.void,
+							}),
+							DaemonEventBusLive,
+							Logger.replace(Logger.defaultLogger, logger),
+						),
+					),
+				);
+				const scope = yield* Scope.make();
+				try {
+					yield* Layer.buildWithScope(layer, scope).pipe(
+						Logger.withMinimumLogLevel(LogLevel.Debug),
+					);
+					yield* TestClock.adjust("1 millis");
+					yield* TestClock.adjust("2 minutes");
+					expect(get).not.toHaveBeenCalled();
+					expect(sweep).not.toHaveBeenCalled();
+					expect(logs.filter((log) => log.level === "DEBUG")).toHaveLength(1);
+					expect(logs.filter((log) => log.level === "WARN")).toEqual([]);
+					mkdirSync(missingDirectory);
+					yield* TestClock.adjust("1 minute");
+					expect(sweep).toHaveBeenCalled();
+				} finally {
+					yield* Scope.close(scope, Exit.void);
+					rmSync(directory, { recursive: true, force: true });
+				}
+			}),
+	);
+
 	it.scoped(
 		"ticks a running relay, skips cold empty projects, and survives one project failure",
 		() =>
@@ -175,37 +246,41 @@ describe("daemon automatic settlement layer", () => {
 			}),
 	);
 
-	it.scoped("does no project work when disabled", () =>
-		Effect.gen(function* () {
-			const peek = vi.fn(() => Effect.succeed(Option.none<Relay>()));
-			const layer = AutoSettleLive.pipe(
-				Layer.provideMerge(
-					Layer.mergeAll(
-						DaemonConfigRefLive(
-							makeDaemonConfigFromOptions({ autoSettleAfterDays: null }),
+	it.scoped(
+		"disables settlement but still stops workers for missing projects",
+		() =>
+			Effect.gen(function* () {
+				const peek = vi.fn(() => Effect.succeed(Option.none<Relay>()));
+				const invalidate = vi.fn(() => Effect.void);
+				const layer = AutoSettleLive.pipe(
+					Layer.provideMerge(
+						Layer.mergeAll(
+							DaemonConfigRefLive(
+								makeDaemonConfigFromOptions({ autoSettleAfterDays: null }),
+							),
+							makeProjectRegistryLive([
+								{
+									slug: "cold",
+									title: "Cold",
+									directory: "/missing",
+									lastUsed: 1,
+								},
+							]),
+							Layer.succeed(RelayCacheTag, {
+								peek,
+								get: () => Effect.fail(new Error("must skip")),
+								invalidate,
+							}),
+							DaemonEventBusLive,
 						),
-						makeProjectRegistryLive([
-							{
-								slug: "cold",
-								title: "Cold",
-								directory: "/missing",
-								lastUsed: 1,
-							},
-						]),
-						Layer.succeed(RelayCacheTag, {
-							peek,
-							get: () => Effect.fail(new Error("must skip")),
-							invalidate: () => Effect.void,
-						}),
-						DaemonEventBusLive,
 					),
-				),
-			);
-			const scope = yield* Scope.make();
-			yield* Layer.buildWithScope(layer, scope);
-			yield* TestClock.adjust("1 minute");
-			expect(peek).not.toHaveBeenCalled();
-			yield* Scope.close(scope, Exit.void);
-		}),
+				);
+				const scope = yield* Scope.make();
+				yield* Layer.buildWithScope(layer, scope);
+				yield* TestClock.adjust("1 minute");
+				expect(peek).not.toHaveBeenCalled();
+				expect(invalidate).toHaveBeenCalledWith("cold");
+				yield* Scope.close(scope, Exit.void);
+			}),
 	);
 });

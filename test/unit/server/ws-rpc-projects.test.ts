@@ -19,6 +19,7 @@ const project = {
 	title: "Project 1",
 	directory: "/work/proj-1",
 	instanceId: "inst-1",
+	missing: true,
 };
 
 describe("WsRpcServerLayer project management", () => {

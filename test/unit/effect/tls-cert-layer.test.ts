@@ -24,7 +24,6 @@ const baseConfig: DaemonRuntimeConfig = {
 	keepAwakeArgs: undefined,
 	claudeConfigDir: undefined,
 	shuttingDown: false,
-	dismissedPaths: new Set(),
 	startTime: Date.now(),
 	hostExplicit: false,
 	persistedSessionCounts: new Map(),

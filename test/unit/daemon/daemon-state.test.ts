@@ -16,7 +16,6 @@ describe("DaemonState", () => {
 			expect(state.keepAwake).toBe(false);
 			expect(state.clientCount).toBe(0);
 			expect(state.shuttingDown).toBe(false);
-			expect(state.dismissedPaths.size).toBe(0);
 			expect(state.projects).toEqual([]);
 			expect(state.instances).toEqual([]);
 			expect(state.tls).toBe(false);
@@ -31,13 +30,11 @@ describe("DaemonState", () => {
 
 			expect(result.pinHash).toBe("abc123");
 			expect(result.keepAwake).toBe(true);
-			expect(result.dismissedPaths.has("/tmp/foo")).toBe(true);
 		}).pipe(
 			Effect.provide(
 				makeDaemonStateLive({
 					pinHash: "abc123",
 					keepAwake: true,
-					dismissedPaths: new Set(["/tmp/foo"]),
 				}),
 			),
 		),

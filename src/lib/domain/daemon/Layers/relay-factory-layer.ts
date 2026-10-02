@@ -9,7 +9,7 @@
 // imperative createProjectRelay. The full conversion of createProjectRelay
 // to Effect is beyond scope — this provides the Effect-native entry point.
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -303,6 +303,11 @@ export const RelayFactoryLive = (
 						}
 
 						// Create persistence DB directory and open SQLite
+						if (!existsSync(project.directory)) {
+							return yield* new RelayFactoryError({
+								reason: `Project directory does not exist: ${project.directory}`,
+							});
+						}
 						const conduitDir = resolve(project.directory, ".conduit");
 						yield* Effect.try({
 							try: () => mkdirSync(conduitDir, { recursive: true }),

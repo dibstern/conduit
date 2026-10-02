@@ -43,7 +43,6 @@ export interface ForegroundDaemonHandle {
 		slug?: string,
 		instanceId?: string,
 	): Promise<StoredProject>;
-	discoverProjects(): Promise<void>;
 	getStatus(): DaemonStatus;
 	getProjects(): ReadonlyArray<Readonly<StoredProject>>;
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
@@ -105,7 +104,6 @@ const buildInitialRuntimeConfig = (
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(claudeConfigDir !== undefined && { claudeConfigDir }),
-		dismissedPaths: persisted?.dismissedPaths ?? [],
 		startTime: Date.now(),
 		persistedSessionCounts: persistedSessionCounts(persisted),
 	});
@@ -337,8 +335,6 @@ export async function startForegroundDaemon(
 		},
 		addProject: (directory, slug, instanceId) =>
 			runHandleEffect((h) => h.addProject(directory, slug, instanceId)),
-		discoverProjects: () =>
-			runHandleEffect((h) => h.discoverProjects()).then(() => undefined),
 		getStatus: () => {
 			requestSnapshotRefresh();
 			return status;

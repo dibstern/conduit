@@ -121,7 +121,6 @@ import { DaemonWsRpcHandlersLive } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
-import { ProjectDiscoveryLive } from "./project-discovery-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryError,
@@ -908,7 +907,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const scopedFibers = Layer.mergeAll(
 		AutoSettleLive,
 		WebSocketRoutingLive,
-		ProjectDiscoveryLive,
 		SessionPrefetchLive,
 		InstanceHealthPollingLive,
 	).pipe(Layer.provideMerge(withWsRelayRouter));

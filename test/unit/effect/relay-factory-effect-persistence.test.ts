@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +64,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-effect-"));
 			const projectDir = join(dir, "project");
+			mkdirSync(projectDir);
 			const server = createServer();
 			createProjectRelayMock.mockResolvedValue({
 				stop: vi.fn(async () => undefined),
@@ -124,6 +125,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-config-"));
 			const projectDir = join(dir, "project");
+			mkdirSync(projectDir);
 			const server = createServer();
 			createProjectRelayMock.mockResolvedValue({
 				stop: vi.fn(async () => undefined),
@@ -249,6 +251,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect("threads Effect-owned instance mutators into relay config", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-instance-"));
 		const projectDir = join(dir, "project");
+		mkdirSync(projectDir);
 		const server = createServer();
 		createProjectRelayMock.mockResolvedValue({
 			stop: vi.fn(async () => undefined),
@@ -363,6 +366,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect("threads auxiliary daemon services into relay config", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-aux-"));
 		const projectDir = join(dir, "project");
+		mkdirSync(projectDir);
 		const server = createServer();
 		const scanResult = {
 			discovered: [4321],
@@ -472,6 +476,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect("aborts in-flight relay creation when interrupted", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-abort-"));
 		const projectDir = join(dir, "project");
+		mkdirSync(projectDir);
 		const server = createServer();
 		let signal: AbortSignal | undefined;
 		let markStarted: (() => void) | undefined;
@@ -542,6 +547,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				join(tmpdir(), "conduit-relay-project-mutators-"),
 			);
 			const projectDir = join(dir, "project");
+			mkdirSync(projectDir);
 			const server = createServer();
 			const firstStop = vi.fn(async () => undefined);
 			const secondStop = vi.fn(async () => undefined);
