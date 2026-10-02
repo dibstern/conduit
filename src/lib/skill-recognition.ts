@@ -163,3 +163,26 @@ export function tokenizeSkills(
 
 	return segments;
 }
+
+/** Which skill a Skill call loaded. Sessions recorded before Skill inputs were
+ *  normalized carry the name only in the result text, so recover it from there. */
+export function skillNameFromTool(
+	input: unknown,
+	result: string | undefined,
+): string {
+	if (
+		input !== null &&
+		typeof input === "object" &&
+		"tool" in input &&
+		input.tool === "Skill" &&
+		"name" in input &&
+		typeof input.name === "string" &&
+		input.name.length > 0
+	) {
+		return input.name;
+	}
+	const match = result?.match(
+		/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']|^"?Launching skill: ([^"\s]+)/,
+	);
+	return match?.[1] || match?.[2] || "";
+}

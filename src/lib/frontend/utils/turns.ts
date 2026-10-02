@@ -2,6 +2,7 @@
 // reply segments. The transcript renders one collapsed activity line per segment
 // (summary sentence + duration strip), expandable to the log.
 
+import { skillNameFromTool } from "../../skill-recognition.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -239,13 +240,8 @@ export function toolTags(tool: ToolMessage): readonly string[] {
 	);
 }
 
-/** Which skill a Skill call loaded. Sessions recorded before Skill inputs were
- *  normalized carry the name only in the result text, so recover it from there. */
 export function skillName(tool: ToolMessage): string {
-	const match = tool.result?.match(
-		/^<skill_content\b[^>]*(?:name|skill_name)=["']([^"']+)["']|^"?Launching skill: ([^"\s]+)/,
-	);
-	return toolSubject(tool) || match?.[1] || match?.[2] || "";
+	return skillNameFromTool(ensureCanonical(tool.name, tool.input), tool.result);
 }
 
 export function toolCommand(tool: ToolMessage): string | undefined {

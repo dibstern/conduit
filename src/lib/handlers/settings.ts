@@ -93,6 +93,31 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 		return yield* Effect.fail(openCodeResult.left);
 	});
 
+export const getSkillNamesForSession = (sessionId: string) =>
+	Effect.gen(function* () {
+		const engine = yield* OrchestrationEngineTag;
+		const providerId = yield* engine.getProviderForSessionEffect(sessionId);
+		const commands =
+			providerId === "claude"
+				? (yield* engine.dispatchEffect({
+						type: "discover",
+						providerId: "claude",
+					})).commands
+				: yield* (yield* OpenCodeSettingsServiceTag).listCommands();
+		return new Set(
+			commands
+				.filter(
+					(command) =>
+						!command.name.startsWith("anthropic-skills:") &&
+						(command.source === "user-skill" ||
+							command.source === "project-skill" ||
+							command.source === "plugin-skill" ||
+							command.source === "skill"),
+				)
+				.map((command) => command.name),
+		);
+	});
+
 export const handleGetProjects = (
 	clientId: string,
 	_payload: Record<string, never>,

@@ -17,7 +17,7 @@
 		getModelDisplayName,
 	} from "../../stores/discovery.svelte.js";
 	import { extractDisplayText } from "../../utils/format.js";
-	import { tokenizeSkills } from "../../utils/skill-highlight.js";
+	import { tokenizeSkills } from "../../../skill-recognition.js";
 	import { isQueued } from "../../utils/turns.js";
 	import Surface from "../ui/Surface.svelte";
 	import MessageTime from "./MessageTime.svelte";

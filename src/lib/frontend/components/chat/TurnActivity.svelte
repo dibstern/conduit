@@ -9,7 +9,8 @@
 <!-- Skills are the turn's chapters, so their count is a control of its own: it    -->
 <!-- lists which ran and when, picks them out on the strip, and jumps to the call.  -->
 <script lang="ts">
-	import { tick } from "svelte";
+	import { tick, untrack } from "svelte";
+	import { revealedPart } from "../../stores/reveal.svelte.js";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -63,6 +64,14 @@
 	const TICKER_ROWS = 3;
 	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
 
+	$effect(() => {
+		const uuid = revealedPart.request?.uuid;
+		untrack(() => {
+			const i = segment.activity.findIndex((part) => part.uuid === uuid);
+			if (i >= 0) void jumpTo(i);
+		});
+	});
+
 	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */
 	function chapterTiming(c: SkillChapter): string {
 		let at: string | undefined;
@@ -81,7 +90,7 @@
 		expanded = true;
 		focusUuid = part.uuid;
 		await tick();
-		panelEl?.querySelector(`[data-part="${part.uuid}"]`)?.scrollIntoView({ block: "nearest" });
+		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
 	}
 </script>
 

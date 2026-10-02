@@ -3,6 +3,7 @@
 	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { onDestroy, untrack } from "svelte";
+	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
@@ -81,7 +82,7 @@
 {#snippet header(sheet: boolean)}
 	{#if sheet}
 		<div data-testid="session-sheet-header" class="flex items-start gap-3 border-b border-border px-4 pt-[8px] pb-[11px] font-brand">
-			{#if status.icon}<span class="mt-0.5 grid size-[20px] shrink-0 place-items-center {status.colour}" aria-hidden="true"><Icon name={status.icon} size={14} /></span>{/if}
+			<span class="mt-0.5 grid size-[20px] shrink-0 place-items-center {status.colour}" aria-hidden="true">{#if "dither" in status.glyph}<DitherGlyph state={status.glyph.dither} />{:else}<Icon name={status.glyph.icon} size={14} />{/if}</span>
 			<div class="min-w-0 flex-1">
 				<div class="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-text">{session.title || "New Session"}</div>
 				<div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-text-secondary">

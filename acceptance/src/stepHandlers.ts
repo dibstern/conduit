@@ -7,6 +7,7 @@ import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
+import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { visualHandlers } from "./steps/visual.js";
 
@@ -14,6 +15,7 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
+	...sessionSkillsHandlers,
 	...mockAppHandlers,
 	...modelDriftHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
