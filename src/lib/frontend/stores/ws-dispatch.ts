@@ -4,6 +4,7 @@
 // Two-tier dispatcher routes per-session events by event.sessionId
 // via routePerSession. Global events handled by handleMessage directly.
 
+import { BUILD_ID } from "../../build-id.js";
 import { notificationContent } from "../../notification-content.js";
 import {
 	type PerSessionEvent,
@@ -15,6 +16,11 @@ import type {
 	GetFileListResponse,
 } from "../transport/ws-rpc.js";
 import type { RelayMessage, ToolMessage } from "../types.js";
+import {
+	claimBuildReload,
+	refreshAppShell,
+	releaseBuildReload,
+} from "../utils/build-id.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import {
 	findMessage,
@@ -27,6 +33,8 @@ import {
 	handleStatus,
 	handleThinkingStop,
 	handleToolExecuting,
+	inputSyncState,
+	persistInputDraft,
 	type SessionActivity,
 	type SessionMessages,
 	sessionActivity,
@@ -397,6 +405,7 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "protocol_version":
 			handleProtocolVersion(msg.version);
+			handleBuildId(msg.buildId);
 			break;
 		case "connection_status":
 			handleConnectionStatus(msg);
@@ -658,6 +667,54 @@ const STALE_DAEMON_BANNER_ID = "stale-daemon";
 const STALE_PAGE_BANNER_ID = "stale-page";
 const PROTOCOL_VERSION_GRACE_MS = 10_000;
 let protocolVersionTimer: ReturnType<typeof setTimeout> | null = null;
+
+const BUILD_MISMATCH_BANNER_ID = "build-mismatch";
+let buildReloadPending = false;
+
+function showBuildMismatchBanner(): void {
+	showBanner({
+		id: BUILD_MISMATCH_BANNER_ID,
+		variant: "warning",
+		icon: "refresh-cw",
+		text: "This page and the server have different builds. Restart the server, then reload this tab. Your draft is still here.",
+		dismissible: false,
+	});
+}
+
+function handleBuildId(serverBuildId: string | undefined): void {
+	if (buildReloadPending) return;
+	const action = claimBuildReload(BUILD_ID, serverBuildId);
+	if (action === "current") {
+		removeBanner(BUILD_MISMATCH_BANNER_ID);
+		return;
+	}
+	if (action === "warn") {
+		showBuildMismatchBanner();
+		return;
+	}
+	buildReloadPending = true;
+	inputSyncState.reloadPending = true;
+	showToast("Conduit was updated. Saving your draft and reloading…", {
+		duration: 1_000,
+	});
+	void (async () => {
+		try {
+			await refreshAppShell();
+			// Leave the notice visible briefly; save after any last keystrokes.
+			await new Promise((resolve) => setTimeout(resolve, 750));
+			if (await persistInputDraft()) {
+				location.reload();
+				return;
+			}
+		} catch {
+			// Failed worker updates and draft saves also keep this tab open.
+		}
+		releaseBuildReload(serverBuildId);
+		buildReloadPending = false;
+		inputSyncState.reloadPending = false;
+		showBuildMismatchBanner();
+	})();
+}
 
 function showStaleDaemonBanner(): void {
 	showBanner({

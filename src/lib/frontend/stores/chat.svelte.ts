@@ -441,7 +441,26 @@ export const inputSyncState = $state({
 	lastFrom: "",
 	/** Timestamp of the last sync update (monotonic, for change detection). */
 	lastUpdated: 0,
+	/** A reconnect's older server draft must not replace text being saved. */
+	reloadPending: false,
 });
+
+let persistInputDraftHook: (() => Promise<boolean>) | undefined;
+
+/** The mounted composer flushes its latest text through existing draft sync. */
+export function registerInputDraftPersistence(
+	persist: () => Promise<boolean>,
+): () => void {
+	persistInputDraftHook = persist;
+	return () => {
+		if (persistInputDraftHook === persist) persistInputDraftHook = undefined;
+	};
+}
+
+/** False defers reload to keep pending attachments in the mounted composer. */
+export async function persistInputDraft(): Promise<boolean> {
+	return (await persistInputDraftHook?.()) ?? true;
+}
 
 /** Handle an incoming input_sync message from another tab. */
 export function handleInputSyncReceived(msg: {

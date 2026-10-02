@@ -30,6 +30,13 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
 	);
 });
 
+// A build-mismatch reload must get the current shell from the server.
+self.addEventListener("fetch", (event: FetchEvent) => {
+	if (event.request.mode === "navigate") {
+		event.respondWith(fetch(event.request, { cache: "no-store" }));
+	}
+});
+
 interface PushPayload {
 	alertId?: string;
 	type?: string;
