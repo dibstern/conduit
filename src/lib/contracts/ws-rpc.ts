@@ -440,6 +440,49 @@ export const ProjectMutationResponseSchema = Schema.Struct({
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
+	addedInstanceId: Schema.optional(Schema.String),
+});
+
+export const GetInstanceStatusResponseSchema = Schema.Struct({
+	instance: OpenCodeInstanceSchema,
+});
+
+export const GetStatusResponseSchema = Schema.Struct({
+	uptime: Schema.Number,
+	port: Schema.Number,
+	host: Schema.String,
+	tailscaleIP: Schema.optional(Schema.String),
+	lanIP: Schema.optional(Schema.String),
+	projectCount: Schema.Number,
+	sessionCount: Schema.Number,
+	processingCount: Schema.optional(Schema.Number),
+	clientCount: Schema.Number,
+	pinEnabled: Schema.Boolean,
+	tlsEnabled: Schema.Boolean,
+	keepAwake: Schema.Boolean,
+	projects: Schema.Array(
+		Schema.Struct({
+			slug: Schema.String,
+			directory: Schema.String,
+			title: Schema.String,
+			status: Schema.optional(Schema.String),
+			lastUsed: Schema.optional(Schema.Number),
+			sse: Schema.optional(
+				Schema.Struct({
+					connected: Schema.Boolean,
+					lastEventAt: Schema.NullOr(Schema.Number),
+					reconnectCount: Schema.Number,
+					stale: Schema.Boolean,
+				}),
+			),
+		}),
+	),
+});
+
+export const SetKeepAwakeResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	supported: Schema.Boolean,
+	active: Schema.Boolean,
 });
 
 export const ScanNowResponseSchema = Schema.Struct({
@@ -512,6 +555,10 @@ export type GetProjectsResponse = typeof GetProjectsResponseSchema.Type;
 export type ProjectMutationResponse = typeof ProjectMutationResponseSchema.Type;
 export type OpenCodeInstance = typeof OpenCodeInstanceSchema.Type;
 export type InstanceListResponse = typeof InstanceListResponseSchema.Type;
+export type GetInstanceStatusResponse =
+	typeof GetInstanceStatusResponseSchema.Type;
+export type GetStatusResponse = typeof GetStatusResponseSchema.Type;
+export type SetKeepAwakeResponse = typeof SetKeepAwakeResponseSchema.Type;
 export type ScanNowResponse = typeof ScanNowResponseSchema.Type;
 export type DetectProxyResponse = typeof DetectProxyResponseSchema.Type;
 export type PtyInfo = typeof PtyInfoSchema.Type;
@@ -563,6 +610,86 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
 }) {}
+
+export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
+	failure: WsRpcError,
+	success: GetStatusResponseSchema,
+	payload: {},
+}) {}
+
+export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {
+		pin: Schema.NullOr(Schema.String.pipe(Schema.pattern(/^\d{4,8}$/))),
+	},
+}) {}
+
+export class SetKeepAwake extends Schema.TaggedRequest<SetKeepAwake>()(
+	"SetKeepAwake",
+	{
+		failure: WsRpcError,
+		success: SetKeepAwakeResponseSchema,
+		payload: { enabled: Schema.Boolean },
+	},
+) {}
+
+export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeCommand>()(
+	"SetKeepAwakeCommand",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			command: NonEmptyString,
+			args: Schema.optionalWith(Schema.Array(Schema.String), {
+				default: () => [],
+			}),
+		},
+	},
+) {}
+
+export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {},
+}) {}
+
+export class SetAgent extends Schema.TaggedRequest<SetAgent>()("SetAgent", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: { slug: Schema.String, agent: Schema.String },
+}) {}
+
+export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()(
+	"RestartWithConfig",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			config: Schema.optional(
+				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+			),
+		},
+	},
+) {}
+
+export class GetInstances extends Schema.TaggedRequest<GetInstances>()(
+	"GetInstances",
+	{
+		failure: WsRpcError,
+		success: InstanceListResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class GetInstanceStatus extends Schema.TaggedRequest<GetInstanceStatus>()(
+	"GetInstanceStatus",
+	{
+		failure: WsRpcError,
+		success: GetInstanceStatusResponseSchema,
+		payload: { instanceId: NonEmptyString },
+	},
+) {}
 
 export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
 	failure: WsRpcError,
@@ -725,6 +852,7 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			instanceId: NonEmptyString,
+			driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 			name: Schema.optional(Schema.String),
 			port: Schema.optional(Schema.Number),
 			env: Schema.optional(
@@ -1426,6 +1554,15 @@ export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
 ) {}
 
 export const WsRpcRequest = Schema.Union(
+	GetStatus,
+	SetPin,
+	SetKeepAwake,
+	SetKeepAwakeCommand,
+	Shutdown,
+	SetAgent,
+	RestartWithConfig,
+	GetInstances,
+	GetInstanceStatus,
 	AttachProject,
 	ResolveSession,
 	GetAgents,
@@ -1522,6 +1659,15 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
+	Rpc.fromTaggedRequest(GetStatus),
+	Rpc.fromTaggedRequest(SetPin),
+	Rpc.fromTaggedRequest(SetKeepAwake),
+	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
+	Rpc.fromTaggedRequest(Shutdown),
+	Rpc.fromTaggedRequest(SetAgent),
+	Rpc.fromTaggedRequest(RestartWithConfig),
+	Rpc.fromTaggedRequest(GetInstances),
+	Rpc.fromTaggedRequest(GetInstanceStatus),
 	Rpc.fromTaggedRequest(AttachProject),
 	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetAgents),

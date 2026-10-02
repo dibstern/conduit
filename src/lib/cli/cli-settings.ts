@@ -24,18 +24,18 @@ export interface SettingsInfo {
 export interface SettingsMenuOptions extends PromptOptions {
 	/** Get current settings state. */
 	getSettingsInfo: () => SettingsInfo | Promise<SettingsInfo>;
-	/** IPC: set PIN. */
+	/** RPC: set PIN. */
 	setPin: (pin: string) => Promise<{ ok: boolean; error?: string }>;
-	/** IPC: remove PIN (set null). */
+	/** RPC: remove PIN (set null). */
 	removePin: () => Promise<{ ok: boolean; error?: string }>;
-	/** IPC: toggle keep-awake. */
+	/** RPC: toggle keep-awake. */
 	setKeepAwake: (enabled: boolean) => Promise<{
 		ok: boolean;
 		supported?: boolean;
 		active?: boolean;
 		error?: string;
 	}>;
-	/** IPC: set custom keep-awake command and args. */
+	/** RPC: set custom keep-awake command and args. */
 	setKeepAwakeCommand?: (
 		command: string,
 		args: string[],

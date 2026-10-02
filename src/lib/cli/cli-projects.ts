@@ -25,13 +25,13 @@ export interface ProjectsMenuOptions extends PromptOptions {
 	getProjects: () => ProjectStatus[] | Promise<ProjectStatus[]>;
 	/** Current working directory. */
 	cwd: string;
-	/** IPC: add a project. */
+	/** RPC: add a project. */
 	addProject: (
 		directory: string,
 	) => Promise<{ ok: boolean; slug?: string; error?: string }>;
-	/** IPC: remove a project. */
+	/** RPC: remove a project. */
 	removeProject: (slug: string) => Promise<{ ok: boolean; error?: string }>;
-	/** IPC: set project title. */
+	/** RPC: set project title. */
 	setProjectTitle: (
 		slug: string,
 		title: string,

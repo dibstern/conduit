@@ -1,7 +1,7 @@
 // Tests: --foreground handler in run()
 //
 // The --foreground handler uses an injectable daemon starter facade so the
-// handler logic can be tested without starting real HTTP/IPC servers.
+// handler logic can be tested without starting real HTTP/RPC servers.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,7 +71,7 @@ function createMockIO(cwd = "/test/project") {
 		exit: vi.fn(),
 		// Provide these so run() doesn't try to connect to real sockets
 		isDaemonRunning: vi.fn().mockResolvedValue(false),
-		sendIPC: vi.fn().mockResolvedValue({ ok: true }),
+		sendRPC: vi.fn().mockResolvedValue({ ok: true }),
 		spawnDaemon: vi.fn().mockResolvedValue({ pid: 1, port: 2633 }),
 		startForegroundDaemon: mockStartForegroundDaemon,
 		generateQR: (url: string) => `[QR:${url}]`,

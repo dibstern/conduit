@@ -124,8 +124,6 @@ describe("startOnboardingServer", () => {
 			httpServer: null,
 			upgradeServer: null,
 			onboardingServer: null,
-			ipcServer: null,
-			ipcClients: new Set(),
 			clientCount: 0,
 			socketPath: join(tmpDir, "unused.sock"),
 			router: null,

@@ -1,19 +1,19 @@
 // CLI command handlers. Keep command output and failure paths local to each handler.
 
 import { resolve } from "node:path";
+import type { Request } from "effect/Request";
 import {
 	AddProject,
+	GetProjects,
 	GetStatus,
-	type IpcTaggedRequest,
-	ListProjects,
 	RemoveProject,
+	RenameProject,
 	SetPin,
-	SetProjectTitle,
 	Shutdown,
-} from "../lib/contracts/ipc-requests.js";
+} from "../lib/contracts/ws-rpc.js";
+import type { SendRPC } from "../lib/daemon/daemon-rpc-client.js";
 import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
-import type { IPCResponse } from "../lib/types.js";
 import type { CLIOptions } from "./cli-core.js";
 import {
 	DEFAULT_CONFIG_DIR,
@@ -30,7 +30,7 @@ export interface CommandContext {
 	stdout: { write(s: string): void };
 	stderr: { write(s: string): void };
 	exit: (code: number) => void;
-	ipcSend: (cmd: IpcTaggedRequest) => Promise<IPCResponse>;
+	rpcSend: SendRPC;
 	checkDaemon: () => Promise<boolean>;
 	spawnDaemonFn: NonNullable<CLIOptions["spawnDaemon"]>;
 	startForegroundDaemonFn: NonNullable<CLIOptions["startForegroundDaemon"]>;
@@ -74,7 +74,7 @@ export async function handleDaemon(ctx: CommandContext): Promise<void> {
 		logLevel: args.logLevel,
 		logFormat: args.logFormat ?? "json",
 	});
-	// Resolves only after shutdown (signal or IPC), then exits the process.
+	// Resolves only after shutdown (signal or RPC), then exits the process.
 	return;
 }
 
@@ -85,7 +85,7 @@ export async function handleForeground(ctx: CommandContext): Promise<void> {
 		stdout,
 		exit,
 		checkDaemon,
-		ipcSend,
+		rpcSend,
 		startForegroundDaemonFn,
 	} = ctx;
 
@@ -94,7 +94,7 @@ export async function handleForeground(ctx: CommandContext): Promise<void> {
 		try {
 			const running = await checkDaemon();
 			if (running) {
-				await ipcSend(new Shutdown({}));
+				await rpcSend(new Shutdown({}));
 				stdout.write("Stopped existing daemon.\n");
 			}
 		} catch {
@@ -142,7 +142,7 @@ export async function handleHelp(ctx: CommandContext): Promise<void> {
 }
 
 export async function handleStatus(ctx: CommandContext): Promise<void> {
-	const { stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	const running = await checkDaemon();
 	if (!running) {
@@ -152,11 +152,11 @@ export async function handleStatus(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const response = await ipcSend(new GetStatus({}));
-	if (!response.ok) {
-		stderr.write(
-			`Failed to get status: ${response.error ?? "unknown error"}\n`,
-		);
+	let response: Request.Success<GetStatus>;
+	try {
+		response = await rpcSend(new GetStatus({}));
+	} catch (err) {
+		stderr.write(`Failed to get status: ${formatErrorDetail(err)}\n`);
 		exit(1);
 		return;
 	}
@@ -177,7 +177,7 @@ export async function handleStatus(ctx: CommandContext): Promise<void> {
 }
 
 export async function handleStop(ctx: CommandContext): Promise<void> {
-	const { stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	const running = await checkDaemon();
 	if (!running) {
@@ -187,7 +187,7 @@ export async function handleStop(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		await ipcSend(new Shutdown({}));
+		await rpcSend(new Shutdown({}));
 		stdout.write("Daemon stopped.\n");
 	} catch (err) {
 		stderr.write(`Failed to stop daemon: ${formatErrorDetail(err)}\n`);
@@ -197,7 +197,7 @@ export async function handleStop(ctx: CommandContext): Promise<void> {
 }
 
 export async function handlePin(ctx: CommandContext): Promise<void> {
-	const { args, stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { args, stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	if (!args.pin || !/^\d{4,8}$/.test(args.pin)) {
 		stderr.write("PIN must be 4-8 digits.\n");
@@ -213,18 +213,18 @@ export async function handlePin(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const response = await ipcSend(new SetPin({ pin: args.pin }));
-	if (response.ok) {
+	try {
+		await rpcSend(new SetPin({ pin: args.pin }));
 		stdout.write("PIN updated.\n");
-	} else {
-		stderr.write(`Failed to set PIN: ${response.error ?? "unknown error"}\n`);
+	} catch (err) {
+		stderr.write(`Failed to set PIN: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
 export async function handleAdd(ctx: CommandContext): Promise<void> {
-	const { args, cwd, stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { args, cwd, stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	const addDir = resolve(args.addPath ?? cwd);
 
@@ -236,20 +236,18 @@ export async function handleAdd(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const response = await ipcSend(new AddProject({ directory: addDir }));
-	if (response.ok) {
-		stdout.write(`Project added: ${response.slug ?? addDir}\n`);
-	} else {
-		stderr.write(
-			`Failed to add project: ${response.error ?? "unknown error"}\n`,
-		);
+	try {
+		const response = await rpcSend(new AddProject({ directory: addDir }));
+		stdout.write(`Project added: ${response.addedSlug ?? addDir}\n`);
+	} catch (err) {
+		stderr.write(`Failed to add project: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
 export async function handleRemove(ctx: CommandContext): Promise<void> {
-	const { cwd, stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { cwd, stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	const running = await checkDaemon();
 	if (!running) {
@@ -260,18 +258,15 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 	}
 
 	// First, list projects to find the slug for cwd
-	const listResponse = await ipcSend(new ListProjects({}));
-	if (!listResponse.ok || !Array.isArray(listResponse.projects)) {
+	let listResponse: Request.Success<GetProjects>;
+	try {
+		listResponse = await rpcSend(new GetProjects({}));
+	} catch {
 		stderr.write("Failed to list projects.\n");
 		exit(1);
 		return;
 	}
-
-	const projects = listResponse.projects as Array<{
-		slug: string;
-		directory: string;
-	}>;
-	const match = projects.find((p) => p.directory === cwd);
+	const match = listResponse.projects.find((p) => p.directory === cwd);
 
 	if (!match) {
 		stderr.write(`Current directory is not registered: ${cwd}\n`);
@@ -279,20 +274,18 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const response = await ipcSend(new RemoveProject({ slug: match.slug }));
-	if (response.ok) {
+	try {
+		await rpcSend(new RemoveProject({ slug: match.slug }));
 		stdout.write(`Project removed: ${match.slug}\n`);
-	} else {
-		stderr.write(
-			`Failed to remove project: ${response.error ?? "unknown error"}\n`,
-		);
+	} catch (err) {
+		stderr.write(`Failed to remove project: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;
 }
 
 export async function handleList(ctx: CommandContext): Promise<void> {
-	const { stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	const running = await checkDaemon();
 	if (!running) {
@@ -302,18 +295,15 @@ export async function handleList(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const response = await ipcSend(new ListProjects({}));
-	if (!response.ok || !Array.isArray(response.projects)) {
+	let response: Request.Success<GetProjects>;
+	try {
+		response = await rpcSend(new GetProjects({}));
+	} catch {
 		stderr.write("Failed to list projects.\n");
 		exit(1);
 		return;
 	}
-
-	const projects = response.projects as Array<{
-		slug: string;
-		directory: string;
-		title?: string;
-	}>;
+	const projects = response.projects;
 
 	if (projects.length === 0) {
 		stdout.write("No projects registered.\n");
@@ -329,7 +319,7 @@ export async function handleList(ctx: CommandContext): Promise<void> {
 }
 
 export async function handleTitle(ctx: CommandContext): Promise<void> {
-	const { args, cwd, stdout, stderr, exit, checkDaemon, ipcSend } = ctx;
+	const { args, cwd, stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
 
 	if (!args.title) {
 		stderr.write("Title is required. Usage: --title <name>\n");
@@ -346,18 +336,15 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 	}
 
 	// Find slug for cwd
-	const listResponse = await ipcSend(new ListProjects({}));
-	if (!listResponse.ok || !Array.isArray(listResponse.projects)) {
+	let listResponse: Request.Success<GetProjects>;
+	try {
+		listResponse = await rpcSend(new GetProjects({}));
+	} catch {
 		stderr.write("Failed to list projects.\n");
 		exit(1);
 		return;
 	}
-
-	const projects = listResponse.projects as Array<{
-		slug: string;
-		directory: string;
-	}>;
-	const match = projects.find((p) => p.directory === cwd);
+	const match = listResponse.projects.find((p) => p.directory === cwd);
 
 	if (!match) {
 		stderr.write(`Current directory is not registered: ${cwd}\n`);
@@ -365,17 +352,11 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const response = await ipcSend(
-		new SetProjectTitle({
-			slug: match.slug,
-			title: args.title,
-		}),
-	);
-
-	if (response.ok) {
+	try {
+		await rpcSend(new RenameProject({ slug: match.slug, title: args.title }));
 		stdout.write(`Title updated: ${args.title}\n`);
-	} else {
-		stderr.write(`Failed to set title: ${response.error ?? "unknown error"}\n`);
+	} catch (err) {
+		stderr.write(`Failed to set title: ${formatErrorDetail(err)}\n`);
 		exit(1);
 	}
 	return;

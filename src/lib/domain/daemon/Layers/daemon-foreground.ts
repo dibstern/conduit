@@ -48,16 +48,16 @@ export interface ForegroundDaemonHandle {
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	removeProject(slug: string): Promise<void>;
 	stop(): Promise<void>;
-	/** Settles with stop()'s outcome, whether stop was triggered by a signal, IPC shutdown, or a direct call. */
+	/** Settles with stop()'s outcome, whether stop was triggered by a signal, RPC shutdown, or a direct call. */
 	readonly stopped: Promise<void>;
 }
 
-class ForegroundIpcUnsupportedError extends Error {
+class ForegroundRuntimeUnavailableError extends Error {
 	constructor(operation: string) {
 		super(
-			`Foreground daemon IPC operation "${operation}" is not available until the daemon IPC context is fully Effect-owned`,
+			`Foreground daemon operation "${operation}" is not available until the daemon context is fully Effect-owned`,
 		);
-		this.name = "ForegroundIpcUnsupportedError";
+		this.name = "ForegroundRuntimeUnavailableError";
 	}
 }
 
@@ -175,7 +175,7 @@ export async function startForegroundDaemon(
 
 	const requireRuntime = () => {
 		if (runtime == null || handle == null || stopped) {
-			throw new ForegroundIpcUnsupportedError("runtime unavailable");
+			throw new ForegroundRuntimeUnavailableError("runtime unavailable");
 		}
 		return { runtime, handle };
 	};
@@ -285,11 +285,7 @@ export async function startForegroundDaemon(
 					mirrorRuntimeConfig(config);
 				}),
 		},
-		ipcPostResponseActions: {
-			scheduleShutdown: () => {
-				void stop();
-			},
-		},
+
 		...(options.opencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.opencodeUrl,
 		}),

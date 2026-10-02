@@ -11,15 +11,15 @@ import { runSetup } from "../lib/cli/cli-setup.js";
 import { getTailscaleIP, hasMkcert } from "../lib/cli/tls.js";
 import {
 	AddProject,
+	GetProjects,
 	GetStatus,
-	ListProjects,
 	RemoveProject,
+	RenameProject,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
 	SetPin,
-	SetProjectTitle,
 	Shutdown,
-} from "../lib/contracts/ipc-requests.js";
+} from "../lib/contracts/ws-rpc.js";
 import { isDaemonSpawnPortInUseError } from "../lib/daemon/daemon-spawn.js";
 import { DEFAULT_CONFIG_DIR } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
@@ -43,7 +43,7 @@ export async function defaultInteractiveMenu(
 		stdout,
 		stderr,
 		exit,
-		ipcSend,
+		rpcSend,
 		checkDaemon,
 		spawnDaemon,
 	} = ctx;
@@ -74,7 +74,7 @@ export async function defaultInteractiveMenu(
 
 			// Register restored projects
 			for (const proj of setupResult.restoredProjects) {
-				await ipcSend(new AddProject({ directory: proj.path }));
+				await menuResult(rpcSend(new AddProject({ directory: proj.path })));
 			}
 		} catch (err) {
 			const message = formatErrorDetail(err);
@@ -89,14 +89,25 @@ export async function defaultInteractiveMenu(
 		}
 
 		// Register cwd
-		await ipcSend(new AddProject({ directory: cwd }));
+		await menuResult(rpcSend(new AddProject({ directory: cwd })));
 
 		// Show main menu
 		await launchMainMenu(ctx, setupResult.port);
 	} else {
 		// Daemon already running — auto-add cwd, then show main menu
-		await ipcSend(new AddProject({ directory: cwd }));
+		await menuResult(rpcSend(new AddProject({ directory: cwd })));
 		await launchMainMenu(ctx, args.port);
+	}
+}
+
+async function menuResult(
+	operation: Promise<unknown>,
+): Promise<{ ok: boolean; error?: string }> {
+	try {
+		await operation;
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: formatErrorDetail(err) };
 	}
 }
 
@@ -128,10 +139,10 @@ async function launchMainMenu(
 	ctx: InteractiveContext,
 	port: number,
 ): Promise<void> {
-	const { cwd, stdin, stdout, exit, ipcSend, getAddr, generateQR: qr } = ctx;
+	const { cwd, stdin, stdout, exit, rpcSend, getAddr, generateQR: qr } = ctx;
 
 	const buildDaemonInfo = async (): Promise<DaemonInfo> => {
-		const status = await ipcSend(new GetStatus({}));
+		const status = await rpcSend(new GetStatus({}));
 		const tls = status["tlsEnabled"] === true;
 		const scheme = tls ? "https" : "http";
 		// Prefer Tailscale IP if available, then LAN IP, then localhost
@@ -176,7 +187,7 @@ async function launchMainMenu(
 		exit,
 		getDaemonInfo: buildDaemonInfo,
 		onSetupNotifications: async () => {
-			const status = await ipcSend(new GetStatus({}));
+			const status = await rpcSend(new GetStatus({}));
 			const tlsActive = (status["tlsEnabled"] as boolean) ?? false;
 			await showNotificationWizard({
 				stdin,
@@ -196,50 +207,33 @@ async function launchMainMenu(
 				exit,
 				cwd,
 				getProjects: async () => {
-					const res = await ipcSend(new ListProjects({}));
-					if (!res.ok || !Array.isArray(res.projects)) return [];
-					return (
-						res.projects as Array<{
-							slug: string;
-							directory: string;
-							title?: string;
-							sessions?: number;
-							clients?: number;
-							isProcessing?: boolean;
-						}>
-					).map((p) => ({
-						slug: p.slug,
-						path: p.directory,
-						...(p.title != null && { title: p.title }),
-						sessions: p.sessions ?? 0,
-						clients: p.clients ?? 0,
-						isProcessing: p.isProcessing ?? false,
-					}));
+					try {
+						const res = await rpcSend(new GetProjects({}));
+						return res.projects.map((p) => ({
+							slug: p.slug,
+							path: p.directory,
+							title: p.title,
+							sessions: 0,
+							clients: 0,
+							isProcessing: false,
+						}));
+					} catch {
+						return [];
+					}
 				},
 				addProject: async (directory: string) => {
-					const res = await ipcSend(new AddProject({ directory }));
-					const slug = res.slug as string | undefined;
-					const error = res.error as string | undefined;
-					return {
-						ok: res.ok,
-						...(slug != null && { slug }),
-						...(error != null && { error }),
-					};
+					try {
+						const res = await rpcSend(new AddProject({ directory }));
+						return { ok: true, slug: res.addedSlug ?? directory };
+					} catch (err) {
+						return { ok: false, error: formatErrorDetail(err) };
+					}
 				},
 				removeProject: async (slug: string) => {
-					const res = await ipcSend(new RemoveProject({ slug }));
-					const error = res.error as string | undefined;
-					return { ok: res.ok, ...(error != null && { error }) };
+					return menuResult(rpcSend(new RemoveProject({ slug })));
 				},
 				setProjectTitle: async (slug: string, title: string) => {
-					const res = await ipcSend(
-						new SetProjectTitle({
-							slug,
-							title,
-						}),
-					);
-					const error = res.error as string | undefined;
-					return { ok: res.ok, ...(error != null && { error }) };
+					return menuResult(rpcSend(new RenameProject({ slug, title })));
 				},
 				onBack: async () => {
 					/* returns to main menu via re-render */
@@ -253,7 +247,7 @@ async function launchMainMenu(
 				exit,
 				logPath: join(DEFAULT_CONFIG_DIR, "daemon.log"),
 				getSettingsInfo: async () => {
-					const status = await ipcSend(new GetStatus({}));
+					const status = await rpcSend(new GetStatus({}));
 					return {
 						tailscaleIP: getTailscaleIP(),
 						hasMkcert: await hasMkcert(),
@@ -263,33 +257,23 @@ async function launchMainMenu(
 					};
 				},
 				setPin: async (pin: string) => {
-					const res = await ipcSend(new SetPin({ pin }));
-					const error = res.error as string | undefined;
-					return { ok: res.ok, ...(error != null && { error }) };
+					return menuResult(rpcSend(new SetPin({ pin })));
 				},
 				removePin: async () => {
-					const res = await ipcSend(new SetPin({ pin: null }));
-					const error = res.error as string | undefined;
-					return { ok: res.ok, ...(error != null && { error }) };
+					return menuResult(rpcSend(new SetPin({ pin: null })));
 				},
 				setKeepAwake: async (enabled: boolean) => {
-					const res = await ipcSend(
-						new SetKeepAwake({
-							enabled,
-						}),
-					);
-					const error = res.error as string | undefined;
-					return { ok: res.ok, ...(error != null && { error }) };
+					try {
+						const res = await rpcSend(new SetKeepAwake({ enabled }));
+						return { ok: true, supported: res.supported, active: res.active };
+					} catch (err) {
+						return { ok: false, error: formatErrorDetail(err) };
+					}
 				},
 				setKeepAwakeCommand: async (command: string, args: string[]) => {
-					const res = await ipcSend(
-						new SetKeepAwakeCommand({
-							command,
-							args,
-						}),
+					return menuResult(
+						rpcSend(new SetKeepAwakeCommand({ command, args })),
 					);
-					const error = res.error as string | undefined;
-					return { ok: res.ok, ...(error != null && { error }) };
 				},
 				onBack: async () => {
 					/* returns to main menu via re-render */
@@ -302,7 +286,7 @@ async function launchMainMenu(
 		},
 		onShutdown: async () => {
 			try {
-				await ipcSend(new Shutdown({}));
+				await rpcSend(new Shutdown({}));
 			} catch {
 				// Daemon already stopped or socket removed — treat as success
 			}
