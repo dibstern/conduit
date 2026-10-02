@@ -20,11 +20,15 @@ import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
+	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import { markSeen } from "../../../src/lib/domain/relay/Services/session-attention.js";
+import {
+	announceBackgroundWork,
+	markSeen,
+} from "../../../src/lib/domain/relay/Services/session-attention.js";
 import {
 	forkOpenCodeSession,
 	forkSession,
@@ -53,6 +57,7 @@ import {
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema,
@@ -111,6 +116,7 @@ const makeShellTestLayer = (
 			OrchestrationEngineTag,
 			withDispatchEffect({ dispatch: async () => undefined }),
 		),
+		Layer.succeed(BackgroundLivenessTag, () => false),
 		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
 		Layer.succeed(LoggerTag, makeMockLogger()),
 		cleanup,
@@ -1091,6 +1097,39 @@ describe("subscribeShell", () => {
 				expect(delta.sequence).toBe(yield* readModelVersion);
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	// Background work outlives the turn that started it, so the session row
+	// says idle while the work runs. Only the in-memory liveness knows.
+	it.scoped(
+		"background work starting and ending reaches a live subscriber",
+		() => {
+			const liveness = makeSessionBackgroundLiveness();
+			return Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commitThroughSeam([sessionCreated(SID)]);
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				const attentionAfter = (taskIds: string[]) =>
+					Effect.gen(function* () {
+						liveness.record({ sessionId: SID, kind: "snapshot", taskIds });
+						yield* announceBackgroundWork(SID);
+						yield* Effect.yieldNow();
+						const delta = yield* Queue.take(q).pipe(
+							Effect.timeout("2 seconds"),
+						);
+						if (delta._tag !== "upsert") throw new Error("expected upsert");
+						return delta.item.attention;
+					});
+				expect(yield* attentionAfter(["task-1"])).toBe("working");
+				expect(yield* attentionAfter([])).toBe("idle");
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(
+				Effect.provideService(BackgroundLivenessTag, liveness.hasLiveWork),
+				Effect.provide(makeShellTestLayer()),
+			);
+		},
 	);
 
 	it.scoped(

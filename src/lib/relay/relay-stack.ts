@@ -510,9 +510,9 @@ export async function createProjectRelay(
 	}
 	const log = config.log ?? createLogger("relay");
 	// Background liveness is created before startup supplies its broadcaster.
-	let broadcastBackgroundSessionLists: (() => void) | undefined;
-	const backgroundLiveness = makeSessionBackgroundLiveness(() =>
-		broadcastBackgroundSessionLists?.(),
+	let announceBackgroundWork: ((sessionId: string) => void) | undefined;
+	const backgroundLiveness = makeSessionBackgroundLiveness((sessionId) =>
+		announceBackgroundWork?.(sessionId),
 	);
 	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
@@ -560,7 +560,7 @@ export async function createProjectRelay(
 		initialDefaultVariant,
 		layers,
 	});
-	broadcastBackgroundSessionLists = startup.broadcastBackgroundSessionLists;
+	announceBackgroundWork = startup.announceBackgroundWork;
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
 	const {

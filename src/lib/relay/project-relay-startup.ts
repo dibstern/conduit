@@ -13,6 +13,7 @@ import {
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
@@ -175,7 +176,10 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const runFork = Runtime.runFork(
-			yield* Effect.runtime<SessionManagerServiceTag>(),
+			yield* Effect.runtime<
+				| SessionManagerServiceTag
+				| Effect.Effect.Context<ReturnType<typeof announceBackgroundWork>>
+			>(),
 		);
 		const sessionId = opencodeAvailable
 			? yield* sessionManagerService.initialize(config.sessionTitle)
@@ -442,19 +446,20 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				return {
 					sql,
 					sessionManagerService,
-					broadcastBackgroundSessionLists: () => {
+					// The sidebar follows the stamped row; open session views follow
+					// their family push.
+					announceBackgroundWork: (changedSessionId: string) => {
 						runFork(
-							sessionManagerService
-								.pushViewerFamilies()
-								.pipe(
-									Effect.catchAllCause((cause) =>
-										Effect.sync(() =>
-											log.warn(
-												`Failed to push background viewed families: ${Cause.pretty(cause)}`,
-											),
+							announceBackgroundWork(changedSessionId).pipe(
+								Effect.andThen(sessionManagerService.pushViewerFamilies()),
+								Effect.catchAllCause((cause) =>
+									Effect.sync(() =>
+										log.warn(
+											`Failed to announce background work: ${Cause.pretty(cause)}`,
 										),
 									),
 								),
+							),
 						);
 					},
 					api,

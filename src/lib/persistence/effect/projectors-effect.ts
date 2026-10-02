@@ -649,12 +649,22 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// Only the terminal "completed" boundary reaches persistence at all —
 				// ingestion filters "started"/"failed" out before the append — but the
 				// guard stays because a replay or backfill can hand us either.
-				// A compaction owns no provider message, so it gets a synthetic
-				// assistant message holding one `compaction` part; that is what keeps
-				// the divider and the reduced context gauge across a reload. Ids keyed
-				// on the event sequence plus DO NOTHING make replay a no-op.
+				// The `compaction` part keeps the divider and the reduced context gauge
+				// across a reload. An auto-compaction lands mid-message, so it joins
+				// the in-flight assistant message as its next part: a standalone
+				// message would sort by its own time, after that message's result,
+				// and split the turn on reload. Between turns it gets a synthetic
+				// message. Ids keyed on the event sequence plus DO NOTHING make
+				// replay a no-op.
 				if (event.data.state !== "completed") return [];
-				const messageId = `compaction-${event.sequence}`;
+				const partId = `compaction-part-${event.sequence}`;
+				const [latest] = yield* sql<{
+					id: string;
+					role: string;
+					is_streaming: number;
+				}>`SELECT id, role, is_streaming FROM messages
+					WHERE session_id = ${event.data.sessionId}
+					ORDER BY created_at DESC, id DESC LIMIT 1`;
 				const metadata = encodeJson({
 					...(typeof event.data.preTokens === "number"
 						? { preTokens: event.data.preTokens }
@@ -663,6 +673,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 						? { postTokens: event.data.postTokens }
 						: {}),
 				});
+				if (latest?.role === "assistant" && latest.is_streaming === 1) {
+					yield* sql`
+						INSERT INTO message_parts
+						(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+						VALUES (${partId}, ${latest.id}, 'compaction', ${event.data.detail}, ${metadata},
+							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${latest.id}), 0),
+							${event.createdAt}, ${event.createdAt})
+						ON CONFLICT (id) DO NOTHING`;
+					return [latest.id];
+				}
+				const messageId = `compaction-${event.sequence}`;
 				yield* sql`
 					INSERT INTO messages
 					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
@@ -671,7 +692,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				yield* sql`
 					INSERT INTO message_parts
 					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
-					VALUES (${`compaction-part-${event.sequence}`}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, 0, ${event.createdAt}, ${event.createdAt})
+					VALUES (${partId}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, 0, ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
 				return [messageId];
 			}
