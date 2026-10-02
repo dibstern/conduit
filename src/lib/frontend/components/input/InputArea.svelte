@@ -25,10 +25,11 @@
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
 	import {
 		discoveryState,
-		extractSlashQuery,
+		extractCommandQuery,
 		filterCommands,
 		getEffectiveInstanceId,
 		getModelDisplayName,
+		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
 	import {
 		buildMentionInsertion,
@@ -187,16 +188,27 @@
 		return true;
 	}));
 
-	const slashQuery = $derived(extractSlashQuery(inputText, cursorPos));
-	const commandMenuVisible = $derived(slashQuery !== null);
-	const commandQuery = $derived(slashQuery?.query ?? "");
-	const filteredCommands = $derived(
-		commandMenuVisible ? filterCommands(discoveryState.commands, commandQuery) : [],
+	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
+	const commandMenuVisible = $derived(commandMatch !== null);
+	const commandQuery = $derived(commandMatch?.query ?? "");
+	/** `$` lists the provider's built-ins; `/` lists everything else. */
+	const menuCommands = $derived(
+		commandMatch
+			? discoveryState.commands.filter(
+					(c) => (c.builtin ?? false) === (commandMatch.trigger === "$"),
+				)
+			: [],
 	);
+	const filteredCommands = $derived(filterCommands(menuCommands, commandQuery));
 	const commandListboxVisible = $derived(filteredCommands.length > 0);
 
-	/** Names of known slash commands/skills, for inline recognition in the composer. */
-	const commandNameSet = $derived(new Set(discoveryState.commands.map((c) => c.name)));
+	/** Known `/skill` and `$builtin` names, for inline recognition in the composer. */
+	const commandNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => !c.builtin).map((c) => c.name)),
+	);
+	const builtinNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => c.builtin).map((c) => c.name)),
+	);
 
 	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
 	const fileMenuVisible = $derived(
@@ -362,7 +374,7 @@
 	let creatingSession = false;
 
 	async function sendMessage() {
-		const text = inputText.trim();
+		const text = toProviderCommands(inputText.trim(), builtinNameSet);
 		if (!text) return;
 
 		// Parse @references and fetch file contents
@@ -542,13 +554,13 @@
 	}
 
 	function handleCommandSelect(command: string) {
-		// Replace the slash query region with the selected command text (e.g. "/skill ").
+		// Replace the query region with the selected command text (e.g. "/skill " or "$compact ").
 		// User can then type arguments and press Enter to send.
 		let newCursorPos: number;
-		if (slashQuery) {
-			const before = inputText.slice(0, slashQuery.start);
-			const after = inputText.slice(slashQuery.end);
-			newCursorPos = slashQuery.start + command.length;
+		if (commandMatch) {
+			const before = inputText.slice(0, commandMatch.start);
+			const after = inputText.slice(commandMatch.end);
+			newCursorPos = commandMatch.start + command.length;
 			inputText = before + command + after;
 		} else {
 			inputText = command;
@@ -568,9 +580,9 @@
 	}
 
 	function handleCommandClose() {
-		if (slashQuery) {
-			const before = inputText.slice(0, slashQuery.start);
-			const after = inputText.slice(slashQuery.end);
+		if (commandMatch) {
+			const before = inputText.slice(0, commandMatch.start);
+			const after = inputText.slice(commandMatch.end);
 			inputText = before + after;
 		} else {
 			inputText = "";
@@ -644,7 +656,7 @@
 	</div>
 {/if}
 
-<!-- Command Menu (above input when "/" is typed) -->
+<!-- Command Menu (above input when "/" or "$" is typed) -->
 {#if commandMenuVisible}
 	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
 		<CommandMenu
@@ -653,7 +665,8 @@
 			listboxId={commandListboxId}
 			query={commandQuery}
 			visible={commandMenuVisible}
-			commands={[...discoveryState.commands]}
+			commands={[...menuCommands]}
+			trigger={commandMatch?.trigger ?? "/"}
 			onSelect={handleCommandSelect}
 			onClose={handleCommandClose}
 		/>
@@ -746,6 +759,7 @@
 					<SkillHighlightBackdrop
 						text={plainText ? "" : inputText}
 						commandNames={commandNameSet}
+						builtinNames={builtinNameSet}
 						dimmed={composing || plainText}
 					/>
 					<!--

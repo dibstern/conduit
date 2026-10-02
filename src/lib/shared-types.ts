@@ -191,6 +191,8 @@ export interface CommandInfo {
 	name: string;
 	description?: string;
 	args?: string;
+	/** The provider's own command or bundled skill; the composer offers these under `$`. */
+	builtin?: boolean;
 }
 
 export interface FileEntry {
@@ -541,6 +543,7 @@ const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
 	args: Schema.optional(Schema.String),
+	builtin: Schema.optional(Schema.Boolean),
 });
 
 const ProjectInfoSchema = Schema.Struct({

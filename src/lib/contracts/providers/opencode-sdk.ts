@@ -402,6 +402,7 @@ export const OpenCodeCommandSchema = Schema.Struct({
 	description: Schema.optional(Schema.String),
 	agent: Schema.optional(Schema.String),
 	model: Schema.optional(Schema.String),
+	source: Schema.optional(Schema.Literal("command", "mcp", "skill")),
 	template: Schema.String,
 	subtask: Schema.optional(Schema.Boolean),
 });

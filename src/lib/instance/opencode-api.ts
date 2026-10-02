@@ -793,6 +793,7 @@ class AppNamespace {
 		ReadonlyArray<{
 			readonly name: string;
 			readonly description?: string | undefined;
+			readonly source?: "command" | "mcp" | "skill" | undefined;
 		}>
 	> {
 		return this.api.sdk("app.commands", decodeOpenCodeCommandListResponse, () =>

@@ -111,13 +111,13 @@ describe("tokenizeSkills", () => {
 	it("gives repeated tokens distinct keys via occurrence index", () => {
 		const segs = tokenizeSkills("/commit and /commit", known);
 		const skillKeys = segs.filter((s) => s.kind === "skill").map((s) => s.key);
-		expect(skillKeys).toEqual(["skill:commit:0", "skill:commit:1"]);
+		expect(skillKeys).toEqual(["skill:/commit:0", "skill:/commit:1"]);
 	});
 
 	it("keys change when a token transitions from text to skill (drives shimmer)", () => {
 		const partial = tokenizeSkills("/comm", known)[0];
 		const complete = tokenizeSkills("/commit", known)[0];
-		expect(partial?.key).toBe("text:comm:0");
-		expect(complete?.key).toBe("skill:commit:0");
+		expect(partial?.key).toBe("text:/comm:0");
+		expect(complete?.key).toBe("skill:/commit:0");
 	});
 });

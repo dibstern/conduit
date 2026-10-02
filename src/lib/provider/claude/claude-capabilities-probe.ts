@@ -50,6 +50,7 @@ interface SDKSlashCommandSubset {
 	readonly name: string;
 	readonly description?: string;
 	readonly argumentHint?: string;
+	readonly builtin?: boolean;
 }
 
 interface SDKAgentInfoSubset {
@@ -251,7 +252,8 @@ export async function probeClaudeCapabilities(
 			name: command.name,
 			...(command.description ? { description: command.description } : {}),
 			...(command.argumentHint ? { args: command.argumentHint } : {}),
-			source: "claude-sdk",
+			// The SDK flags Claude Code's own commands and bundled skills alike.
+			source: command.builtin ? "builtin" : "claude-sdk",
 		}));
 		const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
 			id: agent.name,
