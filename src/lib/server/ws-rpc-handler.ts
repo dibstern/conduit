@@ -11,6 +11,7 @@ import {
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
+import { isRecord } from "../utils.js";
 import {
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
@@ -219,6 +220,38 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	private onConnection(ws: WebSocket): void {
 		this.clients.add(ws);
 		ws.on("close", () => this.clients.delete(ws));
+		if (
+			process.env["NODE_ENV"] === "test" &&
+			process.send &&
+			process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"]
+		) {
+			ws.on("message", (data) => {
+				const at = process.hrtime.bigint().toString();
+				let frames: unknown;
+				try {
+					frames = JSON.parse(data.toString());
+				} catch {
+					return;
+				}
+				const values: unknown[] = Array.isArray(frames) ? frames : [frames];
+				for (const frame of values) {
+					if (
+						isRecord(frame) &&
+						frame["_tag"] === "Request" &&
+						frame["tag"] === "SendMessage" &&
+						isRecord(frame["payload"]) &&
+						typeof frame["payload"]["text"] === "string"
+					) {
+						process.send?.({
+							channel: "conduit-process-test",
+							kind: "receipt",
+							prompt: frame["payload"]["text"],
+							at,
+						});
+					}
+				}
+			});
+		}
 		this.runConnection(ws);
 	}
 
