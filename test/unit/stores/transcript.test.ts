@@ -296,6 +296,59 @@ describe("transcript detail reducer", () => {
 		expect(reconciled[1]).toBe(optimistic);
 	});
 
+	// After a reload nothing local remembers the send; the rows still show it.
+	it("restores a queued prompt from a reply still being written above it", () => {
+		const prompt = (id: string, created: number): HistoryMessage => ({
+			id,
+			role: "user",
+			time: { created },
+			parts: [{ id: `${id}-text`, type: "text", text: id }],
+		});
+		const reply = (id: string, created: number, completed?: number) => ({
+			...row(id, created, id),
+			time: { created, ...(completed === undefined ? {} : { completed }) },
+		});
+		const queuedEpochs = (
+			rows: HistoryMessage[],
+			options = { live: true, active: true },
+		) =>
+			deriveTranscriptMessages(
+				applyTranscriptEnvelope(entry(), snapshot(rows, 1)),
+				[],
+				{ ...options, turnEpoch: 3 },
+			)
+				.filter((message) => message.type === "user")
+				.map((message) => message.sentDuringEpoch);
+
+		// Claude stamps a row's last write as `completed`; OpenCode omits it mid-run.
+		expect(
+			queuedEpochs([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)]),
+		).toEqual([undefined, 3]);
+		expect(
+			queuedEpochs([prompt("one", 1), reply("a", 2), prompt("next", 10)]),
+		).toEqual([undefined, 3]);
+		// The reply had finished before the prompt was sent.
+		expect(
+			queuedEpochs([prompt("one", 1), reply("a", 2, 5), prompt("next", 10)]),
+		).toEqual([undefined, undefined]);
+		// The prompt has started: its own reply is below it.
+		expect(
+			queuedEpochs([
+				prompt("one", 1),
+				reply("a", 2, 50),
+				prompt("next", 10),
+				reply("b", 60),
+			]),
+		).toEqual([undefined, undefined]);
+		// Nothing is running any more.
+		expect(
+			queuedEpochs([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)], {
+				live: true,
+				active: false,
+			}),
+		).toEqual([undefined, undefined]);
+	});
+
 	it("does not adopt a repeated send into an older projected user row", () => {
 		const user = (id: string): HistoryMessage => ({
 			id,

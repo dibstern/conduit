@@ -310,6 +310,22 @@ export function deriveTranscriptMessages(
 	const projected: ChatMessage[] = [];
 	const adoptedUuids = new Set<string>();
 	const carriedAdditions: TranscriptEntry["carriedUsers"] = new Map();
+	// After a reload nothing local remembers a queued send, but the rows do: the
+	// reply above it was still being written after it was sent, and no reply
+	// has started below it.
+	const waitingUserIds = new Set<string>();
+	let reply: HistoryMessage | undefined;
+	for (const row of entry.rows) {
+		if (row.role === "assistant") {
+			reply = row;
+			waitingUserIds.clear();
+		} else if (
+			reply &&
+			(reply.time?.completed ?? Number.POSITIVE_INFINITY) >
+				(row.time?.created ?? Number.POSITIVE_INFINITY)
+		)
+			waitingUserIds.add(row.id);
+	}
 	for (const row of entry.rows) {
 		// A user row is created before its parts arrive. Showing it empty would
 		// mark its uuid as seen and so block adopting the optimistic send.
@@ -353,7 +369,7 @@ export function deriveTranscriptMessages(
 					!carried &&
 					options.live &&
 					options.active &&
-					options.newUserIds?.has(row.id)
+					(options.newUserIds?.has(row.id) || waitingUserIds.has(row.id))
 				) {
 					carried = { sentDuringEpoch: options.turnEpoch };
 					carriedAdditions.set(row.id, carried);
