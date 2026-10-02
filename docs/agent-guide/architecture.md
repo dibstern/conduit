@@ -55,6 +55,57 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 - CLI commands use the same `WsRpcGroup` and daemon handlers over a filesystem-protected Unix socket with NDJSON framing. Browser PIN authentication remains required on network WebSockets.
 - Browser real-time transport remains WebSocket-based. Effect RPC runs over the WebSocket protocol for migrated browser operations; raw PTY input remains the terminal data-plane path.
 
+## PTY lifetime
+
+Local terminals belong to a detached per-user PTY host, not the server. The host
+entrypoint is `src/bin/pty-host.ts`, emitted by the server build as
+`dist/src/bin/pty-host.js`. It imports the same stamped build ID as the server.
+`LocalPtyServiceLive` connects lazily and starts the host when creating the first
+terminal. Each project discovers its terminals by cwd and attaches to a snapshot
+of up to 50 KiB of UTF-8 scrollback followed by live output. Replay uses
+`pty_output` with `replace: true`, including empty history, so the browser resets
+its buffer and renderer before accepting live output. Replacing a disconnected
+proxy resynchronizes browsers already attached to that terminal. A lost host
+connection emits `pty_exited`; the next host list removes missing terminals with
+`pty_deleted`. Replacement replay for a confirmed running local terminal carries
+`restored: true`, allowing the browser to clear its exit flag. Ordinary lists
+preserve exit flags, including when an older RPC response arrives after an exit
+event. Unavailable input returns a `PTY_INPUT_FAILED` system error. Relay shutdown
+detaches its proxies; it does not kill hosted shells.
+
+Discovery errors preserve cached tabs until a successful host list or confirmed
+socket absence. Closing a disconnected or undiscovered terminal first discovers
+and closes the surviving hosted shell. Close and restore share a lock so a pending
+attach cannot reintroduce a closed terminal.
+
+The protected `pty.sock`, `pty-host.pid`, and `pty-host.log` live in the Conduit
+config directory, respecting `CONDUIT_CONFIG_DIR`. An atomic directory election
+and a generation-specific socket ensure one host; PID files are diagnostic.
+`pty.sock` points to that generation's socket. Paths exceeding macOS's 103 usable
+socket-path bytes use a persistent user-owned hashed symlink under `/tmp` to the
+config directory, budgeting for the private UUID socket too. IPC paths use
+private permissions while PTY shells retain the inherited umask. The host uses
+versioned NDJSON over the socket and
+refuses incompatible protocol versions. A different build is replaced only if
+the host atomically confirms that no terminal tabs remain, including exited tabs
+with saved scrollback. Otherwise the compatible old host stays alive and the
+server logs the mismatch.
+
+Explicit server shutdown leaves live terminals running. A host with no live
+terminals and no connected clients exits after 30 seconds; set
+`CONDUIT_PTY_HOST_IDLE_TIMEOUT_MS` to a positive timeout in milliseconds to change
+the grace period. Saved exited tabs can expire with an idle host. A live terminal
+keeps its host running through server downtime. Test harnesses explicitly stop
+their own hosts before removing temporary configuration directories. To kill
+all hosted terminals and stop the host, run
+`node dist/src/bin/pty-host.js stop`. To force a host upgrade, killing its
+terminals, run `node dist/src/bin/pty-host.js restart`. These commands use the
+same config-directory environment override as the server. Ordinary server
+restarts never require them. The NDJSON `hello`/`stop`/`stopped` control envelope
+must remain stable across protocol versions: explicit forced control may retry
+once with the reported host version, without exposing an incompatible terminal
+connection or signaling a PID. Incompatible control framing fails safely.
+
 ## Communication Flow
 
 | Flow | Path |

@@ -25,7 +25,7 @@ export const PtyManagerLive: Layer.Layer<PtyManagerTag, never, LoggerTag> =
 			const manager = new PtyManager({ log: ptyLog });
 			yield* Effect.addFinalizer(() =>
 				Effect.try({
-					try: () => manager.closeAll(),
+					try: () => manager.detachAll(),
 					catch: (cause) => cause,
 				}).pipe(
 					Effect.catchAll((cause) =>

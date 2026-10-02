@@ -9,6 +9,8 @@ import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
+import type { PtyInfo } from "../../src/lib/shared-types.js";
+import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 
@@ -23,6 +25,24 @@ class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
 		import("@effect/rpc/RpcClientError").RpcClientError
 	>
 >() {}
+
+function browserRpcRuntime(port: number) {
+	const protocol = RpcClient.layerProtocolSocket().pipe(
+		Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
+		Layer.provide(
+			Layer.succeed(
+				Socket.WebSocketConstructor,
+				(url) => new WebSocket(url) as unknown as globalThis.WebSocket,
+			),
+		),
+		Layer.provide(RpcSerialization.layerJson),
+	);
+	return ManagedRuntime.make(
+		Layer.scoped(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
+			Layer.provide(protocol),
+		),
+	);
+}
 
 interface Generation {
 	pid: number;
@@ -42,6 +62,7 @@ export interface BrowserFrame {
 export class ProcessHarness {
 	readonly root = mkdtempSync("/tmp/conduit-process-");
 	readonly projectDir = join(this.root, "project");
+	readonly configDir = join(this.root, "config");
 	readonly marks: ProcessMark[] = [];
 	readonly generations: Generation[] = [];
 	readonly browsers: ProcessBrowser[] = [];
@@ -83,7 +104,7 @@ export class ProcessHarness {
 		}
 	}
 
-	async restart(): Promise<void> {
+	async restart(options: { probe?: boolean } = {}): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
@@ -105,6 +126,7 @@ export class ProcessHarness {
 				env: {
 					PATH: process.env["PATH"] ?? "",
 					HOME: join(this.root, "home"),
+					SHELL: "/bin/sh",
 					XDG_CONFIG_HOME: join(this.root, "config"),
 					XDG_CACHE_HOME: join(this.root, "cache"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
@@ -170,6 +192,8 @@ export class ProcessHarness {
 				}
 			});
 		});
+		// PTY-only tests can make the first browser connections race on restore.
+		if (options.probe === false) return;
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
 		const probe = await ProcessBrowser.connect(this.port);
@@ -187,14 +211,43 @@ export class ProcessHarness {
 		}
 	}
 
-	async connect(sessionId?: string): Promise<ProcessBrowser> {
-		const browser = await ProcessBrowser.connect(this.port, sessionId);
+	async connect(
+		sessionId?: string,
+		originId?: string,
+	): Promise<ProcessBrowser> {
+		const browser = await ProcessBrowser.connect(
+			this.port,
+			sessionId,
+			originId,
+		);
 		this.browsers.push(browser);
 		return browser;
 	}
 
+	/** Close before any /ws init replay or ListPtys can discover hosted terminals. */
+	async closePtyWithoutBrowser(ptyId: string): Promise<void> {
+		const runtime = browserRpcRuntime(this.port);
+		try {
+			const rpc = await runtime.runPromise(
+				BrowserRpc.pipe(Effect.timeout(TIMEOUT_MS)),
+			);
+			await runtime.runPromise(
+				rpc
+					.ClosePty({ projectSlug: "process-test", ptyId })
+					.pipe(Effect.timeout(TIMEOUT_MS)),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+	}
+
 	async kill(): Promise<void> {
 		await this.stop("SIGKILL");
+	}
+
+	async shutdown(): Promise<void> {
+		// Foreground runtime disposal takes about five seconds even without PTYs.
+		await this.stop("SIGTERM", 10_000);
 	}
 
 	async disconnectParent(): Promise<void> {
@@ -219,11 +272,11 @@ export class ProcessHarness {
 		}
 	}
 
-	private async stop(signal: NodeJS.Signals): Promise<void> {
+	private async stop(signal: NodeJS.Signals, timeoutMs = 3000): Promise<void> {
 		const child = this.child;
 		if (!child) return;
 		child.kill(signal);
-		const force = setTimeout(() => child.kill("SIGKILL"), 3000);
+		const force = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
 		try {
 			await this.exit;
 		} finally {
@@ -252,6 +305,13 @@ export class ProcessHarness {
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
 		await this.stop("SIGTERM");
+		const hostClient = this.dist
+			? ((await import(
+					pathToFileURL(join(this.dist, "src/lib/terminal/pty-host-client.js"))
+						.href
+				)) as typeof import("../../src/lib/terminal/pty-host-client.js"))
+			: { stopPtyHost };
+		await hostClient.stopPtyHost({ configDir: this.configDir, force: true });
 		rmSync(this.root, { recursive: true, force: true });
 		this.disposed = true;
 	}
@@ -261,6 +321,9 @@ export class ProcessBrowser {
 	readonly frames: BrowserFrame[] = [];
 	readonly originId: string;
 	private readonly waiters = new Set<() => void>();
+	private readonly messageListeners = new Set<
+		(message: Record<string, unknown>) => void
+	>();
 	private closed = false;
 	private failure: Error | undefined;
 	private constructor(
@@ -274,6 +337,7 @@ export class ProcessBrowser {
 			const at = process.hrtime.bigint();
 			const message = JSON.parse(data.toString()) as Record<string, unknown>;
 			this.frames.push({ message, at });
+			for (const notify of this.messageListeners) notify(message);
 			for (const notify of this.waiters) notify();
 		});
 		ws.on("error", (error) => {
@@ -290,23 +354,9 @@ export class ProcessBrowser {
 	static async connect(
 		port: number,
 		sessionId?: string,
+		originId: string = randomUUID(),
 	): Promise<ProcessBrowser> {
-		const originId = randomUUID();
-		const protocol = RpcClient.layerProtocolSocket().pipe(
-			Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
-			Layer.provide(
-				Layer.succeed(
-					Socket.WebSocketConstructor,
-					(url) => new WebSocket(url) as unknown as globalThis.WebSocket,
-				),
-			),
-			Layer.provide(RpcSerialization.layerJson),
-		);
-		const runtime = ManagedRuntime.make(
-			Layer.scoped(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
-				Layer.provide(protocol),
-			),
-		);
+		const runtime = browserRpcRuntime(port);
 		const rpc = await runtime
 			.runPromise(BrowserRpc.pipe(Effect.timeout(TIMEOUT_MS)))
 			.catch(async (error: unknown) => {
@@ -346,6 +396,16 @@ export class ProcessBrowser {
 		return this.runtime.runPromise(effect.pipe(Effect.timeout(TIMEOUT_MS)));
 	}
 
+	onMessage(listener: (message: Record<string, unknown>) => void): () => void {
+		for (const { message } of this.frames) listener(message);
+		this.messageListeners.add(listener);
+		return () => this.messageListeners.delete(listener);
+	}
+
+	get connected(): boolean {
+		return !this.closed && !this.failure;
+	}
+
 	async createSession(): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
@@ -356,6 +416,52 @@ export class ProcessBrowser {
 		);
 		await this.view(result.sessionId);
 		return result.sessionId;
+	}
+
+	async createPty(): Promise<PtyInfo> {
+		const cursor = this.frames.length;
+		await this.run(
+			this.rpc.CreatePty({
+				projectSlug: "process-test",
+				originId: this.originId,
+			}),
+		);
+		const message = await this.waitFor(
+			(frame) => frame["type"] === "pty_created",
+			cursor,
+		);
+		return message["pty"] as PtyInfo;
+	}
+
+	async listPtys(): Promise<readonly PtyInfo[]> {
+		return (
+			await this.run(
+				this.rpc.ListPtys({
+					projectSlug: "process-test",
+					originId: this.originId,
+				}),
+			)
+		).ptys;
+	}
+
+	inputPty(ptyId: string, data: string): void {
+		this.ws.send(JSON.stringify({ type: "pty_input", ptyId, data }));
+	}
+
+	async resizePty(ptyId: string, cols: number, rows: number): Promise<void> {
+		await this.run(
+			this.rpc.ResizePty({
+				projectSlug: "process-test",
+				originId: this.originId,
+				ptyId,
+				cols,
+				rows,
+			}),
+		);
+	}
+
+	async closePty(ptyId: string): Promise<void> {
+		await this.run(this.rpc.ClosePty({ projectSlug: "process-test", ptyId }));
 	}
 
 	async view(sessionId: string): Promise<void> {
