@@ -11,7 +11,21 @@ export type ProcessMark =
 	| { kind: "receipt" | "enqueue"; prompt: string; at: string }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
-	| { kind: "query"; sessionId: string };
+	| {
+			kind: "query";
+			sessionId: string;
+			pid: number;
+			env: Readonly<Record<string, string | undefined>>;
+	  }
+	| {
+			kind: "runner-started";
+			pid: number;
+			sessionId: string;
+			socketPath: string;
+			buildId: string;
+			protocolVersion: number;
+	  }
+	| { kind: "runner-command"; commandId: string; type: string };
 
 export function responseChunks(prompt: string): string[] {
 	return [`Echo(${prompt}): `, `stream(${prompt}) `, `done(${prompt}).`];
@@ -46,7 +60,22 @@ function query(params: {
 }): Query {
 	const sessionId = params.options?.resume ?? randomUUID();
 	let closed = false;
-	mark({ kind: "query", sessionId });
+	mark({
+		kind: "query",
+		sessionId,
+		pid: process.pid,
+		env: Object.fromEntries(
+			[
+				"CONDUIT_ENV_PROOF",
+				"PATH",
+				"CLAUDE_CONFIG_DIR",
+				"ANTHROPIC_API_KEY",
+				"ANTHROPIC_MODEL",
+				"CLAUDE_AGENT_SDK_CLIENT_APP",
+				"ENABLE_CLAUDEAI_MCP_SERVERS",
+			].map((key) => [key, params.options?.env?.[key]]),
+		),
+	});
 	const messages = (async function* (): AsyncGenerator<SDKMessage> {
 		yield {
 			type: "system",

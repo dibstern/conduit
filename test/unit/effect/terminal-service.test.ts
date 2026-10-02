@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -23,6 +23,7 @@ import {
 	PtyManager,
 	type PtyUpstream,
 } from "../../../src/lib/relay/pty-manager.js";
+import type { RelayMessage } from "../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -80,6 +81,15 @@ const makeLayer = (options?: {
 	const localPty =
 		options?.localPty ??
 		({
+			list: () => Effect.succeed([]),
+			attach: (ptyId: string) =>
+				Effect.fail(
+					new TerminalServiceError({
+						operation: "connect",
+						ptyId,
+						cause: "Not found",
+					}),
+				),
 			create: vi.fn(() => {
 				const session: LocalPtySession = {
 					pty: {
@@ -121,6 +131,15 @@ describe("OpenCodeTerminalServiceLive", () => {
 		const exitHandlers: Array<(exitCode: number) => void> = [];
 		const upstream = { ...makeUpstream(openState), resize: vi.fn() };
 		const localPty: LocalPtyService = {
+			list: () => Effect.succeed([]),
+			attach: (ptyId) =>
+				Effect.fail(
+					new TerminalServiceError({
+						operation: "connect",
+						ptyId,
+						cause: "Not found",
+					}),
+				),
 			create: vi.fn(() => {
 				const session: LocalPtySession = {
 					pty: {
@@ -147,7 +166,9 @@ describe("OpenCodeTerminalServiceLive", () => {
 				throw new Error("fetch failed");
 			}),
 		});
-		const wsHandler = makeMockWebSocketHandler();
+		const wsHandler = makeMockWebSocketHandler({
+			getClientIds: () => ["client-1"],
+		});
 		const ptyManager = new PtyManager({ log: makeMockLogger() });
 		const layer = makeLayer({ api, wsHandler, ptyManager, localPty });
 
@@ -172,7 +193,7 @@ describe("OpenCodeTerminalServiceLive", () => {
 			});
 
 			dataHandlers[0]?.("hello\n");
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
+			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 				type: "pty_output",
 				ptyId: "local-pty-1",
 				data: "hello\n",
@@ -220,6 +241,15 @@ describe("OpenCodeTerminalServiceLive", () => {
 			sendTo: vi.fn((_clientId, message) => sent.push(message)),
 		});
 		const localPty: LocalPtyService = {
+			list: () => Effect.succeed([]),
+			attach: (ptyId) =>
+				Effect.fail(
+					new TerminalServiceError({
+						operation: "connect",
+						ptyId,
+						cause: "Not found",
+					}),
+				),
 			create: vi.fn(() =>
 				Effect.fail(
 					new TerminalServiceError({
@@ -348,6 +378,133 @@ describe("OpenCodeTerminalServiceLive", () => {
 		},
 	);
 
+	it.effect("closes a hosted terminal before the relay discovers it", () => {
+		const upstream = makeUpstream(openState);
+		const hosted: LocalPtySession = {
+			pty: {
+				id: "local-pty-undiscovered",
+				title: "Terminal",
+				command: "sh",
+				cwd: "/project",
+				status: "running",
+				pid: 456,
+			},
+			upstream,
+			onData: vi.fn(),
+			onExit: vi.fn(),
+		};
+		const localPty: LocalPtyService = {
+			list: vi.fn(() => Effect.succeed([hosted.pty])),
+			attach: vi.fn(() => Effect.succeed(hosted)),
+			create: vi.fn(() => Effect.succeed(hosted)),
+		};
+		const api = makeApi();
+		const ptyManager = new PtyManager({ log: makeMockLogger() });
+		const layer = makeLayer({ localPty, api, ptyManager });
+
+		return Effect.gen(function* () {
+			const service = yield* OpenCodeTerminalServiceTag;
+			expect(ptyManager.sessionCount).toBe(0);
+			yield* service.close(hosted.pty.id);
+			expect(localPty.list).toHaveBeenCalledWith("/project");
+			expect(localPty.attach).toHaveBeenCalledWith(hosted.pty.id, "/project");
+			expect(upstream.close).toHaveBeenCalledWith(1000, "Terminal closed");
+			expect(api.pty.delete).not.toHaveBeenCalled();
+			expect(ptyManager.sessionCount).toBe(0);
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect("serializes close after a suspended local terminal reattach", () =>
+		Effect.gen(function* () {
+			const attachStarted = yield* Deferred.make<void>();
+			const releaseAttach = yield* Deferred.make<void>();
+			const closeStarted = yield* Deferred.make<void>();
+			const events: Array<"attached" | "closed" | "deleted" | "listed"> = [];
+			const disconnectHandlers: Array<() => void> = [];
+			const oldUpstream = makeUpstream(openState);
+			const restoredUpstream = makeUpstream(openState);
+			restoredUpstream.close.mockImplementation(() => events.push("closed"));
+			const initial: LocalPtySession = {
+				pty: {
+					id: "local-pty-1",
+					title: "Terminal",
+					command: "sh",
+					cwd: "/project",
+					status: "running",
+					pid: 456,
+				},
+				upstream: oldUpstream,
+				onData: vi.fn(),
+				onExit: vi.fn(),
+				onDisconnect: (handler) => disconnectHandlers.push(handler),
+			};
+			const restored: LocalPtySession = {
+				...initial,
+				upstream: restoredUpstream,
+				onData: (handler) => {
+					events.push("attached");
+					handler("replayed\n");
+				},
+			};
+			const localPty: LocalPtyService = {
+				create: () => Effect.succeed(initial),
+				list: () => Effect.succeed([initial.pty]),
+				attach: () =>
+					Effect.gen(function* () {
+						yield* Deferred.succeed(attachStarted, undefined);
+						yield* Deferred.await(releaseAttach);
+						return restored;
+					}),
+			};
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
+			const wsHandler = makeMockWebSocketHandler({
+				getClientIds: () => ["client-1"],
+				broadcast: vi.fn((message: RelayMessage) => {
+					if (message.type === "pty_deleted") events.push("deleted");
+				}),
+				sendTo: vi.fn((_clientId: string, message: RelayMessage) => {
+					if (
+						message.type === "pty_list" &&
+						message.ptys.some(({ id }) => id === initial.pty.id)
+					)
+						events.push("listed");
+				}),
+			});
+			const layer = makeLayer({ localPty, ptyManager, wsHandler });
+
+			yield* Effect.gen(function* () {
+				const service = yield* OpenCodeTerminalServiceTag;
+				yield* service.create("client-1");
+				oldUpstream.readyState = 0;
+				disconnectHandlers[0]?.();
+				const listing = yield* Effect.fork(service.list("client-1"));
+				yield* Deferred.await(attachStarted);
+				const closing = yield* Effect.fork(
+					Effect.gen(function* () {
+						yield* Deferred.succeed(closeStarted, undefined);
+						yield* service.close(initial.pty.id);
+					}),
+				);
+				yield* Deferred.await(closeStarted);
+				yield* Effect.yieldNow();
+				const closedBeforeAttach = Option.isSome(yield* Fiber.poll(closing));
+				yield* Deferred.succeed(releaseAttach, undefined);
+				yield* Fiber.join(listing);
+				yield* Fiber.join(closing);
+
+				expect(closedBeforeAttach).toBe(false);
+				expect(ptyManager.hasSession(initial.pty.id)).toBe(false);
+				expect(restoredUpstream.close).toHaveBeenCalledExactlyOnceWith(
+					1000,
+					"Proxy closed",
+				);
+				const deletion = events.indexOf("deleted");
+				expect(deletion).toBeGreaterThan(events.indexOf("attached"));
+				expect(events.slice(deletion + 1)).not.toContain("listed");
+			}).pipe(Effect.provide(layer));
+		}),
+	);
+
 	it.effect("replays tracked PTY sessions, scrollback, and exit state", () => {
 		const ptyManager = new PtyManager({ log: makeMockLogger() });
 		const wsHandler = makeMockWebSocketHandler();
@@ -387,11 +544,13 @@ describe("OpenCodeTerminalServiceLive", () => {
 				type: "pty_output",
 				ptyId: "pty-running",
 				data: "hello\n",
+				replace: true,
 			});
 			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 				type: "pty_output",
 				ptyId: "pty-exited",
 				data: "done\n",
+				replace: true,
 			});
 			expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 				type: "pty_exited",

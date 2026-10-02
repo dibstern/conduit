@@ -16,6 +16,7 @@ import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
@@ -120,7 +121,11 @@ export async function createDaemonHarness(
 		projectUrl,
 		projectPath,
 		async stop(): Promise<void> {
-			await daemon.stop();
+			try {
+				await daemon.stop();
+			} finally {
+				await stopPtyHost({ configDir: tmpDir, force: true });
+			}
 			try {
 				rmSync(tmpDir, { recursive: true, force: true });
 			} catch {

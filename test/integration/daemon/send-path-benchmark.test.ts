@@ -24,6 +24,7 @@ describe("send-path benchmark CLI aggregation", () => {
 		candidate: { enqueue: number[]; forward: number[] },
 		baseline = { enqueue: [10, 10, 10, 10, 10], forward: [1, 1, 1, 1, 1] },
 		failCandidate = false,
+		candidateRunner = false,
 	) {
 		const root = mkdtempSync("/tmp/conduit-benchmark-cli-");
 		roots.push(root);
@@ -73,6 +74,7 @@ describe("send-path benchmark CLI aggregation", () => {
 				join(root, "baseline"),
 				"--candidate",
 				join(root, "candidate"),
+				...(candidateRunner ? ["--candidate-runner", "process"] : []),
 				"--output",
 				output,
 			],
@@ -107,6 +109,27 @@ describe("send-path benchmark CLI aggregation", () => {
 			expect(result.enqueue.p99).toBe(10);
 			expect(result.forward.p99).toBe(1);
 		}
+	});
+
+	it("enables the process flag only for the candidate and records its activation", () => {
+		const { child, output, trace } = compare(
+			{ enqueue: [10, 10, 10, 10, 10], forward: [1, 1, 1, 1, 1] },
+			undefined,
+			false,
+			true,
+		);
+		expect(child.status, child.stderr).toBe(0);
+		expect(readFileSync(`${trace}.modes`, "utf8")).toBe(
+			"baseline:in-process\ncandidate:process\n",
+		);
+		const result = JSON.parse(readFileSync(output, "utf8")) as {
+			baseline: { runnerMode: string; runners: unknown[] };
+			candidate: { runnerMode: string; runners: unknown[] };
+		};
+		expect(result.baseline.runnerMode).toBe("in-process");
+		expect(result.baseline.runners).toHaveLength(0);
+		expect(result.candidate.runnerMode).toBe("process");
+		expect(result.candidate.runners).toHaveLength(1);
 	});
 
 	it.each([

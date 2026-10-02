@@ -143,8 +143,16 @@ const mergePersistedInstanceConfigs = (
 
 	const mergeInstance = (runtimeInstance: PersistedInstanceConfig) => {
 		const persistedInstance = persistedById.get(runtimeInstance.id);
+		// Process identity belongs to the current snapshot. Never resurrect a
+		// PID cleared after failed recovery or explicit shutdown.
+		const {
+			pid: _pid,
+			version: _version,
+			processIdentity: _processIdentity,
+			...metadata
+		} = persistedInstance ?? {};
 		return {
-			...persistedInstance,
+			...metadata,
 			...runtimeInstance,
 			driver: runtimeInstance.driver ?? persistedInstance?.driver ?? "opencode",
 			...(runtimeInstance.configDir !== undefined
@@ -177,6 +185,12 @@ export const makeConfigWriterLive = (configDir: string) =>
 					return saveDaemonConfig(
 						{
 							...config,
+							// These legacy settings have no runtime Ref; retain their
+							// saved values when writing the live runtime snapshot.
+							debug: persisted?.debug ?? config.debug,
+							dangerouslySkipPermissions:
+								persisted?.dangerouslySkipPermissions ??
+								config.dangerouslySkipPermissions,
 							instances: mergePersistedInstanceConfigs(
 								config.instances ?? [],
 								persisted?.instances ?? [],

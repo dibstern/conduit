@@ -279,12 +279,14 @@ export async function probeClaudeCapabilities(
 			name: command.name,
 			...(command.description ? { description: command.description } : {}),
 			...(command.argumentHint ? { args: command.argumentHint } : {}),
-			// The SDK flags Claude Code's own commands and bundled skills alike.
-			source: command.builtin
-				? "builtin"
-				: skillNames.has(command.name)
-					? "plugin-skill"
-					: "claude-sdk",
+			// The SDK flags Claude Code's own commands and bundled skills alike, but
+			// not Anthropic's first-party skills plugin, which ships as a plugin.
+			source:
+				command.builtin || command.name.startsWith("anthropic-skills:")
+					? "builtin"
+					: skillNames.has(command.name)
+						? "plugin-skill"
+						: "claude-sdk",
 		}));
 		const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
 			id: agent.name,

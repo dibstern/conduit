@@ -167,6 +167,8 @@ export interface HistoryMessage {
 }
 
 export interface SendTurnInput {
+	/** Durable outbox identity, forwarded to a process session runner. */
+	readonly commandId?: string;
 	readonly sessionId: string;
 	readonly turnId: string;
 	readonly prompt: string;

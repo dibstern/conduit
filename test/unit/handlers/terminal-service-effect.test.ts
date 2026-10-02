@@ -32,7 +32,11 @@ describe("terminal handlers with Effect-native terminal service", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(terminal.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
+					expect(terminal.sendInput).toHaveBeenCalledWith(
+						"pty-1",
+						"ls\n",
+						"client-1",
+					);
 				}),
 			);
 		},

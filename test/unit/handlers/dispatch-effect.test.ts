@@ -6,25 +6,30 @@
 
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
+import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import { WebSocketError } from "../../../src/lib/errors.js";
 import { dispatchMessageEffect } from "../../../src/lib/handlers/index.js";
-import {
-	makeMockPtyManager,
-	makeTestHandlerLayer,
-} from "../../helpers/mock-factories.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 describe("dispatchMessageEffect", () => {
 	it.effect("dispatches pty_input with validated payload", () => {
-		const ptyManager = makeMockPtyManager();
-		const layer = makeTestHandlerLayer({ ptyManager });
+		const layer = makeTestHandlerLayer();
 
 		return Effect.gen(function* () {
+			const terminal = yield* OpenCodeTerminalServiceTag;
+			const sendInput = vi
+				.spyOn(terminal, "sendInput")
+				.mockReturnValue(Effect.void);
 			yield* dispatchMessageEffect("client-1", "pty_input", {
 				ptyId: "pty-1",
 				data: "ls\n",
 			}) as Effect.Effect<void, never>;
-			expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
+			expect(sendInput).toHaveBeenCalledExactlyOnceWith(
+				"pty-1",
+				"ls\n",
+				"client-1",
+			);
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -82,17 +87,24 @@ describe("dispatchMessageEffect", () => {
 	});
 
 	it.effect("accepts payloads with extra unknown fields (open schema)", () => {
-		const ptyManager = makeMockPtyManager();
-		const layer = makeTestHandlerLayer({ ptyManager });
+		const layer = makeTestHandlerLayer();
 
 		// Schema.Struct allows extra keys by default
 		return Effect.gen(function* () {
+			const terminal = yield* OpenCodeTerminalServiceTag;
+			const sendInput = vi
+				.spyOn(terminal, "sendInput")
+				.mockReturnValue(Effect.void);
 			yield* dispatchMessageEffect("client-1", "pty_input", {
 				ptyId: "pty-1",
 				data: "pwd\n",
 				extraField: "should be ignored",
 			}) as Effect.Effect<void, never>;
-			expect(ptyManager.sendInput).toHaveBeenCalledWith("pty-1", "pwd\n");
+			expect(sendInput).toHaveBeenCalledExactlyOnceWith(
+				"pty-1",
+				"pwd\n",
+				"client-1",
+			);
 		}).pipe(Effect.provide(layer));
 	});
 });

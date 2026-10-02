@@ -898,6 +898,8 @@ const PtyOutputSchema = Schema.Struct({
 	type: Schema.Literal("pty_output"),
 	ptyId: Schema.String,
 	data: Schema.String,
+	replace: Schema.optional(Schema.Boolean),
+	restored: Schema.optional(Schema.Boolean),
 });
 
 const PtyExitedSchema = Schema.Struct({
@@ -1282,6 +1284,7 @@ export interface OpenCodeInstance {
 	url?: string;
 	status: InstanceStatus;
 	pid?: number;
+	version?: string;
 	env?: Record<string, string>;
 	needsRestart?: boolean;
 	exitCode?: number;
@@ -1294,6 +1297,8 @@ export interface InstanceConfig {
 	name: string;
 	port: number;
 	managed: boolean;
+	pid?: number;
+	version?: string;
 	driver?: ProviderDriverKind;
 	configDir?: string;
 	env?: Record<string, string>;

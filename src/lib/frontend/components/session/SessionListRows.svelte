@@ -19,7 +19,7 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import Icon from "../ui/Icon.svelte";
 
-	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerLoading, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
 		isEmpty: boolean;
 		emptyMessage: string;
@@ -28,7 +28,7 @@
 		filteredLength: number;
 		snoozedShelfOpen: boolean;
 		settledShelfOpen: boolean;
-		pagerLoading: boolean;
+		pagerPending: boolean;
 		unavailableProjectLabels: string[];
 		selectMode: boolean;
 		selectedSessionIds: Set<string>;
@@ -43,6 +43,9 @@
 	} = $props();
 	let heldSessionId = $state<string | null>(null);
 	let sentinelEl: HTMLElement | undefined = $state();
+	// Until the user scrolls, paging is background fill (a list kept short by a
+	// collapsed shelf pages to the end on load) and nobody is waiting for it.
+	let scrolled = $state(false);
 
 	function handleSwitchSession(session: SessionInfo) {
 		touch(session, "sidebar-pick");
@@ -102,7 +105,7 @@
 	{/snippet}
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={() => { heldSessionId = null; }}>
+	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
 		{#if isEmpty}
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
@@ -173,7 +176,7 @@
 		<div id="session-list-sentinel" class="h-px" bind:this={sentinelEl}></div>
 		<SessionPager {sentinelEl} />
 
-		{#if pagerLoading}
+		{#if pagerPending && (searching || scrolled)}
 			<div
 				class="px-3.5 py-2 text-center text-xs text-text-dimmer font-brand"
 				data-testid="session-list-loading-more"

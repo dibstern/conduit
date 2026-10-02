@@ -3,7 +3,8 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 
 type Mark =
-	| { kind: "query"; sessionId: string }
+	| { kind: "query"; sessionId: string; pid: number }
+	| { kind: "runner-started"; pid: number }
 	| { kind: "receipt" | "enqueue"; prompt: string; at: string }
 	| { kind: "emit"; prompt: string; text: string; at: string };
 
@@ -12,20 +13,42 @@ export function responseChunks(prompt: string): string[] {
 }
 
 export class ProcessHarness {
-	readonly marks: Mark[] = [{ kind: "query", sessionId: "fixture-session" }];
+	readonly marks: Mark[] = [
+		{ kind: "query", sessionId: "fixture-session", pid: 1 },
+	];
+	readonly generations = [{ pid: 1 }];
 	private sends = 0;
 	private readonly frames: Array<{
 		message: Record<string, unknown>;
 		at: bigint;
 	}> = [];
 	private constructor(private readonly dist: string) {}
-	static async start({ dist }: { dist: string }): Promise<ProcessHarness> {
+	static async start({
+		dist,
+		claudeRunner,
+	}: {
+		dist: string;
+		claudeRunner?: "process";
+	}): Promise<ProcessHarness> {
 		const config = JSON.parse(
 			readFileSync(`${dist}/latencies.json`, "utf8"),
-		) as { failActivation?: boolean };
+		) as { failActivation?: boolean; trace: string };
 		if (config.failActivation)
 			throw new Error("Fake Claude SDK activation was not acknowledged");
-		return new ProcessHarness(dist);
+		appendFileSync(
+			`${config.trace}.modes`,
+			`${basename(dist)}:${claudeRunner ?? "in-process"}\n`,
+		);
+		const harness = new ProcessHarness(dist);
+		if (claudeRunner) {
+			harness.marks[0] = {
+				kind: "query",
+				sessionId: "fixture-session",
+				pid: 2,
+			};
+			harness.marks.push({ kind: "runner-started", pid: 2 });
+		}
+		return harness;
 	}
 	async connect() {
 		const config = JSON.parse(

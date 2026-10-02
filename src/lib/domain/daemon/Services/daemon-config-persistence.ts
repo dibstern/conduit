@@ -5,6 +5,8 @@
 import { FileSystem } from "@effect/platform";
 import { Context, Effect, Ref } from "effect";
 import { migrateLegacyDefaultOpencodeInstanceId } from "../../../contracts/provider-instance.js";
+import { sanitizeRestartMetadata } from "../../../daemon/config-persistence.js";
+import { isRecord } from "../../../utils.js";
 import type {
 	DaemonInstanceConfig,
 	DaemonProject,
@@ -61,8 +63,10 @@ function serializeState(state: DaemonState): DaemonConfigOnDisk {
 }
 
 /** Deserialize a parsed JSON object into a DaemonState, merged with defaults. */
-function deserializeConfig(raw: Record<string, unknown>): DaemonState {
+function deserializeConfig(value: Record<string, unknown>): DaemonState {
 	const defaults = emptyDaemonState();
+	const raw = sanitizeRestartMetadata(value);
+	if (!isRecord(raw)) return defaults;
 
 	const state: DaemonState = {
 		...defaults,

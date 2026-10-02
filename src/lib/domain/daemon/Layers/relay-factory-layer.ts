@@ -25,6 +25,7 @@ import {
 	Runtime,
 } from "effect";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
+import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -41,6 +42,7 @@ import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
 	getInstances as getEffectInstances,
+	getManagedOpenCodeProcessEnv,
 	InstanceManagerStateTag,
 	PollerFibersTag,
 	persistConfig as persistEffectInstanceConfig,
@@ -336,6 +338,27 @@ export const RelayFactoryLive = (
 
 						// Read config for any runtime values needed
 						const _config = yield* Ref.get(configRef);
+						const instances = Array.from(
+							yield* getEffectInstances.pipe(
+								Effect.provideService(InstanceManagerStateTag, instanceState),
+							),
+						);
+						const selectedInstance =
+							instances.find(
+								(instance) =>
+									instance.driver !== "claude" &&
+									instance.id === project.instanceId,
+							) ?? instances.find((instance) => instance.driver !== "claude");
+						const opencodeAuth = selectedInstance?.managed
+							? openCodeAuth(
+									yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
+										Effect.provideService(
+											InstanceManagerStateTag,
+											instanceState,
+										),
+									),
+								)
+							: undefined;
 						envResolver?.register(project.directory, project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
@@ -350,6 +373,7 @@ export const RelayFactoryLive = (
 								createProjectRelay({
 									httpServer,
 									opencodeUrl,
+									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.directory,
 									...(envResolver && {
 										shellEnv: (directory: string) => envResolver.get(directory),

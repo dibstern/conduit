@@ -1868,7 +1868,7 @@ describe("handleForkSession", () => {
 });
 
 describe("handlePtyInput", () => {
-	it.effect("sends input through terminal service", () => {
+	it.effect("forwards input and client origin through terminal service", () => {
 		const terminal = mockTerminalService();
 
 		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
@@ -1879,7 +1879,11 @@ describe("handlePtyInput", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(terminal.sendInput).toHaveBeenCalledWith("pty-1", "ls\n");
+				expect(terminal.sendInput).toHaveBeenCalledExactlyOnceWith(
+					"pty-1",
+					"ls\n",
+					"client-1",
+				);
 			}),
 		);
 	});

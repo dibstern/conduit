@@ -7,6 +7,8 @@ import type { Immutable, RelayMessage, TabEntry } from "../types.js";
 import { STATUS_MESSAGE_MS } from "../ui-constants.js";
 
 const SCROLLBACK_MAX_BYTES = 50 * 1024; // 50 KB per tab
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 const DEFAULT_MAX_TABS = 10;
 const PENDING_CREATE_TIMEOUT_MS = 15_000;
 
@@ -62,7 +64,10 @@ export const terminalState = {
 // Non-reactive state (high-throughput PTY data)
 
 const scrollbackBuffers = new Map<string, string[]>();
-const outputListeners = new Map<string, Set<(data: string) => void>>();
+const outputListeners = new Map<
+	string,
+	Set<(data: string, replace?: boolean) => void>
+>();
 let pendingCreateTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
@@ -127,7 +132,7 @@ export function getTabList(): readonly Immutable<TabEntry>[] {
  */
 export function onOutput(
 	ptyId: string,
-	cb: (data: string) => void,
+	cb: (data: string, replace?: boolean) => void,
 ): () => void {
 	let listeners = outputListeners.get(ptyId);
 	if (!listeners) {
@@ -168,7 +173,11 @@ export function handlePtyList(
 		const ptyId = pty.id;
 		if (!ptyId) continue;
 		serverIds.add(ptyId);
-		if (!serverPtys.has(ptyId)) rememberPty(ptyId, pty.status === "exited");
+		// Lists may arrive after a newer exit event.
+		rememberPty(
+			ptyId,
+			pty.status === "exited" || serverPtys.get(ptyId)?.exited === true,
+		);
 	}
 
 	for (const id of [...serverPtys.keys()]) {
@@ -233,8 +242,11 @@ export function handlePtyCreated(
 export function handlePtyOutput(
 	msg: Extract<RelayMessage, { type: "pty_output" }>,
 ): void {
-	const { ptyId, data } = msg;
+	const { ptyId, data, replace, restored } = msg;
 	if (!ptyId || typeof data !== "string") return;
+	if (replace && restored && serverPtys.has(ptyId)) {
+		serverPtys.set(ptyId, { ptyId, exited: false });
+	}
 	if (!clientTerminal.panelOpen && !clientTerminal.unreadPtyIds.has(ptyId)) {
 		clientTerminal.unreadPtyIds = new Set([
 			...clientTerminal.unreadPtyIds,
@@ -242,28 +254,45 @@ export function handlePtyOutput(
 		]);
 	}
 
-	// Append to scrollback buffer (trim if over limit)
+	// A host snapshot replaces this browser's previous history on reconnect.
 	let buffer = scrollbackBuffers.get(ptyId);
 	if (!buffer) {
 		buffer = [];
 		scrollbackBuffers.set(ptyId, buffer);
 	}
-	buffer.push(data);
+	if (replace) buffer.length = 0;
+	if (data || !replace) buffer.push(data);
 
-	// Trim buffer if over max bytes
+	// Retain the newest bytes, including a partial oldest chunk.
 	let totalBytes = 0;
-	for (const chunk of buffer) totalBytes += chunk.length;
-	while (totalBytes > SCROLLBACK_MAX_BYTES && buffer.length > 1) {
-		const removed = buffer.shift();
-		if (removed === undefined) break;
-		totalBytes -= removed.length;
+	for (const chunk of buffer) totalBytes += textEncoder.encode(chunk).length;
+	while (totalBytes > SCROLLBACK_MAX_BYTES) {
+		const chunk = buffer[0];
+		if (chunk === undefined) break;
+		const bytes = textEncoder.encode(chunk);
+		const excess = totalBytes - SCROLLBACK_MAX_BYTES;
+		if (bytes.length <= excess) {
+			buffer.shift();
+			totalBytes -= bytes.length;
+			continue;
+		}
+		let offset = excess;
+		while (offset < bytes.length) {
+			const byte = bytes[offset];
+			if (byte === undefined || (byte & 0xc0) !== 0x80) break;
+			offset++;
+		}
+		if (offset === bytes.length) buffer.shift();
+		else buffer[0] = textDecoder.decode(bytes.subarray(offset));
+		totalBytes -= offset;
 	}
 
 	// Emit to listeners (bypasses Svelte reactivity)
 	const listeners = outputListeners.get(ptyId);
 	if (listeners) {
 		for (const cb of listeners) {
-			cb(data);
+			if (replace) cb(data, true);
+			else cb(data);
 		}
 	}
 }
@@ -381,7 +410,7 @@ export function getScrollbackSize(ptyId: string): number {
 	const buffer = scrollbackBuffers.get(ptyId);
 	if (!buffer) return 0;
 	let total = 0;
-	for (const chunk of buffer) total += chunk.length;
+	for (const chunk of buffer) total += textEncoder.encode(chunk).length;
 	return total;
 }
 

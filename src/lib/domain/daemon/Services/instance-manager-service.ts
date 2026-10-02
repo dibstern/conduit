@@ -7,7 +7,6 @@
 // addInstance uses atomic Ref.modify for capacity enforcement — two
 // concurrent addInstance calls cannot both pass the capacity check.
 
-import { createOpencodeServer } from "@opencode-ai/sdk/server";
 import {
 	Clock,
 	Context,
@@ -19,6 +18,7 @@ import {
 	Option,
 	Ref,
 	Schedule,
+	Scope,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import {
@@ -27,6 +27,21 @@ import {
 	instanceNotFound,
 	invalidInstanceUrl,
 } from "../../../instance/instance-errors.js";
+import {
+	availableOpenCodePort,
+	canReuseManagedOpenCode,
+	commitManagedOpenCodeSpawn,
+	inspectManagedOpenCodeProcess,
+	isProcessAlive,
+	ManagedOpenCodeProcessError,
+	type ManagedOpenCodeRecord,
+	managedOpenCodeEnv,
+	probeOpenCodeHealth,
+	publicManagedOpenCodeEnv,
+	spawnManagedOpenCode,
+	stopManagedOpenCode,
+	waitForOpenCodeHealth,
+} from "../../../instance/managed-opencode-process.js";
 import type {
 	InstanceConfig,
 	OpenCodeInstance,
@@ -39,8 +54,12 @@ export {
 	InvalidInstanceUrl,
 } from "../../../instance/instance-errors.js";
 
-import { requestConfigSave } from "./config-persistence-service.js";
 import {
+	ConfigPersistenceTag,
+	requestConfigSave,
+} from "./config-persistence-service.js";
+import {
+	type DaemonEventBusTag,
 	publishInstanceError,
 	publishInstanceStatusChanged,
 } from "./daemon-pubsub.js";
@@ -75,11 +94,34 @@ const DEFAULT_CONFIG: InstanceManagerConfig = {
 	restartWindowMs: 60_000,
 };
 
+export class ManagedOpenCodeLifecycleTag extends Context.Tag(
+	"ManagedOpenCodeLifecycle",
+)<
+	ManagedOpenCodeLifecycleTag,
+	{
+		readonly start: (instance: OpenCodeInstance) => Effect.Effect<void>;
+		readonly withLock: <A, E, R>(
+			effect: Effect.Effect<A, E, R>,
+		) => Effect.Effect<A, E, R>;
+	}
+>() {}
+
+const withManagedOpenCodeLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.gen(function* () {
+		const lifecycle = yield* Effect.serviceOption(ManagedOpenCodeLifecycleTag);
+		return yield* Option.isSome(lifecycle)
+			? lifecycle.value.withLock(effect)
+			: effect;
+	});
+
 export interface InstanceManagerState {
 	instances: HashMap.HashMap<string, OpenCodeInstance>;
 	externalUrls: HashMap.HashMap<string, string>;
 	restartTimestamps: HashMap.HashMap<string, ReadonlyArray<number>>;
 	config: InstanceManagerConfig;
+	stopManagedProcesses?: boolean;
+	/** Recovery identities and credentials never enter the browser read model. */
+	managedProcesses?: HashMap.HashMap<string, ManagedOpenCodeRecord>;
 }
 
 export interface InstanceManagerStateOptions
@@ -100,6 +142,8 @@ export const emptyInstanceManagerState = (
 	externalUrls: HashMap.empty(),
 	restartTimestamps: HashMap.empty(),
 	config: { ...DEFAULT_CONFIG, ...config },
+	stopManagedProcesses: false,
+	managedProcesses: HashMap.empty(),
 });
 
 const buildInstanceManagerState = (
@@ -120,7 +164,19 @@ const buildInstanceManagerState = (
 					status: driver === "claude" ? "healthy" : "starting",
 					restartCount: 0,
 					createdAt: now,
-					...(instance.env !== undefined ? { env: instance.env } : {}),
+					...(instance.env !== undefined
+						? {
+								env:
+									driver === "opencode" && instance.managed
+										? publicManagedOpenCodeEnv(instance.env)
+										: instance.env,
+							}
+						: {}),
+					...(driver === "opencode" &&
+					instance.managed &&
+					instance.pid !== undefined
+						? { pid: instance.pid, version: instance.version }
+						: {}),
 					...(instance.configDir !== undefined
 						? { configDir: instance.configDir }
 						: {}),
@@ -141,6 +197,28 @@ const buildInstanceManagerState = (
 		),
 		restartTimestamps: HashMap.empty(),
 		config: { ...DEFAULT_CONFIG, ...config },
+		stopManagedProcesses: false,
+		managedProcesses: HashMap.fromIterable(
+			initialInstances
+				.filter((instance) => instance.managed && instance.driver !== "claude")
+				.map(
+					(instance) =>
+						[
+							instance.id,
+							{
+								port: instance.port,
+								...(instance.env !== undefined ? { env: instance.env } : {}),
+								...(instance.pid !== undefined ? { pid: instance.pid } : {}),
+								...(instance.processIdentity !== undefined
+									? { processIdentity: instance.processIdentity }
+									: {}),
+								...(instance.version !== undefined
+									? { version: instance.version }
+									: {}),
+							},
+						] as const,
+				),
+		),
 	};
 };
 
@@ -306,7 +384,14 @@ export const addInstance = (input: AddInstanceInput) =>
 			restartCount: 0,
 			createdAt: now,
 			// Only include optional env when defined (exactOptionalPropertyTypes)
-			...(input.env !== undefined ? { env: input.env } : {}),
+			...(input.env !== undefined
+				? {
+						env:
+							driver === "opencode" && input.managed
+								? publicManagedOpenCodeEnv(input.env)
+								: input.env,
+					}
+				: {}),
 			...(input.configDir !== undefined ? { configDir: input.configDir } : {}),
 			...(driver === "opencode" && inputExternalUrl !== undefined
 				? { url: inputExternalUrl }
@@ -341,7 +426,23 @@ export const addInstance = (input: AddInstanceInput) =>
 						: state.externalUrls;
 				return [
 					undefined,
-					{ ...state, instances: newInstances, externalUrls: newExternalUrls },
+					{
+						...state,
+						instances: newInstances,
+						externalUrls: newExternalUrls,
+						...(driver === "opencode" && input.managed
+							? {
+									managedProcesses: HashMap.set(
+										state.managedProcesses ?? HashMap.empty(),
+										input.id,
+										{
+											port: input.port,
+											...(input.env !== undefined ? { env: input.env } : {}),
+										},
+									),
+								}
+							: {}),
+					},
 				];
 			},
 		);
@@ -377,18 +478,29 @@ export const removeInstance = (instanceId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* InstanceManagerStateTag;
 		const fiberMap = yield* PollerFibersTag;
+		const processRecord = HashMap.get(
+			(yield* Ref.get(ref)).managedProcesses ?? HashMap.empty(),
+			instanceId,
+		);
+		if (Option.isSome(processRecord))
+			yield* stopRecordedManagedOpenCode(processRecord.value);
 
 		yield* Ref.update(ref, (state) => ({
 			...state,
 			instances: HashMap.remove(state.instances, instanceId),
 			externalUrls: HashMap.remove(state.externalUrls, instanceId),
 			restartTimestamps: HashMap.remove(state.restartTimestamps, instanceId),
+			managedProcesses: HashMap.remove(
+				state.managedProcesses ?? HashMap.empty(),
+				instanceId,
+			),
 		}));
 
 		yield* FiberMap.remove(fiberMap, pollerKey(instanceId));
 		yield* FiberMap.remove(fiberMap, restartKey(instanceId));
 		yield* requestConfigSave;
 	}).pipe(
+		withManagedOpenCodeLock,
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.remove", {
 			attributes: { instanceId },
@@ -422,6 +534,16 @@ export const getInstances = Effect.gen(function* () {
 	return HashMap.values(state.instances);
 }).pipe(Effect.withSpan("instance.getAll"));
 
+export const getManagedOpenCodeProcessEnv = (instanceId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* InstanceManagerStateTag;
+		const record = HashMap.get(
+			(yield* Ref.get(ref)).managedProcesses ?? HashMap.empty(),
+			instanceId,
+		);
+		return Option.isSome(record) ? record.value.env : undefined;
+	});
+
 /**
  * Get all instance records in daemon.json shape, including unmanaged external
  * URLs tracked separately for lifecycle lookup.
@@ -432,13 +554,36 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 	const configs: DaemonInstanceConfig[] = [];
 	for (const inst of HashMap.values(state.instances)) {
 		const externalUrl = HashMap.get(state.externalUrls, inst.id);
+		const privateRecord = HashMap.get(
+			state.managedProcesses ?? HashMap.empty(),
+			inst.id,
+		);
+		const record =
+			inst.managed && inst.driver !== "claude" && Option.isSome(privateRecord)
+				? privateRecord.value
+				: undefined;
+		const pid = record?.pid ?? inst.pid;
 		configs.push({
 			id: inst.id,
 			name: inst.name,
 			port: inst.port,
 			managed: inst.managed,
+			...(inst.managed && inst.driver !== "claude" && pid !== undefined
+				? {
+						pid,
+						...(record?.processIdentity !== undefined
+							? { processIdentity: record.processIdentity }
+							: {}),
+						...(inst.version !== undefined ? { version: inst.version } : {}),
+					}
+				: {}),
 			driver: inst.driver ?? "opencode",
-			...(inst.env !== undefined ? { env: inst.env } : {}),
+			...((record?.env ?? inst.env) !== undefined
+				? { env: record?.env ?? inst.env }
+				: {}),
+			...(inst.pid === undefined && record?.processIdentity !== undefined
+				? { processIdentity: record.processIdentity }
+				: {}),
 			...(Option.isSome(externalUrl) ? { url: externalUrl.value } : {}),
 			...(inst.configDir !== undefined ? { configDir: inst.configDir } : {}),
 		});
@@ -504,7 +649,13 @@ export const startHealthPoller = (instanceId: string) =>
 				? externalUrl.value
 				: `http://localhost:${instance.port}`;
 			const isHealthy = yield* healthCheck.check({
-				instance,
+				instance: {
+					...instance,
+					env:
+						(instance.managed
+							? yield* getManagedOpenCodeProcessEnv(instance.id)
+							: instance.env) ?? {},
+				},
 				url: instanceUrl,
 			});
 
@@ -557,33 +708,46 @@ export const stopHealthPoller = (instanceId: string) =>
 		yield* FiberMap.remove(fibers, pollerKey(instanceId));
 	});
 
-const portFromServerUrl = (url: string, fallback: number): number => {
-	try {
-		const parsed = new URL(url);
-		if (parsed.port) return Number.parseInt(parsed.port, 10);
-		return parsed.protocol === "https:" ? 443 : 80;
-	} catch {
-		return fallback;
-	}
-};
+const stopRecordedManagedOpenCode = (record: ManagedOpenCodeRecord) =>
+	Effect.tryPromise({
+		try: async () => {
+			if (await stopManagedOpenCode(record)) return;
+			// A recycled worker PID cannot keep a dead supervisor's record alive.
+			if (
+				record.processIdentity &&
+				isProcessAlive(record.processIdentity.supervisorPid)
+			)
+				throw new ManagedOpenCodeProcessError({
+					message:
+						"Cannot verify OpenCode ownership; retaining its recovery record",
+				});
+		},
+		catch: (cause) => cause,
+	});
 
 const markManagedInstanceHealthy = (
 	instance: OpenCodeInstance,
-	serverUrl: string,
+	processState: ManagedOpenCodeRecord & { pid: number },
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* InstanceManagerStateTag;
 		const now = yield* Clock.currentTimeMillis;
-		const port = portFromServerUrl(serverUrl, instance.port);
+		const { env, processIdentity: _identity, ...visible } = processState;
 		yield* Ref.update(ref, (state) => ({
 			...state,
 			instances: HashMap.modify(state.instances, instance.id, (current) => ({
 				...current,
-				port,
+				...visible,
+				...(env !== undefined ? { env: publicManagedOpenCodeEnv(env) } : {}),
 				status: "healthy" as const,
 				lastHealthCheck: now,
 			})),
 			externalUrls: HashMap.remove(state.externalUrls, instance.id),
+			managedProcesses: HashMap.set(
+				state.managedProcesses ?? HashMap.empty(),
+				instance.id,
+				processState,
+			),
 		}));
 		yield* publishInstanceStatusChanged(instance.id);
 	});
@@ -596,55 +760,311 @@ const markManagedInstanceUnhealthy = (
 		const ref = yield* InstanceManagerStateTag;
 		yield* Ref.update(ref, (state) => ({
 			...state,
-			instances: HashMap.modify(state.instances, instance.id, (current) => ({
-				...current,
-				status: "unhealthy" as const,
-			})),
+			instances: HashMap.modify(state.instances, instance.id, (current) => {
+				const { pid: _pid, version: _version, ...rest } = current;
+				return { ...rest, status: "unhealthy" as const };
+			}),
 		}));
 		const message = cause instanceof Error ? cause.message : String(cause);
 		yield* publishInstanceStatusChanged(instance.id);
 		yield* publishInstanceError(instance.id, message);
 		yield* Effect.logWarning(
-			`Failed to start OpenCode SDK server for instance ${instance.id}: ${message}`,
+			`Failed to start managed OpenCode for instance ${instance.id}: ${message}`,
 		);
 	});
 
-const startManagedOpenCodeServer = (instance: OpenCodeInstance) =>
+const startManagedOpenCodeServer = (
+	instance: OpenCodeInstance,
+	configDir: string,
+) =>
 	Effect.acquireRelease(
-		Effect.tryPromise({
-			try: () =>
-				createOpencodeServer({
-					hostname: "127.0.0.1",
-					port: instance.port,
-					timeout: 5000,
-				}),
-			catch: (cause) => cause,
+		Effect.gen(function* () {
+			const ref = yield* InstanceManagerStateTag;
+			const persistence = yield* ConfigPersistenceTag;
+			const save = persistence.requestSave.pipe(
+				Effect.zipRight(persistence.flush),
+			);
+			let owned: ManagedOpenCodeRecord | undefined;
+			let previous: ManagedOpenCodeRecord | undefined;
+			return yield* Effect.gen(function* () {
+				const record: ManagedOpenCodeRecord = Option.getOrElse(
+					HashMap.get(
+						(yield* Ref.get(ref)).managedProcesses ?? HashMap.empty(),
+						instance.id,
+					),
+					() => instance,
+				);
+				previous = record;
+				const reusable = yield* Effect.tryPromise({
+					try: () => canReuseManagedOpenCode(record),
+					catch: (cause) => cause,
+				});
+				if (reusable && record.pid !== undefined) {
+					const identity = yield* Effect.tryPromise({
+						try: () => inspectManagedOpenCodeProcess(record.processIdentity),
+						catch: (cause) => cause,
+					});
+					if (!identity?.running || !identity.listening)
+						return yield* new ManagedOpenCodeProcessError({
+							message: "OpenCode ownership changed during recovery",
+						});
+					const health = yield* Effect.tryPromise({
+						try: () => probeOpenCodeHealth(record.port, record.env),
+						catch: (cause) => cause,
+					});
+					if (!health)
+						return yield* new ManagedOpenCodeProcessError({
+							message: "OpenCode became unhealthy during recovery",
+						});
+					owned = { ...record, pid: identity.pid, ...health };
+					yield* markManagedInstanceHealthy(instance, {
+						...record,
+						pid: identity.pid,
+						...health,
+					});
+					yield* save;
+					return owned;
+				}
+				// An authenticated supervisor can safely terminate its original
+				// group even if the recorded worker PID is stale or corrupted.
+				const original = yield* Effect.tryPromise({
+					try: () => inspectManagedOpenCodeProcess(record.processIdentity),
+					catch: (cause) => cause,
+				});
+				if (original) {
+					yield* stopRecordedManagedOpenCode({ ...record, pid: original.pid });
+				} else if (record.processIdentity) {
+					yield* stopRecordedManagedOpenCode(record);
+				}
+				// A stale PID may belong to another program. Do not signal it, and
+				// use a fresh port when replacing an invalid recorded process.
+				const port = yield* Effect.tryPromise({
+					try: () =>
+						availableOpenCodePort(record.pid !== undefined ? 0 : instance.port),
+					catch: (cause) => cause,
+				});
+				const env = managedOpenCodeEnv(record.env ?? instance.env);
+				yield* Ref.update(ref, (state) => ({
+					...state,
+					instances: HashMap.modify(state.instances, instance.id, (current) => {
+						const { pid: _pid, version: _version, ...rest } = current;
+						return { ...rest, port, env: publicManagedOpenCodeEnv(env) };
+					}),
+					managedProcesses: HashMap.set(
+						state.managedProcesses ?? HashMap.empty(),
+						instance.id,
+						{ port, env },
+					),
+				}));
+				yield* save;
+				const spawned = yield* Effect.tryPromise({
+					try: () => spawnManagedOpenCode(instance.id, port, env, configDir),
+					catch: (cause) => cause,
+				});
+				owned = {
+					port,
+					env,
+					pid: spawned.pid,
+					processIdentity: spawned.processIdentity,
+				};
+				yield* Ref.update(ref, (state) => ({
+					...state,
+					instances: HashMap.modify(
+						state.instances,
+						instance.id,
+						(current) => ({ ...current, pid: spawned.pid }),
+					),
+					managedProcesses: HashMap.set(
+						state.managedProcesses ?? HashMap.empty(),
+						instance.id,
+						{
+							port,
+							env,
+							pid: spawned.pid,
+							processIdentity: spawned.processIdentity,
+						},
+					),
+				}));
+				// Record identity before readiness, so a crash during startup can
+				// still rediscover the detached child.
+				yield* save;
+				yield* Effect.tryPromise({
+					try: () => commitManagedOpenCodeSpawn(spawned.process),
+					catch: (cause) => cause,
+				});
+				const health = yield* Effect.tryPromise({
+					try: (signal) =>
+						waitForOpenCodeHealth(
+							{ port, env, processIdentity: spawned.processIdentity },
+							spawned.process,
+							signal,
+						),
+					catch: (cause) => cause,
+				});
+				yield* markManagedInstanceHealthy(instance, {
+					port,
+					env,
+					processIdentity: spawned.processIdentity,
+					...health,
+				});
+				yield* save;
+				return {
+					port,
+					env,
+					processIdentity: spawned.processIdentity,
+					...health,
+				};
+			}).pipe(
+				Effect.catchAll((cause) =>
+					Effect.gen(function* () {
+						let released = true;
+						if (owned) {
+							const record = owned;
+							released = yield* stopRecordedManagedOpenCode(record).pipe(
+								Effect.as(true),
+								Effect.catchAll((error) =>
+									Effect.logWarning(
+										"Retaining failed-start OpenCode ownership",
+										error,
+									).pipe(Effect.as(false)),
+								),
+							);
+						}
+						yield* markManagedInstanceUnhealthy(instance, cause);
+						if (owned && released) {
+							const env = owned.env;
+							yield* Ref.update(ref, (state) => ({
+								...state,
+								managedProcesses: HashMap.set(
+									state.managedProcesses ?? HashMap.empty(),
+									instance.id,
+									{
+										port: instance.port,
+										...(env !== undefined ? { env } : {}),
+									},
+								),
+							}));
+						}
+						yield* save.pipe(
+							Effect.catchAll((error) =>
+								Effect.logError(
+									"Failed to persist OpenCode startup recovery state",
+									error,
+								),
+							),
+						);
+						return !released
+							? (owned ?? null)
+							: !owned && previous?.processIdentity
+								? previous
+								: null;
+					}),
+				),
+			);
 		}).pipe(
-			Effect.tap((server) => markManagedInstanceHealthy(instance, server.url)),
 			Effect.catchAll((cause) =>
-				markManagedInstanceUnhealthy(instance, cause).pipe(Effect.as(null)),
+				Effect.logError(
+					`Managed OpenCode startup failed for ${instance.id}`,
+					cause,
+				).pipe(Effect.as(null)),
 			),
 		),
-		(server) =>
-			server === null
-				? Effect.void
-				: Effect.try({
-						try: () => server.close(),
-						catch: (cause) => cause,
-					}).pipe(Effect.catchAll(() => Effect.void)),
+		(record) =>
+			Effect.gen(function* () {
+				if (record === null) return;
+				const ref = yield* InstanceManagerStateTag;
+				const state = yield* Ref.get(ref);
+				const registered = HashMap.get(state.instances, instance.id);
+				const current = HashMap.get(
+					state.managedProcesses ?? HashMap.empty(),
+					instance.id,
+				);
+				const sameGeneration =
+					Option.isSome(current) &&
+					current.value.processIdentity?.token ===
+						record.processIdentity?.token;
+				if (
+					!state.stopManagedProcesses &&
+					Option.isSome(registered) &&
+					registered.value.managed &&
+					registered.value.driver !== "claude" &&
+					sameGeneration
+				)
+					return;
+				// Successful spawn or authenticated adoption establishes group
+				// ownership. Explicit stop must work even if its API later hangs.
+				yield* stopRecordedManagedOpenCode(record);
+				yield* Ref.update(ref, (state) => {
+					const processes = state.managedProcesses ?? HashMap.empty();
+					const current = HashMap.get(processes, instance.id);
+					if (
+						Option.isNone(current) ||
+						current.value.processIdentity?.token !==
+							record.processIdentity?.token
+					)
+						return state;
+					return {
+						...state,
+						instances: HashMap.modify(
+							state.instances,
+							instance.id,
+							(current) => {
+								const { pid: _pid, version: _version, ...rest } = current;
+								return { ...rest, status: "stopped" as const };
+							},
+						),
+						managedProcesses: HashMap.set(processes, instance.id, {
+							port: record.port,
+							...(record.env !== undefined ? { env: record.env } : {}),
+						}),
+					};
+				});
+				const persistence = yield* ConfigPersistenceTag;
+				yield* persistence.requestSave;
+				yield* persistence.flush;
+			}).pipe(
+				Effect.catchAll((cause) =>
+					Effect.logError(
+						`Managed OpenCode cleanup failed for ${instance.id}`,
+						cause,
+					),
+				),
+			),
 	);
 
-export const startManagedOpenCodeServers = Effect.gen(function* () {
+export const requestManagedOpenCodeShutdown = Effect.gen(function* () {
 	const ref = yield* InstanceManagerStateTag;
-	const state = yield* Ref.get(ref);
-	const managedInstances = Array.from(HashMap.values(state.instances)).filter(
-		(instance) => instance.managed && instance.driver !== "claude",
+	yield* Ref.update(ref, (state) => ({ ...state, stopManagedProcesses: true }));
+});
+
+export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
+	Layer.scoped(
+		ManagedOpenCodeLifecycleTag,
+		Effect.gen(function* () {
+			const scope = yield* Effect.scope;
+			const context = yield* Effect.context<
+				InstanceManagerStateTag | ConfigPersistenceTag | DaemonEventBusTag
+			>();
+			const semaphore = yield* Effect.makeSemaphore(1);
+			const start = (instance: OpenCodeInstance) =>
+				startManagedOpenCodeServer(instance, configDir).pipe(
+					// RPC scopes end after each request; ownership lasts with the daemon.
+					Scope.extend(scope),
+					Effect.provide(context),
+					Effect.asVoid,
+				);
+			const state = yield* Ref.get(yield* InstanceManagerStateTag);
+			yield* Effect.forEach(
+				HashMap.values(state.instances),
+				(instance) =>
+					instance.managed && instance.driver !== "claude"
+						? semaphore.withPermits(1)(start(instance))
+						: Effect.void,
+				{ concurrency: 1, discard: true },
+			);
+			return { start, withLock: semaphore.withPermits(1) };
+		}).pipe(Effect.withSpan("instance.startManagedOpenCodeServers")),
 	);
-	yield* Effect.forEach(managedInstances, startManagedOpenCodeServer, {
-		concurrency: 1,
-		discard: true,
-	});
-}).pipe(Effect.withSpan("instance.startManagedOpenCodeServers"));
 
 /**
  * Schedule a restart for an unhealthy instance with exponential backoff.
@@ -764,8 +1184,7 @@ export const cancelInstanceFibers = (instanceId: string) =>
 	});
 
 /**
- * Start an instance — update status to "starting" and begin health polling.
- * The actual process spawn is handled externally; this manages Effect-side state.
+ * Start an instance in the daemon's scope and begin health polling.
  */
 export const startInstance = (instanceId: string) =>
 	Effect.gen(function* () {
@@ -773,6 +1192,14 @@ export const startInstance = (instanceId: string) =>
 		const state = yield* Ref.get(stateRef);
 		const instance = HashMap.get(state.instances, instanceId);
 		if (Option.isSome(instance) && instance.value.driver === "claude") return;
+		const lifecycle = yield* Effect.serviceOption(ManagedOpenCodeLifecycleTag);
+		if (
+			Option.isSome(instance) &&
+			instance.value.managed &&
+			instance.value.status === "healthy" &&
+			Option.isSome(lifecycle)
+		)
+			return;
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
 			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
@@ -781,8 +1208,16 @@ export const startInstance = (instanceId: string) =>
 			})),
 		}));
 		yield* publishInstanceStatusChanged(instanceId);
+		if (
+			Option.isSome(instance) &&
+			instance.value.managed &&
+			Option.isSome(lifecycle)
+		) {
+			yield* lifecycle.value.start(instance.value);
+		}
 		yield* startHealthPoller(instanceId);
 	}).pipe(
+		withManagedOpenCodeLock,
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.start"),
 	);
@@ -797,15 +1232,30 @@ export const stopInstance = (instanceId: string) =>
 		const instance = HashMap.get(state.instances, instanceId);
 		if (Option.isSome(instance) && instance.value.driver === "claude") return;
 		yield* cancelInstanceFibers(instanceId);
+		const record = HashMap.get(
+			state.managedProcesses ?? HashMap.empty(),
+			instanceId,
+		);
+		if (Option.isSome(record)) yield* stopRecordedManagedOpenCode(record.value);
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
-			instances: HashMap.modify(s.instances, instanceId, (inst) => ({
-				...inst,
-				status: "stopped" as const,
-			})),
+			instances: HashMap.modify(s.instances, instanceId, (inst) => {
+				const { pid: _pid, version: _version, ...rest } = inst;
+				return { ...rest, status: "stopped" as const };
+			}),
+			managedProcesses: Option.isSome(record)
+				? HashMap.set(s.managedProcesses ?? HashMap.empty(), instanceId, {
+						port: record.value.port,
+						...(record.value.env !== undefined
+							? { env: record.value.env }
+							: {}),
+					})
+				: (s.managedProcesses ?? HashMap.empty()),
 		}));
 		yield* publishInstanceStatusChanged(instanceId);
+		yield* requestConfigSave;
 	}).pipe(
+		withManagedOpenCodeLock,
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.stop"),
 	);
@@ -825,16 +1275,42 @@ export const updateInstance = (
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
 		if (updates.driver === "claude") {
+			const record = HashMap.get(
+				(yield* Ref.get(stateRef)).managedProcesses ?? HashMap.empty(),
+				instanceId,
+			);
+			if (Option.isSome(record))
+				yield* stopRecordedManagedOpenCode(record.value);
 			yield* cancelInstanceFibers(instanceId);
 		}
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
 			instances: HashMap.modify(s.instances, instanceId, (inst) => {
-				const updated = { ...inst, ...updates };
+				const updated = {
+					...inst,
+					...updates,
+					...(inst.managed &&
+					inst.driver !== "claude" &&
+					updates.env !== undefined
+						? { env: publicManagedOpenCodeEnv(updates.env) }
+						: {}),
+				};
 				if (updates.driver !== "claude") return updated;
-				const { url: _url, ...claudeInstance } = updated;
+				const {
+					url: _url,
+					pid: _pid,
+					version: _version,
+					env,
+					...claudeInstance
+				} = updated;
+				const {
+					OPENCODE_SERVER_PASSWORD: _password,
+					OPENCODE_SERVER_USERNAME: _username,
+					...claudeEnv
+				} = env ?? {};
 				return {
 					...claudeInstance,
+					...(env !== undefined ? { env: claudeEnv } : {}),
 					managed: false,
 					port: 0,
 					status: "healthy" as const,
@@ -848,10 +1324,37 @@ export const updateInstance = (
 				updates.driver === "claude"
 					? HashMap.remove(s.restartTimestamps, instanceId)
 					: s.restartTimestamps,
+			managedProcesses:
+				updates.driver === "claude"
+					? HashMap.remove(s.managedProcesses ?? HashMap.empty(), instanceId)
+					: updates.env !== undefined
+						? HashMap.modify(
+								s.managedProcesses ?? HashMap.empty(),
+								instanceId,
+								(record) => ({
+									...record,
+									env: {
+										...updates.env,
+										...(record.env?.["OPENCODE_SERVER_PASSWORD"] !==
+											undefined &&
+										updates.env?.["OPENCODE_SERVER_PASSWORD"] === undefined
+											? {
+													OPENCODE_SERVER_PASSWORD:
+														record.env["OPENCODE_SERVER_PASSWORD"],
+													OPENCODE_SERVER_USERNAME:
+														record.env["OPENCODE_SERVER_USERNAME"] ??
+														"opencode",
+												}
+											: {}),
+									},
+								}),
+							)
+						: (s.managedProcesses ?? HashMap.empty()),
 		}));
 		yield* publishInstanceStatusChanged(instanceId);
 		yield* requestConfigSave;
 	}).pipe(
+		withManagedOpenCodeLock,
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.update"),
 	);

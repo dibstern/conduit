@@ -671,7 +671,7 @@ export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeComman
 export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
 	failure: WsRpcError,
 	success: OkResponseSchema,
-	payload: {},
+	payload: { preserveManagedInstances: Schema.optional(Schema.Boolean) },
 }) {}
 
 export class SetAgent extends Schema.TaggedRequest<SetAgent>()("SetAgent", {

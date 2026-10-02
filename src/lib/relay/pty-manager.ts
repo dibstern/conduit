@@ -3,9 +3,12 @@
 // management is isolated and independently testable.
 
 import { createSilentLogger, type Logger } from "../logger.js";
-import type { PtyStatus } from "../shared-types.js";
+import type { PtyInfo, PtyStatus } from "../shared-types.js";
+import {
+	PTY_SCROLLBACK_BYTES,
+	PtyScrollback,
+} from "../terminal/pty-host-protocol.js";
 
-const DEFAULT_SCROLLBACK_MAX = 50 * 1024; // 50 KB per terminal (matches claude-relay)
 const WS_OPEN = 1;
 
 export interface PtyUpstream {
@@ -14,15 +17,16 @@ export interface PtyUpstream {
 	close(code?: number, reason?: string | Buffer): void;
 	terminate(): void;
 	resize?(cols: number, rows: number): void;
+	detach?(): void;
 }
 
 export interface PtySessionState {
 	upstream: PtyUpstream;
 	source: "local" | "opencode";
-	scrollback: string[];
-	scrollbackSize: number;
+	scrollback: PtyScrollback;
 	exited: boolean;
 	exitCode: number | null;
+	info?: PtyInfo;
 }
 
 export interface PtyManagerOptions {
@@ -37,7 +41,7 @@ export class PtyManager {
 
 	constructor(options: PtyManagerOptions) {
 		this.log = options.log ?? createSilentLogger();
-		this.scrollbackMax = options.scrollbackMax ?? DEFAULT_SCROLLBACK_MAX;
+		this.scrollbackMax = options.scrollbackMax ?? PTY_SCROLLBACK_BYTES;
 	}
 
 	get sessionCount(): number {
@@ -63,6 +67,7 @@ export class PtyManager {
 		ptyId: string,
 		upstream: PtyUpstream,
 		source: "local" | "opencode" = "opencode",
+		info?: PtyInfo,
 	): PtySessionState {
 		if (this.sessions.has(ptyId)) {
 			this.closeSession(ptyId);
@@ -70,34 +75,21 @@ export class PtyManager {
 		const session: PtySessionState = {
 			upstream,
 			source,
-			scrollback: [],
-			scrollbackSize: 0,
+			scrollback: new PtyScrollback(this.scrollbackMax),
 			exited: false,
 			exitCode: null,
+			...(info && { info }),
 		};
 		this.sessions.set(ptyId, session);
 		return session;
 	}
 
 	appendScrollback(ptyId: string, text: string): void {
-		const session = this.sessions.get(ptyId);
-		if (!session) return;
-		session.scrollback.push(text);
-		session.scrollbackSize += text.length;
-		while (
-			session.scrollbackSize > this.scrollbackMax &&
-			session.scrollback.length > 1
-		) {
-			const removed = session.scrollback.shift();
-			if (removed === undefined) break;
-			session.scrollbackSize -= removed.length;
-		}
+		this.sessions.get(ptyId)?.scrollback.append(text);
 	}
 
 	getScrollback(ptyId: string): string {
-		const session = this.sessions.get(ptyId);
-		if (!session || session.scrollback.length === 0) return "";
-		return session.scrollback.join("");
+		return this.sessions.get(ptyId)?.scrollback.read() ?? "";
 	}
 
 	markExited(ptyId: string, exitCode: number): void {
@@ -130,6 +122,17 @@ export class PtyManager {
 	closeAll(): void {
 		for (const ptyId of [...this.sessions.keys()]) {
 			this.closeSession(ptyId);
+		}
+	}
+
+	detachAll(): void {
+		for (const [ptyId, session] of this.sessions) {
+			if (session.upstream.detach) {
+				session.upstream.detach();
+				this.sessions.delete(ptyId);
+			} else {
+				this.closeSession(ptyId);
+			}
 		}
 	}
 }
