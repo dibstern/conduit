@@ -25,6 +25,7 @@ Scenario Outline: The full bar returns when the transcript is scrolled up
   When I scroll the transcript up by 400 pixels
   Then the jump-to-latest control is visible
   And the session bar is expanded
+  And the session bar's first row reads back, identity and Views from left to right
   And the session-bar region visually matches <baseline> at <threshold> percent
 
 Examples:
