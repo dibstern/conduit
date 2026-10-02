@@ -531,7 +531,19 @@ export const makeProcessClaudeSessionRunner = (
 										),
 									);
 								const existing = children.get(sessionId);
-								if (existing || command.type !== "send-turn") {
+								if (
+									command.type === "pre-warm" &&
+									existing &&
+									(existing.failure ||
+										existing.idleExiting ||
+										existing.stopping ||
+										existing.ending > 0)
+								)
+									return { entry: undefined, draining: false };
+								if (
+									existing ||
+									(command.type !== "send-turn" && command.type !== "pre-warm")
+								) {
 									if (existing && command.type === "end-session") {
 										if (existing.ending === 0)
 											existing.endingReleased = yield* Deferred.make<void>();
@@ -608,6 +620,14 @@ export const makeProcessClaudeSessionRunner = (
 					if (!entry) return;
 					child = entry;
 					const connection = yield* Deferred.await(entry.ready);
+					if (
+						command.type === "pre-warm" &&
+						(entry.failure ||
+							entry.idleExiting ||
+							entry.stopping ||
+							entry.ending > 0)
+					)
+						return;
 					if (closing)
 						return yield* Effect.fail(
 							claudeRunnerFailure(
@@ -627,7 +647,14 @@ export const makeProcessClaudeSessionRunner = (
 										...process.env,
 									},
 								}
-							: command;
+							: command.type === "pre-warm"
+								? {
+										...command,
+										shellEnv: deps.shellEnv?.(command.input.workspaceRoot) ?? {
+											...process.env,
+										},
+									}
+								: command;
 					const commandId =
 						command.type === "send-turn"
 							? (command.input.commandId ?? randomUUID())
@@ -699,6 +726,17 @@ export const makeProcessClaudeSessionRunner = (
 					),
 					Effect.catchAllDefect((cause) =>
 						Effect.fail(claudeRunnerFailure(command.type, cause)),
+					),
+					Effect.catchAll((failure) =>
+						command.type === "pre-warm" &&
+						(closing ||
+							failure.code === "runner_idle_exit" ||
+							child?.failure ||
+							child?.idleExiting ||
+							child?.stopping ||
+							(child?.ending ?? 0) > 0)
+							? Effect.succeed(undefined)
+							: Effect.fail(failure),
 					),
 					Effect.onError((cause) => {
 						if (

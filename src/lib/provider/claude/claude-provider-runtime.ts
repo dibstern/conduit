@@ -35,6 +35,7 @@ import {
 	HashMap,
 	HashSet,
 	Layer,
+	Option,
 	Ref,
 	type Scope,
 } from "effect";
@@ -56,6 +57,7 @@ import type {
 	EventSink,
 	PermissionDecision,
 	PermissionResponse,
+	PreWarmSessionInput,
 	ProviderCapabilities,
 	SendTurnInput,
 	TurnResult,
@@ -67,6 +69,7 @@ import {
 } from "./claude-capabilities-service.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
+import { buildClaudeQueryOptions } from "./claude-query-options.js";
 import {
 	discoverCapabilitiesEffect,
 	expectedApiModelIdEffect,
@@ -89,7 +92,6 @@ import {
 } from "./claude-runtime-state.js";
 import {
 	buildUserMessage,
-	clearTurnDeferreds,
 	hasPendingTurn,
 	pushTurnDeferred,
 	rejectTurnIfPendingEffect,
@@ -98,13 +100,10 @@ import {
 	settleQueuedTurnDeferredsEffect,
 	shiftTurnDeferred,
 } from "./claude-runtime-turn.js";
-import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
-import { buildClaudeFlagSettings } from "./claude-sdk-settings.js";
 import {
 	asError,
 	ClaudeSDKDecodeError,
 	decodeProviderMessage,
-	validateOptionsJsonShape,
 	validateUserMessage,
 } from "./claude-sdk-validation.js";
 import type {
@@ -130,9 +129,12 @@ import {
 	type ClaudeTranslationService,
 	makeClaudeTranslationService,
 } from "./claude-translation-service.js";
+import {
+	type ClaudeWarmedQueryOwner,
+	makeClaudeWarmedQueryOwner,
+} from "./claude-warmed-query.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { serializePriorConversation } from "./history-transcript.js";
-import { toSdkPermissionMode } from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	CanUseTool,
@@ -156,6 +158,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly shellEnv?: (
 		directory: string,
 	) => Readonly<Record<string, string | undefined>>;
+	readonly prepareShellEnv?: (directory: string) => Promise<boolean>;
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
@@ -215,13 +218,21 @@ export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
 ): Effect.Effect<ClaudeProviderRuntime, never, Scope.Scope> =>
 	Effect.gen(function* () {
+		const providerScope = yield* Effect.scope;
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
+		const preWarmFibers = yield* FiberMap.make<
+			string,
+			void,
+			ProviderInstanceFailure
+		>();
+		const processRunnerEnabled =
+			process.env["CONDUIT_CLAUDE_RUNNER"] === "process";
 		let runtime: ClaudeProviderRuntime | undefined;
 		const runner = yield* (
-			process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
+			processRunnerEnabled
 				? makeProcessClaudeSessionRunner
 				: makeClaudeSessionRunner
 		)(
@@ -247,6 +258,9 @@ export const makeClaudeProviderRuntime = (
 			runner,
 			abortFibers,
 			interactionFibers,
+			preWarmFibers,
+			providerScope,
+			processRunnerEnabled,
 		);
 		const providerRuntime = runtime;
 		yield* Effect.addFinalizer(() =>
@@ -274,12 +288,17 @@ export const makeClaudeSessionRunner = (
 		>();
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
+		const warmedQueries = yield* makeClaudeWarmedQueryOwner(
+			deps.queryFactory ??
+				(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>),
+		);
 		const runner = new InProcessClaudeSessionRunner(
 			{ ...deps, capabilitiesService },
 			stateRef,
 			streamFibers,
 			subagentFinalizationFibers,
 			shutdownFibers,
+			warmedQueries,
 			emit,
 		);
 		yield* Effect.addFinalizer(() =>
@@ -335,6 +354,13 @@ export class ClaudeProviderRuntime {
 		private readonly runner: ClaudeSessionRunner,
 		private readonly abortFibers: FiberMap.FiberMap<string, void, never>,
 		private readonly interactionFibers: FiberMap.FiberMap<string, void, never>,
+		private readonly preWarmFibers: FiberMap.FiberMap<
+			string,
+			void,
+			ProviderInstanceFailure
+		>,
+		private readonly providerScope: Scope.Scope,
+		private readonly processRunnerEnabled = false,
 	) {}
 
 	private commandEffect(
@@ -419,10 +445,91 @@ export class ClaudeProviderRuntime {
 		});
 	}
 
+	preWarmSessionEffect(
+		input: PreWarmSessionInput,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		if (!this.processRunnerEnabled) return Effect.void;
+		const preWarm = Effect.gen(this, function* () {
+			let model = input.model;
+			if (!model) {
+				// Discovery is shared with sends; cancellation only stops this waiter.
+				const discovery = yield* Effect.forkIn(
+					this.discoverEffect(),
+					this.providerScope,
+				);
+				const { models } = yield* Fiber.join(discovery);
+				const inferred =
+					models.find((item) => item.id === "default") ?? models[0];
+				if (!inferred) return;
+				model = { providerId: inferred.providerId, modelId: inferred.id };
+			}
+			const prepareShellEnv = this.deps.prepareShellEnv;
+			if (prepareShellEnv) {
+				// Keep capture owned by the resolver when this request times out.
+				const ready = yield* Effect.tryPromise({
+					try: () => prepareShellEnv(input.workspaceRoot),
+					catch: (cause) =>
+						new ProviderInstanceFailure({
+							providerId: this.providerId,
+							operation: "preWarmSession",
+							cause,
+						}),
+				}).pipe(Effect.timeoutOption("10 seconds"));
+				if (Option.isNone(ready) || !ready.value) return;
+			}
+			const claudeSettingsOverrides = yield* Effect.try({
+				try: () => this.deps.claudeSettingsOverrides?.(),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "preWarmSession",
+						cause,
+					}),
+			});
+			yield* this.commandEffect({
+				type: "pre-warm",
+				sessionId: input.sessionId,
+				input: { ...input, model },
+				claudeSettingsOverrides,
+			});
+		});
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen(this, function* () {
+				const runPreWarm = yield* FiberMap.runtime(this.preWarmFibers)();
+				const fiber = yield* Effect.sync(() => {
+					const existing = FiberMap.unsafeGet(
+						this.preWarmFibers,
+						input.sessionId,
+					);
+					return Option.isSome(existing)
+						? existing.value
+						: runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
+								onlyIfMissing: true,
+							});
+				});
+				const exit = yield* restore(Fiber.await(fiber)).pipe(
+					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
+				);
+				if (Exit.isSuccess(exit)) return;
+				return yield* Cause.isInterruptedOnly(exit.cause)
+					? Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: this.providerId,
+								operation: "preWarmSession",
+								cause: new Error("Session pre-warm was cancelled"),
+							}),
+						)
+					: Effect.failCause(exit.cause);
+			}),
+		);
+	}
+
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({ type: "interrupt", sessionId });
+		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
+			Effect.andThen(this.commandEffect({ type: "interrupt", sessionId })),
+		);
 	}
 	resolvePermissionEffect(
 		sessionId: string,
@@ -471,10 +578,13 @@ export class ClaudeProviderRuntime {
 	endSessionEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({ type: "end-session", sessionId });
+		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
+			Effect.andThen(this.commandEffect({ type: "end-session", sessionId })),
+		);
 	}
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({ type: "shutdown" }).pipe(
+		return FiberMap.clear(this.preWarmFibers).pipe(
+			Effect.andThen(this.commandEffect({ type: "shutdown" })),
 			Effect.ensuring(
 				Effect.gen(this, function* () {
 					this.sinks.clear();
@@ -666,6 +776,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			never
 		>,
 		private readonly shutdownFibers: FiberMap.FiberMap<string, void, never>,
+		private readonly warmedQueries: ClaudeWarmedQueryOwner,
 		private readonly emit: (
 			output: ClaudeSessionOutput,
 		) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
@@ -689,6 +800,19 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure> {
 		const execute = Effect.gen(this, function* () {
 			switch (command.type) {
+				case "pre-warm":
+					if (
+						(yield* getSession(this.stateRef, command.sessionId)) ||
+						(yield* getSetupLock(this.stateRef, command.sessionId))
+					)
+						return;
+					yield* this.warmedQueries.preWarmEffect(
+						command.input,
+						command.claudeSettingsOverrides,
+						this.deps.shellEnv?.(command.input.workspaceRoot),
+						this.getPermissionBridge(),
+					);
+					return;
 				case "send-turn": {
 					const finished = yield* Deferred.make<void>();
 					const eventSink = this.makeSessionSink(
@@ -780,8 +904,10 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						!Array.from(this.sinkBindings.values()).some(
 							(binding) => binding.sessionId === command.sessionId,
 						)
-					)
+					) {
+						yield* this.warmedQueries.discardEffect(command.sessionId);
 						return;
+					}
 					yield* Ref.update(this.stateRef, (state) => ({
 						...state,
 						shutdownAfterTurn: HashSet.add(
@@ -1082,6 +1208,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	private removeSessionEffect(sessionId: string): Effect.Effect<void> {
 		return Effect.gen(this, function* () {
+			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			yield* removeSession(this.stateRef, sessionId);
 			yield* this.recordBackgroundTaskEffect({
@@ -1248,20 +1375,47 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			yield* setSetupLock(this.stateRef, sessionId, setupLock);
 
 			let promptQueue: PromptQueueController | undefined;
+			let activeQuery: Query | undefined;
 			const setup = Effect.gen(this, function* () {
-				const queue = yield* makeEffectPromptQueue();
-				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
-				promptQueue = queue;
-
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				yield* queue.enqueue(userMessage);
-
-				const abortController = new AbortController();
-				// Wire the input's abort signal to our abort controller.
+				const bridge = this.getPermissionBridge();
+				let ctx: ClaudeSessionContext | undefined;
+				const canUseTool: CanUseTool = async (
+					toolName,
+					toolInput,
+					permissionOptions,
+				) => {
+					if (!ctx)
+						return { behavior: "deny", message: "Claude session is not ready" };
+					return bridge.canUseTool(ctx, toolName, toolInput, permissionOptions);
+				};
+				let abortController = new AbortController();
+				const launchOptions = yield* Effect.try({
+					try: () =>
+						buildClaudeQueryOptions(
+							input,
+							abortController,
+							canUseTool,
+							this.sinkBindings.get(this.sinkId(input.eventSink) ?? "")
+								?.claudeSettingsOverrides,
+							this.deps.shellEnv?.(input.workspaceRoot),
+						),
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
+				});
+				const warmed = yield* this.warmedQueries.takeEffect(
+					sessionId,
+					launchOptions,
+				);
+				activeQuery = warmed?.query;
+				const queue = warmed?.promptQueue ?? (yield* makeEffectPromptQueue());
+				promptQueue = queue;
+				const turnAdmissionSemaphore = yield* Effect.makeSemaphore(1);
+				abortController = warmed?.abortController ?? abortController;
 				if (input.abortSignal) {
 					if (input.abortSignal.aborted) {
 						abortController.abort();
@@ -1273,23 +1427,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						);
 					}
 				}
-
-				const bridge = this.getPermissionBridge();
-
-				const resumeSessionId =
-					typeof input.providerState["resumeSessionId"] === "string"
-						? input.providerState["resumeSessionId"]
-						: undefined;
-				let ctx: ClaudeSessionContext | undefined;
-				const canUseTool: CanUseTool = async (
-					toolName,
-					toolInput,
-					permissionOptions,
-				) => {
-					if (!ctx)
-						return { behavior: "deny", message: "Claude session is not ready" };
-					return bridge.canUseTool(ctx, toolName, toolInput, permissionOptions);
-				};
+				const options = warmed?.options ?? launchOptions;
+				const resumeSessionId = options.resume;
 				const context = {
 					sessionId,
 					workspaceRoot: input.workspaceRoot,
@@ -1317,56 +1456,16 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					stopped: false,
 				};
 
-				// canUseTool resolves the complete session context lazily.
-				const options = yield* Effect.try({
-					try: () =>
-						validateOptionsJsonShape({
-							cwd: input.workspaceRoot,
-							abortController,
-							env: makeClaudeSdkEnv({
-								configDir:
-									input.configDir ??
-									(typeof input.providerState["claudeConfigDir"] === "string"
-										? input.providerState["claudeConfigDir"]
-										: undefined),
-								baseEnv: this.deps.shellEnv?.(input.workspaceRoot),
-							}),
-							includePartialMessages: true,
-							forwardSubagentText: true,
-							settings: buildClaudeFlagSettings(
-								this.sinkBindings.get(this.sinkId(input.eventSink) ?? "")
-									?.claudeSettingsOverrides,
-							),
-							settingSources: ["user", "project", "local"],
-							canUseTool,
-							model: apiModelId,
-							// The SDK refuses bypassPermissions, at launch or via a later
-							// setPermissionMode, unless the query opted in here. Opting in
-							// only permits the mode; it does not enable it. Always opt in
-							// so "Full access" can be chosen mid-session.
-							allowDangerouslySkipPermissions: true,
-							...(input.permissionMode
-								? { permissionMode: toSdkPermissionMode(input.permissionMode) }
-								: {}),
-							...(resumeSessionId ? { resume: resumeSessionId } : {}),
-							...(input.agent ? { agent: input.agent } : {}),
-							...(input.variant
-								? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
-								: {}),
-						}),
-					catch: (cause) =>
-						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-				});
-
-				const query = yield* Effect.try({
-					try: () =>
-						this.queryFactory({
-							prompt: queue,
-							options,
-						}),
-					catch: (cause) =>
-						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-				});
+				// Cold creation retains the SDK's original first-prompt admission.
+				if (!warmed) yield* queue.enqueue(userMessage);
+				const query =
+					warmed?.query ??
+					(yield* Effect.try({
+						try: () => this.queryFactory({ prompt: queue, options }),
+						catch: (cause) =>
+							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
+					}));
+				activeQuery = query;
 				ctx = {
 					...context,
 					query,
@@ -1376,6 +1475,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							join(options.env?.["HOME"] ?? homedir(), ".claude"),
 					),
 				};
+				warmed?.bindContext(ctx);
+				if (warmed) yield* queue.enqueue(userMessage);
 
 				this.retainSink(ctx.eventSink);
 				this.retainSink(input.eventSink);
@@ -1398,15 +1499,26 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				Effect.tap(() =>
 					Deferred.succeed(setupLock, undefined).pipe(Effect.ignore),
 				),
-				Effect.catchAll((err) =>
-					Effect.gen(this, function* () {
-						yield* clearTurnDeferreds(this.stateRef, sessionId);
-						yield* Deferred.fail(setupLock, asError(err)).pipe(Effect.ignore);
-						if (promptQueue) {
-							yield* promptQueue.close().pipe(Effect.ignore);
-						}
-						return yield* Effect.fail(err);
-					}),
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit)
+						? Effect.gen(this, function* () {
+								const failure = asError(Cause.squash(exit.cause));
+								yield* settleQueuedTurnDeferredsEffect(
+									this.stateRef,
+									sessionId,
+									failure.message,
+								);
+								yield* Deferred.fail(setupLock, failure);
+								if (promptQueue) yield* Effect.exit(promptQueue.close());
+								if (activeQuery)
+									yield* Effect.try(() => activeQuery?.close()).pipe(
+										Effect.ignore,
+									);
+								const current = yield* getSession(this.stateRef, sessionId);
+								if (activeQuery && current?.query === activeQuery)
+									yield* this.removeSessionEffect(sessionId);
+							})
+						: Effect.void,
 				),
 				Effect.ensuring(
 					Effect.gen(this, function* () {
@@ -1973,6 +2085,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, sessionId);
+			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return;
 
@@ -2185,6 +2298,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, sessionId);
+			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return; // idempotent
 			log.info(`Ending Claude session: ${sessionId}`);
@@ -2205,6 +2319,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	shutdownLocalEffect(): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
+			yield* this.warmedQueries.clearEffect();
 			yield* FiberMap.clear(this.shutdownFibers);
 			log.info("ClaudeProviderRuntime shutting down");
 			const state = yield* getState(this.stateRef);

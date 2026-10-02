@@ -15,6 +15,7 @@ import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
+import { ProviderInstanceIdSchema } from "../../src/lib/contracts/provider-instance.js";
 import { Shutdown, WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
@@ -24,6 +25,7 @@ import {
 	type ManagedOpenCodeRecord,
 	stopManagedOpenCode,
 } from "../../src/lib/instance/managed-opencode-process.js";
+import type { ModelInfo } from "../../src/lib/provider/types.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
@@ -106,6 +108,10 @@ export class ProcessHarness {
 			serverProtocolVersion?: number;
 			runnerHelloProtocolVersion?: number;
 		},
+		private readonly queryInitializationDelayMs = 0,
+		private readonly queryInitializationFailures = 0,
+		private readonly blockCapabilitiesProbe = false,
+		capabilityModels?: readonly ModelInfo[],
 	) {
 		for (const directory of [
 			"home",
@@ -119,6 +125,13 @@ export class ProcessHarness {
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
+		if (blockCapabilitiesProbe)
+			writeFileSync(join(this.root, "capabilities-probe-gated"), "hold");
+		if (capabilityModels)
+			writeFileSync(
+				join(this.root, "capabilities-probe-result.json"),
+				JSON.stringify({ models: capabilityModels, agents: [], commands: [] }),
+			);
 		if (shellEnvProof)
 			writeFileSync(
 				join(this.root, "home/.zprofile"),
@@ -176,6 +189,10 @@ export class ProcessHarness {
 			ignoreOpenCodeSigterm?: boolean;
 			pauseOpenCodeSupervisor?: boolean;
 			runnerLifecycle?: ProcessHarness["runnerLifecycle"];
+			queryInitializationDelayMs?: number;
+			queryInitializationFailures?: number;
+			blockCapabilitiesProbe?: boolean;
+			capabilityModels?: readonly ModelInfo[];
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -187,6 +204,10 @@ export class ProcessHarness {
 			options.ignoreOpenCodeSigterm,
 			options.pauseOpenCodeSupervisor,
 			options.runnerLifecycle,
+			options.queryInitializationDelayMs,
+			options.queryInitializationFailures,
+			options.blockCapabilitiesProbe,
+			options.capabilityModels,
 		);
 		try {
 			await harness.restart();
@@ -283,6 +304,12 @@ export class ProcessHarness {
 								),
 							}
 						: {}),
+					CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS: String(
+						this.queryInitializationDelayMs,
+					),
+					CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES: String(
+						this.queryInitializationFailures,
+					),
 					...(this.claudeRunner
 						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
 						: {}),
@@ -492,6 +519,8 @@ export class ProcessHarness {
 
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
+		if (this.blockCapabilitiesProbe)
+			writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 		this.rememberManagedOpenCode();
 		let cleanupFailure: Error | undefined;
 		try {
@@ -697,11 +726,14 @@ export class ProcessBrowser {
 		return !this.closed && !this.failure;
 	}
 
-	async createSession(title?: string): Promise<string> {
+	async createSession(title?: string, instanceId?: string): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
 				projectSlug: "process-test",
 				providerId: "claude",
+				...(instanceId
+					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
+					: {}),
 				...(title !== undefined ? { title } : {}),
 				originId: this.originId,
 			}),
@@ -763,6 +795,12 @@ export class ProcessBrowser {
 				sessionId,
 				originId: this.originId,
 			}),
+		);
+	}
+
+	async preWarmSession(sessionId: string): Promise<void> {
+		await this.run(
+			this.rpc.PreWarmSession({ projectSlug: "process-test", sessionId }),
 		);
 	}
 

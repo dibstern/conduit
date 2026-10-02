@@ -16,13 +16,37 @@ export type ProcessMark =
 			pid: number;
 	  }
 	| { kind: "runner-end-selected"; sessionId: string }
-	| { kind: "receipt" | "enqueue"; prompt: string; at: string }
+	| { kind: "receipt"; prompt: string; at: string }
+	| {
+			kind: "enqueue";
+			prompt: string;
+			at: string;
+			queryId: string;
+			promptIndex: number;
+	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
 	| {
+			kind:
+				| "initialization-ready"
+				| "initialization-failed"
+				| "query-closed"
+				| "system-init";
+			queryId: string;
+			at: string;
+	  }
+	| {
 			kind: "query";
+			queryId: string;
+			at: string;
 			sessionId: string;
 			pid: number;
+			options: {
+				model?: string;
+				effort?: Options["effort"];
+				permissionMode?: Options["permissionMode"];
+				settings?: { disableAllHooks?: boolean };
+			};
 			env: Readonly<Record<string, string | undefined>>;
 	  }
 	| {
@@ -62,16 +86,44 @@ function stream(sessionId: string, event: Record<string, unknown>): SDKMessage {
 	} as unknown as SDKMessage;
 }
 
+let initializationAttempts = 0;
+
 function query(params: {
 	prompt: AsyncIterable<SDKUserMessage>;
 	options?: Options;
 }): Query {
 	const sessionId = params.options?.resume ?? randomUUID();
+	const queryId = randomUUID();
 	let closed = false;
+	let promptIndex = 0;
+	let initializationFinished = false;
+	let rejectInitialization: (error: Error) => void = () => {};
+	const fails =
+		++initializationAttempts <=
+		Number(process.env["CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES"] ?? 0);
+	const delayMs = Number(
+		process.env["CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS"] ?? 0,
+	);
+	let initializationTimer: ReturnType<typeof setTimeout> | undefined;
+	const settings = params.options?.settings;
 	mark({
 		kind: "query",
+		queryId,
+		at: process.hrtime.bigint().toString(),
 		sessionId,
 		pid: process.pid,
+		options: {
+			...(params.options?.model ? { model: params.options.model } : {}),
+			...(params.options?.effort ? { effort: params.options.effort } : {}),
+			...(params.options?.permissionMode
+				? { permissionMode: params.options.permissionMode }
+				: {}),
+			...(settings &&
+			typeof settings === "object" &&
+			typeof settings.disableAllHooks === "boolean"
+				? { settings: { disableAllHooks: settings.disableAllHooks } }
+				: {}),
+		},
 		env: Object.fromEntries(
 			[
 				"CONDUIT_ENV_PROOF",
@@ -84,24 +136,28 @@ function query(params: {
 			].map((key) => [key, params.options?.env?.[key]]),
 		),
 	});
+	// Like the SDK, query construction starts initialization without input. The
+	// public system/init message remains a first-prompt event, not readiness.
+	const initialization = new Promise<Record<string, never>>((done, fail) => {
+		rejectInitialization = fail;
+		const finish = () => {
+			if (initializationFinished) return;
+			initializationFinished = true;
+			mark({
+				kind: fails ? "initialization-failed" : "initialization-ready",
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
+			if (fails) fail(new Error("Synthetic Claude initialization failure"));
+			else done({});
+		};
+		if (delayMs > 0) initializationTimer = setTimeout(finish, delayMs);
+		else finish();
+	});
+	// A caller may attach the readiness barrier on the next tick.
+	void initialization.catch(() => {});
 	const messages = (async function* (): AsyncGenerator<SDKMessage> {
-		yield {
-			type: "system",
-			subtype: "init",
-			session_id: sessionId,
-			uuid: randomUUID(),
-			cwd: params.options?.cwd ?? "",
-			apiKeySource: "none",
-			claude_code_version: "process-test",
-			tools: ["Bash"],
-			mcp_servers: [],
-			model: "claude-sonnet-4",
-			permissionMode: "default",
-			slash_commands: [],
-			output_style: "default",
-			skills: [],
-			plugins: [],
-		} as unknown as SDKMessage;
+		await initialization;
 		for await (const input of params.prompt) {
 			const at = process.hrtime.bigint().toString();
 			if (closed) return;
@@ -113,7 +169,37 @@ function query(params: {
 							.filter((block) => block.type === "text")
 							.map((block) => block.text)
 							.join("");
-			mark({ kind: "enqueue", prompt, at });
+			mark({
+				kind: "enqueue",
+				prompt,
+				at,
+				queryId,
+				promptIndex: ++promptIndex,
+			});
+			if (promptIndex === 1) {
+				mark({
+					kind: "system-init",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				yield {
+					type: "system",
+					subtype: "init",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					cwd: params.options?.cwd ?? "",
+					apiKeySource: "none",
+					claude_code_version: "process-test",
+					tools: ["Bash"],
+					mcp_servers: [],
+					model: params.options?.model ?? "claude-sonnet-4",
+					permissionMode: params.options?.permissionMode ?? "default",
+					slash_commands: [],
+					output_style: "default",
+					skills: [],
+					plugins: [],
+				} as unknown as SDKMessage;
+			}
 			const messageId = randomUUID();
 			yield stream(sessionId, {
 				type: "message_start",
@@ -279,8 +365,22 @@ function query(params: {
 	// The adapter consumes the iterable and these control methods; the full SDK
 	// interface also contains unrelated account/MCP methods that this fake never uses.
 	return Object.assign(messages, {
+		initializationResult: () => initialization,
 		close: () => {
+			if (closed) return;
 			closed = true;
+			clearTimeout(initializationTimer);
+			if (!initializationFinished) {
+				initializationFinished = true;
+				rejectInitialization(
+					new Error("Claude query closed before initialization"),
+				);
+			}
+			mark({
+				kind: "query-closed",
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
 		},
 		interrupt: async () => {},
 		setModel: async () => {},

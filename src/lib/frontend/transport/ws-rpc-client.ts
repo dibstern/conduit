@@ -176,6 +176,11 @@ export interface ViewSessionRpcInput {
 	readonly originId: string;
 }
 
+export interface PreWarmSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}
+
 export interface AttachProjectRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
@@ -539,6 +544,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 
 const callViewSession = (input: ViewSessionRpcInput) =>
 	callControl(input.projectSlug, (client) => client.ViewSession(input));
+
+const callPreWarmSession = (input: PreWarmSessionRpcInput) =>
+	callControl(input.projectSlug, (client) => client.PreWarmSession(input));
 
 const callAttachProject = (input: AttachProjectRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -965,6 +973,12 @@ export async function viewSessionRpc(
 	input: ViewSessionRpcInput,
 ): Promise<ViewSessionResponse> {
 	return await runTransportEffect(callViewSession(input));
+}
+
+export async function preWarmSessionRpc(
+	input: PreWarmSessionRpcInput,
+): Promise<void> {
+	await runTransportEffect(callPreWarmSession(input));
 }
 
 export async function attachProjectRpc(

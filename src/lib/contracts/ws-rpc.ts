@@ -1368,6 +1368,18 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 	},
 ) {}
 
+export class PreWarmSession extends Schema.TaggedRequest<PreWarmSession>()(
+	"PreWarmSession",
+	{
+		failure: WsRpcError,
+		success: Schema.Void,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
 	"AttachProject",
 	{
@@ -1620,6 +1632,7 @@ export const WsRpcRequest = Schema.Union(
 	ListDaemonSessions,
 	CreateSession,
 	ViewSession,
+	PreWarmSession,
 	DeleteSession,
 	ForkSession,
 	RespondPermission,
@@ -1725,6 +1738,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ListDaemonSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
+	Rpc.fromTaggedRequest(PreWarmSession),
 	Rpc.fromTaggedRequest(DeleteSession),
 	Rpc.fromTaggedRequest(ForkSession),
 	Rpc.fromTaggedRequest(RespondPermission),

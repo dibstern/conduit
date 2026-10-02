@@ -193,6 +193,20 @@ export interface SendTurnInput {
 	readonly agent?: string;
 }
 
+/** Launch inputs only: pre-warming never admits a user turn. */
+export type PreWarmSessionInput = Pick<
+	SendTurnInput,
+	| "sessionId"
+	| "workspaceRoot"
+	| "providerState"
+	| "model"
+	| "configDir"
+	| "permissionMode"
+	| "variant"
+	| "contextWindow"
+	| "agent"
+>;
+
 export type CommandSource =
 	| "builtin"
 	| "user-command"
@@ -254,6 +268,11 @@ export interface ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
+
+	/** Prepare an idle runtime without sending a prompt, when supported. */
+	readonly preWarmSessionEffect?: (
+		input: PreWarmSessionInput,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Interrupt an in-progress turn */
 	interruptTurnEffect(

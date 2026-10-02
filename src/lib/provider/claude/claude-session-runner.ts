@@ -8,6 +8,7 @@ import type {
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
+	PreWarmSessionInput,
 	QuestionRequest,
 	SendTurnInput,
 	TurnResult,
@@ -21,6 +22,13 @@ export type ClaudeSessionTurn = Omit<
 >;
 
 export type ClaudeSessionCommand =
+	| {
+			readonly type: "pre-warm";
+			readonly sessionId: string;
+			readonly input: PreWarmSessionInput;
+			readonly claudeSettingsOverrides?: Settings | undefined;
+			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+	  }
 	| {
 			readonly type: "send-turn";
 			readonly sinkId: string;

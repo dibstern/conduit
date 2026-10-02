@@ -115,6 +115,51 @@ describe("built-dist Claude runner lifecycle", () => {
 		return { harness, browser, sessionId };
 	}
 
+	it("reclaims a pre-warmed runner through the idle policy without a send", async () => {
+		const { harness, browser, sessionId } = await start({ idleTimeoutMs: 500 });
+		await browser.preWarmSession(sessionId);
+		const runner = started(harness);
+		const query = harness.marks.find((mark) => mark.kind === "query");
+		if (query?.kind !== "query")
+			throw new Error("Missing pre-warm query proof");
+		expect(query.pid).toBe(runner.pid);
+		expect(
+			harness.marks.some(
+				(mark) =>
+					mark.kind === "initialization-ready" &&
+					mark.queryId === query.queryId,
+			),
+		).toBe(true);
+		expect(() => process.kill(runner.pid, 0)).not.toThrow();
+		await vi.waitFor(
+			() => {
+				expect(
+					harness.marks.some(
+						(mark) =>
+							mark.kind === "runner-idle-exit-started" &&
+							mark.pid === runner.pid,
+					),
+				).toBe(true);
+				expect(() => process.kill(runner.pid, 0)).toThrow();
+				expect(existsSync(runner.socketPath)).toBe(false);
+				expect(
+					harness.marks.some(
+						(mark) =>
+							mark.kind === "query-closed" && mark.queryId === query.queryId,
+					),
+				).toBe(true);
+			},
+			{ timeout: 5000 },
+		);
+		expect(harness.marks.some((mark) => mark.kind === "enqueue")).toBe(false);
+		const state = snapshot(harness, sessionId);
+		expect(state.turns).toEqual([]);
+		expect(state.commands).toEqual([]);
+		expect(state.events.some((event) => event.type === "turn.error")).toBe(
+			false,
+		);
+	}, 30_000);
+
 	it("exits after the idle window, resets it on activity, and respawns on send", async () => {
 		const idleTimeoutMs = 1200;
 		const { harness, browser, sessionId } = await start({ idleTimeoutMs });

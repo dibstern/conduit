@@ -377,6 +377,8 @@ export const RelayFactoryLive = (
 									projectDir: project.directory,
 									...(envResolver && {
 										shellEnv: (directory: string) => envResolver.get(directory),
+										prepareShellEnv: (directory: string) =>
+											envResolver.waitUntilReady(directory),
 									}),
 									slug: project.slug,
 									noServer: true,

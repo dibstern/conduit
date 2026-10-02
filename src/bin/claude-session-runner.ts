@@ -179,7 +179,7 @@ const main = Effect.gen(function* () {
 						});
 					idle?.activity();
 					if (command.type === "send-turn") idle?.beginTurn();
-					if (command.type === "send-turn")
+					if (command.type === "send-turn" || command.type === "pre-warm")
 						shellEnv = command.shellEnv ?? process.env;
 					if (process.env["NODE_ENV"] === "test" && process.connected)
 						process.send?.({
