@@ -383,6 +383,22 @@ const main = Effect.gen(function* () {
 										...config,
 										shellEnv: () => shellEnv,
 										queryFactory: createQuery,
+										prepareQuery: async () => {
+											// First warming prepares the snapshot in the command path.
+											// Revalidate native sources only when creating another query.
+											if (
+												!frozenSnapshot ||
+												!snapshot ||
+												replayedSettings?.settingSources?.length === 0 ||
+												!settingsResolver
+											)
+												return;
+											replayedSettings = await replayClaudeRunnerFileSettings(
+												frozenSnapshot.fileSettings,
+												frozenSnapshot.options,
+												settingsResolver,
+											);
+										},
 										...(subagentSdk ? { subagentSdk } : {}),
 										...(testSubagentPollTimeoutMs !== undefined
 											? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
@@ -509,7 +525,23 @@ const main = Effect.gen(function* () {
 					role = undefined;
 					register();
 				} else if (message.type === "command" && runner) {
-					const command = message.command;
+					// An interrupted first turn can leave the durable cursor unset.
+					// Match the resumed warm query before the runtime selects it.
+					const command =
+						message.command.type === "send-turn" &&
+						frozenSnapshot &&
+						resumeSessionId
+							? {
+									...message.command,
+									input: {
+										...message.command.input,
+										providerState: {
+											...message.command.input.providerState,
+											resumeSessionId,
+										},
+									},
+								}
+							: message.command;
 					if (exiting) {
 						peer.write({
 							type: "command-reply",

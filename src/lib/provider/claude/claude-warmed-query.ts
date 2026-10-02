@@ -119,6 +119,7 @@ export function inheritedSettingsFingerprint(
 /** Owns empty queries until initialization succeeds and a real turn adopts them. */
 export const makeClaudeWarmedQueryOwner = (
 	queryFactory: NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>,
+	prepareQuery?: () => Promise<void>,
 ) =>
 	Effect.gen(function* () {
 		const initializing = yield* FiberMap.make<PendingWarmedQuery, void>();
@@ -167,6 +168,15 @@ export const makeClaudeWarmedQueryOwner = (
 								);
 							const existing = pending.get(input.sessionId);
 							if (existing) return existing;
+							if (prepareQuery)
+								yield* Effect.tryPromise({
+									try: prepareQuery,
+									catch: (cause) =>
+										new ClaudeBoundaryError({
+											operation: "prepareQuery",
+											cause,
+										}),
+								});
 							const promptQueue = yield* makeEffectPromptQueue();
 							const abortController = new AbortController();
 							let inheritedSettings: string | undefined;

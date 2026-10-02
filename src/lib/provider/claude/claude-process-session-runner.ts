@@ -1189,7 +1189,11 @@ export const makeProcessClaudeSessionRunner = (
 									if (existing && !draining) {
 										existing.commandsInFlight++;
 										admitted = existing;
-										if (command.type === "send-turn")
+										if (
+											command.type === "send-turn" ||
+											command.type === "apply-live-settings" ||
+											command.type === "set-permission-mode"
+										)
 											existing.upgrade.activity++;
 									}
 									return {
