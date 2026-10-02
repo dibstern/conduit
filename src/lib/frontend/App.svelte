@@ -10,7 +10,10 @@
 	import SnoozePickerHost from "./components/session/SnoozePickerHost.svelte";
 
 	const route = $derived(getCurrentRoute());
-	$effect(() => normalizeRoute());
+	// Pre, so a legacy /p/<slug>/ address is already ?p=<slug> when ChatLayout
+	// mounts and opens the daemon socket. A plain $effect runs after children
+	// mount, and the socket then attaches the daemon's first project instead.
+	$effect.pre(() => normalizeRoute());
 </script>
 
 {#if route.page === "chat"}
