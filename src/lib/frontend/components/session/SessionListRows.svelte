@@ -19,7 +19,7 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import Icon from "../ui/Icon.svelte";
 
-	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerLoading, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenameend }: {
+	let { arrangement, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerLoading, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
 		isEmpty: boolean;
 		emptyMessage: string;
@@ -38,6 +38,7 @@
 		getProjectAccent: (session: SessionInfo) => number;
 		oncontextmenu: (session: SessionInfo, anchor: HTMLElement, trigger?: "touch") => void;
 		ontoggleselection: (id: string) => void;
+		onrenamestart: (id: string) => void;
 		onrenameend: () => void;
 	} = $props();
 	let heldSessionId = $state<string | null>(null);
@@ -95,6 +96,7 @@
 			onsnooze={() => openSnoozePicker(s, "center")}
 			onunsnooze={() => { void sessionVerbActions.unsnooze(s); }}
 			oncommitsnooze={() => sessionVerbActions.commitTomorrow(s)}
+			onrenamestart={() => onrenamestart(s.id)}
 			{onrenameend}
 		/>
 	{/snippet}

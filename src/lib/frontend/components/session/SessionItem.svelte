@@ -142,7 +142,7 @@
 		projectAccent = 1,
 		href = "",
 		active = false,
-		renaming: renamingProp = false,
+		renaming: isRenaming = false,
 		selectMode = false,
 		selected = false,
 		density = "comfortable",
@@ -165,6 +165,7 @@
 		heldSessionId,
 		onholdchange,
 		menuOpen = false,
+		onrenamestart,
 		onrenameend,
 	}: {
 		session: SessionInfo;
@@ -198,13 +199,18 @@
 		onholdchange?: (id: string | null) => void;
 		/** This row's action menu is open: keep its anchor and verbs on screen. */
 		menuOpen?: boolean;
+		/**
+		 * Asks the list to put this row in rename mode. The list owns that state
+		 * because a row is rebuilt when its session changes status group, and a
+		 * rename held here would end mid-typing.
+		 */
+		onrenamestart?: () => void;
 		onrenameend?: () => void;
 	} = $props();
 
 	const CLICK_SUPPRESSION_MS = 450;
 	const NATIVE_CONTEXT_MENU_SUPPRESSION_MS = 1_000;
 
-	let localRenaming = $state(false);
 	let moreBtnEl: HTMLButtonElement | HTMLAnchorElement | undefined =
 		$state(undefined);
 	let rowEl: HTMLAnchorElement | undefined = $state();
@@ -223,9 +229,6 @@
 	// otherwise reach the sheet as mousedown and click at the lift point,
 	// focusing or running whichever item is now under it.
 	let consumeTouchEnd = false;
-
-	// Combined rename state: local (double-click) OR external (context menu)
-	const isRenaming = $derived(localRenaming || renamingProp);
 
 	const displayTitle = $derived(session.title || "New Session");
 	const actions = $derived(getSessionActionState(session, now));
@@ -481,15 +484,11 @@
 		ontoggleselection?.(session.id);
 	}
 
-	function startRename() {
-		localRenaming = true;
-	}
-
 	function handleDblClick(e: MouseEvent) {
-		if (selectMode || !onrenameend) return;
+		if (selectMode || !onrenamestart) return;
 		e.preventDefault();
 		e.stopPropagation();
-		startRename();
+		onrenamestart();
 	}
 
 	function swipeVerb(direction: "settle" | "snooze"): string {
@@ -643,16 +642,11 @@
 			</span>
 		{/if}
 		{#if isRenaming}
-			<!-- The bespoke version hard-coded `border-accent` to say "this row is
-			     being edited". TextInput says that on focus and the field is
-			     autofocused, so the signal survives -- which matters, because an
-			     additive `border-accent` here would silently lose to the base
-			     `border-border` (Tailwind emits border-colour utilities
-			     alphabetically). -->
 			<SessionRenameInput
 				{session}
-				class="font-brand min-h-[44px] md:min-h-0"
-				onend={() => { localRenaming = false; onrenameend?.(); }}
+				variant="row"
+				class="min-h-[44px] md:min-h-0"
+				onend={() => onrenameend?.()}
 			/>
 		{:else}
 			<span
@@ -671,7 +665,7 @@
 
 	</span>
 
-	{#if contextText && !shelfRow && !isRenaming}
+	{#if contextText && !shelfRow}
 		<span
 			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-brand"
 		>
@@ -680,7 +674,10 @@
 		</span>
 	{/if}
 
-	{#if !isRenaming}
+	<!-- Kept while renaming: the status tells you the session is still working
+	     while you type. Shelf rows only show a time here, so they give the
+	     space to the field, as they do with the project label. -->
+	{#if !shelfRow || !isRenaming}
 		<!-- One row, not a stack: a 36px control stacked under a pill is 56px of
 		     content inside a row that promises 46px, and the row would silently
 		     grow past its own density contract. -->
@@ -695,13 +692,13 @@
 			     already leads with it; announcing it twice per row is noise. -->
 			{#if status.word && !shelfRow}
 				<span
-					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-brand {status.pill} {statusHidesOnHover ? `md:group-hover:hidden md:group-focus-within:hidden ${menuOpen ? 'md:hidden' : ''}` : ''}"
+					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-brand {status.pill} {statusHidesOnHover && !isRenaming ? `md:group-hover:hidden md:group-focus-within:hidden ${menuOpen ? 'md:hidden' : ''}` : ''}"
 					aria-hidden="true"
 				>
 					{status.word}
 				</span>
 			{:else}
-				<span class="session-item-meta md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}" title={settled && session.settledAutomatically ? "Settled automatically after it sat idle" : undefined}>{settled && session.settledAutomatically ? `Auto · ${timeText}` : timeText}</span>
+				<span class="session-item-meta {isRenaming ? '' : 'md:group-hover:hidden md:group-focus-within:hidden'} {menuOpen && !isRenaming ? 'md:hidden' : ''}" title={settled && session.settledAutomatically ? "Settled automatically after it sat idle" : undefined}>{settled && session.settledAutomatically ? `Auto · ${timeText}` : timeText}</span>
 			{/if}
 			{#if woken}
 				<span
@@ -711,7 +708,7 @@
 			{/if}
 
 			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
-			{#if !selectMode && oncontextmenuProp}
+			{#if !selectMode && oncontextmenuProp && !isRenaming}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
 					{#if canMarkRead}
 						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"

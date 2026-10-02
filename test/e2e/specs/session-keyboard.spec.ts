@@ -96,8 +96,100 @@ test("row rename commits on Enter, ignores empty titles, and cancels on Escape",
 	await input.fill("Discarded title");
 	await input.press("Escape");
 	await expect(row).toContainText("Renamed from row");
+
+	// The key hints are buttons too: phone keyboards have no Esc.
+	await row.dblclick();
+	input = row.getByRole("textbox", { name: "Session name" });
+	await input.fill("Saved by tap");
+	await row.getByRole("button", { name: "Save", exact: true }).click();
+	await expect(input).toHaveCount(0);
+	await expect(row).toContainText("Saved by tap");
+	await row.dblclick();
+	input = row.getByRole("textbox", { name: "Session name" });
+	await input.fill("Cancelled by tap");
+	await row.getByRole("button", { name: "Cancel", exact: true }).click();
+	await expect(input).toHaveCount(0);
+	await expect(row).toContainText("Saved by tap");
 	await page.reload();
-	await expect(row).toContainText("Renamed from row");
+	await expect(row).toContainText("Saved by tap");
+});
+
+test("row rename keeps the draft through updates and offers a title that lands mid-edit", async ({
+	page,
+	relayUrl,
+}) => {
+	const rows = await twoRows(page, relayUrl);
+	const id = await rows.first().getAttribute("data-session-id");
+	if (!id) throw new Error("missing session id");
+	const rowIn = (p: Page) =>
+		p.locator(`#session-list [data-session-id="${id}"]`);
+	const row = rowIn(page);
+
+	// A second tab renames the same session, which pushes a session update to
+	// the first tab while its rename field is open.
+	const other = await page.context().newPage();
+	await gotoRelay(other, relayUrl);
+	const renameFromOtherTab = async (title: string) => {
+		// Not dblclick: the first click reads the unread row, which rebuilds it.
+		await rowIn(other).focus();
+		await other.keyboard.press("r");
+		const otherInput = rowIn(other).getByRole("textbox", {
+			name: "Session name",
+		});
+		await otherInput.fill(title);
+		await otherInput.press("Enter");
+		await expect(rowIn(other)).toContainText(title);
+	};
+
+	await row.dblclick();
+	const input = row.getByRole("textbox", { name: "Session name" });
+	await input.fill("My half-typed dra");
+
+	// Marking it unread moves the row from Idle to "Done, unread", which
+	// rebuilds the row mid-typing.
+	await rowIn(other).focus();
+	await other.keyboard.press("u");
+	await expect(
+		page.locator("#session-list-scroller > .session-group-label", {
+			hasText: /^Done, unread/i,
+		}),
+	).toBeVisible();
+	await expect(input).toHaveValue("My half-typed dra");
+	await expect(input).toBeFocused();
+	await input.press("End");
+	await input.pressSequentially("ft");
+	await expect(input).toHaveValue("My half-typed draft");
+	await input.fill("My half-typed dra");
+
+	await renameFromOtherTab("Renamed elsewhere");
+	const incoming = row.getByTestId("session-rename-incoming");
+	await expect(incoming).toContainText("Renamed elsewhere");
+	await expect(input).toHaveValue("My half-typed dra");
+	await expect(input).toBeFocused();
+	await page.screenshot({
+		path: test.info().outputPath("rename-incoming-title.png"),
+	});
+
+	await incoming.getByRole("button", { name: "Use" }).click();
+	await expect(input).toHaveValue("Renamed elsewhere");
+	await expect(input).toBeFocused();
+	await expect(incoming).toHaveCount(0);
+	await input.fill("Mine wins");
+	await input.press("Enter");
+	await expect(row).toContainText("Mine wins");
+
+	// Saving an untouched draft must not revert a title that arrived mid-edit.
+	await row.focus();
+	await page.keyboard.press("r");
+	await renameFromOtherTab("Second rename elsewhere");
+	await row
+		.getByTestId("session-rename-incoming")
+		.getByRole("button", { name: "Dismiss" })
+		.click();
+	await expect(row.getByTestId("session-rename-incoming")).toHaveCount(0);
+	await row.getByRole("textbox", { name: "Session name" }).press("Enter");
+	await expect(row).toContainText("Second rename elsewhere");
+	await other.close();
 });
 
 test("scope digits, shortcut sheet and text-field guards", async ({
