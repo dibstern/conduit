@@ -1,20 +1,16 @@
+import type { Request } from "effect/Request";
 import { AddProject, GetStatus } from "../lib/contracts/ws-rpc.js";
-import { isDaemonSpawnPortInUseError } from "../lib/daemon/daemon-spawn.js";
-import { formatErrorDetail } from "../lib/errors.js";
 import type { CommandContext } from "./cli-command-handlers.js";
-import { defaultInteractiveMenu } from "./cli-commands.js";
 
 export async function handleDefault(ctx: CommandContext): Promise<void> {
 	const {
 		args,
-		options,
 		cwd,
 		stdout,
 		stderr,
 		exit,
 		rpcSend,
 		checkDaemon,
-		spawnDaemonFn,
 		getAddr,
 		getTsIP,
 		qr,
@@ -26,55 +22,12 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
-	const stdin = options?.stdin ?? process.stdin;
-
-	// Determine if interactive mode should be used:
-	// - Explicit injectable overrides everything
-	// - stdin being a TTY means real terminal → interactive
-	// - Non-TTY (pipe, test, CI) → legacy non-interactive behavior
-	if (options?.showInteractiveMenu || (stdin as { isTTY?: boolean }).isTTY) {
-		const interactiveMenu =
-			options?.showInteractiveMenu ?? defaultInteractiveMenu;
-
-		await interactiveMenu({
-			args,
-			cwd,
-			stdin,
-			stdout,
-			stderr,
-			exit,
-			rpcSend,
-			checkDaemon,
-			spawnDaemon: spawnDaemonFn,
-			getAddr,
-			generateQR: qr,
-		});
+	const unavailable =
+		"Server is not running. Run conduit serve or conduit service install.\n";
+	if (!(await checkDaemon().catch(() => false))) {
+		stderr.write(unavailable);
+		exit(1);
 		return;
-	}
-
-	// Non-interactive default (legacy behavior)
-	let running = await checkDaemon();
-	if (!running) {
-		try {
-			const result = await spawnDaemonFn({
-				port: args.port,
-				opencodeUrl: `http://localhost:${args.ocPort}`,
-			});
-			stdout.write(
-				`Daemon started (pid: ${result.pid}, port: ${result.port})\n`,
-			);
-			running = true;
-		} catch (err) {
-			const message = formatErrorDetail(err);
-			if (isDaemonSpawnPortInUseError(err)) {
-				stderr.write(`Port ${args.port} is already in use.\n`);
-				stderr.write("Try a different port: --port <number>\n");
-			} else {
-				stderr.write(`Failed to start daemon: ${message}\n`);
-			}
-			exit(1);
-			return;
-		}
 	}
 
 	let slug: string | undefined;
@@ -85,26 +38,33 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		// The default view remains available when project registration fails.
 	}
 
-	const statusResponse = await rpcSend(new GetStatus({}));
+	let statusResponse: Request.Success<GetStatus>;
+	try {
+		statusResponse = await rpcSend(new GetStatus({}));
+	} catch {
+		stderr.write(unavailable);
+		exit(1);
+		return;
+	}
+	const port =
+		typeof statusResponse.port === "number" ? statusResponse.port : args.port;
 	const scheme = statusResponse["tlsEnabled"] === true ? "https" : "http";
-	// 3b. Build URLs with Tailscale priority (consistent with interactive path)
+	// Prefer Tailscale for share URLs, then LAN, then localhost.
 	const tsIP = getTsIP();
 	const lanIP = getAddr();
 	const primaryIP = tsIP ?? lanIP ?? "localhost";
-	const url = `${scheme}://${primaryIP}:${args.port}`;
+	const url = `${scheme}://${primaryIP}:${port}`;
 	const tlsActive = statusResponse["tlsEnabled"] === true;
 
 	if (primaryIP !== "localhost") {
-		const qrUrl = tlsActive
-			? `http://${primaryIP}:${args.port + 1}/setup`
-			: url;
+		const qrUrl = tlsActive ? `http://${primaryIP}:${port + 1}/setup` : url;
 		const qrCode = qr(qrUrl);
 		if (qrCode) {
 			stdout.write("\n");
 			stdout.write(qrCode);
 			if (tlsActive) {
 				stdout.write(
-					`  Scan or visit: http://${primaryIP}:${args.port + 1}/setup\n`,
+					`  Scan or visit: http://${primaryIP}:${port + 1}/setup\n`,
 				);
 			}
 			stdout.write("\n");
@@ -115,7 +75,7 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 	stdout.write("conduit\n");
 	stdout.write(`  URL: ${url}\n`);
 	if (tsIP && lanIP && tsIP !== lanIP) {
-		stdout.write(`  Local: ${scheme}://${lanIP}:${args.port}\n`);
+		stdout.write(`  Local: ${scheme}://${lanIP}:${port}\n`);
 	}
 
 	if (slug) {

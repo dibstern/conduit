@@ -94,8 +94,6 @@ export async function createDaemonHarness(
 		host: "127.0.0.1",
 		configDir: tmpDir,
 		socketPath: join(tmpDir, "relay.sock"),
-		pidPath: join(tmpDir, "daemon.pid"),
-		logPath: join(tmpDir, "daemon.log"),
 		opencodeUrl,
 		staticDir,
 		logLevel: "error",

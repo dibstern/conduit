@@ -82,11 +82,6 @@ export interface DaemonConfig {
 	}>;
 }
 
-export interface CrashInfo {
-	reason: string;
-	timestamp: number;
-}
-
 const DaemonProjectSchema = Schema.Struct({
 	path: Schema.String,
 	slug: Schema.String,
@@ -446,40 +441,11 @@ export async function saveDaemonConfig(
 	await rename(tmpPath, finalPath);
 }
 
-/** Remove daemon.json, relay.sock, and daemon.pid. Ignores ENOENT. */
+/** Remove daemon.json and relay.sock. Ignores ENOENT. */
 export function clearDaemonConfig(configDir?: string): void {
 	const dir = resolveDir(configDir);
 	safeUnlink(join(dir, "daemon.json"));
 	safeUnlink(join(dir, "relay.sock"));
-	safeUnlink(join(dir, "daemon.pid"));
-}
-
-/** Read crash.json. Returns null if missing or corrupt. */
-export function readCrashInfo(configDir?: string): CrashInfo | null {
-	try {
-		const dir = resolveDir(configDir);
-		const data = readFileSync(join(dir, "crash.json"), "utf-8");
-		return JSON.parse(data) as CrashInfo;
-	} catch {
-		return null;
-	}
-}
-
-/** Write crash.json (non-atomic, non-critical). */
-export function writeCrashInfo(info: CrashInfo, configDir?: string): void {
-	try {
-		const dir = resolveDir(configDir);
-		ensureDir(dir);
-		writeFileSync(join(dir, "crash.json"), JSON.stringify(info), "utf-8");
-	} catch {
-		// Non-critical — silently ignore write failures.
-	}
-}
-
-/** Remove crash.json. Ignores ENOENT. */
-export function clearCrashInfo(configDir?: string): void {
-	const dir = resolveDir(configDir);
-	safeUnlink(join(dir, "crash.json"));
 }
 
 /**

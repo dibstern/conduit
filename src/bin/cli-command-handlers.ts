@@ -12,11 +12,10 @@ import {
 	Shutdown,
 } from "../lib/contracts/ws-rpc.js";
 import type { SendRPC } from "../lib/daemon/daemon-rpc-client.js";
-import { ENV, RELAY_ENV_KEYS } from "../lib/env.js";
+import { ENV } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
 import type { CLIOptions } from "./cli-core.js";
 import {
-	DEFAULT_CONFIG_DIR,
 	DEFAULT_PORT,
 	formatUptime,
 	HELP_TEXT,
@@ -32,106 +31,45 @@ export interface CommandContext {
 	exit: (code: number) => void;
 	rpcSend: SendRPC;
 	checkDaemon: () => Promise<boolean>;
-	spawnDaemonFn: NonNullable<CLIOptions["spawnDaemon"]>;
 	startForegroundDaemonFn: NonNullable<CLIOptions["startForegroundDaemon"]>;
-	startDaemonChildProcessFn: NonNullable<CLIOptions["startDaemonChildProcess"]>;
 	qr: NonNullable<CLIOptions["generateQR"]>;
 	getAddr: NonNullable<CLIOptions["getNetworkAddress"]>;
 	getTsIP: NonNullable<CLIOptions["getTailscaleIP"]>;
 }
 
-export async function handleDaemon(ctx: CommandContext): Promise<void> {
-	const { args, startDaemonChildProcessFn } = ctx;
-
-	// This is the child process spawned by Daemon.spawn().
-	// Read config from env vars set by the parent.
-	const daemonPort = Number.parseInt(
-		process.env[RELAY_ENV_KEYS.PORT] ?? String(DEFAULT_PORT),
-		10,
-	);
-	const daemonHost = process.env[RELAY_ENV_KEYS.HOST];
-	const daemonConfigDir =
-		process.env[RELAY_ENV_KEYS.CONFIG_DIR] ?? DEFAULT_CONFIG_DIR;
-
-	const pinHash = process.env[RELAY_ENV_KEYS.PIN_HASH];
-	const opencodeUrl = process.env[RELAY_ENV_KEYS.OC_URL];
-	const keepAwakeCommand = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND];
-	const keepAwakeArgsRaw = process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS];
-	const claudeConfigDir = process.env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR];
-	await startDaemonChildProcessFn({
-		port: daemonPort,
-		...(daemonHost ? { host: daemonHost } : {}),
-		configDir: daemonConfigDir,
-		...(pinHash ? { pinHash } : {}),
-		keepAwake: process.env[RELAY_ENV_KEYS.KEEP_AWAKE] === "1",
-		...(keepAwakeCommand ? { keepAwakeCommand } : {}),
-		...(keepAwakeArgsRaw
-			? { keepAwakeArgs: JSON.parse(keepAwakeArgsRaw) as string[] }
-			: {}),
-		tlsEnabled: process.env[RELAY_ENV_KEYS.TLS] === "1",
-		...(claudeConfigDir ? { claudeConfigDir } : {}),
-		...(opencodeUrl ? { opencodeUrl } : {}),
-		logLevel: args.logLevel,
-		logFormat: args.logFormat ?? "json",
-	});
-	// Resolves only after shutdown (signal or RPC), then exits the process.
-	return;
-}
-
-export async function handleForeground(ctx: CommandContext): Promise<void> {
-	const {
-		args,
-		cwd,
-		stdout,
-		exit,
-		checkDaemon,
-		rpcSend,
-		startForegroundDaemonFn,
-	} = ctx;
-
-	// Stop any running daemon first if requested (avoids port conflicts)
-	if (args.restartDaemon) {
-		try {
-			const running = await checkDaemon();
-			if (running) {
-				await rpcSend(new Shutdown({ preserveManagedInstances: true }));
-				stdout.write("Stopped existing daemon.\n");
-			}
-		} catch {
-			// Daemon not running or already stopped — continue
-		}
-	}
-
+export async function handleServe(ctx: CommandContext): Promise<void> {
+	const { args, options, stdout, stderr, exit, startForegroundDaemonFn } = ctx;
 	const opencodeUrl = ENV.opencodeUrl || `http://localhost:${args.ocPort}`;
 
-	stdout.write(`\nConduit (foreground)\n`);
-	stdout.write(`  OpenCode: ${opencodeUrl}\n`);
+	try {
+		const daemon = await startForegroundDaemonFn({
+			...(args.portExplicit ? { port: args.port } : {}),
+			...(args.host ? { host: args.host } : {}),
+			...(options?.configDir ? { configDir: options.configDir } : {}),
+			...(args.claudeConfigDir
+				? { claudeConfigDir: args.claudeConfigDir }
+				: {}),
+			opencodeUrl,
+			tlsEnabled: !args.noHttps,
+			logLevel: args.logLevel,
+			logFormat: args.logFormat ?? "pretty",
+		});
 
-	const daemon = await startForegroundDaemonFn({
-		port: args.port,
-		...(args.host ? { host: args.host } : {}),
-		...(args.claudeConfigDir ? { claudeConfigDir: args.claudeConfigDir } : {}),
-		opencodeUrl,
-		// Always enable TLS in foreground (matches daemon spawn behavior).
-		// Gracefully falls back to HTTP if mkcert is not available.
-		tlsEnabled: !args.noHttps,
-		logLevel: args.logLevel,
-		logFormat: args.logFormat ?? "pretty",
-	});
+		const status = daemon.getStatus();
+		const scheme = status.tlsEnabled ? "https" : "http";
+		stdout.write("\nConduit (foreground)\n");
+		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
+		stdout.write(
+			`  Relay:    ${scheme}://${status.host ?? "localhost"}:${daemon.port}\n`,
+		);
+		stdout.write("  Ready.\n\n");
 
-	await daemon.addProject(cwd);
-
-	const fgStatus = daemon.getStatus();
-	const fgScheme = fgStatus.tlsEnabled ? "https" : "http";
-	const fgHost = fgStatus.host ?? "localhost";
-	stdout.write(`  Relay:    ${fgScheme}://${fgHost}:${daemon.port}\n`);
-	stdout.write(`  Project:  ${cwd}\n`);
-	stdout.write(`  Ready.\n\n`);
-	void daemon.stopped.then(
-		() => exit(0),
-		() => exit(1),
-	);
-	return;
+		await daemon.stopped;
+		exit(0);
+	} catch (err) {
+		stderr.write(`Server failed: ${formatErrorDetail(err)}\n`);
+		exit(1);
+	}
 }
 
 export async function handleHelp(ctx: CommandContext): Promise<void> {
@@ -147,7 +85,7 @@ export async function handleStatus(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}
@@ -181,14 +119,14 @@ export async function handleStop(ctx: CommandContext): Promise<void> {
 
 	const running = await checkDaemon();
 	if (!running) {
-		stderr.write("Daemon is not running.\n");
-		exit(1);
+		stdout.write("Server is not running.\n");
+		exit(0);
 		return;
 	}
 
 	try {
 		await rpcSend(new Shutdown({}));
-		stdout.write("Daemon stopped.\n");
+		stdout.write("Server stopped.\n");
 	} catch (err) {
 		stderr.write(`Failed to stop daemon: ${formatErrorDetail(err)}\n`);
 		exit(1);
@@ -208,7 +146,7 @@ export async function handlePin(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}
@@ -231,7 +169,7 @@ export async function handleAdd(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}
@@ -252,7 +190,7 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}
@@ -290,7 +228,7 @@ export async function handleList(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}
@@ -330,7 +268,7 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}

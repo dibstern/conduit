@@ -2,7 +2,7 @@
 //
 // Tests cover:
 // T1: parseArgs — all flags parsed correctly, defaults, --help, unknown flags (AC1-AC8)
-// T2: Default invocation — checks daemon, spawns if needed, registers project, outputs QR/URL (AC1)
+// T2: Default invocation — connects to server, registers project, outputs QR/URL (AC1)
 // T3: --status — sends GetStatus, formats output (AC2)
 // T4: --stop — sends shutdown, displays confirmation (AC3)
 // T5: --pin — validates 4-8 digit, sends SetPin (AC4)
@@ -20,7 +20,6 @@ import {
 	type CLIOptions,
 	generateQR,
 	getNetworkAddress,
-	type InteractiveContext,
 	parseArgs,
 	run,
 } from "../../../src/bin/cli-core.js";
@@ -30,8 +29,6 @@ import {
 	type WsRpcRequest,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SendRPC } from "../../../src/lib/daemon/daemon-rpc-client.js";
-import { DaemonSpawnPortInUseError } from "../../../src/lib/daemon/daemon-spawn.js";
-import { RELAY_ENV_KEYS } from "../../../src/lib/env.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
@@ -81,7 +78,6 @@ function createMockCLI(
 			return {};
 		}) as SendRPC,
 		isDaemonRunning: async () => true,
-		spawnDaemon: async () => ({ pid: 12345, port: 2633 }),
 		generateQR: (url: string) => `[QR:${url}]`,
 		getNetworkAddress: () => "192.168.1.100",
 		getTailscaleIP: () => null,
@@ -99,21 +95,18 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			expect(args.command).toBe("default");
 			expect(args.port).toBe(2633);
 			expect(args.ocPort).toBe(4096);
-			expect(args.noUpdate).toBe(false);
-			expect(args.debug).toBe(false);
 		});
 
 		it.each([
-			["--daemon", "command", "daemon"],
-			["--foreground", "command", "foreground"],
+			["serve", "command", "serve"],
+			["--foreground", "command", "serve"],
+			["stop", "command", "stop"],
 			["--status", "command", "status"],
 			["--stop", "command", "stop"],
 			["--remove", "command", "remove"],
 			["--list", "command", "list"],
 			["--help", "command", "help"],
 			["-h", "command", "help"],
-			["--no-update", "noUpdate", true],
-			["--debug", "debug", true],
 		] as const)("%s sets %s to %s", (flag, field, expected) => {
 			const args = parseArgs([flag]);
 			expect(args[field]).toBe(expected);
@@ -144,18 +137,9 @@ describe("Ticket 3.3 — CLI Interface", () => {
 		});
 
 		it("multiple flags combined", () => {
-			const args = parseArgs([
-				"--port",
-				"3000",
-				"--oc-port",
-				"5000",
-				"--debug",
-				"--no-update",
-			]);
+			const args = parseArgs(["--port", "3000", "--oc-port", "5000"]);
 			expect(args.port).toBe(3000);
 			expect(args.ocPort).toBe(5000);
-			expect(args.debug).toBe(true);
-			expect(args.noUpdate).toBe(true);
 		});
 
 		const defaultCases: Array<[string[], "port" | "ocPort", number]> = [
@@ -226,23 +210,6 @@ describe("Ticket 3.3 — CLI Interface", () => {
 		);
 	});
 
-	it("property: noUpdate and debug are always booleans", () => {
-		fc.assert(
-			fc.property(
-				fc.array(fc.string({ minLength: 0, maxLength: 20 }), {
-					minLength: 0,
-					maxLength: 10,
-				}),
-				(argv) => {
-					const args = parseArgs(argv);
-					expect(typeof args.noUpdate).toBe("boolean");
-					expect(typeof args.debug).toBe("boolean");
-				},
-			),
-			{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-		);
-	});
-
 	it("property: parseArgs never throws for arbitrary input", () => {
 		fc.assert(
 			fc.property(
@@ -260,8 +227,6 @@ describe("Ticket 3.3 — CLI Interface", () => {
 							"--help",
 							"--list",
 							"--remove",
-							"--debug",
-							"--no-update",
 						),
 					),
 					{ minLength: 0, maxLength: 20 },
@@ -277,113 +242,35 @@ describe("Ticket 3.3 — CLI Interface", () => {
 	});
 });
 
-describe("internal --daemon child", () => {
-	it("starts through the injectable daemon child starter", async () => {
-		const previousEnv = Object.fromEntries(
-			Object.values(RELAY_ENV_KEYS).map((key) => [key, process.env[key]]),
-		);
-		let captured:
-			| Parameters<NonNullable<CLIOptions["startDaemonChildProcess"]>>[0]
-			| null = null;
-		try {
-			// Start from no relay env at all, so a variable exported by the shell
-			// (CLAUDE_CONFIG_DIR under a custom Claude Code instance) cannot leak in.
-			for (const key of Object.values(RELAY_ENV_KEYS)) delete process.env[key];
-			process.env[RELAY_ENV_KEYS.PORT] = "3456";
-			process.env[RELAY_ENV_KEYS.HOST] = "0.0.0.0";
-			process.env[RELAY_ENV_KEYS.CONFIG_DIR] = "/tmp/conduit-cli-daemon";
-			process.env[RELAY_ENV_KEYS.PIN_HASH] = "pin-hash";
-			process.env[RELAY_ENV_KEYS.KEEP_AWAKE] = "1";
-			process.env[RELAY_ENV_KEYS.KEEP_AWAKE_COMMAND] = "caffeinate";
-			process.env[RELAY_ENV_KEYS.KEEP_AWAKE_ARGS] = JSON.stringify(["-dims"]);
-			process.env[RELAY_ENV_KEYS.TLS] = "1";
-			process.env[RELAY_ENV_KEYS.OC_URL] = "http://opencode:4096";
-			process.env[RELAY_ENV_KEYS.CLAUDE_CONFIG_DIR] = "/tmp/conduit-cli-claude";
-
-			await run(
-				["--daemon", "--log-level", "debug", "--log-format", "pretty"],
-				createMockCLI({
-					startDaemonChildProcess: async (opts) => {
-						captured = opts;
-					},
-				}),
-			);
-
-			expect(captured).toEqual({
-				port: 3456,
-				host: "0.0.0.0",
-				configDir: "/tmp/conduit-cli-daemon",
-				pinHash: "pin-hash",
-				keepAwake: true,
-				keepAwakeCommand: "caffeinate",
-				keepAwakeArgs: ["-dims"],
-				tlsEnabled: true,
-				opencodeUrl: "http://opencode:4096",
-				claudeConfigDir: "/tmp/conduit-cli-claude",
-				logLevel: "debug",
-				logFormat: "pretty",
-			});
-		} finally {
-			for (const [key, value] of Object.entries(previousEnv)) {
-				if (value === undefined) {
-					delete process.env[key];
-				} else {
-					process.env[key] = value;
-				}
-			}
-		}
-	});
-});
-
-describe("T2: Default invocation — auto-start, register, display (AC1)", () => {
-	it("starts daemon if not running, registers cwd, shows URL + QR", async () => {
-		let spawnCalled = false;
+describe("T2: Default invocation — register and display (AC1)", () => {
+	it("prints one guidance line when the server is unavailable", async () => {
 		const cli = createMockCLI({
 			isDaemonRunning: async () => false,
-			spawnDaemon: async () => {
-				spawnCalled = true;
-				return { pid: 99, port: 2633 };
-			},
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") {
-					return { addedSlug: "my-project" };
-				}
-				return { ok: true };
-			},
 		});
-
 		await run([], cli);
-
-		expect(spawnCalled).toBe(true);
-		expect(cli.state.output).toContain("Daemon started");
-		expect(cli.state.output).toContain("192.168.1.100");
-		expect(cli.state.output).toContain("my-project");
-		expect(cli.state.output).toContain("[QR:");
+		expect(cli.state.errors).toBe(
+			"Server is not running. Run conduit serve or conduit service install.\n",
+		);
+		expect(cli.state.output).toBe("");
+		expect(cli.state.rpcRequests).toHaveLength(0);
+		expect(cli.state.exitCode).toBe(1);
 	});
 
-	it("skips spawning if daemon is already running", async () => {
-		let spawnCalled = false;
+	it("registers cwd and prints its URL without opening a menu", async () => {
 		const cli = createMockCLI({
-			isDaemonRunning: async () => true,
-			spawnDaemon: async () => {
-				spawnCalled = true;
-				return { pid: 99, port: 2633 };
-			},
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") {
-					return { addedSlug: "my-project" };
-				}
-				return { ok: true };
+				if (cmd._tag === "AddProject") return { addedSlug: "my-project" };
+				return { port: 4000, tlsEnabled: false };
 			},
 		});
-
 		await run([], cli);
-
-		expect(spawnCalled).toBe(false);
-		expect(cli.state.output).not.toContain("Daemon started");
-		expect(cli.state.output).toContain("192.168.1.100");
+		expect(cli.state.output).toContain("http://192.168.1.100:4000");
+		expect(cli.state.output).toContain("my-project");
+		expect(cli.state.rpcRequests.map((cmd) => cmd._tag)).toEqual([
+			"AddProject",
+			"GetStatus",
+		]);
 	});
 
 	it("registers cwd via AddProject RPC command", async () => {
@@ -515,7 +402,18 @@ describe("T3: --status — sends GetStatus, formats output (AC2)", () => {
 	});
 });
 
-describe("T4: --stop — sends shutdown (AC3)", () => {
+describe("T4: stop — sends shutdown (AC3)", () => {
+	it.each([
+		"stop",
+		"--stop",
+	])("%s succeeds when the server is absent", async (command) => {
+		const cli = createMockCLI({ isDaemonRunning: async () => false });
+		await run([command], cli);
+		expect(cli.state.output).toBe("Server is not running.\n");
+		expect(cli.state.exitCode).toBe(0);
+		expect(cli.state.rpcRequests).toHaveLength(0);
+	});
+
 	it("sends shutdown command and displays confirmation", async () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
@@ -530,7 +428,7 @@ describe("T4: --stop — sends shutdown (AC3)", () => {
 		const command = cli.state.rpcRequests[0];
 		assert.exists(command, "expected RPC command");
 		expect(command._tag).toBe("Shutdown");
-		expect(cli.state.output).toContain("Daemon stopped");
+		expect(cli.state.output).toContain("Server stopped");
 	});
 
 	it("handles RPC error gracefully", async () => {
@@ -621,7 +519,6 @@ describe("T5: --pin — validates digit, sends SetPin (AC4)", () => {
 
 it.each([
 	["--status"],
-	["--stop"],
 	["--pin", "123456"],
 	["--add", "/tmp/test"],
 	["--list"],
@@ -917,58 +814,20 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 
 		expect(cli.state.output).toContain(":3000");
 	});
-
-	it("custom port is passed to spawnDaemon", async () => {
-		let spawnPort: number | undefined;
-		const cli = createMockCLI({
-			isDaemonRunning: async () => false,
-			spawnDaemon: async (opts) => {
-				spawnPort = opts?.port;
-				return { pid: 1, port: opts?.port ?? 2633 };
-			},
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") return { addedSlug: "test" };
-				return { ok: true };
-			},
-		});
-
-		await run(["--port", "4000"], cli);
-
-		expect(spawnPort).toBe(4000);
-	});
 });
 
 describe("T8: Error handling (AC8)", () => {
-	it("handles EADDRINUSE when spawning daemon", async () => {
+	it("prints guidance when the server becomes unreachable before GetStatus", async () => {
 		const cli = createMockCLI({
-			isDaemonRunning: async () => false,
-			spawnDaemon: async () => {
-				throw new DaemonSpawnPortInUseError({
-					host: "127.0.0.1",
-					port: 2633,
-				});
+			sendRPC: async (cmd) => {
+				if (cmd._tag === "AddProject") return { addedSlug: "project" };
+				throw new Error("Connection refused");
 			},
 		});
-
 		await run([], cli);
-
-		expect(cli.state.errors).toContain("already in use");
-		expect(cli.state.errors).toContain("different port");
-		expect(cli.state.exitCode).toBe(1);
-	});
-
-	it("handles generic spawn errors", async () => {
-		const cli = createMockCLI({
-			isDaemonRunning: async () => false,
-			spawnDaemon: async () => {
-				throw new Error("Something went wrong");
-			},
-		});
-
-		await run([], cli);
-
-		expect(cli.state.errors).toContain("Something went wrong");
+		expect(cli.state.errors).toBe(
+			"Server is not running. Run conduit serve or conduit service install.\n",
+		);
 		expect(cli.state.exitCode).toBe(1);
 	});
 
@@ -1046,8 +905,6 @@ describe("--help shows usage information", () => {
 		expect(cli.state.output).toContain("--title");
 		expect(cli.state.output).toContain("--port");
 		expect(cli.state.output).toContain("--oc-port");
-		expect(cli.state.output).toContain("--no-update");
-		expect(cli.state.output).toContain("--debug");
 		expect(cli.state.output).toContain("--help");
 	});
 
@@ -1065,8 +922,6 @@ describe("--help shows usage information", () => {
 
 		await run(["--help"], cli);
 
-		expect(cli.state.output).toContain("--yes");
-		expect(cli.state.output).toContain("-y");
 		expect(cli.state.output).toContain("--no-https");
 		expect(cli.state.output).toContain("--dangerously-skip-permissions");
 	});
@@ -1074,10 +929,8 @@ describe("--help shows usage information", () => {
 
 // T12: New flags (Ticket 8.15)
 
-describe("T12: parseArgs — new flags -y, --no-https, --dangerously-skip-permissions", () => {
+describe("T12: parseArgs — --no-https, --dangerously-skip-permissions", () => {
 	it.each([
-		["-y", "yes", true],
-		["--yes", "yes", true],
 		["--no-https", "noHttps", true],
 		["--dangerously-skip-permissions", "skipPerms", true],
 	] as const)("%s sets %s to %s", (flag, field, expected) => {
@@ -1086,15 +939,13 @@ describe("T12: parseArgs — new flags -y, --no-https, --dangerously-skip-permis
 	});
 
 	it("new flags combined with existing flags", () => {
-		const args = parseArgs(["--port", "3000", "-y", "--no-https", "--debug"]);
+		const args = parseArgs(["--port", "3000", "--no-https"]);
 		expect(args.port).toBe(3000);
-		expect(args.yes).toBe(true);
 		expect(args.noHttps).toBe(true);
-		expect(args.debug).toBe(true);
 		expect(args.command).toBe("default");
 	});
 
-	it("property: yes, noHttps, skipPerms are always booleans", () => {
+	it("property: noHttps and skipPerms are always booleans", () => {
 		fc.assert(
 			fc.property(
 				fc.array(fc.string({ minLength: 0, maxLength: 20 }), {
@@ -1103,7 +954,6 @@ describe("T12: parseArgs — new flags -y, --no-https, --dangerously-skip-permis
 				}),
 				(argv) => {
 					const args = parseArgs(argv);
-					expect(typeof args.yes).toBe("boolean");
 					expect(typeof args.noHttps).toBe("boolean");
 					expect(typeof args.skipPerms).toBe("boolean");
 				},
@@ -1139,167 +989,6 @@ describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () 
 		// --pin handler runs (PIN is valid, daemon is running) → "PIN updated"
 		expect(cli.state.output).toContain("PIN updated");
 		expect(cli.state.exitCode).toBeNull();
-	});
-});
-
-// T14: Interactive mode (Ticket 8.15)
-
-describe("T14: Interactive mode — showInteractiveMenu injectable (Ticket 8.15)", () => {
-	it("enters interactive mode when showInteractiveMenu is injected", async () => {
-		let interactiveCalled = false;
-		const capturedContexts: InteractiveContext[] = [];
-
-		const cli = createMockCLI({
-			showInteractiveMenu: async (ctx) => {
-				interactiveCalled = true;
-				capturedContexts.push(ctx);
-			},
-		});
-
-		await run([], cli);
-
-		expect(interactiveCalled).toBe(true);
-		expect(capturedContexts).toHaveLength(1);
-		const capturedCtx = capturedContexts[0];
-		assert.exists(capturedCtx, "expected CLI context");
-		expect(capturedCtx.cwd).toBe("/home/user/my-project");
-	});
-
-	it("passes args to interactive context", async () => {
-		const capturedContexts: InteractiveContext[] = [];
-
-		const cli = createMockCLI({
-			showInteractiveMenu: async (ctx) => {
-				capturedContexts.push(ctx);
-			},
-		});
-
-		await run(["--port", "4000", "-y", "--no-https"], cli);
-
-		expect(capturedContexts).toHaveLength(1);
-		const capturedCtx = capturedContexts[0];
-		assert.exists(capturedCtx, "expected CLI context");
-		expect(capturedCtx.args.port).toBe(4000);
-		expect(capturedCtx.args.yes).toBe(true);
-		expect(capturedCtx.args.noHttps).toBe(true);
-	});
-
-	it("interactive context has rpcSend, checkDaemon, spawnDaemon", async () => {
-		const capturedContexts: InteractiveContext[] = [];
-
-		const cli = createMockCLI({
-			showInteractiveMenu: async (ctx) => {
-				capturedContexts.push(ctx);
-			},
-		});
-
-		await run([], cli);
-
-		expect(capturedContexts).toHaveLength(1);
-		const capturedCtx = capturedContexts[0];
-		assert.exists(capturedCtx, "expected CLI context");
-		expect(typeof capturedCtx.rpcSend).toBe("function");
-		expect(typeof capturedCtx.checkDaemon).toBe("function");
-		expect(typeof capturedCtx.spawnDaemon).toBe("function");
-		expect(typeof capturedCtx.getAddr).toBe("function");
-	});
-
-	it("uses showInteractiveMenu for default command only (not --status)", async () => {
-		let interactiveCalled = false;
-
-		const cli = createMockCLI({
-			showInteractiveMenu: async () => {
-				interactiveCalled = true;
-			},
-			sendRPC: async () => ({
-				ok: true,
-				uptime: 0,
-				port: 2633,
-				projectCount: 0,
-				clientCount: 0,
-			}),
-		});
-
-		await run(["--status"], cli);
-
-		expect(interactiveCalled).toBe(false);
-	});
-
-	it("uses showInteractiveMenu for default command only (not --stop)", async () => {
-		let interactiveCalled = false;
-
-		const cli = createMockCLI({
-			showInteractiveMenu: async () => {
-				interactiveCalled = true;
-			},
-		});
-
-		await run(["--stop"], cli);
-
-		expect(interactiveCalled).toBe(false);
-	});
-
-	it("non-interactive fallback when no showInteractiveMenu and non-TTY stdin", async () => {
-		// The default createMockCLI does NOT provide showInteractiveMenu
-		// and does NOT provide stdin, so stdin falls back to process.stdin
-		// which in tests is not a TTY → legacy behavior
-		const cli = createMockCLI({
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") {
-					return { addedSlug: "my-project" };
-				}
-				return { ok: true };
-			},
-		});
-
-		await run([], cli);
-
-		// Legacy behavior: shows URL and QR
-		expect(cli.state.output).toContain("192.168.1.100");
-		expect(cli.state.output).toContain("[QR:");
-	});
-
-	it("--dangerously-skip-permissions validation runs before interactive mode", async () => {
-		let interactiveCalled = false;
-
-		const cli = createMockCLI({
-			showInteractiveMenu: async () => {
-				interactiveCalled = true;
-			},
-		});
-
-		await run(["--dangerously-skip-permissions"], cli);
-
-		expect(interactiveCalled).toBe(false);
-		expect(cli.state.errors).toContain(
-			"--dangerously-skip-permissions requires --pin",
-		);
-		expect(cli.state.exitCode).toBe(1);
-	});
-
-	it("interactive mode receives stdin from options", async () => {
-		const capturedContexts: InteractiveContext[] = [];
-		const mockStdin = {
-			on: () => {},
-			isTTY: true,
-		} as unknown as NodeJS.ReadStream & {
-			setRawMode?: (mode: boolean) => void;
-		};
-
-		const cli = createMockCLI({
-			stdin: mockStdin,
-			showInteractiveMenu: async (ctx) => {
-				capturedContexts.push(ctx);
-			},
-		});
-
-		await run([], cli);
-
-		expect(capturedContexts).toHaveLength(1);
-		const capturedCtx = capturedContexts[0];
-		assert.exists(capturedCtx, "expected CLI context");
-		expect(capturedCtx.stdin).toBe(mockStdin);
 	});
 });
 
@@ -1580,7 +1269,7 @@ describe("instance subcommands", () => {
 // These test the distinct branching in parseArgs for flags that accept
 // a value (valid value, invalid value, missing value).
 
-describe("T17-T20: --log-level, --log-format, --host, --restart-daemon", () => {
+describe("T17-T20: --log-level, --log-format, --host", () => {
 	it.each([
 		"debug",
 		"error",
@@ -1632,10 +1321,6 @@ describe("T17-T20: --log-level, --log-format, --host, --restart-daemon", () => {
 		expect(args.command).toBe("stop");
 	});
 
-	it("--restart-daemon sets restartDaemon to true", () => {
-		expect(parseArgs(["--restart-daemon"]).restartDaemon).toBe(true);
-	});
-
 	it("flags combine correctly", () => {
 		const args = parseArgs([
 			"--port",
@@ -1647,14 +1332,12 @@ describe("T17-T20: --log-level, --log-format, --host, --restart-daemon", () => {
 			"--host",
 			"0.0.0.0",
 			"--foreground",
-			"--restart-daemon",
 		]);
 		expect(args.logLevel).toBe("debug");
 		expect(args.logFormat).toBe("json");
 		expect(args.host).toBe("0.0.0.0");
 		expect(args.port).toBe(3000);
-		expect(args.command).toBe("foreground");
-		expect(args.restartDaemon).toBe(true);
+		expect(args.command).toBe("serve");
 	});
 });
 
@@ -1663,9 +1346,7 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 	// When you add a new flag to parseArgs, add it here too — that's the
 	// entire point of this test.
 	const PARSED_FLAGS = [
-		"--daemon",
 		"--foreground",
-		"--restart-daemon",
 		"--status",
 		"--stop",
 		"--pin",
@@ -1679,10 +1360,6 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		"-H",
 		"--oc-port",
 		"--claude-config-dir",
-		"--no-update",
-		"--debug",
-		"-y",
-		"--yes",
 		"--no-https",
 		"--dangerously-skip-permissions",
 		"--managed",
@@ -1694,17 +1371,14 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		"-h",
 	];
 
-	// Flags that are intentionally omitted from HELP_TEXT.
-	// --daemon is an internal flag used by Daemon.spawn() to launch the
-	// child process; users should never type it directly.
-	const INTERNAL_FLAGS = new Set(["--daemon"]);
+	// Older installed services can still pass this hidden alias.
+	const INTERNAL_FLAGS = new Set(["--foreground"]);
 
 	// Short aliases are documented inline with their long form
 	// (e.g. "-p, --port") so we check the long form covers them.
 	const SHORT_ALIASES: Record<string, string> = {
 		"-p": "--port",
 		"-H": "--host",
-		"-y": "--yes",
 		"-h": "--help",
 	};
 
@@ -1742,10 +1416,6 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 
 	for (const flag of INTERNAL_FLAGS) {
 		it(`HELP_TEXT does not expose internal flag ${flag}`, () => {
-			// Match as a standalone flag definition, not as a substring.
-			// --daemon shouldn't appear as "  --daemon" in the options list.
-			// It could appear inside a description string (e.g. "--restart-daemon")
-			// so we check it doesn't appear as a standalone option line.
 			const asOptionLine = new RegExp(
 				`^\\s+${flag.replace(/-/g, "\\-")}\\s`,
 				"m",

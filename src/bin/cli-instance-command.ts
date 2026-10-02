@@ -16,7 +16,7 @@ export async function handleInstance(ctx: CommandContext): Promise<void> {
 	const running = await checkDaemon();
 	if (!running) {
 		stderr.write("Daemon is not running.\n");
-		stderr.write("Start with: npx conduit\n");
+		stderr.write("Start with: conduit serve or conduit service install\n");
 		exit(1);
 		return;
 	}

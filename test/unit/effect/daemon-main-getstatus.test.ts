@@ -75,7 +75,6 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			staticDir: tmpDir,
 			port: 0,
 			tlsEnabled: true,
@@ -93,7 +92,6 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			staticDir: tmpDir,
 			port: 0,
 			host: "127.0.0.1",
@@ -115,7 +113,6 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath,
-			pidPath: join(tmpDir, "daemon.pid"),
 			staticDir: tmpDir,
 			port: 0,
 			tlsEnabled: false,
@@ -141,7 +138,6 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			staticDir: tmpDir,
 			port: 0,
 			tlsEnabled: false,
@@ -192,7 +188,6 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			staticDir: tmpDir,
 			port: 0,
 			tlsEnabled: false,
@@ -221,7 +216,6 @@ describe("daemon main runtime config status", () => {
 		const options = {
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			staticDir: tmpDir,
 			port: 0,
 			tlsEnabled: false,

@@ -100,7 +100,6 @@ describe("CLI and browser daemon RPC parity", () => {
 	it("starts over an abandoned socket and flushes the shutdown reply before stopping", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-stale-rpc-"));
 		const socketPath = join(root, "relay.sock");
-		const pidPath = join(root, "daemon.pid");
 		execFileSync(process.execPath, [
 			"-e",
 			"require('node:net').createServer().listen(process.argv[1], () => process.exit(0))",
@@ -112,7 +111,6 @@ describe("CLI and browser daemon RPC parity", () => {
 			daemon = await startForegroundDaemon({
 				configDir: join(root, "config"),
 				socketPath,
-				pidPath,
 				port: 0,
 				host: "127.0.0.1",
 				keepAwake: false,
@@ -126,7 +124,6 @@ describe("CLI and browser daemon RPC parity", () => {
 			});
 			await daemon.stopped;
 			expect(existsSync(socketPath)).toBe(false);
-			expect(existsSync(pidPath)).toBe(false);
 		} finally {
 			await daemon?.stop();
 			rmSync(root, { recursive: true, force: true });
@@ -141,7 +138,6 @@ describe("CLI and browser daemon RPC parity", () => {
 			daemon = await startForegroundDaemon({
 				configDir: join(root, "config"),
 				socketPath,
-				pidPath: join(root, "daemon.pid"),
 				port: 0,
 				host: "127.0.0.1",
 				keepAwake: false,
@@ -231,7 +227,6 @@ describe("CLI and browser daemon RPC parity", () => {
 		const options = {
 			configDir,
 			socketPath,
-			pidPath: join(root, "daemon.pid"),
 			port: 0,
 			host: "127.0.0.1",
 			keepAwake: false,
@@ -345,8 +340,6 @@ describe("CLI and browser daemon RPC parity", () => {
 		const options = {
 			configDir,
 			socketPath,
-			pidPath: join(root, "daemon.pid"),
-			logPath: join(root, "daemon.log"),
 			port: 0,
 			host: "127.0.0.1",
 			keepAwake: false,

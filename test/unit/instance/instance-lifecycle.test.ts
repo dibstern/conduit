@@ -35,7 +35,6 @@ describe("instance lifecycle integration", () => {
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
 		});
@@ -51,7 +50,6 @@ describe("instance lifecycle integration", () => {
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			smartDefault: false,
 		});
 		expect(daemon.getInstances()).toHaveLength(0);
@@ -95,7 +93,6 @@ describe("instance lifecycle integration", () => {
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
 		});

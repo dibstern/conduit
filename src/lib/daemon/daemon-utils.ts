@@ -1,11 +1,9 @@
 // Pure utility functions extracted from the Daemon class.
 
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
-import { cleanupStalePidFiles } from "./pid-manager.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,7 +88,7 @@ export async function findFreePort(startFrom: number): Promise<number> {
 }
 
 /**
- * Check if a daemon is already running by probing the PID file and RPC socket.
+ * Check if a daemon is already running by probing its RPC socket.
  *
  * Extracted from Daemon.isRunning() so callers don't need the full Daemon class.
  * The static method `Daemon.isRunning` delegates here.
@@ -98,30 +96,6 @@ export async function findFreePort(startFrom: number): Promise<number> {
 export async function isDaemonRunning(socketPath?: string): Promise<boolean> {
 	const resolvedSocketPath =
 		socketPath ?? join(DEFAULT_CONFIG_DIR, "relay.sock");
-	const pidPath = resolvedSocketPath.replace(/relay\.sock$/, "daemon.pid");
-
-	// Check PID file
-	let pid: number | null = null;
-	try {
-		const content = readFileSync(pidPath, "utf-8").trim();
-		pid = Number.parseInt(content, 10);
-	} catch {
-		// No PID file — try socket directly (PID file may have been
-		// cleaned up while the daemon is still running)
-	}
-
-	if (pid !== null && !Number.isNaN(pid)) {
-		// Check if PID is alive
-		try {
-			process.kill(pid, 0);
-		} catch {
-			// Process doesn't exist — stale
-			cleanupStalePidFiles(pidPath, resolvedSocketPath);
-			return false;
-		}
-	}
-
-	// Verify via socket connection (works even without PID file)
 	const { connect } = await import("node:net");
 	return new Promise((resolve) => {
 		const client = connect(resolvedSocketPath);
@@ -138,9 +112,7 @@ export async function isDaemonRunning(socketPath?: string): Promise<boolean> {
 
 		client.on("error", () => {
 			clearTimeout(timeout);
-			if (pid !== null) {
-				cleanupStalePidFiles(pidPath, resolvedSocketPath);
-			}
+			client.destroy();
 			resolve(false);
 		});
 	});

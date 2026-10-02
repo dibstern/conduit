@@ -7,23 +7,20 @@ import {
 	type SendRPC,
 	sendRpcRequest,
 } from "../lib/daemon/daemon-rpc-client.js";
-import { spawnDaemon } from "../lib/daemon/daemon-spawn.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
 import {
 	type ForegroundDaemonHandle,
-	startDaemonChildProcess,
 	startForegroundDaemon,
 } from "../lib/domain/daemon/Layers/daemon-foreground.js";
 import {
 	type CommandContext,
 	handleAdd,
-	handleDaemon,
-	handleForeground,
 	handleHelp,
 	handleList,
 	handlePin,
 	handleRemove,
+	handleServe,
 	handleStatus,
 	handleStop,
 	handleTitle,
@@ -49,42 +46,20 @@ export {
 } from "./cli-utils.js";
 
 export interface CLIOptions {
-	/** Config directory for local diagnostics. */
+	/** Config directory for server startup and local diagnostics. */
 	configDir?: string;
 	cwd?: string;
-	stdin?: NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
 	stdout?: { write(s: string): void };
 	stderr?: { write(s: string): void };
 	exit?: (code: number) => void;
 	sendRPC?: SendRPC;
 	isDaemonRunning?: () => Promise<boolean>;
-	spawnDaemon?: (
-		opts?: DaemonOptions,
-	) => Promise<{ pid: number; port: number }>;
 	startForegroundDaemon?: (
 		opts: DaemonOptions,
 	) => Promise<ForegroundDaemonHandle>;
-	startDaemonChildProcess?: (opts: DaemonOptions) => Promise<void>;
 	generateQR?: (url: string) => string;
 	getNetworkAddress?: () => string | null;
 	getTailscaleIP?: () => string | null;
-	/** Injectable for testing: override the interactive menu (setup + main menu). */
-	showInteractiveMenu?: (ctx: InteractiveContext) => Promise<void>;
-}
-
-/** Context passed to the interactive menu flow. */
-export interface InteractiveContext {
-	args: import("./cli-utils.js").ParsedArgs;
-	cwd: string;
-	stdin: NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
-	stdout: { write(s: string): void };
-	stderr: { write(s: string): void };
-	exit: (code: number) => void;
-	rpcSend: SendRPC;
-	checkDaemon: () => Promise<boolean>;
-	spawnDaemon: (opts?: DaemonOptions) => Promise<{ pid: number; port: number }>;
-	getAddr: () => string | null;
-	generateQR: (url: string) => string;
 }
 
 export async function run(argv: string[], options?: CLIOptions): Promise<void> {
@@ -103,24 +78,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	const checkDaemon =
 		options?.isDaemonRunning ?? (() => isDaemonRunning(DEFAULT_SOCKET_PATH));
 
-	const spawnDaemonFn =
-		options?.spawnDaemon ??
-		((opts?: DaemonOptions) =>
-			spawnDaemon(
-				{
-					port: args.port,
-					...(args.host ? { host: args.host } : {}),
-					...(args.claudeConfigDir
-						? { claudeConfigDir: args.claudeConfigDir }
-						: {}),
-					...opts,
-				},
-				isDaemonRunning,
-			));
 	const startForegroundDaemonFn =
 		options?.startForegroundDaemon ?? startForegroundDaemon;
-	const startDaemonChildProcessFn =
-		options?.startDaemonChildProcess ?? startDaemonChildProcess;
 
 	const qr = options?.generateQR ?? generateQR;
 	const getAddr = options?.getNetworkAddress ?? getNetworkAddress;
@@ -135,9 +94,7 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		exit,
 		rpcSend,
 		checkDaemon,
-		spawnDaemonFn,
 		startForegroundDaemonFn,
-		startDaemonChildProcessFn,
 		qr,
 		getAddr,
 		getTsIP,
@@ -151,10 +108,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 				stdout,
 				...(options?.configDir && { configDir: options.configDir }),
 			});
-		case "daemon":
-			return handleDaemon(context);
-		case "foreground":
-			return handleForeground(context);
+		case "serve":
+			return handleServe(context);
 		case "help":
 			return handleHelp(context);
 		case "status":

@@ -63,11 +63,13 @@ cannot remove the retry's sink, approval waiter or abort ownership.
   server disposal. A fresh server rediscovers them. This matches the managed
   OpenCode policy: restart preserves, explicit stop kills.
 - A server crash, including `SIGKILL`, preserves independent runner processes.
-- `Shutdown`, ordinary foreground `stop()`, `SIGTERM` and `SIGINT` are explicit
-  stops. They interrupt turns, settle approvals and terminate verified runners
-  within the existing shutdown deadline. Deleting a session also kills its runner.
-- An external restart controller that wants graceful preservation must use
-  `RestartWithConfig` before starting the replacement server.
+- `conduit serve` handles `SIGTERM` and `SIGINT` as restarts. They flush and
+  dispose the server while preserving runners, the PTY host and managed OpenCode.
+  Start another `conduit serve` to re-adopt them. A second `SIGINT` during
+  shutdown exits immediately.
+- `conduit stop`, `Shutdown` RPC and the foreground handle's `stop()` are full
+  stops. They interrupt turns, settle approvals and terminate verified runners,
+  the PTY host and managed OpenCode. Deleting a session also kills its runner.
 
 A disconnected runner waits up to 60 seconds for a verified server handshake
 and replay attachment. Set `CONDUIT_CLAUDE_RUNNER_REATTACH_GRACE_MS` to a positive

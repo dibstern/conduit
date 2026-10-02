@@ -19,8 +19,6 @@ const daemon = await startForegroundDaemon({
 	host: "127.0.0.1",
 	configDir,
 	socketPath: join(configDir, "relay.sock"),
-	pidPath: join(configDir, "daemon.pid"),
-	logPath: join(configDir, "daemon.log"),
 	staticDir,
 	opencodeUrl,
 	smartDefault: false,

@@ -8,10 +8,6 @@ import {
 	type DaemonRuntimeConfig,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
-	CrashCounterLive,
-	CrashCounterTag,
-} from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
-import {
 	AuthManagerFromConfigLive,
 	AuthManagerTag,
 } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -128,41 +124,6 @@ describe("AuthManagerLive from DaemonConfigRef", () => {
 				),
 			),
 		),
-	);
-});
-
-describe("CrashCounterLive", () => {
-	it.effect("records crashes and returns count", () =>
-		Effect.gen(function* () {
-			const counter = yield* CrashCounterTag;
-			const result = yield* counter.record();
-			expect(result.count).toBe(1);
-			expect(result.shouldAbort).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(CrashCounterLive))),
-	);
-
-	it.effect("resets crash counter", () =>
-		Effect.gen(function* () {
-			const counter = yield* CrashCounterTag;
-			yield* counter.record();
-			yield* counter.record();
-			yield* counter.reset();
-			const result = yield* counter.record();
-			expect(result.count).toBe(1);
-			expect(result.shouldAbort).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(CrashCounterLive))),
-	);
-
-	it.effect("shouldAbort returns true after max crashes", () =>
-		Effect.gen(function* () {
-			const counter = yield* CrashCounterTag;
-			// Default max is 3, record 3 times
-			yield* counter.record();
-			yield* counter.record();
-			const result = yield* counter.record();
-			expect(result.count).toBe(3);
-			expect(result.shouldAbort).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(CrashCounterLive))),
 	);
 });
 

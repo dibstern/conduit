@@ -45,8 +45,6 @@ function daemonOpts(tmpDir: string, port = 0) {
 	return {
 		configDir: tmpDir,
 		socketPath: join(tmpDir, "relay.sock"),
-		pidPath: join(tmpDir, "daemon.pid"),
-		logPath: join(tmpDir, "daemon.log"),
 		port,
 		smartDefault: false,
 	};

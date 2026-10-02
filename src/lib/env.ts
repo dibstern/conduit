@@ -27,23 +27,6 @@ export interface TraceEnvConfig {
 	readonly batchWindowMs: number;
 }
 
-// These are set by the parent process (via daemon-spawn.ts) and read by the
-// child daemon process (via cli-core.ts). They are an internal IPC mechanism,
-// not user-facing configuration.
-
-export const RELAY_ENV_KEYS = {
-	PORT: "CONDUIT_PORT",
-	HOST: "CONDUIT_HOST",
-	CONFIG_DIR: "CONDUIT_CONFIG_DIR",
-	PIN_HASH: "CONDUIT_PIN_HASH",
-	KEEP_AWAKE: "CONDUIT_KEEP_AWAKE",
-	KEEP_AWAKE_COMMAND: "CONDUIT_KEEP_AWAKE_COMMAND",
-	KEEP_AWAKE_ARGS: "CONDUIT_KEEP_AWAKE_ARGS",
-	CLAUDE_CONFIG_DIR: "CONDUIT_CLAUDE_CONFIG_DIR",
-	TLS: "CONDUIT_TLS",
-	OC_URL: "CONDUIT_OC_URL",
-} as const;
-
 const parseBoundedInteger = (
 	value: string | undefined,
 	defaultValue: number,
@@ -111,6 +94,6 @@ export const ENV = {
 	/** Log level (default: info). Set via LOG_LEVEL env var. */
 	logLevel:
 		(process.env["LOG_LEVEL"] as LogLevel | undefined) ?? ("info" as const),
-	/** Log format (default: auto — pretty for foreground, json for daemon). */
+	/** Log format (default: pretty). */
 	logFormat: process.env["LOG_FORMAT"] as LogFormat | undefined,
 } as const;

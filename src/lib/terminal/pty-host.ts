@@ -91,7 +91,6 @@ export async function runPtyHost(options: {
 			}
 		}
 	}
-	const lockPath = join(configDir, "pty-host.pid");
 	const generation = randomUUID();
 	const privateSocket = join(alias, `h-${generation}`);
 	const publication = join(alias, `s-${generation}`);
@@ -157,9 +156,7 @@ export async function runPtyHost(options: {
 		}
 	};
 	const releasePaths = (): void => {
-		for (const file of elected
-			? [socketPath, lockPath, publication]
-			: [publication]) {
+		for (const file of elected ? [socketPath, publication] : [publication]) {
 			try {
 				unlinkSync(file);
 			} catch (error) {
@@ -477,8 +474,6 @@ export async function runPtyHost(options: {
 				if (!isRecord(error) || error["code"] !== "ENOENT") throw error;
 			}
 		}
-		// PID is diagnostic only; stale or reused values never elect or kill a host.
-		writeFileSync(lockPath, String(process.pid), { mode: 0o600 });
 		symlinkSync(`h-${generation}`, publication);
 		renameSync(publication, socketPath);
 		server.on("error", (error) => {

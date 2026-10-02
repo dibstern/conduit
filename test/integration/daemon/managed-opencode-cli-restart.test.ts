@@ -7,9 +7,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
-// Failure cases: CLI replacement uses explicit-stop semantics, replacement
+// Failure cases: a server signal uses explicit-stop semantics, replacement
 // respawns OpenCode, or explicit CLI stop leaves the process or its child alive.
-describe("managed OpenCode through CLI daemon replacement", () => {
+describe("managed OpenCode through CLI server replacement", () => {
 	let harness: ProcessHarness | undefined;
 	const cliProcesses: Array<{
 		child: ChildProcess;
@@ -120,7 +120,7 @@ describe("managed OpenCode through CLI daemon replacement", () => {
 		);
 	});
 
-	it("preserves the same OpenCode PID on --restart-daemon, then terminates it on --stop", async () => {
+	it("preserves the same OpenCode PID after SIGTERM and serve, then terminates it on stop", async () => {
 		harness = await ProcessHarness.start({ managedOpenCode: true });
 		const before = await health();
 		const port = recorded().port;
@@ -128,9 +128,11 @@ describe("managed OpenCode through CLI daemon replacement", () => {
 		if (!daemonBefore) throw new Error("Initial daemon generation missing");
 		expect(recorded().pid).toBe(before.pid);
 
+		await harness.terminate();
+		expect(daemonBefore.exitCode).toBe(0);
+		expect(alive(before.pid)).toBe(true);
 		const replacement = spawnCli([
-			"--foreground",
-			"--restart-daemon",
+			"serve",
 			"--port",
 			String(daemonBefore.port),
 			"--host",
@@ -140,15 +142,7 @@ describe("managed OpenCode through CLI daemon replacement", () => {
 		await vi.waitFor(() => expect(replacement.output()).toContain("Ready."), {
 			timeout: 15_000,
 		});
-		expect(replacement.output()).toContain("Stopped existing daemon.");
-		await vi.waitFor(() => expect(daemonBefore.exitCode).toBe(0));
-		// Clear the harness's reference to its exited daemon. The replacement is
-		// the real CLI process and is stopped below through its Unix socket.
-		await harness.terminate();
 		expect(replacement.child.pid).not.toBe(daemonBefore.pid);
-		expect(loadDaemonConfig(join(harness.root, "config"))?.pid).toBe(
-			replacement.child.pid,
-		);
 		expect(alive(before.pid)).toBe(true);
 		const after = await health();
 		const afterRecord = recorded();
@@ -156,11 +150,11 @@ describe("managed OpenCode through CLI daemon replacement", () => {
 		expect(afterRecord.pid).toBe(before.pid);
 		expect(afterRecord.port).toBe(port);
 
-		const stop = spawnCli(["--stop"]);
+		const stop = spawnCli(["stop"]);
 		await vi.waitFor(() => expect(stop.child.exitCode).toBe(0), {
 			timeout: 15_000,
 		});
-		expect(stop.output()).toContain("Daemon stopped.");
+		expect(stop.output()).toMatch(/(?:server|daemon) stopped\./i);
 		await vi.waitFor(() => expect(replacement.child.exitCode).toBe(0), {
 			timeout: 5000,
 		});

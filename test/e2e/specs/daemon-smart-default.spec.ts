@@ -66,8 +66,6 @@ const test = base.extend<{
 			host: "127.0.0.1",
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
-			logPath: join(tmpDir, "daemon.log"),
 			staticDir,
 			logLevel: "error",
 			// No opencodeUrl! Smart default should auto-detect.

@@ -68,8 +68,6 @@ export interface DaemonState {
 	startTime: number;
 	configDir: string;
 	socketPath: string;
-	logPath: string;
-	pidPath: string;
 	staticDir?: string;
 
 	pendingSave: boolean;
@@ -98,8 +96,6 @@ export function emptyDaemonState(): DaemonState {
 		startTime: Date.now(),
 		configDir,
 		socketPath: `${configDir}/relay.sock`,
-		logPath: `${configDir}/daemon.log`,
-		pidPath: `${configDir}/daemon.pid`,
 
 		// Internal coordination
 		pendingSave: false,

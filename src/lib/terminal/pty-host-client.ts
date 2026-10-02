@@ -586,7 +586,7 @@ export class PtyHostClient {
 		];
 		if (options.force && hosts.length > 0) {
 			// These handles are children this process spawned for this exact config.
-			// Never signal a PID reported by the protocol or a diagnostic PID file.
+			// Never signal a PID reported by the protocol.
 			for (const host of hosts) {
 				host.cancelled = true;
 				host.child.kill("SIGTERM");

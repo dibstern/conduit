@@ -379,7 +379,11 @@ export const WebSocketRoutingLive: Layer.Layer<
 			daemonHandlers,
 			undefined,
 			reattachViewSession,
-			() => Deferred.succeed(shutdownSignal, undefined).pipe(Effect.asVoid),
+			(tag) =>
+				Deferred.succeed(
+					shutdownSignal,
+					tag === "Shutdown" ? "stop" : "restart",
+				).pipe(Effect.asVoid),
 		);
 
 		const attachDaemonSocket = (ws: WebSocket, req: http.IncomingMessage) =>

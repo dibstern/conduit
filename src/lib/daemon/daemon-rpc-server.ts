@@ -1,4 +1,5 @@
-import { chmod, unlink } from "node:fs/promises";
+import { lstatSync, unlinkSync } from "node:fs";
+import { chmod, lstat } from "node:fs/promises";
 import type { Socket as NetSocket } from "node:net";
 import { SocketServer } from "@effect/platform";
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node";
@@ -6,7 +7,8 @@ import { RpcSerialization, RpcServer } from "@effect/rpc";
 import { Context, Effect, Layer, Option } from "effect";
 import { WsRpcGroup } from "../contracts/ws-rpc.js";
 import type { WsRpcServerLayer } from "../server/ws-rpc.js";
-import { removeSocketFile } from "./pid-manager.js";
+import { isRecord } from "../utils.js";
+import { isDaemonRunning } from "./daemon-utils.js";
 
 type ShutdownTag = "Shutdown" | "RestartWithConfig";
 
@@ -80,22 +82,52 @@ export const makeDaemonRpcSocketLayer = <R>(
 	Layer.scoped(
 		DaemonRpcSocketTag,
 		Effect.gen(function* () {
-			yield* Effect.sync(() => removeSocketFile(socketPath));
+			const existing = yield* Effect.tryPromise({
+				try: () => lstat(socketPath),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.catchAll((cause) =>
+					isRecord(cause) && cause["code"] === "ENOENT"
+						? Effect.succeed(null)
+						: Effect.fail(cause),
+				),
+			);
+			if (existing !== null) {
+				const listening = yield* Effect.tryPromise({
+					try: () => isDaemonRunning(socketPath),
+					catch: (cause) => cause,
+				});
+				if (listening) {
+					return yield* Effect.fail(
+						new Error(
+							`A Conduit server is already listening at ${socketPath}.`,
+						),
+					);
+				}
+				yield* Effect.try({
+					try: () => {
+						try {
+							const current = lstatSync(socketPath);
+							if (
+								current.dev === existing.dev &&
+								current.ino === existing.ino &&
+								current.ctimeMs === existing.ctimeMs
+							)
+								unlinkSync(socketPath);
+						} catch (cause) {
+							if (!isRecord(cause) || cause["code"] !== "ENOENT") throw cause;
+						}
+					},
+					catch: (cause) => cause,
+				});
+			}
 			const server = yield* NodeSocketServer.make({ path: socketPath });
 			const clients = new Set<NetSocket>();
 			const drain = Effect.sync(() => {
 				for (const client of clients) client.destroy();
 			});
-			yield* Effect.addFinalizer(() =>
-				drain.pipe(
-					Effect.zipRight(
-						Effect.tryPromise({
-							try: () => unlink(socketPath),
-							catch: (cause) => cause,
-						}).pipe(Effect.catchAll(() => Effect.void)),
-					),
-				),
-			);
+			// Closing the acquired net.Server removes its own Unix socket.
+			yield* Effect.addFinalizer(() => drain);
 			yield* Effect.tryPromise({
 				try: () => chmod(socketPath, 0o600),
 				catch: (cause) => cause,

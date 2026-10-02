@@ -80,6 +80,33 @@ Run this only when changing daemon lifecycle or daemon-specific flows that are c
 OPENCODE_SERVER_PASSWORD=<password> pnpm test:daemon
 ```
 
+For foreground startup, full stop, and restart preservation, use the isolated
+process harness. It starts the built CLI with temporary HOME, config and project
+directories, a fake Claude SDK, and managed OpenCode stand-ins. It does not need
+the user's running server or provider credentials.
+
+```sh
+export npm_config_verify_deps_before_run=false pnpm_config_verify_deps_before_run=false
+pnpm build
+CONDUIT_TEST_DIST=dist npx --no-install vitest run --config vitest.integration.config.ts \
+  test/integration/daemon/serve-foreground.test.ts \
+  test/integration/daemon/process-harness.test.ts \
+  test/integration/daemon/process-harness-build.test.ts \
+  test/integration/daemon/claude-runner-restart.test.ts \
+  test/integration/daemon/pty-host.test.ts \
+  test/integration/daemon/managed-opencode-restart.test.ts \
+  test/integration/daemon/managed-opencode-cli-restart.test.ts
+npx vitest run test/integration/daemon/claude-process-runner-lifecycle.test.ts
+```
+
+`serve-foreground.test.ts` verifies that `conduit serve` exits 0 on signal shutdown
+with independent runners, terminals and managed OpenCode
+available for the next server to re-adopt. It also verifies full `conduit stop`,
+occupied-port rejection, the hidden `--foreground` alias and bare project
+registration. Evidence and cleanup results go to
+`test-results/85kb-16-serve.json`. Inspect `ps -axo pid,command` for processes
+started by the tests; never signal processes belonging to the user's live server.
+
 ### Multi-Instance
 
 Run this when changing instance switching, registry behavior, or multi-instance UI and routing.

@@ -1,4 +1,4 @@
-// Shared type definitions extracted from daemon.ts so daemon lifecycle, spawn,
+// Shared type definitions extracted from daemon.ts so daemon lifecycle
 // and layer modules can import types without pulling in the full Daemon class
 // and its heavy transitive dependencies.
 
@@ -11,8 +11,6 @@ export interface DaemonOptions {
 	host?: string;
 	configDir?: string;
 	socketPath?: string;
-	logPath?: string;
-	pidPath?: string;
 	pinHash?: string;
 	tlsEnabled?: boolean;
 	keepAwake?: boolean;
@@ -39,7 +37,7 @@ export interface DaemonOptions {
 	smartDefaultUrl?: string;
 	/** Log level override (default: info). */
 	logLevel?: LogLevel;
-	/** Log format override (default: json for daemon, pretty for foreground). */
+	/** Log format override (default: pretty). */
 	logFormat?: LogFormat;
 }
 

@@ -22,16 +22,20 @@ be at your desk.
 
 ```bash
 # Requires: opencode serve (running on port 4096)
+npx conduit-code serve
+# In another terminal, from your project directory:
 npx conduit-code
 ```
 
 <p align="center">
   <img src="media/GENERATE-SETUP.gif"
-       alt="Conduit first-run setup wizard with QR code" width="220">
+       alt="Conduit project setup with QR code" width="220">
 </p>
 
-First run opens a setup wizard: set a port and PIN, optionally enable HTTPS,
-scan the QR code with your phone. About two minutes.
+`serve` keeps the server in your terminal. Bare `conduit` registers the current
+project and prints its browser URL. Set a port with `serve --port <port>` and a
+PIN with `conduit --pin <PIN>`. Use `conduit service install` to keep the server
+running at login.
 
 For access beyond your local network, [Tailscale](https://tailscale.com) is
 the cleanest option — encrypted tunnel, no port forwarding, free for personal
@@ -70,11 +74,11 @@ as diagrams. Code blocks have syntax highlighting and copy buttons.
 
 ---
 
-## One daemon, every project
+## One server, every project
 
 ```bash
 cd ~/backend  && npx conduit-code    # registers project
-cd ~/frontend && npx conduit-code    # adds to same daemon
+cd ~/frontend && npx conduit-code    # adds to same server
 ```
 
 <p align="center">
@@ -83,7 +87,9 @@ cd ~/frontend && npx conduit-code    # adds to same daemon
 </p>
 
 One port, all projects. Switch between registered sessions from the browser.
-The daemon stays running after the terminal closes — sessions survive.
+The optional user service keeps the server running after the terminal closes.
+Stopping `serve` with Ctrl-C preserves independent session runners, terminals
+and managed OpenCode so the next server can re-adopt them.
 
 ---
 
@@ -193,7 +199,7 @@ using OAuth.
 - QR scan to connect instantly
 
 **Server**
-- Background daemon — persists after terminal close
+- Foreground server with an optional launchd or systemd user service
 - Multi-project support — single port, all registered projects
 - PIN authentication (4–8 digits)
 - HTTPS with auto-generated certificates via mkcert
@@ -211,8 +217,8 @@ Push requires HTTPS. One-time setup:
 brew install mkcert && mkcert -install
 ```
 
-Conduit generates certificates automatically on first run. The wizard
-handles the rest. If push registration fails, check that your browser trusts
+`conduit serve` generates certificates when HTTPS is enabled. Use the printed
+setup URL to install the certificate on your phone. If push registration fails, check that your browser trusts
 the certificate and that your phone can reach the address.
 
 ---
@@ -253,10 +259,10 @@ over as-is.
 No. Conduit works over plain HTTP on localhost. mkcert is only needed for
 HTTPS, which is required for push notifications and LAN access.
 
-**"What happens if the daemon crashes?"**
-Sessions are owned by OpenCode (SQLite), not Conduit. Restart the daemon and
-your sessions are still there. Conduit includes a crash counter that prevents
-restart loops.
+**"What happens if the server crashes?"**
+The next `conduit serve` re-adopts independent Claude runners, terminals and
+managed OpenCode. Registered projects and conversation history are persisted.
+An installed user service restarts the server automatically.
 
 </details>
 
@@ -265,21 +271,20 @@ restart loops.
 ## CLI reference
 
 ```
-npx conduit-code                                  Interactive setup + main menu
+npx conduit-code serve                            Run the server in this terminal
+npx conduit-code                                  Register current directory and print its URL
 npx conduit-code --add .                          Register current directory
 npx conduit-code --add /path                      Register project by path
 npx conduit-code --remove                         Unregister current project
 npx conduit-code --list                           List registered projects
 npx conduit-code --status                         Show daemon status
-npx conduit-code --stop                           Stop the daemon
+npx conduit-code stop                             Stop server, runners, terminals and managed OpenCode
 npx conduit-code --pin <PIN>                      Set or update PIN
 npx conduit-code --title <name>                   Set project display name
 npx conduit-code -p, --port <port>                HTTP port (default: 2633)
 npx conduit-code --oc-port <port>                 OpenCode port (default: 4096)
 npx conduit-code --no-https                       Disable TLS
-npx conduit-code -y, --yes                        Skip prompts, accept defaults
 npx conduit-code --dangerously-skip-permissions   Bypass permission prompts (PIN required)
-npx conduit-code --foreground                     Run in foreground (dev mode)
 npx conduit-code --log-level <level>              error | warn | info | verbose | debug
 npx conduit-code --log-format <format>            pretty | json
 ```
@@ -293,14 +298,14 @@ On macOS or Linux, install an optional service to start Conduit at login and
 restart it after it exits:
 
 ```sh
-conduit --stop                         # Stop an existing self-daemonised server first
+conduit stop                          # Fully stop an existing server before installing
 conduit service install --port 2633
 conduit service status                # Installed/loaded/running state, PID and log paths
 conduit service uninstall             # Stop the service and remove its unit
 ```
 
 The service uses `$SHELL -l -c` to resolve Conduit, Node and credentials through
-your login shell. Probes and services start with the same system PATH; configure
+your login shell and runs `conduit serve`. Probes and services start with the same system PATH; configure
 tools in login-shell startup files if they are only available in your interactive
 shell. If `conduit` is absent from that PATH, installation warns and
 uses the installed CLI entry with `node` resolved through PATH. It preserves the

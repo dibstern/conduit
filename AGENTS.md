@@ -12,7 +12,7 @@ NEVER stash changes, you are interrupting other sessions and work.
 ## Architecture At A Glance
 
 - `src/bin/cli.ts` is the thin CLI entrypoint; `src/bin/cli-core.ts` routes commands.
-- The CLI either runs a relay in-process with `foreground` or manages a long-lived `Daemon` over Unix socket IPC.
+- `conduit serve` runs the server in the foreground. CLI commands use the browser RPC contract over a protected Unix socket; `conduit service install` optionally keeps the server running at login.
 - `src/lib/daemon/daemon.ts` owns process lifecycle, persisted config, the shared HTTP and IPC servers, project registration, and provider runtime coordination.
 - One daemon can host many projects. Each project gets its own relay stack mounted under `/p/<slug>`.
 - `src/lib/relay/relay-stack.ts` builds the per-project relay around provider adapters, `SessionManagerService`, `WebSocketHandler`, pollers, and PTY wiring.

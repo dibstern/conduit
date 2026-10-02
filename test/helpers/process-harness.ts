@@ -8,16 +8,29 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
-import { ProviderInstanceIdSchema } from "../../src/lib/contracts/provider-instance.js";
-import { Shutdown, WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
+import {
+	defaultInstanceIdForDriver,
+	ProviderInstanceIdSchema,
+} from "../../src/lib/contracts/provider-instance.js";
+import {
+	GetInstances,
+	GetStatus,
+	Shutdown,
+	WsRpcGroup,
+} from "../../src/lib/contracts/ws-rpc.js";
+import {
+	type DaemonConfig,
+	loadDaemonConfig,
+} from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	inspectManagedOpenCodeProcess,
@@ -69,7 +82,7 @@ interface Generation {
 	pid: number;
 	port: number;
 	projects: string[];
-	instances: Array<{ managed: boolean; url: string }>;
+	instances: Array<{ managed: boolean; url?: string }>;
 	signal?: NodeJS.Signals | null;
 	exitCode?: number | null;
 	fakeSdkActive?: boolean;
@@ -87,11 +100,15 @@ export class ProcessHarness {
 	readonly marks: ProcessMark[] = [];
 	readonly generations: Generation[] = [];
 	readonly browsers: ProcessBrowser[] = [];
+	readonly cliPids: number[] = [];
 	private child: ChildProcess | undefined;
 	private exit: Promise<void> | undefined;
 	private logs = "";
 	private port = 0;
 	private disposed = false;
+	private environment: NodeJS.ProcessEnv = {};
+	private defaultOpenCode: Server | undefined;
+	private defaultOpenCodeUrl = "http://127.0.0.1:0";
 	private readonly ownedOpenCode = new Map<string, ManagedOpenCodeRecord>();
 	private runnerCleanup:
 		| Awaited<ReturnType<typeof cleanupTestClaudeRunners>>
@@ -126,6 +143,7 @@ export class ProcessHarness {
 			| "answer-permission"
 			| "send-turn",
 		private readonly runnerReattachGraceMs?: number,
+		private readonly foregroundCli = false,
 	) {
 		this.configDir = join(
 			this.root,
@@ -155,7 +173,9 @@ export class ProcessHarness {
 				join(this.root, "home/.zprofile"),
 				'export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n',
 			);
-		if (managedOpenCode) {
+		if (foregroundCli && !dist)
+			throw new Error("Foreground CLI coverage requires a build");
+		if (managedOpenCode || foregroundCli) {
 			mkdirSync(join(this.root, "bin"));
 			const executable = join(this.root, "bin", "opencode");
 			copyFileSync(
@@ -163,36 +183,49 @@ export class ProcessHarness {
 				executable,
 			);
 			chmodSync(executable, 0o755);
+			const config: DaemonConfig = {
+				pid: 0,
+				port: 0,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: foregroundCli
+					? [
+							{
+								path: this.projectDir,
+								slug: "process-test",
+								addedAt: Date.now(),
+							},
+						]
+					: [],
+				...(managedOpenCode
+					? {
+							instances: [
+								{
+									id: "managed-test",
+									name: "Managed test",
+									port: 0,
+									managed: true,
+									driver: "opencode",
+									env: {
+										OPENCODE_SERVER_USERNAME: "test-user",
+										CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
+											ignoreOpenCodeSigterm,
+										),
+										CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
+											pauseOpenCodeSupervisor,
+										),
+									},
+								},
+							],
+						}
+					: {}),
+			};
 			writeFileSync(
 				join(this.configDir, "daemon.json"),
-				JSON.stringify({
-					pid: 0,
-					port: 0,
-					pinHash: null,
-					tls: false,
-					debug: false,
-					keepAwake: false,
-					dangerouslySkipPermissions: false,
-					projects: [],
-					instances: [
-						{
-							id: "managed-test",
-							name: "Managed test",
-							port: 0,
-							managed: true,
-							driver: "opencode",
-							env: {
-								OPENCODE_SERVER_USERNAME: "test-user",
-								CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
-									ignoreOpenCodeSigterm,
-								),
-								CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
-									pauseOpenCodeSupervisor,
-								),
-							},
-						},
-					],
-				}),
+				JSON.stringify(config),
 			);
 		}
 	}
@@ -218,6 +251,7 @@ export class ProcessHarness {
 				| "answer-permission"
 				| "send-turn";
 			runnerReattachGraceMs?: number;
+			foregroundCli?: boolean;
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -239,6 +273,7 @@ export class ProcessHarness {
 			options.holdRunnerAck,
 			options.holdRunnerOutput,
 			options.runnerReattachGraceMs,
+			options.foregroundCli,
 		);
 		try {
 			await harness.restart();
@@ -249,7 +284,9 @@ export class ProcessHarness {
 		}
 	}
 
-	async restart(options: { skipBrowserProbe?: boolean } = {}): Promise<void> {
+	async restart(
+		options: { skipBrowserProbe?: boolean; cliArgs?: string[] } = {},
+	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
@@ -257,21 +294,89 @@ export class ProcessHarness {
 		const fakeModule = pathToFileURL(
 			fileURLToPath(new URL("./fake-claude-process-sdk.ts", import.meta.url)),
 		).href;
+		if (this.foregroundCli && !this.defaultOpenCode) {
+			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
+			const server = createHttpServer((request, response) => {
+				response.setHeader("Content-Type", "application/json");
+				response.end(
+					request.url?.split("?")[0] === "/session"
+						? "[]"
+						: JSON.stringify({ healthy: true, version: "process-test" }),
+				);
+			});
+			this.defaultOpenCode = server;
+			await new Promise<void>((done, fail) => {
+				server.once("error", fail);
+				server.listen(0, "127.0.0.1", done);
+			});
+			const address = server.address();
+			if (!address || typeof address === "string")
+				throw new Error("No isolated OpenCode placeholder port");
+			this.defaultOpenCodeUrl = `http://127.0.0.1:${address.port}`;
+			const config = loadDaemonConfig(this.configDir);
+			if (!config) throw new Error("Invalid process harness seed config");
+			writeFileSync(
+				join(this.configDir, "daemon.json"),
+				JSON.stringify({
+					...config,
+					instances: [
+						{
+							id: defaultInstanceIdForDriver("opencode"),
+							name: "External test",
+							port: address.port,
+							managed: false,
+							url: this.defaultOpenCodeUrl,
+							driver: "opencode",
+						},
+						...(config.instances ?? []),
+					],
+				}),
+			);
+		}
+		if (this.foregroundCli && this.port === 0) {
+			this.port = await new Promise<number>((done, fail) => {
+				const server = createServer();
+				server.once("error", fail);
+				server.listen(0, "127.0.0.1", () => {
+					const address = server.address();
+					if (!address || typeof address === "string") {
+						server.close(() => fail(new Error("No isolated CLI port")));
+						return;
+					}
+					server.close(() => done(address.port));
+				});
+			});
+		}
 		const child = spawn(
 			process.execPath,
 			[
 				"--import",
 				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
-				fileURLToPath(new URL("./process-harness-server.ts", import.meta.url)),
-				this.root,
-				...(this.dist ? [this.dist] : []),
+				...(this.foregroundCli && this.dist
+					? [
+							join(this.dist, "src/bin/cli.js"),
+							...(options.cliArgs ?? ["serve"]),
+							"--port",
+							String(this.port),
+							"--host",
+							"127.0.0.1",
+							"--no-https",
+						]
+					: [
+							fileURLToPath(
+								new URL("./process-harness-server.ts", import.meta.url),
+							),
+							this.root,
+							...(this.dist ? [this.dist] : []),
+						]),
 			],
 			{
 				cwd: this.projectDir,
-				env: {
-					PATH: this.managedOpenCode
-						? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
-						: (process.env["PATH"] ?? ""),
+				env: (this.environment = {
+					PATH:
+						this.managedOpenCode || this.foregroundCli
+							? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
+							: (process.env["PATH"] ?? ""),
 					HOME: join(this.root, "home"),
 					SHELL: "/bin/sh",
 					XDG_CONFIG_HOME: join(this.root, "config"),
@@ -279,6 +384,7 @@ export class ProcessHarness {
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
 					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
+					OPENCODE_URL: this.defaultOpenCodeUrl,
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
 					...Object.fromEntries(
@@ -364,7 +470,7 @@ export class ProcessHarness {
 						: {}),
 					NODE_ENV: "test",
 					LOG_LEVEL: "error",
-				},
+				}),
 				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},
 		);
@@ -376,6 +482,7 @@ export class ProcessHarness {
 			this.logs = (this.logs + data.toString()).slice(-8000);
 		});
 		let generation: Generation | undefined;
+		let fakeSdkActive = false;
 		this.exit = new Promise<void>((done) => {
 			child.once("exit", (exitCode, signal) => {
 				if (generation) Object.assign(generation, { exitCode, signal });
@@ -384,42 +491,85 @@ export class ProcessHarness {
 			child.once("error", () => done());
 		});
 		await new Promise<void>((done, fail) => {
-			const timer = setTimeout(
-				() => fail(new Error(`Server startup timeout\n${this.logs}`)),
-				TIMEOUT_MS,
-			);
+			let finished = false;
+			const timer = setTimeout(() => {
+				finished = true;
+				fail(new Error(`Server startup timeout\n${this.logs}`));
+			}, TIMEOUT_MS);
 			const onExit = () => {
+				finished = true;
 				clearTimeout(timer);
 				fail(new Error(`Server exited before ready\n${this.logs}`));
 			};
 			const onError = (error: Error) => {
+				finished = true;
 				clearTimeout(timer);
 				fail(error);
 			};
 			child.once("exit", onExit);
 			child.once("error", onError);
+			const ready = (value: Generation) => {
+				if (finished) return;
+				finished = true;
+				clearTimeout(timer);
+				child.off("exit", onExit);
+				child.off("error", onError);
+				generation = { ...value, fakeSdkActive };
+				this.port = generation.port;
+				this.generations.push(generation);
+				done();
+			};
 			child.on("message", (value: unknown) => {
 				if (!isRecord(value) || value["channel"] !== "conduit-process-test")
 					return;
 				if (value["kind"] === "ready") {
-					clearTimeout(timer);
-					child.off("exit", onExit);
-					child.off("error", onError);
-					generation = value as unknown as Generation;
-					this.port = generation.port;
-					this.generations.push(generation);
-					done();
+					ready(value as unknown as Generation);
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
-						generation &&
 						value["module"] === fakeModule &&
 						value["projectDir"] === this.projectDir
-					)
-						generation.fakeSdkActive = true;
+					) {
+						fakeSdkActive = true;
+						if (generation) generation.fakeSdkActive = true;
+					}
 				} else {
 					this.marks.push(value as unknown as ProcessMark);
 				}
 			});
+			if (this.foregroundCli) {
+				void (async () => {
+					while (!finished) {
+						try {
+							const socketPath = join(this.configDir, "relay.sock");
+							const status = await sendRpcRequest(
+								socketPath,
+								new GetStatus({}),
+							);
+							const instances = await sendRpcRequest(
+								socketPath,
+								new GetInstances({}),
+							);
+							if (child.pid && status.port === this.port) {
+								ready({
+									pid: child.pid,
+									port: status.port,
+									projects: status.projects.map((project) => project.directory),
+									instances: instances.instances.map((instance) => ({
+										managed: instance.managed,
+										...(instance.url !== undefined
+											? { url: instance.url }
+											: {}),
+									})),
+								});
+							}
+						} catch {
+							// The socket is absent until this foreground process listens.
+						}
+						if (!finished)
+							await new Promise<void>((resolve) => setTimeout(resolve, 25));
+					}
+				})();
+			}
 		});
 		this.rememberManagedOpenCode();
 		// Project registration is lazy. Attach without sending a prompt so the
@@ -479,12 +629,71 @@ export class ProcessHarness {
 		await this.stop("SIGTERM", 10_000);
 	}
 
+	async signal(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+		await this.stop(signal, 10_000);
+	}
+
+	async runCli(args: string[]): Promise<{
+		pid: number | undefined;
+		code: number | null;
+		signal: NodeJS.Signals | null;
+		output: string;
+	}> {
+		if (!this.dist) throw new Error("CLI commands require a build");
+		const child = spawn(
+			process.execPath,
+			[
+				"--disable-warning=DEP0205",
+				"--import",
+				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+				join(this.dist, "src/bin/cli.js"),
+				...args,
+			],
+			{
+				cwd: this.projectDir,
+				env: this.environment,
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+		let output = "";
+		if (child.pid) this.cliPids.push(child.pid);
+		for (const stream of [child.stdout, child.stderr])
+			stream?.on("data", (data: Buffer) => {
+				output = (output + data.toString()).slice(-8000);
+			});
+		return new Promise((done, fail) => {
+			let timedOut = false;
+			const timer = setTimeout(() => {
+				timedOut = true;
+				child.kill("SIGKILL");
+			}, TIMEOUT_MS);
+			child.once("error", (cause) => {
+				clearTimeout(timer);
+				fail(cause);
+			});
+			child.once("exit", (code, signal) => {
+				clearTimeout(timer);
+				if (timedOut) {
+					fail(
+						new Error(`CLI command did not exit: ${args.join(" ")}\n${output}`),
+					);
+					return;
+				}
+				done({ pid: child.pid, code, signal, output });
+			});
+		});
+	}
+
 	async shutdown(): Promise<void> {
-		if (!this.child) return;
-		await sendRpcRequest(join(this.configDir, "relay.sock"), new Shutdown({}));
-		for (const connected of this.browsers) await connected.close();
 		const child = this.child;
-		const force = setTimeout(() => child?.kill("SIGKILL"), 5000);
+		if (!child) return;
+		if (child.exitCode === null && child.signalCode === null)
+			await sendRpcRequest(
+				join(this.configDir, "relay.sock"),
+				new Shutdown({}),
+			);
+		for (const connected of this.browsers) await connected.close();
+		const force = setTimeout(() => child?.kill("SIGKILL"), 10_000);
 		try {
 			await this.exit;
 		} finally {
@@ -494,16 +703,19 @@ export class ProcessHarness {
 		for (const connected of this.browsers) await connected.close();
 	}
 
-	async waitForExit(): Promise<void> {
+	async waitForExit(
+		options: { keepBrowsersOpen?: boolean } = {},
+	): Promise<void> {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			for (const browser of this.browsers) await browser.close();
+			if (!options.keepBrowsersOpen)
+				for (const browser of this.browsers) await browser.close();
 			await Promise.race([
 				this.exit,
 				new Promise<never>((_done, fail) => {
 					timer = setTimeout(
 						() => fail(new Error("Server did not stop")),
-						5000,
+						10_000,
 					);
 				}),
 			]);
@@ -564,6 +776,7 @@ export class ProcessHarness {
 			runnerCleanup: this.runnerCleanup,
 			generations: this.generations,
 			marks: this.marks,
+			cliPids: this.cliPids,
 			frames: this.browsers.map((browser) =>
 				browser.frames.map(({ message, at }) => ({
 					message,
@@ -575,7 +788,6 @@ export class ProcessHarness {
 	}
 
 	private rememberManagedOpenCode(): void {
-		if (!this.managedOpenCode) return;
 		const config = loadDaemonConfig(this.configDir);
 		for (const instance of config?.instances ?? []) {
 			if (
@@ -586,6 +798,15 @@ export class ProcessHarness {
 			)
 				this.ownedOpenCode.set(instance.processIdentity.token, instance);
 		}
+	}
+
+	ownedOpenCodePids(): number[] {
+		this.rememberManagedOpenCode();
+		return [...this.ownedOpenCode.values()].flatMap((record) =>
+			[record.pid, record.processIdentity?.supervisorPid].filter(
+				(pid): pid is number => pid !== undefined,
+			),
+		);
 	}
 
 	runnerPids(): number[] {
@@ -635,7 +856,7 @@ export class ProcessHarness {
 			failures.push(cause);
 		}
 		try {
-			if (this.managedOpenCode) await this.shutdown();
+			if (this.generations.length > 0) await this.shutdown();
 			else await this.stop("SIGTERM");
 		} catch (cause) {
 			failures.push(cause);
@@ -679,47 +900,6 @@ export class ProcessHarness {
 				);
 			}
 		}
-		const runnerPids = new Set(
-			this.marks.flatMap((mark) =>
-				(mark.kind === "runner-spawned" || mark.kind === "runner-started") &&
-				Number.isSafeInteger(mark.pid) &&
-				mark.pid > 0 &&
-				!this.generations.some((generation) => generation.pid === mark.pid)
-					? [mark.pid]
-					: [],
-			),
-		);
-		for (const pid of runnerPids) {
-			try {
-				try {
-					process.kill(pid, 0);
-				} catch (cause) {
-					if (isRecord(cause) && cause["code"] === "ESRCH") continue;
-					throw cause;
-				}
-				// Only reap an exact PID reported by this harness's child process.
-				try {
-					process.kill(pid, "SIGKILL");
-				} catch (cause) {
-					if (isRecord(cause) && cause["code"] === "ESRCH") continue;
-					throw cause;
-				}
-				const deadline = Date.now() + 3000;
-				while (true) {
-					try {
-						process.kill(pid, 0);
-					} catch (cause) {
-						if (isRecord(cause) && cause["code"] === "ESRCH") break;
-						throw cause;
-					}
-					if (Date.now() >= deadline)
-						throw new Error(`Harness runner ${pid} did not exit`);
-					await new Promise<void>((done) => setTimeout(done, 25));
-				}
-			} catch (cause) {
-				failures.push(cause);
-			}
-		}
 		try {
 			this.runnerCleanup = await cleanupTestClaudeRunners(
 				this.root,
@@ -746,6 +926,18 @@ export class ProcessHarness {
 		} catch (cause) {
 			failures.push(cause);
 		}
+		if (this.defaultOpenCode) {
+			const server = this.defaultOpenCode;
+			try {
+				await new Promise<void>((done, fail) => {
+					server.close((error) => (error ? fail(error) : done()));
+					server.closeAllConnections();
+				});
+				this.defaultOpenCode = undefined;
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
 		if (failures.length === 1) throw failures[0];
 		if (failures.length > 1)
 			throw new AggregateError(
@@ -753,7 +945,12 @@ export class ProcessHarness {
 				`Harness cleanup failed; recovery retained at ${this.root}`,
 			);
 		// Keep registration/socket evidence if cleanup cannot prove termination.
-		rmSync(this.root, { recursive: true, force: true });
+		rmSync(this.root, {
+			recursive: true,
+			force: true,
+			maxRetries: 5,
+			retryDelay: 100,
+		});
 		this.disposed = true;
 	}
 }

@@ -1,4 +1,3 @@
-import type { CrashCounterTag } from "../Services/daemon-startup.js";
 import type { DaemonStateTag } from "../Services/daemon-state.js";
 import type { InstanceMgmtTag } from "../Services/management-service.js";
 // Top-level Effect program that replaces the Daemon class's start() method.
@@ -21,10 +20,7 @@ import {
 	Schedule,
 	Supervisor,
 } from "effect";
-import {
-	type CrashLimitExceeded,
-	runStartupSequence,
-} from "../Services/daemon-startup.js";
+import { runStartupSequence } from "../Services/daemon-startup.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
 
 export { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
@@ -51,7 +47,7 @@ export const makeSupervisorLive: Layer.Layer<SupervisorTag> = Layer.effect(
 // Minimal: lists only the Tags used by the current startup sequence.
 // Do not import Tags for background tasks that are still stubs.
 
-export type DaemonDeps = DaemonStateTag | CrashCounterTag | InstanceMgmtTag;
+export type DaemonDeps = DaemonStateTag | InstanceMgmtTag;
 
 /** Exponential backoff with 3 retries for startup. */
 export const startupRetry = Schedule.exponential("1 second").pipe(
@@ -65,7 +61,7 @@ export const startupRetry = Schedule.exponential("1 second").pipe(
 /**
  * Takes a Layer providing all DaemonDeps and returns a Layer<never> that:
  *   1. Enables cooperative yielding
- *   2. Runs the startup sequence with retry and CrashLimitExceeded handling
+ *   2. Runs the startup sequence with retry
  *   3. Forks background tasks under supervision
  *   4. Keeps alive until interrupted
  *
@@ -82,15 +78,10 @@ export const makeDaemonProgramLayer = (
 				RuntimeFlagsPatch.enable(RuntimeFlags.CooperativeYielding),
 			);
 
-			// Run startup sequence with retry and crash-limit handling
+			// Run startup sequence with retry
 			yield* runStartupSequence.pipe(
 				Effect.retry(startupRetry),
 				Effect.withSpan("daemon.startup"),
-				Effect.catchTag("CrashLimitExceeded", (e: CrashLimitExceeded) =>
-					Effect.logError(
-						`Daemon aborting: crash limit exceeded (${e.count} consecutive crashes)`,
-					).pipe(Effect.andThen(Effect.die(e))),
-				),
 			);
 
 			yield* Effect.logInfo("Daemon started — awaiting interruption");

@@ -18,8 +18,7 @@ export interface ParsedArgs {
 	command:
 		| "default"
 		| "doctor"
-		| "daemon"
-		| "foreground"
+		| "serve"
 		| "status"
 		| "stop"
 		| "pin"
@@ -46,16 +45,12 @@ export interface ParsedArgs {
 	instanceManaged?: boolean;
 	instanceUrl?: string;
 	serviceAction?: string;
-	noUpdate: boolean;
-	debug: boolean;
-	yes: boolean;
 	noHttps: boolean;
 	skipPerms: boolean;
 	/** Claude Code config dir (CLAUDE_CONFIG_DIR) for Claude SDK subprocesses; persisted in daemon.json. */
 	claudeConfigDir?: string;
 	logLevel: LogLevel;
 	logFormat?: LogFormat;
-	restartDaemon: boolean;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -65,13 +60,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		port: DEFAULT_PORT,
 		...(ENV.hostExplicit ? { host: ENV.host } : {}),
 		ocPort: DEFAULT_OC_PORT,
-		noUpdate: false,
-		debug: false,
-		yes: false,
 		noHttps: false,
 		skipPerms: false,
 		logLevel: ENV.logLevel,
-		restartDaemon: false,
 	};
 
 	for (let i = 0; i < argv.length; i++) {
@@ -93,22 +84,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
 				result.command = "doctor";
 				break;
 
-			case "--daemon":
-				result.command = "daemon";
-				break;
-
+			case "serve":
 			case "--foreground":
-				result.command = "foreground";
-				break;
-
-			case "--restart-daemon":
-				result.restartDaemon = true;
+				result.command = "serve";
 				break;
 
 			case "--status":
 				result.command = "status";
 				break;
 
+			case "stop":
 			case "--stop":
 				result.command = "stop";
 				break;
@@ -193,19 +178,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
 				i++;
 				break;
 			}
-
-			case "--no-update":
-				result.noUpdate = true;
-				break;
-
-			case "--debug":
-				result.debug = true;
-				break;
-
-			case "-y":
-			case "--yes":
-				result.yes = true;
-				break;
 
 			case "--no-https":
 				result.noHttps = true;
@@ -345,19 +317,22 @@ export function generateQR(url: string): string {
 	}
 }
 
-export const HELP_TEXT = `Usage: conduit [options]
+export const HELP_TEXT = `Usage: conduit [command] [options]
 
-  With no flags, launches the interactive setup wizard and main menu.
+  With no command, registers the current directory and prints its server URL.
+  Start the server with conduit serve or conduit service install.
 
 Commands:
+  serve                 Run the server in this process until stopped
+  stop                  Shut down the server and its managed processes
   service install       Install a launchd/systemd user service (accepts server options)
   service uninstall     Stop and remove the user service
   service status        Show service state, PID and log paths
   doctor                Check registered projects' shell env and tools locally
 
 Options:
-  --status              Show daemon status
-  --stop                Stop daemon
+  --status              Show server status
+  --stop                Alias for stop
   --pin <PIN>           Set/update PIN (4-8 digit)
   --add <path>          Add project by path
   --remove              Remove current project
@@ -377,15 +352,10 @@ Options:
   --managed             Mark as managed (spawned by relay-daemon; used with --instance add)
   --url <url>           External URL for unmanaged instances (used with --instance add)
   --log-level <level>   Set log level: error, warn, info (default), verbose, debug
-  --log-format <format> Set output format: pretty (default foreground), json (default daemon)
-  --no-update           Skip version check
-  --debug               Enable debug mode
-  -y, --yes             Skip interactive prompts (auto-accept defaults)
+  --log-format <format> Set output format: pretty (default), json
   --no-https            Disable TLS
   --dangerously-skip-permissions
                         Skip permission prompts (requires --pin)
-  --foreground           Run daemon in foreground (for dev with tsx watch)
-  --restart-daemon       Stop any running daemon before starting
   -h, --help            Show this help
 `;
 

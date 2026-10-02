@@ -57,11 +57,9 @@ export const makeDaemonRpcTestLayer = (
 			port: 0,
 			configDir: "/tmp/daemon-rpc-fixture",
 			socketPath: "/tmp/daemon-rpc-fixture/relay.sock",
-			logPath: "/tmp/daemon-rpc-fixture/daemon.log",
-			pidPath: "/tmp/daemon-rpc-fixture/daemon.pid",
 		} satisfies Partial<DaemonState>),
 		DaemonLifecycleContextLive("/tmp/daemon-rpc-fixture/relay.sock"),
-		Layer.effect(ShutdownSignalTag, Deferred.make<void>()),
+		Layer.effect(ShutdownSignalTag, Deferred.make<"restart" | "stop">()),
 		Layer.effect(
 			KeepAwakeTag,
 			Effect.gen(function* () {

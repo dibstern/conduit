@@ -66,8 +66,6 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
-			logPath: join(tmpDir, "daemon.log"),
 			port: 0, // OS-assigned
 			keepAwake: false,
 			smartDefault: false,
@@ -93,8 +91,6 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		const options = {
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
-			logPath: join(tmpDir, "daemon.log"),
 			port: 0,
 			keepAwake: false,
 			smartDefault: false,
@@ -159,29 +155,24 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		});
 	}, 30_000);
 
-	it("stop() removes PID file and socket file", async () => {
+	it("stop() removes the RPC socket", async () => {
 		tmpDir = mkdtempSync(join(tmpdir(), "daemon-lifecycle-"));
-		const pidPath = join(tmpDir, "daemon.pid");
 		const socketPath = join(tmpDir, "relay.sock");
 
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath,
-			pidPath,
-			logPath: join(tmpDir, "daemon.log"),
 			port: 0,
 			keepAwake: false,
 			smartDefault: false,
 		});
 
-		// Files exist while running
-		expect(existsSync(pidPath)).toBe(true);
+		expect(existsSync(socketPath)).toBe(true);
 
 		await daemon.stop();
 		daemon = null;
 
 		// Cleaned up
-		expect(existsSync(pidPath)).toBe(false);
 		expect(existsSync(socketPath)).toBe(false);
 	}, 15_000);
 
@@ -191,8 +182,6 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		daemon = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
-			logPath: join(tmpDir, "daemon.log"),
 			port: 0,
 			keepAwake: false,
 			smartDefault: false,

@@ -18,10 +18,7 @@ import {
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
-import {
-	startDaemonChildProcess,
-	startForegroundDaemon,
-} from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 async function listen(server: Server): Promise<number> {
 	return new Promise((resolve) => {
@@ -63,7 +60,6 @@ describe("startForegroundDaemon", () => {
 			port: 0,
 			configDir,
 			socketPath: join(root, "relay.sock"),
-			pidPath: join(root, "daemon.pid"),
 			staticDir,
 			tlsEnabled: false,
 			smartDefault: false,
@@ -95,14 +91,13 @@ describe("startForegroundDaemon", () => {
 	it("a SIGTERM stops the daemon and settles `stopped`", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-"));
 		const staticDir = join(root, "static");
-		const pidPath = join(root, "daemon.pid");
+		const socketPath = join(root, "relay.sock");
 		mkdirSync(staticDir);
 		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>");
 		const daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: join(root, "config"),
-			socketPath: join(root, "relay.sock"),
-			pidPath,
+			socketPath,
 			staticDir,
 			tlsEnabled: false,
 			smartDefault: false,
@@ -113,46 +108,9 @@ describe("startForegroundDaemon", () => {
 			// Invokes the installed SIGTERM listeners without the default action.
 			process.emit("SIGTERM");
 			await daemon.stopped;
-			expect(existsSync(pidPath)).toBe(false);
+			expect(existsSync(socketPath)).toBe(false);
 		} finally {
 			await daemon.stop();
-			rmSync(root, { recursive: true, force: true });
-		}
-	});
-
-	it("the daemon child process exits once it has stopped", async () => {
-		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-"));
-		const staticDir = join(root, "static");
-		mkdirSync(staticDir);
-		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>");
-		const exited = new Promise<number | string | null | undefined>(
-			(resolve) => {
-				vi.spyOn(process, "exit").mockImplementation((code) => {
-					resolve(code);
-					return undefined as never;
-				});
-			},
-		);
-		try {
-			const started = startDaemonChildProcess({
-				port: 0,
-				configDir: join(root, "config"),
-				socketPath: join(root, "relay.sock"),
-				pidPath: join(root, "daemon.pid"),
-				staticDir,
-				tlsEnabled: false,
-				smartDefault: false,
-				logLevel: "error",
-				logFormat: "json",
-			});
-			await vi.waitFor(() =>
-				expect(existsSync(join(root, "daemon.pid"))).toBe(true),
-			);
-			process.emit("SIGTERM");
-			expect(await exited).toBe(0);
-			await started;
-		} finally {
-			vi.restoreAllMocks();
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
@@ -175,7 +133,6 @@ describe("startForegroundDaemon", () => {
 			port: 0,
 			configDir,
 			socketPath: join(root, "relay.sock"),
-			pidPath: join(root, "daemon.pid"),
 			staticDir,
 			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
 			tlsEnabled: false,
@@ -233,7 +190,6 @@ describe("startForegroundDaemon", () => {
 			port: 0,
 			configDir,
 			socketPath: join(root, "relay.sock"),
-			pidPath: join(root, "daemon.pid"),
 			staticDir,
 			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
 			tlsEnabled: false,
@@ -284,7 +240,6 @@ describe("startForegroundDaemon", () => {
 			port: 0,
 			configDir,
 			socketPath,
-			pidPath: join(root, "daemon.pid"),
 			staticDir,
 			tlsEnabled: false,
 			smartDefault: false,

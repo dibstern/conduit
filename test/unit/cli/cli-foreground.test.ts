@@ -1,6 +1,6 @@
-// Tests: --foreground handler in run()
+// Tests: serve and its hidden --foreground alias in run()
 //
-// The --foreground handler uses an injectable daemon starter facade so the
+// The serve handler uses an injectable daemon starter facade so the
 // handler logic can be tested without starting real HTTP/RPC servers.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,7 +17,8 @@ const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 			.mockImplementation((opts: { port?: number }) =>
 				Promise.resolve({
 					addProject: mockAddProject,
-					stopped: new Promise<void>(() => {}),
+					stopped: Promise.resolve(),
+					stop: vi.fn().mockResolvedValue(undefined),
 					getStatus: vi
 						.fn()
 						.mockReturnValue({ tlsEnabled: true, host: "0.0.0.0" }),
@@ -72,14 +73,13 @@ function createMockIO(cwd = "/test/project") {
 		// Provide these so run() doesn't try to connect to real sockets
 		isDaemonRunning: vi.fn().mockResolvedValue(false),
 		sendRPC: vi.fn().mockResolvedValue({ ok: true }),
-		spawnDaemon: vi.fn().mockResolvedValue({ pid: 1, port: 2633 }),
 		startForegroundDaemon: mockStartForegroundDaemon,
 		generateQR: (url: string) => `[QR:${url}]`,
 		getNetworkAddress: () => "192.168.1.100",
 	};
 }
 
-describe("--foreground handler", () => {
+describe("serve handler", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -91,21 +91,20 @@ describe("--foreground handler", () => {
 	it("starts daemon in foreground and writes expected output", async () => {
 		const io = createMockIO("/test/project");
 
-		await run(["--foreground", "--port", "19876"], io);
+		await run(["serve", "--port", "19876"], io);
 
 		const joined = io.output.join("");
 
 		// Verify banner output
 		expect(joined).toContain("Conduit (foreground)");
 		expect(joined).toContain("https://0.0.0.0:19876");
-		expect(joined).toContain("/test/project");
 		expect(joined).toContain("Ready.");
 	});
 
 	it("calls foreground starter with correct port and opencodeUrl from --oc-port", async () => {
 		const io = createMockIO("/my/project");
 
-		await run(["--foreground", "--port", "3000", "--oc-port", "5000"], io);
+		await run(["serve", "--port", "3000", "--oc-port", "5000"], io);
 
 		// Verify foreground starter was called with correct options
 		// host is omitted when not explicitly set (daemon auto-selects based on TLS)
@@ -122,7 +121,7 @@ describe("--foreground handler", () => {
 		mockEnv.opencodeUrl = "http://opencode:4096";
 		const io = createMockIO("/my/project");
 
-		await run(["--foreground", "--port", "3000", "--oc-port", "9999"], io);
+		await run(["serve", "--port", "3000", "--oc-port", "9999"], io);
 
 		// Verify foreground starter was called with env var URL, not --oc-port
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
@@ -138,49 +137,104 @@ describe("--foreground handler", () => {
 		expect(joined).toContain("http://opencode:4096");
 	});
 
-	it("calls addProject(cwd) after startup", async () => {
+	it("leaves project registration to the default command", async () => {
 		const io = createMockIO("/workspace/app");
 
-		await run(["--foreground"], io);
+		await run(["serve"], io);
 
-		// Verify lifecycle: foreground starter called, then addProject
 		expect(mockStartForegroundDaemon).toHaveBeenCalledOnce();
-		expect(mockAddProject).toHaveBeenCalledWith("/workspace/app");
+		expect(mockAddProject).not.toHaveBeenCalled();
 	});
 
 	it("outputs OpenCode URL and Relay URL", async () => {
 		const io = createMockIO("/home/user/app");
 
-		await run(["--foreground", "--port", "2633", "--oc-port", "4096"], io);
+		await run(["serve", "--port", "2633", "--oc-port", "4096"], io);
 
 		const joined = io.output.join("");
 		expect(joined).toContain("OpenCode: http://localhost:4096");
 		expect(joined).toContain("Relay:    https://0.0.0.0:2633");
-		expect(joined).toContain("Project:  /home/user/app");
 	});
 
-	it("does not call exit()", async () => {
+	it("awaits shutdown before resolving and exiting successfully", async () => {
 		const io = createMockIO("/test");
-
-		await run(["--foreground"], io);
-
-		// The handler should return, not call exit
+		let stop: () => void = () => {};
+		const stopped = new Promise<void>((resolve) => {
+			stop = resolve;
+		});
+		mockStartForegroundDaemon.mockImplementationOnce(() =>
+			Promise.resolve({
+				addProject: mockAddProject,
+				stopped,
+				stop: vi.fn().mockResolvedValue(undefined),
+				getStatus: () => ({ tlsEnabled: false, host: "127.0.0.1" }),
+				port: 2633,
+			}),
+		);
+		let returned = false;
+		const running = run(["serve"], io).then(() => {
+			returned = true;
+		});
+		await vi.waitFor(() => expect(io.output.join("")).toContain("Ready."));
+		expect(returned).toBe(false);
 		expect(io.exit).not.toHaveBeenCalled();
+
+		stop();
+		await running;
+		expect(io.exit).toHaveBeenCalledExactlyOnceWith(0);
 	});
 
-	it("uses default ports when none specified and enables TLS", async () => {
+	it("uses persisted server port when none specified and enables TLS", async () => {
 		const io = createMockIO("/test");
 
 		await run(["--foreground"], io);
 
-		// Default port is 2633, default oc-port is 4096
-		// host is omitted when not explicitly set (daemon auto-selects based on TLS)
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
-			port: 2633,
 			opencodeUrl: "http://localhost:4096",
 			tlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});
+		expect(io.exit).toHaveBeenCalledExactlyOnceWith(0);
+	});
+
+	it("reports a bound port without shutting down the existing server", async () => {
+		const io = createMockIO();
+		io.isDaemonRunning.mockResolvedValue(true);
+		mockStartForegroundDaemon.mockRejectedValueOnce(
+			Object.assign(new Error("Port 2633 is already in use"), {
+				code: "EADDRINUSE",
+			}),
+		);
+		await run(["serve"], io);
+		expect(io.errors.join("")).toContain("already in use");
+		expect(io.exit).toHaveBeenCalledExactlyOnceWith(1);
+		expect(io.sendRPC).not.toHaveBeenCalled();
+	});
+
+	it("exits with failure when startup fails", async () => {
+		const io = createMockIO();
+		mockStartForegroundDaemon.mockRejectedValueOnce(
+			new Error("Startup failed"),
+		);
+		await run(["serve"], io);
+		expect(io.errors.join("")).toContain("Startup failed");
+		expect(io.exit).toHaveBeenCalledExactlyOnceWith(1);
+	});
+
+	it("exits with failure when shutdown fails", async () => {
+		const io = createMockIO();
+		mockStartForegroundDaemon.mockImplementationOnce(() =>
+			Promise.resolve({
+				addProject: mockAddProject,
+				stopped: Promise.reject(new Error("Shutdown failed")),
+				stop: vi.fn().mockResolvedValue(undefined),
+				getStatus: () => ({ tlsEnabled: false, host: "127.0.0.1" }),
+				port: 2633,
+			}),
+		);
+		await run(["serve"], io);
+		expect(io.errors.join("")).toContain("Shutdown failed");
+		expect(io.exit).toHaveBeenCalledExactlyOnceWith(1);
 	});
 });

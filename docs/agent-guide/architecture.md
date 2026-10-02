@@ -7,8 +7,8 @@ Use this guide before changing daemon behavior, project routing, relay wiring, e
 | Area | Shape |
 |---|---|
 | CLI | `src/bin/cli.ts` is the thin entrypoint; `src/bin/cli-core.ts` routes commands. |
-| Process model | The CLI either runs a relay in-process with `foreground` or controls a long-lived daemon over Unix socket RPC. |
-| Daemon | Daemon lifecycle is owned by Effect domain services/layers under `src/lib/domain/daemon/*`, with low-level socket/server helpers still living in `src/lib/daemon/*`. CLI foreground and child-daemon startup enter through Effect-backed starter facades. |
+| Process model | `conduit serve` runs the server in the foreground. Other CLI commands use browser RPC over a protected Unix socket. `conduit service install` optionally keeps it running through launchd or systemd. |
+| Daemon | Daemon lifecycle is owned by Effect domain services/layers under `src/lib/domain/daemon/*`, with low-level socket/server helpers in `src/lib/daemon/*`. `serve` enters through the Effect-backed foreground starter. |
 | Multi-project model | One daemon can host many projects, each mounted under `/p/<slug>`. |
 
 ## System Context Diagram
@@ -44,7 +44,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 | Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
 | Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals, activities) are the primary record. Projectors maintain materialized views from the append-only event log. |
-| Daemon-owned state | The config directory holds protected local RPC socket and PID files, daemon config, recent projects, and push settings. |
+| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, and push settings. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
 
 ## Effect Ownership Guardrails
@@ -78,9 +78,9 @@ socket absence. Closing a disconnected or undiscovered terminal first discovers
 and closes the surviving hosted shell. Close and restore share a lock so a pending
 attach cannot reintroduce a closed terminal.
 
-The protected `pty.sock`, `pty-host.pid`, and `pty-host.log` live in the Conduit
+The protected `pty.sock` and `pty-host.log` live in the Conduit
 config directory, respecting `CONDUIT_CONFIG_DIR`. An atomic directory election
-and a generation-specific socket ensure one host; PID files are diagnostic.
+and a generation-specific socket ensure one host.
 `pty.sock` points to that generation's socket. Paths exceeding macOS's 103 usable
 socket-path bytes use a persistent user-owned hashed symlink under `/tmp` to the
 config directory, budgeting for the private UUID socket too. IPC paths use
@@ -91,7 +91,8 @@ the host atomically confirms that no terminal tabs remain, including exited tabs
 with saved scrollback. Otherwise the compatible old host stays alive and the
 server logs the mismatch.
 
-Explicit server shutdown leaves live terminals running. A host with no live
+`SIGINT`, `SIGTERM`, and restart RPC leave live terminals running. `conduit stop`
+terminates all hosted terminals and the host. A host with no live
 terminals and no connected clients exits after 30 seconds; set
 `CONDUIT_PTY_HOST_IDLE_TIMEOUT_MS` to a positive timeout in milliseconds to change
 the grace period. Saved exited tabs can expire with an idle host. A live terminal
@@ -113,6 +114,26 @@ connection or signaling a PID. Incompatible control framing fails safely.
 | Browser to relay | Browser loads the SPA over HTTP, `RequestRouter` serves auth/setup/health/info/themes/project routes, the daemon upgrades `/ws` and attaches sockets to relay `WebSocketHandler`s, and `src/lib/handlers/index.ts` dispatches incoming message types to session, instance, file, terminal, and bridge services. |
 | Provider to event store to browser | Provider instances stream events into the SQLite event store. Projectors update materialized views (sessions, messages, turns). Pollers reconcile provider-side status. `WebSocketHandler` broadcasts normalized events to relevant clients or session viewers. |
 | CLI to daemon | Commands such as `status`, `stop`, `AddProject`, and `SetPin` use the browser RPC contract over the protected Unix socket; the daemon updates config and registries, mounts new relays on the shared HTTP and WebSocket surface, and rebroadcasts instance status changes. |
+
+## Running the server
+
+Start `conduit serve` in a terminal, or use `conduit service install` for an
+optional login service. New service units run `conduit serve` through the login
+shell. The hidden `--foreground` alias keeps older units working.
+
+The server owns the HTTP/WS edge, project registry, config persistence, event
+store writes and projections, outbox and reactor, and supervision of Claude
+runners, the PTY host and managed OpenCode. It refuses an occupied configured
+port before acquiring runtime resources.
+
+`SIGINT` and `SIGTERM` flush config and dispose the server while preserving
+independent runners, terminals and managed OpenCode for re-adoption. The process
+exits 0 after shutdown; a second `SIGINT` exits immediately. `conduit stop` uses
+RPC for a full stop of the server and those processes. With no server it exits 0.
+
+Bare `conduit` registers the current project over RPC and prints its URL. When
+the server is unavailable it prints guidance to run `conduit serve` or
+`conduit service install` and exits 1.
 
 ## Browser Routes
 

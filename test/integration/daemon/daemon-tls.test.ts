@@ -240,8 +240,6 @@ describe("Daemon TLS integration", () => {
 			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
-				pidPath: join(tmpDir, "daemon.pid"),
-				logPath: join(tmpDir, "daemon.log"),
 				port: 0,
 				staticDir,
 				tlsEnabled: true,
@@ -276,8 +274,6 @@ describe("Daemon TLS integration", () => {
 			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
-				pidPath: join(tmpDir, "daemon.pid"),
-				logPath: join(tmpDir, "daemon.log"),
 				port: 0,
 				staticDir,
 				tlsEnabled: true,
@@ -307,8 +303,6 @@ describe("Daemon TLS integration", () => {
 			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
-				pidPath: join(tmpDir, "daemon.pid"),
-				logPath: join(tmpDir, "daemon.log"),
 				port: 0,
 				staticDir,
 				tlsEnabled: true,
@@ -327,8 +321,6 @@ describe("Daemon TLS integration", () => {
 		const d = await startForegroundDaemon({
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
-			pidPath: join(tmpDir, "daemon.pid"),
-			logPath: join(tmpDir, "daemon.log"),
 			port: 0,
 			staticDir,
 			tlsEnabled: false,
@@ -352,8 +344,6 @@ describe("Daemon TLS integration", () => {
 			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
-				pidPath: join(tmpDir, "daemon.pid"),
-				logPath: join(tmpDir, "daemon.log"),
 				port: 0,
 				host: "127.0.0.1", // Explicit host — should NOT be overridden
 				staticDir,
@@ -380,8 +370,6 @@ describe("Daemon TLS integration", () => {
 			const d = await startForegroundDaemon({
 				configDir: tmpDir,
 				socketPath: join(tmpDir, "relay.sock"),
-				pidPath: join(tmpDir, "daemon.pid"),
-				logPath: join(tmpDir, "daemon.log"),
 				port: 0,
 				staticDir,
 				tlsEnabled: true,

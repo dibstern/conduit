@@ -567,7 +567,7 @@ describe("PTY host process survival", () => {
 
 	it.each([
 		"SIGKILL",
-		"shutdown",
+		"SIGTERM",
 	] as const)("keeps shell PID and replays disconnected output once after %s", async (stop) => {
 		harness = await ProcessHarness.start({ dist: DIST });
 		const browser = await harness.connect();
@@ -1088,35 +1088,23 @@ describe("PTY host process survival", () => {
 		evidence["assertionsCompleted"] = true;
 	});
 
-	it.each([
-		"malformed",
-		"reused",
-	] as const)("starts one working host despite a %s diagnostic PID file", async (kind) => {
+	it("identifies one working host for concurrent clients", async () => {
 		harness = await ProcessHarness.start({ dist: DIST });
 		await stopPtyHost({ configDir: harness.configDir, force: true });
-		const sentinel = sentinelProcess();
-		const pidFile = join(harness.configDir, "pty-host.pid");
-		const previous = kind === "malformed" ? "not-a-pid" : String(sentinel.pid);
-		writeFileSync(pidFile, previous, { mode: 0o600 });
 		evidence = {
 			assertionsCompleted: false,
-			kind,
-			previousPidFile: previous,
-			sentinelPid: sentinel.pid,
 		};
 		const connected = await Promise.all([connect(), connect(), connect()]);
 		expect(new Set(connected.map(({ hello }) => hello.pid)).size).toBe(1);
 		const client = connected[0];
 		if (!client) throw new Error("No PTY host connected");
-		expect(client.hello.pid).not.toBe(sentinel.pid);
-		expect(alive(sentinel.pid)).toBe(true);
-		expect(Number(readFileSync(pidFile, "utf8"))).toBe(client.hello.pid);
+		expect(alive(client.hello.pid)).toBe(true);
 		const session = await client.create({
 			cwd: harness.projectDir,
 			shell: "/bin/sh",
 			env: { HOME: join(harness.root, "home") },
 		});
-		const marker = `85kb-pid-file-${kind}-${randomUUID()}`;
+		const marker = `85kb-host-identity-${randomUUID()}`;
 		let output = "";
 		session.onData((data) => {
 			output += data;
@@ -1391,8 +1379,6 @@ describe("PTY host process survival", () => {
 			statSync(ptyHostSocketPath(harness.configDir)).mode & 0o777;
 		const lockMode =
 			statSync(join(harness.configDir, ".pty-host-lock")).mode & 0o777;
-		const pidMode =
-			statSync(join(harness.configDir, "pty-host.pid")).mode & 0o777;
 		evidence = {
 			assertionsCompleted: false,
 			hostPid: host.hello.pid,
@@ -1403,13 +1389,11 @@ describe("PTY host process survival", () => {
 			outputMode: outputMode.toString(8),
 			socketMode: socketMode.toString(8),
 			lockMode: lockMode.toString(8),
-			pidMode: pidMode.toString(8),
 		};
 		expect(actualMask).toBe("0022");
 		expect(outputMode).toBe(0o644);
 		expect(socketMode).toBe(0o600);
 		expect(lockMode).toBe(0o700);
-		expect(pidMode).toBe(0o600);
 		evidence["assertionsCompleted"] = true;
 	}, 60_000);
 

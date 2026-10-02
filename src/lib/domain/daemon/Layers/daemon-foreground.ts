@@ -1,6 +1,16 @@
 import { mkdirSync } from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
-import { Cause, Deferred, Effect, Exit, ManagedRuntime } from "effect";
+import Database from "better-sqlite3";
+import {
+	Cause,
+	Data,
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	ManagedRuntime,
+} from "effect";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -10,9 +20,13 @@ import type {
 	DaemonOptions,
 	DaemonStatus,
 } from "../../../daemon/daemon-types.js";
+import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFormat, setLogLevel } from "../../../logger.js";
+import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
+import { setClaudeRunnerRestart } from "../../../provider/claude/claude-runner-shutdown.js";
+import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import {
@@ -31,6 +45,7 @@ import {
 	requestManagedOpenCodeShutdown,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
+import { RelayCacheTag } from "../Services/relay-cache.js";
 import {
 	type DaemonLiveOptions,
 	makeDaemonLive,
@@ -38,6 +53,14 @@ import {
 } from "./daemon-layers.js";
 
 export { OpenCodeUnavailableError };
+
+class ForegroundDaemonStartError extends Data.TaggedError(
+	"ForegroundDaemonStartError",
+)<{ readonly reason: string }> {
+	override get message(): string {
+		return `Conduit server cannot start: ${this.reason}.`;
+	}
+}
 
 export interface ForegroundDaemonHandle {
 	readonly port: number;
@@ -148,6 +171,7 @@ type ForegroundRuntimeRequirements =
 	| ConfigPersistenceTag
 	| DaemonConfigRefTag
 	| InstanceManagerStateTag
+	| RelayCacheTag
 	| ShutdownSignalTag;
 
 export async function startForegroundDaemon(
@@ -157,6 +181,29 @@ export async function startForegroundDaemon(
 	if (options.logFormat) setLogFormat(options.logFormat);
 
 	const configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
+	const initialConfig = buildInitialRuntimeConfig(options, configDir);
+	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
+	// Check before acquiring runtime resources or replacing a stale RPC socket.
+	await new Promise<void>((ready, fail) => {
+		const probe = createServer();
+		probe.once("error", (error: NodeJS.ErrnoException) => {
+			fail(
+				error.code === "EADDRINUSE"
+					? new ForegroundDaemonStartError({
+							reason: `port ${initialConfig.port} is already in use (${initialConfig.host})`,
+						})
+					: error,
+			);
+		});
+		probe.listen(initialConfig.port, initialConfig.host, () => {
+			probe.close((error) => (error ? fail(error) : ready()));
+		});
+	});
+	if (await isDaemonRunning(socketPath)) {
+		throw new ForegroundDaemonStartError({
+			reason: `a server is already running for ${configDir}`,
+		});
+	}
 	mkdirSync(configDir, { recursive: true });
 
 	let runtime: ManagedRuntime.ManagedRuntime<
@@ -171,6 +218,7 @@ export async function startForegroundDaemon(
 	let stopped = false;
 	let refreshInFlight: Promise<void> | null = null;
 	let stopInFlight: Promise<void> | null = null;
+	let shutdownMode: "restart" | "stop" = "restart";
 	let settleStopped!: { resolve: () => void; reject: (error: unknown) => void };
 	const stopSettled = new Promise<void>((resolve, reject) => {
 		settleStopped = { resolve, reject };
@@ -232,42 +280,47 @@ export async function startForegroundDaemon(
 		return result;
 	};
 
-	const teardown = async () => {
+	const teardown = async (mode: "restart" | "stop") => {
 		if (stopInFlight != null) return stopInFlight;
 		const currentRuntime = runtime;
 		if (currentRuntime == null || stopped) return;
 		stopped = true;
 		stopInFlight = (async () => {
-			await runRuntimeEffect(
-				currentRuntime,
-				Effect.gen(function* () {
-					yield* commitDaemonRuntimeConfig((config) => ({
-						...config,
-						shuttingDown: true,
-					}));
-					const persistence = yield* ConfigPersistenceTag;
-					yield* persistence.requestSave;
-					yield* persistence.flush;
-				}),
-			).catch((error: unknown) => {
-				throw new ForegroundDaemonStopError(error);
-			});
-			await currentRuntime.dispose();
-			runtime = null;
-			handle = null;
+			shutdownMode = mode;
+			setClaudeRunnerRestart(mode === "restart");
+			try {
+				if (mode === "stop") {
+					await runRuntimeEffect(
+						currentRuntime,
+						requestManagedOpenCodeShutdown,
+					);
+				}
+				await runRuntimeEffect(
+					currentRuntime,
+					Effect.gen(function* () {
+						yield* commitDaemonRuntimeConfig((config) => ({
+							...config,
+							shuttingDown: true,
+						}));
+						const persistence = yield* ConfigPersistenceTag;
+						yield* persistence.requestSave;
+						yield* persistence.flush;
+					}),
+				).catch((error: unknown) => {
+					throw new ForegroundDaemonStopError(error);
+				});
+			} finally {
+				await currentRuntime.dispose();
+				runtime = null;
+				handle = null;
+			}
 		})().finally(() => {
 			stopInFlight = null;
 		});
 		stopInFlight.then(settleStopped.resolve, settleStopped.reject);
 		return stopInFlight;
 	};
-	const stop = async () => {
-		if (runtime == null || stopped) return stopInFlight ?? undefined;
-		await runRuntimeEffect(runtime, requestManagedOpenCodeShutdown);
-		return teardown();
-	};
 
-	const initialConfig = buildInitialRuntimeConfig(options, configDir);
 	// Claude SDK subprocesses (and PTY sessions) inherit the daemon's env, so
 	// a configured Claude profile must be applied before any provider starts.
 	if (initialConfig.claudeConfigDir !== undefined) {
@@ -285,8 +338,7 @@ export async function startForegroundDaemon(
 	};
 	const liveOptions: DaemonLiveOptions = {
 		configDir,
-		pidPath: options.pidPath ?? join(configDir, "daemon.pid"),
-		socketPath: options.socketPath ?? join(configDir, "relay.sock"),
+		socketPath,
 		staticDir: options.staticDir ?? resolveDefaultStaticDir(),
 		initialConfig,
 		configMirror: {
@@ -314,20 +366,80 @@ export async function startForegroundDaemon(
 		configPath: join(configDir, "daemon.json"),
 	};
 
-	runtime = ManagedRuntime.make(makeDaemonLive(liveOptions));
+	// A native file lock excludes concurrent owners even across a stale RPC socket.
+	// SQLite releases it on process death; no process identity or stale lock cleanup is needed.
+	const serverLease = Layer.scopedDiscard(
+		Effect.acquireRelease(
+			Effect.try({
+				try: () => {
+					const lease = new Database(join(configDir, "server.lock.sqlite"), {
+						timeout: 0,
+					});
+					try {
+						lease.exec("BEGIN IMMEDIATE");
+						return lease;
+					} catch (cause) {
+						lease.close();
+						if (
+							cause instanceof Database.SqliteError &&
+							cause.code === "SQLITE_BUSY"
+						) {
+							throw new ForegroundDaemonStartError({
+								reason: `a server is already running for ${configDir}`,
+							});
+						}
+						throw cause;
+					}
+				},
+				catch: (cause) => cause,
+			}),
+			(lease) =>
+				Effect.promise(async () => {
+					try {
+						if (shutdownMode === "stop") {
+							// All request and relay scopes are drained before the host ends.
+							await stopPtyHost({ configDir, force: true });
+						}
+					} finally {
+						lease.close();
+					}
+				}),
+		),
+	);
+	runtime = ManagedRuntime.make(
+		makeDaemonLive(liveOptions).pipe(Layer.provide(serverLease)),
+	);
 	try {
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
+		// Relay acquisition can dispose a partially recovered scope on failure.
+		setClaudeRunnerRestart(true);
+		const currentHandle = handle;
+		await runRuntimeEffect(
+			runtime,
+			Effect.gen(function* () {
+				const relayCache = yield* RelayCacheTag;
+				const registered = yield* currentHandle.getProjects();
+				for (const project of registered) {
+					if (discoverClaudeRunners(project.directory, configDir).length > 0) {
+						// Recovery belongs to relay startup, including before any browser connects.
+						yield* relayCache.get(project.slug);
+					}
+				}
+			}),
+		);
 		await refreshSnapshots();
+		setClaudeRunnerRestart(false);
 	} catch (error) {
+		// A failed server startup must leave adopted durable children for the next attempt.
+		setClaudeRunnerRestart(true);
 		await runtime.dispose();
 		runtime = null;
 		handle = null;
 		throw error;
 	}
-	// SignalHandlerLayer swallows SIGTERM/SIGINT and only completes this Deferred,
-	// so without a consumer the daemon would ignore both signals.
+	// Signals preserve durable children; explicit RPC shutdown performs a full stop.
 	runRuntimeEffect(runtime, Effect.flatMap(ShutdownSignalTag, Deferred.await))
-		.then(() => teardown())
+		.then((mode) => teardown(mode))
 		.catch(() => {
 			// Runtime disposed before a signal arrived, or stop failed (reported via `stopped`).
 		});
@@ -354,21 +466,7 @@ export async function startForegroundDaemon(
 			return instances;
 		},
 		removeProject: (slug) => runHandleEffect((h) => h.removeProject(slug)),
-		stop,
+		stop: () => teardown("stop"),
 		stopped: stopSettled,
 	};
-}
-
-export async function startDaemonChildProcess(
-	options: DaemonOptions,
-): Promise<void> {
-	const daemon = await startForegroundDaemon(options);
-	// Disposing the runtime leaves timers behind that keep the event loop alive,
-	// so the process would otherwise linger as a zombie after shutdown.
-	try {
-		await daemon.stopped;
-	} catch {
-		process.exit(1);
-	}
-	process.exit(0);
 }

@@ -73,8 +73,11 @@ describe("committed daemon shutdown replies", () => {
 						yield* RpcServer.make(WsRpcGroup).pipe(
 							Effect.provideService(
 								RpcServer.Protocol,
-								withRpcShutdownResponse(protocol, () =>
-									Deferred.succeed(signal, undefined).pipe(Effect.asVoid),
+								withRpcShutdownResponse(protocol, (tag) =>
+									Deferred.succeed(
+										signal,
+										tag === "Shutdown" ? "stop" : "restart",
+									).pipe(Effect.asVoid),
 								),
 							),
 							Effect.provide(
@@ -95,7 +98,9 @@ describe("committed daemon shutdown replies", () => {
 						expect(
 							(yield* Ref.get(yield* DaemonConfigRefTag)).shuttingDown,
 						).toBe(true);
-						yield* Deferred.await(signal).pipe(Effect.timeout("250 millis"));
+						expect(
+							yield* Deferred.await(signal).pipe(Effect.timeout("250 millis")),
+						).toBe(command === "Shutdown" ? "stop" : "restart");
 					}),
 				).pipe(Effect.provide(makeDaemonRpcTestLayer())),
 			);

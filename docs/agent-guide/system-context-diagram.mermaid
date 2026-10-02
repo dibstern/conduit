@@ -23,9 +23,9 @@ flowchart LR
 
     opencode[OpenCode server]
     state[Daemon config dir
-    PID, socket, config, push settings]
+    socket, config, push settings]
 
-    cli -->|foreground or IPC control| daemon
+    cli -->|serve or browser RPC control| daemon
     browser -->|HTTP for SPA and APIs| server
     browser <-->|WebSocket messages| server
     daemon --> server

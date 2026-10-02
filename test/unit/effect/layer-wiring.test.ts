@@ -43,7 +43,6 @@ import {
 	DaemonEvent,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import { CrashCounterTag } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	addInstance,
@@ -59,7 +58,6 @@ import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middl
 const makeMockOptions = (): DaemonLiveOptions => {
 	return {
 		configDir: "/tmp/test-daemon-wiring",
-		pidPath: "/tmp/test-daemon-wiring/daemon.pid",
 		socketPath: "/tmp/test-daemon-wiring/relay.sock",
 		staticDir: process.cwd(),
 		initialConfig: makeDaemonConfigFromOptions({
@@ -178,21 +176,11 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 
-	it.scoped("provides CrashCounterTag (Tier 0)", () =>
-		Effect.gen(function* () {
-			const counter = yield* CrashCounterTag;
-			const result = yield* counter.record();
-			expect(result.count).toBeGreaterThanOrEqual(1);
-			expect(typeof result.shouldAbort).toBe("boolean");
-		}).pipe(Effect.provide(makeDaemonLayer())),
-	);
-
 	it.scoped("installs local trace artifact tracing in Tier 0", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-wiring-"));
 		const options = {
 			...makeMockOptions(),
 			configDir: dir,
-			pidPath: join(dir, "daemon.pid"),
 			socketPath: join(dir, "relay.sock"),
 		} satisfies DaemonLiveOptions;
 		const tracePath = join(dir, "logs", "server.trace.ndjson");
@@ -387,7 +375,6 @@ describe("makeDaemonLive wiring", () => {
 			const options = {
 				...base,
 				configDir,
-				pidPath: join(configDir, "daemon.pid"),
 				socketPath,
 				initialConfig: makeDaemonConfigFromOptions({
 					port: 0,
@@ -433,7 +420,6 @@ describe("makeDaemonLive wiring", () => {
 				const options = {
 					...base,
 					configDir,
-					pidPath: join(configDir, "daemon.pid"),
 					socketPath,
 					initialConfig: makeDaemonConfigFromOptions({
 						port: 0,
@@ -535,7 +521,6 @@ describe("makeDaemonLive wiring", () => {
 				const options = {
 					...base,
 					configDir,
-					pidPath: join(configDir, "daemon.pid"),
 					socketPath,
 					configPath,
 					initialConfig: makeDaemonConfigFromOptions({
@@ -616,21 +601,5 @@ describe("makeDaemonLive wiring", () => {
 				const activeAfterDeactivate = yield* keepAwake.isActive();
 				expect(activeAfterDeactivate).toBe(false);
 			}).pipe(Effect.provide(makeDaemonLayer())),
-	);
-
-	it.scoped("CrashCounter record/reset lifecycle (Tier 0)", () =>
-		Effect.gen(function* () {
-			const counter = yield* CrashCounterTag;
-
-			// Record 2 crashes
-			yield* counter.record();
-			const second = yield* counter.record();
-			expect(second.count).toBe(2);
-
-			// Reset
-			yield* counter.reset();
-			const afterReset = yield* counter.record();
-			expect(afterReset.count).toBe(1);
-		}).pipe(Effect.provide(makeDaemonLayer())),
 	);
 });

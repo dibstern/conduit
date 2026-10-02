@@ -14,16 +14,12 @@ import { join } from "node:path";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
 import {
-	type CrashInfo,
-	clearCrashInfo,
 	clearDaemonConfig,
 	type DaemonConfig,
 	getConfigDir,
 	loadDaemonConfig,
-	readCrashInfo,
 	saveDaemonConfig,
 	syncRecentProjects,
-	writeCrashInfo,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { deserializeRecent } from "../../../src/lib/daemon/recent-projects.js";
 
@@ -183,53 +179,20 @@ describe("saveDaemonConfig", () => {
 });
 
 describe("clearDaemonConfig", () => {
-	it("removes daemon.json, relay.sock, and daemon.pid", () => {
+	it("removes daemon.json and relay.sock", () => {
 		mkdirSync(tempDir, { recursive: true });
 		writeFileSync(join(tempDir, "daemon.json"), "{}");
 		writeFileSync(join(tempDir, "relay.sock"), "");
-		writeFileSync(join(tempDir, "daemon.pid"), "12345");
 
 		clearDaemonConfig(tempDir);
 
 		expect(existsSync(join(tempDir, "daemon.json"))).toBe(false);
 		expect(existsSync(join(tempDir, "relay.sock"))).toBe(false);
-		expect(existsSync(join(tempDir, "daemon.pid"))).toBe(false);
 	});
 
 	it("handles already-missing files without error", () => {
 		// tempDir exists but has none of the files — should not throw
 		expect(() => clearDaemonConfig(tempDir)).not.toThrow();
-	});
-});
-
-describe("CrashInfo", () => {
-	it("writeCrashInfo + readCrashInfo round-trip", () => {
-		const info: CrashInfo = { reason: "SIGTERM", timestamp: 1700000000000 };
-		writeCrashInfo(info, tempDir);
-
-		const loaded = readCrashInfo(tempDir);
-		expect(loaded).toEqual(info);
-	});
-
-	it("readCrashInfo returns null when missing", () => {
-		const loaded = readCrashInfo(tempDir);
-		expect(loaded).toBeNull();
-	});
-
-	it("readCrashInfo returns null on corrupt JSON", () => {
-		mkdirSync(tempDir, { recursive: true });
-		writeFileSync(join(tempDir, "crash.json"), "not json at all");
-
-		const loaded = readCrashInfo(tempDir);
-		expect(loaded).toBeNull();
-	});
-
-	it("clearCrashInfo removes file", () => {
-		writeCrashInfo({ reason: "test", timestamp: 1 }, tempDir);
-		expect(readCrashInfo(tempDir)).not.toBeNull();
-
-		clearCrashInfo(tempDir);
-		expect(readCrashInfo(tempDir)).toBeNull();
 	});
 });
 

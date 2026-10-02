@@ -202,13 +202,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						return { ok: true as const };
 					}),
 				),
-			Shutdown: (request) =>
+			Shutdown: () =>
 				run(
 					Effect.gen(function* () {
 						setClaudeRunnerRestart(false);
-						if (!request.preserveManagedInstances) {
-							yield* requestManagedOpenCodeShutdown;
-						}
+						yield* requestManagedOpenCodeShutdown;
 						const state = yield* DaemonStateTag;
 						yield* Ref.update(state, (current) => ({
 							...current,

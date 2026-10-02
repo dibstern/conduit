@@ -199,7 +199,7 @@ WantedBy=default.target
 
 export function foregroundArguments(args: ParsedArgs): string[] {
 	const flags = [
-		"--foreground",
+		"serve",
 		"--port",
 		String(args.port),
 		"--oc-port",

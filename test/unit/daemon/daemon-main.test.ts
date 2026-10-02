@@ -17,12 +17,7 @@ import { pathToFileURL } from "node:url";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
-import {
-	type CrashCounter,
-	CrashCounterTag,
-	CrashLimitExceeded,
-	runStartupSequence,
-} from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
+import { runStartupSequence } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { resolveDefaultStaticDir } from "../../../src/lib/domain/daemon/Services/daemon-static-dir.js";
 import {
@@ -30,18 +25,6 @@ import {
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-
-function makeMockCrashCounter(overrides?: {
-	record?: CrashCounter["record"];
-	reset?: CrashCounter["reset"];
-}): CrashCounter {
-	return {
-		record:
-			overrides?.record ??
-			vi.fn().mockReturnValue(Effect.succeed({ count: 1, shouldAbort: false })),
-		reset: overrides?.reset ?? vi.fn().mockReturnValue(Effect.void),
-	};
-}
 
 function makeMockInstanceMgmt(): InstanceManagementDeps {
 	return {
@@ -72,13 +55,9 @@ function makeMockInstanceMgmt(): InstanceManagementDeps {
 }
 
 /** Minimal layer providing all DaemonDeps for testing. */
-function makeTestLayer(overrides?: { crashCounter?: CrashCounter }) {
+function makeTestLayer() {
 	return Layer.mergeAll(
 		makeDaemonStateLive(),
-		Layer.succeed(
-			CrashCounterTag,
-			overrides?.crashCounter ?? makeMockCrashCounter(),
-		),
 		Layer.succeed(PersistencePathTag, "/tmp/test-daemon.json"),
 		Layer.succeed(InstanceMgmtTag, makeMockInstanceMgmt()),
 		Layer.succeed(ProjectMgmtTag, {
@@ -169,22 +148,6 @@ describe("daemon-main", () => {
 			Effect.gen(function* () {
 				// Run startup sequence with minimal mocks — should complete without error
 				yield* runStartupSequence.pipe(Effect.provide(makeTestLayer()));
-			}),
-		);
-
-		it.effect("aborts when crash counter triggers CrashLimitExceeded", () =>
-			Effect.gen(function* () {
-				const abortCounter = makeMockCrashCounter({
-					record: () => Effect.succeed({ count: 5, shouldAbort: true }),
-				});
-
-				const result = yield* runStartupSequence.pipe(
-					Effect.provide(makeTestLayer({ crashCounter: abortCounter })),
-					Effect.flip, // Convert error channel to success channel for assertion
-				);
-
-				expect(result).toBeInstanceOf(CrashLimitExceeded);
-				expect((result as CrashLimitExceeded).count).toBe(5);
 			}),
 		);
 	});

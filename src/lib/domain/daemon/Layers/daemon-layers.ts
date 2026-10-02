@@ -27,11 +27,6 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
-import {
-	removePidFile,
-	removeSocketFile,
-	writePidFile,
-} from "../../../daemon/pid-manager.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
@@ -68,7 +63,6 @@ import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../Services/daemon-pubsub.js";
-import { CrashCounterLive } from "../Services/daemon-startup.js";
 import {
 	DaemonStateTag,
 	emptyDaemonState,
@@ -144,7 +138,7 @@ import {
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
 export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
 	ShutdownSignalTag,
-	Deferred.Deferred<void>
+	Deferred.Deferred<"restart" | "stop">
 >() {}
 
 export class DaemonLifecycleLayerError extends Data.TaggedError(
@@ -188,23 +182,37 @@ const closeLifecycleServer = (operation: string, close: () => Promise<void>) =>
 export const SignalHandlerLayer = Layer.scoped(
 	ShutdownSignalTag,
 	Effect.gen(function* () {
-		const deferred = yield* Deferred.make<void>();
+		const deferred = yield* Deferred.make<"restart" | "stop">();
+		let shuttingDown = false;
+		yield* Deferred.await(deferred).pipe(
+			Effect.tap(() =>
+				Effect.sync(() => {
+					shuttingDown = true;
+				}),
+			),
+			Effect.forkScoped,
+		);
 
 		const onShutdown = () => {
-			Deferred.unsafeDone(deferred, Effect.void);
+			shuttingDown = true;
+			Deferred.unsafeDone(deferred, Effect.succeed("restart"));
+		};
+		const onInterrupt = () => {
+			if (shuttingDown) process.exit(0);
+			onShutdown();
 		};
 		const onReload = () => {
 			// SIGHUP — config reload placeholder
 		};
 
 		process.on("SIGTERM", onShutdown);
-		process.on("SIGINT", onShutdown);
+		process.on("SIGINT", onInterrupt);
 		process.on("SIGHUP", onReload);
 
 		yield* Effect.addFinalizer(() =>
 			Effect.sync(() => {
 				process.removeListener("SIGTERM", onShutdown);
-				process.removeListener("SIGINT", onShutdown);
+				process.removeListener("SIGINT", onInterrupt);
 				process.removeListener("SIGHUP", onReload);
 			}),
 		);
@@ -551,8 +559,11 @@ export const DaemonRpcServerLive = Layer.scopedDiscard(
 				handlers,
 			),
 			{
-				onSuccessfulShutdownResponse: () =>
-					Deferred.succeed(shutdownSignal, undefined).pipe(Effect.asVoid),
+				onSuccessfulShutdownResponse: (tag) =>
+					Deferred.succeed(
+						shutdownSignal,
+						tag === "Shutdown" ? "stop" : "restart",
+					).pipe(Effect.asVoid),
 				onClientCountChange: (count) => {
 					ctx.clientCount = count;
 				},
@@ -617,34 +628,6 @@ export const makeOnboardingServerLive = (
 	);
 
 /**
- * PID/socket file layer — writes the PID file on acquisition,
- * removes PID and socket files on scope close.
- */
-export const makePidFileLive = (
-	configDir: string,
-	pidPath: string,
-	socketPath: string,
-) =>
-	Layer.scopedDiscard(
-		Effect.gen(function* () {
-			yield* Effect.try({
-				try: () => writePidFile(configDir, pidPath),
-				catch: (cause) =>
-					new DaemonLifecycleLayerError({
-						operation: "writePidFile",
-						cause,
-					}),
-			});
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => {
-					removePidFile(pidPath);
-					removeSocketFile(socketPath);
-				}),
-			);
-		}),
-	);
-
-/**
  * Options for composing the full DaemonLive layer.
  *
  * Simplified from the original DaemonLiveOptions — fields that are now
@@ -673,7 +656,6 @@ export interface DaemonLiveOptions {
 
 	// DaemonOptions-derived values (computed by caller from DaemonOptions)
 	configDir: string;
-	pidPath: string;
 	socketPath: string;
 
 	// DaemonState + RelayCache (Tasks 1-4 integration)
@@ -698,7 +680,7 @@ export interface DaemonLiveOptions {
  * reverse order on shutdown.
  */
 export const makeDaemonLive = (options: DaemonLiveOptions) => {
-	const { configDir, pidPath, socketPath } = options;
+	const { configDir, socketPath } = options;
 
 	// Tier 0: Foundation (no inter-dependencies)
 	// These Layers have zero dependencies on other Tags. They form the base
@@ -717,8 +699,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		InstanceHealthCheckLive,
 		SignalHandlerLayer,
 		ProcessErrorHandlerLayer,
-		makePidFileLive(configDir, pidPath, socketPath),
-		CrashCounterLive,
 		makeConfigWriterLive(configDir),
 	);
 

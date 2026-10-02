@@ -1,15 +1,11 @@
 import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/management-service.js";
-// TDD tests for startup effect functions: crash counting, instance rehydration,
-// and error isolation policy.
+// TDD tests for startup effect functions: instance rehydration and error isolation.
 
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	autoStartManagedDefault,
-	type CrashCounter,
-	CrashCounterTag,
-	recordCrashCounter,
 	rehydrateInstances,
 } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import {
@@ -23,18 +19,6 @@ import {
 	instanceNotFound,
 	invalidInstanceUrl,
 } from "../../../src/lib/instance/instance-errors.js";
-
-function makeMockCrashCounter(overrides?: {
-	record?: CrashCounter["record"];
-	reset?: CrashCounter["reset"];
-}): CrashCounter {
-	return {
-		record:
-			overrides?.record ??
-			vi.fn().mockReturnValue(Effect.succeed({ count: 1, shouldAbort: false })),
-		reset: overrides?.reset ?? vi.fn().mockReturnValue(Effect.void),
-	};
-}
 
 function makeMockInstanceMgmt(
 	overrides?: Partial<{
@@ -74,42 +58,6 @@ function makeMockInstanceMgmt(
 }
 
 describe("daemon startup effects", () => {
-	describe("recordCrashCounter", () => {
-		it.effect("records crash and proceeds when under limit", () =>
-			Effect.gen(function* () {
-				const result = yield* recordCrashCounter;
-
-				expect(result).toBe(false);
-			}).pipe(
-				Effect.provide(
-					Layer.succeed(
-						CrashCounterTag,
-						makeMockCrashCounter({
-							record: () => Effect.succeed({ count: 1, shouldAbort: false }),
-						}),
-					),
-				),
-			),
-		);
-
-		it.effect("aborts when crash limit exceeded", () =>
-			Effect.gen(function* () {
-				const result = yield* recordCrashCounter;
-
-				expect(result).toBe(true);
-			}).pipe(
-				Effect.provide(
-					Layer.succeed(
-						CrashCounterTag,
-						makeMockCrashCounter({
-							record: () => Effect.succeed({ count: 5, shouldAbort: true }),
-						}),
-					),
-				),
-			),
-		);
-	});
-
 	describe("rehydrateInstances", () => {
 		it.effect("restores instances from persisted state", () =>
 			Effect.gen(function* () {

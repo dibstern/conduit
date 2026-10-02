@@ -45,7 +45,7 @@ function options(platform: NodeJS.Platform): ServiceOptions {
 	return {
 		platform,
 		shell: "/bin/zsh",
-		command: ["conduit", "--foreground", "--port", "7777"],
+		command: ["conduit", "serve", "--port", "7777"],
 		paths: getServicePaths(platform, homeDir, configDir, cwd),
 		uid: 501,
 		cliEntry,
@@ -151,7 +151,7 @@ describe("service unit generation", () => {
 		config.shell = "/home/user/$tools/bin/bash";
 		config.command = [
 			"conduit",
-			"--foreground",
+			"serve",
 			"--claude-config-dir",
 			// biome-ignore lint/suspicious/noTemplateCurlyInString: Test literal systemd expansion without interpolating it.
 			"/profiles/${PROFILE}",
@@ -172,7 +172,7 @@ describe("service unit generation", () => {
 		expect(unit).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
 		expect(unit).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
 		expect(unit).toMatch(
-			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit --foreground --port 7777<\/string>/,
+			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit serve --port 7777<\/string>/,
 		);
 		expect(unit).toContain(`<string>${cwd}</string>`);
 		expect(unit).toContain(`<string>${configDir}</string>`);
@@ -188,7 +188,7 @@ describe("service unit generation", () => {
 			`${homeDir}/.config/systemd/user/conduit.service`,
 		);
 		expect(unit).toContain(
-			'ExecStart="/bin/zsh" -l -c "exec conduit --foreground --port 7777"',
+			'ExecStart="/bin/zsh" -l -c "exec conduit serve --port 7777"',
 		);
 		expect(unit).toContain("Restart=always");
 		expect(unit).toContain("WantedBy=default.target");
@@ -203,7 +203,7 @@ describe("service unit generation", () => {
 		const config = options("darwin");
 		config.command = [
 			"conduit",
-			"--foreground",
+			"serve",
 			"--claude-config-dir",
 			"/profiles/O'Brien & <work> $(ignored)",
 		];
@@ -218,7 +218,7 @@ describe("service unit generation", () => {
 		const config = options("linux");
 		config.command = [
 			"conduit",
-			"--foreground",
+			"serve",
 			"--claude-config-dir",
 			// biome-ignore lint/suspicious/noTemplateCurlyInString: Test literal systemd expansion without interpolating it.
 			"/profiles/50% ${TOKEN} O'Brien \\quoted\"",
@@ -244,7 +244,7 @@ describe("service unit generation", () => {
 		"linux",
 	] as const)("uses PATH node for the absolute CLI fallback on %s", (platform) => {
 		const config = options(platform);
-		config.command = ["node", cliEntry, "--foreground"];
+		config.command = ["node", cliEntry, "serve"];
 		const unit = generateServiceUnit(config);
 		expect(unit).toContain("exec node");
 		expect(unit).toContain(cliEntry.replaceAll("'", "&apos;"));
@@ -276,7 +276,7 @@ describe("service unit generation", () => {
 		);
 	});
 
-	it("preserves the foreground server's flags without propagating daemon restart", () => {
+	it("preserves the server flags in the serve command", () => {
 		const args = parseArgs([
 			"service",
 			"install",
@@ -293,10 +293,9 @@ describe("service unit generation", () => {
 			"debug",
 			"--log-format",
 			"json",
-			"--restart-daemon",
 		]);
 		expect(foregroundArguments(args)).toEqual([
-			"--foreground",
+			"serve",
 			"--port",
 			"7777",
 			"--oc-port",
@@ -851,12 +850,12 @@ describe("service CLI route", () => {
 			.mockResolvedValue(undefined);
 		const checkDaemon = vi.fn(async () => false);
 		const sendRPC = vi.fn();
-		const spawnDaemon = vi.fn();
+		const startForegroundDaemon = vi.fn();
 		await run(["service", "install", "--port", "7777"], {
 			cwd,
 			isDaemonRunning: checkDaemon,
 			sendRPC,
-			spawnDaemon,
+			startForegroundDaemon,
 		});
 		expect(handler).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -867,7 +866,7 @@ describe("service CLI route", () => {
 		);
 		expect(checkDaemon).not.toHaveBeenCalled();
 		expect(sendRPC).not.toHaveBeenCalled();
-		expect(spawnDaemon).not.toHaveBeenCalled();
+		expect(startForegroundDaemon).not.toHaveBeenCalled();
 	});
 
 	it.each([
