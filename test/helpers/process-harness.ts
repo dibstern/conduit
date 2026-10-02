@@ -10,6 +10,10 @@ import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../src/lib/utils.js";
+import {
+	cleanupTestClaudeRunners,
+	testRunnerAlive,
+} from "./claude-runner-cleanup.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 
 export { responseChunks };
@@ -50,12 +54,21 @@ export class ProcessHarness {
 	private logs = "";
 	private port = 0;
 	private disposed = false;
+	private runnerCleanup:
+		| Awaited<ReturnType<typeof cleanupTestClaudeRunners>>
+		| undefined;
 
 	private constructor(
 		private readonly dist?: string,
 		private readonly enqueueMarkDelayMs = 0,
 		private readonly claudeRunner?: "process",
 		private readonly shellEnvProof = false,
+		private readonly restartProof = false,
+		private readonly holdRunnerAck = false,
+		private readonly holdRunnerOutput?:
+			| "permission-request"
+			| "answer-permission",
+		private readonly runnerReattachGraceMs?: number,
 	) {
 		for (const directory of [
 			"home",
@@ -80,13 +93,23 @@ export class ProcessHarness {
 			enqueueMarkDelayMs?: number;
 			claudeRunner?: "process";
 			shellEnvProof?: boolean;
+			restartProof?: boolean;
+			holdRunnerAck?: boolean;
+			holdRunnerOutput?: "permission-request" | "answer-permission";
+			runnerReattachGraceMs?: number;
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
-			options.dist ? resolve(options.dist) : undefined,
+			(options.dist ?? process.env["CONDUIT_TEST_DIST"])
+				? resolve(options.dist ?? process.env["CONDUIT_TEST_DIST"] ?? "dist")
+				: undefined,
 			options.enqueueMarkDelayMs,
 			options.claudeRunner,
 			options.shellEnvProof,
+			options.restartProof,
+			options.holdRunnerAck,
+			options.holdRunnerOutput,
+			options.runnerReattachGraceMs,
 		);
 		try {
 			await harness.restart();
@@ -125,8 +148,26 @@ export class ProcessHarness {
 					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
+					...(this.restartProof
+						? {
+								CONDUIT_TEST_PROCESS_PROOF: join(this.root, "sdk-proof.ndjson"),
+							}
+						: {}),
+					...(this.holdRunnerAck
+						? { CONDUIT_TEST_HOLD_RUNNER_ACK: "text.delta" }
+						: {}),
+					...(this.holdRunnerOutput && this.generations.length === 0
+						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
+						: {}),
 					...(this.claudeRunner
 						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
+						: {}),
+					...(this.runnerReattachGraceMs !== undefined
+						? {
+								CONDUIT_CLAUDE_RUNNER_REATTACH_GRACE_MS: String(
+									this.runnerReattachGraceMs,
+								),
+							}
 						: {}),
 					...(this.shellEnvProof
 						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
@@ -217,9 +258,30 @@ export class ProcessHarness {
 		await this.stop("SIGKILL");
 	}
 
+	async waitForExit(): Promise<void> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			for (const browser of this.browsers) await browser.close();
+			await Promise.race([
+				this.exit,
+				new Promise<never>((_done, fail) => {
+					timer = setTimeout(
+						() => fail(new Error("Server did not stop")),
+						5000,
+					);
+				}),
+			]);
+			this.child = undefined;
+			for (const browser of this.browsers) await browser.close();
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	async disconnectParent(): Promise<void> {
 		const child = this.child;
 		if (!child) throw new Error("No server child to disconnect");
+		for (const browser of this.browsers) await browser.close();
 		child.disconnect();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
@@ -228,7 +290,7 @@ export class ProcessHarness {
 				new Promise<never>((_done, fail) => {
 					timer = setTimeout(
 						() => fail(new Error("Child did not exit after parent disconnect")),
-						5000,
+						8000,
 					);
 				}),
 			]);
@@ -242,8 +304,13 @@ export class ProcessHarness {
 	private async stop(signal: NodeJS.Signals): Promise<void> {
 		const child = this.child;
 		if (!child) return;
+		// Close clients before graceful disposal: RPC scopes can otherwise hold
+		// the server open until the harness deadline kills it before runner cleanup.
+		if (signal !== "SIGKILL")
+			for (const browser of this.browsers) await browser.close();
 		child.kill(signal);
-		const force = setTimeout(() => child.kill("SIGKILL"), 3000);
+		// The runner gets 1s to reply and 3s to terminate before its own force-kill.
+		const force = setTimeout(() => child.kill("SIGKILL"), 6000);
 		try {
 			await this.exit;
 		} finally {
@@ -257,6 +324,7 @@ export class ProcessHarness {
 		return {
 			root: this.root,
 			disposed: this.disposed,
+			runnerCleanup: this.runnerCleanup,
 			generations: this.generations,
 			marks: this.marks,
 			frames: this.browsers.map((browser) =>
@@ -269,11 +337,55 @@ export class ProcessHarness {
 		};
 	}
 
+	runnerPids(): number[] {
+		const serverPids = new Set(
+			this.generations.map((generation) => generation.pid),
+		);
+		return [
+			...new Set([
+				...this.marks.flatMap((mark) =>
+					(mark.kind === "runner-started" ||
+						mark.kind === "runner-spawned" ||
+						mark.kind === "query") &&
+					Number.isSafeInteger(mark.pid) &&
+					!serverPids.has(mark.pid)
+						? [mark.pid]
+						: [],
+				),
+				...(this.runnerCleanup?.runnerPids ?? []),
+			]),
+		];
+	}
+
+	remainingRunnerPids(): number[] {
+		return this.runnerPids().filter(testRunnerAlive);
+	}
+
+	assertNoRunners(): void {
+		const remaining = this.remainingRunnerPids();
+		if (remaining.length > 0)
+			throw new Error(
+				`Claude runners still alive for ${join(this.root, "config")}: ${remaining.join(", ")}`,
+			);
+	}
+
 	async dispose(): Promise<void> {
-		if (this.disposed) return;
-		await this.stop("SIGTERM");
-		rmSync(this.root, { recursive: true, force: true });
-		this.disposed = true;
+		if (this.disposed) {
+			this.assertNoRunners();
+			return;
+		}
+		try {
+			await this.stop("SIGTERM");
+		} finally {
+			this.runnerCleanup = await cleanupTestClaudeRunners(
+				this.root,
+				this.runnerPids(),
+			);
+			this.assertNoRunners();
+			// Keep registration/socket evidence if cleanup cannot prove termination.
+			rmSync(this.root, { recursive: true, force: true });
+			this.disposed = true;
+		}
 	}
 }
 
@@ -417,7 +529,7 @@ export class ProcessBrowser {
 
 	async answerApproval(
 		request: Record<string, unknown>,
-		decision: "allow" | "deny",
+		decision: "allow" | "allow_always" | "deny",
 	): Promise<void> {
 		await this.run(
 			this.rpc.RespondPermission({
@@ -426,6 +538,9 @@ export class ProcessBrowser {
 				commandId: randomUUID(),
 				requestId: String(request["requestId"]),
 				decision,
+				...(decision === "allow_always"
+					? { permissionDestination: "session" as const }
+					: {}),
 			}),
 		);
 	}
@@ -440,6 +555,10 @@ export class ProcessBrowser {
 
 	async shutdown(): Promise<void> {
 		await this.run(this.rpc.Shutdown({}));
+	}
+
+	async restartServer(): Promise<void> {
+		await this.run(this.rpc.RestartWithConfig({ config: {} }));
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {

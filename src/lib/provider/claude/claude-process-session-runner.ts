@@ -1,20 +1,27 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
-import { createConnection } from "node:net";
-import { join, resolve } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Cause, Deferred, Effect, FiberSet } from "effect";
-import { BUILD_ID } from "../../build-id.js";
-import { DEFAULT_CONFIG_DIR } from "../../env.js";
+import { SqlClient } from "@effect/sql";
+import { Deferred, Effect, FiberSet } from "effect";
 import { isRecord } from "../../utils.js";
 import type { HistoryMessage, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
+import { connectClaudeRunner } from "./claude-runner-connection.js";
 import {
-	CLAUDE_RUNNER_PROTOCOL_VERSION,
-	ClaudeRunnerSocket,
+	type ClaudeRunnerSocket,
 	claudeRunnerFailure,
 } from "./claude-runner-protocol.js";
+import { makeClaudeRunnerReceiptStore } from "./claude-runner-receipts.js";
+import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
+import {
+	claudeRunnerDirectory,
+	discoverClaudeRunners,
+	removeClaudeRunner,
+	runnerPidAlive,
+} from "./claude-runner-registry.js";
+import { preserveClaudeRunners } from "./claude-runner-shutdown.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -27,7 +34,11 @@ interface RunnerChild {
 	readonly ready: Deferred.Deferred<ClaudeRunnerSocket, ClaudeSessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly socketPath: string;
+	readonly runnerId: string;
 	stopping: boolean;
+	verified: boolean;
+	recovering?: boolean;
+	pid?: number | undefined;
 	child?: ChildProcess;
 	connection?: ClaudeRunnerSocket;
 }
@@ -36,11 +47,17 @@ export const makeProcessClaudeSessionRunner = (
 	deps: ClaudeSessionRunnerDeps,
 	emit: (
 		output: ClaudeSessionOutput,
+		sessionId?: string,
 	) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
 ) =>
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const lock = yield* Effect.makeSemaphore(1);
+		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const receipts = sql
+			? yield* makeClaudeRunnerReceiptStore(sql).pipe(Effect.orDie)
+			: undefined;
 		const children = new Map<string, RunnerChild>();
 		const sinks = new Map<
 			string,
@@ -63,23 +80,34 @@ export const makeProcessClaudeSessionRunner = (
 						child?.off("exit", finish);
 						resume(Effect.void);
 					};
+					const pid = child?.pid ?? (entry.verified ? entry.pid : undefined);
 					if (
-						!child?.pid ||
-						child.exitCode !== null ||
-						child.signalCode !== null
+						!pid ||
+						(child && (child.exitCode !== null || child.signalCode !== null))
 					) {
 						finish();
 						return;
 					}
-					child.once("exit", finish);
+					child?.once("exit", finish);
+					const kill = (signal: NodeJS.Signals) => {
+						try {
+							process.kill(pid, signal);
+						} catch {
+							finish();
+						}
+					};
 					force = setTimeout(() => {
-						child.kill("SIGKILL");
+						kill("SIGKILL");
 						deadline = setTimeout(finish, 1000);
 					}, 3000);
-					child.kill("SIGTERM");
+					kill("SIGTERM");
+					if (!child) deadline = setTimeout(finish, 4100);
 				}).pipe(
 					Effect.ensuring(
-						Effect.sync(() => rmSync(entry.socketPath, { force: true })),
+						Effect.sync(() => {
+							if (entry.pid !== undefined && !runnerPidAlive(entry.pid))
+								removeClaudeRunner(entry.socketPath);
+						}),
 					),
 				);
 				// Let the server persist the same interruption/interaction cleanup
@@ -106,6 +134,17 @@ export const makeProcessClaudeSessionRunner = (
 			.withPermits(1)(
 				Effect.suspend(() => {
 					closing = true;
+					if (preserveClaudeRunners())
+						return Effect.sync(() => {
+							for (const entry of children.values()) {
+								entry.stopping = true;
+								entry.connection?.destroy();
+								entry.child?.unref();
+								if (entry.child?.connected) entry.child.disconnect();
+							}
+							children.clear();
+							sinks.clear();
+						});
 					return Effect.forEach([...children.values()], stop, {
 						discard: true,
 						concurrency: 4,
@@ -122,86 +161,148 @@ export const makeProcessClaudeSessionRunner = (
 			.pipe(Effect.uninterruptible);
 		yield* Effect.addFinalizer(() => shutdown);
 
-		const start = (sessionId: string, entry: RunnerChild) =>
-			Effect.async<ClaudeRunnerSocket, ClaudeSessionFailure>((resume) => {
-				let settled = false;
-				const timer = setTimeout(
-					() =>
-						failed(
-							claudeRunnerFailure(
-								"spawn runner",
-								"Claude runner startup timed out",
-							),
-						),
-					10_000,
-				);
-				const finish = (
-					result: Effect.Effect<ClaudeRunnerSocket, ClaudeSessionFailure>,
-				) => {
-					if (settled) return;
-					settled = true;
-					clearTimeout(timer);
-					resume(result);
-				};
-				const failed = (failure: ClaudeSessionFailure) => {
-					finish(Effect.fail(failure));
-					if (entry.stopping) return;
-					evict(sessionId, entry);
-					runFork(stop(entry));
-				};
-				try {
-					if (closing || entry.stopping) {
-						failed(
-							claudeRunnerFailure(
-								"spawn runner",
-								"Claude runner is shutting down",
-							),
-						);
-						return;
-					}
-					const socketDir = resolve(DEFAULT_CONFIG_DIR, "r");
-					mkdirSync(socketDir, { recursive: true, mode: 0o700 });
-					if (Buffer.byteLength(entry.socketPath) >= 104) {
-						failed(
-							claudeRunnerFailure(
-								"spawn runner",
-								"Conduit config directory is too long for a Claude runner Unix socket",
-							),
-						);
-						return;
-					}
-					const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-					const child = spawn(
-						process.execPath,
-						[
-							...process.execArgv,
-							fileURLToPath(
-								new URL(
-									`../../../bin/claude-session-runner.${extension}`,
-									import.meta.url,
+		const attach = (sessionId: string, entry: RunnerChild) =>
+			connectClaudeRunner({
+				socketPath: entry.socketPath,
+				sessionId,
+				runnerId: entry.runnerId,
+				...(entry.pid !== undefined ? { pid: entry.pid } : {}),
+				deps,
+				...(receipts ? { receipts } : {}),
+				runFork,
+				emit: (output) =>
+					output.type === "read-turn-history"
+						? Effect.succeed({
+								history: sinks.get(output.sinkId)?.history ?? [],
+							})
+						: emit(output, sessionId).pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										if (output.type === "release-sink")
+											sinks.delete(output.sinkId);
+									}),
 								),
 							),
-							entry.socketPath,
-						],
-						{
-							cwd: deps.workspaceRoot,
-							env: process.env,
-							stdio: ["ignore", "inherit", "inherit", "ipc"],
-						},
+				onHello: (hello, connection) =>
+					Effect.gen(function* () {
+						entry.verified = true;
+						entry.pid = hello.pid;
+						entry.connection = connection;
+						for (const binding of hello.bindings ?? []) {
+							let history: readonly HistoryMessage[] = [];
+							if (sql) {
+								const rows = yield* sql<{
+									payload_json: string;
+								}>`SELECT payload_json FROM provider_command_outbox WHERE command_id = ${binding.commandId ?? binding.sinkId} AND session_id = ${sessionId}`.pipe(
+									Effect.mapError((cause) =>
+										claudeRunnerFailure("restore runner history", cause),
+									),
+								);
+								if (rows[0])
+									history =
+										(
+											JSON.parse(rows[0].payload_json) as {
+												history?: readonly HistoryMessage[];
+											}
+										).history ?? [];
+							}
+							sinks.set(binding.sinkId, { sessionId, history });
+						}
+						for (const pending of hello.pendingOutputs ?? [])
+							if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
+								yield* emit(pending.output, sessionId);
+						if (process.env["NODE_ENV"] === "test" && process.connected)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "runner-started",
+								sessionId,
+								pid: hello.pid,
+								socketPath: entry.socketPath,
+								buildId: hello.buildId,
+								protocolVersion: hello.protocolVersion,
+							});
+					}),
+				onClose: () => {
+					if (entry.stopping || entry.recovering || closing) return;
+					evict(sessionId, entry);
+					if (entry.child) runFork(stop(entry));
+				},
+			});
+
+		const start = (sessionId: string, entry: RunnerChild) =>
+			Effect.gen(function* () {
+				if (Buffer.byteLength(entry.socketPath) >= 104)
+					return yield* Effect.fail(
+						claudeRunnerFailure(
+							"spawn runner",
+							"Conduit config directory is too long for a Claude runner Unix socket",
+						),
 					);
-					entry.child = child;
-					child.once("error", (cause) =>
-						failed(claudeRunnerFailure("spawn runner", cause)),
-					);
-					child.once("exit", (code, signal) => {
-						entry.connection?.destroy();
-						failed(
-							claudeRunnerFailure(
-								"spawn runner",
-								`Claude runner exited (${signal ?? code})`,
-							),
+				const child = yield* Effect.try({
+					try: () => {
+						mkdirSync(claudeRunnerDirectory(deps.workspaceRoot), {
+							recursive: true,
+							mode: 0o700,
+						});
+						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+						return spawn(
+							process.execPath,
+							[
+								...process.execArgv,
+								fileURLToPath(
+									new URL(
+										`../../../bin/claude-session-runner.${extension}`,
+										import.meta.url,
+									),
+								),
+								entry.socketPath,
+								sessionId,
+								entry.runnerId,
+							],
+							{
+								cwd: deps.workspaceRoot,
+								env: process.env,
+								detached: true,
+								stdio: ["ignore", "inherit", "inherit", "ipc"],
+							},
 						);
+					},
+					catch: (cause) => claudeRunnerFailure("spawn runner", cause),
+				});
+				entry.child = child;
+				entry.pid = child.pid;
+				if (process.env["NODE_ENV"] === "test" && process.connected)
+					process.send?.({
+						channel: "conduit-process-test",
+						kind: "runner-spawned",
+						pid: child.pid,
+						socketPath: entry.socketPath,
 					});
+				child.once("exit", () => {
+					entry.connection?.destroy();
+					evict(sessionId, entry);
+					removeClaudeRunner(entry.socketPath);
+				});
+				yield* Effect.async<void, ClaudeSessionFailure>((resume) => {
+					const timer = setTimeout(
+						() =>
+							resume(
+								Effect.fail(
+									claudeRunnerFailure(
+										"spawn runner",
+										"Claude runner startup timed out",
+									),
+								),
+							),
+						10_000,
+					);
+					const failed = (cause: unknown) => {
+						clearTimeout(timer);
+						resume(Effect.fail(claudeRunnerFailure("spawn runner", cause)));
+					};
+					child.once("error", failed);
+					const exited = () => failed("Claude runner exited before listening");
+					child.once("exit", exited);
 					child.on("message", (value: unknown) => {
 						if (!isRecord(value)) return;
 						if (
@@ -215,113 +316,82 @@ export const makeProcessClaudeSessionRunner = (
 							value["type"] !== "listening"
 						)
 							return;
-						const socket = createConnection(entry.socketPath);
-						const connection = new ClaudeRunnerSocket(
-							socket,
-							(message) => {
-								if (message.type === "hello") {
-									if (
-										message.protocolVersion !==
-											CLAUDE_RUNNER_PROTOCOL_VERSION ||
-										message.buildId !== BUILD_ID
-									) {
-										failed(
-											claudeRunnerFailure(
-												"runner hello",
-												"Claude runner protocol/build mismatch",
-											),
-										);
-										connection.destroy();
-										return;
-									}
-									if (process.env["NODE_ENV"] === "test" && process.connected)
-										process.send?.({
-											channel: "conduit-process-test",
-											kind: "runner-started",
-											sessionId,
-											pid: child.pid,
-											socketPath: entry.socketPath,
-											buildId: message.buildId,
-											protocolVersion: message.protocolVersion,
-										});
-									finish(Effect.succeed(connection));
-								} else if (message.type === "output") {
-									const output = message.output;
-									const operation: Effect.Effect<
-										ClaudeSessionOutputReply,
-										ClaudeSessionFailure
-									> =
-										output.type === "read-turn-history"
-											? Effect.suspend(() => {
-													const binding = sinks.get(output.sinkId);
-													return binding
-														? Effect.succeed({ history: binding.history })
-														: Effect.fail(
-																claudeRunnerFailure(
-																	output.type,
-																	"Claude turn history is no longer available",
-																),
-															);
-												})
-											: emit(output);
-									runFork(
-										operation.pipe(
-											Effect.matchCauseEffect({
-												onFailure: (cause) =>
-													Effect.sync(() =>
-														connection.write({
-															type: "output-reply",
-															outputId: message.outputId,
-															failure: claudeRunnerFailure(
-																message.output.type,
-																Cause.squash(cause),
-															),
-														}),
-													),
-												onSuccess: (result) =>
-													Effect.sync(() => {
-														connection.write({
-															type: "output-reply",
-															outputId: message.outputId,
-															result,
-														});
-														if (message.output.type === "release-sink")
-															sinks.delete(message.output.sinkId);
-													}),
-											}),
-										),
-									);
-								}
-							},
-							failed,
-						);
-						entry.connection = connection;
-						socket.once("connect", () =>
-							connection.write({
-								type: "hello",
-								protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
-								buildId: BUILD_ID,
-								config: {
-									workspaceRoot: deps.workspaceRoot,
-									materializeSubagents: deps.materializeSubagents ?? false,
-									...(deps.subagentPollTimeoutMs !== undefined
-										? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
-										: {}),
-								},
-							}),
-						);
-					});
-					return Effect.sync(() => {
 						clearTimeout(timer);
-						evict(sessionId, entry);
-					}).pipe(Effect.flatMap(() => stop(entry)));
-				} catch (cause) {
-					failed(claudeRunnerFailure("spawn runner", cause));
-					return;
-				}
-			});
+						child.off("error", failed);
+						child.off("exit", exited);
+						resume(Effect.void);
+					});
+					return Effect.sync(() => clearTimeout(timer));
+				});
+				return yield* attach(sessionId, entry);
+			}).pipe(Effect.onError(() => stop(entry)));
 
 		class ProcessClaudeSessionRunner implements ClaudeSessionRunner {
+			readonly recoverEffect = Effect.gen(function* () {
+				for (const registration of discoverClaudeRunners(deps.workspaceRoot)) {
+					if (children.has(registration.sessionId)) continue;
+					const entry: RunnerChild = {
+						...registration,
+						verified: false,
+						stopping: false,
+						recovering: true,
+						ready: yield* Deferred.make<
+							ClaudeRunnerSocket,
+							ClaudeSessionFailure
+						>(),
+						stopped: yield* Deferred.make<void>(),
+					};
+					children.set(registration.sessionId, entry);
+					let connected = yield* Effect.either(
+						attach(registration.sessionId, entry),
+					);
+					// A previous server may still own the socket while its shutdown
+					// drains. Rejected hellos do not prove that the runner is dead.
+					for (
+						let retry = 0;
+						connected._tag === "Left" &&
+						runnerPidAlive(registration.pid) &&
+						retry < 4;
+						retry++
+					) {
+						yield* Effect.sleep(100 * 2 ** retry);
+						connected = yield* Effect.either(
+							attach(registration.sessionId, entry),
+						);
+					}
+					entry.recovering = false;
+					if (connected._tag === "Left") {
+						evict(registration.sessionId, entry);
+						if (!runnerPidAlive(registration.pid)) {
+							removeClaudeRunner(entry.socketPath);
+							continue;
+						}
+						// Keep its registration, spool and approval ownership intact.
+						// Startup must not orphan approvals or launch a second runner.
+						return yield* Effect.fail(connected.left);
+					}
+					yield* Deferred.succeed(entry.ready, connected.right);
+					if (sql) {
+						const commands = yield* recoverClaudeRunnerCommands(
+							sql,
+							registration.sessionId,
+							connected.right,
+						).pipe(
+							Effect.mapError((cause) =>
+								claudeRunnerFailure("recover runner commands", cause),
+							),
+						);
+						for (const command of commands)
+							runFork(
+								command.pipe(
+									Effect.catchAllCause((cause) =>
+										Effect.logError("Claude command recovery failed", cause),
+									),
+								),
+							);
+					}
+				}
+			});
 			executeEffect(
 				command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 			): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -356,7 +426,12 @@ export const makeProcessClaudeSessionRunner = (
 					const entry = yield* lock.withPermits(1)(
 						Effect.gen(function* () {
 							const existing = children.get(sessionId);
-							if (existing || command.type !== "send-turn") return existing;
+							if (existing?.pid && !runnerPidAlive(existing.pid)) {
+								evict(sessionId, existing);
+								removeClaudeRunner(existing.socketPath);
+							} else if (existing || command.type !== "send-turn")
+								return existing;
+							const runnerId = randomBytes(6).toString("hex");
 							const created: RunnerChild = {
 								ready: yield* Deferred.make<
 									ClaudeRunnerSocket,
@@ -364,10 +439,11 @@ export const makeProcessClaudeSessionRunner = (
 								>(),
 								stopped: yield* Deferred.make<void>(),
 								stopping: false,
+								verified: false,
+								runnerId,
 								socketPath: join(
-									resolve(DEFAULT_CONFIG_DIR),
-									"r",
-									randomBytes(6).toString("hex"),
+									claudeRunnerDirectory(deps.workspaceRoot),
+									runnerId,
 								),
 							};
 							children.set(sessionId, created);
@@ -422,7 +498,27 @@ export const makeProcessClaudeSessionRunner = (
 									),
 								),
 							);
-					return yield* connection.commandEffect(commandId, payload);
+					if (
+						process.env["NODE_ENV"] === "test" &&
+						process.env["CONDUIT_TEST_HOLD_RUNNER_OUTPUT"] === command.type
+					) {
+						const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+						if (proof)
+							appendFileSync(
+								proof,
+								`${JSON.stringify({ kind: "held-output", type: command.type })}\n`,
+							);
+						yield* Effect.never;
+					}
+					// Retransmission keeps the original attempt; an intentional outbox
+					// retry advances it and must be allowed to execute again.
+					return yield* connection.commandEffect(
+						commandId,
+						payload,
+						command.type === "send-turn"
+							? command.input.commandAttempt
+							: undefined,
+					);
 				}).pipe(
 					Effect.catchAllDefect((cause) =>
 						Effect.fail(claudeRunnerFailure(command.type, cause)),

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import type {
 	Options,
 	Query,
@@ -25,13 +26,16 @@ export type ProcessMark =
 			buildId: string;
 			protocolVersion: number;
 	  }
-	| { kind: "runner-command"; commandId: string; type: string };
+	| { kind: "runner-command"; commandId: string; type: string }
+	| { kind: "runner-spawned"; pid: number; socketPath: string };
 
 export function responseChunks(prompt: string): string[] {
 	return [`Echo(${prompt}): `, `stream(${prompt}) `, `done(${prompt}).`];
 }
 
 function mark(message: ProcessMark): void {
+	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+	if (proof) appendFileSync(proof, `${JSON.stringify(message)}\n`);
 	const send = () => {
 		if (process.connected)
 			process.send?.({ channel: "conduit-process-test", ...message });
@@ -117,6 +121,8 @@ function query(params: {
 				content_block: { type: "text", text: "" },
 			});
 			for (const text of responseChunks(prompt)) {
+				if (prompt.startsWith("restart-"))
+					await new Promise<void>((done) => setTimeout(done, 120));
 				const event = stream(sessionId, {
 					type: "content_block_delta",
 					index: 0,
@@ -153,9 +159,33 @@ function query(params: {
 						new AbortController().signal,
 					toolUseID,
 					requestId: randomUUID(),
+					...(prompt === "approval-restart"
+						? {
+								suggestions: [
+									{
+										type: "addRules" as const,
+										rules: [
+											{
+												toolName: "Bash",
+												ruleContent: "printf harness-approved",
+											},
+										],
+										behavior: "allow" as const,
+										destination: "session" as const,
+									},
+								],
+							}
+						: {}),
 				});
 				if (!approval) throw new Error("Approval bridge returned no decision");
-				mark({ kind: "approval", prompt, behavior: approval.behavior });
+				mark({
+					kind: "approval",
+					prompt,
+					behavior: approval.behavior,
+					...(approval.behavior === "allow" && approval.updatedPermissions
+						? { updatedPermissions: approval.updatedPermissions }
+						: {}),
+				});
 				yield {
 					type: "user",
 					uuid: randomUUID(),

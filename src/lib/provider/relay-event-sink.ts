@@ -25,6 +25,8 @@ import { translateDomainEventToRelay } from "../relay/domain-event-to-relay.js";
 import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
+import { currentClaudeRunnerPermissionReply } from "./claude/claude-runner-receipts.js";
+import { preserveClaudeRunners } from "./claude/claude-runner-shutdown.js";
 import { MissingPendingInteractions } from "./errors.js";
 import {
 	type EventSinkError,
@@ -438,10 +440,28 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// (interrupt, cancel, timeout) is the SDK being told no.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
-						recordInteraction("permission.resolved", {
-							id: request.requestId,
-							decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
-						}),
+						Exit.isFailure(exit) &&
+						process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
+						preserveClaudeRunners()
+							? Effect.void
+							: recordInteraction("permission.resolved", {
+									id: request.requestId,
+									decision: Exit.isSuccess(exit)
+										? exit.value.decision
+										: "reject",
+								}).pipe(
+									Effect.locally(
+										currentClaudeRunnerPermissionReply,
+										process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
+											Exit.isSuccess(exit)
+											? {
+													sessionId,
+													requestId: request.requestId,
+													response: exit.value,
+												}
+											: undefined,
+									),
+								),
 					),
 				);
 			});
@@ -510,6 +530,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// later records the resolution. Any other end resolves it here.
 				return yield* ask.pipe(
 					Effect.onExit((exit) => {
+						if (
+							Exit.isFailure(exit) &&
+							process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
+							preserveClaudeRunners()
+						)
+							return Effect.void;
 						if (Exit.isSuccess(exit)) {
 							return recordInteraction("question.resolved", {
 								id: request.requestId,

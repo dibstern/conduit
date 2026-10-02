@@ -24,6 +24,7 @@ import {
 	type Settings,
 	query as sdkQuery,
 } from "@anthropic-ai/claude-agent-sdk";
+import { SqlClient } from "@effect/sql";
 import {
 	Cause,
 	Context,
@@ -39,6 +40,8 @@ import {
 	type Scope,
 } from "effect";
 import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
+import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
+import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -67,6 +70,9 @@ import {
 } from "./claude-capabilities-service.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
+import { makeRecoveredClaudeEventSink } from "./claude-runner-event-sink.js";
+import { claudeRunnerSinkId } from "./claude-runner-protocol.js";
+import { preserveClaudeRunners } from "./claude-runner-shutdown.js";
 import {
 	discoverCapabilitiesEffect,
 	expectedApiModelIdEffect,
@@ -234,8 +240,10 @@ export const makeClaudeProviderRuntime = (
 				materializeSubagents: deps.materializeSubagents !== undefined,
 				capabilitiesService,
 			},
-			(output) =>
-				runtime ? runtime.handleOutputEffect(output) : Effect.succeed({}),
+			(output, sessionId?: string) =>
+				runtime
+					? runtime.handleOutputEffect(output, sessionId)
+					: Effect.succeed({}),
 		);
 		runtime = new ClaudeProviderRuntime(
 			{ ...deps, capabilitiesService },
@@ -324,6 +332,31 @@ function sessionFailure(
 export class ClaudeProviderRuntime {
 	readonly providerId = "claude";
 	private readonly sinks = new Map<string, EventSink>();
+	private recoveredSink: ((sessionId: string) => EventSink) | undefined;
+	private readonly recoveredSinkIds = new Set<string>();
+	private readonly recoveredRequests = new Map<
+		string,
+		Deferred.Deferred<void>
+	>();
+
+	readonly recoverEffect = Effect.gen(this, function* () {
+		if (!this.runner.recoverEffect) return;
+		const sql = yield* SqlClient.SqlClient;
+		const ingestion = yield* ProviderRuntimeIngestionTag;
+		const pending = yield* PendingInteractionServiceTag;
+		this.recoveredSink = (sessionId) =>
+			makeRecoveredClaudeEventSink({
+				sessionId,
+				sql,
+				ingestion,
+				pending,
+				onRegistered: (id) => {
+					const ready = this.recoveredRequests.get(id);
+					return ready ? Deferred.succeed(ready, undefined) : Effect.void;
+				},
+			});
+		yield* this.runner.recoverEffect;
+	});
 
 	constructor(
 		private readonly deps: ClaudeProviderInstanceDeps,
@@ -386,7 +419,13 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
-			const sinkId = randomUUID();
+			const sinkId =
+				process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
+					? claudeRunnerSinkId(
+							input.commandId ?? randomUUID(),
+							input.commandAttempt,
+						)
+					: randomUUID();
 			this.sinks.set(sinkId, eventSink);
 			const aborted = Effect.async<void>((resume) => {
 				const onAbort = () => resume(Effect.void);
@@ -482,13 +521,19 @@ export class ClaudeProviderRuntime {
 
 	handleOutputEffect(
 		output: ClaudeSessionOutput,
+		recoveredSessionId?: string,
 	): Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> {
 		return Effect.gen(this, function* () {
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;
 			}
-			const sink = this.sinks.get(output.sinkId);
+			let sink = this.sinks.get(output.sinkId);
+			if (!sink && recoveredSessionId && this.recoveredSink) {
+				sink = this.recoveredSink(recoveredSessionId);
+				this.sinks.set(output.sinkId, sink);
+				this.recoveredSinkIds.add(output.sinkId);
+			}
 			if (!sink) return;
 			switch (output.type) {
 				case "event":
@@ -497,6 +542,11 @@ export class ClaudeProviderRuntime {
 						.pipe(Effect.mapError((cause) => sessionFailure("push", cause)));
 				case "permission-request":
 				case "question-request": {
+					const registered = this.recoveredSinkIds.has(output.sinkId)
+						? yield* Deferred.make<void>()
+						: undefined;
+					if (registered)
+						this.recoveredRequests.set(output.request.requestId, registered);
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
 							? sink.requestPermission(output.request).pipe(
@@ -525,7 +575,9 @@ export class ClaudeProviderRuntime {
 						`${output.sinkId}:${output.request.requestId}`,
 						request.pipe(
 							Effect.onExit((exit) =>
-								Exit.isFailure(exit)
+								Exit.isFailure(exit) &&
+								(process.env["CONDUIT_CLAUDE_RUNNER"] !== "process" ||
+									!preserveClaudeRunners())
 									? this.runner
 											.executeEffect({
 												type: "interaction-failed",
@@ -546,6 +598,10 @@ export class ClaudeProviderRuntime {
 							Effect.catchAllCause(() => Effect.void),
 						),
 					);
+					if (registered) {
+						yield* Deferred.await(registered);
+						this.recoveredRequests.delete(output.request.requestId);
+					}
 					return;
 				}
 				case "resolve-permission":
@@ -583,6 +639,7 @@ export class ClaudeProviderRuntime {
 						}
 					}
 					this.sinks.delete(output.sinkId);
+					this.recoveredSinkIds.delete(output.sinkId);
 					yield* FiberMap.remove(this.abortFibers, output.sinkId);
 					return;
 				case "materialize-subagents":

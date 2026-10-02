@@ -1,11 +1,11 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Deferred, Effect, FiberRef, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
-import type {
+import {
 	EventStoreEffectTag,
-	EventStoreError,
+	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -13,7 +13,15 @@ import type {
 } from "../../../persistence/effect/projection-runner-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import {
+	commitClaudeRunnerOutput,
+	currentClaudeRunnerOutput,
+	currentClaudeRunnerPermissionReply,
+	ownsClaudeRunnerAttachment,
+} from "../../../provider/claude/claude-runner-receipts.js";
+import {
 	emptyProviderRuntimeDomainMapperState,
+	partKey,
+	restoreRuntimeToolStart,
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
 import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
@@ -64,6 +72,7 @@ export const makeProviderRuntimeIngestionLive = (
 		ProviderRuntimeIngestionTag,
 		Effect.gen(function* () {
 			const commitAndSignal = yield* makeCommitAndSignal;
+			const eventStore = yield* EventStoreEffectTag;
 			const sql = yield* SqlClient.SqlClient;
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
@@ -81,11 +90,36 @@ export const makeProviderRuntimeIngestionLive = (
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
 				ingestSemaphore.withPermits(1)(
 					Effect.gen(function* () {
+						const context = yield* FiberRef.get(currentClaudeRunnerOutput);
+						const permissionReply = yield* FiberRef.get(
+							currentClaudeRunnerPermissionReply,
+						);
+						const receipt = context && !context.consumed ? context : undefined;
 						const currentState = yield* Ref.get(mapperStateRef);
 						let nextState = currentState;
 						const domainEvents: CanonicalEvent[] = [];
 
 						for (const event of events) {
+							if (context && event.type === "tool.completed") {
+								const data = event.data as { partId?: string };
+								const partId =
+									data.partId ?? event.providerRefs.providerToolUseId;
+								if (
+									partId &&
+									!nextState.startedToolPartIds.has(partKey(event, partId))
+								) {
+									const started = yield* sql<{
+										message_id: string;
+									}>`SELECT p.message_id FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE p.id = ${partId} AND m.session_id = ${event.sessionId} AND p.type = 'tool' LIMIT 1`;
+									if (started[0])
+										nextState = restoreRuntimeToolStart(
+											event,
+											nextState,
+											partId,
+											started[0].message_id,
+										);
+								}
+							}
 							const result = translateProviderRuntimeEventToDomain(
 								event,
 								nextState,
@@ -145,24 +179,62 @@ export const makeProviderRuntimeIngestionLive = (
 								needsSessionRow.set(event.sessionId, event.provider);
 							}
 						}
-						for (const [sessionId, provider] of needsSessionRow) {
-							const seededAt = Date.now();
-							yield* sql`
+						const ensureSessions = Effect.gen(function* () {
+							for (const [sessionId, provider] of needsSessionRow) {
+								const seededAt = Date.now();
+								yield* sql`
 									INSERT OR IGNORE INTO sessions
 									(id, provider, title, status, created_at, updated_at)
 									VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
-						}
-
-						yield* commitAndSignal(persistentEvents, {
-							publish: ingestOptions.publishToBus ?? true,
-							...(ingestOptions.beforeCommit
-								? { beforeCommit: ingestOptions.beforeCommit }
-								: {}),
-							afterCommit: Effect.zipRight(
-								Ref.set(mapperStateRef, nextState),
-								ingestOptions.afterCommit ?? Effect.void,
-							),
+							}
 						});
+						let appended = true;
+						const beforeCommit = Effect.gen(function* () {
+							yield* ingestOptions.beforeCommit ?? Effect.void;
+							if (permissionReply)
+								yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
+						});
+						const afterCommit = Effect.gen(function* () {
+							if (appended) {
+								yield* Ref.set(mapperStateRef, nextState);
+								yield* ingestOptions.afterCommit ?? Effect.void;
+							}
+							if (receipt) {
+								receipt.consumed = true;
+								yield* Deferred.succeed(receipt.committed, undefined);
+								if (appended) receipt.onCommitted?.();
+							}
+						});
+						const commitOptions = {
+							publish: ingestOptions.publishToBus ?? true,
+							afterCommit,
+						};
+						if (context && (receipt || context.attachmentId)) {
+							yield* commitAndSignal.write(
+								(project) =>
+									Effect.gen(function* () {
+										// Claim inside the append transaction, before event IDs or
+										// projections are written. Replayed and fenced frames are no-ops.
+										appended = receipt
+											? yield* commitClaudeRunnerOutput(sql, receipt)
+											: yield* ownsClaudeRunnerAttachment(sql, context);
+										if (!appended) return;
+										yield* ensureSessions;
+										yield* project(
+											yield* eventStore.appendBatch(persistentEvents),
+										);
+										yield* beforeCommit;
+									}),
+								commitOptions,
+							);
+						} else {
+							yield* ensureSessions;
+							yield* commitAndSignal(persistentEvents, {
+								...commitOptions,
+								beforeCommit,
+							});
+						}
+						if (!appended) return 0;
 
 						if (
 							options.relayPublisher &&

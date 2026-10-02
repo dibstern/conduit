@@ -17,7 +17,8 @@ async function main(): Promise<void> {
 	// local deadline, including disconnects during daemon startup.
 	process.once("disconnect", () => {
 		disconnected = true;
-		setTimeout(() => process.exit(1), 3000);
+		// Allow the runner's 1s reply window and 3s force-kill budget to finish.
+		setTimeout(() => process.exit(1), 6000);
 		void daemon?.stop().catch((error: unknown) => {
 			console.error(error);
 			process.exit(1);

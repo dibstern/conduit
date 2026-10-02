@@ -4,6 +4,7 @@ import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
+import { setClaudeRunnerRestart } from "../../../provider/claude/claude-runner-shutdown.js";
 import {
 	type DaemonRpcHandlers,
 	wsRpcHandlers,
@@ -203,6 +204,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			Shutdown: () =>
 				run(
 					Effect.gen(function* () {
+						setClaudeRunnerRestart(false);
 						const state = yield* DaemonStateTag;
 						yield* Ref.update(state, (current) => ({
 							...current,
@@ -236,6 +238,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			RestartWithConfig: (request) =>
 				run(
 					Effect.gen(function* () {
+						setClaudeRunnerRestart(true);
 						const state = yield* DaemonStateTag;
 						const update = request.config;
 						const tls =

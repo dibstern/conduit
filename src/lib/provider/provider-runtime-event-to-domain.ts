@@ -631,8 +631,21 @@ function messageKey(event: ProviderRuntimeEvent): string {
 	return event.turnId ? `${event.sessionId}:${event.turnId}` : event.sessionId;
 }
 
-function partKey(event: ProviderRuntimeEvent, partId: string): string {
+export function partKey(event: ProviderRuntimeEvent, partId: string): string {
 	return `${event.sessionId}:${event.turnId ?? ""}:${partId}`;
+}
+
+export function restoreRuntimeToolStart(
+	event: ProviderRuntimeEvent,
+	state: ProviderRuntimeDomainMapperState,
+	partId: string,
+	messageId: string,
+): ProviderRuntimeDomainMapperState {
+	return withStartedToolPartId(
+		event,
+		withItemMessageId(event, state, partId, messageId),
+		partId,
+	);
 }
 
 function partIdFromData(
