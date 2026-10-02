@@ -1271,6 +1271,7 @@ export interface OpenCodeInstance {
 	url?: string;
 	status: InstanceStatus;
 	pid?: number;
+	version?: string;
 	env?: Record<string, string>;
 	needsRestart?: boolean;
 	exitCode?: number;
@@ -1283,6 +1284,8 @@ export interface InstanceConfig {
 	name: string;
 	port: number;
 	managed: boolean;
+	pid?: number;
+	version?: string;
 	driver?: ProviderDriverKind;
 	configDir?: string;
 	env?: Record<string, string>;

@@ -1,6 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,7 +15,15 @@ import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
-import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
+import { Shutdown, WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
+import { loadDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
+import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
+import {
+	inspectManagedOpenCodeProcess,
+	isProcessAlive,
+	type ManagedOpenCodeRecord,
+	stopManagedOpenCode,
+} from "../../src/lib/instance/managed-opencode-process.js";
 import { isRecord } from "../../src/lib/utils.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 
@@ -50,12 +65,16 @@ export class ProcessHarness {
 	private logs = "";
 	private port = 0;
 	private disposed = false;
+	private readonly ownedOpenCode = new Map<string, ManagedOpenCodeRecord>();
 
 	private constructor(
 		private readonly dist?: string,
 		private readonly enqueueMarkDelayMs = 0,
 		private readonly claudeRunner?: "process",
 		private readonly shellEnvProof = false,
+		private readonly managedOpenCode = false,
+		ignoreOpenCodeSigterm = false,
+		pauseOpenCodeSupervisor = false,
 	) {
 		for (const directory of [
 			"home",
@@ -64,6 +83,7 @@ export class ProcessHarness {
 			"project",
 			"cache",
 			"static",
+			"data",
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
@@ -72,6 +92,46 @@ export class ProcessHarness {
 				join(this.root, "home/.zprofile"),
 				'export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n',
 			);
+		if (managedOpenCode) {
+			mkdirSync(join(this.root, "bin"));
+			const executable = join(this.root, "bin", "opencode");
+			copyFileSync(
+				fileURLToPath(new URL("./fake-opencode-process.mjs", import.meta.url)),
+				executable,
+			);
+			chmodSync(executable, 0o755);
+			writeFileSync(
+				join(this.root, "config", "daemon.json"),
+				JSON.stringify({
+					pid: 0,
+					port: 0,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					dangerouslySkipPermissions: false,
+					projects: [],
+					instances: [
+						{
+							id: "managed-test",
+							name: "Managed test",
+							port: 0,
+							managed: true,
+							driver: "opencode",
+							env: {
+								OPENCODE_SERVER_USERNAME: "test-user",
+								CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
+									ignoreOpenCodeSigterm,
+								),
+								CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
+									pauseOpenCodeSupervisor,
+								),
+							},
+						},
+					],
+				}),
+			);
+		}
 	}
 
 	static async start(
@@ -80,6 +140,9 @@ export class ProcessHarness {
 			enqueueMarkDelayMs?: number;
 			claudeRunner?: "process";
 			shellEnvProof?: boolean;
+			managedOpenCode?: boolean;
+			ignoreOpenCodeSigterm?: boolean;
+			pauseOpenCodeSupervisor?: boolean;
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -87,6 +150,9 @@ export class ProcessHarness {
 			options.enqueueMarkDelayMs,
 			options.claudeRunner,
 			options.shellEnvProof,
+			options.managedOpenCode,
+			options.ignoreOpenCodeSigterm,
+			options.pauseOpenCodeSupervisor,
 		);
 		try {
 			await harness.restart();
@@ -97,7 +163,7 @@ export class ProcessHarness {
 		}
 	}
 
-	async restart(): Promise<void> {
+	async restart(options: { skipBrowserProbe?: boolean } = {}): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
@@ -117,10 +183,13 @@ export class ProcessHarness {
 			{
 				cwd: this.projectDir,
 				env: {
-					PATH: process.env["PATH"] ?? "",
+					PATH: this.managedOpenCode
+						? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
+						: (process.env["PATH"] ?? ""),
 					HOME: join(this.root, "home"),
 					XDG_CONFIG_HOME: join(this.root, "config"),
 					XDG_CACHE_HOME: join(this.root, "cache"),
+					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
 					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
@@ -190,8 +259,10 @@ export class ProcessHarness {
 				}
 			});
 		});
+		this.rememberManagedOpenCode();
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
+		if (options.skipBrowserProbe) return;
 		const probe = await ProcessBrowser.connect(this.port);
 		try {
 			const deadline = Date.now() + 2000;
@@ -215,6 +286,28 @@ export class ProcessHarness {
 
 	async kill(): Promise<void> {
 		await this.stop("SIGKILL");
+	}
+
+	async terminate(): Promise<void> {
+		await this.stop("SIGTERM");
+	}
+
+	async shutdown(): Promise<void> {
+		if (!this.child) return;
+		await sendRpcRequest(
+			join(this.root, "config", "relay.sock"),
+			new Shutdown({}),
+		);
+		for (const connected of this.browsers) await connected.close();
+		const child = this.child;
+		const force = setTimeout(() => child?.kill("SIGKILL"), 5000);
+		try {
+			await this.exit;
+		} finally {
+			clearTimeout(force);
+		}
+		this.child = undefined;
+		for (const connected of this.browsers) await connected.close();
 	}
 
 	async disconnectParent(): Promise<void> {
@@ -269,9 +362,57 @@ export class ProcessHarness {
 		};
 	}
 
+	private rememberManagedOpenCode(): void {
+		if (!this.managedOpenCode) return;
+		const config = loadDaemonConfig(join(this.root, "config"));
+		for (const instance of config?.instances ?? []) {
+			if (
+				instance.managed &&
+				instance.driver !== "claude" &&
+				instance.processIdentity &&
+				!this.ownedOpenCode.has(instance.processIdentity.token)
+			)
+				this.ownedOpenCode.set(instance.processIdentity.token, instance);
+		}
+	}
+
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
-		await this.stop("SIGTERM");
+		this.rememberManagedOpenCode();
+		let cleanupFailure: Error | undefined;
+		try {
+			if (this.managedOpenCode) await this.shutdown();
+			else await this.stop("SIGTERM");
+		} finally {
+			await this.stop("SIGKILL");
+			this.rememberManagedOpenCode();
+			// Retain authenticated ownership across deliberately corrupted configs.
+			// Historical numeric IDs in the fixture ledger can be reused.
+			for (const record of this.ownedOpenCode.values()) {
+				try {
+					const owned = await inspectManagedOpenCodeProcess(
+						record.processIdentity,
+					);
+					const stopped = owned
+						? await stopManagedOpenCode({ ...record, pid: owned.pid })
+						: false;
+					if (
+						!stopped &&
+						record.processIdentity &&
+						isProcessAlive(record.processIdentity.supervisorPid)
+					)
+						cleanupFailure ??= new Error(
+							`Cannot verify managed fixture cleanup; recovery retained at ${this.root}`,
+						);
+				} catch (cause) {
+					cleanupFailure ??= new Error(
+						`Cannot verify managed fixture cleanup; recovery retained at ${this.root}`,
+						{ cause },
+					);
+				}
+			}
+		}
+		if (cleanupFailure) throw cleanupFailure;
 		rmSync(this.root, { recursive: true, force: true });
 		this.disposed = true;
 	}
@@ -366,6 +507,41 @@ export class ProcessBrowser {
 		return this.runtime.runPromise(effect.pipe(Effect.timeout(TIMEOUT_MS)));
 	}
 
+	async shutdown(): Promise<void> {
+		await this.run(this.rpc.Shutdown({}));
+	}
+
+	async instances() {
+		return this.run(this.rpc.GetInstances({}));
+	}
+
+	async instanceStatus(instanceId: string) {
+		return this.run(this.rpc.GetInstanceStatus({ instanceId }));
+	}
+
+	async removeInstance(instanceId: string) {
+		return this.run(this.rpc.RemoveInstance({ instanceId }));
+	}
+
+	async startInstance(instanceId: string) {
+		return this.run(this.rpc.StartInstance({ instanceId }));
+	}
+
+	async stopInstance(instanceId: string) {
+		return this.run(this.rpc.StopInstance({ instanceId }));
+	}
+
+	async updateInstance(
+		instanceId: string,
+		updates: { driver?: "opencode" | "claude"; env?: Record<string, string> },
+	) {
+		return this.run(this.rpc.UpdateInstance({ instanceId, ...updates }));
+	}
+
+	async daemonStatus() {
+		return this.run(this.rpc.GetStatus({}));
+	}
+
 	async createSession(title?: string): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
@@ -436,10 +612,6 @@ export class ProcessBrowser {
 				this.rpc.LoadMoreHistory({ projectSlug: "process-test", sessionId }),
 			)
 		).messages;
-	}
-
-	async shutdown(): Promise<void> {
-		await this.run(this.rpc.Shutdown({}));
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {

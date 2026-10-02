@@ -94,7 +94,7 @@ export async function handleForeground(ctx: CommandContext): Promise<void> {
 		try {
 			const running = await checkDaemon();
 			if (running) {
-				await rpcSend(new Shutdown({}));
+				await rpcSend(new Shutdown({ preserveManagedInstances: true }));
 				stdout.write("Stopped existing daemon.\n");
 			}
 		} catch {

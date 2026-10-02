@@ -26,6 +26,10 @@ import {
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
+import {
+	type InstanceManagerStateTag,
+	requestManagedOpenCodeShutdown,
+} from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
 import {
 	type DaemonLiveOptions,
@@ -143,6 +147,7 @@ type ForegroundRuntimeRequirements =
 	| DaemonHandleTag
 	| ConfigPersistenceTag
 	| DaemonConfigRefTag
+	| InstanceManagerStateTag
 	| ShutdownSignalTag;
 
 export async function startForegroundDaemon(
@@ -227,7 +232,7 @@ export async function startForegroundDaemon(
 		return result;
 	};
 
-	const stop = async () => {
+	const teardown = async () => {
 		if (stopInFlight != null) return stopInFlight;
 		const currentRuntime = runtime;
 		if (currentRuntime == null || stopped) return;
@@ -255,6 +260,11 @@ export async function startForegroundDaemon(
 		});
 		stopInFlight.then(settleStopped.resolve, settleStopped.reject);
 		return stopInFlight;
+	};
+	const stop = async () => {
+		if (runtime == null || stopped) return stopInFlight ?? undefined;
+		await runRuntimeEffect(runtime, requestManagedOpenCodeShutdown);
+		return teardown();
 	};
 
 	const initialConfig = buildInitialRuntimeConfig(options, configDir);
@@ -317,7 +327,7 @@ export async function startForegroundDaemon(
 	// SignalHandlerLayer swallows SIGTERM/SIGINT and only completes this Deferred,
 	// so without a consumer the daemon would ignore both signals.
 	runRuntimeEffect(runtime, Effect.flatMap(ShutdownSignalTag, Deferred.await))
-		.then(() => stop())
+		.then(() => teardown())
 		.catch(() => {
 			// Runtime disposed before a signal arrived, or stop failed (reported via `stopped`).
 		});

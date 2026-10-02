@@ -15,6 +15,7 @@ import {
 	resolveOpenCodeInstanceUrl,
 } from "../../../daemon/config-persistence.js";
 import { GapEndpoints } from "../../../instance/gap-endpoints.js";
+import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { SSEStream, type SSEStreamPort } from "../../../relay/sse-stream.js";
@@ -84,10 +85,15 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 				const existing = bundles.get(instanceId);
 				if (existing) return existing.api;
 
-				const url = resolveOpenCodeInstanceUrl(
-					loadDaemonConfig(config.configDir),
-					instanceId,
+				const daemonConfig = loadDaemonConfig(config.configDir);
+				const instance = daemonConfig?.instances?.find(
+					(instance) => instance.id === instanceId,
 				);
+				const auth =
+					instance?.managed && instance.driver !== "claude"
+						? openCodeAuth(instance.env)
+						: undefined;
+				const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
 				if (url === undefined) {
 					return yield* Effect.fail(
 						new Error(
@@ -111,6 +117,7 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 					authHeaders,
 				} = createSdkClient({
 					baseUrl: url,
+					...(auth !== undefined ? { auth } : {}),
 					...(config.noServer && config.projectDir != null
 						? { directory: config.projectDir }
 						: {}),
