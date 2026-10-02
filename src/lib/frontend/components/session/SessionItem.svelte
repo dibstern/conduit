@@ -256,7 +256,13 @@
 	// deliberately not re-derived from `processing`, the local phase or the
 	// pending counts: a second derivation could disagree with the section this
 	// row is filed under, and two answers on one screen is worse than either.
-	const status = $derived(ATTENTION_DISPLAY[sessionAttention(session)]);
+	const attention = $derived(sessionAttention(session));
+	const status = $derived(ATTENTION_DISPLAY[attention]);
+	// Approve and Reply are filled pills that read as buttons, so swapping them
+	// for the hover verbs looks like the button vanishing under the cursor.
+	const statusHidesOnHover = $derived(
+		attention !== "needs-approval" && attention !== "needs-reply",
+	);
 	const emphasis = $derived(EMPHASIS_CLASSES[status.emphasis]);
 	const densityClass = $derived(
 		shelfRow ? DENSITY_CLASSES[density].settled : DENSITY_CLASSES[density].row,
@@ -689,7 +695,7 @@
 			     already leads with it; announcing it twice per row is noise. -->
 			{#if status.word && !shelfRow}
 				<span
-					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-brand {status.pill} md:group-hover:hidden md:group-focus-within:hidden {menuOpen ? 'md:hidden' : ''}"
+					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-brand {status.pill} {statusHidesOnHover ? `md:group-hover:hidden md:group-focus-within:hidden ${menuOpen ? 'md:hidden' : ''}` : ''}"
 					aria-hidden="true"
 				>
 					{status.word}
