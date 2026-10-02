@@ -328,6 +328,7 @@ export function translateProviderRuntimeEventToDomain(
 
 		case "turn.error": {
 			const code = stringField(data["code"]);
+			const userMessageId = stringField(data["userMessageId"]);
 			const payload = {
 				messageId: messageIdFromDataOrState(event, data, state),
 				error:
@@ -335,6 +336,7 @@ export function translateProviderRuntimeEventToDomain(
 					stringField(data["message"]) ??
 					"Provider runtime error",
 				...(code != null ? { code } : {}),
+				...(userMessageId ? { userMessageId } : {}),
 			} satisfies TurnErrorPayload;
 			return singleEvent(event, state, "turn.error", payload);
 		}

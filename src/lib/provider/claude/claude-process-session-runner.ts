@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { Cause, Deferred, Effect, FiberSet } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
+import { createLogger } from "../../logger.js";
 import { isRecord } from "../../utils.js";
 import type { HistoryMessage, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
@@ -14,7 +15,12 @@ import {
 	CLAUDE_RUNNER_PROTOCOL_VERSION,
 	ClaudeRunnerSocket,
 	claudeRunnerFailure,
+	claudeRunnerHelloFailure,
 } from "./claude-runner-protocol.js";
+import {
+	failClaudeRunnerTurn,
+	observeClaudeRunnerTurn,
+} from "./claude-runner-turn-failure.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -26,11 +32,19 @@ import type {
 interface RunnerChild {
 	readonly ready: Deferred.Deferred<ClaudeRunnerSocket, ClaudeSessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
+	readonly drained: Deferred.Deferred<void>;
 	readonly socketPath: string;
+	readonly outputs: Effect.Semaphore;
 	stopping: boolean;
+	ending: number;
+	endingReleased?: Deferred.Deferred<void>;
+	idleExiting: boolean;
+	failure?: ClaudeSessionFailure;
 	child?: ChildProcess;
 	connection?: ClaudeRunnerSocket;
 }
+
+const log = createLogger("claude-process-session-runner");
 
 export const makeProcessClaudeSessionRunner = (
 	deps: ClaudeSessionRunnerDeps,
@@ -41,10 +55,21 @@ export const makeProcessClaudeSessionRunner = (
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const lock = yield* Effect.makeSemaphore(1);
+		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const children = new Map<string, RunnerChild>();
 		const sinks = new Map<
 			string,
-			{ sessionId: string; history: readonly HistoryMessage[] }
+			{
+				sessionId: string;
+				history: readonly HistoryMessage[];
+				userMessageId?: string;
+				messageId: string;
+				terminal: boolean;
+				pending: boolean;
+				accepted: boolean;
+				releaseRequested: boolean;
+				completed: Deferred.Deferred<void> | undefined;
+			}
 		>();
 		let closing = false;
 
@@ -144,9 +169,58 @@ export const makeProcessClaudeSessionRunner = (
 					resume(result);
 				};
 				const failed = (failure: ClaudeSessionFailure) => {
+					const wasReady = settled;
 					finish(Effect.fail(failure));
-					if (entry.stopping) return;
-					evict(sessionId, entry);
+					if (entry.stopping || entry.failure) return;
+					entry.failure = failure;
+					const bindings = [...sinks].filter(
+						([, binding]) => binding.sessionId === sessionId,
+					);
+					if (
+						!entry.idleExiting &&
+						(!wasReady ||
+							failure.operation === "runner hello" ||
+							bindings.some(([, binding]) => binding.pending))
+					)
+						log.error(
+							`Claude runner failed for session ${sessionId}: ${failure.message}`,
+						);
+					// Warm completed turns retain a sink for background output. A
+					// dead runner cannot release it, even when no send is waiting.
+					runFork(
+						entry.outputs
+							.withPermits(1)(
+								emit({
+									type: "background-task",
+									transition: { sessionId, kind: "session-ended" },
+								}).pipe(
+									Effect.andThen(
+										Effect.forEach(
+											bindings.filter(([, binding]) => !binding.pending),
+											([sinkId]) => emit({ type: "release-sink", sinkId }),
+											{ discard: true },
+										),
+									),
+								),
+							)
+							.pipe(
+								Effect.ignore,
+								Effect.andThen(
+									Effect.forEach(
+										bindings.filter(
+											([, binding]) => !entry.idleExiting || binding.accepted,
+										),
+										([, binding]) =>
+											binding.completed
+												? Deferred.await(binding.completed)
+												: Effect.void,
+										{ discard: true },
+									),
+								),
+								Effect.ensuring(Effect.sync(() => evict(sessionId, entry))),
+								Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+							),
+					);
 					runFork(stop(entry));
 				};
 				try {
@@ -159,7 +233,7 @@ export const makeProcessClaudeSessionRunner = (
 						);
 						return;
 					}
-					const socketDir = resolve(DEFAULT_CONFIG_DIR, "r");
+					const socketDir = resolve(configDir, "r");
 					mkdirSync(socketDir, { recursive: true, mode: 0o700 });
 					if (Buffer.byteLength(entry.socketPath) >= 104) {
 						failed(
@@ -185,11 +259,21 @@ export const makeProcessClaudeSessionRunner = (
 						],
 						{
 							cwd: deps.workspaceRoot,
-							env: process.env,
+							env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
 							stdio: ["ignore", "inherit", "inherit", "ipc"],
 						},
 					);
 					entry.child = child;
+					if (
+						process.env["NODE_ENV"] === "test" &&
+						process.connected &&
+						child.pid
+					)
+						process.send?.({
+							channel: "conduit-process-test",
+							kind: "runner-spawned",
+							pid: child.pid,
+						});
 					child.once("error", (cause) =>
 						failed(claudeRunnerFailure("spawn runner", cause)),
 					);
@@ -219,19 +303,26 @@ export const makeProcessClaudeSessionRunner = (
 						const connection = new ClaudeRunnerSocket(
 							socket,
 							(message) => {
+								if (message.type === "idle-exit") {
+									entry.idleExiting = true;
+									connection.write({ type: "idle-exit-ack" });
+									return;
+								}
+								if (message.type === "command-accepted") {
+									const binding = sinks.get(message.sinkId);
+									if (binding) binding.accepted = true;
+									return;
+								}
+								if (message.type === "refused") {
+									failed(message.failure);
+									connection.destroy();
+									return;
+								}
 								if (message.type === "hello") {
-									if (
-										message.protocolVersion !==
-											CLAUDE_RUNNER_PROTOCOL_VERSION ||
-										message.buildId !== BUILD_ID
-									) {
-										failed(
-											claudeRunnerFailure(
-												"runner hello",
-												"Claude runner protocol/build mismatch",
-											),
-										);
-										connection.destroy();
+									const failure = claudeRunnerHelloFailure(message, "runner");
+									if (failure) {
+										connection.refuse(failure);
+										failed(failure);
 										return;
 									}
 									if (process.env["NODE_ENV"] === "test" && process.connected)
@@ -246,7 +337,31 @@ export const makeProcessClaudeSessionRunner = (
 										});
 									finish(Effect.succeed(connection));
 								} else if (message.type === "output") {
-									const output = message.output;
+									const received = message.output;
+									const binding =
+										"sinkId" in received
+											? sinks.get(received.sinkId)
+											: undefined;
+									// SDK failures need the same owner as socket failures,
+									// especially when another user turn is already queued.
+									const output =
+										received.type === "event" &&
+										received.event.type === "turn.error" &&
+										binding?.userMessageId &&
+										received.event.sessionId === binding.sessionId &&
+										isRecord(received.event.data)
+											? {
+													...received,
+													event: {
+														...received.event,
+														data: {
+															...received.event.data,
+															userMessageId: binding.userMessageId,
+														},
+													},
+												}
+											: received;
+									let released = false;
 									const operation: Effect.Effect<
 										ClaudeSessionOutputReply,
 										ClaudeSessionFailure
@@ -263,33 +378,58 @@ export const makeProcessClaudeSessionRunner = (
 																),
 															);
 												})
-											: emit(output);
-									runFork(
-										operation.pipe(
-											Effect.matchCauseEffect({
-												onFailure: (cause) =>
-													Effect.sync(() =>
-														connection.write({
-															type: "output-reply",
-															outputId: message.outputId,
-															failure: claudeRunnerFailure(
-																message.output.type,
-																Cause.squash(cause),
-															),
-														}),
-													),
-												onSuccess: (result) =>
-													Effect.sync(() => {
-														connection.write({
-															type: "output-reply",
-															outputId: message.outputId,
-															result,
-														});
-														if (message.output.type === "release-sink")
-															sinks.delete(message.output.sinkId);
-													}),
-											}),
+											: output.type === "release-sink"
+												? Effect.suspend(() => {
+														// Decide under the output permit: a command reply
+														// may have finished while this frame was queued.
+														if (binding?.pending) {
+															binding.releaseRequested = true;
+															return Effect.succeed({});
+														}
+														released = true;
+														return emit(output);
+													})
+												: emit(output);
+									const forwarding = operation.pipe(
+										Effect.tap(() =>
+											Effect.sync(() =>
+												observeClaudeRunnerTurn(output, binding),
+											),
 										),
+										Effect.matchCauseEffect({
+											onFailure: (cause) =>
+												Effect.sync(() =>
+													connection.write({
+														type: "output-reply",
+														outputId: message.outputId,
+														failure: claudeRunnerFailure(
+															message.output.type,
+															Cause.squash(cause),
+														),
+													}),
+												),
+											onSuccess: (result) =>
+												Effect.sync(() => {
+													connection.write({
+														type: "output-reply",
+														outputId: message.outputId,
+														result,
+													});
+													if (
+														message.output.type === "release-sink" &&
+														released
+													)
+														sinks.delete(message.output.sinkId);
+												}),
+										}),
+									);
+									// Long subagent work must not block streaming or crash cleanup.
+									runFork(
+										output.type === "materialize-subagents" ||
+											output.type === "ensure-subagent-session" ||
+											output.type === "read-turn-history"
+											? forwarding
+											: entry.outputs.withPermits(1)(forwarding),
 									);
 								}
 							},
@@ -299,7 +439,13 @@ export const makeProcessClaudeSessionRunner = (
 						socket.once("connect", () =>
 							connection.write({
 								type: "hello",
-								protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
+								protocolVersion:
+									process.env["NODE_ENV"] === "test" &&
+									process.env["CONDUIT_TEST_SERVER_PROTOCOL_VERSION"]
+										? Number(
+												process.env["CONDUIT_TEST_SERVER_PROTOCOL_VERSION"],
+											)
+										: CLAUDE_RUNNER_PROTOCOL_VERSION,
 								buildId: BUILD_ID,
 								config: {
 									workspaceRoot: deps.workspaceRoot,
@@ -334,7 +480,26 @@ export const makeProcessClaudeSessionRunner = (
 			executeEffect(
 				command: ClaudeSessionCommand,
 			): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure> {
+				const turn =
+					command.type === "send-turn"
+						? {
+								sessionId: command.input.sessionId,
+								history: command.input.history,
+								...(command.input.userMessageId
+									? { userMessageId: command.input.userMessageId }
+									: {}),
+								messageId: "",
+								terminal: false,
+								pending: true,
+								accepted: false,
+								releaseRequested: false,
+								completed: undefined as Deferred.Deferred<void> | undefined,
+							}
+						: undefined;
+				let child: RunnerChild | undefined;
+				let ending: RunnerChild | undefined;
 				return Effect.gen(function* () {
+					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
 						yield* shutdown;
 						return;
@@ -353,40 +518,95 @@ export const makeProcessClaudeSessionRunner = (
 								? command.sessionId
 								: sinks.get(command.sinkId)?.sessionId;
 					if (!sessionId) return;
-					const entry = yield* lock.withPermits(1)(
-						Effect.gen(function* () {
-							const existing = children.get(sessionId);
-							if (existing || command.type !== "send-turn") return existing;
-							const created: RunnerChild = {
-								ready: yield* Deferred.make<
-									ClaudeRunnerSocket,
-									ClaudeSessionFailure
-								>(),
-								stopped: yield* Deferred.make<void>(),
-								stopping: false,
-								socketPath: join(
-									resolve(DEFAULT_CONFIG_DIR),
-									"r",
-									randomBytes(6).toString("hex"),
-								),
-							};
-							children.set(sessionId, created);
-							runFork(
-								start(sessionId, created).pipe(
-									Effect.exit,
-									Effect.flatMap((exit) => Deferred.done(created.ready, exit)),
-									Effect.asVoid,
-								),
+					let entry: RunnerChild | undefined;
+					let draining = false;
+					do {
+						const selection = yield* lock.withPermits(1)(
+							Effect.gen(function* () {
+								if (closing)
+									return yield* Effect.fail(
+										claudeRunnerFailure(
+											command.type,
+											"Claude runners are shutting down",
+										),
+									);
+								const existing = children.get(sessionId);
+								if (existing || command.type !== "send-turn") {
+									if (existing && command.type === "end-session") {
+										if (existing.ending === 0)
+											existing.endingReleased = yield* Deferred.make<void>();
+										existing.ending++;
+										ending = existing;
+										if (process.env["NODE_ENV"] === "test" && process.connected)
+											process.send?.({
+												channel: "conduit-process-test",
+												kind: "runner-end-selected",
+												sessionId,
+											});
+									}
+									const draining =
+										command.type === "send-turn" &&
+										(existing?.failure !== undefined ||
+											existing?.idleExiting === true ||
+											(existing?.ending ?? 0) > 0);
+									if (
+										existing &&
+										!draining &&
+										turn &&
+										command.type === "send-turn"
+									)
+										sinks.set(command.sinkId, turn);
+									return {
+										entry: existing,
+										draining,
+										admission: existing?.endingReleased,
+									};
+								}
+								const created: RunnerChild = {
+									ready: yield* Deferred.make<
+										ClaudeRunnerSocket,
+										ClaudeSessionFailure
+									>(),
+									stopped: yield* Deferred.make<void>(),
+									drained: yield* Deferred.make<void>(),
+									stopping: false,
+									ending: 0,
+									idleExiting: false,
+									outputs: yield* Effect.makeSemaphore(1),
+									socketPath: join(
+										configDir,
+										"r",
+										randomBytes(6).toString("hex"),
+									),
+								};
+								children.set(sessionId, created);
+								if (turn && command.type === "send-turn")
+									sinks.set(command.sinkId, turn);
+								runFork(
+									start(sessionId, created).pipe(
+										Effect.exit,
+										Effect.flatMap((exit) =>
+											Deferred.done(created.ready, exit),
+										),
+										Effect.asVoid,
+									),
+								);
+								return { entry: created, draining: false };
+							}),
+						);
+						entry = selection.entry;
+						draining = selection.draining;
+						// Old cleanup is session-wide. Finish it before a replacement
+						// can register interactions or publish a new busy status.
+						if (entry && draining)
+							yield* Deferred.await(
+								!entry.failure && !entry.idleExiting && selection.admission
+									? selection.admission
+									: entry.drained,
 							);
-							return created;
-						}),
-					);
+					} while (draining);
 					if (!entry) return;
-					if (command.type === "send-turn")
-						sinks.set(command.sinkId, {
-							sessionId,
-							history: command.input.history,
-						});
+					child = entry;
 					const connection = yield* Deferred.await(entry.ready);
 					if (closing)
 						return yield* Effect.fail(
@@ -412,25 +632,97 @@ export const makeProcessClaudeSessionRunner = (
 						command.type === "send-turn"
 							? (command.input.commandId ?? randomUUID())
 							: randomUUID();
-					if (command.type === "end-session")
+					if (command.type === "end-session") {
+						const bindings = [...sinks.values()].filter(
+							(binding) => binding.sessionId === sessionId,
+						);
 						return yield* connection
 							.commandEffect(commandId, payload)
 							.pipe(
 								Effect.ensuring(
 									stop(entry).pipe(
-										Effect.ensuring(Effect.sync(() => evict(sessionId, entry))),
+										Effect.andThen(
+											Effect.suspend(() =>
+												entry.failure
+													? Deferred.await(entry.drained)
+													: Effect.forEach(
+															bindings,
+															(binding) =>
+																binding.completed
+																	? Deferred.await(binding.completed)
+																	: Effect.void,
+															{ discard: true },
+														).pipe(
+															Effect.ensuring(
+																Effect.sync(() => evict(sessionId, entry)),
+															),
+															Effect.ensuring(
+																Deferred.succeed(entry.drained, undefined),
+															),
+														),
+											),
+										),
 									),
 								),
 							);
-					return yield* connection.commandEffect(commandId, payload);
+					}
+					return yield* connection.commandEffect(commandId, payload).pipe(
+						Effect.tap(() => {
+							if (!turn || command.type !== "send-turn") return Effect.void;
+							return entry.outputs.withPermits(1)(
+								Effect.gen(function* () {
+									turn.pending = false;
+									if (turn.releaseRequested || entry.failure) {
+										yield* emit({
+											type: "release-sink",
+											sinkId: command.sinkId,
+										});
+										sinks.delete(command.sinkId);
+									}
+								}),
+							);
+						}),
+					);
 				}).pipe(
+					Effect.retry({
+						while: (failure) =>
+							failure.code === "runner_idle_exit" &&
+							turn !== undefined &&
+							!turn.accepted &&
+							!closing,
+					}),
+					Effect.onExit(() =>
+						Effect.gen(function* () {
+							if (ending && --ending.ending === 0 && ending.endingReleased)
+								yield* Deferred.succeed(ending.endingReleased, undefined);
+						}),
+					),
 					Effect.catchAllDefect((cause) =>
 						Effect.fail(claudeRunnerFailure(command.type, cause)),
 					),
-					Effect.onError(() =>
-						Effect.sync(() => {
-							if (command.type === "send-turn") sinks.delete(command.sinkId);
-						}),
+					Effect.onError((cause) => {
+						if (
+							command.type !== "send-turn" ||
+							!turn ||
+							Cause.isInterruptedOnly(cause)
+						)
+							return Effect.void;
+						const cleanup = failClaudeRunnerTurn(
+							emit,
+							command.sinkId,
+							turn,
+							claudeRunnerFailure(command.type, Cause.squash(cause)),
+						).pipe(
+							Effect.ensuring(Effect.sync(() => sinks.delete(command.sinkId))),
+						);
+						return child ? child.outputs.withPermits(1)(cleanup) : cleanup;
+					}),
+					Effect.ensuring(
+						Effect.suspend(() =>
+							turn?.completed
+								? Deferred.succeed(turn.completed, undefined)
+								: Effect.void,
+						),
 					),
 				);
 			}

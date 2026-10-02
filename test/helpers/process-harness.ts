@@ -56,6 +56,16 @@ export class ProcessHarness {
 		private readonly enqueueMarkDelayMs = 0,
 		private readonly claudeRunner?: "process",
 		private readonly shellEnvProof = false,
+		private readonly runnerLifecycle?: {
+			helloDelayMs?: number;
+			idleExitDelayMs?: number;
+			idleDayMs?: number;
+			nonDefaultConfigDir?: boolean;
+			idleTimeoutMs?: number | null;
+			failureCleanupDelayMs?: number;
+			serverProtocolVersion?: number;
+			runnerHelloProtocolVersion?: number;
+		},
 	) {
 		for (const directory of [
 			"home",
@@ -64,6 +74,7 @@ export class ProcessHarness {
 			"project",
 			"cache",
 			"static",
+			"active-config",
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
@@ -80,6 +91,7 @@ export class ProcessHarness {
 			enqueueMarkDelayMs?: number;
 			claudeRunner?: "process";
 			shellEnvProof?: boolean;
+			runnerLifecycle?: ProcessHarness["runnerLifecycle"];
 		} = {},
 	): Promise<ProcessHarness> {
 		const harness = new ProcessHarness(
@@ -87,6 +99,7 @@ export class ProcessHarness {
 			options.enqueueMarkDelayMs,
 			options.claudeRunner,
 			options.shellEnvProof,
+			options.runnerLifecycle,
 		);
 		try {
 			await harness.restart();
@@ -125,6 +138,60 @@ export class ProcessHarness {
 					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
+					...Object.fromEntries(
+						[
+							[
+								"CONDUIT_TEST_RUNNER_HELLO_DELAY_MS",
+								this.runnerLifecycle?.helloDelayMs,
+							],
+							[
+								"CONDUIT_TEST_RUNNER_IDLE_EXIT_DELAY_MS",
+								this.runnerLifecycle?.idleExitDelayMs,
+							],
+							[
+								"CONDUIT_TEST_RUNNER_IDLE_DAY_MS",
+								this.runnerLifecycle?.idleDayMs,
+							],
+						]
+							.filter(([, value]) => value !== undefined)
+							.map(([key, value]) => [key, String(value)]),
+					),
+					...(this.runnerLifecycle?.nonDefaultConfigDir
+						? {
+								CONDUIT_TEST_DAEMON_CONFIG_DIR: join(
+									this.root,
+									"active-config",
+								),
+							}
+						: {}),
+					...(this.runnerLifecycle?.failureCleanupDelayMs !== undefined
+						? {
+								CONDUIT_TEST_RUNNER_FAILURE_DELAY_MS: String(
+									this.runnerLifecycle.failureCleanupDelayMs,
+								),
+							}
+						: {}),
+					...(this.runnerLifecycle?.idleTimeoutMs !== undefined
+						? {
+								CONDUIT_TEST_RUNNER_IDLE_MS: String(
+									this.runnerLifecycle.idleTimeoutMs,
+								),
+							}
+						: {}),
+					...(this.runnerLifecycle?.serverProtocolVersion !== undefined
+						? {
+								CONDUIT_TEST_SERVER_PROTOCOL_VERSION: String(
+									this.runnerLifecycle.serverProtocolVersion,
+								),
+							}
+						: {}),
+					...(this.runnerLifecycle?.runnerHelloProtocolVersion !== undefined
+						? {
+								CONDUIT_TEST_RUNNER_HELLO_VERSION: String(
+									this.runnerLifecycle.runnerHelloProtocolVersion,
+								),
+							}
+						: {}),
 					...(this.claudeRunner
 						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
 						: {}),
@@ -272,6 +339,40 @@ export class ProcessHarness {
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
 		await this.stop("SIGTERM");
+		const runnerPids = new Set(
+			this.marks.flatMap((mark) =>
+				mark.kind === "runner-spawned" || mark.kind === "runner-started"
+					? [mark.pid]
+					: [],
+			),
+		);
+		for (const pid of runnerPids) {
+			try {
+				process.kill(pid, 0);
+			} catch (cause) {
+				if (isRecord(cause) && cause["code"] === "ESRCH") continue;
+				throw cause;
+			}
+			// Only reap an exact PID reported by this harness's child process.
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch (cause) {
+				if (isRecord(cause) && cause["code"] === "ESRCH") continue;
+				throw cause;
+			}
+			const deadline = Date.now() + 3000;
+			while (true) {
+				try {
+					process.kill(pid, 0);
+				} catch (cause) {
+					if (isRecord(cause) && cause["code"] === "ESRCH") break;
+					throw cause;
+				}
+				if (Date.now() >= deadline)
+					throw new Error(`Harness runner ${pid} did not exit`);
+				await new Promise<void>((done) => setTimeout(done, 25));
+			}
+		}
 		rmSync(this.root, { recursive: true, force: true });
 		this.disposed = true;
 	}
@@ -442,6 +543,12 @@ export class ProcessBrowser {
 		await this.run(this.rpc.Shutdown({}));
 	}
 
+	async setAutoSettle(days: number | null): Promise<void> {
+		await this.run(
+			this.rpc.SetAutoSettleSetting({ autoSettleAfterDays: days }),
+		);
+	}
+
 	async deleteSession(sessionId: string): Promise<void> {
 		await this.run(
 			this.rpc.DeleteSession({
@@ -460,6 +567,20 @@ export class ProcessBrowser {
 				agentId,
 				originId: this.originId,
 			}),
+		);
+	}
+
+	async reloadSession(sessionId: string, signal?: AbortSignal): Promise<void> {
+		await this.runtime.runPromise(
+			this.rpc
+				.ReloadProviderSession({
+					projectSlug: "process-test",
+					sessionId,
+					originId: this.originId,
+					commandId: randomUUID(),
+				})
+				.pipe(Effect.timeout(TIMEOUT_MS)),
+			{ signal },
 		);
 	}
 

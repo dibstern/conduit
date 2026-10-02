@@ -77,6 +77,20 @@ function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	};
 }
 
+export function claudeTurnErrorEvent(
+	sessionId: string,
+	messageId: string,
+	cause: unknown,
+	userMessageId?: string,
+): ProviderRuntimeEvent {
+	return makeProviderRuntimeEvent("turn.error", sessionId, {
+		messageId,
+		error: cause instanceof Error ? cause.message : String(cause),
+		code: "provider_error",
+		...(userMessageId ? { userMessageId } : {}),
+	});
+}
+
 type CanonicalItemType =
 	| "assistant_message"
 	| "command_execution"
@@ -433,14 +447,13 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
 			Effect.gen(this, function* () {
-				const errorMsg = cause instanceof Error ? cause.message : String(cause);
 				yield* this.push(
 					ctx,
-					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId || "",
-						error: errorMsg,
-						code: "provider_error",
-					}),
+					claudeTurnErrorEvent(
+						ctx.sessionId,
+						this.currentAssistantMessageId || "",
+						cause,
+					),
 				);
 				yield* this.endTurn(ctx);
 			}),

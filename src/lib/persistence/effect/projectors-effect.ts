@@ -927,6 +927,16 @@ export const makeTurnProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.error")) {
+				// Runner startup and queued sends can fail before an assistant
+				// message identifies the owning turn. Prefer the persisted user ID.
+				if (event.data.userMessageId)
+					return owners(
+						yield* sql<OwnedRow>`UPDATE turns
+							SET state = 'error', completed_at = ${event.createdAt}
+							WHERE id = ${event.data.userMessageId}
+							AND session_id = ${event.sessionId}
+							RETURNING session_id`,
+					);
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE turns

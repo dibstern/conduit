@@ -8,6 +8,14 @@ import type {
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
 
 export type ProcessMark =
+	| {
+			kind:
+				| "runner-hello-pending"
+				| "runner-idle-exit-started"
+				| "runner-spawned";
+			pid: number;
+	  }
+	| { kind: "runner-end-selected"; sessionId: string }
 	| { kind: "receipt" | "enqueue"; prompt: string; at: string }
 	| { kind: "emit"; prompt: string; text: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
@@ -131,6 +139,39 @@ function query(params: {
 				yield event;
 			}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
+			if (prompt.startsWith("stall-"))
+				await new Promise<void>((done) => {
+					params.options?.abortController?.signal.addEventListener(
+						"abort",
+						() => done(),
+						{ once: true },
+					);
+				});
+			if (prompt.startsWith("question-")) {
+				if (!params.options?.canUseTool)
+					throw new Error("Missing question bridge");
+				await params.options.canUseTool(
+					"AskUserQuestion",
+					{
+						questions: [
+							{
+								question: "Continue?",
+								header: "Runner",
+								options: [
+									{ label: "Continue", description: "Continue the turn" },
+								],
+							},
+						],
+					},
+					{
+						signal:
+							params.options.abortController?.signal ??
+							new AbortController().signal,
+						toolUseID: randomUUID(),
+						requestId: randomUUID(),
+					},
+				);
+			}
 			if (prompt.startsWith("approval-")) {
 				const toolUseID = randomUUID();
 				const toolInput = { command: "printf harness-approved" };
@@ -177,6 +218,11 @@ function query(params: {
 					},
 				} as unknown as SDKMessage;
 			}
+			if (
+				prompt.startsWith("failure-") ||
+				prompt.startsWith("approval-failure-")
+			)
+				throw new Error("Harness adapter failure");
 			yield {
 				type: "assistant",
 				uuid: messageId,
@@ -209,6 +255,25 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
+			if (prompt === "ambient-idle") {
+				while (!closed) {
+					await new Promise<void>((done) => setTimeout(done, 50));
+					yield {
+						type: "system",
+						subtype: "background_tasks_changed",
+						session_id: sessionId,
+						uuid: randomUUID(),
+						tasks: [
+							{
+								task_id: "watcher",
+								task_type: "local_bash",
+								description: "watch",
+								ambient: true,
+							},
+						],
+					} as unknown as SDKMessage;
+				}
+			}
 		}
 	})();
 	// The adapter consumes the iterable and these control methods; the full SDK
