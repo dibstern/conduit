@@ -19,6 +19,7 @@
 	} from "../../stores/discovery.svelte.js";
 	import { extractDisplayText } from "../../utils/format.js";
 	import { tokenizeSkills } from "../../utils/skill-highlight.js";
+	import { isQueued } from "../../utils/turns.js";
 	import Surface from "../ui/Surface.svelte";
 	import MessageTime from "./MessageTime.svelte";
 
@@ -34,15 +35,12 @@
 	/** True while the turn that was in-progress when this message was sent
 	 *  hasn't completed yet. Clears automatically when `handleDone`
 	 *  increments `turnEpoch`. */
-	const isQueued = $derived(
-		message.sentDuringEpoch != null &&
-		currentChat().turnEpoch <= message.sentDuringEpoch,
-	);
+	const queued = $derived(isQueued(message, currentChat().turnEpoch));
 </script>
 
 <div
 	class="msg-user max-w-[760px] mx-auto mb-3 px-5"
-	class:opacity-50={isQueued}
+	class:opacity-50={queued}
 	data-uuid={message.uuid}
 >
 	<!-- The queued outline rides in `class` rather than on three `class:`
@@ -51,7 +49,7 @@
 	<Surface
 		variant="plain"
 		padding="lg"
-		class="relative glow-brand-a {isQueued
+		class="relative glow-brand-a {queued
 			? 'border border-dashed border-border'
 			: ''}"
 	>
@@ -70,7 +68,7 @@
 				⚠ Ran {getModelDisplayName(message.modelExecution.actualModel)}, not {getModelDisplayName(message.modelExecution.requestedModel)}
 			</div>
 		{/if}
-		{#if isQueued}
+		{#if queued}
 			<div class="flex items-center mt-2">
 				<span class="queued-shimmer text-text-muted text-xs font-mono">Queued</span>
 			</div>

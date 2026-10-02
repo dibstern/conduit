@@ -197,7 +197,7 @@
 		isProcessing() ? "↓ New activity" : "↓ Latest",
 	);
 
-	const turns = $derived(segmentTurns(currentChat().messages, isProcessing()));
+	const turns = $derived(segmentTurns(currentChat().messages, isProcessing(), currentChat().turnEpoch));
 	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
 	const transcriptToolIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -246,7 +246,7 @@
 		forkSplit ? segmentTurns(forkSplit.inherited, false) : [],
 	);
 	const currentTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
+		forkSplit ? segmentTurns(forkSplit.current, isProcessing(), currentChat().turnEpoch) : [],
 	);
 	const transcript = $derived(currentChat().transcript);
 	const feed = $derived(transcriptFeed(transcript));
