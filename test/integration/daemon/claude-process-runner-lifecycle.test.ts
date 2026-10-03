@@ -518,7 +518,6 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(existsSync("dist/src/bin/claude-session-runner.js")).toBe(true);
 		const harness = await ProcessHarness.start({
 			dist: resolve("dist"),
-			claudeRunner: "process",
 			...(runnerLifecycle ? { runnerLifecycle } : {}),
 		});
 		const fixture: { harness: ProcessHarness; sessionId?: string } = {

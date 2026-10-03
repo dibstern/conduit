@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
@@ -13,6 +13,7 @@ import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import { connectClaudeRunner } from "./claude-runner-connection.js";
 import {
 	type ClaudeRunnerSocket,
+	claudeRunnerBuildId,
 	claudeRunnerFailure,
 	claudeRunnerSinkId,
 } from "./claude-runner-protocol.js";
@@ -21,6 +22,7 @@ import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
 import {
 	claudeRunnerDirectory,
 	discoverClaudeRunners,
+	prepareClaudeRunnerDirectory,
 	removeClaudeRunner,
 	runnerPidAlive,
 } from "./claude-runner-registry.js";
@@ -32,6 +34,10 @@ import {
 	failClaudeRunnerTurn,
 	observeClaudeRunnerTurn,
 } from "./claude-runner-turn-failure.js";
+import {
+	type ClaudeRunnerUpgrade,
+	makeClaudeRunnerUpgrade,
+} from "./claude-runner-upgrade.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -58,6 +64,10 @@ interface RunnerChild {
 	pid?: number | undefined;
 	child?: ChildProcess;
 	connection?: ClaudeRunnerSocket;
+	buildId?: string;
+	candidate?: boolean;
+	commandsInFlight: number;
+	readonly upgrade: ClaudeRunnerUpgrade;
 }
 
 const log = createLogger("claude-process-session-runner");
@@ -82,6 +92,7 @@ export const makeProcessClaudeSessionRunner = (
 			? yield* makeClaudeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
 		const children = new Map<string, RunnerChild>();
+		const candidates = new Set<RunnerChild>();
 		const sinks = new Map<
 			string,
 			{
@@ -98,6 +109,26 @@ export const makeProcessClaudeSessionRunner = (
 		>();
 		let closing = false;
 		let preserving = false;
+		const upgradeMark = (
+			sessionId: string,
+			old: RunnerChild,
+			phase: "warming" | "cancelled" | "failed" | "switched",
+			replacement?: RunnerChild,
+		) => {
+			if (process.env["NODE_ENV"] !== "test" || !process.connected) return;
+			const mark = {
+				channel: "conduit-process-test",
+				kind: "runner-upgrade",
+				phase,
+				sessionId,
+				oldPid: old.pid,
+				...(replacement?.pid ? { newPid: replacement.pid } : {}),
+				at: process.hrtime.bigint().toString(),
+			};
+			const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+			if (proof) appendFileSync(proof, `${JSON.stringify(mark)}\n`);
+			process.send?.(mark);
+		};
 
 		const stop = (entry: RunnerChild) =>
 			Effect.gen(function* () {
@@ -184,7 +215,7 @@ export const makeProcessClaudeSessionRunner = (
 				Effect.gen(function* () {
 					closing = true;
 					preserving = yield* preserveClaudeRunners(rollback);
-					const entries = [...children.values()];
+					const entries = [...children.values(), ...candidates];
 					const release = Effect.forEach(
 						entries,
 						(entry) =>
@@ -209,7 +240,15 @@ export const makeProcessClaudeSessionRunner = (
 							}
 							children.clear();
 							sinks.clear();
-						}).pipe(Effect.ensuring(release));
+						}).pipe(
+							Effect.andThen(
+								Effect.forEach([...candidates], stop, {
+									discard: true,
+									concurrency: 4,
+								}),
+							),
+							Effect.ensuring(release),
+						);
 					return yield* Effect.forEach(entries, stop, {
 						discard: true,
 						concurrency: 4,
@@ -237,6 +276,7 @@ export const makeProcessClaudeSessionRunner = (
 			if (entry.stopping || entry.recovering || entry.failure || closing)
 				return;
 			entry.failure = failure;
+			if (entry.candidate) return;
 			const bindings = [...sinks].filter(
 				([, binding]) => binding.sessionId === sessionId,
 			);
@@ -295,6 +335,7 @@ export const makeProcessClaudeSessionRunner = (
 				runnerId: entry.runnerId,
 				...(entry.pid !== undefined ? { pid: entry.pid } : {}),
 				helloTimeoutMs: entry.child ? 10_000 : 2000,
+				...(entry.candidate ? { preserveRole: true } : {}),
 				deps: { ...deps, daemonConfigDir: configDir },
 				...(receipts ? { receipts } : {}),
 				runFork,
@@ -305,6 +346,16 @@ export const makeProcessClaudeSessionRunner = (
 					),
 				emit: (received) => {
 					const operation = Effect.suspend(() => {
+						// A retired query's shutdown notices must not clear its replacement.
+						if (
+							entry.stopping &&
+							children.get(sessionId) !== entry &&
+							(received.type === "background-task" ||
+								received.type === "cancel-interactions" ||
+								(received.type === "event" &&
+									received.event.type === "session.status"))
+						)
+							return Effect.succeed({});
 						const binding =
 							"sinkId" in received ? sinks.get(received.sinkId) : undefined;
 						const output =
@@ -358,7 +409,9 @@ export const makeProcessClaudeSessionRunner = (
 						entry.verified = true;
 						entry.pid = hello.pid;
 						const ownsEntry = () =>
-							children.get(sessionId) === entry &&
+							(entry.candidate
+								? candidates.has(entry)
+								: children.get(sessionId) === entry) &&
 							!entry.failure &&
 							!entry.stopping &&
 							!closing;
@@ -387,7 +440,11 @@ export const makeProcessClaudeSessionRunner = (
 								);
 							});
 						yield* ensureAttached();
-						for (const binding of hello.bindings ?? []) {
+						entry.buildId = hello.buildId;
+						entry.upgrade.state = hello.upgradeState;
+						for (const binding of entry.candidate
+							? []
+							: (hello.bindings ?? [])) {
 							let history: readonly HistoryMessage[] = [];
 							let userMessageId: string | undefined;
 							let messageId = "";
@@ -449,7 +506,9 @@ export const makeProcessClaudeSessionRunner = (
 								completed,
 							});
 						}
-						for (const pending of hello.pendingOutputs ?? []) {
+						for (const pending of entry.candidate
+							? []
+							: (hello.pendingOutputs ?? [])) {
 							yield* ensureAttached();
 							if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 								yield* emit(pending.output, sessionId);
@@ -469,6 +528,10 @@ export const makeProcessClaudeSessionRunner = (
 				onCommandAccepted: (sinkId) => {
 					const binding = sinks.get(sinkId);
 					if (binding) binding.accepted = true;
+				},
+				onUpgradeState: (state) => {
+					entry.upgrade.state = { ...entry.upgrade.state, ...state };
+					upgrade(sessionId, entry);
 				},
 				onIdleExit: () => {
 					entry.idleExiting = true;
@@ -493,10 +556,7 @@ export const makeProcessClaudeSessionRunner = (
 					);
 				const child = yield* Effect.try({
 					try: () => {
-						mkdirSync(claudeRunnerDirectory(deps.workspaceRoot, configDir), {
-							recursive: true,
-							mode: 0o700,
-						});
+						prepareClaudeRunnerDirectory(deps.workspaceRoot, configDir);
 						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
 						return spawn(
 							process.execPath,
@@ -511,6 +571,7 @@ export const makeProcessClaudeSessionRunner = (
 								entry.socketPath,
 								sessionId,
 								entry.runnerId,
+								...(entry.candidate ? ["upgrade"] : []),
 							],
 							{
 								cwd: deps.workspaceRoot,
@@ -593,6 +654,187 @@ export const makeProcessClaudeSessionRunner = (
 				),
 			);
 
+		const createEntry = (): Effect.Effect<RunnerChild> =>
+			Effect.gen(function* () {
+				const runnerId = randomBytes(6).toString("hex");
+				return {
+					verified: false,
+					runnerId,
+					ready: yield* Deferred.make<
+						ClaudeRunnerSocket,
+						ClaudeSessionFailure
+					>(),
+					stopped: yield* Deferred.make<void>(),
+					drained: yield* Deferred.make<void>(),
+					stopping: false,
+					ending: 0,
+					idleExiting: false,
+					commandsInFlight: 0,
+					upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
+					outputs: yield* Effect.makeSemaphore(1),
+					socketPath: join(
+						claudeRunnerDirectory(deps.workspaceRoot, configDir),
+						runnerId,
+					),
+				} satisfies RunnerChild;
+			});
+		const eligible = (sessionId: string, entry: RunnerChild) =>
+			!closing &&
+			children.get(sessionId) === entry &&
+			!entry.failure &&
+			!entry.recovering &&
+			!entry.stopping &&
+			!entry.idleExiting &&
+			entry.ending === 0 &&
+			entry.commandsInFlight === 0 &&
+			entry.buildId !== undefined &&
+			entry.buildId !== claudeRunnerBuildId() &&
+			entry.upgrade.state?.quiescent === true &&
+			entry.upgrade.state.snapshot !== undefined;
+		const upgrade = makeClaudeRunnerUpgrade<RunnerChild>({
+			eligible,
+			runFork,
+			create: (_sessionId, old) =>
+				createEntry().pipe(
+					Effect.tap((entry) =>
+						Effect.sync(() => {
+							entry.candidate = true;
+							entry.upgrade.state = old.upgrade.state;
+							candidates.add(entry);
+						}),
+					),
+				),
+			warm: (sessionId, old, replacement) =>
+				Effect.gen(function* () {
+					const state = old.upgrade.state;
+					const snapshot = state?.snapshot;
+					if (!snapshot)
+						return yield* Effect.fail(
+							claudeRunnerFailure(
+								"upgrade runner",
+								"Session launch snapshot is missing",
+							),
+						);
+					const connection = yield* start(sessionId, replacement);
+					yield* Deferred.succeed(replacement.ready, connection);
+					upgradeMark(sessionId, old, "warming", replacement);
+					const { model, contextWindow, variant, permissionMode, ...launch } =
+						snapshot.input;
+					yield* connection.commandEffect(randomUUID(), {
+						type: "pre-warm",
+						sessionId,
+						input: {
+							...launch,
+							...(state.liveConfiguration ?? {
+								...(model ? { model } : {}),
+								...(contextWindow ? { contextWindow } : {}),
+								...(variant ? { variant } : {}),
+								...(permissionMode ? { permissionMode } : {}),
+							}),
+							providerState: {
+								...snapshot.input.providerState,
+								...(state.resumeSessionId
+									? { resumeSessionId: state.resumeSessionId }
+									: {}),
+							},
+						},
+						claudeSettingsOverrides: snapshot.claudeSettingsOverrides,
+						shellEnv: snapshot.options.env ?? {},
+						settingsSnapshot: snapshot,
+					});
+				}),
+			commit: (sessionId, old, replacement, activity) =>
+				Effect.gen(function* () {
+					// A replacement cannot dedupe an old turn whose outbox completion
+					// has not committed yet. Check this off the admission path.
+					if (sql) {
+						for (let retry = 0; ; retry++) {
+							if (
+								activity !== old.upgrade.activity ||
+								!eligible(sessionId, old)
+							)
+								return false;
+							const running = yield* sql<{
+								command_id: string;
+							}>`SELECT command_id FROM provider_command_outbox WHERE session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
+								Effect.mapError((cause) =>
+									claudeRunnerFailure("upgrade runner", cause),
+								),
+							);
+							if (running.length === 0) break;
+							if (retry === 99) return false;
+							yield* Effect.sleep(10);
+						}
+					}
+					const revision = yield* lock.withPermits(1)(
+						Effect.sync(() => {
+							if (
+								activity !== old.upgrade.activity ||
+								!eligible(sessionId, old) ||
+								replacement.failure ||
+								replacement.connection?.closed
+							)
+								return undefined;
+							return old.upgrade.state?.revision;
+						}),
+					);
+					const connection = old.connection;
+					if (revision === undefined || !connection) return false;
+					// The runner validates work and its revision atomically before retirement.
+					const retired = yield* connection.retireEffect(revision).pipe(
+						Effect.timeoutFail({
+							duration: "1 second",
+							onTimeout: () =>
+								claudeRunnerFailure(
+									"upgrade runner",
+									"Retirement confirmation timed out",
+								),
+						}),
+						Effect.onError(() =>
+							Effect.sync(() => connection.write({ type: "upgrade-cancel" })),
+						),
+					);
+					if (!retired) return false;
+					return yield* lock.withPermits(1)(
+						Effect.sync(() => {
+							if (
+								activity !== old.upgrade.activity ||
+								!eligible(sessionId, old) ||
+								replacement.failure ||
+								replacement.connection?.closed
+							) {
+								connection.write({ type: "upgrade-cancel" });
+								return false;
+							}
+							replacement.candidate = false;
+							replacement.connection?.write({ type: "upgrade-activate" });
+							children.set(sessionId, replacement);
+							candidates.delete(replacement);
+							candidates.add(old);
+							upgradeMark(sessionId, old, "switched", replacement);
+							runFork(
+								stop(old).pipe(
+									Effect.ensuring(Effect.sync(() => candidates.delete(old))),
+								),
+							);
+							return true;
+						}),
+					);
+				}),
+			stop: (entry) =>
+				stop(entry).pipe(
+					Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
+				),
+			failed: (sessionId, old, cause) => {
+				log.warn(
+					`Claude runner upgrade deferred for session ${sessionId}: ${claudeRunnerFailure("upgrade runner", cause).message}`,
+				);
+				upgradeMark(sessionId, old, "failed");
+			},
+			cancelled: (sessionId, old, replacement) =>
+				upgradeMark(sessionId, old, "cancelled", replacement),
+		});
+
 		class ProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			readonly recoverEffect = Effect.gen(function* () {
 				if (closing)
@@ -606,14 +848,19 @@ export const makeProcessClaudeSessionRunner = (
 					deps.workspaceRoot,
 					configDir,
 				)) {
-					if (children.has(registration.sessionId)) continue;
+					let abandoned =
+						registration.role === "candidate" ||
+						children.has(registration.sessionId);
 					const entry: RunnerChild = {
 						...registration,
 						verified: false,
+						candidate: abandoned,
 						stopping: false,
 						recovering: true,
 						ending: 0,
 						idleExiting: false,
+						commandsInFlight: 0,
+						upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
 						outputs: yield* Effect.makeSemaphore(1),
 						drained: yield* Deferred.make<void>(),
 						ready: yield* Deferred.make<
@@ -622,7 +869,7 @@ export const makeProcessClaudeSessionRunner = (
 						>(),
 						stopped: yield* Deferred.make<void>(),
 					};
-					const registered = yield* lock.withPermits(1)(
+					yield* lock.withPermits(1)(
 						Effect.gen(function* () {
 							if (closing)
 								return yield* Effect.fail(
@@ -631,17 +878,19 @@ export const makeProcessClaudeSessionRunner = (
 										"Claude runners are shutting down",
 									),
 								);
-							if (children.has(registration.sessionId)) return false;
-							children.set(registration.sessionId, entry);
-							return true;
+							abandoned ||= children.has(registration.sessionId);
+							entry.candidate = abandoned;
+							if (abandoned) candidates.add(entry);
+							else children.set(registration.sessionId, entry);
 						}),
 					);
-					if (!registered) continue;
 					const ensureRecovering = Effect.suspend(() =>
 						!closing &&
 						!entry.stopping &&
 						!entry.failure &&
-						children.get(registration.sessionId) === entry
+						(entry.candidate
+							? candidates.has(entry)
+							: children.get(registration.sessionId) === entry)
 							? Effect.void
 							: Effect.fail(
 									claudeRunnerFailure(
@@ -687,6 +936,7 @@ export const makeProcessClaudeSessionRunner = (
 									code: "runner_recovery_abandoned",
 								};
 								evict(registration.sessionId, entry);
+								candidates.delete(entry);
 								yield* releaseEntryWaiters(entry, Cause.fail(entry.failure));
 								removeClaudeRunner(entry.socketPath);
 								return;
@@ -694,6 +944,15 @@ export const makeProcessClaudeSessionRunner = (
 							// Keep its registration, spool and approval ownership intact.
 							// Startup must not orphan approvals or launch a second runner.
 							return yield* Effect.fail(failure);
+						}
+						if (abandoned) {
+							entry.recovering = false;
+							yield* Deferred.succeed(entry.ready, connected.right);
+							yield* stop(entry).pipe(
+								Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+								Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
+							);
+							return;
 						}
 						const commands = sql
 							? yield* recoverClaudeRunnerCommands(
@@ -727,6 +986,7 @@ export const makeProcessClaudeSessionRunner = (
 						yield* lock.withPermits(1)(
 							Effect.gen(function* () {
 								yield* ensureRecovering;
+								entry.commandsInFlight += commands.length;
 								for (const command of commands) {
 									let binding = sinks.get(command.sinkId);
 									// The server can persist admission before the runner sees it.
@@ -782,6 +1042,12 @@ export const makeProcessClaudeSessionRunner = (
 													cause,
 												),
 											),
+											Effect.ensuring(
+												Effect.sync(() => {
+													entry.commandsInFlight--;
+													upgrade(registration.sessionId, entry);
+												}),
+											),
 										),
 									);
 								}
@@ -797,6 +1063,7 @@ export const makeProcessClaudeSessionRunner = (
 											"Claude runner disconnected during recovery",
 										),
 									);
+								else upgrade(registration.sessionId, entry);
 							}),
 						);
 					}).pipe(
@@ -809,6 +1076,7 @@ export const makeProcessClaudeSessionRunner = (
 							);
 							entry.connection?.destroy();
 							evict(registration.sessionId, entry);
+							candidates.delete(entry);
 							return releaseEntryWaiters(entry, exit.cause).pipe(
 								Effect.andThen(
 									closing && !preserving ? stop(entry) : Effect.void,
@@ -847,6 +1115,8 @@ export const makeProcessClaudeSessionRunner = (
 							}
 						: undefined;
 				let child: RunnerChild | undefined;
+				let admitted: RunnerChild | undefined;
+				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				return Effect.gen(function* () {
 					if (turn) turn.completed = yield* Deferred.make<void>();
@@ -868,6 +1138,7 @@ export const makeProcessClaudeSessionRunner = (
 								? command.sessionId
 								: sinks.get(command.sinkId)?.sessionId;
 					if (!sessionId) return;
+					admittedSessionId = sessionId;
 					let entry: RunnerChild | undefined;
 					let draining = false;
 					do {
@@ -919,31 +1190,25 @@ export const makeProcessClaudeSessionRunner = (
 										command.type === "send-turn"
 									)
 										sinks.set(command.sinkId, turn);
+									if (existing && !draining) {
+										existing.commandsInFlight++;
+										admitted = existing;
+										if (
+											command.type === "send-turn" ||
+											command.type === "apply-live-settings" ||
+											command.type === "set-permission-mode"
+										)
+											existing.upgrade.activity++;
+									}
 									return {
 										entry: existing,
 										draining,
 										admission: existing?.endingReleased,
 									};
 								}
-								const runnerId = randomBytes(6).toString("hex");
-								const created: RunnerChild = {
-									verified: false,
-									runnerId,
-									ready: yield* Deferred.make<
-										ClaudeRunnerSocket,
-										ClaudeSessionFailure
-									>(),
-									stopped: yield* Deferred.make<void>(),
-									drained: yield* Deferred.make<void>(),
-									stopping: false,
-									ending: 0,
-									idleExiting: false,
-									outputs: yield* Effect.makeSemaphore(1),
-									socketPath: join(
-										claudeRunnerDirectory(deps.workspaceRoot, configDir),
-										runnerId,
-									),
-								};
+								const created: RunnerChild = yield* createEntry();
+								created.commandsInFlight++;
+								admitted = created;
 								children.set(sessionId, created);
 								if (turn && command.type === "send-turn")
 									sinks.set(command.sinkId, turn);
@@ -995,9 +1260,18 @@ export const makeProcessClaudeSessionRunner = (
 									// until requested rather than serializing it on every warm send.
 									historyOnDemand: true,
 									input: { ...command.input, history: [] },
-									shellEnv: deps.shellEnv?.(command.input.workspaceRoot) ?? {
-										...process.env,
-									},
+									...(entry.upgrade.state?.frozen
+										? {
+												claudeSettingsOverrides:
+													entry.upgrade.state.snapshot?.claudeSettingsOverrides,
+											}
+										: {}),
+									shellEnv: (entry.upgrade.state?.frozen
+										? entry.upgrade.state.snapshot?.options.env
+										: undefined) ??
+										deps.shellEnv?.(command.input.workspaceRoot) ?? {
+											...process.env,
+										},
 								}
 							: command.type === "pre-warm"
 								? {
@@ -1084,6 +1358,14 @@ export const makeProcessClaudeSessionRunner = (
 							}),
 						);
 				}).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							if (!admitted) return;
+							admitted.commandsInFlight--;
+							upgrade(admittedSessionId, admitted);
+							admitted = undefined;
+						}),
+					),
 					Effect.retry({
 						while: (failure) =>
 							(failure.code === "runner_idle_exit" ||

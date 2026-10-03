@@ -1597,6 +1597,30 @@ export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
 	},
 ) {}
 
+export const GoalDetailsSchema = Schema.Struct({
+	checks: Schema.Array(
+		Schema.Struct({
+			iteration: Schema.NonNegativeInt,
+			at: Schema.Number,
+			reason: Schema.NullOr(Schema.String),
+		}),
+	),
+	tokensSinceStart: Schema.NullOr(Schema.Number),
+});
+export type GoalDetails = typeof GoalDetailsSchema.Type;
+
+export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
+	"GetGoalDetails",
+	{
+		failure: WsRpcError,
+		success: GoalDetailsSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 export const WsRpcRequest = Schema.Union(
 	GetStatus,
 	SetPin,
@@ -1609,6 +1633,7 @@ export const WsRpcRequest = Schema.Union(
 	GetInstanceStatus,
 	AttachProject,
 	ResolveSession,
+	GetGoalDetails,
 	GetAgents,
 	GetCommands,
 	GetProjects,
@@ -1716,6 +1741,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetInstanceStatus),
 	Rpc.fromTaggedRequest(AttachProject),
 	Rpc.fromTaggedRequest(ResolveSession),
+	Rpc.fromTaggedRequest(GetGoalDetails),
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),

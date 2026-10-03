@@ -127,8 +127,15 @@
 	// their target. This test only holds because the dialog has no padding or
 	// border of its own; give it either and clicks on that edge read as
 	// backdrop clicks.
+	// A press that starts inside and is released outside also targets the
+	// dialog, as their common ancestor. That happens without any drag when the
+	// press itself resizes the panel: Settings tabs activate on focus, the
+	// panel re-centres, and the release lands on the backdrop.
+	let pressStartedInside = false;
 	function handleClick(e: MouseEvent): void {
-		if (dismissible && e.target === dialogEl) onclose();
+		const startedInside = pressStartedInside;
+		pressStartedInside = false;
+		if (dismissible && !startedInside && e.target === dialogEl) onclose();
 	}
 
 	// Native dialogs can send Tab to <body> when there are no tabbable
@@ -155,7 +162,10 @@
 	class="max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none {placement === 'sheet' ? 'fixed inset-x-0 bottom-0 top-auto m-0 w-full' : 'm-auto'}"
 	oncancel={handleCancel}
 	onclick={handleClick}
-	onpointerdown={() => (closedByPointer = true)}
+	onpointerdown={(e) => {
+		closedByPointer = true;
+		pressStartedInside = e.target !== dialogEl;
+	}}
 	onkeydown={handleKeydown}
 >
 	{#if open}

@@ -1,25 +1,23 @@
-<!-- Composer trigger carrying the selected harness-instance icon + model name. -->
-<!-- Opens an upward popover: 48px instance rail (left) + search & model rows   -->
-<!-- (right). Selecting a rail instance sets the session harness draft and      -->
-<!-- re-scopes both the model list and the agent list. Once a session exists    -->
-<!-- the harness is fixed: non-bound instances render disabled (locked mode).   -->
+<!-- Harness/model drill-down: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
-	import Tooltip from "../ui/Tooltip.svelte";
-	// biome-ignore lint/style/useImportType: ContextWindowSelector is used as a value for bind:this
-	import ContextWindowSelector from "./ContextWindowSelector.svelte";
+	import Dialog from "../ui/Dialog.svelte";
+	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import {
+		model as composerModel,
+		contextWindow,
+		effort,
+	} from "../../stores/composer-settings.svelte.js";
+	import {
 		applyDefaultModelSet,
 		applyGetModelsResponse,
 		applyGetAgentsResponse,
-		applyModelSwitched,
 		chooseDefaultModel,
-		chooseModel,
 		discoveryState,
 		getActiveModel,
 		getAvailableInstances,
@@ -32,6 +30,7 @@
 		selectInstance,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
+	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -40,23 +39,33 @@
 		getModelsRpc,
 		reloadProviderSessionRpc,
 		setDefaultModelRpc,
-		switchModelRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import type { Immutable, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
+	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
+
 	let pickerOpen = $state(false);
+	let view = $state<"root" | "harness" | "model">("root");
+	let innerWidth = $state(window.innerWidth);
+	const phone = $derived(innerWidth < 768);
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
 	let variantRef: ModelVariant | undefined = $state();
 	let searchEl: HTMLInputElement | undefined = $state();
-	let contextWindowRef: ContextWindowSelector | undefined = $state();
+	let triggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let pickerTriggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let harnessRowEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let backEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let draftChosen = $state(false);
 
 	// Prefix for the per-provider heading ids that each group's
 	// `aria-labelledby` points at. One base id per component instance, suffixed
 	// with the provider id, because the picker can mount more than once.
 	const groupHeadingId = $props.id();
+	const titleId = `${groupHeadingId}-title`;
+	const title = $derived(view === "root" ? "Harness & model" : view === "harness" ? "Harness" : "Model");
 
 	const instances = $derived(getAvailableInstances());
 
@@ -96,12 +105,40 @@
 	});
 
 	const activeModelId = $derived(
-		sessionState.currentId
+		sessionState.currentId || draftChosen
 			? discoveryState.currentModelId
 			: discoveryState.defaultModelId,
 	);
 	const activeModel = $derived(getActiveModel(activeModelId));
 	const hasModel = $derived(!!activeModelId);
+	// A draft model change has no server context-info refresh. Prefer its catalog
+	// so the new harness cannot inherit the previous model's window choices.
+	const contextOptions = $derived(
+		activeModel?.contextWindowOptions ??
+			(!sessionState.currentId && draftChosen && activeModel?.limit?.context ? [] : contextWindow.options),
+	);
+	const selectedContext = $derived(
+		contextOptions.find((option) => option.value === contextWindow.current?.value) ??
+			contextOptions.find((option) => option.isDefault) ?? contextOptions[0] ?? null,
+	);
+	const contextLabel = $derived(selectedContext?.label ?? modelContextLabel(activeModel));
+	const contextPercent = $derived(currentChat().contextPercent);
+	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
+	const contextSegments = $derived(contextOptions.map((option) => ({
+		value: option.value,
+		label: option.label,
+		testId: `picker-context-option-${option.value}`,
+		disabled: contextWindow.pending,
+	})));
+	const effortSegments = $derived(effort.options.map((variant) => ({
+		value: variant,
+		label: variant === "medium" ? "med" : variant,
+		testId: `picker-effort-option-${variant}`,
+		disabled: effort.pending,
+	})));
+	$effect(() => {
+		if (sessionState.currentId) draftChosen = false;
+	});
 	$effect(() => {
 		const turnEpoch = currentChat().turnEpoch;
 		const projectSlug = getCurrentSlug();
@@ -144,6 +181,15 @@
 		return name.replace(/-\d{8}$/, "");
 	}
 
+	function modelContextLabel(model: Immutable<ModelInfo> | undefined): string {
+		if (model?.contextWindowOptions?.length) {
+			return model.contextWindowOptions.map((option) => option.label).join(" / ");
+		}
+		const limit = model?.limit?.context;
+		if (!limit) return "";
+		return limit >= 1_000_000 ? `${limit / 1_000_000}M` : `${Math.round(limit / 1_000)}K`;
+	}
+
 	/** Format cost for display as per 1K tokens. */
 	function formatCost(cost?: ModelCost): string {
 		if (!cost) return "";
@@ -182,9 +228,16 @@
 		return locked && instance.id !== boundInstanceId;
 	}
 
-	function instanceTooltip(instance: InstanceOption): string {
-		// Surface live instance health (merged from instanceState) on hover;
-		// healthy is the norm, so only annotate degraded states.
+	function instanceDescription(instance: InstanceOption): string {
+		if (isInstanceDisabled(instance)) return "Harness is fixed for this session";
+		const driver = instance.driver === "claude" ? "Claude Agent SDK" : "OpenCode server";
+		return instance.status && instance.status !== "healthy"
+			? `${driver} · ${instance.status}`
+			: driver;
+	}
+
+	function instanceLabel(instance: InstanceOption): string {
+		// Healthy is the norm, so only annotate degraded states.
 		const status =
 			instance.status && instance.status !== "healthy"
 				? ` · ${instance.status}`
@@ -202,49 +255,33 @@
 		return base;
 	}
 
-	/**
-	 * The one control in this file still hand-rolling its own recipe, and
-	 * deliberately so. `ui/Button`'s only borderless-dim variant is `toolbar`,
-	 * which hard-sets `text-text-dimmer` -- and a call-site `text-text` loses to
-	 * it on stylesheet order, so the primary label of a menu row would come out
-	 * dimmed. `items-baseline` loses to the base `items-center` the same way, and
-	 * the cost column is a smaller type size that is baseline-aligned on purpose.
-	 *
-	 * What this actually wants is `ui/MenuItem`, which cannot be used here: it
-	 * renders a Bits `DropdownMenu.Item` and needs a menu context this
-	 * hand-rolled popover does not provide. Tracked as a design-system gap
-	 * rather than papered over with `!` overrides.
-	 */
-	/**
-	 * `text-accent` on the active row is deleted, not ported: `.text-text` is
-	 * emitted at byte 59336 and `.text-accent` at 57412, so `tone="default"`
-	 * has always won and the row has never been accent-coloured. The
-	 * `.model-item-active` hook stays -- test/visual/instance-model-picker
-	 * locates the active row through it -- and the accent checkmark inside the
-	 * row is a separate element that does render.
-	 */
 	function modelItemClass(model: Immutable<ModelInfo>): string {
 		const base =
-			"model-item flex items-baseline justify-between gap-2 w-full py-1.5 px-3.5 m-0 text-base text-left duration-100 leading-[1.4]";
+			"model-item flex items-center gap-2 min-w-0 flex-1 min-h-[46px] py-2.5 px-1 m-0 text-[13px] text-left duration-100 leading-[1.4]";
 		return isActiveModel(model) ? `${base} model-item-active` : base;
 	}
 
 	function togglePicker(e: MouseEvent) {
 		e.stopPropagation();
+		pickerTriggerEl = e.currentTarget as HTMLButtonElement;
 		variantRef?.close();
-		contextWindowRef?.close();
 		searchQuery = "";
+		view = "root";
 		pickerOpen = !pickerOpen;
 	}
 
 	function closePicker() {
 		pickerOpen = false;
+		(pickerTriggerEl ?? triggerEl)?.focus({ preventScroll: true });
 	}
 
 	function handleInstanceSelect(instance: InstanceOption, e: MouseEvent) {
 		e.stopPropagation();
-		if (isInstanceDisabled(instance) || instance.id === selectedId) return;
+		if (isInstanceDisabled(instance)) return;
+		view = "root";
+		if (instance.id === selectedId) return;
 		selectInstance(instance.id);
+		draftChosen = true;
 		searchQuery = "";
 		// The agent list follows the selected harness — re-fetch instance-scoped.
 		const projectSlug = getCurrentSlug();
@@ -258,28 +295,12 @@
 	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
 		e.stopPropagation();
 		const targetId = modelId ?? model.id;
-		const undoModel = chooseModel({
+		composerModel.select({
 			modelId: targetId,
 			providerId: model.provider,
 		});
-		const projectSlug = getCurrentSlug();
-		const sessionId = sessionState.currentId;
-		if (projectSlug && sessionId) {
-			void switchModelRpc({
-				projectSlug,
-				sessionId,
-				modelId: targetId,
-				providerId: model.provider,
-			})
-				.then((response) => {
-					applyModelSwitched(response);
-					void getAgentsRpc({ projectSlug, sessionId })
-						.then(applyGetAgentsResponse)
-						.catch(() => undefined);
-				})
-				.catch(undoModel);
-		}
-		closePicker();
+		draftChosen = !sessionState.currentId;
+		view = "root";
 	}
 
 	function handleSetDefault(model: Immutable<ModelInfo>, e: MouseEvent) {
@@ -315,33 +336,24 @@
 		closePicker();
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape" && pickerOpen) {
-			closePicker();
-		}
-	}
-
 	$effect(() => {
-		document.addEventListener("keydown", handleKeydown);
-		return () => {
-			document.removeEventListener("keydown", handleKeydown);
-		};
-	});
-
-	// Replaces the `autofocus` attribute the search input used to carry; see the
-	// comment on that input for why the attribute is inert here.
-	$effect(() => {
-		if (pickerOpen) searchEl?.focus();
+		if (!pickerOpen) return;
+		// Phones skip the search box: focusing it would raise the keyboard over the list.
+		if (view === "model" && !phone) searchEl?.focus({ preventScroll: true });
+		else if (view !== "root") backEl?.focus({ preventScroll: true });
+		else harnessRowEl?.focus({ preventScroll: true });
 	});
 </script>
+
+<svelte:window bind:innerWidth />
 
 {#snippet driverIcon(driver: "claude" | "opencode", size: number, badge: boolean)}
 	<span
 		data-driver={driver}
-		class="relative inline-flex flex-none items-center justify-center rounded-md font-bold text-[#0b0b0d] {driver === 'claude' ? 'bg-harness-claude' : 'bg-harness-opencode'}"
-		style="width:{size}px;height:{size}px;font-size:{size >= 24 ? 12 : 11}px"
+		class="relative inline-flex flex-none items-center justify-center"
+		style="width:{size}px;height:{size}px"
 	>
-		{driver === "claude" ? "C" : "O"}
+		<Icon name={driver} {size} />
 		{#if badge}
 			<span
 				class="absolute -bottom-[3px] -right-[3px] h-3 min-w-3 rounded-full bg-accent border-[1.5px] border-bg-alt flex items-center justify-center text-white text-[7px] font-bold"
@@ -350,168 +362,136 @@
 	</span>
 {/snippet}
 
-<div id="model-display" class="relative inline-flex min-w-0 items-center" use:dismiss={{ onDismiss: closePicker, escape: false, enabled: pickerOpen }}>
-	<!-- Trigger: selected instance icon + current model name -->
-	<!-- `toolbar` is the variant whose recipe this already was: borderless,
-	     transparent, dim, with a hover step. Its own `text-text-dimmer` and
-	     `hover:text-text` are overridden additively here, which works only
-	     because `.text-text-muted` and `.hover:text-text-secondary` are both
-	     emitted AFTER them in the built stylesheet. Every override in this file
-	     was checked that way rather than assumed: Tailwind's emission order is
-	     not alphabetical, and collisions within one family resolve in opposite
-	     directions.
-
-	     Button's default `align="center"` is harmless despite `max-w-[200px]`:
-	     the label span shrinks and ellipsises before the button reaches its cap,
-	     so the free space justify would distribute is never non-zero. -->
-	<Button
-		variant="toolbar"
-		size="content"
-		data-testid="model-picker-trigger"
-		data-instance-id={selectedId}
-		class="model-btn min-w-0 gap-1.5 h-9 px-2 text-text-muted text-xs font-medium duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
-		title="Switch model"
-		aria-expanded={pickerOpen}
-		aria-controls={pickerOpen ? "model-picker" : undefined}
-		onclick={togglePicker}
+{#snippet pickerSurface(sheet: boolean)}
+	<Surface
+		variant={sheet ? "plain" : "raised"}
+		radius="none"
+		elevation={sheet ? "modal" : "menu-lg"}
+		id="model-picker"
+		data-testid="model-picker"
+		role={sheet ? undefined : "dialog"}
+		aria-labelledby={sheet ? undefined : titleId}
+		class="model-dropdown flex flex-col overflow-hidden px-3.5 pt-2 font-brand {sheet
+			? 'w-full max-h-[85dvh] rounded-t-[22px] border-t border-border pb-[max(30px,env(safe-area-inset-bottom))]'
+			: 'absolute bottom-[calc(100%+8px)] right-0 w-[300px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[14px] pb-3.5 z-[var(--z-popover)]'}"
 	>
-		{@render driverIcon(selectedDriver, 18, selectedInstance?.isCustom ?? false)}
-		<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-			{displayName}
-		</span>
-		<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />
-	</Button>
-
-	<!-- Variant badge (extracted component) -->
-	<ModelVariant
-		bind:this={variantRef}
-		onOpen={() => {
-			closePicker();
-			contextWindowRef?.close();
-		}}
-	/>
-
-	<!-- Context window badge -->
-	<ContextWindowSelector
-		bind:this={contextWindowRef}
-		onOpen={() => {
-			closePicker();
-			variantRef?.close();
-		}}
-	/>
-
-	<!-- Upward popover: instance rail + model list -->
-	{#if pickerOpen}
-		<Surface
-			variant="raised"
-			radius="none"
-			elevation="menu-lg"
-			id="model-picker"
-			data-testid="model-picker"
-			class="model-dropdown absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] h-[376px] max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:w-auto max-sm:max-w-none max-sm:h-[70vh] flex flex-row overflow-hidden rounded-[14px] z-[var(--z-popover)] font-brand"
-		>
-			<!-- 48px instance rail -->
-			<div
-				data-testid="model-picker-rail"
-				class="w-12 flex-none border-r border-border bg-bg flex flex-col gap-1 p-1 overflow-y-auto"
-			>
-				<!-- `data-active` rather than a conditional `text-accent` class: the variant
-				     has to own both colour states, because a call-site `text-accent` LOSES to
-				     `toolbar`'s own `text-text-dimmer` on stylesheet order. The unlit
-				     `text-text-secondary` is passed additively because that one WINS. Same
-				     rule, opposite outcome.
-
-				     It carried `aria-pressed` but no accessible name: the only label was a
-				     `title`, which is not reliably announced. -->
+		{#if sheet}
+			<div class="mx-auto mb-2.5 h-1 w-9 shrink-0 rounded-full bg-border-chip" aria-hidden="true"></div>
+		{/if}
+		<div class="mb-2 flex min-h-7 shrink-0 items-center gap-2">
+			{#if view !== "root"}
 				<Button
-					variant="toolbar"
+					bind:element={backEl}
+					variant="ghost"
 					size="content"
 					iconOnly
-					icon="star"
-					iconSize={14}
-					ariaLabel="Favorites"
-					data-testid="picker-favorites"
-					data-active={favoritesOnly ? "" : undefined}
-					class="h-10 flex-none border-0 border-b border-solid border-border mb-0.5 rounded-lg hover:bg-bg-alt {favoritesOnly ? '' : 'text-text-secondary'}"
-					title="Favorites"
-					aria-pressed={favoritesOnly}
-					onclick={(e) => {
-						e.stopPropagation();
-						favoritesOnly = !favoritesOnly;
-					}}
+					icon="chevron-left"
+					iconSize={16}
+					ariaLabel="Back"
+					data-testid="picker-back"
+					class="h-7 w-7 rounded-lg"
+					onclick={() => { view = "root"; searchQuery = ""; }}
 				/>
+			{/if}
+			<h2 id={titleId} class="text-sm font-semibold text-text">{title}</h2>
+		</div>
+		<div class="min-h-0 overflow-y-auto">
+			{#if view === "root"}
+				<Button
+					bind:element={harnessRowEl}
+					variant="ghost"
+					size="content"
+					tone="default"
+					hoverFill="base"
+					layout="flow"
+					data-testid="picker-row-harness"
+					class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
+					onclick={() => { view = "harness"; }}
+				>
+					<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Harness</span>
+					<span class="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold">
+						{@render driverIcon(selectedDriver, 16, selectedInstance?.isCustom ?? false)}
+						<span class="truncate">{selectedLabel}</span>
+					</span>
+					<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="content"
+					tone="default"
+					hoverFill="base"
+					layout="flow"
+					data-testid="picker-row-model"
+					class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
+					onclick={() => { view = "model"; }}
+				>
+					<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Model</span>
+					<span class="min-w-0 flex-1 text-[13px] font-semibold">{displayName}</span>
+					<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+				</Button>
+				{#if contextLabel}
+					<div data-testid="picker-row-context" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Context</span>
+						{#if contextOptions.length > 1}
+							<SegmentedControl
+								bind:value={() => selectedContext?.value ?? "", (value) => contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
+								options={contextSegments}
+								variant="picker-context"
+								label="Context window"
+							/>
+						{:else}
+							<span class="min-w-0 flex-1 text-[13px] text-text">{contextLabel}</span>
+						{/if}
+						{#if contextPercent > 0}
+							<span data-testid="picker-context-usage" data-warning={contextWarning ? "true" : undefined} class="shrink-0 text-[11px] {contextWarning ? 'text-status-amber' : 'text-text-muted'}">{Math.round(contextPercent)}% used</span>
+						{/if}
+					</div>
+				{/if}
+				{#if effortSegments.length > 0}
+					<div class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
+						<SegmentedControl
+							bind:value={() => effort.current ?? "", (value) => effort.select(value)}
+							options={effortSegments}
+							variant="picker"
+							label="Effort"
+						/>
+					</div>
+				{/if}
+			{:else if view === "harness"}
 				{#each instances as instance (instance.id)}
 					{@const disabled = isInstanceDisabled(instance)}
 					{@const selected = instance.id === selectedId}
-					<!-- The disabled dimming is deliberately NOT passed on. Button's base already
-					     carries `aria-disabled:opacity-50`, and a variant utility beats the call
-					     site, so the old `opacity-[0.38]` would have lost silently. Letting the
-					     primitive own it moves locked-mode instances from Material's 0.38 to the
-					     design system's own disabled step.
-
-					     `ariaLabel` is the same string the tooltip shows, and the repetition
-					     is deliberate. The button's only content is a one-letter harness
-					     glyph, so without it the accessible name is "C". The tooltip is an
-					     `aria-describedby` DESCRIPTION, which never substitutes for a name --
-					     drop the label and a screen reader announces the button as "C". -->
-					<!-- ui/Tooltip renders no wrapper element of its own -- Bits'
-					     Provider and Root are context-only and the Trigger uses the
-					     `child` snippet -- so the Button stays a direct flex child of
-					     the rail and the layout is untouched. -->
-					<Tooltip side="right">
-						{#snippet trigger({ props })}
-							<Button
-								{...props}
-								variant="toolbar"
-								size="content"
-								ariaLabel={instanceTooltip(instance)}
-								data-testid="picker-instance-{instance.id}"
-								data-driver={instance.driver}
-								aria-pressed={selected}
-								ariaDisabled={disabled}
-								class="relative h-10 flex-none rounded-lg {disabled ? '' : 'hover:bg-bg-alt'}"
-								onclick={(e) => handleInstanceSelect(instance, e)}
-							>
-								{@render driverIcon(instance.driver, 26, instance.isCustom)}
-								{#if instance.isNew && !locked}
-									<span class="absolute top-0 right-0 text-warning">
-										<Icon name="sparkles" size={9} />
-									</span>
-								{/if}
-								<span
-									class="absolute -right-1 top-1/2 -translate-y-1/2 w-[3px] h-[22px] rounded-l-[3px] bg-accent transition-opacity duration-150 {selected ? 'opacity-100' : 'opacity-0'}"
-								></span>
-							</Button>
-						{/snippet}
-						{instanceTooltip(instance)}
-					</Tooltip>
+					<Button
+						variant="ghost"
+						size="content"
+						tone={selected ? "accent" : "default"}
+						hoverFill="base"
+						layout="flow"
+						ariaLabel={instanceLabel(instance)}
+						aria-pressed={selected}
+						ariaDisabled={disabled}
+						data-testid="picker-instance-{instance.id}"
+						data-driver={instance.driver}
+						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 last:border-b-0"
+						onclick={(e) => handleInstanceSelect(instance, e)}
+					>
+						{@render driverIcon(instance.driver, 16, instance.isCustom)}
+						<span class="min-w-0 flex-1 text-left">
+							<span class="block text-[13px] font-semibold">{instance.label}</span>
+							<span class="block text-[11px] text-text-muted">
+								{instanceDescription(instance)}
+							</span>
+						</span>
+						{#if instance.isNew && !locked}
+							<Icon name="sparkles" size={12} class="text-warning" />
+						{/if}
+						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
+					</Button>
 				{/each}
-			</div>
-
-			<!-- Search + scoped model rows -->
-			<div class="flex-1 flex flex-col min-w-0">
-				<div
-					class="flex items-center gap-2 py-2.5 px-3.5 border-b border-border text-text-dimmer"
-				>
+			{:else}
+				<div class="flex items-center gap-2 border-b border-border py-2.5 text-text-dimmer">
 					<Icon name="search" size={13} class="shrink-0" />
-					<!-- `chrome="focus-only"` rather than `bare`: the bordered row around
-					     this field is the affordance for where it sits, but it says nothing
-					     about whether the field has focus, and this input is the first thing
-					     the popover focuses. A keyboard user Tabbing back to it from the model
-					     rows had no way to tell the search box was live
-. `focus-only` keeps the chromeless rest state
-					     and adds an inset outline only under :focus-visible.
-
-					     `aria-label` because the only name this field has is its placeholder,
-					     which disappears the moment anyone types.
-
-					     Focus is taken in an effect rather than with an `autofocus` attribute,
-					     which is what this was and which never worked. Per the HTML spec an
-					     autofocus candidate is ignored once the top document's
-					     autofocus-processed flag is set, i.e. for anything inserted after load,
-					     and this input lives inside an `if` block. Svelte does not special-case
-					     the attribute the way React does, so opening the picker and typing did
-					     nothing. The Open story now asserts focus, so it cannot regress. -->
 					<TextInput
 						bind:element={searchEl}
 						data-testid="model-picker-search"
@@ -520,78 +500,47 @@
 						size="content"
 						aria-label="Search {selectedLabel} models"
 						placeholder="Search {selectedLabel} models…"
-						class="flex-1 min-w-0 text-text text-[13px] font-brand placeholder:text-text-dimmer"
-						onclick={(e) => e.stopPropagation()}
+						class="min-w-0 flex-1 text-[13px] text-text font-brand placeholder:text-text-dimmer"
+					/>
+					<Button
+						variant="toolbar"
+						size="content"
+						iconOnly
+						icon="star"
+						iconSize={14}
+						ariaLabel="Favorites"
+						data-testid="picker-favorites"
+						data-active={favoritesOnly ? "" : undefined}
+						aria-pressed={favoritesOnly}
+						title="Favorites"
+						class="h-7 w-7 rounded-lg"
+						onclick={() => { favoritesOnly = !favoritesOnly; }}
 					/>
 				</div>
-				<div
-					data-testid="model-picker-list"
-					class="flex-1 overflow-y-auto py-1.5"
-				>
+				<div data-testid="model-picker-list" class="py-1.5">
 					{#if locked}
-						<div
-							class="flex items-start gap-2 mx-2 my-1.5 py-2 px-3 border border-dashed border-border rounded-lg text-[11px] leading-[1.4] text-text-dimmer"
-						>
-							<span class="shrink-0">🔒</span>
-							<span>
-								Harness fixed at creation — showing
-								<b class="text-text-secondary font-semibold">{selectedLabel}</b>
-								only. Model switching within it is allowed.
-							</span>
+						<div class="my-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] leading-[1.4] text-text-dimmer">
+							<Icon name="lock" size={12} class="shrink-0" />
+							<span>Harness fixed at creation — showing <b class="font-semibold text-text-secondary">{selectedLabel}</b> only. Model switching within it is allowed.</span>
 						</div>
 					{/if}
 					{#if filteredGroups.length === 0}
-						<div
-							class="model-empty py-4 px-3.5 text-center text-base text-text-dimmer"
-						>
-							{searchQuery.trim() ? "No models match" : "No models available"}
-						</div>
+						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">{searchQuery.trim() ? "No models match" : "No models available"}</div>
 					{:else}
 						{#each filteredGroups as group (group.provider.id)}
-							<!-- `role="group"` + `aria-labelledby`, not `role="listbox"`: these rows
-							     are Tab-focusable buttons and some carry sibling routing buttons
-							     inside the row, both of which are illegal inside a listbox option.
-							     A group is what this genuinely is -- a run of controls under a
-							     heading -- and it makes the provider name part of every row's
-							     announced context rather than a visual-only divider
-. -->
-							<div
-								class={providerSectionClass(group)}
-								role="group"
-								aria-labelledby="{groupHeadingId}-{group.provider.id}"
-							>
-								<div
-									id="{groupHeadingId}-{group.provider.id}"
-									class="model-provider-header py-2 px-3.5 pt-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer"
-								>
-									{group.provider.name || group.provider.id}<!--
-										Was a `.model-provider-disabled .model-provider-header::after`
-										recipe in style.css. Pseudo-element `content` is invisible to
-										text selection and to translation, and screen-reader support
-										for it is inconsistent, so the string belongs in the markup.
-										The span restates the three declarations the rule used to
-										reset, so it renders identically.
-									-->{#if !isProviderConfigured(group.provider)}<span
-											class="font-normal normal-case tracking-normal"
-											>{" (not configured)"}</span
-										>{/if}
+							<div class={providerSectionClass(group)} role="group" aria-labelledby="{groupHeadingId}-{group.provider.id}">
+								<div id="{groupHeadingId}-{group.provider.id}" class="model-provider-header px-1 py-2 text-sm font-semibold uppercase tracking-[0.5px] text-text-dimmer">
+									{group.provider.name || group.provider.id}{#if !isProviderConfigured(group.provider)}<span class="font-normal normal-case tracking-normal">{" (not configured)"}</span>{/if}
 								</div>
 								{#each group.models as model (model.id)}
 									{@const cost = formatCost(model.cost)}
-									<div class="flex items-center">
-										<!--
-											`layout="flow"` because this row aligns on the text
-											baseline, not the box centre: the default `center`
-											emits `items-center` at byte 29745, which outranks a
-											consumer `items-baseline` at 29708. Under `flow` the
-											call site keeps the whole box, `justify-between`
-											included.
-										-->
+									{@const windows = modelContextLabel(model)}
+									<div class="flex items-center gap-1 border-b border-border-subtle last:border-b-0">
 										<Button
 											variant="ghost"
 											size="content"
 											layout="flow"
-											tone="default"
+											tone={isActiveModel(model) ? "accent" : "default"}
 											hoverFill="base"
 											class={modelItemClass(model)}
 											data-model-id={model.id}
@@ -599,46 +548,31 @@
 											aria-current={isActiveModel(model) ? "true" : undefined}
 											onclick={(e) => handleModelClick(model, e)}
 										>
-											<span class="model-item-name flex-1 whitespace-nowrap">
-												{#if isActiveModel(model)}
-													<!-- aria-hidden: `aria-current` on the button carries the state.
-													     Audible, this reads as a literal check character or, in some
-													     screen readers, as nothing at all. -->
-													<span
-														class="model-check text-accent font-bold mr-0.5"
-														aria-hidden="true">&#10003;</span
-													>
-												{/if}
+											<span class="model-item-name min-w-0 flex-1 font-semibold">
 												{stripDateSuffix(formatModelName(model))}
-												{#if isDefaultModel(model)}
-													<span class="ml-1 text-xs text-text-dimmer font-normal"
-														>(default)</span
-													>
-												{/if}
+												{#if isDefaultModel(model)}<span class="ml-1 text-xs font-normal text-text-dimmer">(default)</span>{/if}
 											</span>
-											{#if cost}
-												<span
-													class="model-item-cost shrink-0 text-xs text-text-dimmer whitespace-nowrap"
-												>
-													{cost}
+											{#if windows || cost}
+												<span class="min-w-0 text-right text-[11px] font-normal text-text-muted">
+													{#if windows}<span class="model-item-context block">{windows}</span>{/if}
+													{#if cost}<span class="model-item-cost block">{cost}</span>{/if}
 												</span>
 											{/if}
+											{#if isActiveModel(model)}<Icon name="check" size={16} class="model-check shrink-0 text-accent" />{/if}
 										</Button>
 										{#if model.routingOptions}
-											<span class="model-routing flex items-center gap-0.5 shrink-0 mr-1">
+											<span class="model-routing flex shrink-0 flex-wrap items-center gap-0.5">
 												{#each model.routingOptions as option (option.value)}
-													{@const routed = option.value === discoveryState.currentModelId}
+											{@const routed = option.value === discoveryState.currentModelId}
 													<Button
 														variant="toolbar"
 														size="content"
-														class="px-1.5 py-0.5 text-xs rounded duration-100 {routed ? 'bg-bg font-semibold' : 'hover:bg-bg hover:text-text-secondary'}"
+														class="rounded px-1.5 py-0.5 text-xs duration-100 {routed ? 'bg-bg font-semibold' : 'hover:bg-bg hover:text-text-secondary'}"
 														title="Route via {option.label}{option.isDefault ? ' (default)' : ''}"
 														data-routing-value={option.value}
 														data-active={routed ? "" : undefined}
 														onclick={(e) => handleModelClick(model, e, option.value)}
-													>
-														{option.label}
-													</Button>
+													>{option.label}</Button>
 												{/each}
 											</span>
 										{/if}
@@ -650,15 +584,12 @@
 												icon="star"
 												iconSize={12}
 												ariaLabel={`Set ${formatModelName(model)} as default model`}
-												class="shrink-0 px-1.5 py-1 mr-1 text-xs rounded duration-100 hover:bg-bg hover:text-text-secondary"
+												class="shrink-0 rounded px-1.5 py-1 text-xs duration-100 hover:bg-bg hover:text-text-secondary"
 												title="Set as default model"
 												onclick={(e) => handleSetDefault(model, e)}
 											/>
 										{:else}
-											<span
-												class="shrink-0 px-1.5 py-1 mr-1 text-text [&>svg]:fill-current"
-												title="Default model"
-											>
+											<span class="shrink-0 px-1.5 py-1 text-text [&>svg]:fill-current" title="Default model">
 												<Icon name="star" size={12} />
 												<span class="sr-only">Default model</span>
 											</span>
@@ -668,14 +599,11 @@
 							</div>
 						{/each}
 					{/if}
-
-					<!-- Reload footer -->
-					<div class="model-reload-footer border-t border-border mt-1 pt-1">
+					<div class="mt-1 border-t border-border pt-1">
 						<Button
 							variant="toolbar"
 							size="content"
-							align="start"
-							class="reload-btn w-full gap-2 py-1.5 px-3.5 text-sm text-left duration-100 hover:bg-bg hover:text-text-secondary"
+							class="flex w-full items-center justify-center gap-1.5 px-3 py-1.5 text-xs duration-100 hover:bg-bg hover:text-text-secondary"
 							title="Reload skills and commands from disk"
 							onclick={handleReload}
 						>
@@ -684,7 +612,96 @@
 						</Button>
 					</div>
 				</div>
-			</div>
-		</Surface>
+			{/if}
+		</div>
+	</Surface>
+{/snippet}
+
+<div
+	id="model-display"
+	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-px' : ''}"
+	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
+>
+	{#if variant === "words"}
+		<Button
+			bind:element={triggerEl}
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="none"
+			data-testid="composer-word-model"
+			data-instance-id={selectedId}
+			class="min-w-0 gap-[5px] rounded-md px-[5px] py-[2px] text-[11.5px] font-normal font-brand max-w-[200px] max-sm:max-w-[130px] overflow-hidden"
+			title="Switch model"
+			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
+			aria-haspopup="dialog"
+			aria-expanded={pickerOpen}
+			aria-controls={pickerOpen ? "model-picker" : undefined}
+			onclick={togglePicker}
+		>
+			{@render driverIcon(selectedDriver, 13, selectedInstance?.isCustom ?? false)}
+			<span class="min-w-0 truncate border-b border-dotted border-border-chip">{displayName}</span>
+		</Button>
+		{#if contextLabel}
+			<span aria-hidden="true" class="text-border-chip">·</span>
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="none"
+				data-testid="composer-word-context"
+				class="shrink-0 rounded-md px-[5px] py-[2px] text-[11.5px] font-normal font-brand"
+				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
+				aria-haspopup="dialog"
+				aria-expanded={pickerOpen}
+				aria-controls={pickerOpen ? "model-picker" : undefined}
+				onclick={togglePicker}
+			>
+				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
+			</Button>
+		{/if}
+		{#if effort.options.length > 0}
+			<span aria-hidden="true" class="text-border-chip">·</span>
+		{/if}
+	{:else}
+		<Button
+			bind:element={triggerEl}
+			variant="toolbar"
+			size="content"
+			data-testid="model-picker-trigger"
+			data-instance-id={selectedId}
+			class="model-btn min-w-0 gap-1.5 h-9 px-2 text-text-muted text-xs font-medium duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
+			title="Switch model"
+			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
+			aria-haspopup="dialog"
+			aria-expanded={pickerOpen}
+			aria-controls={pickerOpen ? "model-picker" : undefined}
+			onclick={togglePicker}
+		>
+			{@render driverIcon(selectedDriver, 18, selectedInstance?.isCustom ?? false)}
+			<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+				{displayName}{#if contextLabel}<span data-testid="picker-selected-context" class="hidden md:inline"> · {contextLabel}</span>{/if}
+			</span>
+			<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />
+		</Button>
+	{/if}
+
+	<ModelVariant bind:this={variantRef} onOpen={closePicker} {variant} />
+
+	{#if pickerOpen}
+		{#if phone}
+			<Dialog
+				open={pickerOpen}
+				onclose={closePicker}
+				placement="sheet"
+				labelledBy={titleId}
+				returnFocus={() => pickerTriggerEl ?? triggerEl ?? null}
+				initialFocus="first"
+			>
+				{@render pickerSurface(true)}
+			</Dialog>
+		{:else}
+			{@render pickerSurface(false)}
+		{/if}
 	{/if}
 </div>

@@ -8,11 +8,13 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
+import { homedir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
@@ -96,8 +98,8 @@ export interface BrowserFrame {
 }
 
 export class ProcessHarness {
-	readonly root = mkdtempSync("/tmp/conduit-process-");
-	readonly projectDir = join(this.root, "project");
+	readonly root: string;
+	readonly projectDir: string;
 	readonly configDir: string;
 	readonly marks: ProcessMark[] = [];
 	readonly generations: Generation[] = [];
@@ -130,7 +132,7 @@ export class ProcessHarness {
 	private constructor(
 		private readonly dist?: string,
 		private readonly enqueueMarkDelayMs = 0,
-		private readonly claudeRunner?: "process",
+		private readonly realSdk = false,
 		private readonly shellEnvProof = false,
 		private readonly managedOpenCode = false,
 		ignoreOpenCodeSigterm = false,
@@ -156,9 +158,15 @@ export class ProcessHarness {
 			| "answer-permission"
 			| "send-turn",
 		private readonly runnerReattachGraceMs?: number,
+		private buildId?: string,
+		private readonly upgradeSinkProof = false,
+		private readonly subagentPollTimeoutMs?: number,
+		rootPrefix = "/tmp/conduit-process-",
 		private readonly foregroundCli = false,
 		private readonly autoStartOpenCode = false,
 	) {
+		this.root = mkdtempSync(rootPrefix);
+		this.projectDir = join(this.root, "project");
 		this.configDir = join(
 			this.root,
 			runnerLifecycle?.nonDefaultConfigDir ? "active-config" : "config",
@@ -174,6 +182,15 @@ export class ProcessHarness {
 			"active-config",
 		]) {
 			mkdirSync(join(this.root, directory));
+		}
+		// macOS resolves the login Keychain under HOME, so an isolated HOME hides
+		// the Claude login. Link only the Keychains dir for real-SDK runs.
+		if (realSdk && process.platform === "darwin") {
+			mkdirSync(join(this.root, "home", "Library"));
+			symlinkSync(
+				join(homedir(), "Library", "Keychains"),
+				join(this.root, "home", "Library", "Keychains"),
+			);
 		}
 		if (blockCapabilitiesProbe)
 			writeFileSync(join(this.root, "capabilities-probe-gated"), "hold");
@@ -320,7 +337,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		options: {
 			dist?: string;
 			enqueueMarkDelayMs?: number;
-			claudeRunner?: "process";
+			realSdk?: boolean;
 			shellEnvProof?: boolean;
 			managedOpenCode?: boolean;
 			ignoreOpenCodeSigterm?: boolean;
@@ -337,6 +354,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 				| "answer-permission"
 				| "send-turn";
 			runnerReattachGraceMs?: number;
+			buildId?: string;
+			upgradeSinkProof?: boolean;
+			subagentPollTimeoutMs?: number;
+			rootPrefix?: string;
 			foregroundCli?: boolean;
 			autoStartOpenCode?: boolean;
 		} = {},
@@ -346,7 +367,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				? resolve(options.dist ?? process.env["CONDUIT_TEST_DIST"] ?? "dist")
 				: undefined,
 			options.enqueueMarkDelayMs,
-			options.claudeRunner,
+			options.realSdk,
 			options.shellEnvProof,
 			options.managedOpenCode,
 			options.ignoreOpenCodeSigterm,
@@ -360,6 +381,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.holdRunnerAck,
 			options.holdRunnerOutput,
 			options.runnerReattachGraceMs,
+			options.buildId,
+			options.upgradeSinkProof,
+			options.subagentPollTimeoutMs,
+			options.rootPrefix,
 			options.foregroundCli,
 			options.autoStartOpenCode,
 		);
@@ -379,14 +404,27 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	async restart(
-		options: { skipBrowserProbe?: boolean; cliArgs?: string[] } = {},
+		options: {
+			skipBrowserProbe?: boolean;
+			cliArgs?: string[];
+			buildId?: string;
+			queryInitializationDelayMs?: number;
+		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
+		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
-		const fakeModule = pathToFileURL(
-			fileURLToPath(new URL("./fake-claude-process-sdk.ts", import.meta.url)),
+		const sdkModule = pathToFileURL(
+			fileURLToPath(
+				new URL(
+					this.realSdk
+						? "./real-claude-process-sdk.ts"
+						: "./fake-claude-process-sdk.ts",
+					import.meta.url,
+				),
+			),
 		).href;
 		if (
 			this.foregroundCli &&
@@ -484,9 +522,22 @@ Object.assign(ClaudeDriver, { create: deps => {
 					XDG_CACHE_HOME: join(this.root, "cache"),
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
-					CLAUDE_CONFIG_DIR: join(this.root, "claude"),
+					CLAUDE_CONFIG_DIR: this.realSdk
+						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
+						: join(this.root, "claude"),
 					OPENCODE_URL: this.defaultOpenCodeUrl,
-					CONDUIT_TEST_CLAUDE_QUERY_MODULE: fakeModule,
+					// An explicit config path must keep the login's original Keychain service.
+					...(this.realSdk
+						? {
+								// Claude reads its Keychain login with USER as the account name.
+								USER: userInfo().username,
+								CLAUDE_SECURESTORAGE_CONFIG_DIR:
+									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
+									process.env["CLAUDE_CONFIG_DIR"] ??
+									"",
+							}
+						: {}),
+					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
 					...Object.fromEntries(
 						[
@@ -540,8 +591,20 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS: String(
-						this.queryInitializationDelayMs,
+						options.queryInitializationDelayMs ??
+							this.queryInitializationDelayMs,
 					),
+					...(this.buildId ? { CONDUIT_TEST_BUILD_ID: this.buildId } : {}),
+					...(this.upgradeSinkProof
+						? { CONDUIT_TEST_UPGRADE_SINK_PROOF: "1" }
+						: {}),
+					...(this.subagentPollTimeoutMs !== undefined
+						? {
+								CONDUIT_TEST_SUBAGENT_POLL_TIMEOUT_MS: String(
+									this.subagentPollTimeoutMs,
+								),
+							}
+						: {}),
 					CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES: String(
 						this.queryInitializationFailures,
 					),
@@ -555,9 +618,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 						: {}),
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
-						: {}),
-					...(this.claudeRunner
-						? { CONDUIT_CLAUDE_RUNNER: this.claudeRunner }
 						: {}),
 					...(this.runnerReattachGraceMs !== undefined
 						? {
@@ -627,7 +687,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 					ready(value as unknown as Generation);
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
-						value["module"] === fakeModule &&
+						generation &&
+						value["module"] === sdkModule &&
 						value["projectDir"] === this.projectDir
 					) {
 						fakeSdkActive = true;
@@ -675,7 +736,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.rememberManagedOpenCode();
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
-		if (options.skipBrowserProbe) return;
+		if (options.skipBrowserProbe || this.realSdk) return;
 		const probe = await ProcessBrowser.connect(this.port);
 		try {
 			const deadline = Date.now() + 2000;

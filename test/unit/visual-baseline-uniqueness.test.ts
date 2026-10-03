@@ -69,6 +69,30 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"Both stories use mockQuestionSkipped, which ToolItem dispatches to ToolQuestionCard.",
 	"chat-toolitem--subagent-completed | chat-toolsubagentcard--default":
 		"Both stories use mockToolSubagentCompleted, which ToolItem dispatches to ToolSubagentCard.",
+
+	// Verified legitimate (conduit-test-dfvd composer redesign).
+	"input-attachmenu--open | input-attachmenu--open-code":
+		"Open uses the default OpenCode provider; OpenCode asserts the disabled 'Claude only' Goal entry in play()",
+	"input-inputarea--words-desktop | input-inputarea--words-phone":
+		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
+	"input-inputarea--words-desktop-light | input-inputarea--words-phone-light":
+		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
+	"input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--phone-open-code-cycle | input-permissionmodeselector--responsive":
+		"all three end on the phone-width OpenCode ASK badge; the cycle, normalisation and breakpoint are asserted in play()",
+	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared":
+		"a cleared goal renders no subtitle, so both end on the plain expanded bar",
+	"ui-microlabelbutton--cancelled-hold | ui-microlabelbutton--default | ui-microlabelbutton--hold-and-tap | ui-microlabelbutton--hold-lifecycle":
+		"hold interactions end with the menu closed and the button at rest; the hold timing is asserted in play()",
+	"ui-microlabelbutton--default-light | ui-microlabelbutton--hold-and-tap-light":
+		"hold interactions end with the menu closed and the button at rest; the hold timing is asserted in play()",
+	"ui-microlabelbutton--keyboard | ui-microlabelbutton--pulse | ui-microlabelbutton--reduced-motion":
+		"all end focused at rest after a finished (or suppressed) pulse; the pulse itself is asserted in play()",
+	"ui-microlabelbutton--keyboard-light | ui-microlabelbutton--pulse-light":
+		"both end focused at rest after a finished pulse; the pulse itself is asserted in play()",
+	"ui-tworowcomposerlayout--idle-empty | ui-tworowcomposerlayout--silent-value-changes":
+		"SilentValueChanges ends by emptying the field; its row changes are asserted in play()",
+	"ui-tworowcomposerlayout--idle-empty-light | ui-tworowcomposerlayout--silent-value-changes-light":
+		"SilentValueChanges ends by emptying the field; its row changes are asserted in play()",
 };
 
 const BASELINE_DIRECTORY = resolve(

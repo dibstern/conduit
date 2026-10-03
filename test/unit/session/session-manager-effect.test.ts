@@ -521,6 +521,8 @@ describe("SessionManager Effect", () => {
 				getToolContent: vi.fn(() => Effect.succeed(undefined)),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),
+				getGoalDetails: () =>
+					Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),

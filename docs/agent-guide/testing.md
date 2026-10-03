@@ -25,6 +25,40 @@ pnpm test:integration
 pnpm test:contract
 ```
 
+### Claude process runners
+
+The default server uses Claude runner processes. The process harness isolates
+HOME, server config and project directories, injects the fake SDK, and drives
+browser RPC and WebSocket endpoints. Runner tests require no mode selector.
+Tests that inject an in-process query factory use an explicit runner dependency.
+
+```bash
+pnpm build
+CONDUIT_TEST_DIST=dist npx --no-install vitest run --config vitest.integration.config.ts \
+  test/integration/daemon/claude-runner-upgrade.test.ts \
+  test/integration/daemon/claude-runner-restart.test.ts \
+  test/integration/daemon/claude-process-runner.test.ts \
+  test/integration/daemon/process-harness.test.ts \
+  test/integration/daemon/process-harness-build.test.ts
+npx --no-install vitest run test/integration/daemon/claude-process-runner-lifecycle.test.ts
+CONDUIT_PREWARM_E2E_DIST=dist npx --no-install vitest run --config vitest.integration.config.ts \
+  test/integration/daemon/claude-prewarm.test.ts
+```
+
+The real-SDK smoke skips by default. Opt in on a machine with network and
+keychain access and an existing Claude login:
+
+```bash
+RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
+  test/e2e/provider/claude-runner-real-sdk.test.ts
+```
+
+It writes `test-results/85kb-15-real-sdk.json` with the runner PID and spawn,
+first-event and turn-end timings. Only the session query uses the real SDK;
+title generation and capability probing use fakes. See
+[Claude runners](claude-runners.md) for the default-path latency comparison
+against a preserved pre-.15 build.
+
 ### E2E (Replay — Default)
 
 Run this when changing browser-visible workflows, WebSocket behavior, mobile flows, or end-to-end session lifecycles. Uses recorded WebSocket fixtures — no running OpenCode instance needed.

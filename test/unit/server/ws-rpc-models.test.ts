@@ -47,6 +47,7 @@ const makeReadQuery = (
 	getToolContent: () => Effect.succeed(undefined),
 	getSessionStatus: () => Effect.succeed(undefined),
 	getSession: () => Effect.succeed(undefined),
+	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: () => Effect.succeed({}),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),

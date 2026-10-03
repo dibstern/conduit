@@ -258,6 +258,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
+		configDir: dirname(dbPath),
 		slug: "test-status-poller",
 		noServer: true,
 		log: createSilentLogger(),

@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
+	composerPreferences,
+	setComposerPreferences,
+} from "../../stores/composer-preferences.svelte.js";
+import {
 	clearDiscoveryState,
 	discoveryState,
 	handleAgentList,
@@ -13,6 +17,7 @@ import { routerState } from "../../stores/router.svelte.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
+	setComposerPreferences({ controls: "icons", contextWarning: 80 });
 	routerState.path = "/";
 	clearDiscoveryState();
 	handleInstanceList({ type: "instance_list", instances: [] });
@@ -81,6 +86,71 @@ export const NotificationsEnabled: Story = {
 
 export const Appearance: Story = {
 	args: { initialTab: "appearance" },
+};
+
+export const Composer: Story = {
+	tags: ["autodocs"],
+	args: { initialTab: "composer" },
+	globals: { theme: "dark" },
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("settings-tab-composer")).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		const icons = body.getByRole("radio", { name: "Icons" });
+		const words = body.getByRole("radio", { name: "Words" });
+		await expect(icons).toHaveAttribute("aria-checked", "true");
+		await userEvent.click(words);
+		await expect(words).toHaveAttribute("aria-checked", "true");
+		await expect(composerPreferences.controls).toBe("words");
+		await expect(
+			JSON.parse(localStorage.getItem("conduit-composer-preferences") ?? "{}"),
+		).toEqual({ controls: "words", contextWarning: 80 });
+		await userEvent.click(icons);
+		await expect(icons).toHaveAttribute("aria-checked", "true");
+		await expect(composerPreferences.controls).toBe("icons");
+		const warning = body.getByTestId("settings-composer-context-warning-80");
+		await expect(warning).toHaveAttribute("aria-checked", "true");
+		for (const threshold of [60, 70, 80, 90, "never"] as const) {
+			const option = body.getByTestId(
+				`settings-composer-context-warning-${threshold}`,
+			);
+			await userEvent.click(option);
+			await expect(option).toHaveAttribute("aria-checked", "true");
+			await expect(composerPreferences.contextWarning).toBe(threshold);
+		}
+		await expect(
+			JSON.parse(localStorage.getItem("conduit-composer-preferences") ?? "{}"),
+		).toEqual({ controls: "icons", contextWarning: "never" });
+		await userEvent.click(warning);
+		// userEvent focus reads as keyboard focus; keep its ring out of the baseline.
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+
+export const ComposerLight: Story = {
+	...Composer,
+	tags: ["autodocs"],
+	globals: { theme: "light" },
+};
+
+export const ComposerPhone: Story = {
+	...Composer,
+	tags: ["autodocs"],
+	play: async (context) => {
+		const panel =
+			context.canvasElement.ownerDocument.getElementById("settings-panel");
+		if (!panel) throw new Error("Settings panel is missing");
+		panel.style.maxWidth = "361px";
+		await Composer.play?.(context);
+	},
+};
+
+export const ComposerPhoneLight: Story = {
+	...ComposerPhone,
+	tags: ["autodocs"],
+	globals: { theme: "light" },
 };
 
 export const VisibilityEmpty: Story = {

@@ -6,9 +6,6 @@ export class InputPage {
 	readonly sendBtn: Locator;
 	readonly attachBtn: Locator;
 	readonly attachMenu: Locator;
-	readonly contextMini: Locator;
-	readonly contextFill: Locator;
-	readonly contextLabel: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
@@ -19,9 +16,6 @@ export class InputPage {
 		// presence is the state. It used to be a permanently mounted element
 		// toggled by a `hidden` class.
 		this.attachMenu = page.locator("[data-testid='attach-menu']");
-		this.contextMini = page.locator("#context-mini");
-		this.contextFill = page.locator("#context-mini-fill");
-		this.contextLabel = page.locator("#context-mini-label");
 	}
 
 	async type(text: string): Promise<void> {

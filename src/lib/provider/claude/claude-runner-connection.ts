@@ -1,12 +1,12 @@
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { Cause, Deferred, Effect } from "effect";
-import { BUILD_ID } from "../../build-id.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
 	CLAUDE_RUNNER_PROTOCOL_VERSION,
 	type ClaudeRunnerHello,
 	ClaudeRunnerSocket,
+	claudeRunnerBuildId,
 	claudeRunnerFailure,
 	claudeRunnerHelloFailure,
 } from "./claude-runner-protocol.js";
@@ -14,6 +14,7 @@ import {
 	currentClaudeRunnerOutput,
 	type makeClaudeRunnerReceiptStore,
 } from "./claude-runner-receipts.js";
+import type { ClaudeRunnerUpgradeState } from "./claude-runner-upgrade.js";
 import type {
 	ClaudeSessionFailure,
 	ClaudeSessionOutput,
@@ -31,6 +32,7 @@ export const connectClaudeRunner = (options: {
 	readonly runnerId: string;
 	readonly pid?: number;
 	readonly helloTimeoutMs?: number;
+	readonly preserveRole?: boolean;
 	readonly deps: ClaudeSessionRunnerDeps;
 	readonly receipts?: ReceiptStore;
 	readonly runFork: (effect: Effect.Effect<void>) => unknown;
@@ -45,6 +47,7 @@ export const connectClaudeRunner = (options: {
 	readonly onClose: (failure: ClaudeSessionFailure) => void;
 	readonly onIdleExit?: () => void;
 	readonly onCommandAccepted?: (sinkId: string) => void;
+	readonly onUpgradeState?: (state: ClaudeRunnerUpgradeState) => void;
 	readonly onOutputCommitted?: (output: ClaudeSessionOutput) => void;
 }) =>
 	Effect.gen(function* () {
@@ -110,6 +113,10 @@ export const connectClaudeRunner = (options: {
 				const connection = new ClaudeRunnerSocket(
 					socket,
 					(message) => {
+						if (message.type === "upgrade-state") {
+							options.onUpgradeState?.(message.state);
+							return;
+						}
 						if (message.type === "idle-exit") {
 							options.onIdleExit?.();
 							connection.write({ type: "idle-exit-ack" });
@@ -199,6 +206,9 @@ export const connectClaudeRunner = (options: {
 												connection.write({
 													type: "replay",
 													acknowledgedSequence: acknowledged,
+													...(options.preserveRole
+														? { preserveRole: true }
+														: {}),
 												});
 												finish(Effect.succeed(connection));
 											}),
@@ -407,7 +417,7 @@ export const connectClaudeRunner = (options: {
 							process.env["CONDUIT_TEST_SERVER_PROTOCOL_VERSION"]
 								? Number(process.env["CONDUIT_TEST_SERVER_PROTOCOL_VERSION"])
 								: CLAUDE_RUNNER_PROTOCOL_VERSION,
-						buildId: BUILD_ID,
+						buildId: claudeRunnerBuildId(),
 						acknowledgedSequence: acknowledged,
 						config: {
 							workspaceRoot: options.deps.workspaceRoot,

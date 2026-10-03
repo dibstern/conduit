@@ -121,7 +121,7 @@ async function main(): Promise<void> {
 		host: "127.0.0.1",
 		configDir:
 			process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config"),
-		claudeConfigDir: join(root, "claude"),
+		claudeConfigDir: process.env["CLAUDE_CONFIG_DIR"] ?? join(root, "claude"),
 		staticDir: dist ? join(dist, "frontend") : join(root, "static"),
 		smartDefault: false,
 		// An unreachable unmanaged placeholder also keeps the relay's legacy

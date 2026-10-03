@@ -4,9 +4,12 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import { untrack } from "svelte";
 	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { sessionGoals } from "../../stores/goal.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
 	import ForkContextBlock from "./ForkContextBlock.svelte";
 	import ForkDivider from "./ForkDivider.svelte";
@@ -20,6 +23,7 @@
 		noteSessionChanged,
 		noteUserScroll,
 		publishAtBottom,
+		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
 	import { economics, forkMessageIdAtReply, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
@@ -44,6 +48,14 @@
 		() => currentChat().loadLifecycle,
 		noteUserScroll,
 	);
+
+	let handledFollowRequest = sessionViewState.followRequest;
+	$effect(() => {
+		const request = sessionViewState.followRequest;
+		if (request === handledFollowRequest) return;
+		handledFollowRequest = request;
+		untrack(() => scrollCtrl.requestFollow());
+	});
 
 	// Attach/detach the controller to the scroll container
 	$effect(() => {
@@ -248,6 +260,23 @@
 	const currentTurns = $derived(
 		forkSplit ? segmentTurns(forkSplit.current, isProcessing(), currentChat().turnEpoch) : [],
 	);
+	const goal = $derived(
+		discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "")?.goal : null,
+	);
+	const goalNoticeTurnId = $derived.by(() => {
+		if (!goal) return null;
+		const visibleTurns = forkSplit ? currentTurns : turns;
+		const latestFirst = [...visibleTurns].reverse();
+		// The set fact follows its user prompt. Persisted timestamps keep that
+		// position when later turns arrive or this transcript is loaded again.
+		const anchor = latestFirst.find((turn) => turn.user?.text.trim() === `/goal ${goal.condition}` && (turn.user.createdAt === undefined || turn.user.createdAt <= goal.setAt))
+			?? latestFirst.find((turn) => turn.user?.createdAt !== undefined && turn.user.createdAt <= goal.setAt);
+		if (anchor) return anchor.id;
+		// An older goal must not acquire the newest turn as its start. Wait
+		// until paging reaches its prompt, or the transcript's actual beginning.
+		const chat = currentChat();
+		return chat.transcript && chat.transcript.hwm !== null && !chat.historyHasMore ? null : undefined;
+	});
 	const transcript = $derived(currentChat().transcript);
 	const feed = $derived(transcriptFeed(transcript));
 	const hasRows = $derived((transcript?.rows.length ?? 0) > 0);
@@ -325,6 +354,9 @@
 				<UserMessage message={turn.user} />
 			</div>
 		{/if}
+		{#if goal && turn.id === goalNoticeTurnId}
+			{@render goalNotice()}
+		{/if}
 		{#each turn.segments as segment, i}
 			{@const final = i === turn.segments.length - 1}
 			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
@@ -370,12 +402,24 @@
 		{/if}
 	{/snippet}
 
+	{#snippet goalNotice()}
+		{#if goal}
+			<div data-testid="session-goal-notice" class="max-w-[760px] mx-auto mb-3 px-5 flex items-center gap-1.5 text-[11px] text-status-violet">
+				<Icon name="target" size={12} class="shrink-0" />
+				<span>Goal set · {goal.condition}</span>
+			</div>
+		{/if}
+	{/snippet}
+
 	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- Inert until synchronized: answering, forking or rewinding against a
 	     transcript that is still catching up would act on stale content. -->
 	<div onclick={uiState.rewindActive ? handleRewindClick : undefined} inert={feed !== "live"}>
+	{#if goal && goalNoticeTurnId === null}
+		{@render goalNotice()}
+	{/if}
 	{#if forkSplit && forkSplit.inherited.length > 0}
 		<ForkContextBlock>
 			{#each inheritedTurns as turn (turn.id)}

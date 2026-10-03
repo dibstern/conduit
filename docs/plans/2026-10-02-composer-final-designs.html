@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Composer · final review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Conduit's real tokens (src/lib/frontend/style.css). Approval colours are new: one per mode. */
+[data-theme=dark] {
+	--bg:#0d0e11; --bg-alt:#1b1e24; --surface:#141619; --text:#eceef2; --text2:#a8afbb; --muted:#838b98; --dim:#676e79;
+	--accent:#fe3781; --border:#2d323b; --bsub:#20242b; --chip:#3a414c; --input:#1b1e24; --user:#262a32;
+	--err:#f4607a; --ok:#3fd69a; --warn:#f4b740; --tool:#5aa9f5; --violet:#c0a8ff;
+	--p-never:#4fd1c5; --p-plan:#5aa9f5; --p-ask:#a8afbb; --p-edits:#f4b740; --p-auto:#ff8a4c; --p-full:#f4607a;
+	--home:#4a4f58; --kb:#26292f; --key:#43474f; --send-off-bg:#4a2233; --send-off:#b98a9c;
+	--oc-fg:#f1ecec; --oc-in:#5a5858; --scrim:rgba(0,0,0,.5); --shadow:0 12px 32px rgba(0,0,0,.55); color-scheme: dark;
+}
+[data-theme=light] {
+	--bg:#f5f6f9; --bg-alt:#eef0f5; --surface:#ffffff; --text:#14171c; --text2:#4b525e; --muted:#626975; --dim:#7e8591;
+	--accent:#c9004f; --border:#ccd2dc; --bsub:#e2e6ec; --chip:#b7c0cc; --input:#eef0f5; --user:#e4e8ef;
+	--err:#c11d40; --ok:#0c7750; --warn:#8a5500; --tool:#0f62c0; --violet:#6a3ed4;
+	--p-never:#0b7d74; --p-plan:#0f62c0; --p-ask:#4b525e; --p-edits:#8a5500; --p-auto:#c2410c; --p-full:#c11d40;
+	--home:#14171c; --kb:#d3d6dd; --key:#ffffff; --send-off-bg:#f0cddb; --send-off:#a0607a;
+	--oc-fg:#211e1e; --oc-in:#cfcecd; --scrim:rgba(20,23,28,.28); --shadow:0 12px 28px rgba(20,23,28,.16); color-scheme: light;
+}
+:root { --brand:'Chakra Petch', sans-serif; --mono:'JetBrains Mono', ui-monospace, monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 var(--mono); -webkit-text-size-adjust: 100%; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+svg { width: 16px; height: 16px; flex: none; }
+code { font-family: var(--mono); font-size: .92em; background: var(--bg-alt); border: 1px solid var(--bsub); border-radius: 5px; padding: 0 5px; }
+a { color: var(--accent); }
+
+/* ── page chrome ── */
+header.pg { padding: 26px 24px 8px; max-width: 1900px; margin: 0 auto; }
+header.pg h1 { font: 700 26px/1.2 var(--brand); margin: 0 0 6px; }
+header.pg p { color: var(--text2); max-width: 900px; margin: 4px 0; }
+nav.jump { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; }
+.opts { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 8px 24px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.og { display: flex; align-items: center; gap: 6px; }
+.og > span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { font: 600 11.5px var(--brand); padding: 3px 9px; border-radius: 7px; color: var(--text2); }
+.seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+.copy { margin-left: auto; font: 600 12px var(--brand); padding: 6px 12px; border-radius: 9px; background: var(--text); color: var(--bg); }
+.sec { padding: 28px 24px 30px; border-bottom: 1px solid var(--bsub); max-width: 1900px; margin: 0 auto; }
+.sec h2 { font: 700 20px/1.25 var(--brand); margin: 0 0 6px; }
+.lede { color: var(--text2); max-width: 900px; margin: 4px 0; }
+.stage { display: flex; flex-wrap: wrap; gap: 26px 22px; align-items: flex-start; margin: 20px 0; }
+.tw { color: var(--text); }
+.both .tw { background: var(--bg); border: 1px solid var(--bsub); border-radius: 18px; padding: 10px 14px 16px; }
+.pair { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.tl { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px; }
+.card { width: 340px; }
+.opt-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; min-height: 26px; }
+.opt-h b { font: 700 14px var(--brand); }
+.rec { color: var(--ok); font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; margin-left: 8px; }
+.use { font: 600 11px var(--brand); padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border); color: var(--text2); flex: none; }
+.use.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pros { font-size: 11.5px; color: var(--text2); margin: 10px 2px 0; }
+.pros.con { color: var(--muted); margin-top: 4px; }
+dl.spec { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; max-width: 980px; margin: 4px 0 16px; font-size: 12px; }
+dl.spec dt { color: var(--muted); }
+dl.spec dd { margin: 0; color: var(--text2); }
+dl.spec dd b { color: var(--text); }
+.flag { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 12px; padding: 10px 14px; max-width: 900px; font-size: 12px; color: var(--text2); margin: 12px 0; }
+.flag b { color: var(--warn); }
+.note { display: block; width: 100%; max-width: 900px; min-height: 64px; background: var(--input); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font: 12.5px/1.5 var(--mono); resize: vertical; }
+.note:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.picks { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 12px; max-width: 900px; margin: 12px 0; }
+.picks dt { color: var(--muted); } .picks dd { margin: 0; color: var(--text2); } .picks dd b { color: var(--text); }
+.legend { display: flex; flex-direction: column; gap: 7px; width: 340px; font-size: 12px; }
+.legend > div:not(.opt-h) { display: grid; grid-template-columns: 36px 92px 1fr; align-items: center; gap: 8px; color: var(--text2); }
+.legend b { font: 600 12.5px var(--brand); color: var(--pc); }
+.ladder { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; background: var(--input); border: 1px solid var(--border); border-radius: 16px; padding: 10px 6px 8px; }
+.ladder > div { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.ladder small { font-size: 9.5px; color: var(--muted); text-align: center; line-height: 1.2; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; width: min(720px, 92vw); }
+dialog textarea { width: 100%; height: 50vh; background: var(--input); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: 12px var(--mono); padding: 10px; }
+
+/* ── phone ── */
+.ph { margin: 0; width: 340px; flex: none; }
+.ph > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 0 6px 7px; display: flex; justify-content: space-between; gap: 8px; }
+.ph > figcaption small { font-size: 10px; text-transform: none; letter-spacing: 0; color: var(--dim); text-align: right; }
+.scr { height: var(--h, 700px); border: 1px solid var(--border); border-radius: 40px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 0 0 6px #07080a, 0 0 0 7px var(--bsub); }
+.crop .scr { border-radius: 0 0 40px 40px; border-top: 1px dashed var(--border); box-shadow: 6px 0 0 #07080a, -6px 0 0 #07080a, 0 6px 0 #07080a, 0 7px 0 var(--bsub); }
+.crop .tx { mask-image: linear-gradient(transparent, #000 70px); -webkit-mask-image: linear-gradient(transparent, #000 70px); }
+.sbar { height: 30px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 4px 28px 0; font: 600 12px var(--brand); background: var(--surface); }
+.sbar span { letter-spacing: 1px; font-size: 9px; }
+.topw { position: relative; z-index: 11; flex: none; }
+.top { display: flex; align-items: center; gap: 6px; padding: 3px 8px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.tb { width: 30px; height: 30px; display: grid; place-items: center; color: var(--text2); border-radius: 8px; flex: none; }
+.tt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ttl { font: 600 14px/1.35 var(--brand); display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.ttl .cv, .gs .cv { width: 11px; height: 11px; color: var(--dim); }
+.gs { display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 1.5; min-width: 0; color: var(--bc); padding: 1px 0 2px; }
+.gs span:not(.spin) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs svg { width: 12px; height: 12px; }
+.sstate { width: 30px; display: grid; place-items: center; flex: none; }
+.t-v { --bc: var(--violet); } .t-w { --bc: var(--warn); } .t-m { --bc: var(--muted); } .t-ok { --bc: var(--ok); } .t-err { --bc: var(--err); } .t-a { --bc: var(--accent); } .t-o { --bc: var(--p-auto); }
+.tx { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; padding: 12px 14px 8px; font-size: 12px; }
+.msg.u { align-self: flex-end; background: var(--user); padding: 7px 11px; border-radius: 14px 14px 4px 14px; max-width: 82%; }
+.sys { font-size: 11px; color: var(--violet); display: flex; gap: 6px; align-items: center; }
+.sys svg { width: 12px; height: 12px; }
+.tool { font-size: 11px; color: var(--muted); border: 1px solid var(--bsub); border-radius: 8px; padding: 5px 8px; display: flex; gap: 6px; }
+.tool span { color: var(--tool); } .tool em { margin-left: auto; font-style: normal; color: var(--warn); }
+.dock { flex: none; position: relative; z-index: 3; padding: 6px 10px 30px; background: var(--bg); }
+.dock.hasw { padding-bottom: 16px; }
+.dock.kb { padding-bottom: 6px; }
+.home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 118px; height: 5px; border-radius: 3px; background: var(--home); z-index: 4; pointer-events: none; }
+.safe { display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 34px; z-index: 4; pointer-events: none; border-top: 1px dashed var(--err); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--err) 20%, transparent) 0 6px, transparent 6px 12px); }
+.show-safe .safe { display: block; }
+
+/* ── composer ── */
+.cmp { border: 1px solid var(--border); background: var(--input); border-radius: 20px; transition: border-color .2s; }
+.cmp.goal { border-color: var(--violet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 16%, transparent); }
+.cmp.paused { border: 1px dashed color-mix(in srgb, var(--violet) 60%, var(--border)); }
+.row { display: flex; align-items: flex-end; gap: 1px; padding: 5px; }
+.fld { flex: 1; min-width: 0; padding: 6px 6px; min-height: 32px; font-size: 13px; line-height: 1.45; }
+.phd { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tok { color: var(--violet); background: color-mix(in srgb, var(--violet) 15%, transparent); border-radius: 4px; padding: 0 3px; }
+.caret { display: inline-block; width: 1.5px; height: 1.1em; background: var(--accent); vertical-align: -2px; margin-left: 1px; animation: bl 1s steps(2) infinite; }
+.hint { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fade .2s; }
+.hint b { color: var(--pc); font: 600 13px var(--brand); }
+.hint small { color: var(--muted); font-size: 11px; }
+.capsule { display: flex; align-items: center; flex: none; }
+.ib { width: 32px; height: 32px; border-radius: 10px; display: inline-grid; place-items: center; color: var(--text2); flex: none; transition: background .15s; }
+.ib svg { width: 18px; height: 18px; }
+.ib:hover, .w:hover, .dc:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.hm { width: auto; padding: 0 5px; display: inline-flex; align-items: center; gap: 3px; }
+.hm svg { width: 17px; height: 17px; }
+.hm i { font: 700 10px var(--brand); font-style: normal; color: var(--text2); }
+.cyc { width: auto; min-width: 32px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; }
+.cyc:has(.micro) { padding: 0 2px; }
+.cyc .lbl { max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font: 600 11.5px var(--brand); transition: max-width .25s ease, opacity .2s, margin .25s; }
+.cyc.exp, .w.cyc.roll { background: color-mix(in srgb, var(--pc, var(--text)) 15%, transparent); color: var(--pc, var(--text)); }
+.cyc.exp .lbl { max-width: 90px; opacity: 1; margin-left: 6px; }
+.sh-b { color: var(--pc); }
+.sh-b.elev { background: color-mix(in srgb, var(--pc) 14%, transparent); }
+.pend { outline: 1.5px dashed var(--pc); outline-offset: -2px; animation: pend .7s ease-in-out infinite alternate; }
+[data-hold] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.send, .stop { width: 32px; height: 32px; border-radius: 10px; display: inline-grid; place-items: center; flex: none; }
+.send { background: var(--accent); color: #fff; }
+.send svg { width: 17px; height: 17px; }
+.send.off { background: var(--send-off-bg); color: var(--send-off); }
+.send.goal { background: var(--violet); color: var(--bg); }
+.stop { background: var(--text); color: var(--bg); margin-left: 3px; }
+.stop i { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.meter { display: inline-flex; gap: 2px; align-items: flex-end; height: 13px; }
+.meter i { width: 2.5px; border-radius: 1px; background: var(--chip); }
+.meter i:nth-child(1) { height: 4px; } .meter i:nth-child(2) { height: 6.25px; } .meter i:nth-child(3) { height: 8.5px; } .meter i:nth-child(4) { height: 10.75px; } .meter i:nth-child(5) { height: 13px; }
+.meter[data-l="1"] i:nth-child(-n+1), .meter[data-l="2"] i:nth-child(-n+2), .meter[data-l="3"] i:nth-child(-n+3), .meter[data-l="4"] i:nth-child(-n+4), .meter[data-l="5"] i:nth-child(-n+5) { background: currentColor; }
+.hd { padding: 7px 12px 6px; border-bottom: 1px solid var(--bsub); font-size: 11.5px; color: var(--muted); }
+.hd .l1 { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.hd b { color: var(--text2); font-weight: 600; }
+.hd.t-v b { color: var(--violet); }
+.hd .x { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hd .r { margin-left: auto; color: var(--text2); flex: none; }
+.hd .l2 { color: var(--warn); margin-top: 3px; display: flex; gap: 6px; align-items: flex-start; line-height: 1.35; }
+.hd .l2 svg { width: 12px; height: 12px; margin-top: 1px; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; animation: pu 1.4s ease-in-out infinite; }
+.spin { width: 10px; height: 10px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--violet) 30%, transparent); border-top-color: var(--violet); animation: sp .8s linear infinite; flex: none; display: inline-block; }
+.att { display: flex; gap: 6px; padding: 8px 8px 0; }
+.att span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--bsub); font-size: 11px; color: var(--text2); }
+.att svg { width: 13px; height: 13px; }
+.bar { display: flex; align-items: center; gap: 7px; font-size: 11.5px; line-height: 1.35; padding: 7px 10px; border-radius: 12px; margin-bottom: 6px; color: var(--text2); border: 1px solid color-mix(in srgb, var(--bc) 38%, transparent); background: color-mix(in srgb, var(--bc) 10%, transparent); }
+.bar > svg { width: 14px; height: 14px; color: var(--bc); }
+.bar b { color: var(--bc); font-weight: 600; } .bar.t-m b { color: var(--text); }
+.bar span { flex: 1; min-width: 0; }
+.bar em { font-style: normal; color: var(--bc); font-weight: 600; flex: none; }
+.bar .x { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.bar .x svg { width: 12px; height: 12px; }
+.words { display: flex; align-items: center; gap: 1px; padding: 3px 6px 0; height: 24px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.w { display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px; border-radius: 6px; overflow: hidden; }
+.w u { text-decoration: none; border-bottom: 1px dotted var(--chip); }
+.w .lg { width: 13px; height: 13px; }
+.words s { text-decoration: none; color: var(--chip); }
+.words .sp { flex: 1; }
+.w[data-kind=perm] { color: var(--pc); }
+.w.warn { color: var(--warn); }
+.rl { display: inline-block; }
+.roll .rl { animation: roll .35s cubic-bezier(.2, .8, .2, 1); }
+.bub { position: absolute; transform: translateX(-50%); z-index: 8; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 12px; padding: 6px 12px 8px; display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 104px; max-width: 220px; text-align: center; animation: pop .18s ease-out; pointer-events: none; }
+.bub small { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.bub b { font: 700 16px/1.2 var(--brand); color: var(--pc); }
+.bub em { font-style: normal; font-size: 10.5px; color: var(--text2); white-space: nowrap; }
+.bub::after { content: ''; position: absolute; bottom: -6px; left: var(--ax, 50%); width: 10px; height: 10px; background: var(--surface); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: translateX(-50%) rotate(45deg); }
+.bub .meter { color: var(--text); margin-top: 4px; transform: scale(1.3); }
+.pd { display: flex; gap: 5px; margin-top: 5px; }
+.pd i { width: 6px; height: 6px; border-radius: 50%; background: var(--pc); opacity: .3; }
+.pd i.on { opacity: 1; transform: scale(1.45); }
+.strip { position: absolute; bottom: calc(100% - 2px); right: 10px; z-index: 8; display: flex; gap: 2px; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); animation: up2 .18s ease-out; }
+.strip button { font: 600 11px var(--brand); padding: 5px 7px; border-radius: 9px; color: var(--muted); }
+.strip button.on { background: color-mix(in srgb, var(--pc) 18%, transparent); color: var(--pc); }
+.strip button.pend { color: var(--pc); }
+.menu { position: absolute; bottom: calc(100% - 4px); right: 10px; z-index: 8; width: 272px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 5px; --ko: var(--surface); animation: up2 .18s ease-out; }
+.mi { display: grid; grid-template-columns: 28px 1fr; align-items: center; column-gap: 6px; padding: 6px 8px; border-radius: 10px; width: 100%; }
+.mi .sh { grid-row: span 2; color: var(--pc); }
+.mi .n { font: 600 12.5px var(--brand); }
+.mi .n em { font: 500 9px var(--mono); font-style: normal; color: var(--muted); border: 1px solid var(--bsub); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
+.mi small { color: var(--muted); font-size: 10.5px; line-height: 1.3; }
+.mi.on { background: color-mix(in srgb, var(--pc) 13%, transparent); }
+.mi.on .n { color: var(--pc); }
+.mi + .mi.sep { border-top: 1px solid var(--bsub); border-radius: 0 0 10px 10px; }
+
+/* ── shields ── */
+.sh { position: relative; display: inline-grid; place-items: center; color: var(--pc); --ko: var(--input); }
+.sh svg { width: 19px; height: 19px; grid-area: 1 / 1; }
+.sh.gauge .f { clip-path: inset(calc(100% - var(--f)) 0 0 0); }
+.sh.badge b { position: absolute; right: -6px; bottom: -4px; font: 700 8.5px/1 var(--brand); background: var(--pc); color: var(--ko); border-radius: 4px; padding: 2px 3px 1.5px; min-width: 11px; text-align: center; }
+.sh.micro { grid-template-rows: 15px auto; }
+.sh.micro svg { width: 15px; height: 15px; grid-area: auto; }
+.sh.micro .meter { height: 13px; margin-bottom: 1px; }
+.mi .meter { grid-row: span 2; justify-self: center; color: var(--text); }
+.menu.eff { width: 236px; }
+.tick { animation: tick .24s ease-out; }
+@keyframes tick { 40% { transform: scale(1.14); } }
+.sh.micro b { font: 700 7.5px/1 var(--brand); letter-spacing: .03em; text-transform: uppercase; margin-top: 1px; }
+.dc .sh svg { width: 15px; height: 15px; }
+
+/* ── sheets ── */
+.scrim { position: absolute; inset: 0; z-index: 9; background: var(--scrim); animation: fade .2s; }
+.scrim.lite { z-index: 2; background: transparent; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--surface); border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; padding: 8px 14px 30px; animation: up .22s ease-out; }
+.grab { width: 36px; height: 4px; border-radius: 2px; background: var(--chip); margin: 0 auto 10px; }
+.sh-t { font: 600 14px var(--brand); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; min-height: 28px; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 4px 10px; background: var(--bg-alt); border-radius: 14px; font-size: 11px; color: var(--text2); border: 1px solid transparent; text-align: center; }
+.tile svg { width: 22px; height: 22px; }
+.tile.goal { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 40%, transparent); background: color-mix(in srgb, var(--violet) 10%, transparent); }
+.tile.dis { opacity: .45; cursor: default; }
+.pk .r { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 4px; border-bottom: 1px solid var(--bsub); min-height: 46px; }
+.pk .r:last-child { border-bottom: 0; }
+.pk .k { width: 64px; color: var(--muted); font-size: 11.5px; flex: none; }
+.pk .v { flex: 1; display: flex; align-items: center; gap: 7px; font: 600 13px var(--brand); }
+.pk .lg { width: 16px; height: 16px; }
+.pk .cr { width: 14px; height: 14px; color: var(--dim); }
+.pk .d { color: var(--muted); font-size: 11px; }
+.pk .ck { width: 16px; height: 16px; color: var(--accent); }
+.pk .r.on .v { color: var(--accent); }
+.seg2 { flex: 1; display: flex; gap: 2px; }
+.seg2 i { font-style: normal; padding: 3px 8px; border-radius: 7px; color: var(--muted); font-size: 12px; transition: background .2s, color .2s; }
+.seg2 i.on { background: var(--text); color: var(--bg); font-weight: 600; }
+.seg2 i.on.bump { animation: bump .28s ease-out; }
+.seg2.pick { gap: 3px; } .seg2.pick button { flex: 1; text-align: center; padding: 6px 0; border-radius: 7px; color: var(--muted); font-size: 12px; background: var(--bsub); }
+.seg2.pick button.on { background: var(--text); color: var(--bg); font-weight: 600; }
+.tap { font-size: 9px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; flex: none; }
+.bk { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--text2); }
+.gd { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 0 0 22px 22px; padding: 12px 14px 8px; box-shadow: var(--shadow); animation: down .24s ease-out; font-size: 12px; }
+.gd .k { display: flex; align-items: center; gap: 6px; color: var(--violet); font: 600 11px var(--brand); text-transform: uppercase; letter-spacing: .08em; }
+.gd .k svg { width: 13px; height: 13px; }
+.gd .st { margin-left: auto; color: var(--bc); border: 1px solid color-mix(in srgb, var(--bc) 40%, transparent); border-radius: 6px; padding: 0 6px; font-size: 10px; }
+.gd .cond { font: 600 14px/1.35 var(--brand); margin: 6px 0 4px; }
+.gd .meta { color: var(--muted); font-size: 11px; }
+.gd .hl { margin: 10px 0 5px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.hist li { display: grid; grid-template-columns: 14px 32px 1fr; gap: 6px; align-items: start; font-size: 11.5px; line-height: 1.35; color: var(--text2); }
+.hist svg { width: 13px; height: 13px; margin-top: 1px; }
+.hist .x svg { color: var(--warn); } .hist .ok svg { color: var(--ok); } .hist .err svg { color: var(--err); }
+.hist .t { color: var(--dim); }
+.gd .acts { display: flex; gap: 6px; margin-top: 12px; }
+.gd .acts button { padding: 6px 10px; border-radius: 9px; border: 1px solid var(--border); font-size: 11.5px; color: var(--text2); }
+.gd .acts .danger { color: var(--err); margin-left: auto; }
+.gd .grab { margin: 12px auto 0; }
+.kbd { flex: none; background: var(--kb); padding: 7px 3px 28px; display: flex; flex-direction: column; gap: 8px; }
+.kbd div { display: flex; justify-content: center; gap: 5px; }
+.kbd i { font-style: normal; flex: 0 0 27px; height: 38px; border-radius: 5px; background: var(--key); display: grid; place-items: center; font-size: 14px; color: var(--text); box-shadow: 0 1px 0 rgba(0,0,0,.25); }
+.kbd i.w2 { flex-basis: 64px; font-size: 11px; } .kbd i.spc { flex: 0 0 150px; font-size: 11px; }
+
+/* ── desktop ── */
+.dk { width: 880px; }
+.dscr { height: 540px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.dk .top { padding: 8px 14px; }
+.dk .tx { padding: 16px 0 10px; width: 700px; margin: 0 auto; }
+.dk .dock { padding: 8px 0 18px; }
+.dwrap { width: 700px; margin: 0 auto; }
+.dc { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border-radius: 9px; font: 600 12px var(--brand); color: var(--text2); flex: none; }
+.dc .lg { width: 15px; height: 15px; } .dc .cv { width: 11px; height: 11px; color: var(--dim); }
+.dc.sh-b { color: var(--pc); }
+
+.st-sheet :is(.sheet, .scrim, .menu), .st-details :is(.gd, .scrim), .st-strip .strip { animation: none; }
+.cmp.two .row { flex-wrap: wrap; }
+.cmp.two .fld { flex: 1 0 100%; order: -1; padding: 7px 8px 3px; }
+.cmp.two .capsule { margin-left: auto; }
+.words.icons { height: 34px; padding: 2px 0 0; gap: 2px; }
+.fitopt { max-width: 1440px; }
+.trio { display: flex; flex-wrap: wrap; gap: 18px; }
+.trio .ph { width: 320px; }
+.setmock { width: 340px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px; font-size: 12px; color: var(--text2); }
+.setmock .crumb { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+.setmock .lab { font: 600 13.5px var(--brand); color: var(--text); margin-bottom: 8px; }
+.setmock .seg { display: flex; } .setmock .seg button { flex: 1; text-align: center; padding: 6px; }
+.setmock p { margin: 10px 0 0; }
+@keyframes bl { 50% { opacity: 0; } }
+@keyframes pu { 50% { opacity: .35; } }
+@keyframes sp { to { transform: rotate(360deg); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes roll { from { transform: translateY(95%); opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: translateX(-50%) translateY(5px) scale(.9); } }
+@keyframes up { from { transform: translateY(40%); opacity: 0; } }
+@keyframes up2 { from { transform: translateY(6px); opacity: 0; } }
+@keyframes down { from { transform: translateY(-14px); opacity: 0; } }
+@keyframes bump { 40% { transform: scale(1.18); } }
+@keyframes pend { from { opacity: 1; } to { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+@media (max-width: 760px) { .opts { padding: 8px 12px; } .sec, header.pg { padding-left: 14px; padding-right: 14px; } .copy { margin-left: 0; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="claude" viewBox="0 0 24 24"><g fill="#d97757"><rect x="11" y="1.5" width="2" height="8.5" rx="1"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(40 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(78 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(118 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(160 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(200 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(242 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(282 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(322 12 12)"/></g></symbol>
+		<symbol id="opencode" viewBox="64 64 384 384"><path d="M320 224V352H192V224H320Z" style="fill:var(--oc-in)"/><path fill-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" style="fill:var(--oc-fg)"/></symbol>
+		<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-chevr" viewBox="0 0 24 24"><path d="M10 7l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-shield-open" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-brain" viewBox="0 0 24 24"><path d="M9 4a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 003 3 2 2 0 002-2V6a2 2 0 00-2-2zM15 4a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-3 3 2 2 0 01-2-2V6a2 2 0 012-2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></symbol>
+		<symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7L9.6 17.3a1.7 1.7 0 01-2.4-2.4L15 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="9" cy="10" r="1.7" fill="currentColor"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+		<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z M14 3v5h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.6" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M15.6 12v1.5a2.5 2.5 0 005 0V12a8.6 8.6 0 10-3.4 6.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-slash" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M14 8l-4 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+		<symbol id="i-bot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M12 4v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9.3" cy="13.5" r="1.2" fill="currentColor"/><circle cx="14.7" cy="13.5" r="1.2" fill="currentColor"/></symbol>
+		<symbol id="i-window" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M3.5 9.5h17" stroke="currentColor" stroke-width="1.8"/></symbol>
+		<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+		<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="8" cy="17" r="2.2" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+	</defs>
+</svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-chevl" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-shield-o" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-shield-f" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" fill="currentColor"/></symbol>
+		<symbol id="sh-dontAsk" viewBox="0 0 24 24"><use href="#i-shield-o"/><path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+		<symbol id="sh-plan" viewBox="0 0 24 24"><use href="#i-shield-o"/><path d="M9.3 9.6h5.4M9.3 12.4h5.4M9.3 15.2h3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+		<symbol id="sh-ask" viewBox="0 0 24 24"><use href="#i-shield-o"/><path d="M10.1 10.2a1.95 1.95 0 113.2 1.5c-.75.55-1.3.95-1.3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/><circle cx="12" cy="16.2" r="1" fill="currentColor"/></symbol>
+		<symbol id="sh-acceptEdits" viewBox="0 0 24 24"><use href="#i-shield-o"/><path d="M9.4 15.4l.5-2.3 3.9-3.9 1.8 1.8-3.9 3.9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="sh-auto" viewBox="0 0 24 24"><use href="#i-shield-o"/><path d="M12.9 7.9l-3.3 4.6h2.7l-.9 3.6 3.3-4.6h-2.7z" fill="currentColor"/></symbol>
+		<symbol id="sh-full" viewBox="0 0 24 24"><use href="#i-shield-f"/><path d="M12 8v4.7" style="stroke:var(--ko)" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="15.9" r="1.2" style="fill:var(--ko)"/></symbol>
+	</defs>
+</svg>
+
+<header class="pg">
+	<h1>Composer · final review</h1>
+	<p>Round 3. Locked: <b>W2</b> field width, <b>S4</b> micro labels on the shield <i>and</i> the effort meter, <b>R1</b> cycle everything, <b>P2</b> picker. No bubble: tap cycles, hold opens the menu. Open: <b>V1 icons vs V3 words</b> (both get built, switchable in Settings), and how V1 stops crowding the field.</p>
+	<p><b>Every phone is live.</b> Tap <b>+</b>, the logo, the meter, and the shield. <b>Hold</b> the meter or the shield for its menu. Notes go in the box under each section, then <b>Copy feedback</b> gathers them.</p>
+	<nav class="jump"><a href="#fit">Field width</a><a href="#controls">V1 / V3 setting</a><a href="#shield">Shield</a><a href="#picker">Picker</a><a href="#states">All states</a><a href="#picks">Picks</a></nav>
+</header>
+
+<div class="opts" id="opts">
+	<div class="og"><span>Theme</span><div class="seg"><button data-opt="theme:dark">Dark</button><button data-opt="theme:light">Light</button><button data-opt="theme:both">Both</button></div></div>
+	<div class="og"><span>Controls</span><div class="seg"><button data-opt="ctrl:v1">V1 icons</button><button data-opt="ctrl:v3">V3 words</button></div></div>
+	<div class="og"><span>Field width (V1)</span><div class="seg"><button data-opt="fit:w1">W1</button><button data-opt="fit:w2">W2</button><button data-opt="fit:w3">W3</button></div></div>
+	<div class="og"><span>Safe area</span><div class="seg"><button data-opt="safe:off">Off</button><button data-opt="safe:on">On</button></div></div>
+	<button class="copy" id="copy">Copy feedback</button>
+</div>
+
+<section class="sec" id="fit">
+	<h2>Field width · keeping V1's icons from crowding the text</h2>
+	<p class="lede">The problem: <code>+ │ field │ logo │ meter │ shield │ send</code> leaves the text about 120px, so a sentence wraps into a narrow column, and "Reply to steer…" gets cut off. Three fixes, each shown in the cases that broke. All three follow one rule: <b>text that can't fit on one line always gets the full width.</b> The captions show each composer's measured height, so you can compare the cost.</p>
+	<p class="lede">The <b>Field width</b> choice in the top bar also drives all 25 states below. V3 follows the same rule automatically, which matters when stop and send both show.</p>
+	<div class="stage" data-sec="fit"></div>
+	<dl class="spec">
+		<dt>My pick</dt><dd><b>W2.</b> It costs nothing when idle, and your text gets the full width the moment it needs it. The grey placeholder can never be cut off, because "doesn't fit" is measured, not guessed. ChatGPT's iPhone app does the same, so it already feels familiar.</dd>
+		<dt>Runner-up</dt><dd><b>W1</b> if the one-time jump in W2 bothers you. It's calmer and simpler to build, and it's always 34px taller.</dd>
+		<dt>Build note</dt><dd>W2 measures with the real text box, which is cheap, but it needs one check on every keystroke and on resize.</dd>
+	</dl>
+	<textarea class="note" data-note="fit" data-title="Field width (W1–W3)" placeholder="Which fix? Anything that still feels cramped?"></textarea>
+</section>
+
+<section class="sec" id="controls">
+	<h2>V1 icons and V3 words · switchable in Settings</h2>
+	<p class="lede">Both get built, so you can live with each before deciding. The setting sits under Settings › Composer, and the mock on the right really switches this page.</p>
+	<div class="stage" data-sec="controls"></div>
+	<dl class="spec">
+		<dt>V3 gotcha</dt><dd><b>The words sit near the home-bar swipe zone.</b> Taps work, but an upward flick from that row goes home. Fine for settings. Send and stop stay out of it.</dd>
+	</dl>
+	<textarea class="note" data-note="controls" data-title="V1 / V3 setting" placeholder="Notes on the two layouts or the setting itself."></textarea>
+</section>
+
+<section class="sec" id="shield">
+	<h2>Shield and effort · micro labels, tap to cycle, hold for the menu</h2>
+	<p class="lede">Each mode has its own colour and word. Only Ask is grey, so any colour means "not the default". The approvals menu and desktop chip use the glyph shield instead, since a text label already sits beside it.</p>
+	<div class="stage" data-sec="shield"></div>
+	<dl class="spec">
+		<dt>Order</dt><dd>Plan → Ask → Edits → Auto → Full access → Never ask. OpenCode cycles only Ask → Edits → Full access.</dd>
+		<dt>Risk</dt><dd><b>One stray tap from Auto lands on Full access.</b> You picked this knowingly. The red shield and its FULL label make it obvious, and one more tap moves on to Never ask.</dd>
+	</dl>
+	<textarea class="note" data-note="shield" data-title="Shield (S4, R1, colours)" placeholder="Do the colours and labels read well in both themes?"></textarea>
+</section>
+
+<section class="sec" id="picker">
+	<h2>Picker · P2 drill-down, pick effort directly</h2>
+	<p class="lede">Effort shows every level the model has, xhigh included, and you tap the one you want. Context, with only two sizes, toggles in place. Harness and Model drill in because they're real lists. The OpenCode logo is now the real mark from opencode.ai.</p>
+	<div class="stage" data-sec="picker"></div>
+	<textarea class="note" data-note="picker" data-title="Picker (P2)" placeholder="Notes on the drill-down, the effort row, and context cycling."></textarea>
+</section>
+
+<section class="sec" id="states">
+	<h2>The final composer · every state</h2>
+	<p class="lede">All 25 states plus 2 extras, built from your picks and the top bar's Controls and Field width choices.</p>
+	<div class="stage" data-sec="states"></div>
+	<textarea class="note" data-note="states" data-title="States" placeholder="Reference states by number, e.g. “16: the reason line is too long”."></textarea>
+</section>
+
+<section class="sec" id="picks">
+	<h2>All picks</h2>
+	<dl class="picks">
+		<dt>Live status</dt><dd><b>A1</b> header inside the composer while it works</dd>
+		<dt>Goal</dt><dd><b>Goal paused</b> in violet in the header (orange shown as an extra) · <b>B5</b> subtitle under the title · <b>B2</b> violet border · <b>B5</b> details pull down, with <b>C5</b> check history</dd>
+		<dt>Controls</dt><dd><b>V1</b> icons and <b>V3</b> words, both built, switchable in Settings</dd>
+		<dt>Effort</dt><dd>Five-bar meter with an S4-style micro label (low, med, high, xhigh, max), tap to cycle, hold for the effort menu</dd>
+		<dt>Context warning</dt><dd>User setting: 60 / 70 / <b>80</b> / 90% or Never. Drives the Compact bar and the amber %</dd>
+		<dt>Approvals</dt><dd><b>S4</b> micro-label shield, <b>R1</b> cycle everything, hold for the <b>A4</b> menu</dd>
+		<dt>Field width</dt><dd><b>W2</b> two rows only when the text or placeholder won't fit</dd>
+		<dt>Harness &amp; model</dt><dd>In the composer, opening the <b>P2</b> drill-down: pick effort directly (all 5 levels), context toggles in place</dd>
+		<dt>Add-ons</dt><dd><b>B1</b> Set goal tile · <b>C4</b> violet send on /goal · <b>A2</b> outcome stays visible</dd>
+	</dl>
+	<div class="flag"><b>B5 crowding.</b> The title opens conduit's title menu (with Views). The goal line under it is its own tap target. The top bar grows about 16px, only while a goal exists.</div>
+	<textarea class="note" data-note="picks" data-title="Picks / B5 top bar" placeholder="Anything else before I write the spec?"></textarea>
+</section>
+
+<dialog id="dlg"><p>Copy this and paste it back to me:</p><textarea readonly></textarea><p><button class="copy" onclick="this.closest('dialog').close()">Close</button></p></dialog>
+
+<script>
+const ic = (id, cls = '') => `<svg class="${cls}"><use href="#${id}"/></svg>`;
+const GOAL = 'All 38 acceptance scenarios pass on two consecutive runs';
+const LV = ['Low', 'Medium', 'High', 'Extra high', 'Max'], LVS = ['low', 'med', 'high', 'xhigh', 'max'];
+const LVD = ['Quick, light reasoning', 'Balanced', 'Thinks harder, slower', 'Deeper still, for hard problems', 'Most thorough, slowest'];
+// Order matches src/lib/frontend/permission-modes.ts. f = shield fill for S2 (how much runs unprompted).
+const P = [
+	{ k: 'plan', n: 'Plan', w: 'plan', s: 'Plan', ab: 'P', d: 'Reads and proposes. No edits.', c: '--p-plan', claude: 1, f: 15 },
+	{ k: 'ask', n: 'Ask', w: 'ask', s: 'Ask', ab: '?', d: 'Asks before each edit or command.', c: '--p-ask', f: 35 },
+	{ k: 'acceptEdits', n: 'Edits', w: 'edits', s: 'Edits', ab: 'E', d: 'File edits run without asking.', c: '--p-edits', elev: 1, f: 60 },
+	{ k: 'auto', n: 'Auto', w: 'auto', s: 'Auto', ab: 'A', d: 'A model approves or denies each action.', c: '--p-auto', claude: 1, elev: 1, f: 80 },
+	{ k: 'full', n: 'Full access', w: 'full', s: 'Full', ab: '!', d: 'Everything runs. No prompts.', c: '--p-full', elev: 1, f: 100 },
+	{ k: 'dontAsk', n: 'Never ask', w: 'never', s: 'Never', ab: '–', d: 'Denies anything not pre-approved.', c: '--p-never', claude: 1, f: 0 },
+];
+const PM = Object.fromEntries(P.map(p => [p.k, p]));
+const RANKED = ['dontAsk', 'plan', 'ask', 'acceptEdits', 'auto', 'full'];
+const MODELS = {
+	claude: [{ n: 'Opus 5', w: 'opus-5', b: 'O5', ctx: ['200K', '1M'] }, { n: 'Sonnet 5', w: 'sonnet-5', b: 'S5', ctx: ['200K', '1M'] }, { n: 'Fable 5', w: 'fable-5', b: 'F5', ctx: ['200K', '1M'] }],
+	opencode: [{ n: 'GPT-6 Sol', w: 'gpt-6-sol', b: 'Sol', ctx: ['400K'] }, { n: 'GPT-6 Astra', w: 'gpt-6-astra', b: 'Ast', ctx: ['400K'] }, { n: 'Fable 5 · Bedrock', w: 'fable-5', b: 'F5', ctx: ['200K'] }],
+};
+const GS = {
+	starting: ['t-v', 'i-target', 'Goal set · starting'], pursuing: ['t-v', 'i-target', 'All 38 scenarios pass · 3 checks'],
+	checking: ['t-v', 'spin', 'Checking goal · check 4'], notyet: ['t-w', 'i-target', 'Not yet · 35/38 · check 4'],
+	paused: ['t-v', 'i-pause', 'Goal paused · All 38 scenarios pass'], met: ['t-ok', 'i-check', 'Goal met · 7 checks · 41m'],
+	impossible: ['t-err', 'i-x', 'Impossible · needs a real device'],
+};
+const PHASE = { starting: 'Starting', pursuing: 'Pursuing', checking: 'Checking', notyet: 'Not yet', paused: 'Paused', met: 'Met', impossible: 'Impossible' };
+const ACTIVE = ['starting', 'pursuing', 'checking', 'notyet'];
+
+const DEF = { theme: 'dark', ctrl: 'v1', fit: 'w2', safe: 'off', warn: '80' };
+// Context warning: the bar and the amber % appear at this fill level, or never.
+const warnOn = c => OPTS.warn !== 'never' && c.ctxPct >= +OPTS.warn;
+// Decided: no bubble, S4 micro labels on shield and effort, R1 cycle everything, hold for menus.
+const OPTS = { ...DEF, ...JSON.parse(localStorage.getItem('cfd-opts-2') || '{}'), fb: 'none', shield: 's4', rule: 'r1' };
+if (!['w1', 'w2', 'w3'].includes(OPTS.fit)) OPTS.fit = DEF.fit;
+const BASE = { harness: 'claude', model: 0, effort: 3, perm: 'ask', ctx: '1M', ctxPct: 42, pick: 'root', gen: 0 };
+const C = new Map();
+let N = 0;
+
+const model = c => MODELS[c.harness][c.model] || MODELS[c.harness][0];
+const ctxOf = c => { const m = model(c); return m.ctx.includes(c.ctx) ? c.ctx : m.ctx.at(-1); };
+const permOrder = c => P.map(p => p.k).filter(k => c.harness === 'claude' || !PM[k].claude);
+const meter = l => `<span class="meter" data-l="${l}"><i></i><i></i><i></i><i></i><i></i></span>`;
+
+function shield(k, s) {
+	const p = PM[k], st = `--pc:var(${p.c})`;
+	if (s === 's2') return `<span class="sh gauge" style="${st};--f:${p.f}%">${ic('i-shield-o')}${ic('i-shield-f', 'f')}</span>`;
+	if (s === 's3') return `<span class="sh badge" style="${st}">${ic('i-shield-o')}<b>${p.ab}</b></span>`;
+	if (s === 's4') return `<span class="sh micro" style="${st}">${ic('i-shield-o')}<b>${p.s}</b></span>`;
+	return `<span class="sh" style="${st}">${ic('sh-' + k)}</span>`;
+}
+
+function phone(o) {
+	const c = { ...BASE, ctrl: OPTS.ctrl, fit: OPTS.fit, fb: OPTS.fb, shield: OPTS.shield, rule: OPTS.rule, ...o, id: 'p' + N++ };
+	C.set(c.id, c);
+	return phoneHTML(c);
+}
+
+function phoneHTML(c) {
+	if (c.desk) return deskHTML(c);
+	// Only animate overlays on the render that opens them; taps inside an open sheet re-render it.
+	const still = [c.sheet && c.sheet === c.lastSheet && 'st-sheet', c.details && c.lastDetails && 'st-details', c.strip && c.strip === c.lastStrip && 'st-strip'].filter(Boolean).join(' ');
+	Object.assign(c, { lastSheet: c.sheet, lastDetails: c.details, lastStrip: c.strip });
+	const top = c.noTop ? '' : `<div class="sbar"><b>9:41</b><span>●●● ▮</span></div><div class="topw">${topbar(c)}${c.details ? details(c) : ''}</div>${c.details ? '<div class="scrim" data-act="details"></div>' : ''}`;
+	return `<figure class="ph${c.crop ? ' crop' : ''}" id="${c.id}"${c.measure ? ' data-measure' : ''}>
+	<figcaption><span>${c.cap || ''}</span><small>${c.sub || ''}</small></figcaption>
+	<div class="scr ${still}" style="${c.h ? `--h:${c.h}px` : ''}">${top}
+		<div class="tx">${tx(c)}</div>
+		${c.sheet === 'perm' || c.sheet === 'eff' ? '<div class="scrim lite" data-act="close"></div>' : ''}
+		${dock(c)}
+		${c.kb ? kbd() : '<div class="home"></div><div class="safe"></div>'}
+		${c.sheet === 'attach' ? attach(c) : ''}${c.sheet === 'picker' ? picker(c) : ''}
+	</div></figure>`;
+}
+
+function topbar(c) {
+	const s = c.tone && GS[c.goal] ? [c.tone, ...GS[c.goal].slice(1)] : GS[c.goal];
+	return `<div class="top"><span class="tb">${ic('i-menu')}</span>
+		<div class="tt"><span class="ttl">${c.harness === 'opencode' ? 'Tidy the router' : 'Fix flaky acceptance run'}${ic('i-chev', 'cv')}</span>
+		${s ? `<button class="gs ${s[0]}" data-act="details">${s[1] === 'spin' ? '<span class="spin"></span>' : ic(s[1])}<span>${s[2]}</span>${ic('i-chev', 'cv')}</button>` : ''}</div>
+		<span class="sstate">${c.working ? '<span class="pulse"></span>' : ''}</span></div>`;
+}
+
+function tx(c) {
+	let h = `<div class="msg u">Make the acceptance suite green, then commit.</div>`;
+	if (c.goal && c.goal !== 'cleared') h += `<div class="sys">${ic('i-target')}Goal set · ${GOAL}</div>`;
+	h += `<div>On it. Three visual scenarios fail. Starting with jump-to-live, since the other two look like stale baselines.</div>`;
+	h += `<div class="tool"><span>Bash</span> pnpm acceptance:visual <em>35/38</em></div>`;
+	if (c.goal === 'met') h += `<div>Two clean runs in a row. All 38 pass.</div>`;
+	if (c.goal === 'impossible') h += `<div>The last failure only happens with a real iOS keyboard. I can't reproduce it here.</div>`;
+	return h;
+}
+
+function hist(g) {
+	const base = [['x', '8m', 'Not yet · 29/38 pass. Three baselines are stale.'], ['x', '19m', 'Not yet · 33/38. Focus ring regressed.'], ['x', '31m', 'Not yet · 35/38. jump-to-live fails.']];
+	if (g === 'starting') return [];
+	if (g === 'pursuing') return base.slice(0, 2);
+	if (g === 'checking') return [...base, ['spin', 'now', 'Checking…']];
+	if (g === 'met') return [...base, ['x', '36m', 'Not yet · 38/38 once. Needs a second run.'], ['ok', '41m', 'Met · 38/38 on two runs in a row.']];
+	if (g === 'impossible') return [...base, ['err', '33m', 'Impossible · the last failure needs a real iOS keyboard.']];
+	return base;
+}
+
+function details(c) {
+	const s = GS[c.goal], h = hist(c.goal), done = c.goal === 'met' || c.goal === 'impossible';
+	const rows = h.length ? h.map(([k, t, r]) => `<li class="${k}">${k === 'spin' ? '<span class="spin"></span>' : ic(k === 'ok' ? 'i-check' : 'i-x')}<span class="t">${t}</span><span>${r}</span></li>`).join('')
+		: '<li><span></span><span></span><span>No checks yet. The first runs when Claude finishes a turn.</span></li>';
+	const acts = done ? '<button>Set a new goal</button><button class="danger">Dismiss</button>'
+		: `<button>${c.goal === 'paused' ? 'Resume' : 'Pause'}</button><button>Edit</button><button class="danger">Clear goal</button>`;
+	return `<div class="gd">
+		<div class="k">${ic('i-target')}Goal<span class="st ${s[0]}">${PHASE[c.goal]}</span></div>
+		<p class="cond">${GOAL}</p>
+		<div class="meta">Set 41m ago · ${h.length} checks · 1.24M tokens</div>
+		<div class="hl">Check history</div><ol class="hist">${rows}</ol>
+		<div class="acts">${acts}</div><div class="grab" data-act="details"></div></div>`;
+}
+
+function header(c) {
+	if (!c.working) return '';
+	const g = c.goal;
+	if (g === 'checking') return `<div class="hd t-v"><div class="l1"><span class="spin"></span><b>Checking goal</b><span class="x">· check 4 · reading the transcript</span></div></div>`;
+	const start = g === 'starting';
+	return `<div class="hd"><div class="l1"><span class="pulse"></span><b>${start ? 'Starting 0:04' : 'Working 38:12'}</b><span class="x">· ${start ? 'Reading the goal' : 'Running pnpm acceptance:visual'}</span><span class="r">↓ live</span></div>
+		${g === 'notyet' ? `<div class="l2">${ic('i-target')}<span>Not yet: 35/38 pass. jump-to-live still fails. Continuing.</span></div>` : ''}</div>`;
+}
+
+function bars(c) {
+	let h = '';
+	if (c.slash) h += `<div class="bar t-v">${ic('i-target')}<span><b>/goal</b> sets a goal. Claude keeps working, and checks itself after each turn, until it's met.</span></div>`;
+	if (c.outcome === 'met') h += `<div class="bar t-ok" data-act="details">${ic('i-check')}<span><b>Goal met</b> · 38/38 twice · 7 checks · 41m</span><em>Details</em><button class="x" data-act="dismiss" aria-label="Dismiss">${ic('i-x')}</button></div>`;
+	if (c.outcome === 'impossible') h += `<div class="bar t-err" data-act="details">${ic('i-x')}<span><b>Goal impossible</b> · needs a real iOS keyboard. Stopped after 4 checks.</span><em>Details</em></div>`;
+	if (c.goal === 'cleared') h += `<div class="bar t-m">${ic('i-target')}<span>Goal cleared</span><em data-act="undo">Undo</em></div>`;
+	if (warnOn(c)) h += `<div class="bar t-w">${ic('i-window')}<span><b>Context ${c.ctxPct}% full.</b> Older turns compact soon.</span><em>Compact</em></div>`;
+	if (c.bars?.includes('sub')) h += `<div class="bar t-a">${ic('i-chevl')}<span><b>Back to main</b> · viewing subagent test-runner</span></div>`;
+	if (c.bars?.includes('model')) h += `<div class="bar t-m">${ic(c.harness)}<span>Now <b>${model(c).n}</b> · from your next message</span><button class="x" data-act="dismiss" aria-label="Dismiss">${ic('i-x')}</button></div>`;
+	return h;
+}
+
+function field(c) {
+	if (c.slash) return `<span><span class="tok">/goal</span> ${GOAL}<span class="caret"></span></span>`;
+	if (c.text) return `<span>${c.text}${c.kb ? '<span class="caret"></span>' : ''}</span>`;
+	return `<span class="phd">${c.working ? 'Reply to steer…' : c.harness === 'opencode' ? 'Ask OpenCode…' : 'Ask Claude…'}</span>`;
+}
+
+function sendBtns(c) {
+	if (c.slash) return `<button class="send goal" aria-label="Set goal">${ic('i-target')}</button>`;
+	const send = `<button class="send${c.text || c.files ? '' : ' off'}" aria-label="Send">${ic('i-up')}</button>`;
+	return c.working ? (c.text ? send : '') + '<button class="stop" aria-label="Stop"><i></i></button>' : send;
+}
+
+const hmBtn = c => `<button class="ib hm" data-act="open:picker" aria-label="Harness and model">${ic(c.harness)}<i>${model(c).b}</i></button>`;
+const effBtn = c => `<button class="ib cyc" data-kind="eff" data-act="cyc:eff" data-hold="eff" aria-label="Effort ${LV[c.effort - 1]}"><span class="sh micro" style="--pc:var(--text2)">${meter(c.effort)}<b>${LVS[c.effort - 1]}</b></span></button>`;
+function permBtn(c) {
+	const k = c.pending || c.perm, p = PM[k];
+	return `<button class="ib cyc sh-b${c.pending ? ' pend' : ''}${p.elev ? ' elev' : ''}" data-kind="perm" data-act="cyc:perm" data-hold="perm" style="--pc:var(${p.c})" aria-label="Approvals ${p.n}">${shield(k, c.shield)}<span class="lbl">${p.n}</span></button>`;
+}
+
+function words(c) {
+	const m = model(c), k = c.pending || c.perm, p = PM[k];
+	let h = `<button class="w" data-act="open:picker">${ic(c.harness, 'lg')}<u>${m.w}</u></button><s>·</s><button class="w" data-act="open:picker"><u>${ctxOf(c)}</u></button>`;
+	if (c.ctrl === 'v3') h += `<s>·</s><button class="w cyc" data-kind="eff" data-act="cyc:eff" data-hold="eff"><span class="rl"><u>${LVS[c.effort - 1]}</u></span></button><s>·</s><button class="w cyc${c.pending ? ' pend' : ''}" data-kind="perm" data-act="cyc:perm" data-hold="perm" style="--pc:var(${p.c})"><span class="rl"><u>${p.w}</u></span></button>`;
+	return `<div class="words">${h}<span class="sp"></span><span class="w${warnOn(c) ? ' warn' : ''}">${c.ctxPct}%</span></div>`;
+}
+
+const icons = c => `<div class="words icons">${hmBtn(c)}${effBtn(c)}${permBtn(c)}<span class="sp"></span><span class="w${warnOn(c) ? ' warn' : ''}">${c.ctxPct}%</span></div>`;
+
+function dock(c) {
+	const v1 = c.ctrl === 'v1', under = v1 && c.fit === 'w3', w = !v1 || under;
+	const cap = v1 && !under ? hmBtn(c) + effBtn(c) + permBtn(c) : '';
+	// One rule for every layout: if the text or placeholder can't fit on one line, it gets the full width.
+	const lay = v1 && c.fit === 'w1' ? ' two' : ' auto';
+	const files = c.files ? `<div class="att">${c.files.map(f => `<span>${ic(f.endsWith('.png') ? 'i-image' : 'i-file')}${f}</span>`).join('')}</div>` : '';
+	const cls = c.goal === 'paused' ? ' paused' : ACTIVE.includes(c.goal) ? ' goal' : '';
+	return `<div class="dock${w ? ' hasw' : ''}${c.kb ? ' kb' : ''}">
+		${c.sheet === 'perm' || c.sheet === 'eff' ? menu(c) : ''}${c.strip ? strip(c) : ''}${bars(c)}
+		<div class="cmp${cls}${lay}">${header(c)}${files}<div class="row">
+			<button class="ib" data-act="open:attach" aria-label="Attach">${ic('i-plus')}</button>
+			<div class="fld">${field(c)}</div>
+			${cap ? `<div class="capsule">${cap}</div>` : ''}${sendBtns(c)}
+		</div></div>${under ? icons(c) : w ? words(c) : ''}</div>`;
+}
+
+function menu(c) {
+	if (c.sheet === 'eff') return `<div class="menu eff">${LV.map((n, i) => `<button class="mi${i === c.effort - 1 ? ' on' : ''}" data-act="seteff:${i + 1}" style="--pc:var(--text)">${meter(i + 1)}<span class="n">${n}</span><small>${LVD[i]}</small></button>`).join('')}</div>`;
+	const ks = RANKED.filter(k => permOrder(c).includes(k));
+	return `<div class="menu">${ks.map(k => { const p = PM[k];
+		return `<button class="mi${k === c.perm ? ' on' : ''}" data-act="setperm:${k}" style="--pc:var(${p.c})">${shield(k, 's1')}<span class="n">${p.n}${p.claude ? '<em>Claude</em>' : ''}</span><small>${p.d}</small></button>`; }).join('')}</div>`;
+}
+
+function strip(c) {
+	const items = c.strip === 'eff'
+		? LV.map((l, i) => ({ l, on: i === c.effort - 1, act: `seteff:${i + 1}`, pc: 'var(--text)' }))
+		: permOrder(c).map(k => ({ l: PM[k].s, on: k === (c.pending || c.perm), pend: k === c.pending, act: `setperm:${k}`, pc: `var(${PM[k].c})` }));
+	return `<div class="strip">${items.map(t => `<button class="${t.on ? 'on' : ''}${t.pend ? ' pend' : ''}" data-act="${t.act}" style="--pc:${t.pc}">${t.l}</button>`).join('')}</div>`;
+}
+
+function attach(c) {
+	const t = (i, l, cls = '', act = '') => `<button class="tile ${cls}"${act ? ` data-act="${act}"` : ''}>${ic(i)}<span>${l}</span></button>`;
+	return `<div class="scrim" data-act="close"></div><div class="sheet"><div class="grab"></div><div class="sh-t">Add to message</div><div class="tiles">
+		${t('i-image', 'Photos')}${t('i-camera', 'Camera')}${t('i-file', 'Files')}${t('i-at', 'Mention')}${t('i-slash', 'Command')}
+		${c.harness === 'opencode' ? t('i-target', 'Goal<br>Claude only', 'dis') : t('i-target', 'Set goal', 'goal', 'setgoal')}</div></div>`;
+}
+
+function picker(c) {
+	const m = model(c), bump = c.bump;
+	c.bump = null;
+	const seg = (vals, on, b) => `<span class="seg2">${vals.map(v => `<i class="${v === on ? 'on' : ''}${v === on && b ? ' bump' : ''}">${v}</i>`).join('')}</span><span class="tap">tap</span>`;
+	let body;
+	if (c.pick === 'model') body = `<div class="sh-t"><button class="bk" data-act="back" aria-label="Back">${ic('i-chevl')}</button>Model</div>` +
+		MODELS[c.harness].map((x, i) => `<button class="r${i === c.model ? ' on' : ''}" data-act="setmodel:${i}"><span class="v">${x.n}</span><span class="d">${x.ctx.join(' / ')}</span>${i === c.model ? ic('i-check', 'ck') : ''}</button>`).join('');
+	else if (c.pick === 'harness') body = `<div class="sh-t"><button class="bk" data-act="back" aria-label="Back">${ic('i-chevl')}</button>Harness</div>` +
+		[['claude', 'Claude', 'Claude Agent SDK'], ['opencode', 'OpenCode', 'OpenCode server']].map(([k, n, d]) => `<button class="r${k === c.harness ? ' on' : ''}" data-act="setharness:${k}"><span class="v">${ic(k, 'lg')}${n}</span><span class="d">${d}</span>${k === c.harness ? ic('i-check', 'ck') : ''}</button>`).join('');
+	else body = `<div class="sh-t">Harness &amp; model</div>
+		<button class="r" data-act="pick:harness"><span class="k">Harness</span><span class="v">${ic(c.harness, 'lg')}${c.harness === 'claude' ? 'Claude' : 'OpenCode'}</span>${ic('i-chevr', 'cr')}</button>
+		<button class="r" data-act="pick:model"><span class="k">Model</span><span class="v">${m.n}</span>${ic('i-chevr', 'cr')}</button>
+		${m.ctx.length > 1 ? `<button class="r" data-act="cyc:ctx"><span class="k">Context</span>${seg(m.ctx, ctxOf(c), bump === 'ctx')}</button>` : `<div class="r"><span class="k">Context</span><span class="v" style="font-weight:500">${m.ctx[0]}</span></div>`}
+		<div class="r"><span class="k">Effort</span><span class="seg2 pick" role="radiogroup" aria-label="Effort">${LVS.map((v, i) => `<button role="radio" aria-checked="${i === c.effort - 1}" class="${i === c.effort - 1 ? 'on' : ''}" data-act="seteff:${i + 1}" aria-label="${LV[i]}">${v}</button>`).join('')}</span></div>`;
+	return `<div class="scrim" data-act="close"></div><div class="sheet pk"><div class="grab"></div>${body}</div>`;
+}
+
+const kbd = () => `<div class="kbd">${['qwertyuiop', 'asdfghjkl', 'zxcvbnm'].map(r => `<div>${[...r].map(k => `<i>${k}</i>`).join('')}</div>`).join('')}<div><i class="w2">123</i><i class="spc">space</i><i class="w2">return</i></div></div>`;
+
+function deskHTML(c) {
+	const m = model(c), p = PM[c.perm], cls = ACTIVE.includes(c.goal) ? ' goal' : '';
+	return `<figure class="ph dk" id="${c.id}"><figcaption><span>${c.cap}</span><small>${c.sub || ''}</small></figcaption><div class="dscr">
+		<div class="topw">${topbar(c)}${c.details ? details(c) : ''}</div>
+		<div class="tx">${tx(c)}</div>
+		<div class="dock"><div class="dwrap">${bars(c)}<div class="cmp${cls}">${header(c)}<div class="row">
+			<button class="ib" aria-label="Attach">${ic('i-plus')}</button><div class="fld">${field(c)}</div>
+			<button class="dc">${ic(c.harness, 'lg')}${m.n} · ${ctxOf(c)}${ic('i-chev', 'cv')}</button>
+			<button class="dc cyc" data-kind="eff" data-act="cyc:eff">${meter(c.effort)}${LV[c.effort - 1]}</button>
+			<button class="dc cyc sh-b" data-kind="perm" data-act="cyc:perm" data-hold="perm" style="--pc:var(${p.c})">${shield(c.perm, 's1')}${p.n}</button>
+			${sendBtns(c)}</div></div></div></div></div></figure>`;
+}
+
+/* ── interaction ── */
+function rerender(id) {
+	const el = document.getElementById(id);
+	if (!el) return;
+	el.outerHTML = phoneHTML(C.get(id));
+	measure();
+}
+
+function info(c, kind) {
+	if (kind === 'eff') { const i = c.effort - 1; return { title: 'Effort', label: LV[i], sub: LVD[i], color: 'var(--text)', dots: meter(c.effort) }; }
+	const k = c.pending || c.perm, p = PM[k];
+	return { title: 'Approvals', label: p.n + (c.pending ? '?' : ''), sub: c.pending ? 'Tap again to confirm' : p.d, color: `var(${p.c})`,
+		dots: `<span class="pd">${permOrder(c).map(x => `<i class="${x === k ? 'on' : ''}" style="--pc:var(${PM[x].c})"></i>`).join('')}</span>` };
+}
+
+function bubble(ph, btn, f) {
+	const dock = ph.querySelector('.dock'), b = document.createElement('div');
+	b.className = 'bub';
+	b.style.setProperty('--pc', f.color);
+	b.innerHTML = `<small>${f.title}</small><b>${f.label}</b><em>${f.sub}</em>${f.dots}`;
+	dock.appendChild(b);
+	const dr = dock.getBoundingClientRect(), br = btn.getBoundingClientRect(), w = b.offsetWidth;
+	const cx = br.left + br.width / 2 - dr.left, left = Math.min(Math.max(cx, w / 2 + 6), dr.width - w / 2 - 6);
+	b.style.left = left + 'px';
+	b.style.bottom = (dr.bottom - br.top + 9) + 'px';
+	b.style.setProperty('--ax', (cx - left + w / 2) + 'px');
+}
+
+function feedback(id, kind, persist) {
+	const c = C.get(id), ph = document.getElementById(id), btn = ph?.querySelector(`.cyc[data-kind="${kind}"]`);
+	if (!btn || c.desk) return;
+	let style = c.fb;
+	if (style === 'e5' && !btn.classList.contains('w')) style = 'e2';
+	if (style === 'e4' && c.strip !== kind) { c.strip = kind; rerender(id); return feedback(id, kind, persist); }
+	const f = info(c, kind);
+	if (style === 'e1') btn.classList.add('exp');
+	if (style === 'e2' || (style === 'e5' && c.pending)) bubble(ph, btn, f);
+	if (style === 'e3') ph.querySelector('.fld').innerHTML = `<span class="hint" style="--pc:${f.color}"><b>${f.title} → ${f.label}</b> <small>· ${f.sub}</small></span>`;
+	if (style === 'e5') btn.classList.add('roll');
+	if (persist) return;
+	const g = ++c.gen;
+	setTimeout(() => { if (c.gen !== g) return; c.strip = null; c.pending = null; rerender(id); }, c.pending ? 2200 : 1800);
+}
+
+function cycle(c, kind) {
+	if (kind === 'eff') { c.effort = c.effort % LV.length + 1; return; }
+	if (c.rule === 'r3' && c.pending) { c.perm = c.pending; c.pending = null; return; }
+	const order = permOrder(c);
+	let next;
+	if (c.rule === 'r2') {
+		const safe = order.filter(k => !PM[k].elev);
+		next = PM[c.perm].elev ? 'ask' : safe[(safe.indexOf(c.perm) + 1) % safe.length];
+	} else next = order[(order.indexOf(c.perm) + 1) % order.length];
+	// R3: stepping up into an elevated mode is staged; stepping down is instant.
+	if (c.rule === 'r3' && PM[next].elev && PM[next].f > PM[c.perm].f) c.pending = next;
+	else c.perm = next;
+}
+
+let holdT, held = false;
+document.addEventListener('pointerdown', e => {
+	const h = e.target.closest('[data-hold]');
+	held = false;
+	if (!h) return;
+	holdT = setTimeout(() => {
+		held = true;
+		const ph = h.closest('.ph'), c = C.get(ph.id);
+		if (c.desk) return;
+		Object.assign(c, { sheet: h.dataset.hold, pending: null, strip: null, gen: c.gen + 1 });
+		rerender(ph.id);
+	}, 450);
+});
+['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => clearTimeout(holdT)));
+document.addEventListener('contextmenu', e => { if (e.target.closest('[data-hold]')) e.preventDefault(); });
+
+document.addEventListener('click', e => {
+	const o = e.target.closest('[data-opt]');
+	if (o) { const [k, v] = o.dataset.opt.split(':'); OPTS[k] = v; save(); renderAll(); return; }
+	const a = e.target.closest('[data-act]'), ph = e.target.closest('.ph');
+	if (!a || !ph) return;
+	if (held) { held = false; return; }
+	const c = C.get(ph.id), [act, arg] = a.dataset.act.split(':');
+	e.stopPropagation();
+	switch (act) {
+		case 'open': c.sheet = c.sheet === arg ? null : arg; c.pick = 'root'; break;
+		case 'close': c.sheet = null; c.details = false; break;
+		case 'details': c.details = !c.details; break;
+		case 'pick': c.pick = arg; break;
+		case 'back': c.pick = 'root'; break;
+		case 'setmodel': c.model = +arg; c.pick = 'root'; break;
+		case 'setharness': c.harness = arg; c.model = 0; c.pick = 'root'; if (!permOrder(c).includes(c.perm)) c.perm = 'ask'; break;
+		case 'seteff': c.effort = +arg; if (!c.strip && c.sheet !== 'picker') c.sheet = null; break;
+		case 'setperm': c.perm = arg; c.pending = null; if (!c.strip) c.sheet = null; break;
+		case 'setgoal': c.sheet = null; c.slash = true; c.text = null; break;
+		case 'undo': c.goal = 'pursuing'; c.working = true; break;
+		case 'dismiss': c.outcome = null; c.bars = []; break;
+		case 'cyc':
+			if (arg === 'ctx') { const m = model(c); if (m.ctx.length > 1) { c.ctx = ctxOf(c) === '1M' ? '200K' : '1M'; c.bump = 'ctx'; } break; }
+			cycle(c, arg); rerender(c.id); document.getElementById(c.id)?.querySelector(`.cyc[data-kind="${arg}"]`)?.classList.add('tick'); return;
+	}
+	rerender(c.id);
+	if (c.strip && (act === 'seteff' || act === 'setperm')) feedback(c.id, c.strip);
+});
+
+/* ── sections ── */
+const card = (k, grp, title, ph, body = '', rec = false, use = true) => `<div class="card"><div class="opt-h"><b>${title}${rec ? '<span class="rec">my pick</span>' : ''}</b>${use ? `<button class="use${OPTS[grp] === k ? ' on' : ''}" data-opt="${grp}:${k}">${OPTS[grp] === k ? 'Selected' : 'Use'}</button>` : ''}</div>${ph}${body}</div>`;
+const crop = o => phone({ crop: 1, noTop: 1, h: 300, ...o });
+const FITS = [
+	['w1', 'W1 · Two rows, always', 'The text gets its own full-width line. + and the controls sit on a row underneath, inside the composer.', 'Always about 34px taller than one row, even when the field is empty.'],
+	['w2', 'W2 · Two rows only when needed', 'One row while everything fits. The moment the text or the grey placeholder would not fit, the controls drop to a row underneath.', 'The layout shifts once, at the moment your text reaches the edge. While Claude works, the stop button usually forces two rows.', 1],
+	['w3', 'W3 · Icons under the field', 'The composer keeps just + │ field │ send. The icons move to a row below it, in the spare space above the home bar. Long text still gets the full width, like W2.', 'About 20px taller than today, and the icon row sits close to the home-bar swipe zone.'],
+];
+const FIT_CASES = [
+	['Idle, empty', {}],
+	['Working, empty', { working: true }],
+	['Typing', { text: 'Also run the Linux baselines before you call it done' }],
+	['Working + typing', { working: true, text: 'Skip the flaky one and look at the focus ring' }],
+	['OpenCode, empty', { harness: 'opencode' }],
+];
+const SETTING = () => `<div class="setmock"><div class="crumb">Settings › Composer</div><div class="lab">Controls</div>
+	<div class="seg"><button data-opt="ctrl:v1" aria-pressed="${OPTS.ctrl === 'v1'}">Icons</button><button data-opt="ctrl:v3" aria-pressed="${OPTS.ctrl === 'v3'}">Words</button></div>
+	<p><b>Icons</b> puts model, effort and approvals in the composer as icon buttons. <b>Words</b> lists them as text under the field.</p>
+	<p>This toggle drives the whole page, same as the bar at the top.</p>
+	<div class="lab" style="margin-top:16px">Context warning</div>
+	<div class="seg">${['60', '70', '80', '90', 'never'].map(v => `<button data-opt="warn:${v}" aria-pressed="${OPTS.warn === v}">${v === 'never' ? 'Never' : v + '%'}</button>`).join('')}</div>
+	<p>Show the <b>Compact</b> bar and turn the context % amber once the session is this full. <b>Never</b> hides both. State 21 below is 92% full, so try 90% and Never.</p></div>`;
+const STATES = [
+	['Idle', 'empty field', {}],
+	['Typing', 'send lights up', { text: 'Also run the Linux baselines before you call it done' }],
+	['Working', 'A1 header + stop', { working: true }],
+	['Working + typing', 'steer while it runs', { working: true, text: 'Skip the flaky one for now' }],
+	['Keyboard open', '', { kb: true, text: 'Also run the Linux' }],
+	['Attach sheet', 'B1 · Set goal tile', { sheet: 'attach' }],
+	['Files attached', '', { files: ['screenshot.png', 'failing.log'], text: 'This is what I see on the phone' }],
+	['Picker open', 'P2 · pick any effort level', { sheet: 'picker' }],
+	['Effort menu', 'hold the meter', { sheet: 'eff' }],
+	['Elevated approvals', 'Edits', { perm: 'acceptEdits', working: true }],
+	['Plan mode', 'Claude only', { perm: 'plan', text: 'Map out the refactor before touching code' }],
+	['Setting a goal', 'C4 · typed /goal', { slash: true }],
+	['Goal starting', '', { goal: 'starting', working: true }],
+	['Goal pursuing', 'B5 subtitle + B2 border', { goal: 'pursuing', working: true }],
+	['Goal checking', 'checker running', { goal: 'checking', working: true }],
+	['Not yet', 'reason in the header', { goal: 'notyet', working: true }],
+	['Goal paused', 'violet header · dashed border', { goal: 'paused' }],
+	['Goal met', 'A2 · stays after the run', { goal: 'met', outcome: 'met' }],
+	['Goal impossible', 'A2 · stays after the run', { goal: 'impossible', outcome: 'impossible' }],
+	['Goal cleared', 'undo for a few seconds', { goal: 'cleared' }],
+	['Context nearly full', 'threshold set in Settings', { ctxPct: 92 }],
+	['Subagent', 'back bar', { bars: ['sub'] }],
+	['Model changed', 'notice above the field', { bars: ['model'], model: 1 }],
+	['OpenCode session', 'no goal · 3 approval modes', { harness: 'opencode' }],
+	['Desktop', 'labels shown', { desk: true, goal: 'pursuing', working: true }],
+	['Goal details open', 'extra · B5 pull-down + C5', { goal: 'notyet', working: true, details: true }],
+	['Approvals menu', 'extra · A4, hold the shield', { sheet: 'perm' }],
+	['Paused, orange', 'extra · alt to 17', { goal: 'paused', tone: 't-o' }],
+];
+
+const SECTIONS = {
+	controls: () => [
+		() => card('v1', 'ctrl', 'V1 · Icons', crop({ ctrl: 'v1', measure: 1, cap: 'Working + typing', working: true, text: 'Skip the flaky one for now' }), `<p class="pros">Uses the field-width fix selected above (${OPTS.fit.toUpperCase()}).</p>`),
+		() => card('v3', 'ctrl', 'V3 · Words', crop({ ctrl: 'v3', measure: 1, cap: 'Working + typing', working: true, text: 'Skip the flaky one for now' }), '<p class="pros">No icons in the row, so the field is always wide.</p>'),
+		SETTING,
+	],
+	fit: () => FITS.map(([k, n, pro, con, rec]) => () => `<div class="fitopt"><div class="opt-h" style="max-width:560px"><b>${n}${rec ? '<span class="rec">my pick</span>' : ''}</b><button class="use${OPTS.fit === k ? ' on' : ''}" data-opt="fit:${k}">${OPTS.fit === k ? 'Selected' : 'Use'}</button></div>
+		<div class="trio">${FIT_CASES.map(([cap, o]) => crop({ fit: k, ctrl: 'v1', measure: 1, h: 270, cap, ...o })).join('')}</div>
+		<p class="pros">${pro}</p><p class="pros con">${con}</p></div>`),
+	shield: () => [
+		() => card('s4', 'shield', 'S4 · Micro label', `<div class="ladder">${RANKED.map(p => `<div><span class="ib sh-b${PM[p].elev ? ' elev' : ''}" style="--pc:var(${PM[p].c})">${shield(p, 's4')}</span><small>${PM[p].n}</small></div>`).join('')}</div>`, '<p class="pros">Same 32px footprint as the other buttons. Colour and word both change per mode.</p>', false, false),
+		() => card('em', 'shield', 'Effort · same micro label', `<div class="ladder">${LV.map((n, i) => `<div><span class="ib"><span class="sh micro" style="--pc:var(--text2)">${meter(i + 1)}<b>${LVS[i]}</b></span></span><small>${n}</small></div>`).join('')}</div>`, '<p class="pros">Tap steps up a level and wraps from Max back to Low. Hold opens the effort menu.</p>', false, false),
+		() => `<div class="legend"><div class="opt-h"><b>Colour per mode</b></div>${RANKED.map(k => `<div style="--pc:var(${PM[k].c})"><span class="ib sh-b${PM[k].elev ? ' elev' : ''}">${shield(k, 's4')}</span><b>${PM[k].n}</b><span>${PM[k].d}</span></div>`).join('')}</div>`,
+		() => card('r1', 'rule', 'Live · tap to cycle, hold for menus', crop({ h: 440, cap: OPTS.ctrl === 'v3' ? 'Tap a word · hold effort or approvals' : 'Tap meter or shield · hold either' }), '<p class="pros">Each tap moves to the next value, Full access included. The button itself shows the new value, so no bubble is needed. Hold the meter or the shield for its menu.</p>', false, false),
+	],
+	picker: () => [
+		() => phone({ crop: 1, noTop: 1, h: 520, sheet: 'picker', cap: 'Opened from the logo', sub: 'tap a level · context toggles' }),
+		() => phone({ crop: 1, noTop: 1, h: 520, sheet: 'picker', pick: 'model', cap: 'Model drill-down' }),
+		() => phone({ crop: 1, noTop: 1, h: 520, sheet: 'picker', harness: 'opencode', cap: 'OpenCode', sub: 'one context size, no cycle' }),
+	],
+	states: () => STATES.map(([cap, sub, o], i) => () => phone({ ...o, cap: `${i < 25 ? i + 1 + '.' : '+'} ${cap}`, sub })),
+};
+
+function measure() {
+	document.querySelectorAll('.cmp.auto').forEach(cmp => {
+		cmp.classList.remove('two');
+		const t = cmp.querySelector('.fld > span');
+		if (!t) return;
+		const over = t.classList.contains('phd') ? t.scrollWidth > t.clientWidth + 1 : t.getClientRects().length > 1;
+		cmp.classList.toggle('two', over);
+	});
+	document.querySelectorAll('[data-measure]').forEach(ph => {
+		const d = ph.querySelector('.dock');
+		ph.querySelector('figcaption small').textContent = `composer stack ${d.offsetHeight}px`;
+	});
+}
+
+function renderAll() {
+	const both = OPTS.theme === 'both';
+	document.documentElement.dataset.theme = OPTS.theme === 'light' ? 'light' : 'dark';
+	document.body.classList.toggle('both', both);
+	document.body.classList.toggle('show-safe', OPTS.safe === 'on');
+	C.clear();
+	document.querySelectorAll('.stage').forEach(st => {
+		const items = SECTIONS[st.dataset.sec]();
+		const wrap = (t, f) => `<div class="tw" data-theme="${t}">${both ? `<span class="tl">${t}</span>` : ''}${f()}</div>`;
+		st.innerHTML = items.map(f => both ? `<div class="pair">${wrap('dark', f)}${wrap('light', f)}</div>` : wrap(OPTS.theme, f)).join('');
+	});
+	document.querySelectorAll('.opts [data-opt]').forEach(b => { const [k, v] = b.dataset.opt.split(':'); b.setAttribute('aria-pressed', OPTS[k] === v); });
+	measure();
+	C.forEach(c => { if (c.freeze) feedback(c.id, c.freeze, true); });
+}
+
+const save = () => localStorage.setItem('cfd-opts-2', JSON.stringify(OPTS));
+document.querySelectorAll('.note').forEach(t => {
+	t.value = localStorage.getItem('cfd-note-' + t.dataset.note) || '';
+	t.addEventListener('input', () => localStorage.setItem('cfd-note-' + t.dataset.note, t.value));
+});
+document.getElementById('copy').addEventListener('click', async e => {
+	const name = { v1: 'V1 icons', v3: 'V3 words' };
+	const lines = ['# Composer final review feedback', `Theme(s) reviewed: ${OPTS.theme}`,
+		`Selected: Controls ${name[OPTS.ctrl]} · Field width ${OPTS.fit.toUpperCase()} · Locked: W2, S4 + effort micro label (5 levels), R1, hold menus, P2 · Context warning ${OPTS.warn === 'never' ? 'never' : OPTS.warn + '%'}`];
+	document.querySelectorAll('.note').forEach(t => { if (t.value.trim()) lines.push(`\n## ${t.dataset.title}\n${t.value.trim()}`); });
+	const text = lines.join('\n');
+	try { await navigator.clipboard.writeText(text); e.target.textContent = 'Copied ✓'; setTimeout(() => e.target.textContent = 'Copy feedback', 1500); }
+	catch { const d = document.getElementById('dlg'); d.querySelector('textarea').value = text; d.showModal(); }
+});
+renderAll();
+</script>
+</body>
+</html>

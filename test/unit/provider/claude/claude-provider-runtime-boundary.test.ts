@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
-import { makeClaudeProviderRuntime } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
+import {
+	makeClaudeProviderRuntime,
+	makeClaudeSessionRunner,
+} from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import type {
 	Query,
 	SDKMessage,
@@ -230,6 +233,7 @@ describe("Claude provider runtime boundary", () => {
 				const query = makeBlockingQuery(streamStarted, releaseStream);
 				const scope = yield* Scope.make();
 				const runtime = yield* makeClaudeProviderRuntime({
+					runnerFactory: makeClaudeSessionRunner,
 					workspaceRoot: "/tmp/ws",
 					queryFactory: () => query,
 				}).pipe(Effect.provideService(Scope.Scope, scope));

@@ -84,6 +84,48 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the row query, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/input/ComposerStatusHeader.stories.ts",
+		snippetPattern: /Checking spinner is missing/,
+		reason:
+			"storybook play() guard that narrows the spinner query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/input/InputArea.stories.ts",
+		snippetPattern: /Composer is missing/,
+		reason:
+			"storybook play() guard that narrows the composer query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/input/InputArea.stories.ts",
+		snippetPattern: /Ended goal is missing/,
+		reason:
+			"storybook play() guard that narrows goal fixture state, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/layout/SessionBar.stories.ts",
+		snippetPattern: /Checking spinner is missing/,
+		reason:
+			"storybook play() guard that narrows the spinner query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/model/ModelVariant.stories.ts",
+		snippetPattern: /The effort meter is missing/,
+		reason:
+			"storybook play() guard that narrows the meter query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/overlays/SettingsPanel.stories.ts",
+		snippetPattern: /Settings panel is missing/,
+		reason:
+			"storybook play() guard that narrows the panel query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/ui/Icon.stories.ts",
+		snippetPattern: /Pause icon is missing/,
+		reason:
+			"storybook play() guard that narrows the icon query, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",

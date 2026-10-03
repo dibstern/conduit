@@ -185,8 +185,11 @@ test.describe("Question/Answer Flow", () => {
 			answers: { "0": "PostgreSQL" },
 		});
 
-		// The successful AnswerQuestion RPC clears the pending question.
-		await expect(questionCard).toHaveCount(0);
+		// The successful AnswerQuestion RPC clears the pending question. The tool
+		// is still running with its input, so the card stays in the transcript,
+		// settled as answered with nothing left to submit, until the result lands.
+		await expect(questionCard).toContainText("Answered ✓");
+		await expect(submitBtn).toHaveCount(0);
 	});
 
 	test("agent continues responding after user answers a question", async ({

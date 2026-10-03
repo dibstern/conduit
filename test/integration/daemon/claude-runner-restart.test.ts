@@ -147,7 +147,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("idle-exits an adopted runner and transparently respawns on the following send", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 			runnerLifecycle: { nonDefaultConfigDir: true, idleDayMs: 250 },
 		});
@@ -234,7 +233,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 		for (const restart of [false, true]) {
 			const harness = await ProcessHarness.start({
 				dist: "dist",
-				claudeRunner: "process",
 				restartProof: true,
 				holdRunnerAck: restart,
 			});
@@ -321,7 +319,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	] as const)("restores a Session Approval across %s restart", async (scenario) => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 			...(scenario === "uncommitted-ask"
 				? { holdRunnerOutput: "permission-request" as const }
@@ -428,7 +425,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("drains an interrupted terminal replay before acting on a cached failed send receipt", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 		});
 		harnesses.push(harness);
@@ -713,7 +709,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("recovers an admitted command absent from runner hello with its launch environment and settings", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 			shellEnvProof: true,
 			holdRunnerOutput: "send-turn",
@@ -829,7 +824,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("preserves an adopted approval turn through another graceful server restart", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 		});
 		harnesses.push(harness);
@@ -928,7 +922,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("terminalizes an adopted runner crash during approval and restores terminal state on reconnect", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 		});
 		harnesses.push(harness);
@@ -1047,7 +1040,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("terminalizes the owning pending turn when the adopted SDK fails before an assistant message", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 		});
 		harnesses.push(harness);
@@ -1150,7 +1142,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("expires an orphaned runner when no server reattaches during its grace period", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 			runnerReattachGraceMs: 1000,
 		});
@@ -1185,7 +1176,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 	it("terminates a suspended runner when its test parent disconnects", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
-			claudeRunner: "process",
 			restartProof: true,
 		});
 		harnesses.push(harness);

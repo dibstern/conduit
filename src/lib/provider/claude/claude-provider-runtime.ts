@@ -1,7 +1,7 @@
 // src/lib/provider/claude/claude-provider-runtime.ts
 /**
  * ClaudeProviderRuntime adapts provider operations and EventSink to session
- * messages. The in-process session runner owns the live Claude Agent SDK state.
+ * messages. A per-session runner process owns the live Claude Agent SDK state.
  *
  * Architectural notes:
  * - One SDK query() per conduit session, not per turn.
@@ -70,6 +70,10 @@ import {
 	type ClaudeCapabilitiesService,
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
+import {
+	ClaudeGoalTracker,
+	type ReadClaudeGoalStatus,
+} from "./claude-goal-tracker.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
@@ -160,6 +164,7 @@ const log = createLogger("claude-provider-runtime");
 type EffortLevel = NonNullable<SDKOptions["effort"]>;
 
 export interface ClaudeProviderInstanceDeps {
+	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
@@ -182,6 +187,8 @@ export interface ClaudeProviderInstanceDeps {
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
+	/** Tests can host the session engine locally; production defaults to a process. */
+	readonly runnerFactory?: typeof makeClaudeSessionRunner;
 }
 
 export type ClaudeSessionRunnerDeps = Pick<
@@ -194,7 +201,12 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentSdk"
 	| "subagentPollTimeoutMs"
 	| "capabilitiesService"
-> & { readonly materializeSubagents?: boolean };
+	| "readGoalStatus"
+> & {
+	readonly materializeSubagents?: boolean;
+	readonly onSubagentFinalizationComplete?: () => void;
+	readonly prepareQuery?: () => Promise<void>;
+};
 
 export interface ClaudeProviderRuntimeState {
 	readonly sessions: HashMap.HashMap<string, ClaudeSessionContext>;
@@ -240,13 +252,9 @@ export const makeClaudeProviderRuntime = (
 			void,
 			ProviderInstanceFailure
 		>();
-		const processRunnerEnabled =
-			process.env["CONDUIT_CLAUDE_RUNNER"] === "process";
 		let runtime: ClaudeProviderRuntime | undefined;
 		const runner = yield* (
-			processRunnerEnabled
-				? makeProcessClaudeSessionRunner
-				: makeClaudeSessionRunner
+			deps.runnerFactory ?? makeProcessClaudeSessionRunner
 		)(
 			{
 				workspaceRoot: deps.workspaceRoot,
@@ -264,6 +272,7 @@ export const makeClaudeProviderRuntime = (
 					: {}),
 				materializeSubagents: deps.materializeSubagents !== undefined,
 				capabilitiesService,
+				...(deps.readGoalStatus ? { readGoalStatus: deps.readGoalStatus } : {}),
 			},
 			(output, sessionId?: string) =>
 				runtime
@@ -277,7 +286,6 @@ export const makeClaudeProviderRuntime = (
 			interactionFibers,
 			preWarmFibers,
 			providerScope,
-			processRunnerEnabled,
 			rollbackOption._tag === "Some" ? rollbackOption.value : undefined,
 		);
 		const providerRuntime = runtime;
@@ -309,6 +317,7 @@ export const makeClaudeSessionRunner = (
 		const warmedQueries = yield* makeClaudeWarmedQueryOwner(
 			deps.queryFactory ??
 				(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>),
+			deps.prepareQuery,
 		);
 		const runner = new InProcessClaudeSessionRunner(
 			{ ...deps, capabilitiesService },
@@ -403,7 +412,6 @@ export class ClaudeProviderRuntime {
 			ProviderInstanceFailure
 		>,
 		private readonly providerScope: Scope.Scope,
-		private readonly processRunnerEnabled = false,
 		private readonly runnerRollback?: ClaudeRunnerRollback,
 	) {}
 
@@ -461,14 +469,12 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
-			const sinkId =
-				process.env["CONDUIT_CLAUDE_RUNNER"] === "process"
-					? claudeRunnerSinkId(
-							input.commandId ?? randomUUID(),
-							input.commandAttempt,
-						)
-					: randomUUID();
+			const sinkId = claudeRunnerSinkId(
+				input.commandId ?? randomUUID(),
+				input.commandAttempt,
+			);
 			this.sinks.set(sinkId, eventSink);
+			this.reportSinkForTesting("allocated", sinkId, input.sessionId);
 			const aborted = Effect.async<void>((resume) => {
 				const onAbort = () => resume(Effect.void);
 				if (abortSignal.aborted) onAbort();
@@ -498,7 +504,6 @@ export class ClaudeProviderRuntime {
 	preWarmSessionEffect(
 		input: PreWarmSessionInput,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		if (!this.processRunnerEnabled) return Effect.void;
 		const preWarm = Effect.gen(this, function* () {
 			let model = input.model;
 			if (!model) {
@@ -645,6 +650,26 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
+	private reportSinkForTesting(
+		phase: "allocated" | "released",
+		sinkId: string,
+		sessionId: string | undefined,
+	): void {
+		if (
+			process.env["NODE_ENV"] === "test" &&
+			process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+			process.connected
+		)
+			process.send?.({
+				channel: "conduit-process-test",
+				kind: "runtime-sink",
+				phase,
+				sinkId,
+				sessionId,
+				activeSinks: this.sinks.size,
+			});
+	}
+
 	handleOutputEffect(
 		output: ClaudeSessionOutput,
 		recoveredSessionId?: string,
@@ -659,6 +684,11 @@ export class ClaudeProviderRuntime {
 				sink = this.recoveredSink(recoveredSessionId);
 				this.sinks.set(output.sinkId, sink);
 				this.recoveredSinkIds.add(output.sinkId);
+				this.reportSinkForTesting(
+					"allocated",
+					output.sinkId,
+					recoveredSessionId,
+				);
 			}
 			if (!sink) return;
 			switch (output.type) {
@@ -704,8 +734,7 @@ export class ClaudeProviderRuntime {
 								Effect.gen(this, function* () {
 									if (
 										Exit.isFailure(exit) &&
-										(process.env["CONDUIT_CLAUDE_RUNNER"] !== "process" ||
-											!(yield* preserveClaudeRunners(this.runnerRollback)))
+										!(yield* preserveClaudeRunners(this.runnerRollback))
 									) {
 										yield* this.runner
 											.executeEffect({
@@ -771,6 +800,11 @@ export class ClaudeProviderRuntime {
 					this.sinks.delete(output.sinkId);
 					this.recoveredSinkIds.delete(output.sinkId);
 					yield* FiberMap.remove(this.abortFibers, output.sinkId);
+					this.reportSinkForTesting(
+						"released",
+						output.sinkId,
+						recoveredSessionId,
+					);
 					return;
 				case "materialize-subagents":
 					return yield* this.deps
@@ -858,6 +892,20 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>);
 	}
 
+	hasPendingSubagentFinalizers(sessionId: string): boolean {
+		return Array.from(this.subagentFinalizationFibers).some(
+			([key]) => key.sessionId === sessionId,
+		);
+	}
+
+	getResumeSessionIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | null | undefined> {
+		return getSession(this.stateRef, sessionId).pipe(
+			Effect.map((ctx) => (ctx ? (ctx.resumeSessionId ?? null) : undefined)),
+		);
+	}
+
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -883,6 +931,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						command.claudeSettingsOverrides,
 						this.deps.shellEnv?.(command.input.workspaceRoot),
 						this.getPermissionBridge(),
+						command.settingsSnapshot !== undefined,
 					);
 					return;
 				case "send-turn": {
@@ -1345,6 +1394,31 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		return this.mapProviderFailure(
 			"sendTurn",
 			this.sendTurnLocalEffect(input).pipe(
+				Effect.catchAll((err) =>
+					Effect.gen(this, function* () {
+						const ctx = yield* getSession(this.stateRef, input.sessionId);
+						const tracker = ctx
+							? (ctx.goalTracker ??= new ClaudeGoalTracker(
+									input.sessionId,
+									input.goalState,
+								))
+							: new ClaudeGoalTracker(input.sessionId, input.goalState);
+						const goalChange = tracker.pause(asError(err).message);
+						if (goalChange) {
+							// The pause write must never replace the send's original failure.
+							yield* Effect.suspend(() =>
+								input.eventSink.push(
+									claudeRuntimeEvent(
+										"session.goal_changed",
+										input.sessionId,
+										goalChange,
+									),
+								),
+							).pipe(Effect.exit);
+						}
+						return yield* Effect.fail(err);
+					}),
+				),
 				Effect.annotateLogs(attributes),
 				Effect.withSpan("claude.sendTurn", { attributes }),
 			),
@@ -1483,6 +1557,12 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					sessionId,
 					launchOptions,
 				);
+				if (!warmed && this.deps.prepareQuery)
+					yield* Effect.tryPromise({
+						try: this.deps.prepareQuery,
+						catch: (cause) =>
+							new ClaudeBoundaryError({ operation: "prepareQuery", cause }),
+					});
 				activeQuery = warmed?.query;
 				const queue = warmed?.promptQueue ?? (yield* makeEffectPromptQueue());
 				promptQueue = queue;
@@ -1504,6 +1584,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const context = {
 					sessionId,
 					workspaceRoot: input.workspaceRoot,
+					...(input.configDir !== undefined
+						? { configDir: input.configDir }
+						: {}),
+					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
+					cumulativeTokens: input.cumulativeTokens ?? 0,
 					startedAt: new Date().toISOString(),
 					promptQueue: queue,
 					turnAdmissionSemaphore,
@@ -1557,6 +1642,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 				const translator = makeClaudeTranslationService({
 					getSink: (ctx) => ctx.eventSink,
+					...(this.deps.readGoalStatus
+						? { readGoalStatus: this.deps.readGoalStatus }
+						: {}),
 					onBackgroundTask: (transition) =>
 						this.recordBackgroundTaskEffect(transition),
 				});
@@ -1827,6 +1915,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							const priorSink = ctx.eventSink;
 							this.retainSink(input.eventSink);
 							ctx.eventSink = input.eventSink;
+							ctx.cumulativeTokens =
+								input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
 							yield* this.releaseSinkEffect(priorSink);
 							// Marks the assistant-message boundary: if the SDK's streaming
 							// turn is still open, no `result` resets the translator, and
@@ -2049,7 +2139,17 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx,
 				result,
 			).pipe(Effect.ensuring(this.releaseSinkEffect(ctx.eventSink))),
-		).pipe(Effect.asVoid);
+		).pipe(
+			Effect.tap((fiber) =>
+				Effect.sync(() => {
+					// Effect observers run in reverse registration order. Report after
+					// FiberMap's observer has removed the completed finalizer.
+					const complete = this.deps.onSubagentFinalizationComplete;
+					if (complete) fiber.addObserver(() => queueMicrotask(complete));
+				}),
+			),
+			Effect.asVoid,
+		);
 	}
 
 	private interruptSubagentFinalizersForSession(
@@ -2254,6 +2354,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx.eventSink &&
 				(yield* hasPendingTurn(this.stateRef, ctx.sessionId))
 			) {
+				const goalChange = ctx.goalTracker?.pause("Interrupted");
+				if (goalChange) {
+					yield* ctx.eventSink
+						.push(
+							claudeRuntimeEvent(
+								"session.goal_changed",
+								ctx.sessionId,
+								goalChange,
+							),
+						)
+						.pipe(Effect.ignore);
+				}
 				yield* ctx.eventSink
 					.push(
 						claudeRuntimeEvent("turn.interrupted", ctx.sessionId, {

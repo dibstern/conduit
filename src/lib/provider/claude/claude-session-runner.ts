@@ -13,6 +13,7 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import type { ClaudeRunnerSettingsSnapshot } from "./claude-runner-upgrade.js";
 import type { MaterializedClaudeSubagent } from "./claude-subagent-materializer.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
@@ -28,6 +29,7 @@ export type ClaudeSessionCommand =
 			readonly input: PreWarmSessionInput;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly settingsSnapshot?: ClaudeRunnerSettingsSnapshot;
 	  }
 	| {
 			readonly type: "send-turn";
@@ -168,6 +170,12 @@ export interface ClaudeSessionFailure {
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface ClaudeSessionRunner {
 	readonly recoverEffect?: Effect.Effect<void, ClaudeSessionFailure>;
+	/** Local runner lifecycle state, including work outside the foreground turn. */
+	hasPendingSubagentFinalizers?(sessionId: string): boolean;
+	/** Undefined means no runtime session; null means its cursor is cleared. */
+	getResumeSessionIdEffect?(
+		sessionId: string,
+	): Effect.Effect<string | null | undefined>;
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;

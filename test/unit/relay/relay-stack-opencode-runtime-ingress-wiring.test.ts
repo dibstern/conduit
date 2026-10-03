@@ -272,6 +272,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				httpServer: relayServer,
 				opencodeUrl: mock.url,
 				projectDir,
+				configDir: dir,
 				persistenceDbPath: dbPath,
 				slug: "runtime-ingress-smoke",
 				log: createSilentLogger(),

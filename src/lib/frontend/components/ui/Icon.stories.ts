@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect } from "storybook/test";
 import Icon from "./Icon.svelte";
 
 const meta = {
@@ -27,6 +28,7 @@ const meta = {
 				"file",
 				"download",
 				"loader",
+				"pause",
 				"circle-check",
 				"circle-x",
 				"circle-alert",
@@ -59,4 +61,29 @@ export const Large: Story = {
 
 export const Small: Story = {
 	args: { name: "check", size: 12 },
+};
+
+export const Pause: Story = {
+	args: { name: "pause", size: 12, class: "text-status-violet" },
+	play: async ({ canvasElement }) => {
+		const icon = canvasElement.querySelector("svg");
+		await expect(icon).toBeVisible();
+		if (!icon) throw new Error("Pause icon is missing");
+		await expect(icon.getBoundingClientRect().width).toBe(12);
+		const style = getComputedStyle(icon);
+		const expected = new Option().style;
+		expected.color = style.getPropertyValue("--color-status-violet");
+		await expect(style.color).toBe(expected.color);
+	},
+};
+
+export const PauseLight: Story = { ...Pause, globals: { theme: "light" } };
+
+export const ClaudeMark: Story = {
+	args: { name: "claude", size: 32 },
+};
+
+/** Drawn from the text colour, so it is also captured in light mode. */
+export const OpenCodeMark: Story = {
+	args: { name: "opencode", size: 32 },
 };

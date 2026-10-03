@@ -137,7 +137,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 
 	it("coalesces concurrent warm requests, waits for readiness, and reuses the query for the first streamed approval turn", async () => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			queryInitializationDelayMs: 400,
 			shellEnvProof: true,
 		});
@@ -221,33 +220,34 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 	});
 
-	it("leaves the flag-off path cold until a normal first send", async () => {
+	it("runs a cold first send in the default runner without a warm hint", async () => {
 		const { harness, browser } = await start();
-		const sessionId = await browser.createSession("Flag-off pre-warm");
-		await browser.preWarmSession(sessionId);
-		await browser.preWarmSession(sessionId);
+		const sessionId = await browser.createSession("Cold default runner");
 		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 			0,
 		);
 		expect(
 			harness.marks.filter((mark) => mark.kind === "runner-started"),
 		).toHaveLength(0);
-		expect(
-			(await browser.send(sessionId, "flag-off-first-send")).chunks,
-		).toEqual(responseChunks("flag-off-first-send"));
+		const turn = await browser.send(sessionId, "cold-first-send");
+		expect(turn.chunks).toEqual(responseChunks("cold-first-send"));
+		expect(turn.done["code"]).toBe(0);
 		await vi.waitFor(() =>
 			expect(
 				harness.marks.filter((mark) => mark.kind === "query"),
 			).toHaveLength(1),
 		);
-		expect(
-			harness.marks.filter((mark) => mark.kind === "runner-started"),
-		).toHaveLength(0);
+		const runners = harness.marks.filter(
+			(mark) => mark.kind === "runner-started",
+		);
+		expect(runners).toHaveLength(1);
+		const query = harness.marks.find((mark) => mark.kind === "query");
+		expect(query?.kind === "query" && query.pid).toBe(runners[0]?.pid);
+		expect(runners[0]?.pid).not.toBe(harness.generations[0]?.pid);
 	});
 
 	it("waits for pending shell environment capture before booting and reuses the resolved query", async () => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			shellEnvProof: true,
 		});
 		const sessionId = await browser.createSession("Pending shell capture");
@@ -342,7 +342,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		"cancel",
 	] as const)("discards a warm waiting for shell capture when the session receives %s", async (lifecycleAction) => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			shellEnvProof: true,
 		});
 		const sessionId = await browser.createSession(
@@ -460,7 +459,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		"cancel",
 	] as const)("does not warm a session receiving %s during provider discovery", async (lifecycleAction) => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			blockCapabilitiesProbe: true,
 		});
 		const markerPath = join(harness.root, "capabilities-probe-started");
@@ -575,7 +573,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		"cancel",
 	] as const)("preserves the live catalog for a first send when another session's pre-warm receives %s", async (lifecycleAction) => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			blockCapabilitiesProbe: true,
 			capabilityModels: [
 				{
@@ -710,7 +707,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 	});
 
 	it("pre-warms a named Claude instance with its configured directory and reuses that query for the first send", async () => {
-		const { harness, browser } = await start({ claudeRunner: "process" });
+		const { harness, browser } = await start({});
 		const configDir = join(harness.root, "work-claude");
 		mkdirSync(configDir);
 		const added = await Effect.runPromise(
@@ -768,7 +765,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 
 	it("settles a first send interrupted while initialization is pending and allows the next send", async () => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			queryInitializationDelayMs: 1000,
 		});
 		const sessionId = await browser.createSession("Cancel pending pre-warm");
@@ -838,7 +834,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		0, 1,
 	])("preserves a send racing slow initialization with %s initialization failures", async (queryInitializationFailures) => {
 		const { harness, browser } = await start({
-			claudeRunner: "process",
 			queryInitializationDelayMs: 500,
 			queryInitializationFailures,
 		});
@@ -905,7 +900,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		"settings",
 		"inherited settings",
 	] as const)("starts a fresh query when %s changes before the first send", async (changed) => {
-		const { harness, browser } = await start({ claudeRunner: "process" });
+		const { harness, browser } = await start({});
 		const sessionId = await browser.createSession(`Changed ${changed}`);
 		await browser.preWarmSession(sessionId);
 		await vi.waitFor(() =>
@@ -983,7 +978,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 	});
 
 	it("closes an unused initialized query and runner on server shutdown", async () => {
-		const { harness, browser } = await start({ claudeRunner: "process" });
+		const { harness, browser } = await start({});
 		const sessionId = await browser.createSession("Unused pre-warm shutdown");
 		await browser.preWarmSession(sessionId);
 		await vi.waitFor(() =>

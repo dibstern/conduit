@@ -441,11 +441,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
-							if (
-								Exit.isFailure(exit) &&
-								process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-								(yield* preserveClaudeRunners())
-							)
+							if (Exit.isFailure(exit) && (yield* preserveClaudeRunners()))
 								return;
 							yield* recordInteraction("permission.resolved", {
 								id: request.requestId,
@@ -453,8 +449,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 							}).pipe(
 								Effect.locally(
 									currentClaudeRunnerPermissionReply,
-									process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-										Exit.isSuccess(exit)
+									Exit.isSuccess(exit)
 										? {
 												sessionId,
 												requestId: request.requestId,
@@ -533,11 +528,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
-							if (
-								Exit.isFailure(exit) &&
-								process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-								(yield* preserveClaudeRunners())
-							)
+							if (Exit.isFailure(exit) && (yield* preserveClaudeRunners()))
 								return;
 							if (Exit.isSuccess(exit)) {
 								return yield* recordInteraction("question.resolved", {

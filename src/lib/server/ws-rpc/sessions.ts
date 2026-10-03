@@ -1,5 +1,9 @@
 import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../daemon/config-persistence.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
@@ -22,9 +26,32 @@ import {
 	viewSessionForClient,
 } from "../../handlers/session.js";
 import { preWarmSession } from "../../handlers/session-prewarm.js";
+import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
+	GetGoalDetails: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const read = yield* ReadQueryEffectTag;
+			const session = yield* read.getSession(request.sessionId);
+			if (!session) {
+				return yield* new WsRpcError({
+					message: `Session ${request.sessionId} not found`,
+				});
+			}
+			if (
+				resolveProviderRoutingDriver(
+					loadDaemonConfig(config.configDir),
+					session.provider,
+				) !== "claude"
+			) {
+				return yield* new WsRpcError({
+					message: "Goal details are available only for Claude sessions",
+				});
+			}
+			return yield* read.getGoalDetails(request.sessionId);
+		}).pipe(Effect.catchAll(mapRpcFailure("GetGoalDetails"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
 			Effect.catchAll(mapRpcFailure("PreWarmSession")),
@@ -304,6 +331,7 @@ export const sessionsHandlers = {
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "GetGoalDetails"
 	| "PreWarmSession"
 	| "ResolveSession"
 	| "ListDaemonSessions"

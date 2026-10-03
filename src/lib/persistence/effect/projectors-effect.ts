@@ -213,6 +213,22 @@ export const makeSessionProjector = (): EffectProjector => ({
 			const sql = yield* SqlClient.SqlClient;
 			const written: string[] = [];
 
+			if (event.type === "session.goal_changed" && event.data.goal) {
+				const goal = event.data.goal;
+				// Read the preceding fact before replacing it. Pauses and status
+				// resyncs with unchanged iterations do not create another check.
+				yield* sql`INSERT OR IGNORE INTO session_goal_checks
+					(event_id, session_id, condition, set_at, iterations, reason, created_at)
+					SELECT ${event.eventId}, id, ${goal.condition}, ${goal.setAt},
+						${goal.iterations}, ${goal.lastReason ?? null}, ${event.createdAt}
+					FROM sessions WHERE id = ${event.data.sessionId}
+					AND ${goal.iterations} > CASE
+						WHEN json_extract(goal_state, '$.goal.setAt') = ${goal.setAt}
+							AND json_extract(goal_state, '$.goal.condition') = ${goal.condition}
+						THEN COALESCE(json_extract(goal_state, '$.goal.iterations'), 0)
+						ELSE 0 END`;
+			}
+
 			// Every session statement is a single-table write against `sessions`
 			// keyed by id, so `RETURNING id` names exactly the rows it wrote: the
 			// subagent row for a message filed under its parent, and nothing at

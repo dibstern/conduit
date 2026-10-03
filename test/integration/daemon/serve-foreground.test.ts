@@ -217,7 +217,6 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
-			claudeRunner: "process",
 			managedOpenCode: true,
 			restartProof: true,
 		});
@@ -319,7 +318,6 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
-			claudeRunner: "process",
 		});
 		const failed = await warmProject("process-test");
 		const healthy = await warmProject(
@@ -368,7 +366,6 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
-			claudeRunner: "process",
 			managedOpenCode: true,
 		});
 		const project = await warmProject("process-test");
@@ -424,7 +421,6 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
-			claudeRunner: "process",
 		});
 		const removed = await warmProject("process-test");
 		const recoveringDirectory = join(harness.root, "recovering-project");
@@ -487,7 +483,6 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
-			claudeRunner: "process",
 		});
 		const healthy = await warmProject("process-test");
 		const failedDirectory = join(harness.root, "rollback-project");
@@ -720,7 +715,6 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
-			claudeRunner: "process",
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession(

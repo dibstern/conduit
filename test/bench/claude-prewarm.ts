@@ -52,6 +52,7 @@ async function measureFirstSend(
 	harness: ProcessHarness,
 	browser: ProcessBrowser,
 	prewarm: boolean,
+	runnerMode: "process" | "in-process",
 	batch: number,
 	round: number,
 ) {
@@ -137,14 +138,14 @@ async function measureFirstSend(
 		throw new Error("First send did not use exactly one initialized SDK query");
 	const serverPid = harness.generations.at(-1)?.pid;
 	if (
-		prewarm &&
+		runnerMode === "process" &&
 		(runner?.kind !== "runner-started" ||
 			runner.pid !== query.pid ||
 			query.pid === serverPid)
 	)
-		throw new Error(
-			"Warm first send did not reuse the initialized runner process",
-		);
+		throw new Error("First send did not use the initialized runner process");
+	if (runnerMode === "in-process" && (runner || query.pid !== serverPid))
+		throw new Error("Baseline build must use its default in-process runner");
 	const sample = {
 		batch,
 		round,
@@ -175,7 +176,7 @@ async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	if (args.includes("--help")) {
 		console.log(
-			"Usage: node --import tsx test/bench/claude-prewarm.ts [--dist dist] [--output test-results/85kb-14-prewarm.json] [--initialization-ms 250] [--batches 5] [--sessions 8]\nUses fresh sessions, rotating mode order, and a synthetic one-time initialization delay. Gate: warm p50, p99 and median batch p99 <= cold in-process baseline, with no latency allowance.",
+			"Usage: node --import tsx test/bench/claude-prewarm.ts --baseline-dist <pre-.15 dist> [--dist dist] [--output test-results/85kb-14-prewarm.json] [--initialization-ms 250] [--batches 5] [--sessions 8]\nUses each build's default runner path, fresh sessions, rotating mode order, and a synthetic one-time initialization delay. Gate: warm p50, p99 and median batch p99 <= cold in-process baseline, with no latency allowance.",
 		);
 		return;
 	}
@@ -187,6 +188,7 @@ async function main(): Promise<void> {
 			!key ||
 			![
 				"--dist",
+				"--baseline-dist",
 				"--output",
 				"--initialization-ms",
 				"--batches",
@@ -197,11 +199,14 @@ async function main(): Promise<void> {
 			options[key]
 		)
 			throw new Error(
-				"Expected --dist, --output, --initialization-ms, --batches, or --sessions with a value; use --help",
+				"Expected --dist, --baseline-dist, --output, --initialization-ms, --batches, or --sessions with a value; use --help",
 			);
 		options[key] = value;
 	}
 	const dist = resolve(options["--dist"] ?? "dist");
+	if (!options["--baseline-dist"])
+		throw new Error("--baseline-dist requires a pre-.15 in-process build");
+	const baselineDist = resolve(options["--baseline-dist"]);
 	const output = resolve(
 		options["--output"] ?? "test-results/85kb-14-prewarm.json",
 	);
@@ -219,8 +224,12 @@ async function main(): Promise<void> {
 		throw new Error(
 			"Initialization delay, batches, and sessions must be positive integers",
 		);
-	accessSync(join(dist, "src/lib/domain/daemon/Layers/daemon-foreground.js"));
-	accessSync(join(dist, "src/lib/server/ws-rpc-handler.js"));
+	for (const build of [baselineDist, dist]) {
+		accessSync(
+			join(build, "src/lib/domain/daemon/Layers/daemon-foreground.js"),
+		);
+		accessSync(join(build, "src/lib/server/ws-rpc-handler.js"));
+	}
 	const machine = {
 		platform: platform(),
 		release: release(),
@@ -261,11 +270,8 @@ async function main(): Promise<void> {
 			"prewarmed-process",
 		] as const) {
 			const harness = await ProcessHarness.start({
-				dist,
+				dist: name === "cold-in-process" ? baselineDist : dist,
 				queryInitializationDelayMs: initializationMs,
-				...(name === "cold-in-process"
-					? {}
-					: { claudeRunner: "process" as const }),
 			});
 			harnesses.push(harness);
 			const mode = {
@@ -286,6 +292,7 @@ async function main(): Promise<void> {
 							mode.harness,
 							mode.browser,
 							mode.name === "prewarmed-process",
+							mode.name === "cold-in-process" ? "in-process" : "process",
 							batch,
 							round,
 						),
@@ -370,6 +377,7 @@ async function main(): Promise<void> {
 		JSON.stringify(
 			{
 				machine,
+				baselineDist,
 				dist,
 				method,
 				results,

@@ -99,6 +99,7 @@ type SessionHandledType =
 	| "session.status"
 	| "session.provider_changed"
 	| "session.permission_mode_changed"
+	| "session.goal_changed"
 	| "turn.completed"
 	| "turn.error"
 	| "permission.asked"
@@ -350,6 +351,17 @@ export const sessionHandlers: {
 			},
 		];
 	},
+
+	"session.goal_changed": (event) => [
+		{
+			sql: "UPDATE sessions SET goal_state = ?, updated_at = ? WHERE id = ?",
+			params: [
+				JSON.stringify(event.data),
+				event.createdAt,
+				event.data.sessionId,
+			],
+		},
+	],
 
 	"turn.completed": (event) => {
 		return [

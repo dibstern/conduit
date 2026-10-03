@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
 import type { TurnResult } from "../types.js";
+import type { ClaudeRunnerUpgradeState } from "./claude-runner-upgrade.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -13,6 +14,11 @@ import type {
 } from "./claude-session-runner.js";
 
 export const CLAUDE_RUNNER_PROTOCOL_VERSION = 5;
+
+export const claudeRunnerBuildId = (): string =>
+	process.env["NODE_ENV"] === "test"
+		? (process.env["CONDUIT_TEST_BUILD_ID"] ?? BUILD_ID)
+		: BUILD_ID;
 
 /** Cleanup from an old attempt must never release a newer attempt's sink. */
 export const claudeRunnerSinkId = (commandId: string, attempt = 0): string =>
@@ -26,6 +32,7 @@ export interface ClaudeRunnerHello {
 	readonly sessionId?: string;
 	readonly pid?: number;
 	readonly acknowledgedSequence?: number;
+	readonly upgradeState?: ClaudeRunnerUpgradeState;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;
@@ -50,6 +57,12 @@ export interface ClaudeRunnerHello {
 
 type ClaudeRunnerReply =
 	| {
+			readonly type: "upgrade-reply";
+			readonly requestId: string;
+			readonly result: boolean;
+			readonly failure?: ClaudeSessionFailure;
+	  }
+	| {
 			readonly type: "command-reply";
 			readonly commandId: string;
 			readonly result?: TurnResult;
@@ -65,6 +78,13 @@ type ClaudeRunnerReply =
 
 export type ClaudeRunnerMessage =
 	| ClaudeRunnerHello
+	| { readonly type: "upgrade-state"; readonly state: ClaudeRunnerUpgradeState }
+	| {
+			readonly type: "upgrade-retire";
+			readonly requestId: string;
+			readonly revision: number;
+	  }
+	| { readonly type: "upgrade-cancel" | "upgrade-activate" }
 	| { readonly type: "idle-exit" | "idle-exit-ack" }
 	| {
 			readonly type: "command-accepted";
@@ -85,7 +105,11 @@ export type ClaudeRunnerMessage =
 			readonly sequence?: number;
 			readonly output: ClaudeSessionOutput;
 	  }
-	| { readonly type: "replay"; readonly acknowledgedSequence: number };
+	| {
+			readonly type: "replay";
+			readonly acknowledgedSequence: number;
+			readonly preserveRole?: boolean;
+	  };
 
 export function claudeRunnerHelloFailure(
 	hello: ClaudeRunnerHello,
@@ -95,11 +119,6 @@ export function claudeRunnerHelloFailure(
 		return claudeRunnerFailure(
 			"runner hello",
 			`Claude runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${CLAUDE_RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
-		);
-	if (hello.buildId !== BUILD_ID)
-		return claudeRunnerFailure(
-			"runner hello",
-			`Claude runner build mismatch: ${peer} build ${hello.buildId}, expected ${BUILD_ID}`,
 		);
 	return undefined;
 }
@@ -167,12 +186,15 @@ export class ClaudeRunnerSocket {
 				}
 				if (
 					message.type === "command-reply" ||
-					message.type === "output-reply"
+					message.type === "output-reply" ||
+					message.type === "upgrade-reply"
 				) {
 					const key =
-						message.type === "command-reply"
-							? `command:${message.commandId}`
-							: `output:${message.outputId}`;
+						message.type === "upgrade-reply"
+							? `upgrade:${message.requestId}`
+							: message.type === "command-reply"
+								? `command:${message.commandId}`
+								: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) reply.reply(message);
 					else onMessage(message);
@@ -213,6 +235,15 @@ export class ClaudeRunnerSocket {
 
 	get closed(): boolean {
 		return this.failure !== undefined || this.socket.destroyed;
+	}
+
+	retireEffect(revision: number): Effect.Effect<boolean, ClaudeSessionFailure> {
+		const requestId = randomUUID();
+		return this.requestEffect(`upgrade:${requestId}`, {
+			type: "upgrade-retire",
+			requestId,
+			revision,
+		});
 	}
 
 	commandEffect(

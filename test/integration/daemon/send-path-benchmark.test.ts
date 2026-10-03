@@ -24,7 +24,6 @@ describe("send-path benchmark CLI aggregation", () => {
 		candidate: { enqueue: number[]; forward: number[] },
 		baseline = { enqueue: [10, 10, 10, 10, 10], forward: [1, 1, 1, 1, 1] },
 		failCandidate = false,
-		candidateRunner = false,
 	) {
 		const root = mkdtempSync("/tmp/conduit-benchmark-cli-");
 		roots.push(root);
@@ -60,6 +59,7 @@ describe("send-path benchmark CLI aggregation", () => {
 					trace,
 					promptTrace: `${trace}.prompts`,
 					failActivation: label === "candidate" && failCandidate,
+					...(label === "baseline" ? { runnerMode: "in-process" } : {}),
 				}),
 			);
 		}
@@ -74,7 +74,6 @@ describe("send-path benchmark CLI aggregation", () => {
 				join(root, "baseline"),
 				"--candidate",
 				join(root, "candidate"),
-				...(candidateRunner ? ["--candidate-runner", "process"] : []),
 				"--output",
 				output,
 			],
@@ -111,13 +110,11 @@ describe("send-path benchmark CLI aggregation", () => {
 		}
 	});
 
-	it("enables the process flag only for the candidate and records its activation", () => {
-		const { child, output, trace } = compare(
-			{ enqueue: [10, 10, 10, 10, 10], forward: [1, 1, 1, 1, 1] },
-			undefined,
-			false,
-			true,
-		);
+	it("measures each build's default runner path and records its activation", () => {
+		const { child, output, trace } = compare({
+			enqueue: [10, 10, 10, 10, 10],
+			forward: [1, 1, 1, 1, 1],
+		});
 		expect(child.status, child.stderr).toBe(0);
 		expect(readFileSync(`${trace}.modes`, "utf8")).toBe(
 			"baseline:in-process\ncandidate:process\n",

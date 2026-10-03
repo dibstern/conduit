@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeProviderRuntime,
+	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import type {
 	PermissionResult,
@@ -77,6 +78,7 @@ describe("Claude runner interaction transport", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
+						runnerFactory: makeClaudeSessionRunner,
 						workspaceRoot: "/tmp/ws",
 						queryFactory: factory,
 						capabilitiesService,
@@ -127,6 +129,7 @@ describe("Claude runner interaction transport", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
+						runnerFactory: makeClaudeSessionRunner,
 						workspaceRoot: "/tmp/ws",
 						queryFactory: factory,
 						capabilitiesService,
@@ -192,6 +195,7 @@ describe("Claude runner interaction transport", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
+						runnerFactory: makeClaudeSessionRunner,
 						workspaceRoot: "/tmp/ws",
 						queryFactory: factory,
 						capabilitiesService,

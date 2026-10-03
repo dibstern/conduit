@@ -23,24 +23,23 @@ export class ProcessHarness {
 		at: bigint;
 	}> = [];
 	private constructor(private readonly dist: string) {}
-	static async start({
-		dist,
-		claudeRunner,
-	}: {
-		dist: string;
-		claudeRunner?: "process";
-	}): Promise<ProcessHarness> {
+	static async start({ dist }: { dist: string }): Promise<ProcessHarness> {
 		const config = JSON.parse(
 			readFileSync(`${dist}/latencies.json`, "utf8"),
-		) as { failActivation?: boolean; trace: string };
+		) as {
+			failActivation?: boolean;
+			trace: string;
+			runnerMode?: "process" | "in-process";
+		};
 		if (config.failActivation)
 			throw new Error("Fake Claude SDK activation was not acknowledged");
+		const runnerMode = config.runnerMode ?? "process";
 		appendFileSync(
 			`${config.trace}.modes`,
-			`${basename(dist)}:${claudeRunner ?? "in-process"}\n`,
+			`${basename(dist)}:${runnerMode}\n`,
 		);
 		const harness = new ProcessHarness(dist);
-		if (claudeRunner) {
+		if (runnerMode === "process") {
 			harness.marks[0] = {
 				kind: "query",
 				sessionId: "fixture-session",

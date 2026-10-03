@@ -10,6 +10,7 @@
 <!-- from InputArea as well.                                                  -->
 
 <script lang="ts">
+	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -23,11 +24,14 @@
 		open = $bindable(false),
 		onCamera,
 		onPhotos,
+		onSetGoal,
 	}: {
 		open?: boolean;
 		onCamera: () => void;
 		onPhotos: () => void;
+		onSetGoal: () => void;
 	} = $props();
+	const canSetGoal = $derived(discoveryState.currentProviderId === "claude");
 </script>
 
 <!-- `side="top"`: the composer sits at the bottom of the viewport, so the menu
@@ -72,5 +76,18 @@
 	<MenuItem id="attach-photos" density="touch" onselect={onPhotos}>
 		<Icon name="image" size={18} class="shrink-0" />
 		<span>Add Photos</span>
+	</MenuItem>
+
+	<MenuItem
+		data-testid="attach-set-goal"
+		density="touch"
+		disabled={!canSetGoal}
+		onselect={onSetGoal}
+	>
+		<Icon name="target" size={18} class="shrink-0 text-status-violet" />
+		<span class="flex flex-col">
+			<span class="text-status-violet">{canSetGoal ? "Set goal" : "Goal"}</span>
+			{#if !canSetGoal}<span class="text-xs text-text-muted">Claude only</span>{/if}
+		</span>
 	</MenuItem>
 </Menu>

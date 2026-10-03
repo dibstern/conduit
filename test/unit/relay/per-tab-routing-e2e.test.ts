@@ -239,6 +239,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),
+		configDir: persistenceDir,
 		slug: "test-project",
 		persistenceDbPath: join(persistenceDir, "events.db"),
 		log: createSilentLogger(), // silence logs

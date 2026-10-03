@@ -9,12 +9,11 @@ import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 /**
  * Reject the Claude permissions a crash left pending.
  *
- * A Claude permission is answered through the SDK callback that asked it, and
- * that callback dies with the process. Graceful shutdown records the reject;
- * a crash does not, and the row would keep the session "needing you" and stop
- * it auto-settling for good. OpenCode's permissions live on in OpenCode and are
- * recovered from there, so the owner is read from the provider that recorded
- * the ask, not from whichever provider the session uses now.
+ * Live runner callbacks are restored before this runs. Only asks without a
+ * restored waiter are orphaned; leaving them pending would keep the session
+ * "needing you". OpenCode's permissions are recovered from OpenCode, so the
+ * owner is read from the provider that recorded the ask, not from whichever
+ * provider the session uses now.
  *
  * Runs at relay startup, before the command gate opens, so it cannot reach an
  * ask a new turn registered.
@@ -51,14 +50,13 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 					AND json_extract(e.data, '$.id') = pa.id
 			)`;
 	const pending = yield* Effect.serviceOption(PendingInteractionServiceTag);
-	const liveRequests =
-		process.env["CONDUIT_CLAUDE_RUNNER"] === "process" && Option.isSome(pending)
-			? new Set(
-					(yield* pending.value.listPendingPermissions()).map(
-						(request) => `${request.sessionId}:${request.requestId}`,
-					),
-				)
-			: new Set<string>();
+	const liveRequests = Option.isSome(pending)
+		? new Set(
+				(yield* pending.value.listPendingPermissions()).map(
+					(request) => `${request.sessionId}:${request.requestId}`,
+				),
+			)
+		: new Set<string>();
 	const stale = orphans.filter(
 		(row) => !liveRequests.has(`${row.session_id}:${row.id}`),
 	);
