@@ -102,9 +102,11 @@ export function runnerPidMatchesRegistration(
 			["-ww", "-o", "command=", "-p", String(entry.pid)],
 			{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000 },
 		);
+		// Whole-argument matches only: `<socketPath>.spool` must not pass.
+		const argv = ` ${command.trim()} `;
 		return (
-			command.includes(entry.socketPath) &&
-			command.trim().split(/\s+/).includes(entry.runnerId)
+			argv.includes(` ${entry.socketPath} `) &&
+			argv.includes(` ${entry.runnerId} `)
 		);
 	} catch {
 		return false;

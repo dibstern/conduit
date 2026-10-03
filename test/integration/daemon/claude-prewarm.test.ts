@@ -8,6 +8,7 @@ import {
 	defaultDaemonConfig,
 	loadDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -61,6 +62,14 @@ function alive(pid: number): boolean {
 	}
 }
 
+function sdkProof(harness: ProcessHarness): ProcessMark[] {
+	return readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as ProcessMark);
+}
+
 describe("Claude session pre-warm through daemon RPC", () => {
 	const harnesses: ProcessHarness[] = [];
 	const evidence: unknown[] = [];
@@ -82,8 +91,17 @@ describe("Claude session pre-warm through daemon RPC", () => {
 	}> = [];
 	afterEach(async (context) => {
 		const cleanup: Array<{ pid: number; alive: boolean }> = [];
+		const sdk: Array<
+			{ root: string; marks: ProcessMark[] } | { root: string; error: string }
+		> = [];
 		try {
 			for (const harness of harnesses) {
+				try {
+					if (existsSync(join(harness.root, "sdk-proof.ndjson")))
+						sdk.push({ root: harness.root, marks: sdkProof(harness) });
+				} catch (cause) {
+					sdk.push({ root: harness.root, error: String(cause) });
+				}
 				await harness.dispose();
 				const pids = new Set([
 					...harness.generations.map((generation) => generation.pid),
@@ -108,6 +126,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 					context.task.result?.errors?.map((error) => error.message) ?? [],
 				harnesses: harnesses.map((harness) => harness.proof()),
 				cleanup,
+				sdk,
 				captures: [...captures],
 				allChildrenTerminated: cleanup.every((child) => !child.alive),
 			});
@@ -977,9 +996,19 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 	});
 
-	it("closes an unused initialized query and runner on server shutdown", async () => {
-		const { harness, browser } = await start({});
-		const sessionId = await browser.createSession("Unused pre-warm shutdown");
+	it.each([
+		["an unused initialized", "server shutdown", "unused"],
+		["a used", "server shutdown", "used"],
+		["an unused initialized", "project removal", "unused"],
+		["a used", "project removal", "used"],
+		["an unused initialized", "SIGTERM", "unused"],
+		["a used", "SIGTERM", "used"],
+		["an approval-waiting", "server shutdown", "approval"],
+		["an approval-waiting", "project removal", "approval"],
+		["an approval-waiting", "SIGTERM", "approval"],
+	] as const)("closes %s query and runner on %s", async (query, action, state) => {
+		const { harness, browser } = await start({ restartProof: true });
+		const sessionId = await browser.createSession(`${query} query shutdown`);
 		await browser.preWarmSession(sessionId);
 		await vi.waitFor(() =>
 			expect(
@@ -988,18 +1017,63 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
-			throw new Error("Missing unused runner");
+			throw new Error("Missing initialized runner");
+		if (state === "approval") {
+			const cursor = browser.frames.length;
+			await Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug: "process-test",
+					sessionId,
+					originId: browser.originId,
+					commandId: randomUUID(),
+					text: "approval-query-shutdown",
+				}),
+			);
+			await browser.waitFor(
+				(message) => message["type"] === "permission_request",
+				cursor,
+			);
+		} else if (state === "used") {
+			const prompt = "query-cleanup-after-turn";
+			expect((await browser.send(sessionId, prompt)).chunks).toEqual(
+				responseChunks(prompt),
+			);
+		} else {
+			expect(
+				harness.marks.filter((mark) => mark.kind === "enqueue"),
+			).toHaveLength(0);
+		}
+		const before = sdkProof(harness);
+		const closed = new Set(
+			before.flatMap((mark) =>
+				mark.kind === "query-closed" ? [mark.queryId] : [],
+			),
+		);
 		expect(
-			harness.marks.filter((mark) => mark.kind === "enqueue"),
-		).toHaveLength(0);
-		await browser.shutdown();
+			before.some((mark) => mark.kind === "query" && !closed.has(mark.queryId)),
+		).toBe(true);
+		if (action === "server shutdown") await browser.shutdown();
+		else if (action === "project removal")
+			await Effect.runPromise(
+				browser.rpc.RemoveProject({ slug: "process-test" }),
+			);
+		else process.kill(runner.pid, "SIGTERM");
 		await vi.waitFor(
 			() => {
 				expect(alive(runner.pid)).toBe(false);
 				expect(existsSync(runner.socketPath)).toBe(false);
+				// Relay disposal disconnects IPC. The SDK writes this proof before
+				// sending its optional IPC mark, so detached cleanup is still visible.
+				const proof = sdkProof(harness);
+				const queries = proof
+					.filter((mark) => mark.kind === "query")
+					.map((mark) => mark.queryId);
+				expect(queries.length).toBeGreaterThan(0);
 				expect(
-					harness.marks.filter((mark) => mark.kind === "query-closed"),
-				).toHaveLength(1);
+					proof.flatMap((mark) =>
+						mark.kind === "query-closed" ? [mark.queryId] : [],
+					),
+				).toEqual(queries);
 			},
 			{ timeout: 15_000 },
 		);
