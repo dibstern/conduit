@@ -468,6 +468,8 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-long-title-narrow", "mobile"],
 		["layout-sessionbar--desktop-settled", "mobile"],
 		["layout-sessionbar--desktop-no-session", "mobile"],
+		// Row hover verbs exist only from md up; phones use swipe and long-press.
+		["session-sessionitem--hover-actions-narrow-sidebar", "mobile"],
 		["layout-sessionbar--desktop-with-skills", "mobile"],
 		// These stories exercise the desktop Files pane; phone Files uses a separate overlay.
 		["layout-chatlayout--files-tree", "mobile"],
