@@ -24,6 +24,7 @@ function sendTurn(
 			history: [],
 			providerState: {},
 			workspaceRoot: "/tmp/project",
+			extraFolders: [],
 			eventSink: createMockEventSink(),
 			abortSignal: new AbortController().signal,
 			...inputOverrides,

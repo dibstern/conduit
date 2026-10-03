@@ -296,6 +296,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 					providerState: {},
 					model: { providerId: "anthropic", modelId: "claude-sonnet" },
 					workspaceRoot: "/tmp",
+					extraFolders: [],
 					eventSink: {
 						push: vi.fn(() => Effect.void),
 						requestPermission: vi.fn(() =>

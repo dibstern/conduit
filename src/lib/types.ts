@@ -149,6 +149,8 @@ export interface ProjectRelayConfig {
 	opencodeAuth?: { username: string; password: string };
 	/** Project working directory */
 	projectDir: string;
+	/** Additional Claude workspace folders, fixed for this relay's lifetime. */
+	extraFolders?: readonly string[];
 	/** URL slug for this project */
 	slug: string;
 	/** Session title for the initial session */

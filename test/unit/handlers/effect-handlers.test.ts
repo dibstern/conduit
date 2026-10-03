@@ -309,7 +309,7 @@ function mockConfig(
 	return makeMockConfig({
 		opencodeUrl: "http://localhost:3000",
 		slug: "test-project",
-		projectDir: "/tmp/test",
+		projectDir: tmpdir(),
 		configDir: "/tmp/test-config",
 		...overrides,
 	});

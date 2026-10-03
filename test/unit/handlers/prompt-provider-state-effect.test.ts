@@ -37,6 +37,7 @@ import type { SendTurnCommand } from "../../../src/lib/provider/orchestration-en
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	MOCK_PROJECT_DIR,
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
@@ -151,7 +152,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(ConfigTag, {
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
-						projectDir: "/tmp/project",
+						projectDir: MOCK_PROJECT_DIR,
 						slug: "provider-state-test",
 						persistenceDbPath: filename,
 					} satisfies ProjectRelayConfig),
@@ -249,7 +250,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: "/tmp/project",
+					projectDir: MOCK_PROJECT_DIR,
 					slug: "history-test",
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
@@ -358,7 +359,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: "/tmp/project",
+					projectDir: MOCK_PROJECT_DIR,
 					slug: "claude-user-effect-test",
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
@@ -473,7 +474,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(ConfigTag, {
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
-						projectDir: "/tmp/project",
+						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-sink-effect-test",
 						persistenceDbPath: filename,
 					} satisfies ProjectRelayConfig),
@@ -616,7 +617,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: "/tmp/project",
+					projectDir: MOCK_PROJECT_DIR,
 					slug: "claude-child-sink-test",
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),

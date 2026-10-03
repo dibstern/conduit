@@ -48,6 +48,8 @@ Redaction rule for committed traces: string *contents* that carry private
 data (hook outputs, memory dumps) may be replaced; envelope fields and
 structure must stay exactly as captured.
 
+Re-capture `extra-folder-read-turn.jsonl` with `pnpm build` then `RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts test/e2e/provider/claude-extra-folder-trace-capture.test.ts`; review the captured trace before committing it.
+
 ## Consequences
 
 - New undocumented SDK behavior is caught by a failing decode on a real

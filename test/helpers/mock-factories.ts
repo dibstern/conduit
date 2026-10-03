@@ -13,6 +13,7 @@
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
+import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
 import { vi } from "vitest";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -273,11 +274,14 @@ function createMockPtyManager(): HandlerDeps["ptyManager"] {
 	});
 }
 
+/** Turns refuse a missing main folder, so mock projects use a real directory. */
+export const MOCK_PROJECT_DIR = tmpdir();
+
 function createMockConfig(): HandlerDeps["config"] {
 	return {
 		httpServer: {} as HandlerDeps["config"]["httpServer"],
 		opencodeUrl: "http://localhost:4096",
-		projectDir: "/test/project",
+		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		persistenceDbPath: "/test/config/projects/test-project/events.db",
 	} satisfies HandlerDeps["config"];
@@ -819,7 +823,7 @@ export function makeMockConfig(
 	return {
 		httpServer: {} as ProjectRelayConfig["httpServer"],
 		opencodeUrl: "http://localhost:4096",
-		projectDir: "/test/project",
+		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		...overrides,
 	} as unknown as ProjectRelayConfig;

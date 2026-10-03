@@ -395,6 +395,7 @@ export const RelayFactoryLive = (
 									opencodeUrl,
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.directory,
+									extraFolders: project.folders.slice(1),
 									...(envResolver && {
 										shellEnv: (directory: string) => envResolver.get(directory),
 										prepareShellEnv: (directory: string) =>

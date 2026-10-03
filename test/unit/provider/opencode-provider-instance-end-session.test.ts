@@ -45,6 +45,7 @@ function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 		history: [],
 		providerState: {},
 		workspaceRoot: "/tmp/project",
+		extraFolders: [],
 		eventSink: {
 			push: vi.fn(() => Effect.void),
 			requestPermission: vi.fn(() =>

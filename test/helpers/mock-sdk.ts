@@ -128,6 +128,7 @@ export function makeBaseSendTurnInput(
 		history: [],
 		providerState: {},
 		workspaceRoot: "/tmp/ws",
+		extraFolders: [],
 		eventSink: createMockEventSink(),
 		abortSignal: new AbortController().signal,
 		...overrides,

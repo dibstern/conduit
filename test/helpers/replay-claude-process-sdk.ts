@@ -41,6 +41,9 @@ export const claudeSdk: typeof fakeSdk = {
 			if (!turns) throw new Error("Claude replay requires a turn plan");
 			replayer = createClaudeTraceReplayer({
 				turns: JSON.parse(turns) as readonly ClaudeTraceName[],
+				delayMs: Number(
+					process.env["CONDUIT_TEST_CLAUDE_REPLAY_DELAY_MS"] ?? 0,
+				),
 			});
 		}
 		// Reuse fake SDK initialization without giving it the runner's prompt queue.

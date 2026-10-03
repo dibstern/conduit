@@ -171,7 +171,9 @@ export class ProcessHarness {
 		private readonly opencodeRecording?: string,
 		private readonly claudeReplay?: {
 			readonly turns: readonly ClaudeTraceName[];
+			readonly delayMs?: number;
 		},
+		private readonly claudeCaptureDir?: string,
 	) {
 		this.root = mkdtempSync(rootPrefix);
 		this.projectDir = join(this.root, "process-test");
@@ -401,6 +403,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			autoStartOpenCode?: boolean;
 			opencodeRecording?: string;
 			claudeReplay?: ProcessHarness["claudeReplay"];
+			claudeCaptureDir?: string;
 		} = {},
 	): ProcessHarness {
 		return new ProcessHarness(
@@ -429,6 +432,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.autoStartOpenCode,
 			options.opencodeRecording,
 			options.claudeReplay,
+			options.claudeCaptureDir,
 		);
 	}
 
@@ -603,10 +607,16 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(this.claudeCaptureDir
+						? { CONDUIT_CLAUDE_SDK_CAPTURE: this.claudeCaptureDir }
+						: {}),
 					...(this.claudeReplay
 						? {
 								CONDUIT_TEST_CLAUDE_REPLAY_TURNS: JSON.stringify(
 									this.claudeReplay.turns,
+								),
+								CONDUIT_TEST_CLAUDE_REPLAY_DELAY_MS: String(
+									this.claudeReplay.delayMs ?? 0,
 								),
 								CONDUIT_TEST_CLAUDE_OPTIONS_FILE: join(
 									this.root,

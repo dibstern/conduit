@@ -170,6 +170,7 @@ export interface ClaudeProviderInstanceDeps {
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
 	readonly workspaceRoot: string;
+	readonly extraFolders?: readonly string[];
 	readonly daemonConfigDir?: string;
 	readonly shellEnv?: (
 		directory: string,
@@ -195,6 +196,7 @@ export interface ClaudeProviderInstanceDeps {
 export type ClaudeSessionRunnerDeps = Pick<
 	ClaudeProviderInstanceDeps,
 	| "workspaceRoot"
+	| "extraFolders"
 	| "daemonConfigDir"
 	| "shellEnv"
 	| "claudeSettingsOverrides"
@@ -258,6 +260,7 @@ export const makeClaudeProviderRuntime = (
 		)(
 			{
 				workspaceRoot: deps.workspaceRoot,
+				extraFolders: deps.extraFolders ?? [],
 				...(deps.daemonConfigDir !== undefined
 					? { daemonConfigDir: deps.daemonConfigDir }
 					: {}),

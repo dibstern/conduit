@@ -80,6 +80,7 @@ function sendTurnCommand(
 			history: [],
 			providerState: {},
 			workspaceRoot: "/tmp/project",
+			extraFolders: [],
 			...(overrides.configDir === undefined
 				? {}
 				: { configDir: overrides.configDir }),

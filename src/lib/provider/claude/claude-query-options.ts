@@ -25,8 +25,13 @@ export function buildClaudeQueryOptions(
 		typeof input.providerState["resumeSessionId"] === "string"
 			? input.providerState["resumeSessionId"]
 			: undefined;
+	// Older durable commands and launch snapshots predate extra folders.
+	const extraFolders = input.extraFolders ?? [];
 	return validateOptionsJsonShape({
 		cwd: input.workspaceRoot,
+		...(extraFolders.length > 0
+			? { additionalDirectories: [...extraFolders] }
+			: {}),
 		abortController,
 		env: makeClaudeSdkEnv({
 			configDir:
