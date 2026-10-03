@@ -64,7 +64,10 @@ import {
 	type PersistenceEffectError,
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
+import {
+	makeOrchestrationRuntimeLayer,
+	type OrchestrationRuntimeLayerOptions,
+} from "../provider/orchestration-wiring.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -98,6 +101,7 @@ export interface RelayRuntime {
 
 export interface ProjectRelayLayerInputs {
 	config: ProjectRelayConfig;
+	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
 	backgroundLiveness: ReturnType<typeof makeSessionBackgroundLiveness>;
 	getWsHandler: () => WebSocketHandlerShape;
@@ -117,6 +121,7 @@ export interface ProjectRelayLayerInputs {
 /** Build the shared per-project Layer graph and its managed runtime. */
 export function createProjectRelayLayers({
 	config,
+	claudeRunnerFactory,
 	testSendLimit,
 	backgroundLiveness,
 	getWsHandler,
@@ -131,6 +136,7 @@ export function createProjectRelayLayers({
 		...(config.claudeSdk != null && {
 			claudeQueryFactory: config.claudeSdk.query,
 		}),
+		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
@@ -288,7 +294,7 @@ export function createProjectRelayLayers({
 		toolContentServiceLayer,
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
-		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundWork),
+		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,

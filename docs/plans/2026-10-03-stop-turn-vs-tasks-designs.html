@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stop: the turn vs background tasks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Tokens and primitives copied from the composer final designs page. */
+[data-theme=dark] {
+	--bg:#0d0e11; --bg-alt:#1b1e24; --surface:#141619; --text:#eceef2; --text2:#a8afbb; --muted:#838b98; --dim:#676e79;
+	--accent:#fe3781; --border:#2d323b; --bsub:#20242b; --chip:#3a414c; --input:#1b1e24; --user:#262a32;
+	--err:#f4607a; --ok:#3fd69a; --warn:#f4b740; --tool:#5aa9f5; --violet:#c0a8ff; --p-ask:#a8afbb;
+	--home:#4a4f58; --send-off-bg:#4a2233; --send-off:#b98a9c; --scrim:rgba(0,0,0,.5); --shadow:0 12px 32px rgba(0,0,0,.55); --on-tool:#08111c; color-scheme: dark;
+}
+[data-theme=light] {
+	--bg:#f5f6f9; --bg-alt:#eef0f5; --surface:#ffffff; --text:#14171c; --text2:#4b525e; --muted:#626975; --dim:#7e8591;
+	--accent:#c9004f; --border:#ccd2dc; --bsub:#e2e6ec; --chip:#b7c0cc; --input:#eef0f5; --user:#e4e8ef;
+	--err:#c11d40; --ok:#0c7750; --warn:#8a5500; --tool:#0f62c0; --violet:#6a3ed4; --p-ask:#4b525e;
+	--home:#14171c; --send-off-bg:#f0cddb; --send-off:#a0607a; --scrim:rgba(20,23,28,.28); --shadow:0 12px 28px rgba(20,23,28,.16); --on-tool:#fff; color-scheme: light;
+}
+:root { --brand:'Chakra Petch', sans-serif; --mono:'JetBrains Mono', ui-monospace, monospace; }
+@property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@property --p { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 var(--mono); -webkit-text-size-adjust: 100%; overflow-x: hidden; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+svg { width: 16px; height: 16px; flex: none; }
+code { font-family: var(--mono); font-size: .92em; background: var(--bg-alt); border: 1px solid var(--bsub); border-radius: 5px; padding: 0 5px; }
+a { color: var(--accent); }
+
+/* page chrome */
+header.pg { padding: 26px 20px 8px; max-width: 1900px; margin: 0 auto; }
+header.pg h1 { font: 700 26px/1.2 var(--brand); margin: 0 0 6px; }
+header.pg p { color: var(--text2); max-width: 900px; margin: 6px 0; }
+nav.jump { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; }
+nav.jump a { display: inline-flex; align-items: center; min-height: 44px; }
+.opts { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 6px 20px; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+.og { display: flex; align-items: center; gap: 6px; }
+.og > span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; padding: 2px; gap: 2px; }
+.seg button { font: 600 12px var(--brand); min-height: 40px; min-width: 44px; padding: 0 12px; border-radius: 8px; color: var(--text2); }
+.seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+.copy { margin-left: auto; font: 600 12px var(--brand); min-height: 44px; padding: 0 14px; border-radius: 10px; background: var(--text); color: var(--bg); }
+.sec { padding: 26px 20px 30px; border-bottom: 1px solid var(--bsub); max-width: 1900px; margin: 0 auto; }
+.sec h2 { font: 700 20px/1.25 var(--brand); margin: 0 0 6px; }
+.lede { color: var(--text2); max-width: 900px; margin: 4px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(372px, 1fr)); gap: 34px 24px; margin: 22px 0; }
+@media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+.card { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.card h3 { font: 700 15.5px/1.3 var(--brand); margin: 0; display: flex; gap: 8px; align-items: baseline; }
+.card h3 .num { font: 600 12px var(--mono); color: var(--muted); }
+.card .why { font-size: 11.5px; color: var(--text2); margin: 0; min-height: 3em; }
+.dtag { align-self: flex-start; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 6px; }
+.dtag.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.dtag.need { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.fit { display: flex; justify-content: center; width: 100%; min-width: 0; padding: 8px 0 4px; }
+dl.spec { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; max-width: 980px; margin: 4px 0 16px; font-size: 12px; }
+dl.spec dt { color: var(--muted); } dl.spec dd { margin: 0; color: var(--text2); } dl.spec dd b { color: var(--text); }
+@media (max-width: 600px) { dl.spec { grid-template-columns: 1fr; gap: 2px; } dl.spec dd { margin-bottom: 10px; } }
+.flag { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 12px; padding: 10px 14px; max-width: 900px; font-size: 12px; color: var(--text2); margin: 12px 0; }
+.flag b { color: var(--warn); }
+.note { display: block; width: 100%; max-width: 900px; min-height: 64px; background: var(--input); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font: 12.5px/1.5 var(--mono); resize: vertical; margin-top: 8px; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; width: min(720px, 92vw); }
+dialog textarea { width: 100%; height: 50vh; background: var(--input); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: 12px var(--mono); padding: 10px; }
+
+/* phone */
+.ph { margin: 7px; width: 340px; flex: none; }
+.scr { height: var(--h, 540px); border: 1px solid var(--border); border-radius: 40px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 0 0 6px #07080a, 0 0 0 7px var(--bsub); }
+.sbar { height: 30px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 4px 28px 0; font: 600 12px var(--brand); background: var(--surface); }
+.sbar span { letter-spacing: 1px; font-size: 9px; }
+.topw { position: relative; z-index: 11; flex: none; }
+.top { display: flex; align-items: flex-start; gap: 6px; padding: 3px 8px 6px; background: var(--surface); border-bottom: 1px solid var(--border); position: relative; }
+.tb { width: 30px; height: 30px; display: grid; place-items: center; color: var(--text2); border-radius: 8px; flex: none; }
+.tt { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-top: 3px; }
+.ttl { font: 600 14px/1.35 var(--brand); display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.cv { width: 11px; height: 11px; color: var(--dim); }
+.gs { display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 1.5; min-width: 0; color: var(--violet); padding: 1px 0; }
+.gs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs svg { width: 12px; height: 12px; }
+.tx { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; padding: 12px 14px 8px; font-size: 12px; }
+.msg.u { align-self: flex-end; background: var(--user); padding: 7px 11px; border-radius: 14px 14px 4px 14px; max-width: 82%; }
+.tool { font-size: 11px; color: var(--muted); border: 1px solid var(--bsub); border-radius: 8px; padding: 5px 8px; display: flex; gap: 6px; }
+.tool span { color: var(--tool); } .tool em { margin-left: auto; font-style: normal; color: var(--text2); }
+.dock { flex: none; position: relative; z-index: 3; padding: 6px 10px 30px; background: var(--bg); }
+.dock.hasw { padding-bottom: 16px; }
+.home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 118px; height: 5px; border-radius: 3px; background: var(--home); z-index: 4; pointer-events: none; }
+.scrim { position: absolute; inset: 0; z-index: 9; background: var(--scrim); }
+
+/* desktop */
+.dk { width: 900px; margin: 0; }
+.dk .scr { border-radius: 14px; box-shadow: none; --h: 470px; }
+.dk .top { padding: 8px 14px 9px; }
+.dk .dock { padding: 8px 0 22px; display: flex; justify-content: center; }
+.dk .dw { width: 620px; }
+.dc { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; height: 32px; border-radius: 9px; font-size: 11.5px; color: var(--text2); white-space: nowrap; }
+.dc svg { width: 14px; height: 14px; }
+
+/* composer */
+.cmp { border: 1px solid var(--border); background: var(--input); border-radius: 20px; position: relative; z-index: 1; }
+.cmp.goal { border-color: var(--violet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 16%, transparent); }
+.row { display: flex; align-items: flex-end; gap: 1px; padding: 5px; }
+.fld { flex: 1; min-width: 0; padding: 6px 6px; min-height: 32px; font-size: 13px; line-height: 1.45; display: flex; align-items: center; }
+.phd { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.phd .bl { color: var(--tool); }
+.ib { width: 32px; height: 32px; border-radius: 10px; display: inline-grid; place-items: center; color: var(--text2); flex: none; }
+.ib svg { width: 18px; height: 18px; }
+.hm { width: auto; padding: 0 5px; display: inline-flex; align-items: center; gap: 3px; }
+.hm svg { width: 17px; height: 17px; }
+.hm i { font: 700 10px var(--brand); font-style: normal; color: var(--text2); }
+.send, .stop { width: 32px; height: 32px; border-radius: 10px; display: inline-grid; place-items: center; flex: none; }
+.send { background: var(--accent); color: #fff; }
+.send svg { width: 17px; height: 17px; }
+.send.off { background: var(--send-off-bg); color: var(--send-off); }
+.stop { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); margin-left: 3px; position: relative; }
+.stop > i { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.meter { display: inline-flex; gap: 2px; align-items: flex-end; height: 13px; }
+.meter i { width: 2.5px; border-radius: 1px; background: var(--chip); }
+.meter i:nth-child(1) { height: 4px; } .meter i:nth-child(2) { height: 6.25px; } .meter i:nth-child(3) { height: 8.5px; } .meter i:nth-child(4) { height: 10.75px; } .meter i:nth-child(5) { height: 13px; }
+.meter[data-l="4"] i:nth-child(-n+4) { background: currentColor; }
+.sh { display: inline-grid; place-items: center; color: var(--pc); grid-template-rows: 15px auto; }
+.sh svg { width: 15px; height: 15px; }
+.sh .meter { height: 13px; margin-bottom: 1px; }
+.sh b { font: 700 7.5px/1 var(--brand); letter-spacing: .03em; text-transform: uppercase; margin-top: 1px; }
+.cyc { width: auto; min-width: 32px; padding: 0 2px; }
+.hd { padding: 7px 12px 6px; border-bottom: 1px solid var(--bsub); font-size: 11.5px; color: var(--muted); }
+.hd .l1 { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.hd b { color: var(--tool); font-weight: 600; }
+.hd .x { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hd .gl { color: var(--tool); display: inline-flex; }
+.words { display: flex; align-items: center; gap: 1px; padding: 3px 6px 0; height: 24px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.w { display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px; border-radius: 6px; }
+.w u { text-decoration: none; border-bottom: 1px dotted var(--chip); }
+.w .lg { width: 13px; height: 13px; }
+.words s { text-decoration: none; color: var(--chip); }
+.words .sp { flex: 1; }
+.w.bgc { color: var(--tool); background: color-mix(in srgb, var(--tool) 12%, transparent); font-weight: 600; }
+
+/* block grid glyph for tasks */
+.bgd { display: inline-grid; grid-template-columns: repeat(5, 2px); grid-auto-rows: 2px; gap: 1px; flex: none; color: inherit; }
+.bgd i { background: currentColor; border-radius: .5px; animation: bk 1.1s steps(2) infinite; }
+.bgd i:nth-child(3n) { animation-delay: -.35s; } .bgd i:nth-child(4n+1) { animation-delay: -.7s; } .bgd i:nth-child(5n+2) { animation-delay: -.2s; }
+
+/* the new header row */
+.tr { display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 1.5; color: var(--tool); min-width: 0; padding: 1px 0 1px; white-space: nowrap; }
+.tr .x { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: color-mix(in srgb, var(--tool) 62%, var(--text2)); }
+.tr b { font-weight: 600; color: var(--tool); }
+.tr .ra { margin-left: auto; flex: none; font: 600 11px var(--mono); color: var(--tool); padding: 0 2px 0 8px; }
+.tr .cv { color: var(--tool); opacity: .75; }
+.tr .lbl { color: var(--muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: .07em; flex: none; }
+button.tr { width: 100%; }
+
+/* 1 badge */
+.bdg em { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; border-radius: 8px; background: var(--tool); color: var(--on-tool); font: 700 9px/15px var(--brand); font-style: normal; text-align: center; box-shadow: 0 0 0 2px var(--input); }
+/* 3 chips + dots */
+.tr.chips { gap: 4px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--tool) 13%, transparent); color: var(--tool); font-size: 10.5px; flex: none; }
+.chip i { font-style: normal; color: var(--muted); }
+.dots { display: flex; justify-content: center; gap: 6px; padding-top: 7px; }
+.dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--tool); animation: pu 1.4s ease-in-out infinite; }
+.dots i:nth-child(2) { animation-delay: .35s; } .dots i:nth-child(3) { animation-delay: .7s; }
+/* 4 pull-down */
+.pd { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 0 0 22px 22px; padding: 12px 14px 10px; box-shadow: var(--shadow); font-size: 12px; z-index: 12; }
+.pd .k { display: flex; align-items: center; gap: 7px; color: var(--tool); font: 600 11px var(--brand); text-transform: uppercase; letter-spacing: .08em; }
+.pd ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.pd li { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--bsub); color: var(--text); }
+.pd li svg { width: 14px; height: 14px; color: var(--tool); }
+.pd li em { font-style: normal; color: var(--muted); font-size: 11px; }
+.pd .pn { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.acts { display: flex; gap: 6px; margin-top: 10px; }
+.acts button { padding: 6px 10px; border-radius: 9px; border: 1px solid var(--border); font-size: 11.5px; color: var(--text2); display: inline-flex; align-items: center; gap: 6px; }
+.acts .danger { color: var(--err); margin-left: auto; }
+.acts .danger i { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.grab { width: 36px; height: 4px; border-radius: 2px; background: var(--chip); margin: 10px auto 0; }
+.fpre { display: inline-flex; color: var(--tool); margin-right: 7px; flex: none; }
+/* 5 shimmer */
+.top.shim::after, .cmp.shimc::before { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--tool), transparent) no-repeat; background-size: 35% 100%; animation: sweep 1.8s linear infinite; }
+.top.shim::after { bottom: -1px; }
+.cmp.shimc { overflow: hidden; }
+.cmp.shimc::before { top: 0; left: 18px; right: 18px; }
+/* 7 tree + send badge */
+.tree { color: var(--violet); opacity: .65; margin: 0 1px 0 4px; }
+.sb { position: relative; }
+.sbd { position: absolute; right: -4px; bottom: -4px; background: var(--tool); color: var(--on-tool); border-radius: 5px; padding: 2.5px; display: grid; box-shadow: 0 0 0 2px var(--input); }
+.sbd .bgd { grid-template-columns: repeat(5, 1.6px); grid-auto-rows: 1.6px; gap: .8px; }
+/* 8 carousel */
+.car { display: inline-flex; gap: 5px; align-items: center; min-width: 0; animation: cin .35s ease-out; }
+.cdots { display: inline-flex; gap: 3px; margin-left: 6px; flex: none; }
+.cdots i { width: 4px; height: 4px; border-radius: 50%; background: var(--chip); }
+.cdots i.on { background: var(--tool); }
+/* 9 lanes */
+.tr.lanes { flex-direction: column; align-items: stretch; gap: 2px; }
+.tr.lanes .h { display: flex; align-items: center; gap: 5px; }
+.lane { display: grid; grid-template-columns: 88px 1fr 24px; gap: 6px; align-items: center; font-size: 9.5px; color: var(--text2); }
+.lane span { overflow: hidden; text-overflow: ellipsis; }
+.lane i { height: 4px; border-radius: 2px; width: var(--w); background: repeating-linear-gradient(-45deg, var(--tool) 0 3px, color-mix(in srgb, var(--tool) 45%, transparent) 3px 6px); background-size: 8.5px 8.5px; animation: stripes .7s linear infinite; }
+.lane em { font-style: normal; color: var(--muted); text-align: right; }
+.stop.lanes { display: inline-flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 3px; padding-left: 10px; }
+.stop.lanes > i { width: 12px; height: 2.5px; border-radius: 1px; background: var(--tool); transform-origin: left; animation: lane 1.3s ease-in-out infinite alternate; }
+.stop.lanes > i:nth-child(2) { animation-delay: -.6s; }
+/* 10 two-tone border */
+.cmp.goal.duo { border: 1.5px solid transparent; background: linear-gradient(var(--input), var(--input)) padding-box, linear-gradient(90deg, var(--violet) 30%, var(--tool) 70%) border-box; box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool) 12%, transparent); }
+/* 11 per-task + split stop */
+.tk { display: inline-flex; align-items: center; gap: 2px; padding: 0 1px 0 6px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--tool) 35%, transparent); font-size: 10.5px; flex: none; }
+.tk button { width: 15px; height: 15px; display: grid; place-items: center; color: var(--muted); font-size: 11px; line-height: 1; }
+.split { display: inline-flex; align-items: center; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--text) 10%, transparent); margin-left: 3px; flex: none; }
+.split > i { width: 10px; height: 10px; border-radius: 2px; background: currentColor; margin: 0 7px 0 10px; }
+.split > span { border-left: 1px solid var(--border); padding: 0 4px; height: 18px; display: grid; place-items: center; }
+.split > span svg { width: 12px; height: 12px; }
+/* 12 thread */
+.thread { position: absolute; left: 11px; top: 102px; bottom: 74px; width: 2px; background: repeating-linear-gradient(180deg, var(--tool) 0 5px, transparent 5px 10px); background-size: 2px 10px; animation: drip .7s linear infinite; opacity: .75; z-index: 2; }
+.cmp.thr::before { content: ''; position: absolute; left: -1px; top: 12px; bottom: 12px; width: 3px; border-radius: 2px; background: var(--tool); }
+.tr .knot { width: 6px; height: 6px; border-radius: 50%; background: var(--tool); flex: none; }
+/* 13 avatars */
+.av { display: inline-flex; flex: none; }
+.av span { width: 17px; height: 17px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--tool); display: grid; place-items: center; color: var(--tool); margin-left: -5px; }
+.av span:first-child { margin-left: 0; }
+.av svg { width: 9px; height: 9px; }
+.peek { display: flex; justify-content: flex-end; padding-right: 22px; margin-bottom: -10px; position: relative; z-index: 0; }
+.peek .av span { width: 21px; height: 21px; }
+.peek .av svg { width: 11px; height: 11px; }
+/* 14 clock + ring */
+.clk { font-weight: 600; font-variant-numeric: tabular-nums; }
+.stop.ring::before { content: ''; position: absolute; inset: 0; border-radius: 10px; padding: 2px; background: conic-gradient(var(--tool) var(--p), color-mix(in srgb, var(--tool) 16%, transparent) 0); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: ring 6s linear infinite; }
+/* 15 pixel rain */
+.rain { position: absolute; right: 13px; top: 100px; bottom: 80px; width: 10px; overflow: hidden; z-index: 2; pointer-events: none; }
+.rain i { position: absolute; top: 0; width: 3px; height: 3px; border-radius: .5px; background: var(--tool); left: var(--x); opacity: .85; animation: fall var(--d) linear infinite; animation-delay: var(--dl); }
+.pile { display: flex; flex-direction: column; align-items: center; gap: 1px; width: max-content; margin: 0 12px 1px auto; }
+.pile span { display: flex; gap: 1px; }
+.pile i { width: 3px; height: 3px; background: var(--tool); border-radius: .5px; }
+/* 16 terminal */
+.term { margin: 2px 0 3px; padding: 4px 7px; border-radius: 8px; background: color-mix(in srgb, var(--tool) 7%, var(--bg)); border: 1px solid var(--bsub); font-size: 9.5px; line-height: 1.5; color: var(--text2); white-space: nowrap; overflow: hidden; }
+.term p { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+.term p b { color: var(--tool); font-weight: 600; }
+.term p:last-child { color: var(--text); }
+.cur { display: inline-block; width: 7px; height: 13px; background: var(--tool); vertical-align: -2px; margin-left: 4px; animation: blink 1s steps(2) infinite; }
+/* 17 orbit */
+.orb { position: relative; display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none; }
+.orb > i { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px; border-radius: 50%; background: var(--tool); animation: orbit 2.6s linear infinite; animation-delay: calc(var(--k) * -2.6s / var(--n)); --r: 21px; }
+.orbg { position: relative; display: inline-grid; place-items: center; width: 14px; height: 14px; flex: none; }
+.orbg > i { position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px; border-radius: 50%; background: var(--tool); animation: orbit 1.8s linear infinite; --r: 8px; }
+/* 18 folder tabs */
+.ftabs { display: flex; gap: 3px; padding-left: 18px; position: relative; z-index: 2; margin-bottom: -1px; }
+.ftabs span { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--tool); background: var(--input); border: 1px solid color-mix(in srgb, var(--tool) 55%, transparent); border-bottom-color: var(--input); border-radius: 8px 8px 0 0; padding: 2px 8px 3px; }
+.tab2 { display: inline-flex; align-items: center; gap: 4px; border-bottom: 1.5px solid var(--tool); padding: 0 3px; flex: none; }
+.tab2 + .tab2 { opacity: .7; border-bottom-color: color-mix(in srgb, var(--tool) 45%, transparent); }
+/* 19 heartbeat */
+.ecg { flex: 1; height: 13px; width: auto; min-width: 40px; }
+.ecg path { fill: none; stroke: var(--tool); stroke-width: 1.4; stroke-linejoin: round; stroke-dasharray: 26 100; animation: ecg 1.9s linear infinite; }
+.ecg path.bgl { stroke: color-mix(in srgb, var(--tool) 18%, transparent); stroke-dasharray: none; animation: none; }
+.cmp.goal.trace { border: 1.5px solid transparent; background: linear-gradient(var(--input), var(--input)) padding-box, conic-gradient(from var(--a), var(--violet) 0 70%, var(--tool) 85%, var(--violet) 100%) border-box; animation: spin 2.6s linear infinite; }
+/* 20 hanging tags */
+.tags { position: absolute; top: 100%; right: 46px; display: flex; gap: 12px; z-index: 5; pointer-events: none; }
+.tag2 { display: flex; flex-direction: column; align-items: center; transform-origin: top center; animation: sway 3.2s ease-in-out infinite; animation-delay: var(--dl); }
+.tag2::before { content: ''; width: 1px; height: var(--len, 12px); background: color-mix(in srgb, var(--tool) 60%, transparent); }
+.tag2 span { font-size: 9.5px; color: var(--tool); background: var(--surface); border: 1px solid color-mix(in srgb, var(--tool) 50%, transparent); border-radius: 3px 3px 7px 7px; padding: 7px 6px 3px; position: relative; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,.25); }
+.tag2 span::before { content: ''; position: absolute; top: 2px; left: 50%; width: 3px; height: 3px; margin-left: -2.5px; border-radius: 50%; border: 1px solid var(--tool); }
+.tagd { position: relative; display: inline-grid; flex: none; }
+.tagd i { position: absolute; left: -8px; bottom: -8px; font: 700 8.5px/1 var(--brand); font-style: normal; color: var(--on-tool); background: var(--tool); padding: 2px 4px; border-radius: 2px 6px 6px 2px; transform: rotate(-20deg); box-shadow: 0 0 0 1.5px var(--input); }
+/* 21 equalizer */
+.eqt { display: inline-flex; align-items: center; gap: 4px; flex: none; color: color-mix(in srgb, var(--tool) 62%, var(--text2)); }
+.eqt + .eqt { margin-left: 6px; }
+.eq { display: inline-flex; gap: 1.5px; align-items: flex-end; height: 11px; }
+.eq i { width: 2px; height: 2px; background: var(--tool); border-radius: 1px; animation: eq .8s ease-in-out infinite alternate; animation-delay: var(--dl); }
+.cmp.flo { overflow: hidden; }
+.floor { position: absolute; left: 16px; right: 16px; bottom: 0; height: 9px; display: flex; align-items: flex-end; gap: 3px; opacity: .3; pointer-events: none; z-index: -1; }
+.floor i { flex: 1; height: 1px; background: var(--tool); border-radius: 1px 1px 0 0; animation: eq2 var(--d) ease-in-out infinite alternate; animation-delay: var(--dl); }
+.cmp.flo .row { position: relative; z-index: 1; }
+
+@keyframes bk { 50% { opacity: .25; } }
+@keyframes pu { 50% { opacity: .3; } }
+@keyframes sweep { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+@keyframes cin { from { opacity: 0; transform: translateY(4px); } }
+@keyframes stripes { to { background-position: 8.5px 0; } }
+@keyframes lane { from { transform: scaleX(.35); } to { transform: scaleX(1); } }
+@keyframes drip { to { background-position: 0 10px; } }
+@keyframes ring { to { --p: 100%; } }
+@keyframes fall { from { transform: translateY(-6px); } to { transform: translateY(380px); } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes orbit { from { transform: rotate(0deg) translateX(var(--r)); } to { transform: rotate(360deg) translateX(var(--r)); } }
+@keyframes ecg { from { stroke-dashoffset: 126; } to { stroke-dashoffset: 0; } }
+@keyframes spin { to { --a: 360deg; } }
+@keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes eq { to { height: 11px; } }
+@keyframes eq2 { to { height: 9px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="claude" viewBox="0 0 24 24"><g fill="#d97757"><rect x="11" y="1.5" width="2" height="8.5" rx="1"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(40 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(78 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(118 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(160 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(200 12 12)"/><rect x="11" y="2.5" width="2" height="7.5" rx="1" transform="rotate(242 12 12)"/><rect x="11" y="1.5" width="2" height="8.5" rx="1" transform="rotate(282 12 12)"/><rect x="11" y="2" width="2" height="8" rx="1" transform="rotate(322 12 12)"/></g></symbol>
+		<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></symbol>
+		<symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18.5" cy="12" r="1.7" fill="currentColor"/></symbol>
+		<symbol id="i-shield-o" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></symbol>
+		<symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="3" stroke="currentColor" stroke-width="1.9" fill="none"/><path d="M7.5 10l3 2.5-3 2.5M12.5 15.5h4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+		<symbol id="i-bot" viewBox="0 0 24 24"><rect x="4.5" y="7.5" width="15" height="12" rx="4" stroke="currentColor" stroke-width="1.9" fill="none"/><path d="M12 7.5V4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="9.5" cy="13.5" r="1.4" fill="currentColor"/><circle cx="14.5" cy="13.5" r="1.4" fill="currentColor"/></symbol>
+	</defs>
+</svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="i-flow" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.9" fill="none"/><circle cx="18" cy="12" r="2.5" stroke="currentColor" stroke-width="1.9" fill="none"/><circle cx="6" cy="18" r="2.5" stroke="currentColor" stroke-width="1.9" fill="none"/><path d="M8.5 6.5l7 4.5M8.5 17.5l7-4.5" stroke="currentColor" stroke-width="1.9" fill="none"/></symbol>
+	</defs>
+</svg>
+<style>
+.tr.combo { gap: 4px; }
+.tr.combo .chip { max-width: var(--cw, 92px); padding: 0 6px 0 5px; }
+.tr.combo .chip svg { width: 11px; height: 11px; }
+.tr.combo .chip .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text); opacity: .85; }
+.tr.combo .chip i { font-style: normal; color: var(--muted); flex: none; }
+.more { color: var(--tool); font-size: 10.5px; padding: 0 2px; flex: none; font-weight: 600; }
+.pd li { grid-template-columns: 16px 1fr auto auto; }
+.pd li .t { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.pd li .t span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd li .t small { color: var(--muted); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd li .t small code { font-size: 10px; padding: 0 3px; }
+.pd li .xs { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--text2); border: 1px solid var(--border); }
+.pd li .xs i { width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
+.sbd.n { padding: 0 4px; min-width: 15px; height: 15px; font: 700 9px/15px var(--brand); text-align: center; display: block; }
+.dk .pd .grab { display: none; } .dk .pd { left: 52px; right: auto; width: 460px; top: calc(100% - 6px); border: 1px solid var(--border); border-radius: 14px; }
+.dk .tr.combo .chip { max-width: 230px; }
+table.data { border-collapse: collapse; width: 100%; max-width: 1100px; font-size: 12px; margin: 10px 0 4px; }
+table.data th { text-align: left; color: var(--muted); font-weight: 500; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); }
+table.data td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--bsub); vertical-align: top; color: var(--text2); }
+table.data td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+.yes { color: var(--ok); font-weight: 600; } .no { color: var(--err); font-weight: 600; } .part { color: var(--warn); font-weight: 600; }
+.tablewrap { overflow-x: auto; max-width: 100%; }
+@media (max-width: 700px) { table.data, table.data tbody, table.data tr, table.data td { display: block; } table.data thead { display: none; } table.data tr { border-bottom: 1px solid var(--border); padding: 8px 0; } table.data td { border: 0; padding: 2px 0; } }
+.grid.wide { grid-template-columns: 1fr; }
+</style>
+<style>
+.steps { width: 340px; display: flex; flex-direction: column; gap: 4px; }
+.cap { margin: 8px 0 2px; font-size: 11px; color: var(--muted); }
+.cap:first-child { margin-top: 0; }
+.st .scr { height: auto; border-radius: 16px; box-shadow: none; }
+.st .tx { min-height: 50px; justify-content: center; padding: 8px 14px; }
+.st .dock { padding-bottom: 12px; }
+.dimline { color: var(--muted); font-size: 11.5px; }
+.tap { outline: 2px solid var(--accent); outline-offset: 3px; animation: tapk 1.3s ease-out infinite; }
+@keyframes tapk { 60%, 100% { outline-offset: 7px; outline-color: transparent; } }
+.stop.tk2 { background: color-mix(in srgb, var(--tool) 18%, transparent); color: var(--tool); width: auto; padding: 0 8px; display: inline-flex; gap: 5px; align-items: center; }
+.stop.tk2 em { font: 700 11px var(--brand); font-style: normal; }
+.stop.tk2.ring::before { animation-duration: 4s; }
+.hint { font-size: 11px; color: var(--tool); text-align: right; padding: 0 4px 6px; }
+.toast { display: flex; align-items: center; gap: 8px; margin: 0 0 7px; padding: 6px 6px 6px 11px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); font-size: 11.5px; color: var(--text2); box-shadow: var(--shadow); }
+.toast b { color: var(--text); font-weight: 600; }
+.toast button { margin-left: auto; padding: 6px 10px; border-radius: 8px; color: var(--err); border: 1px solid color-mix(in srgb, var(--err) 40%, transparent); white-space: nowrap; font-size: 11px; }
+.pop { margin: 0 0 7px auto; width: 250px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px; box-shadow: var(--shadow); font-size: 11.5px; }
+.pop button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 8px; min-width: 0; }
+.pop button > span:not(.sq) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pop button svg { width: 13px; height: 13px; color: var(--tool); }
+.pop .pri { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.pop .dz { color: var(--err); }
+.pop .sq { width: 9px; height: 9px; border-radius: 2px; background: currentColor; flex: none; margin: 0 2px; }
+.pop small { color: var(--muted); margin-left: auto; flex: none; font-size: 10.5px; }
+.pop hr { border: 0; border-top: 1px solid var(--bsub); margin: 3px 6px; }
+.pd.bs { position: static; border: 1px solid var(--border); border-radius: 16px; margin-bottom: 7px; }
+button.dots { width: max-content; margin: 7px auto 0; padding: 4px 11px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--tool) 40%, transparent); align-items: center; color: var(--tool); font-size: 10.5px; }
+button.dots span { margin-left: 2px; }
+.split .tap { border-radius: 6px; }
+.pc { margin: 0; font-size: 11.5px; color: var(--text2); }
+.tgl { display: inline-flex; color: var(--tool); vertical-align: middle; margin: 0 2px; }
+.pc b { display: inline-block; width: 14px; font-weight: 700; }
+.pc .p { color: var(--ok); } .pc .m { color: var(--err); }
+.pick { border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 8%, transparent); border-radius: 12px; padding: 10px 14px; max-width: 900px; font-size: 12px; color: var(--text2); margin: 12px 0; }
+.pick b { color: var(--ok); }
+.card.rec h3::after { content: 'My pick'; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); padding: 2px 7px; border-radius: 6px; }
+</style>
+
+<header class="pg">
+	<h1>Stop: the turn vs background tasks</h1>
+	<p><b>Today there is one Stop, and it kills everything:</b> the turn plus every background task. The approved header pull-down adds a stop per task and "Stop all". The open question is what the composer's ■ does while background tasks are running.</p>
+	<nav class="jump"><a href="#catch">The SDK catch</a><a href="#compare">Compare</a><a href="#a">A · ends everything</a><a href="#b">B · turn only</a><a href="#c">C · one button escalates</a><a href="#d">D · ask or split</a><a href="#pick">Your call</a></nav>
+</header>
+
+<div class="opts">
+	<div class="og"><span>Theme</span><div class="seg"><button data-opt="theme:dark">Dark</button><button data-opt="theme:light">Light</button></div></div>
+	<div class="og"><span>Tasks</span><div class="seg"><button data-opt="n:1">1</button><button data-opt="n:2">2</button><button data-opt="n:4">4</button></div></div>
+	<button class="copy" id="copy">Copy feedback</button>
+</div>
+
+<section class="sec" id="catch">
+	<h2>The SDK catch</h2>
+	<dl class="spec">
+		<dt>A options</dt><dd><b>Work today.</b> Conduit's Stop closes the Claude process, which kills every task whatever else we declare. The pull-down's per-task stops still work.</dd>
+		<dt>B, C, D options</dt><dd><b>Need two changes.</b> Conduit declares per-task stop to the SDK, and Stop goes back to interrupting the turn instead of closing the process. Then the SDK lets background work keep running when you stop the turn.</dd>
+	</dl>
+	<div class="flag"><b>Unverified for shells.</b> The SDK docs say an interrupt then spares "background agents and workflows". They don't mention background shell commands like <code>pnpm dev</code>. Before building any B, C or D option, a short test should confirm a background shell survives a turn-only stop.</div>
+	<div class="pick"><b>My pick: B3.</b> Stop ends only the turn, then a toast by the composer offers "Stop them" for a few seconds. You get your two-press flow without a double-tap killing your dev server, and the header pull-down covers everything after the toast fades. If you want exactly your idea, C2 is the safer form of it.</div>
+</section>
+
+<section class="sec" id="compare">
+	<h2>Compare</h2>
+	<div class="tablewrap"><table class="data">
+		<thead><tr><th>Option</th><th>■ means</th><th>Stop everything</th><th>Mis-press risk</th></tr></thead>
+		<tbody>
+			<tr><td>A1 Today</td><td>Turn + all tasks</td><td>1 tap</td><td><span class="no">High.</span> Kills tasks you wanted.</td></tr>
+			<tr><td>A2 Says so</td><td>Turn + all tasks</td><td>1 tap</td><td><span class="no">High,</span> but warned.</td></tr>
+			<tr><td>B1 Header owns tasks</td><td>Turn only</td><td>3 taps, in the header</td><td><span class="yes">None.</span></td></tr>
+			<tr><td>B2 Dots are a button</td><td>Turn only</td><td>3 taps, by the composer</td><td><span class="yes">None.</span></td></tr>
+			<tr><td>B3 Toast offer</td><td>Turn only</td><td>2 taps</td><td><span class="yes">Low.</span></td></tr>
+			<tr><td>C1 Second press</td><td>Turn, then tasks</td><td>2 taps</td><td><span class="no">High.</span> Double-tap, and the button stays armed for hours.</td></tr>
+			<tr><td>C2 Second press, 4 s</td><td>Turn, then tasks</td><td>2 quick taps</td><td><span class="part">Medium.</span> Double-tap.</td></tr>
+			<tr><td>C3 Hold for all</td><td>Tap turn, hold all</td><td>1 hold</td><td><span class="yes">Low,</span> but hidden.</td></tr>
+			<tr><td>C4 Hold for menu</td><td>Tap turn, hold menu</td><td>Hold + 1 tap</td><td><span class="yes">Low,</span> but hidden.</td></tr>
+			<tr><td>D1 Split button</td><td>Turn; ⌄ opens menu</td><td>2 taps</td><td><span class="yes">Low.</span></td></tr>
+			<tr><td>D2 Stop asks</td><td>Asks if tasks run</td><td>2 taps</td><td><span class="yes">None,</span> but slowest.</td></tr>
+			<tr><td>D3 Two buttons</td><td>■ turn, blue grid tasks</td><td>2 taps</td><td><span class="part">Medium.</span> Wrong button.</td></tr>
+		</tbody>
+	</table></div>
+</section>
+
+<section class="sec" id="a">
+	<h2>A · Stop keeps ending everything</h2>
+	<p class="lede">No change to what Stop means. Per-task control lives only in the header pull-down.</p>
+	<div class="grid" data-g="a"></div>
+	<textarea class="note" data-note="a" data-title="A · ends everything" placeholder="Notes on A1 / A2"></textarea>
+</section>
+
+<section class="sec" id="b">
+	<h2>B · Stop ends only the turn</h2>
+	<p class="lede">Background work survives Stop. The options differ in where you go to stop it.</p>
+	<div class="grid" data-g="b"></div>
+	<textarea class="note" data-note="b" data-title="B · turn only" placeholder="Notes on B1 / B2 / B3"></textarea>
+</section>
+
+<section class="sec" id="c">
+	<h2>C · One button that escalates</h2>
+	<p class="lede">Your idea and its variants: ■ stops the turn first, and the same control can then stop the tasks.</p>
+	<div class="grid" data-g="c"></div>
+	<textarea class="note" data-note="c" data-title="C · one button escalates" placeholder="Notes on C1 / C2 / C3 / C4"></textarea>
+</section>
+
+<section class="sec" id="d">
+	<h2>D · Ask, split, or two buttons</h2>
+	<p class="lede">The choice is explicit in the composer itself.</p>
+	<div class="grid" data-g="d"></div>
+	<textarea class="note" data-note="d" data-title="D · ask or split" placeholder="Notes on D1 / D2 / D3"></textarea>
+</section>
+
+<section class="sec" id="pick">
+	<h2>Your call</h2>
+	<p class="lede"><b>Desktop add-on, works with any option:</b> Esc stops the turn, and a second Esc within a second stops the tasks.</p>
+	<textarea class="note" data-note="pick" data-title="Decision" placeholder="e.g. B3, or C2 but with a 6 s window, plus the Esc Esc shortcut"></textarea>
+</section>
+
+<dialog id="dlg"><p>Copy this and paste it back to me:</p><textarea readonly></textarea><p><button class="copy" onclick="this.closest('dialog').close()">Close</button></p></dialog>
+
+<script>
+const OPTS = { theme: 'dark', n: '2', ...JSON.parse(localStorage.getItem('stop-opts') || '{}') };
+const TASKS = [
+	{ d: 'Start the Vite dev server', k: 'term', kind: 'shell', src: '<code>pnpm dev</code>', t: '6m' },
+	{ d: 'Run vitest in watch mode', k: 'term', kind: 'shell', src: '<code>pnpm vitest --watch</code>', t: '2m' },
+	{ d: 'Explore route guard usage', k: 'bot', kind: 'subagent', src: 'Explore agent', t: '40s' },
+	{ d: 'Review the router refactor', k: 'flow', kind: 'workflow', src: 'review workflow', t: '12s' },
+];
+const tg = t => t.replaceAll('▦', `<span class="tgl">${grid()}</span>`);
+const ic = (id, cls = '') => `<svg class="${cls}"><use href="#${id}"/></svg>`;
+const grid = () => `<span class="bgd" aria-hidden="true">${'<i></i>'.repeat(10)}</span>`;
+const meter = l => `<span class="meter" data-l="${l}"><i></i><i></i><i></i><i></i><i></i></span>`;
+const live = k => TASKS.slice(0, k);
+const tasksTxt = k => k === 1 ? '1 task' : `${k} tasks`;
+const killed = k => `Turn stopped. ${k === 1 ? 'The background task was' : k === 2 ? 'Both background tasks were' : `All ${k} background tasks were`} stopped too.`;
+const kept = k => `Turn stopped. ${tasksTxt(k)} still running.`;
+
+const B = {
+	send: () => `<button class="send off" aria-label="Send">${ic('i-up')}</button>`,
+	stop: (c = '') => `<button class="stop ${c}" aria-label="Stop turn"><i></i></button>`,
+	badge: (k, c = '') => `<button class="stop bdg ${c}" aria-label="Stop turn and ${tasksTxt(k)}"><i></i><em>+${k}</em></button>`,
+	tasks: (k, c = '') => `<button class="stop tk2 ${c}" aria-label="Stop ${tasksTxt(k)}">${grid()}<em>${k}</em></button>`,
+	split: (c = '') => `<span class="split"><i></i><span class="${c}">${ic('i-chev')}</span></span>`,
+};
+const CAPS = `<button class="ib hm">${ic('claude')}<i>O5</i></button><button class="ib cyc"><span class="sh" style="--pc:var(--text2)">${meter(4)}<b>xhigh</b></span></button><button class="ib cyc"><span class="sh" style="--pc:var(--p-ask)">${ic('i-shield-o')}<b>Ask</b></span></button>`;
+
+function row(k, tap) {
+	const [first] = live(k);
+	return `<button class="tr combo${tap ? ' tap' : ''}" style="--cw:${k === 1 ? 210 : 168}px">${grid()}<span class="chip">${ic('i-' + first.k)}<span class="d">${first.d}</span></span>${k > 1 ? `<span class="more">+${k - 1}</span>` : ''}${ic('i-chev', 'cv')}</button>`;
+}
+function list(k, tapAll) {
+	return `<div class="k">${grid()}${k === 1 ? '1 background task' : k + ' background tasks'}</div>
+		<ul>${live(k).map(t => `<li>${ic('i-' + t.k)}<span class="t"><span>${t.d}</span><small>${t.kind} · ${t.src}</small></span><em>${t.t}</em><button class="xs" aria-label="Stop ${t.d}"><i></i></button></li>`).join('')}</ul>
+		<div class="acts"><button class="danger${tapAll ? ' tap' : ''}"><i></i>Stop all</button></div>`;
+}
+const O = {
+	toast: (k, tap) => `<div class="toast"><span><b>Turn stopped.</b> ${tasksTxt(k)} still running</span><button class="${tap ? 'tap' : ''}">Stop ${k === 1 ? 'it' : 'them'}</button></div>`,
+	hint: t => `<div class="hint">${t}</div>`,
+	ask: k => `<div class="pop"><button class="pri"><span class="sq"></span><span>Stop turn</span><small>tasks keep going</small></button><button class="dz tap"><span class="sq"></span><span>Stop turn and ${tasksTxt(k)}</span></button></div>`,
+	menu: k => `<div class="pop"><button class="pri"><span class="sq"></span><span>Stop turn</span></button><hr>${live(k).map(t => `<button>${ic('i-' + t.k)}<span>${t.d}</span><small>${t.t}</small></button>`).join('')}<hr><button class="dz tap"><span class="sq"></span><span>Stop turn and all tasks</span></button></div>`,
+	sheet: k => `<div class="pd bs">${list(k, true)}</div>`,
+};
+const dotsBtn = (k, tap) => `<button class="dots${tap ? ' tap' : ''}">${'<i></i>'.repeat(k)}<span>${k} running</span></button>`;
+
+function strip(cap, s, k0) {
+	const k = s.n ?? k0;
+	const btn = s.btn ?? (s.run ? B.stop() : B.send());
+	const dots = s.dots ?? (k ? `<div class="dots">${'<i></i>'.repeat(k)}</div>` : '');
+	const hd = s.run ? `<div class="hd"><div class="l1"><span class="gl">${grid()}</span><b>Working</b><span class="x">· Editing router.test.ts</span></div></div>` : '';
+	return `<p class="cap">${tg(cap)}</p><div class="st"><div class="scr"${s.pd ? ` style="min-height:${200 + k * 44}px"` : ''}>
+		<div class="topw"><div class="top"><span class="tb">${ic('i-menu')}</span><div class="tt"><span class="ttl">Fix the router tests${ic('i-chev', 'cv')}</span>${k ? row(k, s.rowTap) : ''}</div><span class="tb">${ic('i-dots')}</span></div>${s.pd ? `<div class="pd">${list(k, true)}</div>` : ''}</div>
+		<div class="tx">${s.run ? '<div class="tool"><span>Edit</span> router.test.ts <em>running</em></div>' : `<div class="dimline">${s.msg ?? kept(k)}</div>`}</div>
+		<div class="dock">${s.over ?? ''}<div class="cmp">${hd}<div class="row"><button class="ib" aria-label="Attach">${ic('i-plus')}</button><div class="fld"><span class="phd">Ask Claude…</span></div>${CAPS}${btn}</div></div>${dots}</div></div></div>`;
+}
+
+const RUN = k => ['1 · Turn running, ' + tasksTxt(k) + ' in the background', { run: 1 }];
+const TAP = ['2 · Tap ■', { run: 1, btn: B.stop('tap') }];
+const GONE = (num, k) => [num + ' · Turn and tasks gone', { n: 0, msg: killed(k) }];
+
+const TIERS = {
+	a: [
+		{ num: 'A1', name: 'Stop ends everything (today)', why: 'One button, one meaning. The header pull-down is the only place to stop a single task.',
+			plus: 'Nothing new to learn. One press always gets you to quiet.', minus: 'Stopping a runaway turn also kills your dev server and test watcher.',
+			steps: k => [RUN(k), TAP, GONE(3, k)] },
+		{ num: 'A2', name: 'Stop ends everything, and says so', why: 'Same as A1, but ■ carries a count while tasks run, so you know what it takes with it.',
+			plus: 'Honest about what gets killed, at no extra taps.', minus: 'Still kills the dev server. A small badge is easy to stop noticing.',
+			steps: k => [['1 · Turn running, ■ shows +' + k, { run: 1, btn: B.badge(k) }], ['2 · Tap ■', { run: 1, btn: B.badge(k, 'tap') }], GONE(3, k)] },
+	],
+	b: [
+		{ num: 'B1', name: 'Turn only, the header owns tasks', why: 'Stop ends the turn. The tasks row and dots stay, and the pull-down is where tasks get stopped.',
+			plus: 'No accidental task loss. Matches what the SDK does once per-task stop is declared.', minus: 'Stopping everything takes three taps, at the opposite end of the screen.',
+			steps: k => [RUN(k), TAP, ['3 · Tasks keep running. Tap the tasks row', { rowTap: 1 }], ['4 · Stop one, or Stop all', { pd: 1 }]] },
+		{ num: 'B2', name: 'Turn only, the dots become a button', why: 'The dots under the composer turn into a "2 running" pill. Tapping it opens the task list right above the composer.',
+			plus: 'Task control sits where your thumb already is.', minus: 'Two ways into the same list (header and pill). Adds a little height under the composer.',
+			steps: k => [['1 · Turn running, ' + tasksTxt(k) + ' in the background', { run: 1, dots: dotsBtn(k) }], ['2 · Tap ■', { run: 1, btn: B.stop('tap'), dots: dotsBtn(k) }], ['3 · Tasks keep running. Tap the pill', { dots: dotsBtn(k, true) }], ['4 · Stop one, or Stop all', { over: O.sheet(k), dots: dotsBtn(k) }]] },
+		{ num: 'B3', rec: true, name: 'Turn only, then a toast offers the rest', why: 'Stop ends the turn. A toast right above the composer says what is still running and offers "Stop them" for about 6 seconds.',
+			plus: 'Two taps to quiet, and you see what is still running before you decide. A double-tap hits a different target, so it can\'t misfire.', minus: 'The offer fades. After that it is the header pull-down.',
+			steps: k => [RUN(k), TAP, ['3 · Toast: tap "Stop ' + (k === 1 ? 'it' : 'them') + '"', { over: O.toast(k, true) }], GONE(4, k)] },
+	],
+	c: [
+		{ num: 'C1', name: 'Second press stops tasks (your idea)', why: 'After the first press, ■ turns into a blue ▦ ' + 'stop-tasks button whenever the field is empty and tasks are live. Typing turns it back into send.',
+			plus: 'One control, two taps, no hunting.', minus: 'A double-tap kills your tasks. The main button stays destructive for as long as a dev server runs, which can be hours.',
+			steps: k => [RUN(k), TAP, ['3 · ■ became ▦. Tap again', { btn: B.tasks(k, 'tap'), over: O.hint('Tap again to stop ' + tasksTxt(k)) }], GONE(4, k)] },
+		{ num: 'C2', name: 'Second press, short window', why: 'Same as C1, but ▦ only lasts 4 seconds (the ring counts down), then the button goes back to send.',
+			plus: 'Your idea, without a destructive button lingering.', minus: 'Still a double-tap risk. Timed UI is stressful. After the window, it is the header.',
+			steps: k => [RUN(k), TAP, ['3 · ▦ for 4 s, ring counts down', { btn: B.tasks(k, 'ring tap'), over: O.hint('Tap within 4 s to stop ' + tasksTxt(k)) }], ['4 · Not tapped: back to send, tasks live', {}]] },
+		{ num: 'C3', name: 'Tap stops the turn, hold stops everything', why: 'A ring fills while you hold ■, the same hold gesture as the composer\'s micro-label buttons.',
+			plus: 'Can\'t escalate by accident. Still one control.', minus: 'Hidden until someone tells you. Elsewhere in the composer, hold opens a menu, so this reuses the gesture for something else.',
+			steps: k => [RUN(k), ['2 · Hold ■, ring fills', { run: 1, btn: B.stop('ring tap'), over: O.hint('Keep holding to stop the turn and ' + tasksTxt(k)) }], GONE(3, k)] },
+		{ num: 'C4', name: 'Tap stops the turn, hold opens a stop menu', why: 'Matches the hold menus on the approvals shield and effort meter: hold ■ for the turn, each task, or everything.',
+			plus: 'Consistent with the existing hold gestures. Full control without leaving the composer.', minus: 'Still hidden. The menu duplicates the header pull-down.',
+			steps: k => [['1 · Turn running. Hold ■', { run: 1, btn: B.stop('tap') }], ['2 · Menu: pick one', { run: 1, over: O.menu(k) }], GONE(3, k)] },
+	],
+	d: [
+		{ num: 'D1', name: 'Split Stop button', why: '■ stops the turn. The ⌄ segment opens the same menu as C4.',
+			plus: 'Fine control you can see, with no hidden gestures.', minus: 'A wider button squeezes the field on phone, and the chevron is a small target.',
+			steps: k => [['1 · Turn running. Tap ⌄', { run: 1, btn: B.split('tap') }], ['2 · Menu: pick one', { run: 1, btn: B.split(), over: O.menu(k) }], GONE(3, k)] },
+		{ num: 'D2', name: 'Stop asks when tasks are running', why: 'With background tasks live, ■ opens a two-choice popover. With none, it stops instantly as today.',
+			plus: 'Explicit. Impossible to misfire.', minus: 'Two taps every time anything runs in the background, which is friction when you need to halt a runaway turn fast.',
+			steps: k => [RUN(k), ['2 · Tap ■, it asks', { run: 1, btn: B.stop(), over: O.ask(k) }], GONE(3, k)] },
+		{ num: 'D3', name: 'Two buttons: ■ turn, ▦ tasks', why: 'While tasks run, a blue ▦ sits beside the composer\'s main button, during a turn and after it.',
+			plus: 'Both actions always visible, one tap each.', minus: 'Two stop buttons side by side invite tapping the wrong one, and they cost field width.',
+			steps: k => [['1 · Turn running: ▦ and ■', { run: 1, btn: B.tasks(k) + B.stop() }], ['2 · Tap ■: turn stops, ▦ stays', { btn: B.tasks(k, 'tap') + B.send() }], GONE(3, k)] },
+	],
+};
+
+function card(o, k) {
+	return `<article class="card${o.rec ? ' rec' : ''}"><h3><span class="num">${o.num}</span>${tg(o.name)}</h3><p class="why">${tg(o.why)}</p>
+		<p class="pc"><b class="p">+</b>${o.plus}</p><p class="pc"><b class="m">−</b>${o.minus}</p>
+		<div class="fit"><figure class="ph steps" data-w="354">${o.steps(k).map(([c, s]) => strip(c, s, k)).join('')}</figure></div></article>`;
+}
+function render() {
+	document.documentElement.dataset.theme = OPTS.theme;
+	const k = +OPTS.n;
+	for (const [g, opts] of Object.entries(TIERS)) document.querySelector(`[data-g=${g}]`).innerHTML = opts.map(o => card(o, k)).join('');
+	document.querySelectorAll('[data-opt]').forEach(b => { const [key, v] = b.dataset.opt.split(':'); b.setAttribute('aria-pressed', OPTS[key] === v); });
+	fit();
+}
+function fit() {
+	document.querySelectorAll('.fit').forEach(f => { const el = f.querySelector('figure'); if (el) el.style.zoom = Math.min(1, f.clientWidth / +el.dataset.w); });
+}
+document.addEventListener('click', e => {
+	const opt = e.target.closest('[data-opt]');
+	if (!opt) return;
+	const [key, v] = opt.dataset.opt.split(':');
+	OPTS[key] = v;
+	localStorage.setItem('stop-opts', JSON.stringify(OPTS));
+	render();
+});
+document.querySelectorAll('.note').forEach(t => {
+	t.value = localStorage.getItem('stop-note-' + t.dataset.note) || '';
+	t.addEventListener('input', () => localStorage.setItem('stop-note-' + t.dataset.note, t.value));
+});
+document.getElementById('copy').addEventListener('click', () => {
+	const notes = [...document.querySelectorAll('.note')].filter(t => t.value.trim()).map(t => `## ${t.dataset.title}\n${t.value.trim()}`);
+	const dlg = document.getElementById('dlg');
+	dlg.querySelector('textarea').value = ['Stop: turn vs background tasks (va96)', ...notes].join('\n\n');
+	dlg.showModal();
+});
+new ResizeObserver(fit).observe(document.body);
+render();
+</script>
+</body>
+</html>

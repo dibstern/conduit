@@ -92,6 +92,9 @@
     Brain,
     Moon,
     PanelsTopLeft,
+    Bot,
+    Workflow,
+    Radar,
   } from '@lucide/svelte';
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
@@ -199,6 +202,9 @@
     'star-off': StarOff,
     'brain': Brain,
     'panels-top-left': PanelsTopLeft,
+    'bot': Bot,
+    'workflow': Workflow,
+    'radar': Radar,
 
     // Harness brand marks (not lucide).
     'claude': ClaudeMark,

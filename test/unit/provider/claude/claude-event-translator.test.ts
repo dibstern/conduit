@@ -2222,7 +2222,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {
-		const liveness = makeSessionBackgroundLiveness();
+		const liveness = makeSessionBackgroundLiveness(undefined, () => 100);
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
 			onBackgroundTask: liveness.record,
@@ -2250,10 +2250,28 @@ describe("ClaudeEventTranslator", () => {
 			ambient: true,
 		};
 
-		await snapshot([bash, watcher], 1);
+		const plan = { task_id: "plan", task_type: "plan", description: "Plan" };
+		const planMode = {
+			task_id: "plan-mode",
+			task_type: "plan_mode",
+			description: "Plan mode",
+		};
+		await snapshot([bash, watcher, plan, planMode], 1);
 		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(true);
-		await snapshot([watcher], 2);
+		expect(liveness.backgroundOf(ctx.sessionId)).toEqual({
+			work: "monitoring",
+			tasks: [
+				{
+					id: "bash",
+					type: "local_bash",
+					description: "codex exec",
+					firstSeenAt: 100,
+				},
+			],
+		});
+		await snapshot([watcher, plan, planMode], 2);
 		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);
+		expect(liveness.backgroundOf(ctx.sessionId)).toBeUndefined();
 		await snapshot([bash], 3);
 		await snapshot([], 4);
 		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);

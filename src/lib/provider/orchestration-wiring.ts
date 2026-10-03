@@ -59,6 +59,7 @@ export interface OrchestrationLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
 export interface OrchestrationRuntimeLayerOptions {
@@ -72,6 +73,7 @@ export interface OrchestrationRuntimeLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
 export interface OrchestrationLayer {
@@ -201,6 +203,9 @@ const createOrchestrationComponentsEffect = (
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
 				: {}),
+			...(options.claudeRunnerFactory
+				? { runnerFactory: options.claudeRunnerFactory }
+				: {}),
 		});
 		registry.registerInstance(claudeInstance);
 		// Durable command receipts share the persistence SqlClient with the
@@ -308,6 +313,9 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeRunnerFactory
+					? { claudeRunnerFactory: options.claudeRunnerFactory }
 					: {}),
 			});
 			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());

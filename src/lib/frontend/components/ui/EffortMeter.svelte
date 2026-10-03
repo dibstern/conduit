@@ -11,7 +11,7 @@
 	const active = $derived(Math.max(0, Math.min(count, Math.trunc(filled))));
 </script>
 
-<span class="effort-meter inline-flex h-[13px] items-end gap-[2px]" aria-hidden="true">
+<span data-testid="effort-meter" class="effort-meter inline-flex h-[13px] items-end gap-[2px]" aria-hidden="true">
 	{#each Array.from({ length: count }, (_, index) => index) as index (index)}
 		<span
 			class="block w-[2.5px] shrink-0 rounded-[1px]"

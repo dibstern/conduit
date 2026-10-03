@@ -230,6 +230,17 @@ export const SessionAttentionSchema = Schema.Literal(
 export const BackgroundWorkSchema = Schema.Literal("working", "monitoring");
 export type BackgroundWork = typeof BackgroundWorkSchema.Type;
 
+/** A live, non-ambient Claude background task (shell, agent, monitor, ...). */
+export const BackgroundTaskSchema = Schema.Struct({
+	id: Schema.String,
+	/** SDK task_type, e.g. local_bash, local_agent, monitor_mcp. */
+	type: Schema.String,
+	description: Schema.String,
+	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
+	firstSeenAt: Schema.Number,
+});
+export type BackgroundTask = typeof BackgroundTaskSchema.Type;
+
 export interface SessionGit {
 	branch?: string;
 	head?: string;
@@ -279,6 +290,8 @@ export const SessionInfoSchema = Schema.Struct({
 	attention: Schema.optional(SessionAttentionSchema),
 	/** This session's own background work; unlike attention, not rolled up. */
 	backgroundWork: Schema.optional(BackgroundWorkSchema),
+	/** The live tasks behind backgroundWork, oldest first. */
+	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),

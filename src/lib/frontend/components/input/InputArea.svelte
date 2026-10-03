@@ -3,14 +3,11 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
-	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	import ComposerStatusHeader from "./ComposerStatusHeader.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -134,7 +131,6 @@
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		!sessionViewState.compact ? "Ask anything. / to use skills, @ to mention files" :
 		isProcessing() ? "Reply to steer…" :
 		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
@@ -793,36 +789,6 @@
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-		<!-- Background work outlives the turn; Stop interrupts the whole session. -->
-		{#if currentSession?.backgroundWork && !isProcessing()}
-			<div class="mb-1.5" data-testid="background-work-banner">
-				<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:py-1 max-md:px-3">
-					<span class="shrink-0 text-text-secondary" aria-hidden="true">
-						{#if currentSession.backgroundWork === "monitoring"}
-							<Icon name="eye" size={14} />
-						{:else}
-							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
-						{/if}
-					</span>
-					<span class="flex-1 min-w-0 truncate text-sm text-text-secondary max-md:text-xs">
-						{currentSession.backgroundWork === "monitoring"
-							? "Monitoring, waiting for a watcher to fire"
-							: "Background work running"}
-					</span>
-					<Button
-						variant="secondary"
-						size="sm"
-						icon="square"
-						iconSize={12}
-						type="button"
-						data-testid="background-work-stop"
-						title="Stop the session and its background work"
-						onclick={handleStop}
-					>Stop</Button>
-				</Surface>
-			</div>
-		{/if}
-
 		{#if !sessionState.currentId && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext /></div>
 		{/if}
@@ -895,7 +861,7 @@
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative min-h-6 {plainText ? 'h-[120px]' : ''}" style:min-height="var(--composer-placeholder-height,1.5rem)">
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height="max(32px, var(--composer-placeholder-height, 0px))">
 							<SkillHighlightBackdrop
 								text={plainText ? "" : inputText}
 								commandNames={commandNameSet}
@@ -974,13 +940,6 @@
 					>
 						<!-- Attach button + menu -->
 						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onSetGoal={() => handleAttachSetGoal()} />
-
-						<!-- Agent selector -->
-						{#if composerPreferences.controls === "icons"}
-							<div id="agent-selector-wrap" class="min-w-0">
-								<AgentSelector />
-							</div>
-						{/if}
 					</div>
 				{/snippet}
 				{#snippet controls()}
@@ -998,44 +957,43 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
-					<!-- Send / Stop buttons -->
+					<!-- Send / Stop buttons. While working, send only shows once there is
+					     something to steer with; otherwise stop stands alone. -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
 					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
+					{#if !isProcessing() || canSend}
 					<Button
 						variant="ghost"
 						size="content"
 						tone="inherit"
 						hoverFill="none"
-						disabledStyle="ghosted"
+						disabledStyle="undimmed"
 						iconOnly
 						icon={isGoalCommand ? "target" : "arrow-up"}
-						iconSize={18}
+						iconSize={17}
 						id="send"
 						data-goal={isGoalCommand ? "true" : "false"}
 						type="button"
-						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
+						class="send-btn shrink-0 w-[32px] h-[32px] rounded-[10px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white'} disabled:bg-send-off-bg disabled:text-send-off"
 						disabled={!canSend}
 						title={isGoalCommand ? "Set goal" : sendButtonLabel}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
 						onclick={handleSendClick}
 					/>
+					{/if}
 					{#if isProcessing()}
-						<!-- The arbitrary transition yields to Button's transition-colors; duration-150 restates its default. -->
 						<Button
-							variant="secondary"
+							variant="ghost"
 							size="content"
-							tone="muted"
-							hoverFill="alt"
-							iconOnly
-							icon="square"
-							iconSize={18}
+							tone="inherit"
+							hoverFill="none"
 							id="stop"
 							type="button"
-							class="shrink-0 w-8 h-8 rounded-[10px] touch-manipulation active:opacity-70"
+							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
 							title="Stop generating"
 							ariaLabel="Stop generating"
 							onclick={handleStop}
-						/>
+						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>
 					{/if}
 				{/snippet}
 			</TwoRowComposerLayout>
@@ -1054,6 +1012,14 @@
 				{/if}
 			</div>
 		{/if}
+		{#if currentSession?.backgroundTasks?.length}
+			<!-- One pulse per live background task; the header row lists them. -->
+			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">
+				{#each currentSession.backgroundTasks as task, index (task.id)}
+					<i class="composer-task-dot" style:animation-delay="{(index % 3) * 0.35}s"></i>
+				{/each}
+			</div>
+		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext /></div>
 		{/if}
@@ -1061,6 +1027,15 @@
 </div>
 
 <style>
+	.composer-task-dot {
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--color-tool);
+		animation: composer-task-pulse 1.4s ease-in-out infinite;
+	}
+	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
+	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
 	:global(#send[data-goal="true"]) {
 		background: var(--color-status-violet);
 		color: var(--color-bg);

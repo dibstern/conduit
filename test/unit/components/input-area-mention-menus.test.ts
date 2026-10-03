@@ -76,6 +76,11 @@ describe("InputArea detached listboxes", () => {
 			{ toolId: "other-question", sessionId: "other-session", questions: [] },
 		];
 		const { getByRole } = render(InputArea);
+		// While working, send only appears once there is text to steer with.
+		await enterText(
+			getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement,
+			"steer",
+		);
 		const queuedButton = getByRole("button", { name: "Queue message" });
 		expect(queuedButton.getAttribute("title")).toBe("Queue message");
 

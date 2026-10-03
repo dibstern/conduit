@@ -17,9 +17,13 @@
 		applyDefaultModelSet,
 		applyGetModelsResponse,
 		applyGetAgentsResponse,
+		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
+		formatAgentLabel,
+		getActiveAgent,
 		getActiveModel,
+		getVisibleAgents,
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getProviderGroupsForInstance,
@@ -39,15 +43,16 @@
 		getModelsRpc,
 		reloadProviderSessionRpc,
 		setDefaultModelRpc,
+		switchAgentRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import type { Immutable, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
+	import type { AgentInfo, Immutable, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
 	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
 
 	let pickerOpen = $state(false);
-	let view = $state<"root" | "harness" | "model">("root");
+	let view = $state<"root" | "harness" | "model" | "agent">("root");
 	let innerWidth = $state(window.innerWidth);
 	const phone = $derived(innerWidth < 768);
 	let searchQuery = $state("");
@@ -65,7 +70,9 @@
 	// with the provider id, because the picker can mount more than once.
 	const groupHeadingId = $props.id();
 	const titleId = `${groupHeadingId}-title`;
-	const title = $derived(view === "root" ? "Harness & model" : view === "harness" ? "Harness" : "Model");
+	const title = $derived(
+		view === "root" ? "Harness & model" : view === "harness" ? "Harness" : view === "agent" ? "Agent" : "Model",
+	);
 
 	const instances = $derived(getAvailableInstances());
 
@@ -169,6 +176,38 @@
 		}
 		return "Select model";
 	});
+
+	/** The phone button's two-or-three letter model tag: "Sonnet 5" → S5, "GPT-6 Sol" → Sol. */
+	const shortModelLabel = $derived.by(() => {
+		const name = activeModel ? stripDateSuffix(formatModelName(activeModel)) : stripDateSuffix(activeModelId ?? "");
+		if (!name) return "—";
+		const words = (/\s/.test(name) ? name.split(/\s+/) : name.split("-")).filter((word) => !/^claude$/i.test(word));
+		const index = words.findIndex((word, i) => /^[a-z]+$/i.test(word) && /^\d+(\.\d+)?$/.test(words[i + 1] ?? ""));
+		const word = words[index];
+		if (word) return `${word.charAt(0).toUpperCase()}${words[index + 1]}`;
+		const last = words.at(-1) ?? name;
+		return last.length <= 4 ? last : last.slice(0, 3);
+	});
+
+	const visibleAgents = $derived(getVisibleAgents());
+	const activeAgent = $derived(getActiveAgent() ?? visibleAgents[0]);
+
+	/** Capitalise all-lowercase agent names ("code" → "Code"). */
+	function agentLabel(agent: AgentInfo): string {
+		const label = formatAgentLabel(agent);
+		return label === label.toLowerCase() ? label.charAt(0).toUpperCase() + label.slice(1) : label;
+	}
+
+	function handleAgentSelect(agent: AgentInfo) {
+		view = "root";
+		if (agent.id === activeAgent?.id) return;
+		const undoAgent = chooseAgent(agent.id);
+		const projectSlug = getCurrentSlug();
+		const sessionId = sessionState.currentId;
+		if (projectSlug && sessionId) {
+			void switchAgentRpc({ projectSlug, sessionId, agentId: agent.id }).catch(undoAgent);
+		}
+	}
 
 	function driverLabel(id: string): string {
 		if (id === "claude") return "Claude";
@@ -448,7 +487,7 @@
 					</div>
 				{/if}
 				{#if effortSegments.length > 0}
-					<div class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
+					<div data-testid="picker-row-effort" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
 						<SegmentedControl
 							bind:value={() => effort.current ?? "", (value) => effort.select(value)}
@@ -458,6 +497,48 @@
 						/>
 					</div>
 				{/if}
+				{#if visibleAgents.length > 1}
+					<Button
+						variant="ghost"
+						size="content"
+						tone="default"
+						hoverFill="base"
+						layout="flow"
+						data-testid="picker-row-agent"
+						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
+						onclick={() => { view = "agent"; }}
+					>
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
+						<span class="min-w-0 flex-1 truncate text-[13px] font-semibold">{activeAgent ? agentLabel(activeAgent) : "Default"}</span>
+						<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+					</Button>
+				{:else if activeAgent}
+					<div data-testid="picker-row-agent" class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
+						<span class="min-w-0 flex-1 truncate text-[13px] text-text">{agentLabel(activeAgent)}</span>
+					</div>
+				{/if}
+			{:else if view === "agent"}
+				{#each visibleAgents as agent (agent.id)}
+					{@const selected = agent.id === activeAgent?.id}
+					<Button
+						variant="ghost"
+						size="content"
+						tone={selected ? "accent" : "default"}
+						hoverFill="base"
+						layout="flow"
+						aria-pressed={selected}
+						data-testid="picker-agent-{agent.id}"
+						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
+						onclick={() => handleAgentSelect(agent)}
+					>
+						<span class="min-w-0 flex-1">
+							<span class="block text-[13px] font-semibold">{agentLabel(agent)}</span>
+							{#if agent.description}<span class="block text-[11px] text-text-muted">{agent.description}</span>{/if}
+						</span>
+						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
+					</Button>
+				{/each}
 			{:else if view === "harness"}
 				{#each instances as instance (instance.id)}
 					{@const disabled = isInstanceDisabled(instance)}
@@ -664,13 +745,18 @@
 			<span aria-hidden="true" class="text-border-chip">·</span>
 		{/if}
 	{:else}
+		<!-- Phone: logo + short tag (O5). Desktop: logo + "Name · ctx" + chevron. -->
 		<Button
 			bind:element={triggerEl}
-			variant="toolbar"
+			variant="ghost"
 			size="content"
+			tone="inherit"
+			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
-			class="model-btn min-w-0 gap-1.5 h-9 px-2 text-text-muted text-xs font-medium duration-150 rounded-[10px] max-w-[200px] max-sm:max-w-[130px] hover:bg-bg-alt hover:text-text-secondary font-brand {hasModel ? '' : 'opacity-50'}"
+			class="model-btn min-w-0 h-[32px] text-text-secondary font-brand hover:bg-text/7 {phone
+				? 'gap-[3px] px-[5px] rounded-[10px]'
+				: 'gap-[6px] px-[9px] rounded-[9px] text-[12px] font-semibold max-w-[260px]'} {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
 			aria-haspopup="dialog"
@@ -678,11 +764,16 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={togglePicker}
 		>
-			{@render driverIcon(selectedDriver, 18, selectedInstance?.isCustom ?? false)}
-			<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-				{displayName}{#if contextLabel}<span data-testid="picker-selected-context" class="hidden md:inline"> · {contextLabel}</span>{/if}
-			</span>
-			<Icon name="chevron-down" size={10} class="shrink-0 opacity-50" />
+			{#if phone}
+				{@render driverIcon(selectedDriver, 17, selectedInstance?.isCustom ?? false)}
+				<span class="model-label text-[10px] font-bold whitespace-nowrap">{shortModelLabel}</span>
+			{:else}
+				{@render driverIcon(selectedDriver, 15, selectedInstance?.isCustom ?? false)}
+				<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+					{displayName}{#if contextLabel}<span data-testid="picker-selected-context">{` · ${contextLabel}`}</span>{/if}
+				</span>
+				<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={11} /></span>
+			{/if}
 		</Button>
 	{/if}
 

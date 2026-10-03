@@ -35,7 +35,8 @@
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
-	import { getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -53,6 +54,9 @@
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
+	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
+	import BackgroundTasksRow from "../session/BackgroundTasksRow.svelte";
+	import { tasksPanel } from "../session/background-tasks.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
@@ -77,6 +81,27 @@
 		starting: "Starting", pursuing: "Pursuing", checking: "Checking", not_yet: "Not yet", paused: "Paused", met: "Met", cleared: "Cleared",
 	}[goal.phase] : "");
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	const backgroundTasks = $derived(session?.backgroundTasks ?? []);
+	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
+
+	// Close the pull-down when the session changes or its tasks end.
+	$effect(() => {
+		void sessionState.currentId;
+		return () => { tasksPanel.open = false; };
+	});
+	$effect(() => {
+		if (backgroundTasks.length === 0) tasksPanel.open = false;
+	});
+
+	function stopAllBackgroundTasks() {
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		tasksPanel.open = false;
+		if (!sessionId || !projectSlug) return;
+		void cancelSessionRpc({ projectSlug, sessionId, commandId: crypto.randomUUID() }).catch(() => {
+			showToast("Failed to stop session", { variant: "error" });
+		});
+	}
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
 	let detailsFailed = $state(false);
@@ -139,10 +164,13 @@
 	}
 
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
-		if (!goalDetails.open || event.key !== "Escape") return;
+		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open)) return;
 		event.preventDefault();
 		event.stopPropagation();
-		closeGoalDetails(true);
+		if (tasksPanel.open) {
+			tasksPanel.open = false;
+			document.querySelector<HTMLElement>("[data-testid='background-tasks-row']")?.focus();
+		} else closeGoalDetails(true);
 	}
 
 	function runGoalAction(action: GoalComposerAction["action"]) {
@@ -238,6 +266,8 @@
 
 {#if goalDetails.open && detailsGoal}
 	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => closeGoalDetails(true)} />
+{:else if tasksPanel.open && backgroundTasks.length > 0}
+	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => { tasksPanel.open = false; }} />
 {/if}
 
 {#snippet viewItems(testIdPrefix: string)}
@@ -305,7 +335,7 @@
 	aria-label="Session controls"
 	tabindex="-1"
 	bind:this={barEl}
-	class="relative shrink-0 bg-bg-surface border-b border-border outline-none {goalDetails.open ? 'z-[var(--z-sheet)]' : ''}"
+	class="relative shrink-0 bg-bg-surface border-b border-border outline-none {goalDetails.open || tasksPanel.open ? 'z-[var(--z-sheet)]' : ''}"
 >
 	<!--
 		Leaving. `size="content"` because this button owns its own box: a 44px
@@ -398,12 +428,15 @@
 				<SessionRenameInput {session} onend={() => { renaming = false; }} class="font-brand min-h-[44px] md:min-h-0" />
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
-		{#if goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts)}
-			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { goalDetails.open = !goalDetails.open; }}>
+		{#if goalShown}
+			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; goalDetails.open = !goalDetails.open; }}>
 				<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
 				<span class="min-w-0 truncate">{goal.subtitle}</span>
 				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
 			</Button>
+		{/if}
+		{#if backgroundTasks.length > 0}
+			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact={sessionViewState.compact} />
 		{/if}
 		</div>
 		{#if !collapsed}
@@ -667,6 +700,10 @@
 			</div>
 			<div aria-hidden="true" class="mx-auto mt-[12px] h-[3px] w-[34px] rounded-full bg-text-dimmer/30"></div>
 		</Surface>
+	{/if}
+
+	{#if tasksPanel.open && backgroundTasks.length > 0}
+		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstopall={stopAllBackgroundTasks} />
 	{/if}
 
 </div>

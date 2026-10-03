@@ -61,27 +61,27 @@
 	}
 </script>
 
-{#if showHealthWarning && showInstanceWarning}
-	<div class="banner flex items-center gap-2 px-4 py-2 text-xs border-b bg-error/10 border-error/30 text-error">
-		<span class="banner-icon shrink-0">
-			<Icon name="alert-triangle" size={14} />
-		</span>
-		<span class="banner-text flex-1 min-w-0">
-			No healthy OpenCode instances
-		</span>
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<span
-			class="shrink-0 text-current underline cursor-pointer hover:opacity-80"
-			onclick={handleManageInstances}
-		>
-			Manage Instances
-		</span>
-	</div>
-{/if}
-
-{#if visibleBanners.length > 0}
+{#if (showHealthWarning && showInstanceWarning) || visibleBanners.length > 0}
 	<div class="banners flex flex-col">
+		{#if showHealthWarning && showInstanceWarning}
+			<div class="banner flex items-center gap-2 px-4 py-2 text-xs border-b bg-error/10 border-error/30 text-error">
+				<span class="banner-icon shrink-0">
+					<Icon name="alert-triangle" size={14} />
+				</span>
+				<span class="banner-text flex-1 min-w-0">
+					No healthy OpenCode instances
+				</span>
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<span
+					class="shrink-0 text-current underline cursor-pointer hover:opacity-80"
+					onclick={handleManageInstances}
+				>
+					Manage Instances
+				</span>
+			</div>
+		{/if}
+
 		{#each visibleBanners as banner (banner.id)}
 			<div
 				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)}"

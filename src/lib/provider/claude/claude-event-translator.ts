@@ -693,14 +693,18 @@ export class ClaudeEventTranslator {
 					const transition = this.deps.onBackgroundTask?.({
 						sessionId: ctx.sessionId,
 						kind: "snapshot",
-						taskTypes: message.tasks
+						tasks: message.tasks
 							.filter(
 								(task) =>
 									!task.ambient &&
 									task.task_type !== "plan" &&
 									task.task_type !== "plan_mode",
 							)
-							.map((task) => task.task_type),
+							.map((task) => ({
+								id: task.task_id,
+								type: task.task_type,
+								description: task.description,
+							})),
 					});
 					if (transition) yield* transition;
 					return;

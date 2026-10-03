@@ -267,7 +267,8 @@ export interface ProjectRelayConfig {
 	/**
 	 * Test seam: replaces every Claude Agent SDK `query()` this relay makes —
 	 * session turns and session-title generation — so E2E replay never reaches
-	 * a live model. Defaults to the real SDK.
+	 * a live model. Directly supplied fakes run Claude sessions in-process.
+	 * Defaults to the real SDK.
 	 */
 	claudeSdk?: {
 		readonly query: NonNullable<

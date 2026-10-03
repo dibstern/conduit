@@ -4,7 +4,6 @@ Background:
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And I open a composer session
-  And the mock relay lists a single agent
 
 Scenario Outline: idle empty composer fits in one row
   Then the composer has 1 row

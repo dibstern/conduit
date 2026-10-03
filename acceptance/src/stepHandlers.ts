@@ -1,10 +1,12 @@
 import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
+import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { composerHandlers } from "./steps/composer.js";
 import { composerContextWarningHandlers } from "./steps/composerContextWarning.js";
 import { composerEffortHandlers } from "./steps/composerEffort.js";
 import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
+import { composerFinalDesignHandlers } from "./steps/composerFinalDesign.js";
 import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
 import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
@@ -24,6 +26,7 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
+	...backgroundTasksHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,
 	...sessionSkillsHandlers,
@@ -33,6 +36,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	// feed's more specific "the transcript shows a loading skeleton".
 	...transcriptFeedHandlers,
 	...composerFieldWidthHandlers,
+	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...composerPickerHandlers,
 	...composerWordsHandlers,

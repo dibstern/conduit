@@ -53,7 +53,7 @@ export const subscribeShell = (
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const backgroundWorkOf = yield* BackgroundLivenessTag;
+			const backgroundOf = yield* BackgroundLivenessTag;
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
@@ -61,7 +61,7 @@ export const subscribeShell = (
 						readQuery.readSessionList({
 							...range,
 							roots: true,
-							backgroundWorkOf,
+							backgroundOf,
 						}),
 					// A descendant advance can change its root summary. The read
 					// selects affected roots by the highest descendant version.

@@ -31,12 +31,13 @@ async function selectRailInstance(page: Page, label: string): Promise<void> {
 	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
-async function ensureAgentDropdownOpen(page: Page): Promise<void> {
-	const dropdown = page.getByTestId("agent-dropdown");
-	if ((await dropdown.count()) === 0) {
-		await page.getByTestId("agent-selector-trigger").click();
+async function openPickerAgentView(page: Page): Promise<void> {
+	const choices = page.locator('#model-picker [data-testid^="picker-agent-"]');
+	if ((await choices.count()) === 0) {
+		await openModelPicker(page);
+		await page.getByTestId("picker-row-agent").click();
 	}
-	await dropdown.waitFor({ state: "visible", timeout: 5_000 });
+	await choices.first().waitFor({ state: "visible", timeout: 5_000 });
 }
 
 export const harnessHandlers: StepHandler[] = [
@@ -176,11 +177,11 @@ export const harnessHandlers: StepHandler[] = [
 		name: "assert agent selector lists agents",
 		match: /^the agent selector lists (.+)$/,
 		run: async ({ world, match }) => {
-			await ensureAgentDropdownOpen(world.page);
+			await openPickerAgentView(world.page);
 			const agentIds = (match[1] ?? "").split(",").map((id) => id.trim());
 			for (const agentId of agentIds) {
 				await world.page
-					.locator(`[data-testid="agent-option-${agentId}"]`)
+					.locator(`[data-testid="picker-agent-${agentId}"]`)
 					.waitFor({ state: "visible", timeout: 5_000 });
 			}
 		},
@@ -189,34 +190,16 @@ export const harnessHandlers: StepHandler[] = [
 		name: "assert agent selector does not list agents",
 		match: /^the agent selector does not list (.+)$/,
 		run: async ({ world, match }) => {
-			await ensureAgentDropdownOpen(world.page);
+			await openPickerAgentView(world.page);
 			const agentIds = (match[1] ?? "").split(",").map((id) => id.trim());
 			await world.page.waitForFunction(
 				(ids) =>
 					ids.every(
 						(id) =>
-							document.querySelector(`[data-testid="agent-option-${id}"]`) ===
+							document.querySelector(`[data-testid="picker-agent-${id}"]`) ===
 							null,
 					),
 				agentIds,
-				{ timeout: 5_000 },
-			);
-		},
-	},
-	{
-		name: "assert agent selector scope label",
-		match: /^the agent selector label shows (.+) agents$/,
-		run: async ({ world, match }) => {
-			await ensureAgentDropdownOpen(world.page);
-			const scopeName = match[1] ?? "";
-			await world.page.waitForFunction(
-				(expected) => {
-					const label = document.querySelector(
-						'[data-testid="agent-scope-label"]',
-					);
-					return label?.textContent?.trim() === `${expected} agents`;
-				},
-				scopeName,
 				{ timeout: 5_000 },
 			);
 		},

@@ -24,7 +24,8 @@ import type { OrchestrationEngine } from "../../../provider/orchestration-engine
 import type { Translator } from "../../../relay/event-translator.js";
 import type { PtyManager } from "../../../relay/pty-manager.js";
 import type { WebSocketHandlerShape } from "../../../server/ws-handler-shape.js";
-import type { BackgroundWork, HistoryMessage } from "../../../shared-types.js";
+import type { SessionBackground } from "../../../session/background-liveness.js";
+import type { HistoryMessage } from "../../../shared-types.js";
 import type {
 	ProjectRelayConfig,
 	RelayMessage,
@@ -248,7 +249,7 @@ export class StatusPollerTag extends Context.Tag("StatusPoller")<
 
 export class BackgroundLivenessTag extends Context.Tag("BackgroundLiveness")<
 	BackgroundLivenessTag,
-	(sessionId: string) => BackgroundWork | undefined
+	(sessionId: string) => SessionBackground | undefined
 >() {}
 
 export class PollerManagerTag extends Context.Tag("PollerManager")<

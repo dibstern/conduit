@@ -124,7 +124,7 @@ describe("relay automatic settlement sweep", () => {
 				background.record({
 					sessionId: "background",
 					kind: "snapshot",
-					taskTypes: ["task1"],
+					tasks: [{ id: "task1", type: "local_agent", description: "Audit" }],
 				});
 				const broadcast = vi.fn(() => service.pushViewerFamilies());
 				const ports = {
@@ -165,7 +165,7 @@ describe("relay automatic settlement sweep", () => {
 				background.record({
 					sessionId: "background",
 					kind: "snapshot",
-					taskTypes: [],
+					tasks: [],
 				});
 				viewers.clear();
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(2);

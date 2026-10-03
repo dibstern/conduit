@@ -4,6 +4,7 @@ import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { makeClaudeRunnerIdleExit } from "../../../../src/lib/provider/claude/claude-runner-idle.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionOutput,
@@ -49,6 +50,60 @@ const capabilitiesService = {
 		),
 };
 
+describe("Claude runner idle exit", () => {
+	it.each([
+		"local_bash",
+		"local_agent",
+	])("stays alive for %s tasks and starts the idle window when they finish", (type) => {
+		vi.useFakeTimers();
+		const onIdle = vi.fn();
+		const idle = makeClaudeRunnerIdleExit(onIdle, 100);
+		try {
+			idle.activity({
+				type: "background-task",
+				transition: {
+					sessionId: "session-1",
+					kind: "snapshot",
+					tasks: [{ id: "task-1", type, description: "Task" }],
+				},
+			});
+			vi.advanceTimersByTime(300);
+			expect(onIdle).not.toHaveBeenCalled();
+			expect(idle.quiescent).toBe(false);
+			idle.activity({
+				type: "background-task",
+				transition: { sessionId: "session-1", kind: "snapshot", tasks: [] },
+			});
+			expect(idle.quiescent).toBe(true);
+			vi.advanceTimersByTime(99);
+			expect(onIdle).not.toHaveBeenCalled();
+			vi.advanceTimersByTime(1);
+			expect(onIdle).toHaveBeenCalledOnce();
+		} finally {
+			idle.close();
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not extend the idle window for empty snapshots", () => {
+		vi.useFakeTimers();
+		const onIdle = vi.fn();
+		const idle = makeClaudeRunnerIdleExit(onIdle, 100);
+		try {
+			vi.advanceTimersByTime(99);
+			idle.activity({
+				type: "background-task",
+				transition: { sessionId: "session-1", kind: "snapshot", tasks: [] },
+			});
+			vi.advanceTimersByTime(1);
+			expect(onIdle).toHaveBeenCalledOnce();
+		} finally {
+			idle.close();
+			vi.useRealTimers();
+		}
+	});
+});
+
 describe("in-process Claude session runner", () => {
 	it("routes subagent persistence and background bookkeeping through JSON messages", async () => {
 		const outputs: ClaudeSessionOutput[] = [];
@@ -70,7 +125,13 @@ describe("in-process Claude session runner", () => {
 				subtype: "background_tasks_changed",
 				session_id: "sdk-parent",
 				uuid: "00000000-0000-0000-0000-000000000501",
-				tasks: [{ task_id: "background-1", task_type: "local_bash" }],
+				tasks: [
+					{
+						task_id: "background-1",
+						task_type: "local_bash",
+						description: "Watch tests",
+					},
+				],
 			} as unknown as SDKMessage,
 			makeSuccessResult({ session_id: "sdk-parent" }),
 		]);
@@ -149,7 +210,13 @@ describe("in-process Claude session runner", () => {
 						transition: {
 							sessionId: "session-1",
 							kind: "snapshot",
-							taskTypes: ["local_bash"],
+							tasks: [
+								{
+									id: "background-1",
+									type: "local_bash",
+									description: "Watch tests",
+								},
+							],
 						},
 					});
 					yield* runner.executeEffect({
