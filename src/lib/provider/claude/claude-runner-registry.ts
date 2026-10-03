@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-	existsSync,
 	lstatSync,
 	mkdirSync,
 	readdirSync,
@@ -13,7 +12,6 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
-import { createLogger } from "../../logger.js";
 import { isRecord } from "../../utils.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
 
@@ -24,25 +22,6 @@ export interface ClaudeRunnerRegistration {
 	readonly buildId: string;
 	readonly pid: number;
 	readonly role?: "candidate" | "retiring";
-	/** A recovery journal without a live registration has no process to adopt. */
-	readonly stopped?: true;
-	/** Quarantined evidence is never replayed; only unfinished turn settlement retries. */
-	readonly recoveryFailed?: true;
-}
-
-const log = createLogger("claude-runner-registry");
-
-export function quarantineClaudeRunnerJournal(
-	registration: Pick<ClaudeRunnerRegistration, "runnerId" | "socketPath">,
-	cause: unknown,
-): void {
-	log.error(
-		`Quarantining Claude runner ${registration.runnerId} recovery journal: ${String(cause)}`,
-	);
-	renameSync(
-		`${registration.socketPath}.recovery`,
-		`${registration.socketPath}.recovery.failed`,
-	);
 }
 
 function claudeRunnerTargetDirectory(
@@ -121,100 +100,42 @@ export function removeClaudeRunner(socketPath: string): void {
 export function discoverClaudeRunners(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
-	includeStopped = false,
 ): ClaudeRunnerRegistration[] {
+	const directory = prepareClaudeRunnerDirectory(workspaceRoot, configDir);
 	const entries: ClaudeRunnerRegistration[] = [];
-	const seen = new Set<string>();
-	let directory: string;
-	let filenames: string[];
-	try {
-		directory = prepareClaudeRunnerDirectory(workspaceRoot, configDir);
-		filenames = readdirSync(directory).sort();
-	} catch (cause) {
-		log.error("Failed to discover Claude runners", cause);
-		return entries;
-	}
-	for (const filename of filenames) {
-		const archived = filename.includes(".recovery");
-		const failed = filename.endsWith(".failed");
-		if (!/^[0-9a-f]{12}\.(json|recovery(?:\.failed)?)$/.test(filename))
-			continue;
-		if (archived && !includeStopped) continue;
-		const runnerId = filename.slice(0, 12);
-		if (seen.has(runnerId)) continue;
-		const socketPath = join(directory, runnerId);
-		if (failed && existsSync(`${socketPath}.recovery.failed.settled`)) continue;
-		let value: unknown;
+	for (const filename of readdirSync(directory)) {
+		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
+		const socketPath = join(directory, filename.slice(0, -5));
 		try {
-			const contents = readFileSync(join(directory, filename), "utf8");
-			value = JSON.parse(
-				archived ? (contents.split("\n", 1)[0] ?? "") : contents,
+			const value: unknown = JSON.parse(
+				readFileSync(`${socketPath}.json`, "utf8"),
 			);
 			if (
 				!isRecord(value) ||
 				value["socketPath"] !== socketPath ||
-				value["runnerId"] !== runnerId ||
+				value["runnerId"] !== filename.slice(0, -5) ||
 				typeof value["sessionId"] !== "string" ||
 				typeof value["buildId"] !== "string" ||
 				typeof value["pid"] !== "number" ||
 				!Number.isSafeInteger(value["pid"]) ||
-				value["pid"] <= 0
+				value["pid"] <= 0 ||
+				!runnerPidAlive(value["pid"])
 			) {
-				if (archived)
-					throw new ClaudeRuntimeError({
-						message: "Invalid stopped Claude runner registration",
-					});
 				removeClaudeRunner(socketPath);
 				continue;
 			}
-			if (!runnerPidAlive(value["pid"]) && !archived) {
-				removeClaudeRunner(socketPath);
-				continue;
-			}
-			seen.add(runnerId);
 			entries.push({
-				runnerId,
+				runnerId: filename.slice(0, -5),
 				socketPath,
 				sessionId: value["sessionId"],
 				buildId: value["buildId"],
 				pid: value["pid"],
-				...(archived ? { stopped: true as const } : {}),
-				...(failed ? { recoveryFailed: true as const } : {}),
 				...(value["role"] === "candidate" || value["role"] === "retiring"
 					? { role: value["role"] }
 					: {}),
 			});
-		} catch (cause) {
-			if (archived) {
-				if (!failed) {
-					try {
-						quarantineClaudeRunnerJournal({ runnerId, socketPath }, cause);
-					} catch (error) {
-						log.error(`Failed to quarantine Claude runner ${runnerId}`, error);
-					}
-				}
-				seen.add(runnerId);
-				entries.push({
-					runnerId,
-					socketPath,
-					sessionId:
-						isRecord(value) &&
-						value["runnerId"] === runnerId &&
-						typeof value["sessionId"] === "string"
-							? value["sessionId"]
-							: "",
-					buildId: "",
-					pid: 0,
-					stopped: true,
-					recoveryFailed: true,
-				});
-			} else {
-				try {
-					removeClaudeRunner(socketPath);
-				} catch (error) {
-					log.error(`Failed to clean Claude runner ${runnerId}`, error);
-				}
-			}
+		} catch {
+			removeClaudeRunner(socketPath);
 		}
 	}
 	return entries.sort(

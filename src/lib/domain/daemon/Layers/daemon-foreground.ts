@@ -42,6 +42,7 @@ import {
 	DaemonHandleTag,
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
+import { hasRunningClaudeTurn } from "../Services/daemon-session-reader.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import {
 	type InstanceManagerState,
@@ -455,10 +456,13 @@ export async function startForegroundDaemon(
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>
-							discoverClaudeRunners(project.directory, configDir, true),
+							discoverClaudeRunners(project.directory, configDir),
 						);
-						if (runners.length > 0) {
-							// Relay startup recovers runners before any browser connects.
+						if (
+							runners.length > 0 ||
+							(yield* hasRunningClaudeTurn(project.directory))
+						) {
+							// Cold projects stay lazy unless runner recovery or turn settlement needs them.
 							yield* relayCache.get(project.slug);
 						}
 					}).pipe(

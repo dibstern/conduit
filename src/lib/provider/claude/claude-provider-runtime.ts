@@ -42,7 +42,10 @@ import {
 } from "effect";
 import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
-import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	type ProviderRuntimeIngestionError,
+	ProviderRuntimeIngestionTag,
+} from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -79,11 +82,14 @@ import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
 import { makeRecoveredClaudeEventSink } from "./claude-runner-event-sink.js";
 import { claudeRunnerSinkId } from "./claude-runner-protocol.js";
+import { settleUnclaimedClaudeRunnerCommands } from "./claude-runner-recovery.js";
+import { discoverClaudeRunners } from "./claude-runner-registry.js";
 import {
 	type ClaudeRunnerRollback,
 	ClaudeRunnerRollbackTag,
 	preserveClaudeRunners,
 } from "./claude-runner-shutdown.js";
+import { failClaudeRunnerTurn } from "./claude-runner-turn-failure.js";
 import {
 	discoverCapabilitiesEffect,
 	expectedApiModelIdEffect,
@@ -399,6 +405,60 @@ export class ClaudeProviderRuntime {
 				},
 			});
 		yield* this.runner.recoverEffect;
+		if (yield* preserveClaudeRunners(this.runnerRollback)) return;
+		const registrations = yield* Effect.try(() =>
+			discoverClaudeRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
+		).pipe(
+			Effect.catchAll((error) =>
+				Effect.logError("Could not verify Claude runner ownership", error).pipe(
+					Effect.as(undefined),
+				),
+			),
+		);
+		// Discovery errors are not proof that a running command has no owner.
+		if (!registrations) return;
+		yield* settleUnclaimedClaudeRunnerCommands(
+			sql,
+			new Set(registrations.map((runner) => runner.sessionId)),
+			(sinkId, turn, failure) =>
+				Effect.gen(function* () {
+					let persistenceError: ProviderRuntimeIngestionError | undefined;
+					yield* failClaudeRunnerTurn(
+						(output) =>
+							Effect.gen(function* () {
+								if (output.type === "event") {
+									// Startup has no WebSocket publisher or live sink yet.
+									yield* ingestion.ingestBatch([output.event], {
+										publishToBus: false,
+										publishToRelay: false,
+									});
+								} else if (output.type === "cancel-interactions") {
+									yield* pending.cancelSessionInteractions(
+										turn.sessionId,
+										output.reason,
+										{ recoverQuestions: false },
+									);
+								}
+								return {};
+							}).pipe(
+								Effect.tapError((error) =>
+									Effect.sync(() => {
+										persistenceError = error;
+									}),
+								),
+								Effect.mapError((error) =>
+									sessionFailure("recover stopped runner", error),
+								),
+							),
+						sinkId,
+						turn,
+						failure,
+					);
+					// failClaudeRunnerTurn logs errors; database failures still need a retry.
+					if (persistenceError) return yield* Effect.fail(persistenceError);
+				}),
+			() => preserveClaudeRunners(this.runnerRollback),
+		);
 	});
 
 	constructor(

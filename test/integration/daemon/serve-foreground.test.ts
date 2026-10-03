@@ -197,10 +197,10 @@ describe("foreground conduit serve", () => {
 				{
 					ticket: "conduit-test-85kb.16",
 					dist: DIST,
-					expectedScenarios: 18,
+					expectedScenarios: 15,
 					passed:
-						scenarios.length === 18 &&
-						cleanup.length === 18 &&
+						scenarios.length === 15 &&
+						cleanup.length === 15 &&
 						cleanup.every((entry) => entry["passed"] && entry["verified"]),
 					scenarios,
 					cleanup,
@@ -614,317 +614,195 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
-	it.each([
-		[
-			"persists a detached completed turn through explicit stop after failed adoption",
-			"completed",
-			null,
-		],
-		[
-			"persists a detached interrupted turn through explicit stop after failed adoption",
-			"interrupted",
-			null,
-		],
-		[
-			"quarantines a truncated final journal line after failed adoption",
-			"completed",
-			"truncated",
-		],
-		[
-			"quarantines garbage in the middle of a journal after failed adoption",
-			"completed",
-			"garbage",
-		],
-	] as const)(
-		"%s",
-		async (_name, outcome, corruption) => {
-			harness = await ProcessHarness.start({
-				dist: DIST,
-				foregroundCli: true,
-				restartProof: true,
+	it("settles a detached completed turn after full stop and restart", async () => {
+		harness = await ProcessHarness.start({
+			dist: DIST,
+			foregroundCli: true,
+			restartProof: true,
+		});
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Detached completed turn");
+		const projectDirectory = harness.projectDir;
+		const readTurn = () => {
+			const db = new Database(join(projectDirectory, ".conduit/events.db"), {
+				readonly: true,
 			});
-			const browser = await harness.connect();
-			const sessionId = await browser.createSession(`Detached ${outcome} turn`);
-			const projectDirectory = harness.projectDir;
-			const readTurn = () => {
-				const db = new Database(join(projectDirectory, ".conduit/events.db"), {
-					readonly: true,
-				});
-				try {
-					return {
-						session: db
-							.prepare("SELECT status FROM sessions WHERE id = ?")
-							.get(sessionId) as { status: string },
-						turns: db
-							.prepare(
-								"SELECT state, assistant_message_id FROM turns WHERE session_id = ? ORDER BY requested_at",
-							)
-							.all(sessionId) as Array<{
-							state: string;
-							assistant_message_id: string | null;
-						}>,
-						commands: db
-							.prepare(
-								"SELECT o.command_id, o.status, r.status AS receipt_status FROM provider_command_outbox o LEFT JOIN command_receipts r ON r.command_id = o.command_id WHERE o.session_id = ? AND o.effect_type = 'send_turn' ORDER BY o.request_sequence",
-							)
-							.all(sessionId) as Array<{
-							command_id: string;
-							status: string;
-							receipt_status: string;
-						}>,
-						messages: db
-							.prepare(
-								"SELECT role, text, is_streaming FROM messages WHERE session_id = ? ORDER BY created_at, id",
-							)
-							.all(sessionId) as Array<{
-							role: string;
-							text: string;
-							is_streaming: number;
-						}>,
-					};
-				} finally {
-					db.close();
-				}
-			};
-			const sdkRelease = join(harness.root, "release-upgrade-turn");
-			const marker = join(
-				projectDirectory,
-				".conduit",
-				"recovery-fail-after-adoption",
-			);
-			const release = `${marker}-release`;
-			let damagedJournal: { path: string; contents: string } | undefined;
-			const evidence: Record<string, unknown> = {
-				detachedTurnAfterFailedAdoption: true,
-				outcome,
-				corruption,
-				sessionId,
-			};
-			scenarios.push(evidence);
-			const pending = browser
-				.send(sessionId, "upgrade-long-turn")
-				.catch(() => undefined);
 			try {
-				await browser.waitFor(
-					(frame) =>
-						frame["type"] === "delta" &&
-						frame["text"] === "Echo(upgrade-long-turn): ",
-				);
-				const runner = harness.marks.find(
-					(mark) =>
-						mark.kind === "runner-started" && mark.sessionId === sessionId,
-				);
-				if (runner?.kind !== "runner-started")
-					throw new Error("Missing runner for detached turn");
-				pids.add(runner.pid);
-				evidence["runner"] = runner;
-				const initial = readTurn();
-				evidence["initial"] = initial;
-				expect(initial).toMatchObject({
-					turns: [{ state: "running" }],
-					commands: [{ status: "running" }],
-				});
-				await harness.signal("SIGINT");
-				await pending;
-				expect(alive(runner.pid)).toBe(true);
-				writeFileSync(
-					marker,
-					"fail only after authenticating the in-flight runner",
-				);
-				await harness.restart({ skipBrowserProbe: true });
-				await vi.waitFor(
-					() => expect(existsSync(`${marker}-started`)).toBe(true),
-					{ timeout: 5000 },
-				);
-				writeFileSync(release, "detach after failed relay recovery");
-				await vi.waitFor(
-					() => {
-						const proof = harness?.proof() as { logTail: string };
-						expect(proof.logTail).toContain(
-							JSON.stringify(
-								'Failed to recover relay for project "process-test"',
-							),
-						);
-					},
-					{ timeout: 5000 },
-				);
-				expect(alive(runner.pid)).toBe(true);
-				if (outcome === "completed") {
-					writeFileSync(
-						sdkRelease,
-						"finish the turn while no relay is attached",
-					);
-					await vi.waitFor(
-						() => {
-							const buffered = readFileSync(
-								`${runner.socketPath}.spool`,
-								"utf8",
-							);
-							expect(buffered).toContain('"type":"turn.completed"');
-							expect(buffered).toContain('"status":"idle"');
-						},
-						{ timeout: 5000 },
-					);
-				} else {
-					expect(existsSync(sdkRelease)).toBe(false);
-					expect(
-						readFileSync(`${runner.socketPath}.spool`, "utf8"),
-					).not.toContain('"type":"turn.completed"');
-				}
-				const buffered = readFileSync(
-					`${runner.socketPath}.spool`,
-					"utf8",
-				).trim();
-				evidence["bufferedFrames"] = buffered
-					? buffered.split("\n").map((line) => JSON.parse(line) as unknown)
-					: [];
-				const detached = readTurn();
-				evidence["detached"] = detached;
-				expect(detached).toMatchObject({
-					turns: [{ state: "running" }],
-					commands: [{ status: "running" }],
-				});
-				expect(
-					detached.messages.find((message) => message.role === "assistant")
-						?.text,
-				).toBe("Echo(upgrade-long-turn): ");
-				const stop = await harness.runCli(["stop"]);
-				evidence["stop"] = stop;
-				expect(stop.code).toBe(0);
-				await harness.waitForExit();
-				expect(harness.generations.at(-1)?.exitCode).toBe(0);
-				await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-					timeout: 5000,
-				});
-				evidence["afterStop"] = readTurn();
-				const journal = `${runner.socketPath}.recovery`;
-				expect(existsSync(journal)).toBe(true);
-				evidence["journalAfterStop"] = {
-					path: journal,
-					bytes: statSync(journal).size,
+				return {
+					session: db
+						.prepare("SELECT status FROM sessions WHERE id = ?")
+						.get(sessionId) as { status: string },
+					turns: db
+						.prepare(
+							"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
+						)
+						.all(sessionId) as Array<{ state: string }>,
+					commands: db
+						.prepare(
+							"SELECT o.command_id, o.status, r.status AS receipt_status FROM provider_command_outbox o LEFT JOIN command_receipts r ON r.command_id = o.command_id WHERE o.session_id = ? AND o.effect_type = 'send_turn' ORDER BY o.request_sequence",
+						)
+						.all(sessionId) as Array<{
+						command_id: string;
+						status: string;
+						receipt_status: string;
+					}>,
+					messages: db
+						.prepare(
+							"SELECT role, text, is_streaming FROM messages WHERE session_id = ? ORDER BY created_at, id",
+						)
+						.all(sessionId) as Array<{
+						role: string;
+						text: string;
+						is_streaming: number;
+					}>,
 				};
-				if (corruption !== null) {
-					const lines = readFileSync(journal, "utf8").trimEnd().split("\n");
-					const damagedLine = lines.findIndex((line) => {
-						const message = JSON.parse(line) as {
-							output?: { event?: { type?: string; data?: { text?: string } } };
-						};
-						return (
-							message.output?.event?.type === "text.delta" &&
-							message.output.event.data?.text === "done(upgrade-long-turn)."
-						);
-					});
-					const finalLine = lines[damagedLine];
-					if (damagedLine < 2 || finalLine === undefined)
-						throw new Error("Missing final delta in retained journal");
-					const completePrefix = `${lines.slice(0, damagedLine).join("\n")}\n`;
-					const contents =
-						corruption === "truncated"
-							? completePrefix +
-								finalLine.slice(0, Math.floor(finalLine.length / 2))
-							: `${completePrefix}garbage inside the retained journal\n${lines.slice(damagedLine).join("\n")}\n`;
-					writeFileSync(journal, contents);
-					damagedJournal = { path: journal, contents };
-					evidence["damagedJournal"] = { ...damagedJournal, damagedLine };
-				}
-				rmSync(marker);
-				await harness.restart({ skipBrowserProbe: true });
-				const succeeded = outcome === "completed" && corruption === null;
-				const terminalCommand = succeeded
-					? { status: "completed", receipt_status: "side_effect_completed" }
-					: { status: "failed", receipt_status: "side_effect_failed" };
-				const expected =
-					corruption === "truncated"
-						? "Echo(upgrade-long-turn): stream(upgrade-long-turn) "
-						: succeeded
-							? "Echo(upgrade-long-turn): stream(upgrade-long-turn) done(upgrade-long-turn)."
-							: "Echo(upgrade-long-turn): ";
-				// Eager startup must commit stopped journals without a browser acquiring the relay.
-				await vi.waitFor(
-					() => {
-						const current = readTurn();
-						evidence["persistedBeforeBrowser"] = current;
-						expect(current.commands).toMatchObject([terminalCommand]);
-						expect(existsSync(journal)).toBe(false);
-						if (corruption !== null) {
-							expect(existsSync(`${journal}.failed`)).toBe(true);
-							expect(existsSync(`${journal}.failed.settled`)).toBe(true);
-						}
-					},
-					{ timeout: 10_000 },
-				);
-				const persisted = readTurn();
-				evidence["persistedBeforeBrowser"] = persisted;
-				expect(persisted).toMatchObject({
-					session: { status: "idle" },
-					commands: [terminalCommand],
-				});
-				expect(persisted.turns).toHaveLength(1);
-				if (succeeded) expect(persisted.turns[0]?.state).toBe("completed");
-				else
-					expect(["interrupted", "error"]).toContain(persisted.turns[0]?.state);
-				expect(
-					persisted.messages.find((message) => message.role === "assistant"),
-				).toMatchObject({ text: expected, is_streaming: 0 });
-				expect(existsSync(journal)).toBe(false);
-				evidence["journalConsumed"] = true;
-				const after = await harness.connect(sessionId);
-				const history = await after.history(sessionId);
-				evidence["history"] = history;
-				evidence["persisted"] = persisted;
-				expect(JSON.stringify(history)).toContain(expected);
-				let quarantined: string | undefined;
-				let settledAt: number | undefined;
-				if (damagedJournal) {
-					quarantined = readFileSync(`${journal}.failed`, "utf8");
-					expect(quarantined).toBe(damagedJournal.contents);
-					settledAt = statSync(`${journal}.failed.settled`).mtimeMs;
-					evidence["quarantinedJournal"] = {
-						path: `${journal}.failed`,
-						contents: quarantined,
-						settledAt,
-					};
-					const freshSessionId = await after.createSession(
-						"After quarantined journal",
-					);
-					const result = await after.send(
-						freshSessionId,
-						"after-invalid-journal",
-					);
-					expect(result.chunks.join("")).toBe(
-						"Echo(after-invalid-journal): stream(after-invalid-journal) done(after-invalid-journal).",
-					);
-					evidence["newSend"] = { sessionId: freshSessionId, result };
-				}
-				await harness.signal("SIGINT");
-				await harness.restart();
-				const second = await harness.connect(sessionId);
-				const secondHistory = await second.history(sessionId);
-				const repeated = readTurn();
-				evidence["secondHistory"] = secondHistory;
-				evidence["secondPersisted"] = repeated;
-				expect(secondHistory).toEqual(history);
-				expect(repeated).toEqual(persisted);
-				expect(existsSync(journal)).toBe(false);
-				if (quarantined !== undefined) {
-					expect(readFileSync(`${journal}.failed`, "utf8")).toBe(quarantined);
-					expect(statSync(`${journal}.failed.settled`).mtimeMs).toBe(settledAt);
-					evidence["quarantineUnchangedAfterRestart"] = true;
-				}
 			} finally {
-				// The archived owner's exit was verified before injecting corruption.
-				// Preserve its bytes in the artifact, then unblock authenticated cleanup.
-				if (damagedJournal && existsSync(damagedJournal.path)) {
-					rmSync(damagedJournal.path);
-					evidence["damagedJournalRemovedForCleanup"] = true;
-				}
-				writeFileSync(sdkRelease, "release SDK turn for cleanup");
-				writeFileSync(release, "release failed adoption for cleanup");
-				await pending;
+				db.close();
 			}
-		},
-		60_000,
-	);
+		};
+		const sdkRelease = join(harness.root, "release-upgrade-turn");
+		const marker = join(
+			projectDirectory,
+			".conduit",
+			"recovery-fail-after-adoption",
+		);
+		const release = `${marker}-release`;
+		const evidence: Record<string, unknown> = {
+			detachedTurnAfterFailedAdoption: true,
+			sessionId,
+		};
+		scenarios.push(evidence);
+		const pending = browser
+			.send(sessionId, "upgrade-long-turn")
+			.catch(() => undefined);
+		try {
+			await browser.waitFor(
+				(frame) =>
+					frame["type"] === "delta" &&
+					frame["text"] === "Echo(upgrade-long-turn): ",
+			);
+			const runner = harness.marks.find(
+				(mark) =>
+					mark.kind === "runner-started" && mark.sessionId === sessionId,
+			);
+			if (runner?.kind !== "runner-started")
+				throw new Error("Missing runner for detached turn");
+			pids.add(runner.pid);
+			evidence["runner"] = runner;
+			await harness.signal("SIGINT");
+			await pending;
+			expect(alive(runner.pid)).toBe(true);
+			writeFileSync(marker, "fail after authenticating the in-flight runner");
+			await harness.restart({ skipBrowserProbe: true });
+			await vi.waitFor(
+				() => expect(existsSync(`${marker}-started`)).toBe(true),
+				{
+					timeout: 5000,
+				},
+			);
+			writeFileSync(release, "detach the partially acquired relay");
+			await vi.waitFor(
+				() => {
+					const proof = harness?.proof() as { logTail: string };
+					expect(proof.logTail).toContain(
+						JSON.stringify(
+							'Failed to recover relay for project "process-test"',
+						),
+					);
+				},
+				{ timeout: 5000 },
+			);
+			expect(alive(runner.pid)).toBe(true);
+			writeFileSync(sdkRelease, "finish the turn without an attached relay");
+			await vi.waitFor(
+				() => {
+					const buffered = readFileSync(`${runner.socketPath}.spool`, "utf8");
+					expect(buffered).toContain('"type":"turn.completed"');
+					expect(buffered).toContain('"status":"idle"');
+				},
+				{ timeout: 5000 },
+			);
+			evidence["completedWhileDetached"] = true;
+			const detached = readTurn();
+			evidence["detached"] = detached;
+			expect(detached).toMatchObject({
+				turns: [{ state: "running" }],
+				commands: [{ status: "running" }],
+			});
+			const runnerPids = new Set(
+				harness.marks.flatMap((mark) =>
+					mark.kind === "runner-started" || mark.kind === "runner-spawned"
+						? [mark.pid]
+						: [],
+				),
+			);
+			for (const pid of runnerPids) pids.add(pid);
+			const stop = await harness.runCli(["stop"]);
+			evidence["stop"] = stop;
+			expect(stop.code).toBe(0);
+			await harness.waitForExit();
+			expect(harness.generations.at(-1)?.exitCode).toBe(0);
+			await vi.waitFor(
+				() => {
+					for (const pid of runnerPids) expect(alive(pid)).toBe(false);
+				},
+				{ timeout: 5000 },
+			);
+			evidence["stoppedRunnerPids"] = [...runnerPids];
+			rmSync(marker);
+			await harness.restart({ skipBrowserProbe: true });
+			await vi.waitFor(
+				() => {
+					const current = readTurn();
+					evidence["persistedBeforeBrowser"] = current;
+					expect(current.turns).toHaveLength(1);
+					expect(["completed", "interrupted", "error"]).toContain(
+						current.turns[0]?.state,
+					);
+					expect(current.commands).toHaveLength(1);
+					expect(["completed", "failed"]).toContain(
+						current.commands[0]?.status,
+					);
+					expect(current.commands[0]?.receipt_status).toBe(
+						current.commands[0]?.status === "completed"
+							? "side_effect_completed"
+							: "side_effect_failed",
+					);
+					expect(current.session.status).toBe("idle");
+					expect(
+						current.messages.find((message) => message.role === "assistant"),
+					).toMatchObject({ is_streaming: 0 });
+				},
+				{ timeout: 10_000 },
+			);
+			const after = await harness.connect(sessionId);
+			expect(JSON.stringify(await after.history(sessionId))).toContain(
+				"Echo(upgrade-long-turn): ",
+			);
+			const result = await after.send(sessionId, "after-orphan-stop");
+			expect(result.chunks.join("")).toBe(
+				"Echo(after-orphan-stop): stream(after-orphan-stop) done(after-orphan-stop).",
+			);
+			evidence["newSend"] = result;
+			await vi.waitFor(
+				() => {
+					const current = readTurn();
+					evidence["afterNewSend"] = current;
+					expect(current.turns.at(-1)?.state).toBe("completed");
+					expect(current.commands.at(-1)).toMatchObject({
+						status: "completed",
+						receipt_status: "side_effect_completed",
+					});
+					expect(current.session.status).toBe("idle");
+				},
+				{ timeout: 5000 },
+			);
+		} finally {
+			writeFileSync(sdkRelease, "release SDK turn for cleanup");
+			writeFileSync(release, "release failed adoption for cleanup");
+			await pending;
+		}
+	}, 60_000);
 
 	it("removes a project promptly while OpenCode path keeps recovery startup blocked", async () => {
 		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
@@ -1303,13 +1181,49 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		);
 		expect(alive(first.pid)).toBe(true);
 		const browser = await harness.connect();
-		expect((await browser.daemonStatus()).port).toBe(first.port);
+		const initialStatus = await browser.daemonStatus();
+		expect(initialStatus.port).toBe(first.port);
+		expect(
+			initialStatus.projects.find((project) => project.slug === "process-test"),
+		).toHaveProperty("sse");
 		await browser.close();
 		await harness.signal("SIGINT");
-		await harness.restart({ cliArgs: ["--foreground"] });
+		await harness.restart({
+			cliArgs: ["--foreground"],
+			skipBrowserProbe: true,
+		});
 		const alias = harness.generations[1];
 		if (!alias) throw new Error("Alias server generation missing");
 		expect(alias.pid).not.toBe(first.pid);
+		await vi.waitFor(
+			() => {
+				const proof = harness?.proof() as { logTail: string };
+				const generationStart = proof.logTail.indexOf(`"pid":${alias.pid},`);
+				expect(generationStart).toBeGreaterThanOrEqual(0);
+				expect(proof.logTail.slice(generationStart)).toContain("  Ready.\n");
+			},
+			{ timeout: 5000 },
+		);
+		const restoredStatus = await sendRpcRequest(
+			join(harness.configDir, "relay.sock"),
+			new GetStatus({}),
+		);
+		const evidence: Record<string, unknown> = {
+			duplicate,
+			presentBare,
+			first,
+			alias,
+			initialStatus,
+			restoredStatus,
+			hiddenAliasForeground: true,
+			lazyIdleProjectRestore: true,
+		};
+		scenarios.push(evidence);
+		const restoredProject = restoredStatus.projects.find(
+			(project) => project.slug === "process-test",
+		);
+		expect(restoredProject).toMatchObject({ status: "registering" });
+		expect(restoredProject).not.toHaveProperty("sse");
 		noPidArtifacts();
 		expect((await harness.runCli(["stop"])).code).toBe(0);
 		await harness.waitForExit();
@@ -1319,13 +1233,8 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 			"Server is not running. Run conduit serve or conduit service install.\n",
 		);
 		expect(existsSync(join(harness.configDir, "relay.sock"))).toBe(false);
-		scenarios.push({
-			duplicate,
-			presentBare,
+		Object.assign(evidence, {
 			absentBare,
-			first,
-			alias,
-			hiddenAliasForeground: true,
 			absentBareCliGuidance: true,
 		});
 	}, 45_000);

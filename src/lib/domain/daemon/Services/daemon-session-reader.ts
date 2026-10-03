@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Reactivity } from "@effect/experimental";
+import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
 import {
@@ -115,6 +116,35 @@ const readProjectSessions = (
 				},
 			}),
 		);
+	});
+
+/** Check outstanding Claude admissions without acquiring the project's relay. */
+export const hasRunningClaudeTurn = (projectDirectory: string) =>
+	Effect.gen(function* () {
+		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
+		const databaseStat = yield* Effect.either(
+			Effect.try({
+				try: () => statSync(databasePath),
+				catch: (cause) => cause,
+			}),
+		);
+		if (Either.isLeft(databaseStat)) {
+			if (isMissingPathError(databaseStat.left)) return false;
+			return yield* Effect.fail(databaseStat.left);
+		}
+		const sqliteLayer = SqliteNode.layer({
+			filename: databasePath,
+			readonly: true,
+			disableWAL: true,
+		}).pipe(Layer.provide(Reactivity.layer));
+		return yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const rows = yield* sql<{ has_running_turn: number }>`SELECT EXISTS (
+				SELECT 1 FROM provider_command_outbox
+				WHERE provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+			) AS has_running_turn`;
+			return rows[0]?.has_running_turn === 1;
+		}).pipe(Effect.provide(sqliteLayer));
 	});
 
 /** Use the same read-only SQLite path as the daemon-wide session list. */

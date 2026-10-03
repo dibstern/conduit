@@ -18,9 +18,6 @@ export const currentClaudeRunnerOutput = FiberRef.unsafeMake<
 	ClaudeRunnerOutputReceipt | undefined
 >(undefined);
 
-/** Stopped owners replay before the relay's publishing edge is available. */
-export const replayingStoppedClaudeRunner = FiberRef.unsafeMake(false);
-
 export const currentClaudeRunnerPermissionReply = FiberRef.unsafeMake<
 	| {
 			readonly sessionId: string;
