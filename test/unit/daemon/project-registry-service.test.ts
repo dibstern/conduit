@@ -152,10 +152,14 @@ describe("projectInfos", () => {
 describe("explicit project registration", () => {
 	it.effect("can add the same directory after removal", () =>
 		Effect.gen(function* () {
-			const first = yield* addProjectToEffectRegistry(testProject.directory);
+			const first = yield* addProjectToEffectRegistry({
+				directory: testProject.directory,
+			});
 			yield* removeProjectFromEffectRegistry(first.slug);
 			expect(yield* allProjects).toEqual([]);
-			const added = yield* addProjectToEffectRegistry(testProject.directory);
+			const added = yield* addProjectToEffectRegistry({
+				directory: testProject.directory,
+			});
 			expect(added.directory).toBe(testProject.directory);
 			expect(yield* allProjects).toEqual([added]);
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),

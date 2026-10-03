@@ -438,7 +438,10 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						addProject: (directory: string, instanceId?: string) =>
 							runCallback(
 								provideProjectMutationDeps(
-									addProjectToEffectRegistry(directory, instanceId),
+									addProjectToEffectRegistry({
+										directory,
+										...(instanceId !== undefined && { instanceId }),
+									}),
 								),
 							),
 						removeProject: (projectSlug: string) =>

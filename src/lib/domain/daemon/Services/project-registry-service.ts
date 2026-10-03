@@ -691,10 +691,15 @@ const normalizeProjectDirectory = (directory: string): string => {
 const titleForDirectory = (directory: string): string =>
 	basename(directory) || "project";
 
-export const addProjectToEffectRegistry = (
-	directory: string,
-	instanceId?: string | undefined,
-) =>
+export const addProjectToEffectRegistry = ({
+	directory,
+	slug,
+	instanceId,
+}: {
+	readonly directory: string;
+	readonly slug?: string;
+	readonly instanceId?: string;
+}) =>
 	Effect.gen(function* () {
 		const normalizedDirectory = normalizeProjectDirectory(directory);
 		const existing = yield* findByDirectory(normalizedDirectory);
@@ -705,7 +710,7 @@ export const addProjectToEffectRegistry = (
 		const projects = yield* allProjects;
 		const existingSlugs = new Set(projects.map((project) => project.slug));
 		const project: StoredProject = {
-			slug: generateSlug(normalizedDirectory, existingSlugs),
+			slug: slug ?? generateSlug(normalizedDirectory, existingSlugs),
 			directory: normalizedDirectory,
 			title: titleForDirectory(normalizedDirectory),
 			lastUsed: Date.now(),
