@@ -46,11 +46,14 @@ import type { ModelInfo } from "../../src/lib/provider/types.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
+import type { ClaudeTraceName } from "../e2e/helpers/claude-trace-replayer.js";
+import { loadOpenCodeRecording } from "../e2e/helpers/recorded-loader.js";
 import {
 	cleanupTestClaudeRunners,
 	testRunnerAlive,
 } from "./claude-runner-cleanup.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
+import { MockOpenCodeServer } from "./mock-opencode-server.js";
 
 export { responseChunks };
 
@@ -113,6 +116,7 @@ export class ProcessHarness {
 	private environment: NodeJS.ProcessEnv = {};
 	private defaultOpenCode: Server | undefined;
 	private defaultOpenCodeUrl = "http://127.0.0.1:0";
+	private recordedOpenCode: MockOpenCodeServer | undefined;
 	private readonly ownedOpenCode = new Map<string, ManagedOpenCodeRecord>();
 	private readonly ownedOpenCodeProcesses = new Map<string, Set<number>>();
 	private readonly observedOpenCodeProcesses = new Set<number>();
@@ -163,6 +167,10 @@ export class ProcessHarness {
 		rootPrefix = "/tmp/conduit-process-",
 		private readonly foregroundCli = false,
 		private readonly autoStartOpenCode = false,
+		private readonly opencodeRecording?: string,
+		private readonly claudeReplay?: {
+			readonly turns: readonly ClaudeTraceName[];
+		},
 	) {
 		this.root = mkdtempSync(rootPrefix);
 		this.projectDir = join(this.root, "project");
@@ -384,6 +392,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			rootPrefix?: string;
 			foregroundCli?: boolean;
 			autoStartOpenCode?: boolean;
+			opencodeRecording?: string;
+			claudeReplay?: ProcessHarness["claudeReplay"];
 		} = {},
 	): ProcessHarness {
 		return new ProcessHarness(
@@ -410,6 +420,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.rootPrefix,
 			options.foregroundCli,
 			options.autoStartOpenCode,
+			options.opencodeRecording,
+			options.claudeReplay,
 		);
 	}
 
@@ -439,12 +451,21 @@ Object.assign(ClaudeDriver, { create: deps => {
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
+		if (this.opencodeRecording && !this.recordedOpenCode) {
+			this.recordedOpenCode = new MockOpenCodeServer(
+				loadOpenCodeRecording(this.opencodeRecording),
+			);
+			await this.recordedOpenCode.start();
+			this.defaultOpenCodeUrl = this.recordedOpenCode.url;
+		}
 		const sdkModule = pathToFileURL(
 			fileURLToPath(
 				new URL(
-					this.realSdk
-						? "./real-claude-process-sdk.ts"
-						: "./fake-claude-process-sdk.ts",
+					this.claudeReplay
+						? "./replay-claude-process-sdk.ts"
+						: this.realSdk
+							? "./real-claude-process-sdk.ts"
+							: "./fake-claude-process-sdk.ts",
 					import.meta.url,
 				),
 			),
@@ -452,7 +473,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (
 			this.foregroundCli &&
 			!this.autoStartOpenCode &&
-			!this.defaultOpenCode
+			!this.defaultOpenCode &&
+			!this.recordedOpenCode
 		) {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer(async (request, response) => {
@@ -559,6 +581,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
 						: join(this.root, "claude"),
 					OPENCODE_URL: this.defaultOpenCodeUrl,
+					...(this.opencodeRecording
+						? { CONDUIT_TEST_OPENCODE_URL: this.defaultOpenCodeUrl }
+						: {}),
 					// An explicit config path must keep the login's original Keychain service.
 					...(this.realSdk
 						? {
@@ -571,6 +596,17 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(this.claudeReplay
+						? {
+								CONDUIT_TEST_CLAUDE_REPLAY_TURNS: JSON.stringify(
+									this.claudeReplay.turns,
+								),
+								CONDUIT_TEST_CLAUDE_OPTIONS_FILE: join(
+									this.root,
+									"claude-options.jsonl",
+								),
+							}
+						: {}),
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
 					...Object.fromEntries(
 						[
@@ -775,6 +811,28 @@ Object.assign(ClaudeDriver, { create: deps => {
 		} finally {
 			await probe.close();
 		}
+	}
+
+	get baseUrl(): string {
+		return `http://127.0.0.1:${this.port}`;
+	}
+
+	claudeOptions(): readonly {
+		pid: number;
+		options: Record<string, unknown>;
+	}[] {
+		const file = join(this.root, "claude-options.jsonl");
+		if (!existsSync(file)) return [];
+		return readFileSync(file, "utf8")
+			.split("\n")
+			.filter((line) => line.trim() !== "")
+			.map(
+				(line) =>
+					JSON.parse(line) as {
+						pid: number;
+						options: Record<string, unknown>;
+					},
+			);
 	}
 
 	async connect(
@@ -1272,6 +1330,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 					server.closeAllConnections();
 				});
 				this.defaultOpenCode = undefined;
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
+		if (this.recordedOpenCode) {
+			try {
+				await this.recordedOpenCode.stop();
+				this.recordedOpenCode = undefined;
 			} catch (cause) {
 				failures.push(cause);
 			}
