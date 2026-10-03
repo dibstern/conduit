@@ -27,11 +27,11 @@ test.describe("InstanceModelPicker", () => {
 		});
 		await expect(page.getByTestId("model-picker-trigger")).toBeVisible();
 
-		const label = page
-			.getByTestId("model-picker-trigger")
-			.locator(".model-label");
-		await expect(label).toBeVisible();
-		await expect(label).toHaveText(/Claude Sonnet 4/);
+		// Phones show only a short tag (S4), so assert the accessible name.
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"aria-label",
+			/Sonnet 4/,
+		);
 	});
 
 	test("opens the harness and model root on click", async ({ page }) => {

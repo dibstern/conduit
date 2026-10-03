@@ -48,9 +48,8 @@ test.describe("InputArea", () => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const modelDisplay = page.locator("#model-display");
 		await expect(modelDisplay).toBeVisible();
-		// Agent selector is only shown when 2+ agents are configured
-		const agentSelector = page.locator("#agent-selector-wrap");
-		await expect(agentSelector).toBeAttached();
+		// The agent choice lives in the model picker, not beside the composer.
+		await expect(page.locator("#agent-selector-wrap")).toHaveCount(0);
 	});
 });
 

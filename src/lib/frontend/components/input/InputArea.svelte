@@ -8,7 +8,6 @@
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
-	import AgentSelector from "../model/AgentSelector.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	import ComposerStatusHeader from "./ComposerStatusHeader.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -132,7 +131,6 @@
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		!sessionViewState.compact ? "Ask anything. / to use skills, @ to mention files" :
 		isProcessing() ? "Reply to steer…" :
 		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
@@ -863,7 +861,7 @@
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative min-h-6 {plainText ? 'h-[120px]' : ''}" style:min-height="var(--composer-placeholder-height,1.5rem)">
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height="max(32px, var(--composer-placeholder-height, 0px))">
 							<SkillHighlightBackdrop
 								text={plainText ? "" : inputText}
 								commandNames={commandNameSet}
@@ -942,13 +940,6 @@
 					>
 						<!-- Attach button + menu -->
 						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onSetGoal={() => handleAttachSetGoal()} />
-
-						<!-- Agent selector -->
-						{#if composerPreferences.controls === "icons"}
-							<div id="agent-selector-wrap" class="min-w-0">
-								<AgentSelector />
-							</div>
-						{/if}
 					</div>
 				{/snippet}
 				{#snippet controls()}
@@ -966,44 +957,43 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
-					<!-- Send / Stop buttons -->
+					<!-- Send / Stop buttons. While working, send only shows once there is
+					     something to steer with; otherwise stop stands alone. -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
 					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
+					{#if !isProcessing() || canSend}
 					<Button
 						variant="ghost"
 						size="content"
 						tone="inherit"
 						hoverFill="none"
-						disabledStyle="ghosted"
+						disabledStyle="undimmed"
 						iconOnly
 						icon={isGoalCommand ? "target" : "arrow-up"}
-						iconSize={18}
+						iconSize={17}
 						id="send"
 						data-goal={isGoalCommand ? "true" : "false"}
 						type="button"
-						class="send-btn shrink-0 w-8 h-8 rounded-[10px] bg-brand-a text-white touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
+						class="send-btn shrink-0 w-[32px] h-[32px] rounded-[10px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white'} disabled:bg-send-off-bg disabled:text-send-off"
 						disabled={!canSend}
 						title={isGoalCommand ? "Set goal" : sendButtonLabel}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
 						onclick={handleSendClick}
 					/>
+					{/if}
 					{#if isProcessing()}
-						<!-- The arbitrary transition yields to Button's transition-colors; duration-150 restates its default. -->
 						<Button
-							variant="secondary"
+							variant="ghost"
 							size="content"
-							tone="muted"
-							hoverFill="alt"
-							iconOnly
-							icon="square"
-							iconSize={18}
+							tone="inherit"
+							hoverFill="none"
 							id="stop"
 							type="button"
-							class="shrink-0 w-8 h-8 rounded-[10px] touch-manipulation active:opacity-70"
+							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
 							title="Stop generating"
 							ariaLabel="Stop generating"
 							onclick={handleStop}
-						/>
+						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>
 					{/if}
 				{/snippet}
 			</TwoRowComposerLayout>

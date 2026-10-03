@@ -19,6 +19,9 @@
 	--color-brand-b: #00e5ff; /* cyan */
 	--color-brand-a-glow: rgba(254, 55, 129, 0.15);
 	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
+	/* Send with nothing to send: an opaque, muted rose (composer final design). */
+	--color-send-off-bg: #4a2233;
+	--color-send-off: #b98a9c;
 
 	/* Harness (provider driver) identity colors — theme-independent, like brand. */
 	--color-harness-claude: #d97757; /* Claude clay */
@@ -227,6 +230,8 @@
 	--color-brand-b: #006d7a;
 	--color-brand-a-glow: rgba(201, 0, 79, 0.15);
 	--color-brand-b-glow: rgba(0, 109, 122, 0.15);
+	--color-send-off-bg: #f0cddb;
+	--color-send-off: #a0607a;
 	--color-p-never: #0b7d74;
 	--color-p-plan: #0f62c0;
 	--color-p-ask: #4b525e;
@@ -353,9 +358,11 @@
    than as two copies of the same Tailwind class list. */
 @utility composer-text-metrics {
 	font-family: var(--font-sans);
-	font-size: 1rem;
-	line-height: 1.4;
-	padding: 0.5rem 0.625rem 0.25rem;
+	/* Composer final design .fld: 13px/1.45 with 6px padding, so one line
+	   (6 + 18.85 + 6) centres on the 32px controls beside it. */
+	font-size: 13px;
+	line-height: 1.45;
+	padding: 6px;
 	white-space: pre-wrap;
 	overflow-wrap: break-word;
 }

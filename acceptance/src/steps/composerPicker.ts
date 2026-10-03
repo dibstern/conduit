@@ -69,9 +69,10 @@ export async function seedComposerPickerCatalog(
 		{ type: "context_window_info", contextWindow: "200k", options },
 		{ type: "variant_info", variant: "", variants: claude ? levels : [] },
 	]);
+	// The phone button shows only a short tag (S5); its accessible name has the full model.
 	await expect(
 		page.getByTestId(/^(model-picker-trigger|composer-word-model)$/),
-	).toContainText(claude ? "Sonnet 5" : "Sonnet 4");
+	).toHaveAttribute("aria-label", claude ? /Sonnet 5/ : /Sonnet 4/);
 }
 
 export const composerPickerHandlers: StepHandler[] = [
@@ -87,7 +88,7 @@ export const composerPickerHandlers: StepHandler[] = [
 	},
 	{
 		name: "drill into picker choices",
-		match: /^I view (Harness|Model) choices in the picker$/,
+		match: /^I view (Harness|Model|Agent) choices in the picker$/,
 		run: async ({ world, match }) => {
 			await openModelPicker(world.page);
 			await world.page

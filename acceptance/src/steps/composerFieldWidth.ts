@@ -1,9 +1,5 @@
 import type { StepHandler } from "../runtime.js";
-import {
-	openSessionRoute,
-	requireRelayControl,
-	requireRpcControl,
-} from "./shared.js";
+import { openSessionRoute, requireRelayControl } from "./shared.js";
 
 export const composerFieldWidthHandlers: StepHandler[] = [
 	{
@@ -12,27 +8,6 @@ export const composerFieldWidthHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await openSessionRoute(world.page, "sess-mockup-001");
 			await world.page.locator("#input").waitFor({ state: "visible" });
-		},
-	},
-	{
-		// The design's idle phone row has no agent picker; it only shows when
-		// the provider offers more than one agent.
-		name: "list a single agent",
-		match: /^the mock relay lists a single agent$/,
-		run: async ({ world }) => {
-			// The session's own agent lookup must land first, or its late reply
-			// restores the full list after this one.
-			await requireRpcControl(world.page).waitForRequest(
-				(request) => request.tag === "GetAgents",
-			);
-			await world.page.locator("#agent-selector").waitFor({ state: "visible" });
-			requireRelayControl(world.page).sendMessage({
-				type: "agent_list",
-				providerScope: { id: "claude", name: "Claude" },
-				agents: [{ id: "code", name: "code" }],
-				activeAgentId: "code",
-			});
-			await world.page.locator("#agent-selector").waitFor({ state: "hidden" });
 		},
 	},
 	{

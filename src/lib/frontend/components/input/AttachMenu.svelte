@@ -54,9 +54,9 @@
 	{#snippet trigger({ props })}
 		<Button
 			{...props}
-			variant="secondary"
+			variant="ghost"
 			size="content"
-			tone="muted"
+			tone="inherit"
 			hoverFill="surface"
 			iconOnly
 			icon="plus"
@@ -64,7 +64,7 @@
 			id="attach-btn"
 			type="button"
 			ariaLabel="Attach"
-			class="shrink-0 w-7 h-7 rounded-md bg-bg-alt"
+			class="shrink-0 w-[32px] h-[32px] rounded-[10px] text-text-secondary"
 		/>
 	{/snippet}
 

@@ -354,9 +354,9 @@ export const mockAppHandlers: StepHandler[] = [
 					await rpcControl.waitForRequest(
 						(request) => request.tag === "GetModels",
 					);
+					// Phones show only a short tag, so wait on the accessible name.
 					await world.page
-						.getByTestId("model-picker-trigger")
-						.getByText("Opus", { exact: true })
+						.locator('[data-testid="model-picker-trigger"][aria-label*="Opus"]')
 						.waitFor({ state: "visible", timeout: 5_000 });
 					// A feed that never synchronizes never renders the transcript.
 					if (rpcControl.detailFeed === "synchronize")

@@ -4,7 +4,6 @@ Background:
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup
   And I open a composer session
-  And the mock relay lists a single agent
   And the composer status clock is frozen
   And the transcript is live
   And the transcript is pinned to the bottom
