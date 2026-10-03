@@ -314,13 +314,14 @@
 	// The leading column holds either the 20px status glyph or, in select mode,
 	// the selection control, which is 44px wide because it is a touch target and
 	// not a glyph. It widens rather than letting the control overflow into the
-	// title, and the `minmax(110px, 1fr)` middle column IS the title's floor --
-	// no `min-w-` utility anywhere else may restate it.
+	// title. The middle column floors at 0, not a fixed width: the trailing column
+	// (time, or the hover verbs) must always fit, so in a narrow sidebar the title
+	// ellipsizes rather than pushing the verbs past the clipped edge.
 	const itemClass = $derived(
 		`session-item group grid ${
 			selectMode
-				? "grid-cols-[44px_minmax(110px,1fr)_auto]"
-				: "grid-cols-[20px_minmax(110px,1fr)_auto]"
+				? "grid-cols-[44px_minmax(0,1fr)_auto]"
+				: "grid-cols-[20px_minmax(0,1fr)_auto]"
 		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
 			(picked
 				? " bg-accent-bg text-text"
@@ -513,7 +514,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="relative overflow-hidden rounded-panel session-swipe-wrapper">
+<div class="@container relative overflow-hidden rounded-panel session-swipe-wrapper">
 	{#if (dragging && swipeStage !== "none" && swipeAllowed) || heldDirection}
 		{@const direction = heldDirection ?? swipeDirection}
 		{@const verb = swipeVerb(direction)}
@@ -713,6 +714,9 @@
 			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
 			{#if !selectMode && oncontextmenuProp && !isRenaming}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
+					<!-- The shortcuts need ~200px of row. Below that only the ellipsis
+					     stays, and its menu carries every one of these verbs. -->
+					<span class="contents @max-[260px]:hidden">
 					{#if canMarkRead}
 						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
 							class="size-[27px] rounded-[7px] text-text-secondary hover:text-text hover:bg-bg-alt"
@@ -752,6 +756,7 @@
 					ariaLabel="{actions.pinned ? 'Unpin' : 'Pin'} {displayTitle}" title={actions.pinned ? "Unpin (p)" : "Pin (p)"}
 					onclick={(event) => { event.preventDefault(); event.stopPropagation(); onpin?.(session.id, !actions.pinned); }}
 					><Icon name={actions.pinned ? "star-off" : "star"} size={16} /></Button>
+					</span>
 					<Button
 					bind:element={moreBtnEl}
 					variant="ghost"

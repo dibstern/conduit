@@ -399,3 +399,31 @@ export const SelectModeSelected: Story = {
 		);
 	},
 };
+
+// The sidebar's narrowest width (SIDEBAR_MIN_WIDTH). The hover verbs are the
+// row's last column, and the row clips, so any verb pushed past its right edge
+// simply vanishes.
+export const HoverActionsNarrowSidebar: Story = {
+	name: "Hover actions in a narrow sidebar",
+	args: { ...HoverActions.args, href: "#" },
+	parameters: { pseudo: { hover: true } },
+	play: async ({ canvasElement }) => {
+		const row = canvasElement.querySelector<HTMLElement>(".session-item");
+		if (!row?.parentElement) throw new Error("Session row is missing");
+		row.parentElement.style.width = "180px";
+		row.focus();
+		const rowRight = row.getBoundingClientRect().right;
+		const verbs = within(row)
+			.getByTestId("session-row-actions")
+			.querySelectorAll("button");
+		await expect(
+			within(row).getByRole("button", { name: /More options/ }),
+		).toBeVisible();
+		for (const verb of verbs) {
+			await expect(
+				verb.getBoundingClientRect().right,
+				`${verb.getAttribute("aria-label")} must stay inside the row`,
+			).toBeLessThanOrEqual(rowRight);
+		}
+	},
+};
