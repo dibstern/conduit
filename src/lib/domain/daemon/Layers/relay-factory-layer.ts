@@ -104,6 +104,7 @@ export interface RelayFactory {
 		project: StoredProject,
 		opencodeUrl: string,
 		projectControls?: RelayFactoryProjectControls,
+		stopRunners?: Effect.Effect<boolean>,
 	) => Effect.Effect<ProjectRelay, RelayFactoryError>;
 }
 
@@ -298,6 +299,7 @@ export const RelayFactoryLive = (
 					project: StoredProject,
 					opencodeUrl: string,
 					projectControls?: RelayFactoryProjectControls,
+					stopRunners: Effect.Effect<boolean> = Effect.succeed(false),
 				): Effect.Effect<ProjectRelay, RelayFactoryError> =>
 					Effect.gen(function* () {
 						// Read current HTTP server from Ref
@@ -368,9 +370,10 @@ export const RelayFactoryLive = (
 						// threading Effect-owned daemon read models and instance callbacks.
 						const ac = new AbortController();
 						let lastPublishedGit: SessionGit | undefined;
+						let creation: Promise<ProjectRelay> | undefined;
 						const relay = yield* Effect.tryPromise({
-							try: () =>
-								createProjectRelay({
+							try: () => {
+								creation = createProjectRelay({
 									httpServer,
 									opencodeUrl,
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
@@ -384,8 +387,11 @@ export const RelayFactoryLive = (
 									noServer: true,
 									signal: ac.signal,
 									configDir,
-									fullStopRequested: Ref.get(instanceState).pipe(
-										Effect.map((state) => state.stopManagedProcesses === true),
+									fullStopRequested: Effect.zipWith(
+										Ref.get(instanceState),
+										stopRunners,
+										(state, removed) =>
+											state.stopManagedProcesses === true || removed,
 									),
 									persistenceDbPath: dbPath,
 									getProjects,
@@ -418,7 +424,9 @@ export const RelayFactoryLive = (
 										setProjectTitle: projectControls.setProjectTitle,
 										setProjectInstance: projectControls.setProjectInstance,
 									}),
-								}),
+								});
+								return creation;
+							},
 							catch: (cause) =>
 								new RelayFactoryError({
 									reason: `Failed to create relay for project "${project.slug}"`,
@@ -426,8 +434,24 @@ export const RelayFactoryLive = (
 								}),
 						}).pipe(
 							Effect.onInterrupt(() =>
-								Effect.sync(() => {
+								Effect.gen(function* () {
 									ac.abort();
+									const pending = creation;
+									if (!pending) return;
+									// Interruption must join rollback before removal or a registry sweep.
+									// A late successful acquisition still needs its scope closed.
+									yield* Effect.tryPromise({
+										try: () =>
+											pending.then(
+												(relay) => relay.stop(),
+												() => undefined,
+											),
+										catch: (cause) =>
+											new RelayFactoryError({
+												reason: `Failed to stop cancelled relay for project "${project.slug}"`,
+												cause,
+											}),
+									}).pipe(Effect.catchAll((error) => Effect.logError(error)));
 								}),
 							),
 						);

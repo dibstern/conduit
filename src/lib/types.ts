@@ -245,7 +245,7 @@ export interface ProjectRelayConfig {
 	 * so it can abort in-flight relay creation when a project is removed.
 	 */
 	signal?: AbortSignal;
-	/** Sticky full-stop intent from the server that owns this relay. */
+	/** Sticky server full-stop or project-removal intent; overrides runner preservation. */
 	fullStopRequested?: Effect.Effect<boolean>;
 	/**
 	 * Override the default poller gating config (SSE grace period, staleness

@@ -8,6 +8,7 @@ import {
 	Deferred,
 	Effect,
 	Exit,
+	HashMap,
 	Layer,
 	ManagedRuntime,
 	Ref,
@@ -25,6 +26,7 @@ import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFormat, setLogLevel } from "../../../logger.js";
+import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
 import { setClaudeRunnerRestart } from "../../../provider/claude/claude-runner-shutdown.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
@@ -47,6 +49,10 @@ import {
 	requestManagedOpenCodeShutdown,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
+import {
+	type ProjectRegistryState,
+	ProjectRegistryTag,
+} from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import {
 	type DaemonLiveOptions,
@@ -173,6 +179,7 @@ type ForegroundRuntimeRequirements =
 	| ConfigPersistenceTag
 	| DaemonConfigRefTag
 	| InstanceManagerStateTag
+	| ProjectRegistryTag
 	| RelayCacheTag
 	| ShutdownSignalTag;
 
@@ -222,6 +229,7 @@ export async function startForegroundDaemon(
 	let stopInFlight: Promise<void> | null = null;
 	let shutdownMode: "restart" | "stop" = "restart";
 	let instanceState: Ref.Ref<InstanceManagerState> | undefined;
+	let projectState: Ref.Ref<ProjectRegistryState> | undefined;
 	const fullStopRequested = Effect.suspend(() =>
 		instanceState === undefined
 			? Effect.succeed(shutdownMode === "stop")
@@ -411,8 +419,20 @@ export async function startForegroundDaemon(
 				Effect.gen(function* () {
 					if (yield* fullStopRequested) {
 						// Read intent after request and relay scopes have drained.
-						yield* Effect.promise(() =>
-							stopPtyHost({ configDir, force: true }),
+						const registered = projectState
+							? Array.from(HashMap.values(yield* Ref.get(projectState)))
+							: [];
+						// Failed relay acquisition can preserve a runner without a cache owner.
+						yield* Effect.validateAll(
+							registered,
+							({ project }) =>
+								stopRegisteredClaudeRunners(project.directory, configDir),
+							{ concurrency: 4 },
+						).pipe(
+							Effect.orDie,
+							Effect.ensuring(
+								Effect.promise(() => stopPtyHost({ configDir, force: true })),
+							),
 						);
 					}
 				}).pipe(Effect.ensuring(Effect.sync(() => lease.close()))),
@@ -424,6 +444,7 @@ export async function startForegroundDaemon(
 	try {
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
 		instanceState = await runRuntimeEffect(runtime, InstanceManagerStateTag);
+		projectState = await runRuntimeEffect(runtime, ProjectRegistryTag);
 		setClaudeRunnerRestart(false);
 		const currentHandle = handle;
 		await runRuntimeEffect(

@@ -196,10 +196,10 @@ describe("foreground conduit serve", () => {
 				{
 					ticket: "conduit-test-85kb.16",
 					dist: DIST,
-					expectedScenarios: 11,
+					expectedScenarios: 13,
 					passed:
-						scenarios.length === 11 &&
-						cleanup.length === 11 &&
+						scenarios.length === 13 &&
+						cleanup.length === 13 &&
 						cleanup.every((entry) => entry["passed"] && entry["verified"]),
 					scenarios,
 					cleanup,
@@ -540,6 +540,137 @@ describe("foreground conduit serve", () => {
 			});
 		} finally {
 			writeFileSync(release, "release recovery fixture for cleanup");
+		}
+	}, 60_000);
+
+	it("stops a runner preserved by failed recovery while signal restart still preserves it", async () => {
+		harness = await ProcessHarness.start({
+			dist: DIST,
+			foregroundCli: true,
+		});
+		const failed = await warmProject("process-test");
+		await harness.signal("SIGINT");
+		expect(alive(failed.runner.pid)).toBe(true);
+		const marker = join(
+			harness.projectDir,
+			".conduit",
+			"recovery-fail-after-adoption",
+		);
+		const release = `${marker}-release`;
+		const attempts: Array<Record<string, unknown>> = [];
+		writeFileSync(marker, "fail after authenticating the preserved runner");
+		try {
+			for (const command of ["signal", "stop"] as const) {
+				for (const suffix of ["started", "failed", "release"])
+					rmSync(`${marker}-${suffix}`, { force: true });
+				await harness.restart({ skipBrowserProbe: true });
+				await vi.waitFor(
+					() => expect(existsSync(`${marker}-started`)).toBe(true),
+					{ timeout: 5000 },
+				);
+				expect(alive(failed.runner.pid)).toBe(true);
+				writeFileSync(release, "fail the acquired relay");
+				await vi.waitFor(
+					() => {
+						const proof = harness?.proof() as { logTail: string };
+						expect(proof.logTail).toContain(
+							JSON.stringify(
+								'Failed to recover relay for project "process-test"',
+							),
+						);
+					},
+					{ timeout: 5000 },
+				);
+				expect(existsSync(`${marker}-failed`)).toBe(true);
+				expect(alive(failed.runner.pid)).toBe(true);
+				const status = await sendRpcRequest(
+					join(harness.configDir, "relay.sock"),
+					new GetStatus({}),
+				);
+				if (command === "signal") {
+					await harness.signal("SIGINT");
+					expect(harness.generations.at(-1)?.exitCode).toBe(0);
+					expect(alive(failed.runner.pid)).toBe(true);
+					attempts.push({ command, status, runnerPreserved: true });
+				} else {
+					const stop = await harness.runCli(["stop"]);
+					expect(stop.code).toBe(0);
+					await harness.waitForExit();
+					expect(harness.generations.at(-1)?.exitCode).toBe(0);
+					await vi.waitFor(() => expect(alive(failed.runner.pid)).toBe(false), {
+						timeout: 5000,
+					});
+					attempts.push({ command, status, stop, runnerTerminated: true });
+				}
+			}
+			scenarios.push({
+				fullStopAfterFailedAdoption: true,
+				runner: failed.runner,
+				attempts,
+			});
+		} finally {
+			writeFileSync(release, "release recovery fixture for cleanup");
+		}
+	}, 60_000);
+
+	it("terminates a removed project's runner when removal races signal shutdown", async () => {
+		harness = await ProcessHarness.start({
+			dist: DIST,
+			foregroundCli: true,
+		});
+		const removed = await warmProject("process-test");
+		const retained = await warmProject(
+			"retained-project",
+			join(harness.root, "retained-project"),
+		);
+		const gate = join(harness.root, "signal-config-rename-gated");
+		const release = `${gate}-release`;
+		writeFileSync(gate, "pause config rename after signal preservation begins");
+		const shutdown = harness.signal("SIGINT");
+		try {
+			await vi.waitFor(() => expect(existsSync(`${gate}-started`)).toBe(true), {
+				timeout: 5000,
+			});
+			const pending = JSON.parse(readFileSync(`${gate}-started`, "utf8")) as {
+				preserve: boolean;
+				projects: string[];
+			};
+			expect(pending.preserve).toBe(true);
+			expect(pending.projects).toContain(removed.projectSlug);
+			const server = harness.generations.at(-1);
+			if (!server) throw new Error("Missing foreground generation");
+			expect(alive(server.pid)).toBe(true);
+			const removal = await sendRpcRequest(
+				join(harness.configDir, "relay.sock"),
+				new RemoveProject({ slug: removed.projectSlug }),
+			);
+			expect(removal.projects.map((project) => project.slug)).not.toContain(
+				removed.projectSlug,
+			);
+			expect(existsSync(release)).toBe(false);
+			writeFileSync(release, "finish signal disposal after project removal");
+			await shutdown;
+			expect(harness.generations.at(-1)?.exitCode).toBe(0);
+			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
+				timeout: 5000,
+			});
+			expect(alive(retained.runner.pid)).toBe(true);
+			scenarios.push({
+				removeDuringSignalShutdown: true,
+				pending,
+				removal,
+				removed: removed.runner,
+				retained: retained.runner,
+			});
+		} finally {
+			writeFileSync(release, "release config fixture for cleanup");
+			await shutdown;
+			// Re-adopt the retained project's runner so explicit stop owns its cleanup.
+			if (alive(retained.runner.pid)) {
+				await harness.restart({ skipBrowserProbe: true });
+				await harness.runCli(["stop"]);
+				await harness.waitForExit();
+			}
 		}
 	}, 60_000);
 

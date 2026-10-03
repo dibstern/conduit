@@ -29,6 +29,8 @@ import {
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
+import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
 import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
@@ -359,7 +361,9 @@ const resolveProjectOpencodeUrl = (project: {
 		return yield* getInstanceUrl(first.id);
 	});
 
-export const makeRelayCacheLayer: Layer.Layer<
+export const makeRelayCacheLayer = (
+	configDir: string,
+): Layer.Layer<
 	RelayCacheTag,
 	never,
 	| RelayFactoryTag
@@ -368,117 +372,130 @@ export const makeRelayCacheLayer: Layer.Layer<
 	| DaemonConfigRefTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
-> = Layer.scoped(
-	RelayCacheTag,
-	Effect.gen(function* () {
-		const relayFactory = yield* RelayFactoryTag;
-		const projectRegistry = yield* ProjectRegistryTag;
-		const instanceState = yield* InstanceManagerStateTag;
-		const configRef = yield* DaemonConfigRefTag;
-		const eventBus = yield* DaemonEventBusTag;
-		const configPersistence = yield* ConfigPersistenceTag;
-		const runtime = yield* Effect.runtime<never>();
-		let relayCache: RelayCache | undefined;
+> =>
+	Layer.scoped(
+		RelayCacheTag,
+		Effect.gen(function* () {
+			const relayFactory = yield* RelayFactoryTag;
+			const projectRegistry = yield* ProjectRegistryTag;
+			const instanceState = yield* InstanceManagerStateTag;
+			const configRef = yield* DaemonConfigRefTag;
+			const eventBus = yield* DaemonEventBusTag;
+			const configPersistence = yield* ConfigPersistenceTag;
+			const runtime = yield* Effect.runtime<never>();
+			let relayCache: RelayCache | undefined;
 
-		const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
-			new Promise<A>((resolve, reject) => {
-				Runtime.runCallback(runtime)(effect, {
-					onExit: (exit) => {
-						if (Exit.isSuccess(exit)) {
-							resolve(exit.value);
-							return;
-						}
-						reject(Cause.squash(exit.cause));
-					},
-				});
-			});
-
-		const provideProjectMutationDeps = <A, E>(
-			effect: Effect.Effect<
-				A,
-				E,
-				| ProjectRegistryTag
-				| DaemonConfigRefTag
-				| DaemonEventBusTag
-				| ConfigPersistenceTag
-				| RelayCacheTag
-			>,
-		) => {
-			if (relayCache === undefined) {
-				return Effect.dieMessage("Relay cache not initialized");
-			}
-			return effect.pipe(
-				Effect.provideService(ProjectRegistryTag, projectRegistry),
-				Effect.provideService(DaemonConfigRefTag, configRef),
-				Effect.provideService(DaemonEventBusTag, eventBus),
-				Effect.provideService(ConfigPersistenceTag, configPersistence),
-				Effect.provideService(RelayCacheTag, relayCache),
-			);
-		};
-
-		const relayCacheService = yield* makeRelayCacheService((slug) =>
-			Effect.gen(function* () {
-				const project = yield* getProject(slug).pipe(
-					Effect.provideService(ProjectRegistryTag, projectRegistry),
-				);
-				const opencodeUrl = yield* resolveProjectOpencodeUrl(project).pipe(
-					Effect.provideService(InstanceManagerStateTag, instanceState),
-				);
-				if (opencodeUrl == null) {
-					return yield* new RelayFactoryError({
-						reason: `No OpenCode instance URL available for project "${slug}"`,
+			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
+				new Promise<A>((resolve, reject) => {
+					Runtime.runCallback(runtime)(effect, {
+						onExit: (exit) => {
+							if (Exit.isSuccess(exit)) {
+								resolve(exit.value);
+								return;
+							}
+							reject(Cause.squash(exit.cause));
+						},
 					});
+				});
+
+			const provideProjectMutationDeps = <A, E>(
+				effect: Effect.Effect<
+					A,
+					E,
+					| ProjectRegistryTag
+					| DaemonConfigRefTag
+					| DaemonEventBusTag
+					| ConfigPersistenceTag
+					| RelayCacheTag
+				>,
+			) => {
+				if (relayCache === undefined) {
+					return Effect.dieMessage("Relay cache not initialized");
 				}
-				const projectControls = {
-					addProject: (directory: string, instanceId?: string) =>
-						runCallback(
-							provideProjectMutationDeps(
-								addProjectToEffectRegistry(directory, instanceId),
-							),
-						),
-					removeProject: (projectSlug: string) =>
-						runCallback(
-							provideProjectMutationDeps(
-								removeProjectFromEffectRegistry(projectSlug),
-							),
-						),
-					setProjectTitle: (projectSlug: string, title: string) =>
-						runCallback(
-							provideProjectMutationDeps(
-								updateEffectProject(projectSlug, { title }),
-							),
-						),
-					setProjectInstance: (projectSlug: string, instanceId: string) =>
-						runCallback(
-							provideProjectMutationDeps(
-								updateEffectProject(projectSlug, { instanceId }).pipe(
-									Effect.zipRight(replaceEffectRelay(projectSlug)),
-								),
-							),
-						),
-				};
-				const relay = yield* relayFactory.create(
-					project,
-					opencodeUrl,
-					projectControls,
+				return effect.pipe(
+					Effect.provideService(ProjectRegistryTag, projectRegistry),
+					Effect.provideService(DaemonConfigRefTag, configRef),
+					Effect.provideService(DaemonEventBusTag, eventBus),
+					Effect.provideService(ConfigPersistenceTag, configPersistence),
+					Effect.provideService(RelayCacheTag, relayCache),
 				);
-				return {
-					slug,
-					settleIdleSessions: (idleWindowMs: number, now: number) =>
-						relay.settleIdleSessions(idleWindowMs, now),
-					attach: (ws, options) => relay.wsHandler.attach(ws, options),
-					wsHandler: relay.wsHandler,
-					rpcWsHandler: relay.rpcWsHandler,
-					getStatusSnapshot: () => relay.getStatusSnapshot(),
-					setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
-					stop: () => relay.stop(),
-				};
-			}),
-		);
-		relayCache = relayCacheService;
-		return relayCacheService;
-	}),
-);
+			};
+
+			const relayCacheService = yield* makeRelayCacheService(
+				(slug, stopRunners) =>
+					Effect.gen(function* () {
+						const project = yield* getProject(slug).pipe(
+							Effect.provideService(ProjectRegistryTag, projectRegistry),
+						);
+						const opencodeUrl = yield* resolveProjectOpencodeUrl(project).pipe(
+							Effect.provideService(InstanceManagerStateTag, instanceState),
+						);
+						if (opencodeUrl == null) {
+							return yield* new RelayFactoryError({
+								reason: `No OpenCode instance URL available for project "${slug}"`,
+							});
+						}
+						const projectControls = {
+							addProject: (directory: string, instanceId?: string) =>
+								runCallback(
+									provideProjectMutationDeps(
+										addProjectToEffectRegistry(directory, instanceId),
+									),
+								),
+							removeProject: (projectSlug: string) =>
+								runCallback(
+									provideProjectMutationDeps(
+										removeProjectFromEffectRegistry(projectSlug),
+									),
+								),
+							setProjectTitle: (projectSlug: string, title: string) =>
+								runCallback(
+									provideProjectMutationDeps(
+										updateEffectProject(projectSlug, { title }),
+									),
+								),
+							setProjectInstance: (projectSlug: string, instanceId: string) =>
+								runCallback(
+									provideProjectMutationDeps(
+										updateEffectProject(projectSlug, { instanceId }).pipe(
+											Effect.zipRight(replaceEffectRelay(projectSlug)),
+										),
+									),
+								),
+						};
+						const relay = yield* relayFactory.create(
+							project,
+							opencodeUrl,
+							projectControls,
+							stopRunners,
+						);
+						return {
+							slug,
+							settleIdleSessions: (idleWindowMs: number, now: number) =>
+								relay.settleIdleSessions(idleWindowMs, now),
+							attach: (ws, options) => relay.wsHandler.attach(ws, options),
+							wsHandler: relay.wsHandler,
+							rpcWsHandler: relay.rpcWsHandler,
+							getStatusSnapshot: () => relay.getStatusSnapshot(),
+							setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
+							stop: () => relay.stop(),
+						};
+					}),
+				(projectDir) =>
+					Effect.sync(() => discoverClaudeRunners(projectDir, configDir)).pipe(
+						Effect.map((registered) =>
+							stopRegisteredClaudeRunners(
+								projectDir,
+								configDir,
+								registered,
+							).pipe(Effect.orDie),
+						),
+					),
+			);
+			relayCache = relayCacheService;
+			return relayCacheService;
+		}),
+	);
 
 /**
  * HTTP(S) server layer — starts the HTTP (or TLS protocol-detection) server
@@ -791,7 +808,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 
-	const withRelayCache = makeRelayCacheLayer.pipe(
+	const withRelayCache = makeRelayCacheLayer(configDir).pipe(
 		Layer.provideMerge(registries),
 	);
 

@@ -268,23 +268,27 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { Effect } from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("effect")).href)};
 import { ClaudeDriver } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-provider-instance.js")).href)};
+import { preserveClaudeRunners } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-runner-shutdown.js")).href)};
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home") || !process.send) throw new Error("CLI fixture requires isolated HOME and IPC");
 const identitySaveGate = join(root, "managed-identity-save-gated");
-if (existsSync(identitySaveGate)) {
-  const rename = fsPromises.rename;
-  fsPromises.rename = async (source, destination) => {
-    if (destination === ${JSON.stringify(join(this.configDir, "daemon.json"))}) {
-      const pending = JSON.parse(readFileSync(source, "utf8"));
-      if (pending.instances?.some(instance => instance.processIdentity)) {
-        writeFileSync(identitySaveGate + "-started", "identity has not been persisted");
-        while (!existsSync(identitySaveGate + "-release")) await new Promise(done => setTimeout(done, 10));
-      }
+const signalSaveGate = join(root, "signal-config-rename-gated");
+const rename = fsPromises.rename;
+fsPromises.rename = async (source, destination) => {
+  if (destination === ${JSON.stringify(join(this.configDir, "daemon.json"))} && (existsSync(identitySaveGate) || existsSync(signalSaveGate))) {
+    const pending = JSON.parse(readFileSync(source, "utf8"));
+    if (existsSync(identitySaveGate) && pending.instances?.some(instance => instance.processIdentity)) {
+      writeFileSync(identitySaveGate + "-started", "identity has not been persisted");
+      while (!existsSync(identitySaveGate + "-release")) await new Promise(done => setTimeout(done, 10));
     }
-    return rename(source, destination);
-  };
-  syncBuiltinESMExports();
-}
+    if (existsSync(signalSaveGate) && existsSync(join(root, "sigint-observed")) && await Effect.runPromise(preserveClaudeRunners())) {
+      writeFileSync(signalSaveGate + "-started", JSON.stringify({ preserve: true, projects: pending.projects.map(project => project.slug) }));
+      while (!existsSync(signalSaveGate + "-release")) await new Promise(done => setTimeout(done, 10));
+    }
+  }
+  return rename(source, destination);
+};
+syncBuiltinESMExports();
 process.on("SIGINT", () => writeFileSync(join(root, "sigint-observed"), "observed"));
 const create = ClaudeDriver.create;
 const waitForGate = (gate, workspaceRoot) => Effect.promise(async () => {
@@ -1079,6 +1083,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 		}
 		const failures: unknown[] = [];
 		try {
+			const signalSaveGate = join(this.root, "signal-config-rename-gated");
+			if (existsSync(signalSaveGate))
+				writeFileSync(`${signalSaveGate}-release`, "cleanup");
 			if (this.blockCapabilitiesProbe) {
 				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 				writeFileSync(

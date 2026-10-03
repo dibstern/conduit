@@ -4,10 +4,11 @@ import { appendFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
-import { Cause, Deferred, Effect, FiberSet } from "effect";
+import { Cause, Deferred, Effect, Exit, FiberSet } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
 import { isRecord } from "../../utils.js";
+import { ClaudeRuntimeError } from "../event-sink-errors.js";
 import type { HistoryMessage, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import { connectClaudeRunner } from "./claude-runner-connection.js";
@@ -20,6 +21,7 @@ import {
 import { makeClaudeRunnerReceiptStore } from "./claude-runner-receipts.js";
 import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
 import {
+	type ClaudeRunnerRegistration,
 	claudeRunnerDirectory,
 	discoverClaudeRunners,
 	prepareClaudeRunnerDirectory,
@@ -71,6 +73,154 @@ interface RunnerChild {
 }
 
 const log = createLogger("claude-process-session-runner");
+
+const stop = (
+	entry: Pick<
+		RunnerChild,
+		| "ready"
+		| "stopped"
+		| "socketPath"
+		| "stopping"
+		| "stopSignalled"
+		| "verified"
+		| "pid"
+		| "child"
+		| "connection"
+	>,
+) =>
+	Effect.gen(function* () {
+		if (entry.stopping) {
+			yield* Deferred.await(entry.stopped);
+			// A late verified hello may arrive after an unverified stop.
+			if (entry.stopSignalled || !entry.verified) return;
+		}
+		entry.stopping = true;
+		const cleanup = Effect.async<void>((resume) => {
+			entry.connection?.destroy();
+			const child = entry.child;
+			let force: ReturnType<typeof setTimeout> | undefined;
+			let deadline: ReturnType<typeof setTimeout> | undefined;
+			const finish = () => {
+				clearTimeout(force);
+				clearTimeout(deadline);
+				child?.off("exit", finish);
+				resume(Effect.void);
+			};
+			const pid = child?.pid ?? (entry.verified ? entry.pid : undefined);
+			if (
+				!pid ||
+				(child && (child.exitCode !== null || child.signalCode !== null))
+			) {
+				finish();
+				return;
+			}
+			child?.once("exit", finish);
+			const kill = (signal: NodeJS.Signals) => {
+				try {
+					entry.stopSignalled = true;
+					process.kill(pid, signal);
+				} catch {
+					finish();
+				}
+			};
+			force = setTimeout(() => {
+				kill("SIGKILL");
+				deadline = setTimeout(finish, 1000);
+			}, 3000);
+			kill("SIGTERM");
+			if (!child) deadline = setTimeout(finish, 4100);
+		}).pipe(
+			Effect.ensuring(
+				Effect.sync(() => {
+					if (entry.pid !== undefined && !runnerPidAlive(entry.pid))
+						removeClaudeRunner(entry.socketPath);
+				}),
+			),
+		);
+		// Let the server persist the same interruption/interaction cleanup
+		// outputs as the in-process runner before closing its only channel.
+		yield* Deferred.await(entry.ready).pipe(
+			Effect.flatMap((connection) =>
+				connection.commandEffect(randomUUID(), { type: "shutdown" }),
+			),
+			Effect.interruptible,
+			Effect.timeout("1 second"),
+			Effect.ignore,
+			Effect.ensuring(cleanup),
+			Effect.ensuring(Deferred.succeed(entry.stopped, undefined)),
+		);
+	}).pipe(Effect.uninterruptible);
+
+/** Stop registered runners whose relay owner was disposed during startup rollback. */
+export const stopRegisteredClaudeRunners = (
+	workspaceRoot: string,
+	configDir: string,
+	registered?: ReadonlyArray<ClaudeRunnerRegistration>,
+) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const registrations = yield* Effect.try({
+				try: () =>
+					registered ?? discoverClaudeRunners(workspaceRoot, configDir),
+				catch: (cause) => new ClaudeRuntimeError({ message: String(cause) }),
+			});
+			const runFork = yield* FiberSet.makeRuntime<never, void, never>();
+			const outcomes = yield* Effect.forEach(
+				registrations,
+				(registration) =>
+					Effect.gen(function* () {
+						const connection = yield* Effect.acquireRelease(
+							connectClaudeRunner({
+								...registration,
+								deps: { workspaceRoot, daemonConfigDir: configDir },
+								preserveRole: true,
+								runFork: (effect) => runFork(effect.pipe(Effect.interruptible)),
+								// Relay scopes have drained. Do not acknowledge unpersisted output.
+								emit: () => Effect.never,
+								onHello: () => Effect.void,
+								onClose: () => {},
+							}),
+							(connection) => Effect.sync(() => connection.destroy()),
+						);
+						const ready = yield* Deferred.make<
+							ClaudeRunnerSocket,
+							ClaudeSessionFailure
+						>();
+						yield* Deferred.succeed(ready, connection);
+						yield* stop({
+							ready,
+							stopped: yield* Deferred.make<void>(),
+							socketPath: registration.socketPath,
+							pid: registration.pid,
+							stopping: false,
+							verified: true,
+							connection,
+						});
+						if (runnerPidAlive(registration.pid)) {
+							return yield* new ClaudeRuntimeError({
+								message: `Claude runner ${registration.runnerId} survived shutdown`,
+							});
+						}
+					}).pipe(
+						Effect.catchAll((error) =>
+							runnerPidAlive(registration.pid)
+								? Effect.fail(error)
+								: Effect.sync(() =>
+										removeClaudeRunner(registration.socketPath),
+									),
+						),
+						Effect.exit,
+					),
+				{ concurrency: 4 },
+			);
+			const failures = outcomes.filter(Exit.isFailure);
+			if (failures.length > 0) {
+				return yield* new ClaudeRuntimeError({
+					message: failures.map((exit) => Cause.pretty(exit.cause)).join("\n"),
+				});
+			}
+		}),
+	);
 
 export const makeProcessClaudeSessionRunner = (
 	deps: ClaudeSessionRunnerDeps,
@@ -130,69 +280,6 @@ export const makeProcessClaudeSessionRunner = (
 			process.send?.(mark);
 		};
 
-		const stop = (entry: RunnerChild) =>
-			Effect.gen(function* () {
-				if (entry.stopping) {
-					yield* Deferred.await(entry.stopped);
-					// A late verified hello may arrive after an unverified stop.
-					if (entry.stopSignalled || !entry.verified) return;
-				}
-				entry.stopping = true;
-				const cleanup = Effect.async<void>((resume) => {
-					entry.connection?.destroy();
-					const child = entry.child;
-					let force: ReturnType<typeof setTimeout> | undefined;
-					let deadline: ReturnType<typeof setTimeout> | undefined;
-					const finish = () => {
-						clearTimeout(force);
-						clearTimeout(deadline);
-						child?.off("exit", finish);
-						resume(Effect.void);
-					};
-					const pid = child?.pid ?? (entry.verified ? entry.pid : undefined);
-					if (
-						!pid ||
-						(child && (child.exitCode !== null || child.signalCode !== null))
-					) {
-						finish();
-						return;
-					}
-					child?.once("exit", finish);
-					const kill = (signal: NodeJS.Signals) => {
-						try {
-							entry.stopSignalled = true;
-							process.kill(pid, signal);
-						} catch {
-							finish();
-						}
-					};
-					force = setTimeout(() => {
-						kill("SIGKILL");
-						deadline = setTimeout(finish, 1000);
-					}, 3000);
-					kill("SIGTERM");
-					if (!child) deadline = setTimeout(finish, 4100);
-				}).pipe(
-					Effect.ensuring(
-						Effect.sync(() => {
-							if (entry.pid !== undefined && !runnerPidAlive(entry.pid))
-								removeClaudeRunner(entry.socketPath);
-						}),
-					),
-				);
-				// Let the server persist the same interruption/interaction cleanup
-				// outputs as the in-process runner before closing its only channel.
-				yield* Deferred.await(entry.ready).pipe(
-					Effect.flatMap((connection) =>
-						connection.commandEffect(randomUUID(), { type: "shutdown" }),
-					),
-					Effect.interruptible,
-					Effect.timeout("1 second"),
-					Effect.ignore,
-					Effect.ensuring(cleanup),
-					Effect.ensuring(Deferred.succeed(entry.stopped, undefined)),
-				);
-			}).pipe(Effect.uninterruptible);
 		const evict = (sessionId: string, entry: RunnerChild) => {
 			// A late close from an old child must not remove its replacement.
 			if (children.get(sessionId) !== entry) return;

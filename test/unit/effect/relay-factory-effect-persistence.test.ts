@@ -487,7 +487,13 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		createProjectRelayMock.mockImplementation((config) => {
 			signal = config.signal;
 			markStarted?.();
-			return new Promise(() => undefined);
+			return new Promise((_, reject) => {
+				config.signal?.addEventListener(
+					"abort",
+					() => reject(new Error("cancelled")),
+					{ once: true },
+				);
+			});
 		});
 
 		const layer = RelayFactoryLive(join(dir, "config")).pipe(
@@ -594,7 +600,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				),
 				NoopAuxiliaryDaemonServices,
 			);
-			const layer = makeRelayCacheLayer.pipe(
+			const layer = makeRelayCacheLayer(join(dir, "config")).pipe(
 				Layer.provideMerge(RelayFactoryLive(join(dir, "config"))),
 				Layer.provide(baseLayer),
 			);

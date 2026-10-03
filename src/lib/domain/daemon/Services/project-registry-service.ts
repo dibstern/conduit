@@ -365,17 +365,22 @@ export const remove = (slug: string) =>
 		const bus = yield* DaemonEventBusTag;
 		const relayCache = yield* RelayCacheTag;
 
-		const existed = yield* Ref.modify(ref, (state) => {
-			if (!HashMap.has(state, slug)) {
-				return [false, state] as const;
-			}
-			return [true, HashMap.remove(state, slug)] as const;
+		const removed = yield* Ref.modify(ref, (state) => {
+			const entry = HashMap.get(state, slug);
+			return [
+				entry,
+				Option.isSome(entry) ? HashMap.remove(state, slug) : state,
+			] as const;
 		});
 
-		if (!existed) return;
+		if (Option.isNone(removed)) return;
 
 		// Invalidate relay (stops it via ScopedRef finalizer)
-		yield* relayCache.invalidate(slug);
+		yield* relayCache
+			.invalidate(slug, {
+				stopRunnersIn: removed.value.project.directory,
+			})
+			.pipe(Effect.onError(() => requestConfigSave));
 
 		yield* PubSub.publish(
 			bus,
@@ -385,6 +390,7 @@ export const remove = (slug: string) =>
 		yield* requestConfigSave;
 		yield* Effect.logInfo("Project removed");
 	}).pipe(
+		Effect.uninterruptible,
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.remove", {
 			attributes: { slug },

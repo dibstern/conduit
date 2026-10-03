@@ -176,7 +176,7 @@ describe("WebSocketRelayRouterLive", () => {
 			expect(first).toBe(second);
 			expect(first.attach).toBe(relay.attach);
 			expect(factory).toHaveBeenCalledTimes(1);
-			expect(factory).toHaveBeenCalledWith("test-project");
+			expect(factory.mock.calls[0]?.[0]).toBe("test-project");
 		}).pipe(Effect.provide(Layer.fresh(layer)));
 	});
 
