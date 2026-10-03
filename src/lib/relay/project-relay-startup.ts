@@ -20,6 +20,7 @@ import {
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
+	setModel,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	PollerPubSubTag,
@@ -162,6 +163,30 @@ function acquireStartupServices(inputs: StartupInputs) {
 				),
 			);
 		}
+		// Model choices live in memory, so after a restart a Claude session would
+		// fall back to the global default (possibly another harness) for both the
+		// picker and its next turn. Its latest turn is the durable record.
+		yield* sql<{ session_id: string; requested_model: string }>`
+			SELECT t.session_id, t.requested_model, MAX(t.requested_at)
+			FROM turns t JOIN sessions s ON s.id = t.session_id
+			WHERE s.provider = 'claude' AND t.requested_model IS NOT NULL
+			GROUP BY t.session_id`.pipe(
+			Effect.flatMap((rows) =>
+				Effect.forEach(rows, (row) =>
+					setModel(row.session_id, {
+						providerID: "claude",
+						modelID: row.requested_model,
+					}),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.sync(() =>
+					log.warn(
+						`Could not restore session models: ${formatErrorDetail(error)}`,
+					),
+				),
+			),
+		);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {
