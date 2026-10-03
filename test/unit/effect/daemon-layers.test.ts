@@ -1,6 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { describe, it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
-import { expect } from "vitest";
+import { afterEach, expect } from "vitest";
 import {
 	DaemonLifecycleLayerError,
 	ProcessErrorHandlerLayer,
@@ -18,9 +19,16 @@ import {
 	makeDaemonLifecycleContext,
 } from "../../../src/lib/domain/daemon/Services/daemon-lifecycle-context.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+
+const fixtureDirs: string[] = [];
+afterEach(() => {
+	for (const directory of fixtureDirs.splice(0))
+		rmSync(directory, { recursive: true, force: true });
+});
 
 describe("SignalHandlerLayer", () => {
 	it.scoped("installs signal handlers on layer build", () =>
@@ -94,6 +102,8 @@ describe("DaemonHandleTag", () => {
 	it.scoped(
 		"provides an Effect-owned handle backed by daemon config and project registry services",
 		() => {
+			const configDir = mkdtempSync("/tmp/daemon-handle-");
+			fixtureDirs.push(configDir);
 			const lifecycleContext = makeDaemonLifecycleContext("/tmp/relay.sock");
 			lifecycleContext.clientCount = 7;
 			const relayHealthBySlug = new Map([
@@ -159,6 +169,7 @@ describe("DaemonHandleTag", () => {
 				invalidate: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(
+				makeDaemonStateLive({ configDir }),
 				DaemonConfigRefLive({
 					port: 49876,
 					host: "127.0.0.1",
@@ -268,7 +279,8 @@ describe("DaemonHandleTag", () => {
 					expect(Option.isSome(failure)).toBe(true);
 					if (Option.isSome(failure)) {
 						expect(failure.value._tag).toBe("ProjectNotFound");
-						expect(failure.value.slug).toBe("missing");
+						if (failure.value._tag === "ProjectNotFound")
+							expect(failure.value.slug).toBe("missing");
 					}
 				}
 			}).pipe(Effect.provide(layer));

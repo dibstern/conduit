@@ -104,7 +104,6 @@ export interface RelayFactory {
 		project: StoredProject,
 		opencodeUrl: string,
 		projectControls?: RelayFactoryProjectControls,
-		stopRunners?: Effect.Effect<boolean>,
 	) => Effect.Effect<ProjectRelay, RelayFactoryError>;
 }
 
@@ -299,7 +298,6 @@ export const RelayFactoryLive = (
 					project: StoredProject,
 					opencodeUrl: string,
 					projectControls?: RelayFactoryProjectControls,
-					stopRunners: Effect.Effect<boolean> = Effect.succeed(false),
 				): Effect.Effect<ProjectRelay, RelayFactoryError> =>
 					Effect.gen(function* () {
 						// Read current HTTP server from Ref
@@ -387,12 +385,6 @@ export const RelayFactoryLive = (
 									noServer: true,
 									signal: ac.signal,
 									configDir,
-									fullStopRequested: Effect.zipWith(
-										Ref.get(instanceState),
-										stopRunners,
-										(state, removed) =>
-											state.stopManagedProcesses === true || removed,
-									),
 									persistenceDbPath: dbPath,
 									getProjects,
 									listDaemonSessions,

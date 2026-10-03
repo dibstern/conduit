@@ -1139,39 +1139,110 @@ describe("Claude runners survive server replacement through built dist", () => {
 		}
 	}, 45_000);
 
-	it("expires an orphaned runner when no server reattaches during its grace period", async () => {
+	it("adopts a runner after SIGKILL and more than 60 seconds detached without losing its turn", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
-			runnerReattachGraceMs: 1000,
 		});
 		harnesses.push(harness);
 		const browser = await harness.connect();
-		const sessionId = await browser.createSession("Orphan grace proof");
-		void browser.send(sessionId, "approval-grace").catch(() => undefined);
+		const sessionId = await browser.createSession("Long detached turn");
+		const prompt = "upgrade-long-turn";
+		const pending = browser.send(sessionId, prompt).catch(() => undefined);
 		await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) =>
+				message["type"] === "delta" &&
+				message["text"] === responseChunks(prompt)[0],
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
-		await harness.kill();
-		await vi.waitFor(
-			() => expect(() => process.kill(runner.pid, 0)).toThrow(),
-			{ timeout: 5000 },
-		);
-		expect(existsSync(`${runner.socketPath}.json`)).toBe(false);
-		expect(existsSync(runner.socketPath)).toBe(false);
-		mkdirSync("test-results", { recursive: true });
-		writeFileSync(
-			"test-results/85kb-9-orphan-grace.json",
-			JSON.stringify(
-				{ graceMs: 1000, runner, runnerExited: true, process: harness.proof() },
-				null,
-				2,
-			),
-		);
-	}, 30_000);
+		const registration = JSON.parse(
+			readFileSync(`${runner.socketPath}.json`, "utf8"),
+		) as { runnerId: string; pid: number };
+		const samples: Array<{ elapsedMs: number; alive: boolean }> = [];
+		const evidence: Record<string, unknown> = {
+			runner,
+			registration,
+			minimumDetachedMs: 61_000,
+			samples,
+		};
+		try {
+			expect(persisted(harness, sessionId).turns).toMatchObject([
+				{ state: "running" },
+			]);
+			await harness.kill();
+			await pending;
+			expect(harness.generations.at(-1)?.signal).toBe("SIGKILL");
+			const detachedAt = Date.now();
+			writeFileSync(
+				join(harness.root, "release-upgrade-turn"),
+				"finish detached",
+			);
+			await vi.waitFor(
+				() => {
+					const spool = readFileSync(`${runner.socketPath}.spool`, "utf8");
+					expect(spool).toContain('"type":"turn.completed"');
+				},
+				{ timeout: 5000 },
+			);
+			evidence["completedWhileDetached"] = true;
+			// This is the only acceptance case with a gap exceeding the former 60s
+			// grace. Sample liveness throughout, so a replacement PID cannot pass.
+			do {
+				const alive = harness.remainingRunnerPids().includes(runner.pid);
+				samples.push({ elapsedMs: Date.now() - detachedAt, alive });
+				expect(alive).toBe(true);
+				expect(existsSync(`${runner.socketPath}.json`)).toBe(true);
+				if (Date.now() - detachedAt >= 61_000) break;
+				await new Promise<void>((done) => setTimeout(done, 250));
+			} while ((samples.at(-1)?.elapsedMs ?? 0) < 61_000);
+			evidence["detachedMs"] = Date.now() - detachedAt;
+			expect(evidence["detachedMs"]).toBeGreaterThan(60_000);
+			await harness.restart();
+			const adopted = await harness.connect(sessionId);
+			await settled(harness, sessionId);
+			const restored = JSON.parse(
+				readFileSync(`${runner.socketPath}.json`, "utf8"),
+			) as { runnerId: string; pid: number };
+			expect(restored).toMatchObject(registration);
+			expect(
+				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
+			).toMatchObject({ pid: runner.pid, socketPath: runner.socketPath });
+			const history = await adopted.history(sessionId);
+			expect(history.map((message) => message.role)).toEqual([
+				"user",
+				"assistant",
+			]);
+			expect(history[1]?.parts?.map((part) => part.text ?? "").join("")).toBe(
+				responseChunks(prompt).join(""),
+			);
+			const state = persisted(harness, sessionId);
+			expect(state.turns).toMatchObject([{ state: "completed" }]);
+			expect(
+				state.events.filter((event) => event.type === "turn.completed"),
+			).toHaveLength(1);
+			expect(
+				state.events.some(
+					(event) =>
+						event.type === "turn.interrupted" || event.type === "turn.error",
+				),
+			).toBe(false);
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "query"),
+			).toHaveLength(1);
+			evidence["adoptedRegistration"] = restored;
+			evidence["history"] = history;
+			evidence["persisted"] = state;
+		} finally {
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "cleanup");
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/v4e7-long-detached-turn.json",
+				JSON.stringify({ ...evidence, process: harness.proof() }, null, 2),
+			);
+		}
+	}, 100_000);
 
 	it("terminates a suspended runner when its test parent disconnects", async () => {
 		const harness = await ProcessHarness.start({

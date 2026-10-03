@@ -157,7 +157,6 @@ export class ProcessHarness {
 			| "permission-request"
 			| "answer-permission"
 			| "send-turn",
-		private readonly runnerReattachGraceMs?: number,
 		private buildId?: string,
 		private readonly upgradeSinkProof = false,
 		private readonly subagentPollTimeoutMs?: number,
@@ -268,7 +267,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { Effect } from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("effect")).href)};
 import { ClaudeDriver } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-provider-instance.js")).href)};
-import { preserveClaudeRunners } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-runner-shutdown.js")).href)};
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home") || !process.send) throw new Error("CLI fixture requires isolated HOME and IPC");
 const identitySaveGate = join(root, "managed-identity-save-gated");
@@ -281,8 +279,8 @@ fsPromises.rename = async (source, destination) => {
       writeFileSync(identitySaveGate + "-started", "identity has not been persisted");
       while (!existsSync(identitySaveGate + "-release")) await new Promise(done => setTimeout(done, 10));
     }
-    if (existsSync(signalSaveGate) && existsSync(join(root, "sigint-observed")) && await Effect.runPromise(preserveClaudeRunners())) {
-      writeFileSync(signalSaveGate + "-started", JSON.stringify({ preserve: true, projects: pending.projects.map(project => project.slug) }));
+    if (existsSync(signalSaveGate) && existsSync(join(root, "sigint-observed"))) {
+      writeFileSync(signalSaveGate + "-started", JSON.stringify({ signalObserved: true, projects: pending.projects.map(project => project.slug) }));
       while (!existsSync(signalSaveGate + "-release")) await new Promise(done => setTimeout(done, 10));
     }
   }
@@ -357,7 +355,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 				| "permission-request"
 				| "answer-permission"
 				| "send-turn";
-			runnerReattachGraceMs?: number;
 			buildId?: string;
 			upgradeSinkProof?: boolean;
 			subagentPollTimeoutMs?: number;
@@ -384,7 +381,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.restartProof,
 			options.holdRunnerAck,
 			options.holdRunnerOutput,
-			options.runnerReattachGraceMs,
 			options.buildId,
 			options.upgradeSinkProof,
 			options.subagentPollTimeoutMs,
@@ -630,13 +626,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 						: {}),
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
-						: {}),
-					...(this.runnerReattachGraceMs !== undefined
-						? {
-								CONDUIT_CLAUDE_RUNNER_REATTACH_GRACE_MS: String(
-									this.runnerReattachGraceMs,
-								),
-							}
 						: {}),
 					...(this.shellEnvProof
 						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
@@ -940,7 +929,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (signal !== "SIGKILL")
 			for (const browser of this.browsers) await browser.close();
 		child.kill(signal);
-		// The runner gets 1s to reply and 3s to terminate before its own force-kill.
+		// Bound server disposal even if an independent runner is unresponsive.
 		const force = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
 		try {
 			await this.exit;
@@ -1214,6 +1203,16 @@ Object.assign(ClaudeDriver, { create: deps => {
 			);
 		clearInterval(this.ownershipObserver);
 		failures.push(...this.ownershipErrors);
+		// These PIDs came from fixture-owned spawn/query marks. Registration files
+		// can disappear and suspended runners cannot answer a shutdown handshake.
+		for (const pid of this.remainingRunnerPids()) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch (cause) {
+				if (!(isRecord(cause) && cause["code"] === "ESRCH"))
+					failures.push(cause);
+			}
+		}
 		try {
 			this.runnerCleanup = await cleanupTestClaudeRunners(
 				this.root,

@@ -29,8 +29,6 @@ import {
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
-import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
 import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
@@ -361,9 +359,7 @@ const resolveProjectOpencodeUrl = (project: {
 		return yield* getInstanceUrl(first.id);
 	});
 
-export const makeRelayCacheLayer = (
-	configDir: string,
-): Layer.Layer<
+export const makeRelayCacheLayer = (): Layer.Layer<
 	RelayCacheTag,
 	never,
 	| RelayFactoryTag
@@ -372,6 +368,7 @@ export const makeRelayCacheLayer = (
 	| DaemonConfigRefTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
+	| DaemonStateTag
 > =>
 	Layer.scoped(
 		RelayCacheTag,
@@ -382,6 +379,7 @@ export const makeRelayCacheLayer = (
 			const configRef = yield* DaemonConfigRefTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
+			const daemonState = yield* DaemonStateTag;
 			const runtime = yield* Effect.runtime<never>();
 			let relayCache: RelayCache | undefined;
 
@@ -407,6 +405,7 @@ export const makeRelayCacheLayer = (
 					| DaemonEventBusTag
 					| ConfigPersistenceTag
 					| RelayCacheTag
+					| DaemonStateTag
 				>,
 			) => {
 				if (relayCache === undefined) {
@@ -418,79 +417,68 @@ export const makeRelayCacheLayer = (
 					Effect.provideService(DaemonEventBusTag, eventBus),
 					Effect.provideService(ConfigPersistenceTag, configPersistence),
 					Effect.provideService(RelayCacheTag, relayCache),
+					Effect.provideService(DaemonStateTag, daemonState),
 				);
 			};
 
-			const relayCacheService = yield* makeRelayCacheService(
-				(slug, stopRunners) =>
-					Effect.gen(function* () {
-						const project = yield* getProject(slug).pipe(
-							Effect.provideService(ProjectRegistryTag, projectRegistry),
-						);
-						const opencodeUrl = yield* resolveProjectOpencodeUrl(project).pipe(
-							Effect.provideService(InstanceManagerStateTag, instanceState),
-						);
-						if (opencodeUrl == null) {
-							return yield* new RelayFactoryError({
-								reason: `No OpenCode instance URL available for project "${slug}"`,
-							});
-						}
-						const projectControls = {
-							addProject: (directory: string, instanceId?: string) =>
-								runCallback(
-									provideProjectMutationDeps(
-										addProjectToEffectRegistry(directory, instanceId),
+			const relayCacheService = yield* makeRelayCacheService((slug) =>
+				Effect.gen(function* () {
+					const project = yield* getProject(slug).pipe(
+						Effect.provideService(ProjectRegistryTag, projectRegistry),
+					);
+					const opencodeUrl = yield* resolveProjectOpencodeUrl(project).pipe(
+						Effect.provideService(InstanceManagerStateTag, instanceState),
+					);
+					if (opencodeUrl == null) {
+						return yield* new RelayFactoryError({
+							reason: `No OpenCode instance URL available for project "${slug}"`,
+						});
+					}
+					const projectControls = {
+						addProject: (directory: string, instanceId?: string) =>
+							runCallback(
+								provideProjectMutationDeps(
+									addProjectToEffectRegistry(directory, instanceId),
+								),
+							),
+						removeProject: (projectSlug: string) =>
+							runCallback(
+								provideProjectMutationDeps(
+									removeProjectFromEffectRegistry(projectSlug),
+								),
+							),
+						setProjectTitle: (projectSlug: string, title: string) =>
+							runCallback(
+								provideProjectMutationDeps(
+									updateEffectProject(projectSlug, { title }),
+								),
+							),
+						setProjectInstance: (projectSlug: string, instanceId: string) =>
+							runCallback(
+								provideProjectMutationDeps(
+									updateEffectProject(projectSlug, { instanceId }).pipe(
+										Effect.zipRight(replaceEffectRelay(projectSlug)),
 									),
 								),
-							removeProject: (projectSlug: string) =>
-								runCallback(
-									provideProjectMutationDeps(
-										removeProjectFromEffectRegistry(projectSlug),
-									),
-								),
-							setProjectTitle: (projectSlug: string, title: string) =>
-								runCallback(
-									provideProjectMutationDeps(
-										updateEffectProject(projectSlug, { title }),
-									),
-								),
-							setProjectInstance: (projectSlug: string, instanceId: string) =>
-								runCallback(
-									provideProjectMutationDeps(
-										updateEffectProject(projectSlug, { instanceId }).pipe(
-											Effect.zipRight(replaceEffectRelay(projectSlug)),
-										),
-									),
-								),
-						};
-						const relay = yield* relayFactory.create(
-							project,
-							opencodeUrl,
-							projectControls,
-							stopRunners,
-						);
-						return {
-							slug,
-							settleIdleSessions: (idleWindowMs: number, now: number) =>
-								relay.settleIdleSessions(idleWindowMs, now),
-							attach: (ws, options) => relay.wsHandler.attach(ws, options),
-							wsHandler: relay.wsHandler,
-							rpcWsHandler: relay.rpcWsHandler,
-							getStatusSnapshot: () => relay.getStatusSnapshot(),
-							setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
-							stop: () => relay.stop(),
-						};
-					}),
-				(projectDir) =>
-					Effect.sync(() => discoverClaudeRunners(projectDir, configDir)).pipe(
-						Effect.map((registered) =>
-							stopRegisteredClaudeRunners(
-								projectDir,
-								configDir,
-								registered,
-							).pipe(Effect.orDie),
-						),
-					),
+							),
+					};
+					const relay = yield* relayFactory.create(
+						project,
+						opencodeUrl,
+						projectControls,
+					);
+					return {
+						slug,
+						settleIdleSessions: (idleWindowMs: number, now: number) =>
+							relay.settleIdleSessions(idleWindowMs, now),
+						attach: (ws, options) => relay.wsHandler.attach(ws, options),
+						wsHandler: relay.wsHandler,
+						rpcWsHandler: relay.rpcWsHandler,
+						getStatusSnapshot: () => relay.getStatusSnapshot(),
+						setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
+						stop: () => relay.stop(),
+					};
+				}),
 			);
 			relayCache = relayCacheService;
 			return relayCacheService;
@@ -758,9 +746,19 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// available via Tier 1's provideMerge passthrough).
 	//
 	// DaemonState from disk (with real FS) or empty defaults.
-	const stateLayer = options.configPath
-		? makeDaemonStateFromDiskNode(options.configPath)
-		: makeDaemonStateLive();
+	const stateLayer = (
+		options.configPath
+			? makeDaemonStateFromDiskNode(options.configPath)
+			: makeDaemonStateLive()
+	).pipe(
+		Layer.tap((context) =>
+			Ref.update(Context.get(context, DaemonStateTag), (current) => ({
+				...current,
+				configDir,
+				socketPath,
+			})),
+		),
+	);
 
 	// Compose registry layers explicitly to preserve type information.
 	// RelayFactoryLive has R = DaemonConfigRefTag, which is satisfied by
@@ -808,7 +806,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 
-	const withRelayCache = makeRelayCacheLayer(configDir).pipe(
+	const withRelayCache = makeRelayCacheLayer().pipe(
 		Layer.provideMerge(registries),
 	);
 

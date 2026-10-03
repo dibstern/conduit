@@ -25,6 +25,7 @@ import {
 	Stream,
 } from "effect";
 import { withCachedProjectGit } from "../../../git/session-git.js";
+import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import type { StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { requestConfigSave } from "./config-persistence-service.js";
@@ -375,12 +376,27 @@ export const remove = (slug: string) =>
 
 		if (Option.isNone(removed)) return;
 
-		// Invalidate relay (stops it via ScopedRef finalizer)
-		yield* relayCache
-			.invalidate(slug, {
-				stopRunnersIn: removed.value.project.directory,
-			})
-			.pipe(Effect.onError(() => requestConfigSave));
+		yield* Effect.gen(function* () {
+			// Relay disposal only detaches; removal ends every registered runner afterwards.
+			yield* relayCache.invalidate(slug);
+			const state = yield* Ref.get(yield* DaemonStateTag);
+			yield* stopRegisteredClaudeRunners(
+				removed.value.project.directory,
+				state.configDir,
+			);
+		}).pipe(
+			Effect.onError(() =>
+				// Failed removal must remain reachable by retries and a full stop.
+				Ref.update(ref, (state) =>
+					HashMap.has(state, slug)
+						? state
+						: HashMap.set(state, slug, {
+								_tag: "Registering",
+								project: removed.value.project,
+							}),
+				).pipe(Effect.andThen(requestConfigSave)),
+			),
+		);
 
 		yield* PubSub.publish(
 			bus,

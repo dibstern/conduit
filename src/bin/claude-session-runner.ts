@@ -24,7 +24,6 @@ import {
 	claudeRunnerHelloFailure,
 	claudeRunnerIdleFailure,
 } from "../lib/provider/claude/claude-runner-protocol.js";
-import { ClaudeRunnerReattachGrace } from "../lib/provider/claude/claude-runner-reattach-grace.js";
 import {
 	registerClaudeRunner,
 	removeClaudeRunner,
@@ -123,7 +122,6 @@ const main = Effect.gen(function* () {
 		if (exiting) return;
 		exiting = true;
 		idle?.close();
-		grace.reattached();
 		// Neither an absent server acknowledgement nor SDK disposal can hold exit.
 		exitDeadline = setTimeout(() => {
 			removeClaudeRunner(socketPath);
@@ -133,7 +131,6 @@ const main = Effect.gen(function* () {
 		if (connection) connection.write({ type: "idle-exit" });
 		else finishExit();
 	};
-	const grace = new ClaudeRunnerReattachGrace(beginExit);
 	function finishExit() {
 		const delay =
 			process.env["NODE_ENV"] === "test"
@@ -146,11 +143,6 @@ const main = Effect.gen(function* () {
 			),
 		);
 	}
-	const disconnected = () => {
-		if (!attached) grace.disconnected();
-	};
-	process.once("disconnect", disconnected);
-	if (!process.connected) grace.disconnected();
 	let runner: ClaudeSessionRunner | undefined;
 	let shellEnv: Readonly<Record<string, string | undefined>> = process.env;
 	let initializing = false;
@@ -496,7 +488,6 @@ const main = Effect.gen(function* () {
 						role = undefined;
 						register();
 					}
-					grace.reattached();
 					spool.attach(peer, message.acknowledgedSequence);
 					reportedQuiescent = undefined;
 					reportUpgradeState();
@@ -856,7 +847,6 @@ const main = Effect.gen(function* () {
 					attached = false;
 					connection = undefined;
 					if (exiting) finishExit();
-					else grace.disconnected();
 				}
 			},
 		);
@@ -864,10 +854,8 @@ const main = Effect.gen(function* () {
 	});
 	yield* Effect.addFinalizer(() =>
 		Effect.sync(() => {
-			grace.reattached();
 			idle?.close();
 			clearTimeout(exitDeadline);
-			process.off("disconnect", disconnected);
 			connection?.destroy();
 			server.close();
 			removeClaudeRunner(socketPath);

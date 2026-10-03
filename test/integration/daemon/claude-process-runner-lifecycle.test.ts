@@ -373,7 +373,7 @@ describe("Claude runner admission socket probes", () => {
 		);
 	}, 15_000);
 
-	it("does not attach a retrying adoption after explicit shutdown", async () => {
+	it("detaches a retrying adoption when its relay is disposed", async () => {
 		const fixture = await probe("reject");
 		probes.push(fixture);
 		await Effect.runPromise(
@@ -392,12 +392,16 @@ describe("Claude runner admission socket probes", () => {
 					yield* Fiber.join(recovery).pipe(Effect.timeout("4 seconds"));
 					expect(fixture.attempts).toBe(attempts);
 					expect(fixture.commands).toEqual([]);
+					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
+					expect(
+						discoverClaudeRunners(fixture.workspaceRoot, fixture.configDir),
+					).toHaveLength(1);
 				}),
 			),
 		);
 	}, 15_000);
 
-	it("stops a late verified adoption after explicit shutdown", async () => {
+	it("detaches a late verified adoption when its relay is disposed", async () => {
 		const fixture = await probe("delayed");
 		probes.push(fixture);
 		await Effect.runPromise(
@@ -408,15 +412,20 @@ describe("Claude runner admission socket probes", () => {
 						Effect.exit(runner.recoverEffect),
 					);
 					yield* Deferred.await(fixture.received);
-					yield* runner
-						.executeEffect({ type: "shutdown" })
-						.pipe(Effect.timeout("6 seconds"));
-					fixture.allowHello();
-					yield* Effect.promise(() => fixture.exited).pipe(
-						Effect.timeout("5 seconds"),
+					const disposal = yield* Effect.fork(
+						runner
+							.executeEffect({ type: "shutdown" })
+							.pipe(Effect.timeout("6 seconds")),
 					);
+					yield* Effect.yieldNow();
+					fixture.allowHello();
+					yield* Fiber.join(disposal);
 					yield* Fiber.join(recovery).pipe(Effect.timeout("6 seconds"));
 					expect(fixture.commands).toEqual([]);
+					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
+					expect(
+						discoverClaudeRunners(fixture.workspaceRoot, fixture.configDir),
+					).toHaveLength(1);
 				}),
 			),
 		);

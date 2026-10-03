@@ -28,7 +28,6 @@ import { formatErrorDetail } from "../../../errors.js";
 import { setLogFormat, setLogLevel } from "../../../logger.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
-import { setClaudeRunnerRestart } from "../../../provider/claude/claude-runner-shutdown.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -310,7 +309,6 @@ export async function startForegroundDaemon(
 			if (await runRuntimeEffect(currentRuntime, fullStopRequested)) {
 				shutdownMode = "stop";
 			}
-			setClaudeRunnerRestart(shutdownMode === "restart");
 			try {
 				if (shutdownMode === "stop") {
 					await runRuntimeEffect(
@@ -423,7 +421,7 @@ export async function startForegroundDaemon(
 						const registered = projectState
 							? Array.from(HashMap.values(yield* Ref.get(projectState)))
 							: [];
-						// Failed relay acquisition can preserve a runner without a cache owner.
+						// Registrations include detached runners whose relay never started.
 						yield* Effect.validateAll(
 							registered,
 							({ project }) =>
@@ -446,7 +444,6 @@ export async function startForegroundDaemon(
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
 		instanceState = await runRuntimeEffect(runtime, InstanceManagerStateTag);
 		projectState = await runRuntimeEffect(runtime, ProjectRegistryTag);
-		setClaudeRunnerRestart(false);
 		const currentHandle = handle;
 		await runRuntimeEffect(
 			runtime,
@@ -480,11 +477,6 @@ export async function startForegroundDaemon(
 		);
 		await refreshSnapshots();
 	} catch (error) {
-		// A failed server startup must leave adopted durable children for the next attempt.
-		setClaudeRunnerRestart(
-			instanceState === undefined ||
-				!(await runRuntimeEffect(runtime, fullStopRequested)),
-		);
 		await runtime.dispose();
 		runtime = null;
 		handle = null;

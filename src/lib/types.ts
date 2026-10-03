@@ -1,6 +1,5 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
-import type { Effect } from "effect";
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type {
@@ -245,8 +244,6 @@ export interface ProjectRelayConfig {
 	 * so it can abort in-flight relay creation when a project is removed.
 	 */
 	signal?: AbortSignal;
-	/** Sticky server full-stop or project-removal intent; overrides runner preservation. */
-	fullStopRequested?: Effect.Effect<boolean>;
 	/**
 	 * Override the default poller gating config (SSE grace period, staleness
 	 * threshold, max concurrent pollers). Useful for tests that need

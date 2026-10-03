@@ -39,7 +39,7 @@ export const recoverClaudeRunnerCommands = (
 		sinkId: string,
 		failure: ClaudeSessionFailure,
 	) => Effect.Effect<void>,
-	preserving: () => boolean,
+	closing: () => boolean,
 	deps: ClaudeSessionRunnerDeps,
 ) =>
 	Effect.gen(function* () {
@@ -78,7 +78,7 @@ export const recoverClaudeRunnerCommands = (
 					.pipe(
 						Effect.matchEffect({
 							onSuccess: (result) =>
-								preserving()
+								closing()
 									? Effect.void
 									: settleClaudeRunnerCommand(
 											sql,
@@ -88,7 +88,7 @@ export const recoverClaudeRunnerCommands = (
 											result,
 										),
 							onFailure: (failure) =>
-								preserving()
+								closing()
 									? Effect.void
 									: failTurn(sinkId, failure).pipe(
 											Effect.andThen(
@@ -122,11 +122,9 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 		},
 		failure: ClaudeSessionFailure,
 	) => Effect.Effect<void, E>,
-	preserving: () => Effect.Effect<boolean>,
 ) =>
 	Effect.gen(function* () {
 		for (const row of yield* runningClaudeCommands(sql)) {
-			if (yield* preserving()) return;
 			// Candidates and retiring runners also own their session's admissions.
 			if (claimedSessions.has(row.session_id)) continue;
 			const failure: ClaudeSessionFailure = {

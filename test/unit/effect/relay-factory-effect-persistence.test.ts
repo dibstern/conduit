@@ -19,6 +19,7 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -550,9 +551,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 	it.effect(
 		"threads relay-cache-owned project mutators into relay config",
 		() => {
-			const dir = mkdtempSync(
-				join(tmpdir(), "conduit-relay-project-mutators-"),
-			);
+			const dir = mkdtempSync("/tmp/relay-project-mutators-");
 			const projectDir = join(dir, "project");
 			mkdirSync(projectDir);
 			const server = createServer();
@@ -568,6 +567,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 			const baseLayer = Layer.mergeAll(
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+				makeDaemonStateLive({ configDir: join(dir, "config") }),
 				ConfigPersistenceNoopLive,
 				DaemonEventBusLive,
 				makeProjectRegistryLive([
@@ -600,7 +600,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				),
 				NoopAuxiliaryDaemonServices,
 			);
-			const layer = makeRelayCacheLayer(join(dir, "config")).pipe(
+			const layer = makeRelayCacheLayer().pipe(
 				Layer.provideMerge(RelayFactoryLive(join(dir, "config"))),
 				Layer.provide(baseLayer),
 			);

@@ -21,17 +21,12 @@ import {
 import { makeClaudeRunnerReceiptStore } from "./claude-runner-receipts.js";
 import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
 import {
-	type ClaudeRunnerRegistration,
 	claudeRunnerDirectory,
 	discoverClaudeRunners,
 	prepareClaudeRunnerDirectory,
 	removeClaudeRunner,
 	runnerPidAlive,
 } from "./claude-runner-registry.js";
-import {
-	ClaudeRunnerRollbackTag,
-	preserveClaudeRunners,
-} from "./claude-runner-shutdown.js";
 import {
 	failClaudeRunnerTurn,
 	observeClaudeRunnerTurn,
@@ -62,6 +57,7 @@ interface RunnerChild {
 	failure?: ClaudeSessionFailure;
 	readonly runnerId: string;
 	verified: boolean;
+	listening?: boolean;
 	recovering?: boolean;
 	pid?: number | undefined;
 	child?: ChildProcess;
@@ -100,9 +96,11 @@ const stop = (
 			const child = entry.child;
 			let force: ReturnType<typeof setTimeout> | undefined;
 			let deadline: ReturnType<typeof setTimeout> | undefined;
+			let exited: ReturnType<typeof setInterval> | undefined;
 			const finish = () => {
 				clearTimeout(force);
 				clearTimeout(deadline);
+				clearInterval(exited);
 				child?.off("exit", finish);
 				resume(Effect.void);
 			};
@@ -127,8 +125,13 @@ const stop = (
 				kill("SIGKILL");
 				deadline = setTimeout(finish, 1000);
 			}, 3000);
+			if (!child) {
+				exited = setInterval(() => {
+					if (!runnerPidAlive(pid)) finish();
+				}, 25);
+				deadline = setTimeout(finish, 4100);
+			}
 			kill("SIGTERM");
-			if (!child) deadline = setTimeout(finish, 4100);
 		}).pipe(
 			Effect.ensuring(
 				Effect.sync(() => {
@@ -151,17 +154,15 @@ const stop = (
 		);
 	}).pipe(Effect.uninterruptible);
 
-/** Stop registered runners whose relay owner was disposed during startup rollback. */
+/** Stop registered project runners for an explicit stop or project removal. */
 export const stopRegisteredClaudeRunners = (
 	workspaceRoot: string,
 	configDir: string,
-	registered?: ReadonlyArray<ClaudeRunnerRegistration>,
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const registrations = yield* Effect.try({
-				try: () =>
-					registered ?? discoverClaudeRunners(workspaceRoot, configDir),
+				try: () => discoverClaudeRunners(workspaceRoot, configDir),
 				catch: (cause) => new ClaudeRuntimeError({ message: String(cause) }),
 			});
 			const runFork = yield* FiberSet.makeRuntime<never, void, never>();
@@ -169,24 +170,31 @@ export const stopRegisteredClaudeRunners = (
 				registrations,
 				(registration) =>
 					Effect.gen(function* () {
-						const connection = yield* Effect.acquireRelease(
-							connectClaudeRunner({
-								...registration,
-								deps: { workspaceRoot, daemonConfigDir: configDir },
-								preserveRole: true,
-								runFork: (effect) => runFork(effect.pipe(Effect.interruptible)),
-								// Relay scopes have drained. Do not acknowledge unpersisted output.
-								emit: () => Effect.never,
-								onHello: () => Effect.void,
-								onClose: () => {},
-							}),
-							(connection) => Effect.sync(() => connection.destroy()),
+						const connection = yield* Effect.either(
+							Effect.acquireRelease(
+								connectClaudeRunner({
+									...registration,
+									deps: { workspaceRoot, daemonConfigDir: configDir },
+									preserveRole: true,
+									runFork: (effect) =>
+										runFork(effect.pipe(Effect.interruptible)),
+									// Relay scopes have drained. Do not acknowledge unpersisted output.
+									emit: () => Effect.never,
+									onHello: () => Effect.void,
+									onClose: () => {},
+								}),
+								(connection) => Effect.sync(() => connection.destroy()),
+							),
 						);
 						const ready = yield* Deferred.make<
 							ClaudeRunnerSocket,
 							ClaudeSessionFailure
 						>();
-						yield* Deferred.succeed(ready, connection);
+						if (connection._tag === "Right")
+							yield* Deferred.succeed(ready, connection.right);
+						else yield* Deferred.fail(ready, connection.left);
+						// Explicit intent addresses the registry's runner even when it
+						// cannot greet us. Startup adoption never gains this authority.
 						yield* stop({
 							ready,
 							stopped: yield* Deferred.make<void>(),
@@ -194,7 +202,9 @@ export const stopRegisteredClaudeRunners = (
 							pid: registration.pid,
 							stopping: false,
 							verified: true,
-							connection,
+							...(connection._tag === "Right"
+								? { connection: connection.right }
+								: {}),
 						});
 						if (runnerPidAlive(registration.pid)) {
 							return yield* new ClaudeRuntimeError({
@@ -233,9 +243,6 @@ export const makeProcessClaudeSessionRunner = (
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const lock = yield* Effect.makeSemaphore(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
-		const rollbackOption = yield* Effect.serviceOption(ClaudeRunnerRollbackTag);
-		const rollback =
-			rollbackOption._tag === "Some" ? rollbackOption.value : undefined;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
 		const receipts = sql
@@ -258,7 +265,6 @@ export const makeProcessClaudeSessionRunner = (
 			}
 		>();
 		let closing = false;
-		let preserving = false;
 		const upgradeMark = (
 			sessionId: string,
 			old: RunnerChild,
@@ -297,11 +303,15 @@ export const makeProcessClaudeSessionRunner = (
 				if (entry.endingReleased)
 					yield* Deferred.succeed(entry.endingReleased, undefined);
 			});
+		const detach = (entry: RunnerChild) => {
+			entry.connection?.destroy();
+			entry.child?.unref();
+			if (entry.child?.connected) entry.child.disconnect();
+		};
 		const shutdown = lock
 			.withPermits(1)(
 				Effect.gen(function* () {
 					closing = true;
-					preserving = yield* preserveClaudeRunners(rollback);
 					const entries = [...children.values(), ...candidates];
 					const release = Effect.forEach(
 						entries,
@@ -317,30 +327,16 @@ export const makeProcessClaudeSessionRunner = (
 							),
 						{ discard: true },
 					);
-					if (preserving)
-						return yield* Effect.sync(() => {
-							for (const entry of children.values()) {
-								entry.stopping = true;
-								entry.connection?.destroy();
-								entry.child?.unref();
-								if (entry.child?.connected) entry.child.disconnect();
-							}
-							children.clear();
-							sinks.clear();
-						}).pipe(
-							Effect.andThen(
-								Effect.forEach([...candidates], stop, {
-									discard: true,
-									concurrency: 4,
-								}),
-							),
-							Effect.ensuring(release),
-						);
-					return yield* Effect.forEach(entries, stop, {
-						discard: true,
-						concurrency: 4,
-					}).pipe(
-						Effect.tap(() =>
+					return yield* Effect.forEach(
+						entries,
+						(entry) =>
+							entry.pid === undefined ||
+							(entry.child && !entry.listening && !entry.verified)
+								? stop(entry)
+								: Effect.sync(() => detach(entry)),
+						{ discard: true, concurrency: 4 },
+					).pipe(
+						Effect.ensuring(
 							Effect.sync(() => {
 								children.clear();
 								sinks.clear();
@@ -513,16 +509,10 @@ export const makeProcessClaudeSessionRunner = (
 								)
 									return Effect.void;
 								connection.destroy();
-								return (
-									closing && !preserving ? stop(entry) : Effect.void
-								).pipe(
-									Effect.andThen(
-										Effect.fail(
-											claudeRunnerFailure(
-												"restore runner",
-												"Claude runner attachment is no longer active",
-											),
-										),
+								return Effect.fail(
+									claudeRunnerFailure(
+										"restore runner",
+										"Claude runner attachment is no longer active",
 									),
 								);
 							});
@@ -643,9 +633,14 @@ export const makeProcessClaudeSessionRunner = (
 					);
 				const child = yield* Effect.try({
 					try: () => {
+						if (closing || entry.stopping)
+							throw claudeRunnerFailure(
+								"spawn runner",
+								"Claude runners are shutting down",
+							);
 						prepareClaudeRunnerDirectory(deps.workspaceRoot, configDir);
 						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-						return spawn(
+						const child = spawn(
 							process.execPath,
 							[
 								...process.execArgv,
@@ -667,11 +662,12 @@ export const makeProcessClaudeSessionRunner = (
 								stdio: ["ignore", "inherit", "inherit", "ipc"],
 							},
 						);
+						entry.child = child;
+						entry.pid = child.pid;
+						return child;
 					},
 					catch: (cause) => claudeRunnerFailure("spawn runner", cause),
 				});
-				entry.child = child;
-				entry.pid = child.pid;
 				if (process.env["NODE_ENV"] === "test" && process.connected)
 					process.send?.({
 						channel: "conduit-process-test",
@@ -721,6 +717,7 @@ export const makeProcessClaudeSessionRunner = (
 							value["type"] !== "listening"
 						)
 							return;
+						entry.listening = true;
 						clearTimeout(timer);
 						child.off("error", failed);
 						child.off("exit", exited);
@@ -731,13 +728,14 @@ export const makeProcessClaudeSessionRunner = (
 				return yield* attach(sessionId, entry);
 			}).pipe(
 				Effect.onError((cause) =>
-					Effect.sync(() =>
+					Effect.sync(() => {
+						detach(entry);
 						failed(
 							sessionId,
 							entry,
 							claudeRunnerFailure("spawn runner", Cause.squash(cause)),
-						),
-					).pipe(Effect.andThen(stop(entry))),
+						);
+					}),
 				),
 			);
 
@@ -900,7 +898,7 @@ export const makeProcessClaudeSessionRunner = (
 							candidates.add(old);
 							upgradeMark(sessionId, old, "switched", replacement);
 							runFork(
-								stop(old).pipe(
+								Effect.suspend(() => (closing ? Effect.void : stop(old))).pipe(
 									Effect.ensuring(Effect.sync(() => candidates.delete(old))),
 								),
 							);
@@ -909,7 +907,7 @@ export const makeProcessClaudeSessionRunner = (
 					);
 				}),
 			stop: (entry) =>
-				stop(entry).pipe(
+				Effect.suspend(() => (closing ? Effect.void : stop(entry))).pipe(
 					Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
 				),
 			failed: (sessionId, old, cause) => {
@@ -1035,7 +1033,9 @@ export const makeProcessClaudeSessionRunner = (
 						if (abandoned) {
 							entry.recovering = false;
 							yield* Deferred.succeed(entry.ready, connected.right);
-							yield* stop(entry).pipe(
+							yield* Effect.suspend(() =>
+								closing ? Effect.void : stop(entry),
+							).pipe(
 								Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
 								Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
 							);
@@ -1062,7 +1062,7 @@ export const makeProcessClaudeSessionRunner = (
 											),
 										);
 									},
-									() => preserving,
+									() => closing,
 									deps,
 								).pipe(
 									Effect.mapError((cause) =>
@@ -1099,7 +1099,7 @@ export const makeProcessClaudeSessionRunner = (
 												if (
 													!binding ||
 													sinks.get(command.sinkId) !== binding ||
-													preserving
+													closing
 												)
 													return Effect.void;
 												return entry.outputs.withPermits(1)(
@@ -1164,11 +1164,7 @@ export const makeProcessClaudeSessionRunner = (
 							entry.connection?.destroy();
 							evict(registration.sessionId, entry);
 							candidates.delete(entry);
-							return releaseEntryWaiters(entry, exit.cause).pipe(
-								Effect.andThen(
-									closing && !preserving ? stop(entry) : Effect.void,
-								),
-							);
+							return releaseEntryWaiters(entry, exit.cause);
 						}),
 					);
 				}
@@ -1485,7 +1481,7 @@ export const makeProcessClaudeSessionRunner = (
 						if (
 							command.type !== "send-turn" ||
 							!turn ||
-							preserving ||
+							closing ||
 							Cause.isInterruptedOnly(cause)
 						)
 							return Effect.void;

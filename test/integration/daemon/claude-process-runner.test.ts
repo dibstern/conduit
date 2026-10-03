@@ -387,7 +387,7 @@ describe("Claude session process runner", () => {
 		}
 	}, 45_000);
 
-	it("persists interruption cleanup and terminates the runner on server shutdown during approval", async () => {
+	it("stops a runner waiting for approval and settles its unowned turn on restart", async () => {
 		const harness = await ProcessHarness.start();
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -402,13 +402,29 @@ describe("Claude session process runner", () => {
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
 		await browser.shutdown();
+		await harness.waitForExit();
+		await pending;
+		await vi.waitFor(
+			() => expect(() => process.kill(runner.pid, 0)).toThrow(),
+			{ timeout: 5000 },
+		);
+		expect(existsSync(`${runner.socketPath}.json`)).toBe(false);
+		// The disposed relay cannot acknowledge shutdown output. With the runner
+		// gone, the next startup settles this turn through the ownership check.
+		await harness.restart();
+		const after = await harness.connect(sessionId);
 		await vi
 			.waitFor(
 				() => {
-					const { events } = persisted(harness, sessionId);
+					const { events, commands } = persisted(harness, sessionId);
+					expect(commands.map((command) => command.status)).toEqual(["failed"]);
 					expect(
-						events.some((event) => event.type === "turn.interrupted"),
-					).toBe(true);
+						events.filter(
+							(event) =>
+								event.type === "turn.error" ||
+								event.type === "turn.interrupted",
+						),
+					).toHaveLength(1);
 					expect(
 						events.some(
 							(event) =>
@@ -429,11 +445,9 @@ describe("Claude session process runner", () => {
 					JSON.stringify(persisted(harness, sessionId), null, 2),
 				);
 			});
-		await pending;
-		await harness.dispose();
-		await vi.waitFor(
-			() => expect(() => process.kill(runner.pid, 0)).toThrow(),
-			{ timeout: 5000 },
+		const result = await after.send(sessionId, "after-explicit-approval-stop");
+		expect(result.chunks).toEqual(
+			responseChunks("after-explicit-approval-stop"),
 		);
 	}, 60_000);
 });

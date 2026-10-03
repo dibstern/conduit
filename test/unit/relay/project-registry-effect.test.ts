@@ -1,4 +1,5 @@
 // test/unit/relay/project-registry-effect.test.ts
+import { mkdtempSync, rmSync } from "node:fs";
 import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
@@ -10,13 +11,14 @@ import {
 	Queue,
 	Ref,
 } from "effect";
-import { expect, vi } from "vitest";
+import { afterAll, expect, vi } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	addWithoutRelay,
 	allProjects,
@@ -42,6 +44,10 @@ import {
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+
+const configDir = mkdtempSync("/tmp/project-registry-");
+const TestDaemonStateLive = makeDaemonStateLive({ configDir });
+afterAll(() => rmSync(configDir, { recursive: true, force: true }));
 
 function makeProject(slug: string, dir?: string): StoredProject {
 	return {
@@ -78,6 +84,7 @@ const TestLayer = Layer.fresh(
 	Layer.mergeAll(
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,
+		TestDaemonStateLive,
 		NoOpRelayCacheLive,
 		ConfigPersistenceNoopLive,
 	),
@@ -88,6 +95,7 @@ const FailingRelayTestLayer = Layer.fresh(
 	Layer.mergeAll(
 		makeProjectRegistryLive(),
 		DaemonEventBusLive,
+		TestDaemonStateLive,
 		FailingRelayCacheLive,
 		ConfigPersistenceNoopLive,
 	),
@@ -307,6 +315,7 @@ describe("ProjectRegistry Effect - remove", () => {
 			Layer.mergeAll(
 				makeProjectRegistryLive(),
 				DaemonEventBusLive,
+				TestDaemonStateLive,
 				Layer.succeed(RelayCacheTag, trackingCache),
 				ConfigPersistenceNoopLive,
 			),
@@ -652,6 +661,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 					Layer.mergeAll(
 						makeProjectRegistryLive(),
 						DaemonEventBusLive,
+						TestDaemonStateLive,
 						TrackingRelayCacheLive,
 						ConfigPersistenceNoopLive,
 					),

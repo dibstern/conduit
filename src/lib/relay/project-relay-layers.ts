@@ -64,10 +64,6 @@ import {
 	type PersistenceEffectError,
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import {
-	type ClaudeRunnerRollback,
-	ClaudeRunnerRollbackTag,
-} from "../provider/claude/claude-runner-shutdown.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
@@ -378,15 +374,7 @@ export function createProjectRelayLayers({
 		defaultCommandQueueLayer,
 		makeRelayCommandGateLive(config.slug),
 	).pipe(Layer.provide(baseLayers));
-	const runnerRollback: ClaudeRunnerRollback = {
-		preserve: false,
-		fullStopRequested: config.fullStopRequested ?? Effect.succeed(false),
-	};
-	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers).pipe(
-		Layer.provideMerge(
-			Layer.sync(ClaudeRunnerRollbackTag, () => runnerRollback),
-		),
-	);
+	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {
 		runtime: relayManagedRuntime,
@@ -394,7 +382,6 @@ export function createProjectRelayLayers({
 	};
 	return {
 		relayManagedRuntime,
-		runnerRollback,
 		effectRuntime,
 		monitoringStateAccess,
 		setHistoryIngress: (ingress: EffectOpenCodeRuntimeIngressPort) => {

@@ -27,13 +27,16 @@ import {
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 
 let home: string | undefined;
+let configDir: string | undefined;
 afterEach(() => {
 	if (home) rmSync(home, { recursive: true, force: true });
+	if (configDir) rmSync(configDir, { recursive: true, force: true });
 });
 
 describe("daemon project shell env lifecycle", () => {
 	it("prewarms registered projects without relays, resolves additions, preserves config and removes caches", async () => {
 		home = mkdtempSync(join(tmpdir(), "conduit-env-lifecycle-"));
+		configDir = mkdtempSync("/tmp/project-env-config-");
 		const project = join(home, "project");
 		const added = join(home, "added");
 		mkdirSync(project);
@@ -49,6 +52,7 @@ describe("daemon project shell env lifecycle", () => {
 		const registry = makeProjectRegistryFromDaemonStateLive.pipe(
 			Layer.provideMerge(
 				makeDaemonStateLive({
+					configDir,
 					projects: [{ path: project, slug: "initial", addedAt: 1, shellEnv }],
 				}),
 			),

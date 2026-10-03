@@ -25,7 +25,7 @@ type ReceiptStore = Effect.Effect.Success<
 	ReturnType<typeof makeClaudeRunnerReceiptStore>
 >;
 
-/** A verified attachment is the only authority to signal a discovered PID. */
+/** Verify a discovered runner's identity and protocol before attaching. */
 export const connectClaudeRunner = (options: {
 	readonly socketPath: string;
 	readonly sessionId: string;

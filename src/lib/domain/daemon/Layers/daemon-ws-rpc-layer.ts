@@ -4,7 +4,6 @@ import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
-import { setClaudeRunnerRestart } from "../../../provider/claude/claude-runner-shutdown.js";
 import {
 	type DaemonRpcHandlers,
 	wsRpcHandlers,
@@ -33,7 +32,7 @@ import {
 	addInstance,
 	getInstance,
 	getInstances,
-	InstanceManagerStateTag,
+	type InstanceManagerStateTag,
 	type PollerFibersTag,
 	persistConfig,
 	removeInstance,
@@ -83,15 +82,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
-		const instanceState = yield* InstanceManagerStateTag;
-		yield* Effect.addFinalizer(() =>
-			Effect.gen(function* () {
-				// Requests drain before this scope closes, and relay scopes close afterwards.
-				if ((yield* Ref.get(instanceState)).stopManagedProcesses) {
-					setClaudeRunnerRestart(false);
-				}
-			}),
-		);
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) =>
@@ -214,7 +204,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			Shutdown: () =>
 				run(
 					Effect.gen(function* () {
-						setClaudeRunnerRestart(false);
 						yield* requestManagedOpenCodeShutdown;
 						const state = yield* DaemonStateTag;
 						yield* Ref.update(state, (current) => ({
@@ -249,9 +238,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			RestartWithConfig: (request) =>
 				run(
 					Effect.gen(function* () {
-						setClaudeRunnerRestart(
-							!(yield* Ref.get(instanceState)).stopManagedProcesses,
-						);
 						const state = yield* DaemonStateTag;
 						const update = request.config;
 						const tls =

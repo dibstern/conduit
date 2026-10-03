@@ -80,7 +80,6 @@ export class RelayCreationInvalidatedError extends Data.TaggedError(
 /** Factory function that creates a Relay for the given slug. */
 export type RelayFactory = (
 	slug: string,
-	stopRunners: Effect.Effect<boolean>,
 ) => Effect.Effect<
 	Relay,
 	Error | ProjectNotFound | RelayFactoryError | PersistenceEffectError
@@ -100,10 +99,7 @@ export interface RelayCache {
 	/** Get a cached relay if one exists. Must not create or start a relay. */
 	peek: (slug: string) => Effect.Effect<Option.Option<Relay>>;
 	/** Invalidate (stop and remove) the relay for the given slug. */
-	invalidate: (
-		slug: string,
-		options?: { readonly stopRunnersIn: string },
-	) => Effect.Effect<void>;
+	invalidate: (slug: string) => Effect.Effect<void>;
 }
 
 export class RelayCacheTag extends Context.Tag("RelayCache")<
@@ -115,7 +111,6 @@ interface CacheEntry {
 	readonly scopedRef: ScopedRef.ScopedRef<Relay | null>;
 	readonly ready: Deferred.Deferred<Relay, RelayCacheError>;
 	readonly creationFiber: Deferred.Deferred<Fiber.RuntimeFiber<void, never>>;
-	stopRunners: boolean;
 }
 
 type CacheMap = HashMap.HashMap<string, CacheEntry>;
@@ -148,9 +143,6 @@ export const makeRelayCacheLive = (
 
 export const makeRelayCacheService = (
 	factory: RelayFactory,
-	prepareProjectRunnerStop?: (
-		projectDir: string,
-	) => Effect.Effect<Effect.Effect<void>>,
 ): Effect.Effect<RelayCache, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		// Capture the layer scope so ScopedRefs created at runtime
@@ -174,12 +166,7 @@ export const makeRelayCacheService = (
 			Effect.exit(
 				Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
-						const relay = yield* restore(
-							factory(
-								slug,
-								Effect.sync(() => entry.stopRunners),
-							),
-						);
+						const relay = yield* restore(factory(slug));
 						yield* ScopedRef.set(
 							entry.scopedRef,
 							Effect.gen(function* () {
@@ -224,7 +211,6 @@ export const makeRelayCacheService = (
 								scopedRef,
 								ready,
 								creationFiber,
-								stopRunners: false,
 							};
 
 							yield* Ref.update(cacheRef, (m) =>
@@ -252,28 +238,15 @@ export const makeRelayCacheService = (
 				return relay === null ? Option.none<Relay>() : Option.some(relay);
 			});
 
-		const invalidate: RelayCache["invalidate"] = (slug, options) =>
+		const invalidate: RelayCache["invalidate"] = (slug) =>
 			Effect.gen(function* () {
-				const [existing, preparedStop] = yield* semaphore.withPermits(1)(
-					Effect.gen(function* () {
-						const existing = yield* Ref.modify(cacheRef, (map) => {
-							const entry = HashMap.get(map, slug);
-							if (Option.isSome(entry) && options) {
-								// Removal remains authoritative even if the same slug is re-added.
-								entry.value.stopRunners = true;
-							}
-							return [
-								entry,
-								Option.isSome(entry) ? HashMap.remove(map, slug) : map,
-							] as const;
-						});
-						// Snapshot before allowing another relay to create runners for this directory.
-						const preparedStop = yield* Effect.exit(
-							options && prepareProjectRunnerStop
-								? prepareProjectRunnerStop(options.stopRunnersIn)
-								: Effect.succeed(Effect.void),
-						);
-						return [existing, preparedStop] as const;
+				const existing = yield* semaphore.withPermits(1)(
+					Ref.modify(cacheRef, (map) => {
+						const entry = HashMap.get(map, slug);
+						return [
+							entry,
+							Option.isSome(entry) ? HashMap.remove(map, slug) : map,
+						] as const;
 					}),
 				);
 
@@ -290,9 +263,6 @@ export const makeRelayCacheService = (
 					// which runs relay.stop() via the registered finalizer
 					yield* ScopedRef.set(entry.scopedRef, Effect.succeed(null));
 				}
-				// A failed acquisition may have detached runners and dropped its cache entry.
-				// Preparation failure must not skip disposal of the claimed relay.
-				yield* Effect.flatten(preparedStop);
 			});
 
 		return { get, peek, invalidate } satisfies RelayCache;

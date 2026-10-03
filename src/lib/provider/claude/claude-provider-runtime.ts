@@ -84,11 +84,6 @@ import { makeRecoveredClaudeEventSink } from "./claude-runner-event-sink.js";
 import { claudeRunnerSinkId } from "./claude-runner-protocol.js";
 import { settleUnclaimedClaudeRunnerCommands } from "./claude-runner-recovery.js";
 import { discoverClaudeRunners } from "./claude-runner-registry.js";
-import {
-	type ClaudeRunnerRollback,
-	ClaudeRunnerRollbackTag,
-	preserveClaudeRunners,
-} from "./claude-runner-shutdown.js";
 import { failClaudeRunnerTurn } from "./claude-runner-turn-failure.js";
 import {
 	discoverCapabilitiesEffect,
@@ -248,7 +243,6 @@ export const makeClaudeProviderRuntime = (
 ): Effect.Effect<ClaudeProviderRuntime, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
-		const rollbackOption = yield* Effect.serviceOption(ClaudeRunnerRollbackTag);
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
 		const abortFibers = yield* FiberMap.make<string, void, never>();
@@ -292,7 +286,6 @@ export const makeClaudeProviderRuntime = (
 			interactionFibers,
 			preWarmFibers,
 			providerScope,
-			rollbackOption._tag === "Some" ? rollbackOption.value : undefined,
 		);
 		const providerRuntime = runtime;
 		yield* Effect.addFinalizer(() =>
@@ -405,7 +398,6 @@ export class ClaudeProviderRuntime {
 				},
 			});
 		yield* this.runner.recoverEffect;
-		if (yield* preserveClaudeRunners(this.runnerRollback)) return;
 		const registrations = yield* Effect.try(() =>
 			discoverClaudeRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
 		).pipe(
@@ -457,7 +449,6 @@ export class ClaudeProviderRuntime {
 					// failClaudeRunnerTurn logs errors; database failures still need a retry.
 					if (persistenceError) return yield* Effect.fail(persistenceError);
 				}),
-			() => preserveClaudeRunners(this.runnerRollback),
 		);
 	});
 
@@ -472,7 +463,6 @@ export class ClaudeProviderRuntime {
 			ProviderInstanceFailure
 		>,
 		private readonly providerScope: Scope.Scope,
-		private readonly runnerRollback?: ClaudeRunnerRollback,
 	) {}
 
 	private commandEffect(
@@ -794,7 +784,7 @@ export class ClaudeProviderRuntime {
 								Effect.gen(this, function* () {
 									if (
 										Exit.isFailure(exit) &&
-										!(yield* preserveClaudeRunners(this.runnerRollback))
+										!Cause.isInterruptedOnly(exit.cause)
 									) {
 										yield* this.runner
 											.executeEffect({

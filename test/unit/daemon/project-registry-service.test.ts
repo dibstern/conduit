@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Queue } from "effect";
-import { afterEach, expect } from "vitest";
+import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	addProjectToEffectRegistry,
 	addWithoutRelay,
@@ -38,6 +39,8 @@ const testProject: StoredProject = {
 };
 
 const fixtureDirs: string[] = [];
+const configDir = mkdtempSync("/tmp/registry-service-");
+afterAll(() => rmSync(configDir, { recursive: true, force: true }));
 afterEach(() => {
 	for (const directory of fixtureDirs.splice(0))
 		rmSync(directory, { recursive: true, force: true });
@@ -61,6 +64,7 @@ const makeStubRelayCache = (): RelayCache => ({
 const testLayer = Layer.mergeAll(
 	makeProjectRegistryLive(),
 	DaemonEventBusLive,
+	makeDaemonStateLive({ configDir }),
 	ConfigPersistenceNoopLive,
 	Layer.succeed(RelayCacheTag, makeStubRelayCache()),
 );

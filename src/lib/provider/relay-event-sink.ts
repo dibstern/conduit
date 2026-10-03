@@ -26,7 +26,6 @@ import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { currentClaudeRunnerPermissionReply } from "./claude/claude-runner-receipts.js";
-import { preserveClaudeRunners } from "./claude/claude-runner-shutdown.js";
 import { MissingPendingInteractions } from "./errors.js";
 import {
 	type EventSinkError,
@@ -436,12 +435,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					});
 					return yield* pending.awaitResponse;
 				});
-				// However the wait ends, the ask is over. Anything but an answer
-				// (interrupt, cancel, timeout) is the SDK being told no.
+				// Relay disposal detaches its waiter. Cancellation or failure
+				// resolves the request as a rejection.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
-							if (Exit.isFailure(exit) && (yield* preserveClaudeRunners()))
+							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
 								return;
 							yield* recordInteraction("permission.resolved", {
 								id: request.requestId,
@@ -528,7 +527,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
-							if (Exit.isFailure(exit) && (yield* preserveClaudeRunners()))
+							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
 								return;
 							if (Exit.isSuccess(exit)) {
 								return yield* recordInteraction("question.resolved", {

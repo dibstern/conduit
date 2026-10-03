@@ -33,7 +33,6 @@ import {
 	registerClaudeRunner,
 	runnerPidAlive,
 } from "../../../../src/lib/provider/claude/claude-runner-registry.js";
-import { setClaudeRunnerRestart } from "../../../../src/lib/provider/claude/claude-runner-shutdown.js";
 import type { ClaudeSessionOutput } from "../../../../src/lib/provider/claude/claude-session-runner.js";
 
 const observations: Record<string, unknown>[] = [];
@@ -43,13 +42,13 @@ const children: ChildProcess[] = [];
 let cases = 0;
 
 beforeEach(() => {
-	// These sockets model live runners in this test process. Scope teardown must
-	// disconnect them without signalling the process that owns the test suite.
-	setClaudeRunnerRestart(true);
 	vi.stubEnv("NODE_ENV", "development");
 });
 
 afterEach(async () => {
+	const runnerPids = children.flatMap((child) =>
+		child.pid === undefined ? [] : [child.pid],
+	);
 	for (const socket of sockets) socket.destroy();
 	sockets.clear();
 	await Promise.all(
@@ -67,15 +66,20 @@ afterEach(async () => {
 			child.kill("SIGKILL");
 		});
 	}
-	setClaudeRunnerRestart(false);
 	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
+	const remainingPids = runnerPids.filter(runnerPidAlive);
 	rmSync(config.root, { recursive: true, force: true });
 	mkdirSync("test-results", { recursive: true });
 	writeFileSync(
 		"test-results/85kb-9-adoption-regressions.json",
-		JSON.stringify({ finding: 1, observations }, null, 2),
+		JSON.stringify(
+			{ finding: 1, observations, cleanup: { runnerPids, remainingPids } },
+			null,
+			2,
+		),
 	);
+	expect(remainingPids).toEqual([]);
 });
 
 async function runnerSocket(options: {
@@ -197,7 +201,14 @@ describe("Claude runner adoption", () => {
 	});
 
 	it("retains a live runner's files through transient rejection and restores its pending approval", async () => {
-		const fixture = await runnerSocket({ rejections: 2 });
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1000)"],
+			{ stdio: "ignore" },
+		);
+		children.push(child);
+		const fixture = await runnerSocket({ rejections: 2, child });
+		const kill = vi.spyOn(process, "kill");
 		const emitted: ClaudeSessionOutput[] = [];
 		await Effect.runPromise(
 			Effect.scoped(
@@ -233,6 +244,16 @@ describe("Claude runner adoption", () => {
 				}),
 			),
 		);
+		expect(runnerPidAlive(child.pid ?? 0)).toBe(true);
+		expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+		expect(
+			fixture.commands.some(
+				(message) =>
+					message.type === "command" && message.command.type === "shutdown",
+			),
+		).toBe(false);
+		for (const suffix of ["", ".json", ".spool"])
+			expect(existsSync(`${fixture.socketPath}${suffix}`)).toBe(true);
 		observations.push({
 			case: "transient rejection",
 			attempts: fixture.attempts,
@@ -275,7 +296,6 @@ describe("Claude runner adoption", () => {
 	});
 
 	it("keeps unverified live runner files when startup is interrupted", async () => {
-		setClaudeRunnerRestart(false);
 		const rejected = await Effect.runPromise(Deferred.make<void>());
 		const fixture = await runnerSocket({
 			rejections: Number.POSITIVE_INFINITY,

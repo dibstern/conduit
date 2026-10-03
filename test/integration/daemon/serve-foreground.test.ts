@@ -18,11 +18,15 @@ import {
 	GetStatus,
 	RemoveProject,
 	Shutdown,
+	ViewSession,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { inspectManagedOpenCodeProcess } from "../../../src/lib/instance/managed-opencode-process.js";
-import { ProcessHarness } from "../../helpers/process-harness.js";
+import {
+	ProcessHarness,
+	responseChunks,
+} from "../../helpers/process-harness.js";
 
 // Run after building: CONDUIT_TEST_DIST=dist npx --no-install vitest run
 // --config vitest.integration.config.ts test/integration/daemon/serve-foreground.test.ts
@@ -197,10 +201,10 @@ describe("foreground conduit serve", () => {
 				{
 					ticket: "conduit-test-85kb.16",
 					dist: DIST,
-					expectedScenarios: 15,
+					expectedScenarios: 16,
 					passed:
-						scenarios.length === 15 &&
-						cleanup.length === 15 &&
+						scenarios.length === 16 &&
+						cleanup.length === 16 &&
 						cleanup.every((entry) => entry["passed"] && entry["verified"]),
 					scenarios,
 					cleanup,
@@ -480,67 +484,147 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
-	it("preserves an adopted runner when its relay fails after recovery", async () => {
+	it("retries failed relay adoption on the same server and persists output produced while detached", async () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
+			restartProof: true,
 		});
 		const healthy = await warmProject("process-test");
 		const failedDirectory = join(harness.root, "rollback-project");
 		const failed = await warmProject("rollback-project", failedDirectory);
-		await harness.signal("SIGINT");
+		const prompt = "upgrade-long-turn";
+		const pending = failed.browser
+			.send(failed.sessionId, prompt)
+			.catch(() => undefined);
+		await failed.browser.waitFor(
+			(frame) =>
+				frame["type"] === "delta" &&
+				frame["text"] === responseChunks(prompt)[0],
+		);
+		const registration = JSON.parse(
+			readFileSync(`${failed.runner.socketPath}.json`, "utf8"),
+		) as { runnerId: string; pid: number };
 		const marker = join(
 			failedDirectory,
 			".conduit",
 			"recovery-fail-after-adoption",
 		);
 		const release = `${marker}-release`;
+		const sdkRelease = join(harness.root, "release-upgrade-turn");
+		const evidence: Record<string, unknown> = {
+			retryAfterFailedAdoption: true,
+			runner: failed.runner,
+			registration,
+		};
+		scenarios.push(evidence);
+		const db = new Database(join(failedDirectory, ".conduit/events.db"), {
+			readonly: true,
+		});
 		writeFileSync(marker, "fail only after recovery authenticated the runner");
 		try {
+			await harness.signal("SIGINT");
+			await pending;
 			await harness.restart({ skipBrowserProbe: true });
 			await vi.waitFor(
 				() => expect(existsSync(`${marker}-started`)).toBe(true),
 				{ timeout: 5000 },
 			);
 			expect(alive(failed.runner.pid)).toBe(true);
-			const adopted = await harness.connect(
+			const replacement = harness.generations.at(-1);
+			if (!replacement) throw new Error("Missing replacement generation");
+			evidence["replacement"] = replacement;
+			const healthyBrowser = await harness.connect(
 				healthy.sessionId,
 				undefined,
 				healthy.projectSlug,
 			);
 			expect(
 				(
-					await adopted.send(healthy.sessionId, "adopt-before-rollback")
+					await healthyBrowser.send(healthy.sessionId, "adopt-before-rollback")
 				).chunks.join(""),
 			).toContain("Echo(adopt-before-rollback)");
-			await adopted.close();
-			const removal = await sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				new RemoveProject({ slug: healthy.projectSlug }),
-			);
-			expect(removal.projects.map((project) => project.slug)).not.toContain(
-				healthy.projectSlug,
-			);
 			expect(existsSync(release)).toBe(false);
 			writeFileSync(release, "fail the partially acquired relay");
-			await vi.waitFor(() => expect(existsSync(`${marker}-failed`)).toBe(true));
-			const fresh = await warmProject(
-				"fresh-project",
-				join(harness.root, "fresh-project"),
-			);
+			await vi.waitFor(() => {
+				const proof = harness?.proof() as { logTail: string };
+				expect(proof.logTail).toContain(
+					JSON.stringify(
+						'Failed to recover relay for project "rollback-project"',
+					),
+				);
+			});
 			expect(alive(failed.runner.pid)).toBe(true);
-			await vi.waitFor(() => expect(alive(healthy.runner.pid)).toBe(false), {
-				timeout: 5000,
+			// Retry through ordinary lazy relay startup on this same live server.
+			const attempt = sendRpcRequest(
+				join(harness.configDir, "relay.sock"),
+				new ViewSession({
+					projectSlug: failed.projectSlug,
+					sessionId: failed.sessionId,
+					originId: "failed-lazy-adoption",
+				}),
+			);
+			await expect(attempt).rejects.toBeDefined();
+			expect(alive(failed.runner.pid)).toBe(true);
+			expect(alive(replacement.pid)).toBe(true);
+			evidence["aliveAfterFailedLazyAdoption"] = true;
+			writeFileSync(sdkRelease, "finish the turn with no relay attached");
+			await vi.waitFor(() => {
+				const spool = readFileSync(`${failed.runner.socketPath}.spool`, "utf8");
+				expect(spool).toContain('"type":"turn.completed"');
+				expect(spool).toContain(responseChunks(prompt)[2]);
 			});
-			scenarios.push({
-				rollbackAfterAdoption: true,
-				failed: failed.runner,
-				removed: healthy.runner,
-				fresh: fresh.runner,
-				removal,
+			evidence["completedWhileDetached"] = true;
+			expect(
+				db
+					.prepare(
+						"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
+					)
+					.all(failed.sessionId),
+			).toMatchObject([{ state: "completed" }, { state: "running" }]);
+			rmSync(marker);
+			const adopted = await harness.connect(
+				failed.sessionId,
+				undefined,
+				failed.projectSlug,
+			);
+			await vi.waitFor(() => {
+				expect(
+					db
+						.prepare(
+							"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
+						)
+						.all(failed.sessionId),
+				).toMatchObject([{ state: "completed" }, { state: "completed" }]);
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+						)
+						.all(failed.sessionId),
+				).toEqual([{ status: "completed" }, { status: "completed" }]);
 			});
+			const history = await adopted.history(failed.sessionId);
+			expect(
+				history
+					.at(-1)
+					?.parts?.map((part) => part.text ?? "")
+					.join(""),
+			).toBe(responseChunks(prompt).join(""));
+			const restored = JSON.parse(
+				readFileSync(`${failed.runner.socketPath}.json`, "utf8"),
+			) as { runnerId: string; pid: number };
+			expect(restored).toMatchObject(registration);
+			expect(harness.generations.at(-1)?.pid).toBe(replacement.pid);
+			expect(alive(healthy.runner.pid)).toBe(true);
+			evidence["adoptedRegistration"] = restored;
+			evidence["history"] = history;
+			evidence["sameServer"] = true;
 		} finally {
+			db.close();
+			writeFileSync(sdkRelease, "release SDK turn for cleanup");
 			writeFileSync(release, "release recovery fixture for cleanup");
+			await pending;
 		}
 	}, 60_000);
 
@@ -868,6 +952,64 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
+	it("terminates a suspended registered runner on removal while another project's runner survives", async () => {
+		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
+		const removed = await warmProject("process-test");
+		const retained = await warmProject(
+			"retained-project",
+			join(harness.root, "retained-project"),
+		);
+		const evidence: Record<string, unknown> = {
+			removeSuspendedRegisteredRunner: true,
+			removed: removed.runner,
+			retained: retained.runner,
+		};
+		scenarios.push(evidence);
+		process.kill(removed.runner.pid, "SIGSTOP");
+		const started = performance.now();
+		try {
+			const removal = await sendRpcRequest(
+				join(harness.configDir, "relay.sock"),
+				new RemoveProject({ slug: removed.projectSlug }),
+				{ requestTimeoutMs: 10_000 },
+			).catch((cause: unknown) => {
+				evidence["failure"] = String(cause);
+				throw cause;
+			});
+			evidence["removalMs"] = performance.now() - started;
+			evidence["removal"] = removal;
+			expect(evidence["removalMs"]).toBeLessThan(10_000);
+			expect(removal.projects.map((project) => project.slug)).not.toContain(
+				removed.projectSlug,
+			);
+			expect(removal.projects.map((project) => project.slug)).toContain(
+				retained.projectSlug,
+			);
+			await vi.waitFor(() => {
+				expect(alive(removed.runner.pid)).toBe(false);
+				expect(alive(retained.runner.pid)).toBe(true);
+			});
+			await vi.waitFor(() => {
+				const config = loadDaemonConfig(harness?.configDir);
+				evidence["persistedAfterRemoval"] = config?.projects;
+				expect(config?.projects.map((project) => project.slug)).not.toContain(
+					removed.projectSlug,
+				);
+				expect(config?.projects.map((project) => project.slug)).toContain(
+					retained.projectSlug,
+				);
+			});
+			evidence["suspendedRunnerStopped"] = true;
+		} finally {
+			evidence["elapsedMs"] = performance.now() - started;
+			evidence["removedRunnerAlive"] = alive(removed.runner.pid);
+			evidence["retainedRunnerAlive"] = alive(retained.runner.pid);
+			// On regression the runner is still suspended. End only this fixture's
+			// server so harness teardown can SIGKILL its tracked runner directly.
+			if (alive(removed.runner.pid)) await harness.kill();
+		}
+	}, 40_000);
+
 	it("terminates a removed project's runner when removal races signal shutdown", async () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
@@ -880,17 +1022,20 @@ describe("foreground conduit serve", () => {
 		);
 		const gate = join(harness.root, "signal-config-rename-gated");
 		const release = `${gate}-release`;
-		writeFileSync(gate, "pause config rename after signal preservation begins");
+		writeFileSync(
+			gate,
+			"pause shutdown config rename after SIGINT is observed",
+		);
 		const shutdown = harness.signal("SIGINT");
 		try {
 			await vi.waitFor(() => expect(existsSync(`${gate}-started`)).toBe(true), {
 				timeout: 5000,
 			});
 			const pending = JSON.parse(readFileSync(`${gate}-started`, "utf8")) as {
-				preserve: boolean;
+				signalObserved: boolean;
 				projects: string[];
 			};
-			expect(pending.preserve).toBe(true);
+			expect(pending.signalObserved).toBe(true);
 			expect(pending.projects).toContain(removed.projectSlug);
 			const server = harness.generations.at(-1);
 			if (!server) throw new Error("Missing foreground generation");
@@ -903,6 +1048,10 @@ describe("foreground conduit serve", () => {
 				removed.projectSlug,
 			);
 			expect(existsSync(release)).toBe(false);
+			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
+				timeout: 5000,
+			});
+			expect(alive(retained.runner.pid)).toBe(true);
 			writeFileSync(release, "finish signal disposal after project removal");
 			await shutdown;
 			expect(harness.generations.at(-1)?.exitCode).toBe(0);
@@ -1097,7 +1246,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		}
 	}, 60_000);
 
-	it("stops preserved runners before a browser attaches to the replacement server", async () => {
+	it("stops all registered runners even when their replacement relays never start", async () => {
 		harness = await ProcessHarness.start({
 			dist: DIST,
 			foregroundCli: true,
@@ -1111,25 +1260,74 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Claude runner identity missing");
 		pids.add(runner.pid);
+		const neverStarted = await warmProject(
+			"never-started-project",
+			join(harness.root, "never-started-project"),
+		);
 		await harness.signal("SIGINT");
 		expect(alive(runner.pid)).toBe(true);
-		await harness.restart({ skipBrowserProbe: true });
-		const replacement = harness.generations[1];
-		if (!replacement) throw new Error("Replacement server generation missing");
-		const stop = await harness.runCli(["stop"]);
-		expect(stop.code).toBe(0);
-		await harness.waitForExit();
-		expect(replacement.exitCode).toBe(0);
-		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-			timeout: 5000,
+		expect(alive(neverStarted.runner.pid)).toBe(true);
+		const databases = [
+			harness.projectDir,
+			join(harness.root, "never-started-project"),
+		].map((directory) => {
+			const path = join(directory, ".conduit", "events.db");
+			return { path, original: readFileSync(path) };
 		});
-		noPidArtifacts();
-		scenarios.push({
-			withoutBrowserAttachment: true,
-			runner,
-			replacement,
-			stop,
-		});
+		for (const database of databases)
+			writeFileSync(
+				database.path,
+				"isolated recovery failure: invalid SQLite database",
+			);
+		const markCursor = harness.marks.length;
+		try {
+			await harness.restart({ skipBrowserProbe: true });
+			await vi.waitFor(() => {
+				const proof = harness?.proof() as { logTail: string };
+				for (const projectSlug of ["process-test", "never-started-project"])
+					expect(proof.logTail).toContain(
+						JSON.stringify(
+							`Failed to recover relay for project "${projectSlug}"`,
+						),
+					);
+			});
+			const replacement = harness.generations[1];
+			if (!replacement)
+				throw new Error("Replacement server generation missing");
+			expect(
+				harness.marks
+					.slice(markCursor)
+					.filter((mark) => mark.kind === "runner-started"),
+			).toEqual([]);
+			const status = await sendRpcRequest(
+				join(harness.configDir, "relay.sock"),
+				new GetStatus({}),
+			);
+			expect(status.projects).toHaveLength(2);
+			expect(
+				status.projects.every((project) => project.sse === undefined),
+			).toBe(true);
+			const stop = await harness.runCli(["stop"]);
+			expect(stop.code).toBe(0);
+			await harness.waitForExit();
+			expect(replacement.exitCode).toBe(0);
+			await vi.waitFor(() => {
+				expect(alive(runner.pid)).toBe(false);
+				expect(alive(neverStarted.runner.pid)).toBe(false);
+			});
+			noPidArtifacts();
+			scenarios.push({
+				withoutBrowserAttachment: true,
+				withoutAcquiredRelay: true,
+				status,
+				runners: [runner, neverStarted.runner],
+				replacement,
+				stop,
+			});
+		} finally {
+			for (const database of databases)
+				writeFileSync(database.path, database.original);
+		}
 	}, 45_000);
 
 	it("exits immediately on a second SIGINT during graceful shutdown", async () => {

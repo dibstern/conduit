@@ -481,9 +481,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 			{ signal: config.signal },
 		);
 	} catch (err) {
-		// Failed acquisition may already have adopted durable runners. Project
-		// removal cancels acquisition instead, and must still end those runners.
-		layers.runnerRollback.preserve = !config.signal?.aborted;
 		await relayManagedRuntime.dispose();
 		throw err;
 	}

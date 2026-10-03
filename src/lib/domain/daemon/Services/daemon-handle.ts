@@ -4,12 +4,14 @@ import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
+import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { generateSlug } from "../../../utils.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
 import { DaemonEventBusTag } from "./daemon-pubsub.js";
+import { DaemonStateTag } from "./daemon-state.js";
 import {
 	getInstances as getEffectInstances,
 	InstanceManagerStateTag,
@@ -36,7 +38,7 @@ export interface EffectDaemonHandle {
 	) => Effect.Effect<StoredProject, ProjectAlreadyExists>;
 	readonly removeProject: (
 		slug: string,
-	) => Effect.Effect<void, ProjectNotFound>;
+	) => Effect.Effect<void, ProjectNotFound | ClaudeRuntimeError>;
 	readonly getStatus: () => Effect.Effect<DaemonStatus>;
 	readonly getProjects: () => Effect.Effect<ReadonlyArray<StoredProject>>;
 	readonly getInstances: () => Effect.Effect<ReadonlyArray<OpenCodeInstance>>;
@@ -81,6 +83,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| RelayCacheTag
 	| DaemonLifecycleContextTag
 	| InstanceManagerStateTag
+	| DaemonStateTag
 > = Layer.effect(
 	DaemonHandleTag,
 	Effect.gen(function* () {
@@ -91,6 +94,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const relayCache = yield* RelayCacheTag;
 		const lifecycleContext = yield* DaemonLifecycleContextTag;
 		const instanceState = yield* InstanceManagerStateTag;
+		const daemonState = yield* DaemonStateTag;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
 		const onboardingPort = Effect.sync(() =>
@@ -154,6 +158,7 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(RelayCacheTag, relayCache),
 					Effect.provideService(ConfigPersistenceTag, persistence),
+					Effect.provideService(DaemonStateTag, daemonState),
 				);
 			}).pipe(Effect.withSpan("daemonHandle.removeProject"));
 

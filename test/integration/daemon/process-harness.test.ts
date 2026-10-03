@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ProcessHarness,
@@ -49,6 +49,30 @@ describe("foreground daemon process harness", () => {
 		await harness.disconnectParent();
 		expect(harness.generations[0]?.exitCode).toBe(0);
 		expect(harness.generations[0]?.signal).toBeNull();
+	});
+
+	it("kills a tracked detached runner during teardown even without its registration", async () => {
+		harness = await ProcessHarness.start();
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Tracked teardown proof");
+		await browser.send(sessionId, "tracked-teardown");
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing verified runner");
+		await harness.kill();
+		process.kill(runner.pid, "SIGSTOP");
+		rmSync(`${runner.socketPath}.json`);
+		try {
+			await harness.dispose();
+			expect(harness.runnerPids()).toContain(runner.pid);
+			expect(harness.remainingRunnerPids()).toEqual([]);
+		} finally {
+			try {
+				process.kill(runner.pid, "SIGKILL");
+			} catch {
+				// Successful teardown already killed this fixture-owned PID.
+			}
+		}
 	});
 
 	it.each([
