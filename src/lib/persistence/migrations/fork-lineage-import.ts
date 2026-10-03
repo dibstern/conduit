@@ -16,6 +16,7 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Layer, Schema } from "effect";
 import { loadDaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
+import { projectEventsDbPath } from "../project-storage.js";
 
 class ForkLineageImportError extends Data.TaggedError(
 	"ForkLineageImportError",
@@ -104,7 +105,7 @@ export const migrateForkLineage = (configDir: string) =>
 			source;
 		const remaining = new Set(entries.keys());
 		for (const project of projects) {
-			const filename = join(project, ".conduit", "events.db");
+			const filename = projectEventsDbPath({ directory: project });
 			if (!existsSync(filename)) continue;
 			const sqliteLayer = SqliteNode.layer({ filename }).pipe(
 				Layer.provide(Reactivity.layer),

@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import { resolve } from "node:path";
+import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Cause,
@@ -26,6 +26,7 @@ import {
 } from "effect";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
+import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -314,7 +315,8 @@ export const RelayFactoryLive = (
 								reason: `Project directory does not exist: ${project.directory}`,
 							});
 						}
-						const conduitDir = resolve(project.directory, ".conduit");
+						const dbPath = projectEventsDbPath(project);
+						const conduitDir = dirname(dbPath);
 						yield* Effect.try({
 							try: () => mkdirSync(conduitDir, { recursive: true }),
 							catch: (cause) =>
@@ -323,8 +325,6 @@ export const RelayFactoryLive = (
 									cause,
 								}),
 						});
-
-						const dbPath = resolve(conduitDir, "events.db");
 
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({

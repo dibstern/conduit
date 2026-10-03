@@ -1,5 +1,4 @@
 import { statSync } from "node:fs";
-import { resolve } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
@@ -12,6 +11,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
@@ -69,7 +69,7 @@ const readProjectSessions = (
 		if (gitCache.isStale(projectDirectory))
 			void gitCache.refresh(projectDirectory);
 
-		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
+		const databasePath = projectEventsDbPath({ directory: projectDirectory });
 		const databaseStat = yield* Effect.either(
 			Effect.try({
 				try: () => statSync(databasePath),
@@ -121,7 +121,7 @@ const readProjectSessions = (
 /** Check outstanding Claude admissions without acquiring the project's relay. */
 export const hasRunningClaudeTurn = (projectDirectory: string) =>
 	Effect.gen(function* () {
-		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
+		const databasePath = projectEventsDbPath({ directory: projectDirectory });
 		const databaseStat = yield* Effect.either(
 			Effect.try({
 				try: () => statSync(databasePath),
@@ -154,7 +154,7 @@ export const hasColdAutoSettleCandidate = (
 	idleWindowMs: number,
 ) =>
 	Effect.gen(function* () {
-		const databasePath = resolve(projectDirectory, ".conduit", "events.db");
+		const databasePath = projectEventsDbPath({ directory: projectDirectory });
 		const databaseStat = yield* Effect.either(
 			// Keep the raw error: the shorthand form wraps it in UnknownException,
 			// hiding the ENOENT code that marks a project with no store yet.
@@ -261,7 +261,7 @@ export const listDaemonSessions = (
 export const resolveDaemonSession = (sessionId: string) =>
 	Effect.gen(function* () {
 		for (const project of yield* allProjects) {
-			const databasePath = resolve(project.directory, ".conduit", "events.db");
+			const databasePath = projectEventsDbPath(project);
 			const result = yield* Effect.exit(
 				Effect.gen(function* () {
 					yield* Effect.try(() => statSync(databasePath));
