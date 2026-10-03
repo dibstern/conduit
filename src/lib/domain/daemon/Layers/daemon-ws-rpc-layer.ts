@@ -63,6 +63,7 @@ export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
 export const DaemonWsRpcHandlersLive = Layer.scoped(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
+		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const context = yield* Effect.context<
 			| ProjectRegistryTag
 			| DaemonConfigRefTag
@@ -561,7 +562,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ListDaemonSessions: (request) =>
 				run(
-					listDaemonSessions({
+					listDaemonSessions(configDir, {
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
@@ -576,7 +577,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ResolveSession: (request) =>
 				run(
-					resolveDaemonSession(request.sessionId).pipe(
+					resolveDaemonSession(configDir, request.sessionId).pipe(
 						Effect.map((projectSlug) => ({ projectSlug })),
 					),
 				),

@@ -42,6 +42,7 @@ import {
 	type ManagedOpenCodeRecord,
 	stopManagedOpenCode,
 } from "../../src/lib/instance/managed-opencode-process.js";
+import { projectStorageDir } from "../../src/lib/persistence/project-storage.js";
 import type { ModelInfo } from "../../src/lib/provider/types.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
@@ -364,6 +365,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		}, 25);
 		this.ownershipObserver.unref();
 		this.rememberManagedOpenCode();
+	}
+
+	projectStorePath(slug = "process-test"): string {
+		return join(projectStorageDir(this.configDir, slug), "events.db");
 	}
 
 	static create(

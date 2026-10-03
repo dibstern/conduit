@@ -29,6 +29,7 @@ import {
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
+import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
@@ -694,7 +695,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
-		Layer.effectDiscard(migrateForkLineage(configDir)),
+		Layer.effectDiscard(
+			migrateProjectStorage(configDir).pipe(
+				Effect.andThen(migrateForkLineage(configDir)),
+			),
+		),
 		DaemonEventBusLive,
 		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
@@ -868,7 +873,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
-		AutoSettleLive,
+		AutoSettleLive(configDir),
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		InstanceHealthPollingLive,

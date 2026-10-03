@@ -283,7 +283,7 @@ export function createTestHarness(): TestHarness {
 
 /**
  * Writes a migrated event store to `filename` and seeds it, for fixtures that
- * lay down a project's `.conduit/events.db` before the code under test opens it.
+ * lay down a project history store before the code under test opens it.
  * The SQLite driver is synchronous, so runSync completes; it throws if that ever
  * stops being true.
  */

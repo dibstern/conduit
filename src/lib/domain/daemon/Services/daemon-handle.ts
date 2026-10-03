@@ -20,6 +20,7 @@ import {
 	type ProjectAlreadyExists,
 	type ProjectNotFound,
 	ProjectRegistryTag,
+	type ProjectStorageReadError,
 	removeProjectFromEffectRegistry,
 } from "./project-registry-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
@@ -31,7 +32,10 @@ export interface EffectDaemonHandle {
 		dir: string,
 		slug?: string,
 		instanceId?: string,
-	) => Effect.Effect<StoredProject, ProjectAlreadyExists>;
+	) => Effect.Effect<
+		StoredProject,
+		ProjectAlreadyExists | ProjectStorageReadError
+	>;
 	readonly removeProject: (
 		slug: string,
 	) => Effect.Effect<void, ProjectNotFound | ClaudeRuntimeError>;
@@ -114,6 +118,7 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),
+					Effect.provideService(DaemonStateTag, daemonState),
 				);
 				yield* persistence.requestSave;
 				return project;

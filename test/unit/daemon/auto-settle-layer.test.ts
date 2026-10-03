@@ -28,6 +28,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 
 const DAY = 86_400_000;
 
@@ -58,7 +59,7 @@ describe("daemon automatic settlement layer", () => {
 				const logger = Logger.make(({ logLevel, message }) => {
 					logs.push({ level: logLevel.label, message });
 				});
-				const layer = AutoSettleLive.pipe(
+				const layer = AutoSettleLive(directory).pipe(
 					Layer.provide(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -131,7 +132,7 @@ describe("daemon automatic settlement layer", () => {
 						relays.get(slug) ?? fakeRelay(slug, () => Effect.succeed(0)),
 					),
 				);
-				const layer = AutoSettleLive.pipe(
+				const layer = AutoSettleLive(dir).pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -182,10 +183,10 @@ describe("daemon automatic settlement layer", () => {
 		() =>
 			Effect.gen(function* () {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-cold-"));
-				mkdirSync(join(dir, ".conduit"));
+				mkdirSync(projectStorageDir(dir, "cold"), { recursive: true });
 				const now = Date.now();
 				const old = now - 4 * DAY;
-				const dbPath = join(dir, ".conduit", "events.db");
+				const dbPath = join(projectStorageDir(dir, "cold"), "events.db");
 				yield* Effect.gen(function* () {
 					const store = yield* EventStoreEffectTag;
 					const runner = yield* ProjectionRunnerEffectTag;
@@ -214,7 +215,7 @@ describe("daemon automatic settlement layer", () => {
 				}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath)));
 				const sweep = vi.fn(() => Effect.succeed(1));
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
-				const layer = AutoSettleLive.pipe(
+				const layer = AutoSettleLive(dir).pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
 							DaemonConfigRefLive(
@@ -252,7 +253,7 @@ describe("daemon automatic settlement layer", () => {
 			Effect.gen(function* () {
 				const peek = vi.fn(() => Effect.succeed(Option.none<Relay>()));
 				const invalidate = vi.fn(() => Effect.void);
-				const layer = AutoSettleLive.pipe(
+				const layer = AutoSettleLive("/tmp/conduit-auto-disabled-fixture").pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
 							DaemonConfigRefLive(

@@ -84,15 +84,20 @@ export const migrateForkLineage = (configDir: string) =>
 					}
 				}
 				if (!hasSidecar && archiveText === undefined) return undefined;
-				const projects = new Set(
-					loadDaemonConfig(configDir)?.projects.map((project) => project.path),
+				const projects = new Map(
+					loadDaemonConfig(configDir)?.projects.map((project) => [
+						project.path,
+						{ slug: project.slug, directory: project.path },
+					]),
 				);
 				const recentPath = join(configDir, "recent.json");
 				if (existsSync(recentPath)) {
 					for (const project of deserializeRecent(
 						readFileSync(recentPath, "utf8"),
 					)) {
-						projects.add(project.directory);
+						if (!projects.has(project.directory)) {
+							projects.set(project.directory, project);
+						}
 					}
 				}
 				return { path, archive, archiveText, hasSidecar, entries, projects };
@@ -104,8 +109,8 @@ export const migrateForkLineage = (configDir: string) =>
 		const { path, archive, archiveText, hasSidecar, entries, projects } =
 			source;
 		const remaining = new Set(entries.keys());
-		for (const project of projects) {
-			const filename = projectEventsDbPath({ directory: project });
+		for (const project of projects.values()) {
+			const filename = projectEventsDbPath({ configDir, ...project });
 			if (!existsSync(filename)) continue;
 			const sqliteLayer = SqliteNode.layer({ filename }).pipe(
 				Layer.provide(Reactivity.layer),

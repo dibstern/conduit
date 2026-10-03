@@ -20,6 +20,7 @@ import type {
 	DaemonSessionQueryResult,
 	SessionInfo,
 } from "../../../shared-types.js";
+import type { StoredProject } from "../../../types.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
@@ -50,12 +51,13 @@ interface ProjectSessionCandidate {
 }
 
 const readProjectSessions = (
-	projectSlug: string,
-	projectDirectory: string,
+	project: Pick<StoredProject, "slug" | "directory">,
+	configDir: string,
 	options: DaemonSessionQueryOptions,
 	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
+		const { slug: projectSlug, directory: projectDirectory } = project;
 		const directory = yield* Effect.try({
 			try: () => statSync(projectDirectory),
 			catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
@@ -69,7 +71,7 @@ const readProjectSessions = (
 		if (gitCache.isStale(projectDirectory))
 			void gitCache.refresh(projectDirectory);
 
-		const databasePath = projectEventsDbPath({ directory: projectDirectory });
+		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
 			Effect.try({
 				try: () => statSync(databasePath),
@@ -119,9 +121,12 @@ const readProjectSessions = (
 	});
 
 /** Check outstanding Claude admissions without acquiring the project's relay. */
-export const hasRunningClaudeTurn = (projectDirectory: string) =>
+export const hasRunningClaudeTurn = (
+	project: Pick<StoredProject, "slug" | "directory">,
+	configDir: string,
+) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ directory: projectDirectory });
+		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
 			Effect.try({
 				try: () => statSync(databasePath),
@@ -149,12 +154,13 @@ export const hasRunningClaudeTurn = (projectDirectory: string) =>
 
 /** Use the same read-only SQLite path as the daemon-wide session list. */
 export const hasColdAutoSettleCandidate = (
-	projectDirectory: string,
+	project: Pick<StoredProject, "slug" | "directory">,
+	configDir: string,
 	now: number,
 	idleWindowMs: number,
 ) =>
 	Effect.gen(function* () {
-		const databasePath = projectEventsDbPath({ directory: projectDirectory });
+		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
 			// Keep the raw error: the shorthand form wraps it in UnknownException,
 			// hiding the ENOENT code that marks a project with no store yet.
@@ -181,6 +187,7 @@ export const hasColdAutoSettleCandidate = (
 	});
 
 export const listDaemonSessions = (
+	configDir: string,
 	options: DaemonSessionQueryOptions = {},
 	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
@@ -205,12 +212,7 @@ export const listDaemonSessions = (
 			(project) =>
 				Effect.gen(function* () {
 					const exit = yield* Effect.exit(
-						readProjectSessions(
-							project.slug,
-							project.directory,
-							projectOptions,
-							gitCache,
-						),
+						readProjectSessions(project, configDir, projectOptions, gitCache),
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
@@ -258,10 +260,10 @@ export const listDaemonSessions = (
 		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
 
-export const resolveDaemonSession = (sessionId: string) =>
+export const resolveDaemonSession = (configDir: string, sessionId: string) =>
 	Effect.gen(function* () {
 		for (const project of yield* allProjects) {
-			const databasePath = projectEventsDbPath(project);
+			const databasePath = projectEventsDbPath({ configDir, ...project });
 			const result = yield* Effect.exit(
 				Effect.gen(function* () {
 					yield* Effect.try(() => statSync(databasePath));

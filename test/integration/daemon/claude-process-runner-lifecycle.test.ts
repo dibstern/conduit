@@ -34,7 +34,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function snapshot(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(join(harness.projectDir, ".conduit/events.db"), {
+	const db = new Database(harness.projectStorePath(), {
 		readonly: true,
 	});
 	try {

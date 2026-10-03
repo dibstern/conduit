@@ -104,7 +104,13 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
 				expect(config).toEqual(
 					expect.objectContaining({
-						persistenceDbPath: join(projectDir, ".conduit", "events.db"),
+						persistenceDbPath: join(
+							dir,
+							"config",
+							"projects",
+							"effect-project",
+							"events.db",
+						),
 					}),
 				);
 				expect(config).not.toHaveProperty("persistence");

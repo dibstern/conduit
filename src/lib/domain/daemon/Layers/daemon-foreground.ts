@@ -457,7 +457,7 @@ export async function startForegroundDaemon(
 						);
 						if (
 							runners.length > 0 ||
-							(yield* hasRunningClaudeTurn(project.directory))
+							(yield* hasRunningClaudeTurn(project, configDir))
 						) {
 							// Cold projects stay lazy unless runner recovery or turn settlement needs them.
 							yield* relayCache.get(project.slug);

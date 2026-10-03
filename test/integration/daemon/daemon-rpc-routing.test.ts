@@ -28,6 +28,7 @@ import {
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeEffectWsHandler } from "../../../src/lib/server/effect-ws-handler.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -37,11 +38,15 @@ import {
 } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
-const makeProjectStore = (directory: string, sessionId: string): void => {
-	const conduitDirectory = join(directory, ".conduit");
-	mkdirSync(conduitDirectory, { recursive: true });
+const makeProjectStore = (
+	configDir: string,
+	slug: string,
+	sessionId: string,
+): void => {
+	const storageDirectory = projectStorageDir(configDir, slug);
+	mkdirSync(storageDirectory, { recursive: true });
 	writeEventStore(
-		join(conduitDirectory, "events.db"),
+		join(storageDirectory, "events.db"),
 		Effect.flatMap(
 			SqlClient.SqlClient,
 			(sql) => sql`INSERT INTO sessions (
@@ -78,8 +83,8 @@ describe("daemon shared RPC routing", () => {
 				const projectB = join(root, "project-b");
 				mkdirSync(projectA);
 				mkdirSync(projectB);
-				makeProjectStore(projectA, "session-a");
-				makeProjectStore(projectB, "session-b");
+				makeProjectStore(root, "project-a", "session-a");
+				makeProjectStore(root, "project-b", "session-b");
 				const projects = [
 					{
 						slug: "project-a",
@@ -183,7 +188,9 @@ describe("daemon shared RPC routing", () => {
 				);
 				yield* Layer.build(
 					WebSocketRoutingLive.pipe(
-						Layer.provide(makeDaemonRpcTestLayer(projects, factory)),
+						Layer.provide(
+							makeDaemonRpcTestLayer(projects, factory, { configDir: root }),
+						),
 						Layer.provide(
 							Layer.mergeAll(
 								Layer.effect(HttpServerRefTag, Ref.make<Server | null>(server)),

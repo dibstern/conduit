@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -130,12 +130,9 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 					readFileSync(`${runner.socketPath}.json`, "utf8"),
 				) as ClaudeRunnerRegistration;
 				expect(registration).toMatchObject({ sessionId, pid: runner.pid });
-				const db = new Database(
-					join(harness.projectDir, ".conduit/events.db"),
-					{
-						readonly: true,
-					},
-				);
+				const db = new Database(harness.projectStorePath(), {
+					readonly: true,
+				});
 				try {
 					const checkpoint = db
 						.prepare(

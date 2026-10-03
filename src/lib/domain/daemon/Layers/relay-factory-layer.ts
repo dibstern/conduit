@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import { dirname } from "node:path";
+import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Cause,
@@ -26,7 +26,11 @@ import {
 } from "effect";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
-import { projectEventsDbPath } from "../../../persistence/project-storage.js";
+import {
+	projectEventsDbPath,
+	projectStorageDir,
+	writeProjectStorageOwner,
+} from "../../../persistence/project-storage.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -196,7 +200,7 @@ export const RelayFactoryLive = (
 				ProjectRelayConfig["listDaemonSessions"]
 			> = (options) =>
 				runCallback(
-					listEffectDaemonSessions(options).pipe(
+					listEffectDaemonSessions(configDir, options).pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 					),
 				);
@@ -315,16 +319,32 @@ export const RelayFactoryLive = (
 								reason: `Project directory does not exist: ${project.directory}`,
 							});
 						}
-						const dbPath = projectEventsDbPath(project);
-						const conduitDir = dirname(dbPath);
+						const dbPath = projectEventsDbPath({ configDir, ...project });
+						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
-							try: () => mkdirSync(conduitDir, { recursive: true }),
+							try: () => {
+								mkdirSync(storageDir, { recursive: true });
+								writeProjectStorageOwner(
+									configDir,
+									project.slug,
+									project.directory,
+								);
+							},
 							catch: (cause) =>
 								new RelayFactoryError({
-									reason: `Failed to create .conduit directory at ${conduitDir}`,
+									reason: `Failed to prepare project storage at ${storageDir}`,
 									cause,
 								}),
-						});
+						}).pipe(
+							Effect.catchAll((error) =>
+								dbPath === join(storageDir, "events.db")
+									? Effect.fail(error)
+									: Effect.logWarning(
+											"Using legacy project history after storage setup failed",
+											{ projectSlug: project.slug, cause: error },
+										),
+							),
+						);
 
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({

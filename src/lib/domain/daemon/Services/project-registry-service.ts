@@ -25,9 +25,9 @@ import {
 	Stream,
 } from "effect";
 import { withCachedProjectGit } from "../../../git/session-git.js";
+import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import type { StoredProject } from "../../../types.js";
-import { generateSlug } from "../../../utils.js";
 import { requestConfigSave } from "./config-persistence-service.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
@@ -691,6 +691,17 @@ const normalizeProjectDirectory = (directory: string): string => {
 const titleForDirectory = (directory: string): string =>
 	basename(directory) || "project";
 
+export class ProjectStorageReadError extends Data.TaggedError(
+	"ProjectStorageReadError",
+)<{
+	readonly configDir: string;
+	readonly cause: unknown;
+}> {
+	get message(): string {
+		return `Failed to read project storage in ${this.configDir}: ${String(this.cause)}`;
+	}
+}
+
 export const addProjectToEffectRegistry = ({
 	directory,
 	slug,
@@ -709,8 +720,21 @@ export const addProjectToEffectRegistry = ({
 
 		const projects = yield* allProjects;
 		const existingSlugs = new Set(projects.map((project) => project.slug));
+		let resolvedSlug = slug;
+		if (resolvedSlug === undefined) {
+			const { configDir } = yield* Ref.get(yield* DaemonStateTag);
+			resolvedSlug = yield* Effect.try({
+				try: () =>
+					chooseProjectSlug({
+						configDir,
+						directory: normalizedDirectory,
+						liveSlugs: existingSlugs,
+					}),
+				catch: (cause) => new ProjectStorageReadError({ configDir, cause }),
+			});
+		}
 		const project: StoredProject = {
-			slug: slug ?? generateSlug(normalizedDirectory, existingSlugs),
+			slug: resolvedSlug,
 			directory: normalizedDirectory,
 			title: titleForDirectory(normalizedDirectory),
 			lastUsed: Date.now(),

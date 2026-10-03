@@ -334,7 +334,7 @@ describe("foreground conduit serve", () => {
 			join(harness.root, "healthy-project"),
 		);
 		await harness.signal("SIGINT");
-		const database = join(harness.projectDir, ".conduit", "events.db");
+		const database = harness.projectStorePath();
 		const original = readFileSync(database);
 		writeFileSync(
 			database,
@@ -390,6 +390,7 @@ describe("foreground conduit serve", () => {
 		await harness.signal("SIGINT");
 		const marker = join(harness.projectDir, ".conduit", "recovery-gated");
 		const release = `${marker}-release`;
+		mkdirSync(join(harness.projectDir, ".conduit"), { recursive: true });
 		writeFileSync(marker, "hold eager recovery");
 		const interruptMarker = join(harness.root, "sigint-observed");
 		rmSync(interruptMarker, { force: true });
@@ -440,6 +441,7 @@ describe("foreground conduit serve", () => {
 		await harness.signal("SIGINT");
 		const marker = join(recoveringDirectory, ".conduit", "recovery-gated");
 		const release = `${marker}-release`;
+		mkdirSync(join(recoveringDirectory, ".conduit"), { recursive: true });
 		writeFileSync(marker, "hold second project recovery");
 		try {
 			await harness.restart({ skipBrowserProbe: true });
@@ -522,9 +524,10 @@ describe("foreground conduit serve", () => {
 			registration,
 		};
 		scenarios.push(evidence);
-		const db = new Database(join(failedDirectory, ".conduit/events.db"), {
+		const db = new Database(harness.projectStorePath("rollback-project"), {
 			readonly: true,
 		});
+		mkdirSync(join(failedDirectory, ".conduit"), { recursive: true });
 		writeFileSync(marker, "fail only after recovery authenticated the runner");
 		try {
 			await harness.signal("SIGINT");
@@ -647,6 +650,7 @@ describe("foreground conduit serve", () => {
 		);
 		const release = `${marker}-release`;
 		const attempts: Array<Record<string, unknown>> = [];
+		mkdirSync(join(harness.projectDir, ".conduit"), { recursive: true });
 		writeFileSync(marker, "fail after authenticating the preserved runner");
 		try {
 			for (const command of ["signal", "stop"] as const) {
@@ -711,8 +715,9 @@ describe("foreground conduit serve", () => {
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Detached completed turn");
 		const projectDirectory = harness.projectDir;
+		const storePath = harness.projectStorePath();
 		const readTurn = () => {
-			const db = new Database(join(projectDirectory, ".conduit/events.db"), {
+			const db = new Database(storePath, {
 				readonly: true,
 			});
 			try {
@@ -760,6 +765,7 @@ describe("foreground conduit serve", () => {
 			sessionId,
 		};
 		scenarios.push(evidence);
+		mkdirSync(join(projectDirectory, ".conduit"), { recursive: true });
 		const pending = browser
 			.send(sessionId, "upgrade-long-turn")
 			.catch(() => undefined);
@@ -1186,11 +1192,10 @@ process.on("SIGTERM", () => { child.kill("SIGTERM"); process.exit(0); });
 `,
 		);
 		chmodSync(executable, 0o755);
-		mkdirSync(join(harness.projectDir, ".conduit"));
-		writeFileSync(
-			join(harness.projectDir, ".conduit", "events.db"),
-			"invalid fixture database",
-		);
+		mkdirSync(join(harness.configDir, "projects", "process-test"), {
+			recursive: true,
+		});
+		writeFileSync(harness.projectStorePath(), "invalid fixture database");
 		await expect(harness.restart()).rejects.toThrow();
 		const record = JSON.parse(
 			readFileSync(
@@ -1347,10 +1352,9 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		expect(alive(runner.pid)).toBe(true);
 		expect(alive(neverStarted.runner.pid)).toBe(true);
 		const databases = [
-			harness.projectDir,
-			join(harness.root, "never-started-project"),
-		].map((directory) => {
-			const path = join(directory, ".conduit", "events.db");
+			harness.projectStorePath(),
+			harness.projectStorePath("never-started-project"),
+		].map((path) => {
 			return { path, original: readFileSync(path) };
 		});
 		for (const database of databases)
