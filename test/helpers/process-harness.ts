@@ -687,7 +687,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 					ready(value as unknown as Generation);
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
-						generation &&
 						value["module"] === sdkModule &&
 						value["projectDir"] === this.projectDir
 					) {
