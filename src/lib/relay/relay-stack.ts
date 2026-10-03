@@ -36,6 +36,7 @@ import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
+import { makeClaudeSessionRunner } from "../provider/claude/claude-provider-runtime.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -482,6 +483,10 @@ export interface RelayStack {
 export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
+	// Choose before loading the env-module fake, which also loads in the runner child.
+	const claudeRunnerFactory = config.claudeSdk
+		? makeClaudeSessionRunner
+		: undefined;
 	// Child-process tests load their fake at the existing SDK factory seam.
 	// Normal launches never import test code or change provider selection.
 	const testQueryModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
@@ -540,6 +545,7 @@ export async function createProjectRelay(
 	const defaultCommandQueue = new RelayDefaultCommandQueue();
 	const layers = createProjectRelayLayers({
 		config,
+		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(testSendLimit !== undefined && { testSendLimit }),
 		backgroundLiveness,
 		getWsHandler: () => wsHandler,

@@ -164,7 +164,16 @@ export function createClaudeTraceReplayer(
 						message.type === "result" &&
 						index < messages.length - 1
 					) {
-						await held;
+						// Only this query's own stop may cut the hold short: the runtime
+						// also opens and closes spare (pre-warmed) queries.
+						const { signal } = aborted;
+						if (!signal.aborted)
+							await Promise.race([
+								held,
+								new Promise((resolve) =>
+									signal.addEventListener("abort", resolve, { once: true }),
+								),
+							]);
 						if (interrupted) break;
 					}
 					const tool =
@@ -198,13 +207,11 @@ export function createClaudeTraceReplayer(
 			interrupt: async () => {
 				interrupted = true;
 				aborted.abort();
-				release();
 				return undefined;
 			},
 			close: () => {
 				interrupted = true;
 				aborted.abort();
-				release();
 			},
 			// Settings the runtime syncs before each turn; traces are fixed.
 			setModel: async () => {},
