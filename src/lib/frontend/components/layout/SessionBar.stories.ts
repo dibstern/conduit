@@ -997,3 +997,53 @@ export const DesktopUnreadAndSettled: Story = {
 		await expect(canvas.getByTestId("session-bar-state-chip")).toBeVisible();
 	},
 };
+
+/**
+ * Phone chrome floats over the transcript, so banner tints (all translucent)
+ * need an opaque backing or the messages show through them.
+ */
+export const IslandWithBanners: Story = {
+	args: {
+		island: true,
+		banners: [
+			{
+				id: "build-mismatch",
+				variant: "warning",
+				icon: "refresh-cw",
+				text: "This page and the server have different builds. Restart the server, then reload this tab. Your draft is still here.",
+				dismissible: false,
+			},
+			{
+				id: "skip-perms-1",
+				variant: "skip-permissions",
+				icon: "shield-off",
+				text: "Permissions are disabled. Tools will run without approval.",
+				dismissible: false,
+			},
+		],
+	},
+	play: async ({ canvasElement }) => {
+		const ctx = document.createElement("canvas").getContext("2d");
+		const alphaOf = (color: string): number => {
+			if (!ctx) return 0;
+			ctx.clearRect(0, 0, 1, 1);
+			ctx.fillStyle = color;
+			ctx.fillRect(0, 0, 1, 1);
+			return ctx.getImageData(0, 0, 1, 1).data[3] ?? 0;
+		};
+		const chrome = canvasElement.querySelector("#session-chrome");
+		const banners = canvasElement.querySelectorAll("[data-banner-id]");
+		expect(banners).toHaveLength(2);
+		for (const banner of banners) {
+			let backed = false;
+			for (
+				let el: Element | null = banner;
+				el && !backed && el !== chrome?.parentElement;
+				el = el.parentElement
+			) {
+				backed = alphaOf(getComputedStyle(el).backgroundColor) === 255;
+			}
+			expect(backed, banner.getAttribute("data-banner-id") ?? "").toBe(true);
+		}
+	},
+};

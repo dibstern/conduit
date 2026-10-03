@@ -572,6 +572,12 @@ body:has(dialog:modal) {
 	z-index: var(--z-dropdown);
 }
 
+/* Banner tints are translucent; over the floating chrome they need the page
+   behind them or the transcript shows through. */
+#app.phone-session #session-chrome .banners {
+	background: var(--color-bg);
+}
+
 #app.phone-session #messages {
 	padding-top: var(--phone-chrome-clearance, 0px);
 	scroll-padding-top: var(--phone-chrome-clearance, 0px);
