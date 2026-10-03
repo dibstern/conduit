@@ -121,15 +121,33 @@ async function setupWithProjectManagement(
 					entries: getMockDirectories(path),
 				};
 			},
-			RenameProject: (params) => {
-				const slug = String(params["slug"] ?? "");
-				const title = String(params["title"] ?? "");
+			SaveProject: (params) => {
+				const slug = String(params["slug"] ?? "new-project");
+				const title = String(params["title"] ?? "new-project");
+				const folders = params["folders"] as string[];
 				return {
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
-					projects: baseProjects().map((project) =>
-						project.slug === slug ? { ...project, title } : project,
-					),
+					projects: params["slug"]
+						? baseProjects().map((project) =>
+								project.slug === slug
+									? { ...project, title, folders }
+									: project,
+							)
+						: [
+								...baseProjects(),
+								{
+									slug,
+									title,
+									directory: folders[0] ?? "/src/new-project",
+									folders,
+									...(typeof params["instanceId"] === "string"
+										? { instanceId: params["instanceId"] }
+										: {}),
+								},
+							],
 					current: "myapp",
+					savedSlug: slug,
+					warnings: [],
 				};
 			},
 			RemoveProject: (params) => {
@@ -140,22 +158,6 @@ async function setupWithProjectManagement(
 					current: "myapp",
 				};
 			},
-			AddProject: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				projects: [
-					...baseProjects(),
-					{
-						slug: "new-project",
-						title: "new-project",
-						directory: String(params["directory"] ?? "/src/new-project"),
-						...(typeof params["instanceId"] === "string"
-							? { instanceId: params["instanceId"] }
-							: {}),
-					},
-				],
-				current: "myapp",
-				addedSlug: "new-project",
-			}),
 		},
 	});
 	rpc.setShellRows(
@@ -298,9 +300,9 @@ test("adds a project through the projects panel", async ({ page, baseURL }) => {
 	await panel.getByRole("combobox").fill("/src/new-project");
 	await panel.getByRole("button", { name: "Add", exact: true }).click();
 	const request = await control.rpc.waitForRequest(
-		(req) => req.tag === "AddProject",
+		(req) => req.tag === "SaveProject",
 	);
-	expect(request.payload).toMatchObject({ directory: "/src/new-project" });
+	expect(request.payload).toMatchObject({ folders: ["/src/new-project"] });
 	await expect(panel).toBeHidden();
 	await openProjectsPanel(page);
 	await expect(panel.getByTestId("project-item")).toHaveCount(3);
@@ -675,11 +677,12 @@ test.describe("Project Rename", () => {
 		await expect(renameInput).not.toBeVisible();
 
 		const request = await control.rpc.waitForRequest(
-			(req) => req.tag === "RenameProject",
+			(req) => req.tag === "SaveProject",
 		);
 		expect(request.payload).toMatchObject({
 			slug: "mylib",
 			title: "My Library",
+			folders: ["/src/mylib"],
 		});
 	});
 
@@ -706,7 +709,7 @@ test.describe("Project Rename", () => {
 		await page.waitForTimeout(300);
 		const renameRequests = control.rpc
 			.getRequests()
-			.filter((request) => request.tag === "RenameProject");
+			.filter((request) => request.tag === "SaveProject");
 		expect(renameRequests).toHaveLength(0);
 	});
 

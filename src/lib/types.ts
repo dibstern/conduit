@@ -113,6 +113,7 @@ export interface ConnectionHealth {
 export interface StoredProject {
 	readonly slug: string;
 	readonly directory: string;
+	readonly folders: readonly string[];
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
@@ -166,6 +167,7 @@ export interface ProjectRelayConfig {
 			slug: string;
 			title: string;
 			directory: string;
+			folders?: readonly string[];
 			instanceId?: string;
 		}>
 	>;
@@ -179,17 +181,12 @@ export interface ProjectRelayConfig {
 	refreshSessionGit?: () => Promise<void>;
 	/** Remove a project from the registry. */
 	removeProject?: (slug: string) => void | Promise<void>;
-	/** Set a project's display title. */
-	setProjectTitle?: (slug: string, title: string) => void;
-	/** Add a new project by directory path. Returns the created project info. */
-	addProject?: (
-		directory: string,
-		instanceId?: string,
+	/** Create or update a project's folders and display title. */
+	saveProject?: (
+		input: import("./contracts/ws-rpc.js").SaveProjectInput,
 	) => Promise<{
-		slug: string;
-		title: string;
-		directory: string;
-		instanceId?: string;
+		project: import("./shared-types.js").ProjectInfo;
+		warnings: readonly import("./project-folders.js").FolderIssue[];
 	}>;
 	/** Return the current list of OpenCode instances (for the instance switcher). */
 	getInstances?: () => MaybePromise<

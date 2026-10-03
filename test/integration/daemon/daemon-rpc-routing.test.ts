@@ -90,12 +90,14 @@ describe("daemon shared RPC routing", () => {
 						slug: "project-a",
 						title: "Project A",
 						directory: projectA,
+						folders: [projectA],
 						lastUsed: 2,
 					},
 					{
 						slug: "project-b",
 						title: "Project B",
 						directory: projectB,
+						folders: [projectB],
 						lastUsed: 1,
 					},
 				];
@@ -430,10 +432,10 @@ describe("daemon shared RPC routing", () => {
 					Effect.provide(clientContext),
 				);
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
-				const added = yield* client.AddProject({ directory });
-				expect(added.addedSlug).toBeTruthy();
+				const added = yield* client.SaveProject({ folders: [directory] });
+				expect(added.savedSlug).toBeTruthy();
 				expect((yield* client.GetProjects({})).projects).toMatchObject([
-					{ slug: added.addedSlug, directory },
+					{ slug: added.savedSlug, directory, folders: [directory] },
 				]);
 				expect(
 					(yield* client.GetProjects({ projectSlug: "not-registered" }))
@@ -455,6 +457,7 @@ describe("daemon shared RPC routing", () => {
 						slug,
 						title: slug,
 						directory: `/tmp/${slug}`,
+						folders: [`/tmp/${slug}`],
 						lastUsed: 1,
 					}),
 				);

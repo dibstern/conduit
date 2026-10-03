@@ -136,7 +136,7 @@ async function main(): Promise<void> {
 		await activeDaemon.stop();
 		process.exit(0);
 	}
-	await activeDaemon.addProject(join(root, "project"), "process-test");
+	await activeDaemon.addProject(join(root, "process-test"));
 	process.send({
 		channel: "conduit-process-test",
 		kind: "ready",

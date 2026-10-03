@@ -24,7 +24,7 @@ const daemon = await startForegroundDaemon({
 	smartDefault: false,
 	logLevel: "error",
 });
-await daemon.addProject(join(root, "project"), "build-id-test");
+await daemon.addProject(join(root, "build-id-test"));
 process.send?.({ port: daemon.port, buildId: BUILD_ID });
 const stop = async () => {
 	await daemon.stop();

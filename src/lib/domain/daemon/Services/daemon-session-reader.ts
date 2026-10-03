@@ -152,6 +152,40 @@ export const hasRunningClaudeTurn = (
 		}).pipe(Effect.provide(sqliteLayer));
 	});
 
+/** Count busy/retry sessions and admitted turns awaiting their first provider event. */
+export const countRunningProjectSessions = (
+	project: Pick<StoredProject, "slug" | "directory">,
+	configDir: string,
+) =>
+	Effect.gen(function* () {
+		const databasePath = projectEventsDbPath({ configDir, ...project });
+		const databaseStat = yield* Effect.either(
+			Effect.try({
+				try: () => statSync(databasePath),
+				catch: (cause) => cause,
+			}),
+		);
+		if (Either.isLeft(databaseStat)) {
+			if (isMissingPathError(databaseStat.left)) return 0;
+			return yield* Effect.fail(databaseStat.left);
+		}
+		const sqliteLayer = SqliteNode.layer({
+			filename: databasePath,
+			readonly: true,
+			disableWAL: true,
+		}).pipe(Layer.provide(Reactivity.layer));
+		return yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM (
+				SELECT id FROM sessions WHERE status IN ('busy', 'retry')
+				UNION
+				SELECT session_id FROM provider_command_outbox
+				WHERE effect_type = 'send_turn' AND status IN ('pending', 'running')
+			)`;
+			return rows[0]?.count ?? 0;
+		}).pipe(Effect.provide(sqliteLayer));
+	});
+
 /** Use the same read-only SQLite path as the daemon-wide session list. */
 export const hasColdAutoSettleCandidate = (
 	project: Pick<StoredProject, "slug" | "directory">,

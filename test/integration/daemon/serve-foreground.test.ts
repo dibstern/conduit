@@ -14,9 +14,9 @@ import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
-	AddProject,
 	GetStatus,
 	RemoveProject,
+	SaveProject,
 	Shutdown,
 	ViewSession,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -67,7 +67,7 @@ describe("foreground conduit serve", () => {
 			mkdirSync(directory);
 			await sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
-				new AddProject({ directory }),
+				new SaveProject({ folders: [directory] }),
 			);
 		}
 		const browser = await harness.connect(undefined, undefined, projectSlug);

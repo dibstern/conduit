@@ -6,9 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in the factory
-const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
+const { mockRegisterProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 	() => {
-		const mockAddProject = vi
+		const mockRegisterProject = vi
 			.fn()
 			.mockResolvedValue({ slug: "test-project", directory: "/test/project" });
 
@@ -16,7 +16,7 @@ const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 			.fn()
 			.mockImplementation((opts: { port?: number }) =>
 				Promise.resolve({
-					addProject: mockAddProject,
+					addProject: mockRegisterProject,
 					stopped: Promise.resolve(),
 					stop: vi.fn().mockResolvedValue(undefined),
 					getStatus: vi
@@ -29,7 +29,7 @@ const { mockAddProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 		// Mutable ENV override — defaults to undefined (no override)
 		const mockEnv = { opencodeUrl: undefined as string | undefined };
 
-		return { mockAddProject, mockStartForegroundDaemon, mockEnv };
+		return { mockRegisterProject, mockStartForegroundDaemon, mockEnv };
 	},
 );
 
@@ -143,7 +143,7 @@ describe("serve handler", () => {
 		await run(["serve"], io);
 
 		expect(mockStartForegroundDaemon).toHaveBeenCalledOnce();
-		expect(mockAddProject).not.toHaveBeenCalled();
+		expect(mockRegisterProject).not.toHaveBeenCalled();
 	});
 
 	it("outputs OpenCode URL and Relay URL", async () => {
@@ -164,7 +164,7 @@ describe("serve handler", () => {
 		});
 		mockStartForegroundDaemon.mockImplementationOnce(() =>
 			Promise.resolve({
-				addProject: mockAddProject,
+				addProject: mockRegisterProject,
 				stopped,
 				stop: vi.fn().mockResolvedValue(undefined),
 				getStatus: () => ({ tlsEnabled: false, host: "127.0.0.1" }),
@@ -226,7 +226,7 @@ describe("serve handler", () => {
 		const io = createMockIO();
 		mockStartForegroundDaemon.mockImplementationOnce(() =>
 			Promise.resolve({
-				addProject: mockAddProject,
+				addProject: mockRegisterProject,
 				stopped: Promise.reject(new Error("Shutdown failed")),
 				stop: vi.fn().mockResolvedValue(undefined),
 				getStatus: () => ({ tlsEnabled: false, host: "127.0.0.1" }),

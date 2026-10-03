@@ -113,9 +113,8 @@ export interface RelayFactory {
 }
 
 export interface RelayFactoryProjectControls {
-	readonly addProject: NonNullable<ProjectRelayConfig["addProject"]>;
+	readonly saveProject: NonNullable<ProjectRelayConfig["saveProject"]>;
 	readonly removeProject: NonNullable<ProjectRelayConfig["removeProject"]>;
-	readonly setProjectTitle: NonNullable<ProjectRelayConfig["setProjectTitle"]>;
 	readonly setProjectInstance: NonNullable<
 		ProjectRelayConfig["setProjectInstance"]
 	>;
@@ -431,9 +430,8 @@ export const RelayFactoryLive = (
 										pushManager: relayPushSender,
 									}),
 									...(projectControls != null && {
-										addProject: projectControls.addProject,
+										saveProject: projectControls.saveProject,
 										removeProject: projectControls.removeProject,
-										setProjectTitle: projectControls.setProjectTitle,
 										setProjectInstance: projectControls.setProjectInstance,
 									}),
 								});

@@ -4,10 +4,8 @@
 	import { ADD_PROJECT_TIMEOUT_MS } from "../../ui-constants.js";
 	import { onProject } from "../../stores/ws.svelte.js";
 	import { applyProjectMutationResponse, confirmRemoveProjects } from "../../stores/project.svelte.js";
-	import {
-		addProjectRpc,
-		renameProjectRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { navigate } from "../../stores/router.svelte.js";
+	import { saveProjectRpc } from "../../transport/ws-rpc-client.js";
 	import {
 		instanceState,
 		getInstanceById,
@@ -90,7 +88,7 @@
 			addError = "Directory path is required";
 			return;
 		}
-		// AddProject is daemon-scoped, so the first project can be added with none attached.
+		// SaveProject is daemon-scoped, so the first project can be added with none attached.
 		const projectSlug = getRpcProjectSlug();
 		adding = true;
 		addError = "";
@@ -100,14 +98,15 @@
 				addError = "No response from server — please try again";
 			}
 		}, ADD_PROJECT_TIMEOUT_MS);
-		void addProjectRpc({
+		void saveProjectRpc({
 			...(projectSlug != null ? { projectSlug } : {}),
-			directory: dir,
+			folders: [dir],
 			...(addInstanceId ? { instanceId: addInstanceId } : {}),
 		})
 			.then((response) => {
 				window.clearTimeout(timeout);
 				applyProjectMutationResponse(response);
+				navigate(`/?${new URLSearchParams({ p: response.savedSlug })}`);
 				adding = false;
 				showAddForm = false;
 				addDirectory = "";
@@ -152,10 +151,11 @@
 			if (project && newTitle !== project.title) {
 				const projectSlug = getRpcProjectSlug(slug);
 				if (projectSlug == null) return;
-				void renameProjectRpc({
+				void saveProjectRpc({
 					projectSlug,
 					slug,
 					title: newTitle,
+					folders: project.folders ?? [project.directory],
 				})
 					.then(applyProjectMutationResponse)
 					.catch(() => undefined);
@@ -193,7 +193,7 @@
 
 	onMount(() => {
 		// Listen for project_list responses to reset add form state.
-		// Navigation is handled by the project store (addedSlug → navigate).
+		// Navigation follows the successful SaveProject response.
 		unsubProject = onProject((message) => {
 			if (message.type === "project_list" && adding) {
 				adding = false;

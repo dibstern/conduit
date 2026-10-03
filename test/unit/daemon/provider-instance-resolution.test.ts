@@ -36,7 +36,7 @@ const configWithoutInstances: DaemonConfig = {
 };
 
 describe("provider instance resolution", () => {
-	it("loads and resolves an old OpenCode-only daemon config unchanged", () => {
+	it("loads and resolves an old OpenCode-only daemon config with migrated folders", () => {
 		const oldConfig: DaemonConfig = {
 			pid: 1234,
 			port: 2633,
@@ -68,9 +68,19 @@ describe("provider instance resolution", () => {
 		const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(oldConfig);
 		const loaded = loadDaemonConfig(tempDir);
 
-		expect(decoded).toEqual(oldConfig);
+		const migrated = {
+			...oldConfig,
+			projects: [
+				{
+					...oldConfig.projects[0],
+					directory: "/src/project",
+					folders: ["/src/project"],
+				},
+			],
+		};
+		expect(decoded).toEqual(migrated);
 		// Loading fills in settings added since the file was written.
-		expect(loaded).toEqual({ ...oldConfig, autoSettleAfterDays: 3 });
+		expect(loaded).toEqual({ ...migrated, autoSettleAfterDays: 3 });
 		if (loaded === null) {
 			throw new Error("Expected old daemon config to load");
 		}

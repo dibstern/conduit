@@ -404,7 +404,7 @@ describe("handleGetProjects", () => {
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "project_list",
-					projects: [{ ...projects[0], missing: true }],
+					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
 					current: "test-project",
 				});
 			}),

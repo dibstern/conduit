@@ -1,9 +1,8 @@
 import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 import { hashPin } from "../../../auth.js";
-import { WsRpcError } from "../../../contracts/ws-rpc.js";
+import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail } from "../../../errors.js";
-import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import {
 	type DaemonRpcHandlers,
 	wsRpcHandlers,
@@ -46,6 +45,7 @@ import {
 	broadcastProjectList,
 	broadcastToAll,
 	type ProjectRegistryTag,
+	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
 	replaceRelay,
@@ -66,6 +66,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const context = yield* Effect.context<
 			| ProjectRegistryTag
+			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
 			| DaemonWsClientRegistryTag
@@ -109,6 +110,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				A,
 				E,
 				| ProjectRegistryTag
+				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
 				| DaemonWsClientRegistryTag
@@ -299,43 +301,36 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
-			AddProject: (request) =>
-				run(
-					Effect.gen(function* () {
-						const project = yield* handle.addProject(
-							request.directory,
-							undefined,
-							request.instanceId,
-						);
-						const projects = yield* projectList;
-						return {
-							projectSlug: request.projectSlug,
-							...(request.projectSlug ? { current: request.projectSlug } : {}),
-							projects,
-							addedSlug: project.slug,
-						};
-					}),
+			SaveProject: (request) =>
+				Effect.gen(function* () {
+					const { project, warnings } = yield* handle.saveProject({
+						folders: request.folders,
+						...(request.slug !== undefined && { slug: request.slug }),
+						...(request.title !== undefined && { title: request.title }),
+						...(request.instanceId !== undefined && {
+							instanceId: request.instanceId,
+						}),
+					});
+					const projects = yield* projectList;
+					return {
+						projectSlug: request.projectSlug,
+						...(request.projectSlug ? { current: request.projectSlug } : {}),
+						projects,
+						savedSlug: project.slug,
+						warnings,
+					};
+				}).pipe(
+					Effect.provide(context),
+					Effect.mapError((error) =>
+						error instanceof ProjectSaveRejected || error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			RemoveProject: (request) =>
 				run(
 					Effect.gen(function* () {
 						yield* removeProjectFromEffectRegistry(request.slug);
-						return {
-							projectSlug: request.projectSlug,
-							...(request.projectSlug ? { current: request.projectSlug } : {}),
-							projects: yield* projectList,
-						};
-					}),
-				),
-			RenameProject: (request) =>
-				run(
-					Effect.gen(function* () {
-						const title = normalizeProjectTitle(request.title);
-						if (!title)
-							return yield* new WsRpcError({
-								message: "RenameProject failed: title is required",
-							});
-						yield* updateProject(request.slug, { title });
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),

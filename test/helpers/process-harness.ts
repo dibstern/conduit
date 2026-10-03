@@ -174,7 +174,7 @@ export class ProcessHarness {
 		},
 	) {
 		this.root = mkdtempSync(rootPrefix);
-		this.projectDir = join(this.root, "project");
+		this.projectDir = join(this.root, "process-test");
 		this.configDir = join(
 			this.root,
 			runnerLifecycle?.nonDefaultConfigDir ? "active-config" : "config",
@@ -183,7 +183,7 @@ export class ProcessHarness {
 			"home",
 			"config",
 			"claude",
-			"project",
+			"process-test",
 			"cache",
 			"static",
 			"data",
@@ -234,6 +234,8 @@ export class ProcessHarness {
 					? [
 							{
 								path: this.projectDir,
+								directory: this.projectDir,
+								folders: [this.projectDir],
 								slug: "process-test",
 								addedAt: Date.now(),
 							},
@@ -1306,6 +1308,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				this.root,
 				this.runnerPids(),
 				this.configDir,
+				this.projectDir,
 			);
 		} catch (cause) {
 			failures.push(cause);

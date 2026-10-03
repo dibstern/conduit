@@ -70,8 +70,14 @@ describe("daemon automatic settlement layer", () => {
 									slug: "running",
 									title: "Running",
 									directory: missingDirectory,
+									folders: [missingDirectory],
 								},
-								{ slug: "cold", title: "Cold", directory: missingDirectory },
+								{
+									slug: "cold",
+									title: "Cold",
+									directory: missingDirectory,
+									folders: [missingDirectory],
+								},
 							]),
 							Layer.succeed(RelayCacheTag, {
 								peek: (slug) =>
@@ -143,15 +149,23 @@ describe("daemon automatic settlement layer", () => {
 									slug: "broken",
 									title: "Broken",
 									directory: dir,
+									folders: [dir],
 									lastUsed: 3,
 								},
 								{
 									slug: "running",
 									title: "Running",
 									directory: dir,
+									folders: [dir],
 									lastUsed: 2,
 								},
-								{ slug: "cold", title: "Cold", directory: dir, lastUsed: 1 },
+								{
+									slug: "cold",
+									title: "Cold",
+									directory: dir,
+									folders: [dir],
+									lastUsed: 1,
+								},
 							]),
 							Layer.succeed(RelayCacheTag, {
 								peek: (slug: string) =>
@@ -222,7 +236,13 @@ describe("daemon automatic settlement layer", () => {
 								makeDaemonConfigFromOptions({ autoSettleAfterDays: 3 }),
 							),
 							makeProjectRegistryLive([
-								{ slug: "cold", title: "Cold", directory: dir, lastUsed: 1 },
+								{
+									slug: "cold",
+									title: "Cold",
+									directory: dir,
+									folders: [dir],
+									lastUsed: 1,
+								},
 							]),
 							Layer.succeed(RelayCacheTag, {
 								peek: () => Effect.succeed(Option.none<Relay>()),
@@ -264,6 +284,7 @@ describe("daemon automatic settlement layer", () => {
 									slug: "cold",
 									title: "Cold",
 									directory: "/missing",
+									folders: ["/missing"],
 									lastUsed: 1,
 								},
 							]),

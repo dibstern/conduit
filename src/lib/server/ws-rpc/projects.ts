@@ -1,5 +1,9 @@
 import { Effect } from "effect";
-import { type AttachProject, WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	type AttachProject,
+	ProjectSaveRejected,
+	WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
 import { WebSocketHandlerTag } from "../../domain/relay/Services/services.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
@@ -27,27 +31,48 @@ export const projectsHandlers = {
 				),
 			),
 		),
-	AddProject: (request) =>
+	SaveProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
-			const result = yield* projectService.add(
-				request.directory,
-				request.instanceId,
-			);
+			const wsHandler = yield* WebSocketHandlerTag;
+			const title =
+				request.title === undefined
+					? undefined
+					: normalizeProjectTitle(request.title);
+			if (title === "")
+				return yield* new WsRpcError({
+					message: "SaveProject failed: title is required",
+				});
+			const result = yield* projectService.save({
+				folders: request.folders,
+				...(request.slug !== undefined && { slug: request.slug }),
+				...(title !== undefined && { title }),
+				...(request.instanceId !== undefined && {
+					instanceId: request.instanceId,
+				}),
+			});
 			const current = yield* projectService.currentSlug();
+			wsHandler.broadcast({
+				type: "project_list",
+				projects: result.projects,
+				...(current ? { current } : {}),
+			});
 			return {
 				projectSlug: request.projectSlug,
 				projects: result.projects,
 				...(current ? { current } : {}),
-				addedSlug: result.project.slug,
+				savedSlug: result.project.slug,
+				warnings: result.warnings,
 			};
 		}).pipe(
 			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `AddProject failed: ${String(error)}`,
-					}),
-				),
+				error instanceof ProjectSaveRejected || error instanceof WsRpcError
+					? Effect.fail(error)
+					: Effect.fail(
+							new WsRpcError({
+								message: `SaveProject failed: ${String(error)}`,
+							}),
+						),
 			),
 		),
 	RemoveProject: (request) =>
@@ -74,42 +99,6 @@ export const projectsHandlers = {
 						message: `RemoveProject failed: ${String(error)}`,
 					}),
 				),
-			),
-		),
-	RenameProject: (request) =>
-		Effect.gen(function* () {
-			const projectService = yield* ProjectManagementServiceTag;
-			const wsHandler = yield* WebSocketHandlerTag;
-			const title = normalizeProjectTitle(request.title);
-			if (!title) {
-				return yield* Effect.fail(
-					new WsRpcError({
-						message: "RenameProject failed: title is required",
-					}),
-				);
-			}
-			const projects = yield* projectService.rename(request.slug, title);
-			const current = yield* projectService.currentSlug();
-			const message = {
-				type: "project_list" as const,
-				projects,
-				...(current ? { current } : {}),
-			};
-			wsHandler.broadcast(message);
-			return {
-				projectSlug: request.projectSlug,
-				projects,
-				...(current ? { current } : {}),
-			};
-		}).pipe(
-			Effect.catchAll((error) =>
-				error instanceof WsRpcError
-					? Effect.fail(error)
-					: Effect.fail(
-							new WsRpcError({
-								message: `RenameProject failed: ${String(error)}`,
-							}),
-						),
 			),
 		),
 	SetProjectInstance: (request) =>
@@ -145,8 +134,7 @@ export const projectsHandlers = {
 	WsRpcHandlerMap,
 	| "AttachProject"
 	| "GetProjects"
-	| "AddProject"
+	| "SaveProject"
 	| "RemoveProject"
-	| "RenameProject"
 	| "SetProjectInstance"
 >;

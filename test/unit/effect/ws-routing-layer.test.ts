@@ -134,6 +134,7 @@ const project: StoredProject = {
 	slug: "test-project",
 	title: "Test Project",
 	directory: "/tmp/test-project",
+	folders: ["/tmp/test-project"],
 	lastUsed: 1,
 };
 
@@ -263,12 +264,14 @@ describe("WebSocketRoutingLive", () => {
 										slug: "older",
 										title: "Older",
 										directory: "/nonexistent/conduit-older",
+										folders: ["/nonexistent/conduit-older"],
 										lastUsed: 1,
 									},
 									{
 										slug: "recent",
 										title: "Recent",
 										directory: "/nonexistent/conduit-recent",
+										folders: ["/nonexistent/conduit-recent"],
 										lastUsed: 2,
 									},
 								]

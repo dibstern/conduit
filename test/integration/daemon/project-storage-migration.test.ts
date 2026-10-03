@@ -8,8 +8,8 @@ import {
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	AddProject,
 	RemoveProject,
+	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
@@ -176,10 +176,10 @@ describe("project storage migration through the daemon", () => {
 		mkdirSync(directory);
 		const added = await sendRpcRequest(
 			socket(harness),
-			new AddProject({ directory }),
+			new SaveProject({ folders: [directory] }),
 		);
-		const slug = added.addedSlug;
-		if (!slug) throw new Error("AddProject returned no slug");
+		const slug = added.savedSlug;
+		if (!slug) throw new Error("SaveProject returned no slug");
 		const before = await harness.connect(undefined, undefined, slug);
 		const sessionId = await before.createSession("Retained history");
 		await before.send(sessionId, "retained-history");
@@ -189,9 +189,9 @@ describe("project storage migration through the daemon", () => {
 		expect(existsSync(storageDb(harness, slug))).toBe(true);
 		const readded = await sendRpcRequest(
 			socket(harness),
-			new AddProject({ directory }),
+			new SaveProject({ folders: [directory] }),
 		);
-		expect(readded.addedSlug).toBe(slug);
+		expect(readded.savedSlug).toBe(slug);
 		const after = await harness.connect(sessionId, undefined, slug);
 		expect(await after.history(sessionId)).toEqual(history);
 		expect(existsSync(join(directory, ".conduit"))).toBe(false);
@@ -207,10 +207,10 @@ describe("project storage migration through the daemon", () => {
 		mkdirSync(second, { recursive: true });
 		const firstProject = await sendRpcRequest(
 			socket(harness),
-			new AddProject({ directory: first }),
+			new SaveProject({ folders: [first] }),
 		);
-		const firstSlug = firstProject.addedSlug;
-		if (!firstSlug) throw new Error("First AddProject returned no slug");
+		const firstSlug = firstProject.savedSlug;
+		if (!firstSlug) throw new Error("First SaveProject returned no slug");
 		const browser = await harness.connect(undefined, undefined, firstSlug);
 		const sessionId = await browser.createSession("Private history");
 		await browser.send(sessionId, "first-folder-only");
@@ -221,10 +221,10 @@ describe("project storage migration through the daemon", () => {
 
 		const secondProject = await sendRpcRequest(
 			socket(harness),
-			new AddProject({ directory: second }),
+			new SaveProject({ folders: [second] }),
 		);
-		const secondSlug = secondProject.addedSlug;
-		if (!secondSlug) throw new Error("Second AddProject returned no slug");
+		const secondSlug = secondProject.savedSlug;
+		if (!secondSlug) throw new Error("Second SaveProject returned no slug");
 		expect(secondSlug).not.toBe(firstSlug);
 		expect(readProjectStorageOwner(harness.configDir, firstSlug)).toBe(first);
 		const other = await harness.connect(undefined, undefined, secondSlug);

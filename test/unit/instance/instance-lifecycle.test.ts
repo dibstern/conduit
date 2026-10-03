@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
@@ -89,6 +89,8 @@ describe("instance lifecycle integration", () => {
 	});
 
 	it("addProject assigns instanceId from available instances", async () => {
+		const projectDir = join(tmpDir, "lifecycle-test");
+		mkdirSync(projectDir);
 		daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: tmpDir,
@@ -96,7 +98,7 @@ describe("instance lifecycle integration", () => {
 			opencodeUrl: "http://localhost:4096",
 			smartDefault: false,
 		});
-		const project = await daemon.addProject("/tmp/lifecycle-test");
+		const project = await daemon.addProject(projectDir);
 		expect(project.instanceId).toBe("opencode");
 	});
 });

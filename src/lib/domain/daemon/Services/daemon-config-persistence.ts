@@ -5,7 +5,10 @@
 import { FileSystem } from "@effect/platform";
 import { Context, Effect, Ref } from "effect";
 import { migrateLegacyDefaultOpencodeInstanceId } from "../../../contracts/provider-instance.js";
-import { sanitizeRestartMetadata } from "../../../daemon/config-persistence.js";
+import {
+	migrateProjectFolders,
+	sanitizeRestartMetadata,
+} from "../../../daemon/config-persistence.js";
 import { isRecord } from "../../../utils.js";
 import type {
 	DaemonInstanceConfig,
@@ -57,7 +60,7 @@ function serializeState(state: DaemonState): DaemonConfigOnDisk {
 			keepAwakeArgs: state.keepAwakeArgs,
 		}),
 		dangerouslySkipPermissions: state.dangerouslySkipPermissions,
-		projects: state.projects,
+		projects: state.projects.map(migrateProjectFolders),
 		instances: state.instances,
 	};
 }
@@ -98,7 +101,7 @@ function deserializeConfig(value: Record<string, unknown>): DaemonState {
 			dangerouslySkipPermissions: raw["dangerouslySkipPermissions"],
 		}),
 		...(Array.isArray(raw["projects"]) && {
-			projects: raw["projects"] as DaemonProject[],
+			projects: (raw["projects"] as DaemonProject[]).map(migrateProjectFolders),
 		}),
 		...(Array.isArray(raw["instances"]) && {
 			instances: raw["instances"] as DaemonInstanceConfig[],

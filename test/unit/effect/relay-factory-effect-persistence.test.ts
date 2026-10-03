@@ -95,6 +95,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							slug: "effect-project",
 							title: "Effect Project",
 							directory: projectDir,
+							folders: [projectDir],
 						},
 						"http://localhost:4096",
 					)
@@ -149,6 +150,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 								slug: "effect-project",
 								title: "Effect Project",
 								directory: projectDir,
+								folders: [projectDir],
 								instanceId: "opencode",
 							},
 						]),
@@ -181,6 +183,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							slug: "effect-project",
 							title: "Effect Project",
 							directory: projectDir,
+							folders: [projectDir],
 							instanceId: "opencode",
 						},
 						"http://localhost:4096",
@@ -225,6 +228,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
+						folders: [projectDir],
 						instanceId: "opencode",
 						missing: false,
 					},
@@ -277,6 +281,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							slug: "effect-project",
 							title: "Effect Project",
 							directory: projectDir,
+							folders: [projectDir],
 						},
 					]),
 					makeInstanceManagerStateLive(),
@@ -296,6 +301,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
+						folders: [projectDir],
 					},
 					"http://localhost:4096",
 				)
@@ -407,6 +413,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							slug: "effect-project",
 							title: "Effect Project",
 							directory: projectDir,
+							folders: [projectDir],
 						},
 					]),
 					makeInstanceManagerStateLive(),
@@ -443,6 +450,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
+						folders: [projectDir],
 					},
 					"http://localhost:4096",
 				)
@@ -514,6 +522,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							slug: "effect-project",
 							title: "Effect Project",
 							directory: projectDir,
+							folders: [projectDir],
 						},
 					]),
 					makeInstanceManagerStateLive(),
@@ -533,6 +542,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
+						folders: [projectDir],
 					},
 					"http://localhost:4096",
 				),
@@ -581,6 +591,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						slug: "effect-project",
 						title: "Effect Project",
 						directory: projectDir,
+						folders: [projectDir],
 						instanceId: "opencode",
 					},
 				]),
@@ -619,27 +630,33 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				yield* cache.get("effect-project");
 
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
-				expect(config?.addProject).toBeTypeOf("function");
+				expect(config?.saveProject).toBeTypeOf("function");
 				expect(config?.removeProject).toBeTypeOf("function");
-				expect(config?.setProjectTitle).toBeTypeOf("function");
 				expect(config?.setProjectInstance).toBeTypeOf("function");
-				const addProject = config?.addProject;
+				const saveProject = config?.saveProject;
 				const removeProject = config?.removeProject;
-				const setProjectTitle = config?.setProjectTitle;
 				const setProjectInstance = config?.setProjectInstance;
 				const getProjects = config?.getProjects;
 				if (
-					addProject == null ||
+					saveProject == null ||
 					removeProject == null ||
-					setProjectTitle == null ||
 					setProjectInstance == null ||
 					getProjects == null
 				) {
 					expect.fail("expected project mutation callbacks");
 				}
 
-				const added = yield* Effect.tryPromise<ProjectInfo, unknown>({
-					try: () => addProject(join(dir, "added"), "remote"),
+				const { project: added } = yield* Effect.tryPromise<
+					{ project: ProjectInfo },
+					unknown
+				>({
+					try: () =>
+						saveProject({
+							folders: [
+								{ path: join(dir, "added"), create: { gitInit: false } },
+							],
+							instanceId: "remote",
+						}),
 					catch: (cause) => cause,
 				});
 				expect(added).toEqual(
@@ -652,7 +669,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 				yield* Effect.tryPromise({
 					try: () =>
-						Promise.resolve(setProjectTitle(added.slug, "Added Project")),
+						saveProject({
+							slug: added.slug,
+							folders: added.folders ?? [added.directory],
+							title: "Added Project",
+						}),
 					catch: (cause) => cause,
 				});
 				let projects = yield* Effect.tryPromise<

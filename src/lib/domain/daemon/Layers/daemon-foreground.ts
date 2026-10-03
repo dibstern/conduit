@@ -50,6 +50,7 @@ import {
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
 import {
+	normalizeProjectDirectory,
 	type ProjectRegistryState,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
@@ -73,11 +74,7 @@ class ForegroundDaemonStartError extends Data.TaggedError(
 export interface ForegroundDaemonHandle {
 	readonly port: number;
 	readonly onboardingPort: number | null;
-	addProject(
-		directory: string,
-		slug?: string,
-		instanceId?: string,
-	): Promise<StoredProject>;
+	addProject(directory: string, instanceId?: string): Promise<StoredProject>;
 	getStatus(): DaemonStatus;
 	getProjects(): ReadonlyArray<Readonly<StoredProject>>;
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
@@ -496,8 +493,25 @@ export async function startForegroundDaemon(
 		get onboardingPort() {
 			return onboardingPort;
 		},
-		addProject: (directory, slug, instanceId) =>
-			runHandleEffect((h) => h.addProject(directory, slug, instanceId)),
+		addProject: (directory, instanceId) =>
+			runHandleEffect((h) =>
+				h.getProjects().pipe(
+					Effect.flatMap((projects) => {
+						const normalized = normalizeProjectDirectory(directory);
+						const existing = projects.find(
+							(project) => project.directory === normalized,
+						);
+						return existing
+							? Effect.succeed(existing)
+							: h
+									.saveProject({
+										folders: [directory],
+										...(instanceId !== undefined && { instanceId }),
+									})
+									.pipe(Effect.map((result) => result.project));
+					}),
+				),
+			),
 		getStatus: () => {
 			requestSnapshotRefresh();
 			return status;

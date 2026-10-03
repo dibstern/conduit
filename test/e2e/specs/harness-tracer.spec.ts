@@ -18,10 +18,12 @@ async function sendFromAddedProject(
 ): Promise<string> {
 	const directory = mkdtempSync(join(harness.root, "browser-project-"));
 	const browser = await harness.connect();
-	const added = await Effect.runPromise(browser.rpc.AddProject({ directory }));
-	const slug = added.addedSlug;
+	const added = await Effect.runPromise(
+		browser.rpc.SaveProject({ folders: [directory] }),
+	);
+	const slug = added.savedSlug;
 	if (!slug)
-		throw new Error("AddProject did not return the new project's slug");
+		throw new Error("SaveProject did not return the new project's slug");
 	expect(slug).not.toBe("process-test");
 	expect(added.projects).toEqual(
 		expect.arrayContaining([expect.objectContaining({ directory, slug })]),

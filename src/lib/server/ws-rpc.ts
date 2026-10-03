@@ -17,7 +17,6 @@ import { settingsHandlers } from "./ws-rpc/settings.js";
 import { terminalsHandlers } from "./ws-rpc/terminals.js";
 
 export {
-	AddProject,
 	AnswerQuestion,
 	AttachProject,
 	CancelSession,
@@ -83,7 +82,6 @@ export {
 	RemoveInstance,
 	RemoveProject,
 	RenameInstance,
-	RenameProject,
 	RenameSession,
 	ResizePty,
 	ResolveClaudeSettings,
@@ -92,6 +90,8 @@ export {
 	RespondPermission,
 	RestartWithConfig,
 	RewindSession,
+	SaveProject,
+	type SaveProjectResponse,
 	ScanNow,
 	type ScanNowResponse,
 	SendMessage,
@@ -202,9 +202,8 @@ export type ReattachDaemonViewSession = (payload: {
 export type DaemonRpcName =
 	| keyof typeof daemonOnlyHandlers
 	| "GetProjects"
-	| "AddProject"
+	| "SaveProject"
 	| "RemoveProject"
-	| "RenameProject"
 	| "SetProjectInstance"
 	| "StartInstance"
 	| "StopInstance"
@@ -228,7 +227,7 @@ export type DaemonRpcHandlers = {
 		Rpc.Success<
 			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
 		>,
-		WsRpcError
+		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>
 	>;
 };
 
