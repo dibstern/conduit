@@ -5,6 +5,7 @@ import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
 	CLAUDE_RUNNER_PROTOCOL_VERSION,
 	type ClaudeRunnerHello,
+	type ClaudeRunnerMessage,
 	ClaudeRunnerSocket,
 	claudeRunnerBuildId,
 	claudeRunnerFailure,
@@ -49,6 +50,10 @@ export const connectClaudeRunner = (options: {
 	readonly onCommandAccepted?: (sinkId: string) => void;
 	readonly onUpgradeState?: (state: ClaudeRunnerUpgradeState) => void;
 	readonly onOutputCommitted?: (output: ClaudeSessionOutput) => void;
+	/** Retain a received frame before queued processing can be cancelled by close. */
+	readonly onOutputReceived?: (
+		frame: Extract<ClaudeRunnerMessage, { type: "output" }>,
+	) => void;
 }) =>
 	Effect.gen(function* () {
 		const outputLock = yield* Effect.makeSemaphore(1);
@@ -216,6 +221,7 @@ export const connectClaudeRunner = (options: {
 								),
 							);
 						} else if (message.type === "output") {
+							options.onOutputReceived?.(message);
 							if (
 								message.sequence !== undefined &&
 								Number.isSafeInteger(message.sequence) &&

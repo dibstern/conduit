@@ -478,6 +478,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					stopMonitoring,
 				};
 			}),
+			{ signal: config.signal },
 		);
 	} catch (err) {
 		// Failed acquisition may already have adopted durable runners. Project

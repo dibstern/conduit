@@ -436,10 +436,18 @@ Object.assign(ClaudeDriver, { create: deps => {
 			!this.defaultOpenCode
 		) {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
-			const server = createHttpServer((request, response) => {
+			const server = createHttpServer(async (request, response) => {
+				const path = request.url?.split("?")[0];
+				const gate = join(this.root, "opencode-path-gated");
+				if (path === "/path" && existsSync(gate)) {
+					writeFileSync(`${gate}-started`, request.url ?? "/path");
+					while (!existsSync(`${gate}-release`) && !response.destroyed)
+						await new Promise<void>((done) => setTimeout(done, 10));
+					if (response.destroyed) return;
+				}
 				response.setHeader("Content-Type", "application/json");
 				response.end(
-					request.url?.split("?")[0] === "/session"
+					path === "/session"
 						? "[]"
 						: JSON.stringify({ healthy: true, version: "process-test" }),
 				);
@@ -1086,6 +1094,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const signalSaveGate = join(this.root, "signal-config-rename-gated");
 			if (existsSync(signalSaveGate))
 				writeFileSync(`${signalSaveGate}-release`, "cleanup");
+			const pathGate = join(this.root, "opencode-path-gated");
+			if (existsSync(pathGate)) writeFileSync(`${pathGate}-release`, "cleanup");
 			if (this.blockCapabilitiesProbe) {
 				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 				writeFileSync(

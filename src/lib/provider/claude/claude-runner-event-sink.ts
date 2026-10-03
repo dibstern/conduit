@@ -1,5 +1,5 @@
 import type { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Effect, FiberRef } from "effect";
 import type {
 	PermissionResolvedPayload,
 	QuestionResolvedPayload,
@@ -8,6 +8,7 @@ import type { PendingInteractionService } from "../../domain/relay/Services/pend
 import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createRelayEventSink } from "../relay-event-sink.js";
 import type { PermissionResponse } from "../types.js";
+import { replayingStoppedClaudeRunner } from "./claude-runner-receipts.js";
 
 /** Restore live waiters without appending interactions already in the store. */
 export const makeRecoveredClaudeEventSink = (options: {
@@ -44,7 +45,12 @@ export const makeRecoveredClaudeEventSink = (options: {
 								});
 						}
 					}
-					return yield* ingestion.ingest(event);
+					return yield* (yield* FiberRef.get(replayingStoppedClaudeRunner))
+						? ingestion.ingestBatch([event], {
+								publishToBus: false,
+								publishToRelay: false,
+							})
+						: ingestion.ingest(event);
 				}),
 		},
 		pendingInteractions: {

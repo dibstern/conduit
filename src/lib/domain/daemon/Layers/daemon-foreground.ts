@@ -455,7 +455,7 @@ export async function startForegroundDaemon(
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>
-							discoverClaudeRunners(project.directory, configDir),
+							discoverClaudeRunners(project.directory, configDir, true),
 						);
 						if (runners.length > 0) {
 							// Relay startup recovers runners before any browser connects.

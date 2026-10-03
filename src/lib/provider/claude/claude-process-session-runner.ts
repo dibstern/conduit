@@ -1,6 +1,11 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
@@ -19,7 +24,11 @@ import {
 	claudeRunnerSinkId,
 } from "./claude-runner-protocol.js";
 import { makeClaudeRunnerReceiptStore } from "./claude-runner-receipts.js";
-import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
+import {
+	recoverClaudeRunnerCommands,
+	recoverStoppedClaudeRunner,
+	settleQuarantinedClaudeRunner,
+} from "./claude-runner-recovery.js";
 import {
 	type ClaudeRunnerRegistration,
 	claudeRunnerDirectory,
@@ -87,6 +96,8 @@ const stop = (
 		| "child"
 		| "connection"
 	>,
+	keepOutputConnection = false,
+	beforeKill: Effect.Effect<void> = Effect.void,
 ) =>
 	Effect.gen(function* () {
 		if (entry.stopping) {
@@ -96,11 +107,12 @@ const stop = (
 		}
 		entry.stopping = true;
 		const cleanup = Effect.async<void>((resume) => {
-			entry.connection?.destroy();
+			if (!keepOutputConnection) entry.connection?.destroy();
 			const child = entry.child;
 			let force: ReturnType<typeof setTimeout> | undefined;
 			let deadline: ReturnType<typeof setTimeout> | undefined;
 			const finish = () => {
+				if (keepOutputConnection) entry.connection?.destroy();
 				clearTimeout(force);
 				clearTimeout(deadline);
 				child?.off("exit", finish);
@@ -146,7 +158,7 @@ const stop = (
 			Effect.interruptible,
 			Effect.timeout("1 second"),
 			Effect.ignore,
-			Effect.ensuring(cleanup),
+			Effect.ensuring(beforeKill.pipe(Effect.andThen(cleanup))),
 			Effect.ensuring(Deferred.succeed(entry.stopped, undefined)),
 		);
 	}).pipe(Effect.uninterruptible);
@@ -169,15 +181,47 @@ export const stopRegisteredClaudeRunners = (
 				registrations,
 				(registration) =>
 					Effect.gen(function* () {
+						const journal = `${registration.socketPath}.recovery`;
+						let retaining = false;
+						let retentionFailure: ClaudeSessionFailure | undefined;
 						const connection = yield* Effect.acquireRelease(
 							connectClaudeRunner({
 								...registration,
 								deps: { workspaceRoot, daemonConfigDir: configDir },
 								preserveRole: true,
 								runFork: (effect) => runFork(effect.pipe(Effect.interruptible)),
-								// Relay scopes have drained. Do not acknowledge unpersisted output.
+								// Relay scopes have drained. Next startup commits the retained output.
 								emit: () => Effect.never,
-								onHello: () => Effect.void,
+								onHello: (hello) =>
+									Effect.try({
+										try: () => {
+											if (!existsSync(journal))
+												writeFileSync(
+													journal,
+													`${JSON.stringify(registration)}\n`,
+													{ mode: 0o600 },
+												);
+											const spool = `${registration.socketPath}.spool`;
+											appendFileSync(
+												journal,
+												`${JSON.stringify(hello)}\n${existsSync(spool) ? readFileSync(spool, "utf8") : ""}`,
+											);
+											retaining = true;
+										},
+										catch: (cause) =>
+											claudeRunnerFailure("retain runner output", cause),
+									}),
+								onOutputReceived: (frame) => {
+									if (!retaining) return;
+									try {
+										appendFileSync(journal, `${JSON.stringify(frame)}\n`);
+									} catch (cause) {
+										retentionFailure = {
+											...claudeRunnerFailure("retain runner output", cause),
+											code: "runner_output_retention_failed",
+										};
+									}
+								},
 								onClose: () => {},
 							}),
 							(connection) => Effect.sync(() => connection.destroy()),
@@ -187,15 +231,22 @@ export const stopRegisteredClaudeRunners = (
 							ClaudeSessionFailure
 						>();
 						yield* Deferred.succeed(ready, connection);
-						yield* stop({
-							ready,
-							stopped: yield* Deferred.make<void>(),
-							socketPath: registration.socketPath,
-							pid: registration.pid,
-							stopping: false,
-							verified: true,
-							connection,
-						});
+						yield* stop(
+							{
+								ready,
+								stopped: yield* Deferred.make<void>(),
+								socketPath: registration.socketPath,
+								pid: registration.pid,
+								stopping: false,
+								verified: true,
+								connection,
+							},
+							true,
+							Effect.suspend(() =>
+								retentionFailure ? Effect.fail(retentionFailure) : Effect.void,
+							).pipe(Effect.orDie),
+						);
+						if (retentionFailure) return yield* Effect.fail(retentionFailure);
 						if (runnerPidAlive(registration.pid)) {
 							return yield* new ClaudeRuntimeError({
 								message: `Claude runner ${registration.runnerId} survived shutdown`,
@@ -203,6 +254,8 @@ export const stopRegisteredClaudeRunners = (
 						}
 					}).pipe(
 						Effect.catchAll((error) =>
+							(isRecord(error) &&
+								error["code"] === "runner_output_retention_failed") ||
 							runnerPidAlive(registration.pid)
 								? Effect.fail(error)
 								: Effect.sync(() =>
@@ -329,14 +382,14 @@ export const makeProcessClaudeSessionRunner = (
 							sinks.clear();
 						}).pipe(
 							Effect.andThen(
-								Effect.forEach([...candidates], stop, {
+								Effect.forEach([...candidates], (entry) => stop(entry), {
 									discard: true,
 									concurrency: 4,
 								}),
 							),
 							Effect.ensuring(release),
 						);
-					return yield* Effect.forEach(entries, stop, {
+					return yield* Effect.forEach(entries, (entry) => stop(entry), {
 						discard: true,
 						concurrency: 4,
 					}).pipe(
@@ -931,10 +984,78 @@ export const makeProcessClaudeSessionRunner = (
 							"Claude runners are shutting down",
 						),
 					);
-				for (const registration of discoverClaudeRunners(
+				const registrations = discoverClaudeRunners(
 					deps.workspaceRoot,
 					configDir,
-				)) {
+					true,
+				);
+				// Replay stopped owners before adopting a live replacement for the session.
+				const quarantined: ClaudeRunnerRegistration[] = [];
+				for (const registration of registrations) {
+					if (!registration.stopped) continue;
+					if (!sql || !receipts)
+						return yield* Effect.fail(
+							claudeRunnerFailure(
+								"recover stopped runner",
+								"Claude runner recovery requires the event store",
+							),
+						);
+					if (registration.recoveryFailed) {
+						quarantined.push(registration);
+						continue;
+					}
+					const replaced = registrations.some(
+						(other) =>
+							!other.stopped && other.sessionId === registration.sessionId,
+					);
+					const failed = yield* recoverStoppedClaudeRunner(
+						sql,
+						receipts,
+						registration,
+						(output) => {
+							if (
+								replaced &&
+								(output.type === "background-task" ||
+									output.type === "cancel-interactions" ||
+									(output.type === "event" &&
+										output.event.type === "session.status"))
+							)
+								return Effect.succeed({});
+							return emit(output, registration.sessionId);
+						},
+						!replaced &&
+							registrations
+								.filter(
+									(other) =>
+										other.stopped && other.sessionId === registration.sessionId,
+								)
+								.at(-1) === registration,
+					).pipe(
+						Effect.mapError((cause) =>
+							claudeRunnerFailure("recover stopped runner", cause),
+						),
+					);
+					if (failed) quarantined.push(registration);
+				}
+				// A damaged header has no trustworthy session identity. Only settle
+				// orphan admissions after good journals replay, protecting live owners.
+				for (const registration of quarantined) {
+					if (!sql) continue;
+					yield* settleQuarantinedClaudeRunner(
+						sql,
+						registration,
+						emit,
+						registrations
+							.filter((other) => !other.stopped)
+							.map((other) => other.sessionId),
+					).pipe(
+						Effect.mapError((cause) =>
+							claudeRunnerFailure("settle quarantined runner", cause),
+						),
+					);
+				}
+				for (const registration of registrations) {
+					if (registration.stopped) continue;
 					let abandoned =
 						registration.role === "candidate" ||
 						children.has(registration.sessionId);
