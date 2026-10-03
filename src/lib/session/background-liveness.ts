@@ -1,4 +1,9 @@
-import type { BackgroundWork } from "../shared-types.js";
+import type { BackgroundTask, BackgroundWork } from "../shared-types.js";
+
+export type SessionBackground = {
+	readonly work: BackgroundWork;
+	readonly tasks: readonly BackgroundTask[];
+};
 
 /**
  * Relay-owned state for Claude background tasks that outlive their foreground
@@ -10,7 +15,11 @@ export type BackgroundTaskTransition =
 	| {
 			readonly sessionId: string;
 			readonly kind: "snapshot";
-			readonly taskTypes: readonly string[];
+			readonly tasks: readonly {
+				id: string;
+				type: string;
+				description: string;
+			}[];
 	  }
 	| {
 			// The SDK process ended: the SDK sends no snapshot at startup, so its
@@ -23,28 +32,48 @@ export type BackgroundTaskTransition =
 // local_bash covers the Monitor tool too: the SDK does not tell them apart.
 const WATCH_TASK_TYPES = new Set(["local_bash", "monitor_mcp", "monitor_ws"]);
 
-const classify = (taskTypes: readonly string[]): BackgroundWork | undefined => {
-	if (taskTypes.length === 0) return undefined;
-	return taskTypes.every((type) => WATCH_TASK_TYPES.has(type))
+const classify = (tasks: readonly BackgroundTask[]): BackgroundWork => {
+	return tasks.every((task) => WATCH_TASK_TYPES.has(task.type))
 		? "monitoring"
 		: "working";
 };
 
 export function makeSessionBackgroundLiveness(
 	onChange?: (sessionId: string) => void,
+	now: () => number = Date.now,
 ) {
-	const live = new Map<string, BackgroundWork>();
+	const live = new Map<string, BackgroundTask[]>();
 	return {
 		record(input: BackgroundTaskTransition): void {
-			const work =
-				input.kind === "snapshot" ? classify(input.taskTypes) : undefined;
-			if (live.get(input.sessionId) === work) return;
-			if (work) live.set(input.sessionId, work);
-			else live.delete(input.sessionId);
+			if (input.kind === "session-ended" || input.tasks.length === 0) {
+				if (live.delete(input.sessionId)) onChange?.(input.sessionId);
+				return;
+			}
+			const previous = live.get(input.sessionId) ?? [];
+			const previousById = new Map(previous.map((task) => [task.id, task]));
+			const tasks = input.tasks
+				.map((task) => ({
+					...task,
+					firstSeenAt: previousById.get(task.id)?.firstSeenAt ?? now(),
+				}))
+				.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+			if (
+				previous.length === tasks.length &&
+				tasks.every((task) => {
+					const before = previousById.get(task.id);
+					return (
+						before?.type === task.type &&
+						before.description === task.description
+					);
+				})
+			)
+				return;
+			live.set(input.sessionId, tasks);
 			onChange?.(input.sessionId);
 		},
-		backgroundWork(sessionId: string): BackgroundWork | undefined {
-			return live.get(sessionId);
+		backgroundOf(sessionId: string): SessionBackground | undefined {
+			const tasks = live.get(sessionId);
+			return tasks ? { work: classify(tasks), tasks } : undefined;
 		},
 		hasLiveWork(sessionId: string): boolean {
 			return live.has(sessionId);

@@ -68,6 +68,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					status: "idle",
 					updatedAt: now,
 					messageCount: 6,
+					goalState: facts,
 				},
 			]);
 			const relay = requireRelayControl(world.page);

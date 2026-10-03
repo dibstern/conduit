@@ -55,9 +55,18 @@ describe("typed session row derivations", () => {
 				yield* seedSession("child", { parentId: "root" });
 				const sql = yield* SqlClient.SqlClient;
 				const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
+				const tasks = [
+					{
+						id: "agent-1",
+						type: "local_agent",
+						description: "Audit auth",
+						firstSeenAt: 100,
+					},
+				];
 				const converted = sessionRowsToSessionInfoList(rows, {
 					parentMap: new Map([["child", "root"]]),
-					backgroundWorkOf: (id) => (id === "child" ? "working" : undefined),
+					backgroundOf: (id) =>
+						id === "child" ? { work: "working", tasks } : undefined,
 				});
 				for (const item of converted) {
 					expect(item).toMatchObject({
@@ -66,14 +75,68 @@ describe("typed session row derivations", () => {
 						attention: "working",
 					});
 				}
+				expect(converted.find((item) => item.id === "child")).toMatchObject({
+					backgroundWork: "working",
+					backgroundTasks: tasks,
+				});
+				expect(converted.find((item) => item.id === "root")).not.toHaveProperty(
+					"backgroundTasks",
+				);
+				expect(sessionRowsToSessionInfoList(rows)[0]).not.toHaveProperty(
+					"backgroundTasks",
+				);
 				const priority = sessionRowsToSessionInfoList(rows, {
-					backgroundWorkOf: () => "working",
+					backgroundOf: () => ({ work: "working", tasks }),
 					pendingPermissionCounts: new Map([["child", 1]]),
 				});
 				expect(priority.find((item) => item.id === "child")).toMatchObject({
 					attention: "needs-approval",
 					processing: true,
 				});
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"carries monitoring tasks through list and subscription reads",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("monitor");
+				yield* seedSession("idle");
+				const tasks = [
+					{
+						id: "watch-1",
+						type: "local_bash",
+						description: "Watch tests",
+						firstSeenAt: 100,
+					},
+				];
+				const options = {
+					backgroundOf: (id: string) =>
+						id === "monitor"
+							? { work: "monitoring" as const, tasks }
+							: undefined,
+				};
+				const readQuery = yield* makeReadQueryEffect;
+				const lists = [
+					yield* readQuery.listSessionInfos(options),
+					(yield* readQuery.readSessionList(options)).rows.map(
+						(row) => row.item,
+					),
+				];
+				for (const list of lists) {
+					const monitor = list.find((row) => row.id === "monitor");
+					expect(monitor).toMatchObject({
+						status: "idle",
+						attention: "monitoring",
+						backgroundWork: "monitoring",
+						backgroundTasks: tasks,
+					});
+					expect(monitor).not.toHaveProperty("processing");
+					expect(list.find((row) => row.id === "idle")).not.toHaveProperty(
+						"backgroundTasks",
+					);
+				}
 			}).pipe(Effect.provide(testLayer)),
 	);
 

@@ -53,7 +53,7 @@ export function makeClaudeRunnerIdleExit(
 			if (output?.type === "background-task") {
 				const live =
 					output.transition.kind === "snapshot" &&
-					output.transition.taskTypes.length > 0;
+					output.transition.tasks.length > 0;
 				// Ambient-only SDK snapshots are not session activity.
 				if (!backgroundWork && !live) return;
 				backgroundWork = live;

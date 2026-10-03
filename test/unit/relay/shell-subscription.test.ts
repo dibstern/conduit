@@ -1111,9 +1111,17 @@ describe("subscribeShell", () => {
 				const { q } = yield* openShell();
 				yield* takeN(q, 2);
 
-				const attentionAfter = (taskTypes: string[]) =>
+				const attentionAfter = (types: string[]) =>
 					Effect.gen(function* () {
-						liveness.record({ sessionId: SID, kind: "snapshot", taskTypes });
+						liveness.record({
+							sessionId: SID,
+							kind: "snapshot",
+							tasks: types.map((type, index) => ({
+								id: String(index),
+								type,
+								description: "Task",
+							})),
+						});
 						yield* announceBackgroundWork(SID);
 						yield* Effect.yieldNow();
 						const delta = yield* Queue.take(q).pipe(
@@ -1127,7 +1135,7 @@ describe("subscribeShell", () => {
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(
-				Effect.provideService(BackgroundLivenessTag, liveness.backgroundWork),
+				Effect.provideService(BackgroundLivenessTag, liveness.backgroundOf),
 				Effect.provide(makeShellTestLayer()),
 			);
 		},

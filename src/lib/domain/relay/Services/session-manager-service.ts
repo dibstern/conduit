@@ -43,7 +43,8 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
-import type { BackgroundWork, HistoryMessage } from "../../../shared-types.js";
+import type { SessionBackground } from "../../../session/background-liveness.js";
+import type { HistoryMessage } from "../../../shared-types.js";
 import type { RelayMessage, SessionInfo } from "../../../types.js";
 import {
 	DaemonEventBusTag,
@@ -147,7 +148,7 @@ export type ListSessionsOptions = {
 	limit?: number;
 	roots?: boolean;
 	statuses?: Record<string, SessionStatus> | undefined;
-	backgroundWorkOf?: (sessionId: string) => BackgroundWork | undefined;
+	backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 };
 
 export interface CreateSessionOptions {
@@ -927,7 +928,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const sql = yield* SqlClient.SqlClient;
 		// The relay constructs the session manager before its status-poller layer.
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
-		const backgroundWorkOf = yield* BackgroundLivenessTag;
+		const backgroundOf = yield* BackgroundLivenessTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstanceClientsTag;
@@ -943,7 +944,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				stateRef,
 				readQuery,
 				statusPollerOption,
-				backgroundWorkOf,
+				backgroundOf,
 				snapshot,
 				wsHandler,
 				projectDir: config.projectDir,

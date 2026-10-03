@@ -3,10 +3,8 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
@@ -793,36 +791,6 @@
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-		<!-- Background work outlives the turn; Stop interrupts the whole session. -->
-		{#if currentSession?.backgroundWork && !isProcessing()}
-			<div class="mb-1.5" data-testid="background-work-banner">
-				<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:py-1 max-md:px-3">
-					<span class="shrink-0 text-text-secondary" aria-hidden="true">
-						{#if currentSession.backgroundWork === "monitoring"}
-							<Icon name="eye" size={14} />
-						{:else}
-							<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
-						{/if}
-					</span>
-					<span class="flex-1 min-w-0 truncate text-sm text-text-secondary max-md:text-xs">
-						{currentSession.backgroundWork === "monitoring"
-							? "Monitoring, waiting for a watcher to fire"
-							: "Background work running"}
-					</span>
-					<Button
-						variant="secondary"
-						size="sm"
-						icon="square"
-						iconSize={12}
-						type="button"
-						data-testid="background-work-stop"
-						title="Stop the session and its background work"
-						onclick={handleStop}
-					>Stop</Button>
-				</Surface>
-			</div>
-		{/if}
-
 		{#if !sessionState.currentId && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext /></div>
 		{/if}
@@ -1054,6 +1022,14 @@
 				{/if}
 			</div>
 		{/if}
+		{#if currentSession?.backgroundTasks?.length}
+			<!-- One pulse per live background task; the header row lists them. -->
+			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">
+				{#each currentSession.backgroundTasks as task, index (task.id)}
+					<i class="composer-task-dot" style:animation-delay="{(index % 3) * 0.35}s"></i>
+				{/each}
+			</div>
+		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext /></div>
 		{/if}
@@ -1061,6 +1037,15 @@
 </div>
 
 <style>
+	.composer-task-dot {
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--color-tool);
+		animation: composer-task-pulse 1.4s ease-in-out infinite;
+	}
+	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
+	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
 	:global(#send[data-goal="true"]) {
 		background: var(--color-status-violet);
 		color: var(--color-bg);

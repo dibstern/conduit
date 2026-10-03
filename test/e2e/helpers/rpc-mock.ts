@@ -51,7 +51,7 @@ export class RpcMockControl {
 		string,
 		{ ws: WebSocketRoute; id: string }
 	>();
-	private shellRows: readonly unknown[] | null = null;
+	shellRows: readonly unknown[] | null = null;
 	private shellSequence = 0;
 	private readonly detailRows = new Map<string, readonly unknown[]>();
 	private readonly detailSequences = new Map<string, number>();

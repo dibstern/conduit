@@ -12,7 +12,7 @@ import {
 	sessionRowsToSessionInfoList,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import type { BackgroundWork } from "../../../shared-types.js";
+import type { SessionBackground } from "../../../session/background-liveness.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	type RelayStatusSnapshotService,
@@ -91,8 +91,8 @@ export const listSessions = (options?: ListSessionsOptions) =>
 				...(options?.statuses !== undefined
 					? { statuses: options.statuses }
 					: {}),
-				...(options?.backgroundWorkOf && {
-					backgroundWorkOf: options.backgroundWorkOf,
+				...(options?.backgroundOf && {
+					backgroundOf: options.backgroundOf,
 				}),
 			}),
 			readQuery.getSessionLineage(),
@@ -137,7 +137,7 @@ export const makeSessionListOperations = ({
 	stateRef,
 	readQuery,
 	statusPollerOption,
-	backgroundWorkOf,
+	backgroundOf,
 	snapshot,
 	wsHandler,
 	projectDir,
@@ -146,8 +146,8 @@ export const makeSessionListOperations = ({
 	stateRef: Ref.Ref<SessionManagerState>;
 	readQuery: ReadQueryEffect;
 	statusPollerOption: Option.Option<StatusPollerShape>;
-	backgroundWorkOf:
-		| ((sessionId: string) => BackgroundWork | undefined)
+	backgroundOf:
+		| ((sessionId: string) => SessionBackground | undefined)
 		| undefined;
 	snapshot: RelayStatusSnapshotService;
 	wsHandler: WebSocketHandlerShape;
@@ -167,7 +167,7 @@ export const makeSessionListOperations = ({
 			const base = listSessions({
 				...options,
 				statuses,
-				...(backgroundWorkOf && { backgroundWorkOf }),
+				...(backgroundOf && { backgroundOf }),
 			}).pipe(
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(SessionManagerStateTag, stateRef),
@@ -213,7 +213,7 @@ export const makeSessionListOperations = ({
 				rootId: root?.id ?? sessionId,
 				sessions: sessionRowsToSessionInfoList(rows, {
 					statuses: familyStatuses,
-					...(backgroundWorkOf && { backgroundWorkOf }),
+					...(backgroundOf && { backgroundOf }),
 					pendingQuestionCounts:
 						pendingApprovalCountsByType(approvals).questions,
 					pendingPermissionCounts:

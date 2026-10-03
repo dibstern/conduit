@@ -6,11 +6,8 @@ import {
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
 import type { GoalDetails } from "../../contracts/ws-rpc.js";
-import type {
-	BackgroundWork,
-	SessionAttention,
-	SessionInfo,
-} from "../../shared-types.js";
+import type { SessionBackground } from "../../session/background-liveness.js";
+import type { SessionAttention, SessionInfo } from "../../shared-types.js";
 import type {
 	MessagePartRow,
 	MessageRow,
@@ -87,9 +84,9 @@ export const sessionRowsToSessionInfoList = (
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
-		readonly backgroundWorkOf?: (
+		readonly backgroundOf?: (
 			sessionId: string,
-		) => BackgroundWork | undefined;
+		) => SessionBackground | undefined;
 	} = {},
 ): Array<SessionInfo & { readonly updatedAt: number }> => {
 	const subtree = new Map<
@@ -122,7 +119,7 @@ export const sessionRowsToSessionInfoList = (
 				permissions: 0,
 			};
 			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
-			const work = opts.backgroundWorkOf?.(id);
+			const work = opts.backgroundOf?.(id)?.work;
 			state.processing ||=
 				status === "busy" || status === "retry" || work === "working";
 			state.monitoring ||= work === "monitoring";
@@ -141,7 +138,8 @@ export const sessionRowsToSessionInfoList = (
 			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
 		const unread = row.unread === 1;
 		const status = opts.statuses?.[row.id]?.type ?? row.status;
-		const backgroundWork = opts.backgroundWorkOf?.(row.id);
+		const background = opts.backgroundOf?.(row.id);
+		const backgroundWork = background?.work;
 		const processing =
 			state?.processing ||
 			status === "busy" ||
@@ -176,6 +174,9 @@ export const sessionRowsToSessionInfoList = (
 				: {}),
 			...(processing ? { processing: true } : {}),
 			...(backgroundWork ? { backgroundWork } : {}),
+			...(background?.tasks.length
+				? { backgroundTasks: background.tasks }
+				: {}),
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),
@@ -252,7 +253,7 @@ export interface ReadQueryEffect {
 		titleQuery?: string;
 		before?: { updatedAt: number; id: string };
 		statuses?: Readonly<Record<string, { type: string }>>;
-		backgroundWorkOf?: (sessionId: string) => BackgroundWork | undefined;
+		backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 	}) => Effect.Effect<
 		readonly (SessionInfo & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
@@ -325,9 +326,9 @@ export interface ReadQueryEffect {
 		readonly through?: number;
 		readonly roots?: boolean;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
-		readonly backgroundWorkOf?: (
+		readonly backgroundOf?: (
 			sessionId: string,
-		) => BackgroundWork | undefined;
+		) => SessionBackground | undefined;
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -667,8 +668,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
-				...(opts?.backgroundWorkOf && {
-					backgroundWorkOf: opts.backgroundWorkOf,
+				...(opts?.backgroundOf && {
+					backgroundOf: opts.backgroundOf,
 				}),
 			});
 		});
@@ -899,9 +900,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly after?: number;
 		readonly through?: number;
 		readonly roots?: boolean;
-		readonly backgroundWorkOf?: (
+		readonly backgroundOf?: (
 			sessionId: string,
-		) => BackgroundWork | undefined;
+		) => SessionBackground | undefined;
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -961,8 +962,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
-						...(range?.backgroundWorkOf && {
-							backgroundWorkOf: range.backgroundWorkOf,
+						...(range?.backgroundOf && {
+							backgroundOf: range.backgroundOf,
 						}),
 					});
 					return {

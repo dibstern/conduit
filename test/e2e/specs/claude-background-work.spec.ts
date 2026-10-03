@@ -1,8 +1,9 @@
 // A Claude session whose turn has ended while a backgrounded shell still runs
-// reads as monitoring in the sidebar until the shell ends, with a banner over
-// the composer whose Stop ends the whole session. Bug: it read as done,
-// because the shell's liveness lives in memory and nothing re-sent the row.
-// Specs: conduit-test-0mmk, conduit-test-nvv6, conduit-test-od8e.
+// reads as monitoring in the sidebar until the shell ends, and lists the shell
+// in the session header's tasks row (with a dot on the composer), whose "Stop
+// all" ends the whole session. Bug: it read as done, because the shell's
+// liveness lives in memory and nothing re-sent the row.
+// Specs: conduit-test-0mmk, conduit-test-nvv6, conduit-test-od8e, conduit-test-va96.1.
 //
 // Replays a captured trace (no model call): Bash `sleep 8` with
 // run_in_background, the turn's result, then the shell ending and the SDK's
@@ -99,9 +100,26 @@ test.describe("Claude background work", () => {
 				row,
 				"the turn ended but the sidebar stopped saying monitoring while its background shell ran",
 			).toHaveAttribute("aria-label", /^Monitoring/);
-			await expect(page.getByTestId("background-work-banner")).toContainText(
-				"Monitoring",
+			const tasksRow = page.getByTestId("background-tasks-row");
+			const age = tasksRow.getByTestId("background-task-chip-age");
+			await expect(tasksRow.getByTestId("background-task-chip")).toContainText(
+				"sleep 8",
 			);
+			await expect(
+				page.getByTestId("composer-task-dots").locator("i"),
+			).toHaveCount(1);
+			// Ages count from when the relay first saw the task, so a reload
+			// must not restart them.
+			const seconds = async () =>
+				Number.parseInt((await age.textContent()) ?? "", 10);
+			await expect.poll(seconds).toBeGreaterThanOrEqual(2);
+			const before = await seconds();
+			await page.reload();
+			await expect(age).toBeVisible();
+			expect(
+				await seconds(),
+				"reloading the page restarted the background task's age",
+			).toBeGreaterThanOrEqual(before);
 			await record("turn-ended-shell-running");
 			const composer = testInfo.outputPath("composer-monitoring.png");
 			await page.locator("#input-area").screenshot({
@@ -121,7 +139,8 @@ test.describe("Claude background work", () => {
 				row,
 				"the background shell ended but the sidebar still says working",
 			).toHaveAttribute("aria-label", /^Done, unread/);
-			await expect(page.getByTestId("background-work-banner")).toBeHidden();
+			await expect(page.getByTestId("background-tasks-row")).toBeHidden();
+			await expect(page.getByTestId("composer-task-dots")).toBeHidden();
 			await record("shell-ended");
 		} finally {
 			const path = testInfo.outputPath("background-work-report.json");
@@ -133,7 +152,7 @@ test.describe("Claude background work", () => {
 		}
 	});
 
-	test("Stop on the banner ends the session and its background shell", async ({
+	test("Stop all in the tasks pull-down ends the session and its background shell", async ({
 		page,
 		harness,
 		relayUrl,
@@ -145,15 +164,16 @@ test.describe("Claude background work", () => {
 		await app.goto(relayUrl);
 		await app.sendMessage("Run sleep 8 in the background");
 
-		const banner = page.getByTestId("background-work-banner");
+		const tasksRow = page.getByTestId("background-tasks-row");
 		const row = page.locator(`#session-list [data-session-id="${sessionId}"]`);
-		await expect(banner).toContainText("Monitoring");
+		await expect(tasksRow).toContainText("sleep 8");
 		await expect(row).toHaveAttribute("aria-label", /^Monitoring/);
 
-		await page.getByTestId("background-work-stop").click();
+		await tasksRow.click();
+		await page.getByTestId("background-tasks-stop-all").click();
 		await expect(
-			banner,
-			"Stop left the background work banner up",
+			tasksRow,
+			"Stop all left the background tasks row up",
 		).toBeHidden();
 		await expect(
 			row,
