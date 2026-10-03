@@ -19,8 +19,8 @@ is private and the socket and files are owner-only. Socket names stay outside
 the project tree to fit the Unix socket path limit.
 
 On relay startup, Conduit checks each registered PID for liveness and verifies
-the runner's identity through its socket hello. A registration alone never
-authorizes signalling a PID. Invalid registrations and entries whose PID is
+the runner's identity through its socket hello. Adoption never signals an
+unverified PID. Invalid registrations and entries whose PID is
 verifiably dead are removed without signalling their listed PID. A rejected
 hello from a live or unverified PID preserves its files and retries with
 100/200/400/800 ms backoff. Exhausting these retries fails startup before pending
@@ -68,6 +68,12 @@ cannot remove the retry's sink, approval waiter or abort ownership.
 
 ## Stop and restart
 
+- Each runner owns its lifetime. Its on-disk registration records its existence;
+  the server only attaches. Closing a relay detaches started runners, including
+  failed startup and invalidation. Children still starting before listening are
+  stopped; the runner writes its registration before reporting listening.
+- Unexpected attachment loss while the server is running fails the session's
+  turns and stops that runner. This fault path does not retry the connection.
 - `RestartWithConfig` preserves runners, turns and approvals during graceful
   server disposal. A fresh server rediscovers them. This matches the managed
   OpenCode policy: restart preserves, explicit stop kills.
@@ -77,21 +83,24 @@ cannot remove the retry's sink, approval waiter or abort ownership.
   Start another `conduit serve` to re-adopt them. A second `SIGINT` during
   shutdown exits immediately.
 - `conduit stop`, `Shutdown` RPC and the foreground handle's `stop()` are full
-  stops. They interrupt turns, settle approvals and terminate verified runners,
-  the PTY host and managed OpenCode. Deleting a session also kills its runner.
+  stops. After relays drain, they stop every registered runner for each project,
+  including runners whose relay never started, and terminate the PTY host and
+  managed OpenCode. Project removal disposes its relay, then stops that directory's
+  registered runners. These explicit intents use the private registration as
+  authority for bounded termination even if a suspended runner cannot answer
+  its hello. Deleting a session also kills its runner.
 
-A disconnected runner waits up to 60 seconds for a verified server handshake
-and replay attachment. Set `CONDUIT_CLAUDE_RUNNER_REATTACH_GRACE_MS` to a positive
-integer to choose a different grace period. Rejected connections do not extend
-the deadline. If the server never reattaches, the runner closes its SDK session
-and removes its registration, socket and spool; shutdown has a two-second
-fallback deadline. A reattached runner has no disconnected deadline.
+A disconnected runner has no reattachment deadline. It waits for a server to
+return until an explicit stop, project removal, session deletion, or idle exit.
+When a terminated runner leaves an undelivered turn, the next relay startup
+fails the running turn and outbox admission unless a live registration claims
+that session. Undelivered output can be lost on full stop; the SDK transcript
+retains the conversation history.
 
-Attached and detached runners also use the active config directory's idle
-policy. In-flight turns, background work, pending approvals, and unacknowledged
-outputs prevent idle exit until that work settles or replays. The disconnected
-grace deadline still applies even while work is held. Both deadlines enter one
-exit state and refuse new commands before acceptance, so a racing send retries
+Attached and detached runners use the active config directory's
+`autoSettleAfterDays` inactivity policy. In-flight turns, background work,
+pending approvals, and unacknowledged outputs prevent idle exit until that work
+settles or replays. Idle exit refuses new commands before acceptance, so a racing send retries
 on a fresh runner. Pre-warm counts as activity without admitting a turn, including
 after adoption, and becomes a no-op when racing exit or end-session.
 Protocol mismatches still refuse adoption. A different build with the same
@@ -184,9 +193,10 @@ restart, verifies one SDK prompt delivery, and checks spool truncation. Evidence
 is written to `test-results/85kb-9-*.json`.
 Approval scenarios also cover graceful restart, an ask not yet committed, and
 an already committed "Always Allow" answer not yet delivered to the runner.
-It also verifies orphan grace expiry. Teardown shuts down surviving registered
-runners only after verifying socket identity, asserts every spawned runner PID
-has exited, and then removes the isolated config. `85kb-9-cleanup.json` records
+It also verifies recovery after more than 60 seconds disconnected. Teardown
+shuts down surviving registered runners after verifying socket identity and
+kills any tracked test runner PIDs still alive. It asserts every spawned runner
+PID has exited, then removes the isolated config. `85kb-9-cleanup.json` records
 the assertion for each test config directory.
 Focused adoption, connection and spool regression tests are in
 `test/unit/provider/claude/claude-runner-*.test.ts`; their before-and-after results

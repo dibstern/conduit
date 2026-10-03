@@ -122,9 +122,12 @@ optional login service. New service units run `conduit serve` through the login
 shell. The hidden `--foreground` alias keeps older units working.
 
 The server owns the HTTP/WS edge, project registry, config persistence, event
-store writes and projections, outbox and reactor, and supervision of Claude
-runners, the PTY host and managed OpenCode. It refuses an occupied configured
-port before acquiring runtime resources.
+store writes and projections, outbox and reactor, attachment to Claude runners,
+and supervision of the PTY host and managed OpenCode. Claude runners own their
+lifetime; relay disposal detaches started runners and stops unfinished spawns.
+Explicit full stop and project
+removal terminate registered runners after relay disposal. The server refuses
+an occupied configured port before acquiring runtime resources.
 
 `SIGINT` and `SIGTERM` flush config and dispose the server while preserving
 independent runners, terminals and managed OpenCode for re-adoption. The process
