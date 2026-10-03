@@ -26,6 +26,7 @@ import {
 	prepareClaudeRunnerDirectory,
 	removeClaudeRunner,
 	runnerPidAlive,
+	runnerPidMatchesRegistration,
 } from "./claude-runner-registry.js";
 import {
 	failClaudeRunnerTurn,
@@ -186,6 +187,22 @@ export const stopRegisteredClaudeRunners = (
 								(connection) => Effect.sync(() => connection.destroy()),
 							),
 						);
+						if (
+							connection._tag === "Left" &&
+							!runnerPidMatchesRegistration(registration)
+						) {
+							if (runnerPidAlive(registration.pid)) {
+								log.warn(
+									{ ...registration, cause: connection.left },
+									"Leaving unverified Claude runner after failed hello",
+								);
+							} else {
+								yield* Effect.sync(() =>
+									removeClaudeRunner(registration.socketPath),
+								);
+							}
+							return;
+						}
 						const ready = yield* Deferred.make<
 							ClaudeRunnerSocket,
 							ClaudeSessionFailure
@@ -193,8 +210,7 @@ export const stopRegisteredClaudeRunners = (
 						if (connection._tag === "Right")
 							yield* Deferred.succeed(ready, connection.right);
 						else yield* Deferred.fail(ready, connection.left);
-						// Explicit intent addresses the registry's runner even when it
-						// cannot greet us. Startup adoption never gains this authority.
+						// A failed hello requires independent argv identity before signalling.
 						yield* stop({
 							ready,
 							stopped: yield* Deferred.make<void>(),

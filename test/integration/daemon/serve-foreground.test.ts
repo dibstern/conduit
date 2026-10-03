@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -23,6 +23,10 @@ import {
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { inspectManagedOpenCodeProcess } from "../../../src/lib/instance/managed-opencode-process.js";
+import {
+	prepareClaudeRunnerDirectory,
+	registerClaudeRunner,
+} from "../../../src/lib/provider/claude/claude-runner-registry.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -201,10 +205,10 @@ describe("foreground conduit serve", () => {
 				{
 					ticket: "conduit-test-85kb.16",
 					dist: DIST,
-					expectedScenarios: 16,
+					expectedScenarios: 18,
 					passed:
-						scenarios.length === 16 &&
-						cleanup.length === 16 &&
+						scenarios.length === 18 &&
+						cleanup.length === 18 &&
 						cleanup.every((entry) => entry["passed"] && entry["verified"]),
 					scenarios,
 					cleanup,
@@ -952,6 +956,70 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
+	it.each([
+		false,
+		true,
+	])("leaves an unrelated live process untouched when a stale registration cannot greet full stop (socket reference: %s)", async (mentionsSocket) => {
+		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
+		const runnerId = "012345abcdef";
+		const socketPath = join(
+			prepareClaudeRunnerDirectory(harness.projectDir, harness.configDir),
+			runnerId,
+		);
+		const fixture = spawn(
+			process.execPath,
+			[
+				"-e",
+				`require("node:fs").writeFileSync(require("node:path").join(${JSON.stringify(harness.root)}, "runner-argv-" + process.pid + ".json"), JSON.stringify(process.argv)); setInterval(() => {}, 1000)`,
+				...(mentionsSocket ? [socketPath] : []),
+			],
+			{
+				cwd: harness.root,
+				stdio: "ignore",
+			},
+		);
+		const exited = new Promise<void>((done) =>
+			fixture.once("exit", () => done()),
+		);
+		if (!fixture.pid) throw new Error("Unrelated fixture has no PID");
+		pids.add(fixture.pid);
+		const argvPath = join(harness.root, `runner-argv-${fixture.pid}.json`);
+		await vi.waitFor(() => expect(existsSync(argvPath)).toBe(true));
+		registerClaudeRunner({
+			runnerId,
+			socketPath,
+			sessionId: "stale-pid-fixture",
+			buildId: "stale-pid-fixture",
+			pid: fixture.pid,
+		});
+		writeFileSync(`${socketPath}.spool`, "keep unverified runner evidence");
+		const evidence: Record<string, unknown> = {
+			staleRunnerPid: true,
+			mentionsSocket,
+			fixturePid: fixture.pid,
+			socketPath,
+			runnerId,
+		};
+		scenarios.push(evidence);
+		try {
+			const stop = await harness.runCli(["stop"]);
+			await harness.waitForExit();
+			evidence["stop"] = stop;
+			evidence["fixtureSurvived"] = alive(fixture.pid);
+			expect(stop.code).toBe(0);
+			expect(harness.generations[0]?.exitCode).toBe(0);
+			expect(alive(fixture.pid)).toBe(true);
+			expect(existsSync(`${socketPath}.json`)).toBe(true);
+			expect(readFileSync(`${socketPath}.spool`, "utf8")).toBe(
+				"keep unverified runner evidence",
+			);
+		} finally {
+			fixture.kill("SIGKILL");
+			await exited;
+			evidence["fixtureAliveAfterCleanup"] = alive(fixture.pid);
+		}
+	}, 30_000);
+
 	it("terminates a suspended registered runner on removal while another project's runner survives", async () => {
 		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
 		const removed = await warmProject("process-test");
@@ -964,6 +1032,17 @@ describe("foreground conduit serve", () => {
 			removed: removed.runner,
 			retained: retained.runner,
 		};
+		const runnerArgv: unknown = JSON.parse(
+			readFileSync(
+				join(harness.root, `runner-argv-${removed.runner.pid}.json`),
+				"utf8",
+			),
+		);
+		expect(runnerArgv).toMatchObject({
+			2: removed.runner.socketPath,
+			4: removed.runner.socketPath.split("/").at(-1),
+		});
+		evidence["runnerArgv"] = runnerArgv;
 		scenarios.push(evidence);
 		process.kill(removed.runner.pid, "SIGSTOP");
 		const started = performance.now();

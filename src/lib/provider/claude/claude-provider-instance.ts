@@ -90,7 +90,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	}
 
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.runtime.shutdownEffect();
+		return this.runtime.shutdownEffect({ detachInteractions: true });
 	}
 
 	recoverEffect() {

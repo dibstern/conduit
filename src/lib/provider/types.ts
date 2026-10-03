@@ -81,6 +81,8 @@ export interface EventSink {
 		reason: string,
 		options?: { readonly recoverQuestions?: boolean },
 	): Effect.Effect<void>;
+	/** Relay disposal preserves unanswered interactions for the next relay. */
+	detachInteractions?(): Effect.Effect<void>;
 	/**
 	 * Relay liveness hook. Providers never call this; the orchestration reactor
 	 * calls it for every streamed event so the relay's processing timeout stays

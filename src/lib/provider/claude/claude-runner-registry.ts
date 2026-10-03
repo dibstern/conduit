@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	lstatSync,
@@ -89,6 +90,24 @@ export function runnerPidAlive(pid: number): boolean {
 	} catch (cause) {
 		// An inaccessible PID is not proof of death and must keep its files.
 		return !isRecord(cause) || cause["code"] !== "ESRCH";
+	}
+}
+
+export function runnerPidMatchesRegistration(
+	entry: ClaudeRunnerRegistration,
+): boolean {
+	try {
+		const command = execFileSync(
+			"ps",
+			["-ww", "-o", "command=", "-p", String(entry.pid)],
+			{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000 },
+		);
+		return (
+			command.includes(entry.socketPath) &&
+			command.trim().split(/\s+/).includes(entry.runnerId)
+		);
+	} catch {
+		return false;
 	}
 }
 

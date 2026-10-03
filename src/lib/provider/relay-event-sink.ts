@@ -125,6 +125,7 @@ export type RelayEventSink = EventSink;
 export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	const { sessionId, send, clearTimeout, resetTimeout, persist } = deps;
 	let mapperState = emptyProviderRuntimeDomainMapperState;
+	let detachingInteractions = false;
 
 	function reset(): void {
 		if (resetTimeout) resetTimeout();
@@ -269,6 +270,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 	const sink: RelayEventSink = {
 		noteActivity: reset,
+		detachInteractions: () =>
+			Effect.sync(() => {
+				detachingInteractions = true;
+			}),
 		push(event: ProviderRuntimeEvent): Effect.Effect<void, EventSinkError> {
 			return Effect.gen(function* () {
 				yield* Effect.sync(reset);
@@ -440,8 +445,15 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
-							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
-								return;
+							if (detachingInteractions && Exit.isFailure(exit)) return;
+							if (Exit.isFailure(exit)) {
+								yield* pendingInteractions.resolvePermissionRequest(
+									request.requestId,
+									{
+										decision: "reject",
+									},
+								);
+							}
 							yield* recordInteraction("permission.resolved", {
 								id: request.requestId,
 								decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
@@ -522,13 +534,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					});
 					return yield* pending.awaitAnswers;
 				});
-				// A question kept for recovery is still pending; whoever answers it
-				// later records the resolution. Any other end resolves it here.
+				// Relay disposal and questions kept for recovery leave the ask pending.
+				// Other exits resolve it here.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
-							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
-								return;
+							if (detachingInteractions && Exit.isFailure(exit)) return;
 							if (Exit.isSuccess(exit)) {
 								return yield* recordInteraction("question.resolved", {
 									id: request.requestId,
@@ -540,12 +551,15 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								Option.isSome(failure) &&
 								failure.value instanceof PendingInteractionCancelled &&
 								failure.value.recovered === true;
-							return yield* keptForRecovery
-								? Effect.void
-								: recordInteraction("question.resolved", {
-										id: request.requestId,
-										answers: {},
-									});
+							if (keptForRecovery) return;
+							yield* pendingInteractions.resolveQuestionRequest(
+								request.requestId,
+								{},
+							);
+							return yield* recordInteraction("question.resolved", {
+								id: request.requestId,
+								answers: {},
+							});
 						}),
 					),
 				);

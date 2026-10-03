@@ -564,7 +564,7 @@ export class ProviderSideEffectReactor {
 				resolveQuestion: () => Effect.void,
 			};
 		}
-		const { cancelSessionInteractions } = interactions;
+		const { cancelSessionInteractions, detachInteractions } = interactions;
 		return {
 			push,
 			requestPermission: (request) => interactions.requestPermission(request),
@@ -573,6 +573,7 @@ export class ProviderSideEffectReactor {
 				interactions.resolvePermission(requestId, response),
 			resolveQuestion: (requestId, answers) =>
 				interactions.resolveQuestion(requestId, answers),
+			...(detachInteractions ? { detachInteractions } : {}),
 			...(cancelSessionInteractions
 				? {
 						cancelSessionInteractions: (

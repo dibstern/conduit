@@ -258,6 +258,29 @@ export class ProcessHarness {
 				JSON.stringify(config),
 			);
 		}
+		writeFileSync(
+			join(this.root, "runner-identity-fixture.mjs"),
+			`import childProcess from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
+const root = ${JSON.stringify(this.root)};
+if (process.env.HOME !== join(root, "home")) throw new Error("Runner identity fixture requires isolated HOME");
+if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
+  writeFileSync(join(root, "runner-argv-" + process.pid + ".json"), JSON.stringify(process.argv));
+}
+const executeFile = childProcess.execFileSync;
+childProcess.execFileSync = (command, args, options) => {
+  try { return executeFile(command, args, options); }
+  catch (cause) {
+    if (command !== "ps" || !Array.isArray(args) || !args.includes("command=") || cause.code !== "EPERM") throw cause;
+    const path = join(root, "runner-argv-" + args.at(-1) + ".json");
+    if (!existsSync(path)) throw cause;
+    return process.execPath + " " + JSON.parse(readFileSync(path, "utf8")).slice(1).join(" ");
+  }
+};
+syncBuiltinESMExports();\n`,
+		);
 		if (foregroundCli && dist) {
 			writeFileSync(
 				join(this.root, "cli-fixture.mjs"),
@@ -496,6 +519,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			[
 				"--import",
 				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+				"--import",
+				pathToFileURL(join(this.root, "runner-identity-fixture.mjs")).href,
 				...(this.foregroundCli
 					? ["--import", pathToFileURL(join(this.root, "cli-fixture.mjs")).href]
 					: []),

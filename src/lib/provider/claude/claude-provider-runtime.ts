@@ -288,8 +288,11 @@ export const makeClaudeProviderRuntime = (
 			providerScope,
 		);
 		const providerRuntime = runtime;
+		// Direct scope disposal also detaches before the FiberMaps interrupt waiters.
 		yield* Effect.addFinalizer(() =>
-			providerRuntime.shutdownEffect().pipe(Effect.ignore),
+			providerRuntime
+				.shutdownEffect({ detachInteractions: true })
+				.pipe(Effect.ignore),
 		);
 		return runtime;
 	});
@@ -374,6 +377,7 @@ function sessionFailure(
 export class ClaudeProviderRuntime {
 	readonly providerId = "claude";
 	private readonly sinks = new Map<string, EventSink>();
+	private detachingInteractions = false;
 	private recoveredSink: ((sessionId: string) => EventSink) | undefined;
 	private readonly recoveredSinkIds = new Set<string>();
 	private readonly recoveredRequests = new Map<
@@ -687,9 +691,19 @@ export class ClaudeProviderRuntime {
 			Effect.andThen(this.commandEffect({ type: "end-session", sessionId })),
 		);
 	}
-	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return FiberMap.clear(this.preWarmFibers).pipe(
-			Effect.andThen(this.commandEffect({ type: "shutdown" })),
+	shutdownEffect(options?: {
+		readonly detachInteractions?: true;
+	}): Effect.Effect<void, ProviderInstanceFailure> {
+		return Effect.gen(this, function* () {
+			if (options?.detachInteractions) {
+				this.detachingInteractions = true;
+				for (const sink of this.sinks.values()) {
+					yield* sink.detachInteractions?.() ?? Effect.void;
+				}
+			}
+			yield* FiberMap.clear(this.preWarmFibers);
+			yield* this.commandEffect({ type: "shutdown" });
+		}).pipe(
 			Effect.ensuring(
 				Effect.gen(this, function* () {
 					this.sinks.clear();
@@ -741,6 +755,8 @@ export class ClaudeProviderRuntime {
 				);
 			}
 			if (!sink) return;
+			if (this.detachingInteractions)
+				yield* sink.detachInteractions?.() ?? Effect.void;
 			switch (output.type) {
 				case "event":
 					return yield* sink
