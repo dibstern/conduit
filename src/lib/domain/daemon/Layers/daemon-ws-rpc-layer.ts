@@ -33,7 +33,7 @@ import {
 	addInstance,
 	getInstance,
 	getInstances,
-	type InstanceManagerStateTag,
+	InstanceManagerStateTag,
 	type PollerFibersTag,
 	persistConfig,
 	removeInstance,
@@ -83,6 +83,15 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
+		const instanceState = yield* InstanceManagerStateTag;
+		yield* Effect.addFinalizer(() =>
+			Effect.gen(function* () {
+				// Requests drain before this scope closes, and relay scopes close afterwards.
+				if ((yield* Ref.get(instanceState)).stopManagedProcesses) {
+					setClaudeRunnerRestart(false);
+				}
+			}),
+		);
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) =>
@@ -240,7 +249,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			RestartWithConfig: (request) =>
 				run(
 					Effect.gen(function* () {
-						setClaudeRunnerRestart(true);
+						setClaudeRunnerRestart(
+							!(yield* Ref.get(instanceState)).stopManagedProcesses,
+						);
 						const state = yield* DaemonStateTag;
 						const update = request.config;
 						const tls =

@@ -24,7 +24,10 @@ import {
 	removeClaudeRunner,
 	runnerPidAlive,
 } from "./claude-runner-registry.js";
-import { preserveClaudeRunners } from "./claude-runner-shutdown.js";
+import {
+	ClaudeRunnerRollbackTag,
+	preserveClaudeRunners,
+} from "./claude-runner-shutdown.js";
 import {
 	failClaudeRunnerTurn,
 	observeClaudeRunnerTurn,
@@ -70,6 +73,9 @@ export const makeProcessClaudeSessionRunner = (
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const lock = yield* Effect.makeSemaphore(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
+		const rollbackOption = yield* Effect.serviceOption(ClaudeRunnerRollbackTag);
+		const rollback =
+			rollbackOption._tag === "Some" ? rollbackOption.value : undefined;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
 		const receipts = sql
@@ -175,9 +181,9 @@ export const makeProcessClaudeSessionRunner = (
 			});
 		const shutdown = lock
 			.withPermits(1)(
-				Effect.suspend(() => {
+				Effect.gen(function* () {
 					closing = true;
-					preserving = preserveClaudeRunners();
+					preserving = yield* preserveClaudeRunners(rollback);
 					const entries = [...children.values()];
 					const release = Effect.forEach(
 						entries,
@@ -194,7 +200,7 @@ export const makeProcessClaudeSessionRunner = (
 						{ discard: true },
 					);
 					if (preserving)
-						return Effect.sync(() => {
+						return yield* Effect.sync(() => {
 							for (const entry of children.values()) {
 								entry.stopping = true;
 								entry.connection?.destroy();
@@ -204,7 +210,7 @@ export const makeProcessClaudeSessionRunner = (
 							children.clear();
 							sinks.clear();
 						}).pipe(Effect.ensuring(release));
-					return Effect.forEach(entries, stop, {
+					return yield* Effect.forEach(entries, stop, {
 						discard: true,
 						concurrency: 4,
 					}).pipe(

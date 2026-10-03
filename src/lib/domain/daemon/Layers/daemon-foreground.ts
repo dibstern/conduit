@@ -10,6 +10,7 @@ import {
 	Exit,
 	Layer,
 	ManagedRuntime,
+	Ref,
 } from "effect";
 import {
 	type DaemonConfig,
@@ -41,7 +42,8 @@ import {
 } from "../Services/daemon-handle.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import {
-	type InstanceManagerStateTag,
+	type InstanceManagerState,
+	InstanceManagerStateTag,
 	requestManagedOpenCodeShutdown,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
@@ -219,6 +221,14 @@ export async function startForegroundDaemon(
 	let refreshInFlight: Promise<void> | null = null;
 	let stopInFlight: Promise<void> | null = null;
 	let shutdownMode: "restart" | "stop" = "restart";
+	let instanceState: Ref.Ref<InstanceManagerState> | undefined;
+	const fullStopRequested = Effect.suspend(() =>
+		instanceState === undefined
+			? Effect.succeed(shutdownMode === "stop")
+			: Ref.get(instanceState).pipe(
+					Effect.map((state) => state.stopManagedProcesses === true),
+				),
+	);
 	let settleStopped!: { resolve: () => void; reject: (error: unknown) => void };
 	const stopSettled = new Promise<void>((resolve, reject) => {
 		settleStopped = { resolve, reject };
@@ -287,9 +297,13 @@ export async function startForegroundDaemon(
 		stopped = true;
 		stopInFlight = (async () => {
 			shutdownMode = mode;
-			setClaudeRunnerRestart(mode === "restart");
+			// The Deferred wakes shutdown once; a committed full stop remains authoritative.
+			if (await runRuntimeEffect(currentRuntime, fullStopRequested)) {
+				shutdownMode = "stop";
+			}
+			setClaudeRunnerRestart(shutdownMode === "restart");
 			try {
-				if (mode === "stop") {
+				if (shutdownMode === "stop") {
 					await runRuntimeEffect(
 						currentRuntime,
 						requestManagedOpenCodeShutdown,
@@ -394,16 +408,14 @@ export async function startForegroundDaemon(
 				catch: (cause) => cause,
 			}),
 			(lease) =>
-				Effect.promise(async () => {
-					try {
-						if (shutdownMode === "stop") {
-							// All request and relay scopes are drained before the host ends.
-							await stopPtyHost({ configDir, force: true });
-						}
-					} finally {
-						lease.close();
+				Effect.gen(function* () {
+					if (yield* fullStopRequested) {
+						// Read intent after request and relay scopes have drained.
+						yield* Effect.promise(() =>
+							stopPtyHost({ configDir, force: true }),
+						);
 					}
-				}),
+				}).pipe(Effect.ensuring(Effect.sync(() => lease.close()))),
 		),
 	);
 	runtime = ManagedRuntime.make(
@@ -411,8 +423,8 @@ export async function startForegroundDaemon(
 	);
 	try {
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
-		// Relay acquisition can dispose a partially recovered scope on failure.
-		setClaudeRunnerRestart(true);
+		instanceState = await runRuntimeEffect(runtime, InstanceManagerStateTag);
+		setClaudeRunnerRestart(false);
 		const currentHandle = handle;
 		await runRuntimeEffect(
 			runtime,
@@ -420,18 +432,34 @@ export async function startForegroundDaemon(
 				const relayCache = yield* RelayCacheTag;
 				const registered = yield* currentHandle.getProjects();
 				for (const project of registered) {
-					if (discoverClaudeRunners(project.directory, configDir).length > 0) {
-						// Recovery belongs to relay startup, including before any browser connects.
-						yield* relayCache.get(project.slug);
-					}
+					yield* Effect.gen(function* () {
+						const runners = yield* Effect.sync(() =>
+							discoverClaudeRunners(project.directory, configDir),
+						);
+						if (runners.length > 0) {
+							// Relay startup recovers runners before any browser connects.
+							yield* relayCache.get(project.slug);
+						}
+					}).pipe(
+						Effect.catchAllCause((cause) =>
+							Cause.isInterruptedOnly(cause)
+								? Effect.failCause(cause)
+								: Effect.logError(
+										`Failed to recover relay for project "${project.slug}"`,
+										cause,
+									),
+						),
+					);
 				}
 			}),
 		);
 		await refreshSnapshots();
-		setClaudeRunnerRestart(false);
 	} catch (error) {
 		// A failed server startup must leave adopted durable children for the next attempt.
-		setClaudeRunnerRestart(true);
+		setClaudeRunnerRestart(
+			instanceState === undefined ||
+				!(await runRuntimeEffect(runtime, fullStopRequested)),
+		);
 		await runtime.dispose();
 		runtime = null;
 		handle = null;

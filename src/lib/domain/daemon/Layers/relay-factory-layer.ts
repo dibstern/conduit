@@ -384,6 +384,9 @@ export const RelayFactoryLive = (
 									noServer: true,
 									signal: ac.signal,
 									configDir,
+									fullStopRequested: Ref.get(instanceState).pipe(
+										Effect.map((state) => state.stopManagedProcesses === true),
+									),
 									persistenceDbPath: dbPath,
 									getProjects,
 									listDaemonSessions,

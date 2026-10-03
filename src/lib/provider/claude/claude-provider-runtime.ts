@@ -75,7 +75,11 @@ import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
 import { makeRecoveredClaudeEventSink } from "./claude-runner-event-sink.js";
 import { claudeRunnerSinkId } from "./claude-runner-protocol.js";
-import { preserveClaudeRunners } from "./claude-runner-shutdown.js";
+import {
+	type ClaudeRunnerRollback,
+	ClaudeRunnerRollbackTag,
+	preserveClaudeRunners,
+} from "./claude-runner-shutdown.js";
 import {
 	discoverCapabilitiesEffect,
 	expectedApiModelIdEffect,
@@ -226,6 +230,7 @@ export const makeClaudeProviderRuntime = (
 ): Effect.Effect<ClaudeProviderRuntime, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
+		const rollbackOption = yield* Effect.serviceOption(ClaudeRunnerRollbackTag);
 		const capabilitiesService =
 			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
 		const abortFibers = yield* FiberMap.make<string, void, never>();
@@ -273,6 +278,7 @@ export const makeClaudeProviderRuntime = (
 			preWarmFibers,
 			providerScope,
 			processRunnerEnabled,
+			rollbackOption._tag === "Some" ? rollbackOption.value : undefined,
 		);
 		const providerRuntime = runtime;
 		yield* Effect.addFinalizer(() =>
@@ -398,6 +404,7 @@ export class ClaudeProviderRuntime {
 		>,
 		private readonly providerScope: Scope.Scope,
 		private readonly processRunnerEnabled = false,
+		private readonly runnerRollback?: ClaudeRunnerRollback,
 	) {}
 
 	private commandEffect(
@@ -694,10 +701,13 @@ export class ClaudeProviderRuntime {
 						`${output.sinkId}:${output.request.requestId}`,
 						request.pipe(
 							Effect.onExit((exit) =>
-								Exit.isFailure(exit) &&
-								(process.env["CONDUIT_CLAUDE_RUNNER"] !== "process" ||
-									!preserveClaudeRunners())
-									? this.runner
+								Effect.gen(this, function* () {
+									if (
+										Exit.isFailure(exit) &&
+										(process.env["CONDUIT_CLAUDE_RUNNER"] !== "process" ||
+											!(yield* preserveClaudeRunners(this.runnerRollback)))
+									) {
+										yield* this.runner
 											.executeEffect({
 												type: "interaction-failed",
 												sinkId: output.sinkId,
@@ -711,8 +721,9 @@ export class ClaudeProviderRuntime {
 													Cause.squash(exit.cause),
 												),
 											})
-											.pipe(Effect.ignore)
-									: Effect.void,
+											.pipe(Effect.ignore);
+									}
+								}),
 							),
 							Effect.catchAllCause(() => Effect.void),
 						),

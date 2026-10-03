@@ -440,28 +440,30 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// (interrupt, cancel, timeout) is the SDK being told no.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
-						Exit.isFailure(exit) &&
-						process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-						preserveClaudeRunners()
-							? Effect.void
-							: recordInteraction("permission.resolved", {
-									id: request.requestId,
-									decision: Exit.isSuccess(exit)
-										? exit.value.decision
-										: "reject",
-								}).pipe(
-									Effect.locally(
-										currentClaudeRunnerPermissionReply,
-										process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-											Exit.isSuccess(exit)
-											? {
-													sessionId,
-													requestId: request.requestId,
-													response: exit.value,
-												}
-											: undefined,
-									),
+						Effect.gen(function* () {
+							if (
+								Exit.isFailure(exit) &&
+								process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
+								(yield* preserveClaudeRunners())
+							)
+								return;
+							yield* recordInteraction("permission.resolved", {
+								id: request.requestId,
+								decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
+							}).pipe(
+								Effect.locally(
+									currentClaudeRunnerPermissionReply,
+									process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
+										Exit.isSuccess(exit)
+										? {
+												sessionId,
+												requestId: request.requestId,
+												response: exit.value,
+											}
+										: undefined,
 								),
+							);
+						}),
 					),
 				);
 			});
@@ -529,31 +531,33 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// A question kept for recovery is still pending; whoever answers it
 				// later records the resolution. Any other end resolves it here.
 				return yield* ask.pipe(
-					Effect.onExit((exit) => {
-						if (
-							Exit.isFailure(exit) &&
-							process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
-							preserveClaudeRunners()
-						)
-							return Effect.void;
-						if (Exit.isSuccess(exit)) {
-							return recordInteraction("question.resolved", {
-								id: request.requestId,
-								answers: exit.value,
-							});
-						}
-						const failure = Cause.failureOption(exit.cause);
-						const keptForRecovery =
-							Option.isSome(failure) &&
-							failure.value instanceof PendingInteractionCancelled &&
-							failure.value.recovered === true;
-						return keptForRecovery
-							? Effect.void
-							: recordInteraction("question.resolved", {
+					Effect.onExit((exit) =>
+						Effect.gen(function* () {
+							if (
+								Exit.isFailure(exit) &&
+								process.env["CONDUIT_CLAUDE_RUNNER"] === "process" &&
+								(yield* preserveClaudeRunners())
+							)
+								return;
+							if (Exit.isSuccess(exit)) {
+								return yield* recordInteraction("question.resolved", {
 									id: request.requestId,
-									answers: {},
+									answers: exit.value,
 								});
-					}),
+							}
+							const failure = Cause.failureOption(exit.cause);
+							const keptForRecovery =
+								Option.isSome(failure) &&
+								failure.value instanceof PendingInteractionCancelled &&
+								failure.value.recovered === true;
+							return yield* keptForRecovery
+								? Effect.void
+								: recordInteraction("question.resolved", {
+										id: request.requestId,
+										answers: {},
+									});
+						}),
+					),
 				);
 			});
 		},

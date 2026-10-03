@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import {
 	chmodSync,
 	copyFileSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -110,6 +112,17 @@ export class ProcessHarness {
 	private defaultOpenCode: Server | undefined;
 	private defaultOpenCodeUrl = "http://127.0.0.1:0";
 	private readonly ownedOpenCode = new Map<string, ManagedOpenCodeRecord>();
+	private readonly ownedOpenCodeProcesses = new Map<string, Set<number>>();
+	private readonly observedOpenCodeProcesses = new Set<number>();
+	private readonly ownershipErrors: unknown[] = [];
+	private readonly ownershipObserver: ReturnType<typeof setInterval>;
+	private readonly managedCleanup: Array<{
+		supervisorPid: number;
+		controlAuthenticated: boolean;
+		stopAccepted: boolean;
+		pids: number[];
+		remainingPids: number[];
+	}> = [];
 	private runnerCleanup:
 		| Awaited<ReturnType<typeof cleanupTestClaudeRunners>>
 		| undefined;
@@ -144,6 +157,7 @@ export class ProcessHarness {
 			| "send-turn",
 		private readonly runnerReattachGraceMs?: number,
 		private readonly foregroundCli = false,
+		private readonly autoStartOpenCode = false,
 	) {
 		this.configDir = join(
 			this.root,
@@ -228,9 +242,81 @@ export class ProcessHarness {
 				JSON.stringify(config),
 			);
 		}
+		if (foregroundCli && dist) {
+			writeFileSync(
+				join(this.root, "cli-fixture.mjs"),
+				`import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
+import { Effect } from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("effect")).href)};
+import { ClaudeDriver } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-provider-instance.js")).href)};
+const root = ${JSON.stringify(this.root)};
+if (process.env.HOME !== join(root, "home") || !process.send) throw new Error("CLI fixture requires isolated HOME and IPC");
+const identitySaveGate = join(root, "managed-identity-save-gated");
+if (existsSync(identitySaveGate)) {
+  const rename = fsPromises.rename;
+  fsPromises.rename = async (source, destination) => {
+    if (destination === ${JSON.stringify(join(this.configDir, "daemon.json"))}) {
+      const pending = JSON.parse(readFileSync(source, "utf8"));
+      if (pending.instances?.some(instance => instance.processIdentity)) {
+        writeFileSync(identitySaveGate + "-started", "identity has not been persisted");
+        while (!existsSync(identitySaveGate + "-release")) await new Promise(done => setTimeout(done, 10));
+      }
+    }
+    return rename(source, destination);
+  };
+  syncBuiltinESMExports();
+}
+process.on("SIGINT", () => writeFileSync(join(root, "sigint-observed"), "observed"));
+const create = ClaudeDriver.create;
+const waitForGate = (gate, workspaceRoot) => Effect.promise(async () => {
+  if (existsSync(gate)) {
+    writeFileSync(gate + "-started", workspaceRoot);
+    while (!existsSync(gate + "-release")) await new Promise(done => setTimeout(done, 10));
+  }
+});
+Object.assign(ClaudeDriver, { create: deps => {
+  const projectGate = join(deps.workspaceRoot, ".conduit", "recovery-gated");
+  const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
+  return waitForGate(gate, deps.workspaceRoot).pipe(
+    Effect.zipRight(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
+      existsSync(join(root, "capabilities-probe-result.json"))
+        ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
+        : { models: [], agents: [], commands: [] }
+    ) } })),
+    Effect.map(instance => {
+      const recover = instance.recoverEffect.bind(instance);
+      Object.assign(instance, { recoverEffect: () => {
+        const failureGate = join(deps.workspaceRoot, ".conduit", "recovery-fail-after-adoption");
+        return recover().pipe(
+          Effect.zipRight(waitForGate(failureGate, deps.workspaceRoot)),
+          Effect.tap(() => Effect.sync(() => {
+            if (!existsSync(failureGate)) return;
+            writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");
+            throw new Error("fixture recovery failed after authenticated runner adoption");
+          }))
+        );
+      } });
+      return instance;
+    })
+  );
+} });
+`,
+			);
+		}
+		this.ownershipObserver = setInterval(() => {
+			try {
+				this.rememberManagedOpenCode();
+			} catch (cause) {
+				this.ownershipErrors.push(cause);
+			}
+		}, 25);
+		this.ownershipObserver.unref();
+		this.rememberManagedOpenCode();
 	}
 
-	static async start(
+	static create(
 		options: {
 			dist?: string;
 			enqueueMarkDelayMs?: number;
@@ -252,9 +338,10 @@ export class ProcessHarness {
 				| "send-turn";
 			runnerReattachGraceMs?: number;
 			foregroundCli?: boolean;
+			autoStartOpenCode?: boolean;
 		} = {},
-	): Promise<ProcessHarness> {
-		const harness = new ProcessHarness(
+	): ProcessHarness {
+		return new ProcessHarness(
 			(options.dist ?? process.env["CONDUIT_TEST_DIST"])
 				? resolve(options.dist ?? process.env["CONDUIT_TEST_DIST"] ?? "dist")
 				: undefined,
@@ -274,7 +361,14 @@ export class ProcessHarness {
 			options.holdRunnerOutput,
 			options.runnerReattachGraceMs,
 			options.foregroundCli,
+			options.autoStartOpenCode,
 		);
+	}
+
+	static async start(
+		options: Parameters<typeof ProcessHarness.create>[0] = {},
+	): Promise<ProcessHarness> {
+		const harness = ProcessHarness.create(options);
 		try {
 			await harness.restart();
 			return harness;
@@ -294,7 +388,11 @@ export class ProcessHarness {
 		const fakeModule = pathToFileURL(
 			fileURLToPath(new URL("./fake-claude-process-sdk.ts", import.meta.url)),
 		).href;
-		if (this.foregroundCli && !this.defaultOpenCode) {
+		if (
+			this.foregroundCli &&
+			!this.autoStartOpenCode &&
+			!this.defaultOpenCode
+		) {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer((request, response) => {
 				response.setHeader("Content-Type", "application/json");
@@ -352,6 +450,9 @@ export class ProcessHarness {
 			[
 				"--import",
 				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+				...(this.foregroundCli
+					? ["--import", pathToFileURL(join(this.root, "cli-fixture.mjs")).href]
+					: []),
 				...(this.foregroundCli && this.dist
 					? [
 							join(this.dist, "src/bin/cli.js"),
@@ -593,11 +694,13 @@ export class ProcessHarness {
 	async connect(
 		sessionId?: string,
 		originId?: string,
+		projectSlug = "process-test",
 	): Promise<ProcessBrowser> {
 		const browser = await ProcessBrowser.connect(
 			this.port,
 			sessionId,
 			originId,
+			projectSlug,
 		);
 		this.browsers.push(browser);
 		return browser;
@@ -687,15 +790,23 @@ export class ProcessHarness {
 	async shutdown(): Promise<void> {
 		const child = this.child;
 		if (!child) return;
-		if (child.exitCode === null && child.signalCode === null)
-			await sendRpcRequest(
-				join(this.configDir, "relay.sock"),
-				new Shutdown({}),
-			);
+		let rpcFailure: unknown;
+		if (child.exitCode === null && child.signalCode === null) {
+			try {
+				await sendRpcRequest(
+					join(this.configDir, "relay.sock"),
+					new Shutdown({}),
+				);
+			} catch (cause) {
+				// A startup failure can remove IPC before its owned child exits.
+				rpcFailure = cause;
+			}
+		}
 		for (const connected of this.browsers) await connected.close();
 		const force = setTimeout(() => child?.kill("SIGKILL"), 10_000);
 		try {
 			await this.exit;
+			if (rpcFailure && child.signalCode === "SIGKILL") throw rpcFailure;
 		} finally {
 			clearTimeout(force);
 		}
@@ -774,6 +885,14 @@ export class ProcessHarness {
 			configDir: this.configDir,
 			disposed: this.disposed,
 			runnerCleanup: this.runnerCleanup,
+			managedCleanup: this.managedCleanup,
+			ownedOpenCodePids: [...this.ownedOpenCodeProcesses.values()].flatMap(
+				(pids) => [...pids],
+			),
+			observedOpenCodePids: [...this.observedOpenCodeProcesses],
+			remainingObservedOpenCodePids: [...this.observedOpenCodeProcesses].filter(
+				isProcessAlive,
+			),
 			generations: this.generations,
 			marks: this.marks,
 			cliPids: this.cliPids,
@@ -793,20 +912,71 @@ export class ProcessHarness {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
-				instance.processIdentity &&
-				!this.ownedOpenCode.has(instance.processIdentity.token)
+				instance.processIdentity
+			) {
+				const token = instance.processIdentity.token;
+				if (this.ownedOpenCode.has(token)) continue;
+				this.ownedOpenCode.set(token, instance);
+				const pids = new Set<number>();
+				pids.add(instance.processIdentity.supervisorPid);
+				if (instance.pid !== undefined) pids.add(instance.pid);
+				this.ownedOpenCodeProcesses.set(token, pids);
+			}
+		}
+		const ledger = join(this.configDir, "fake-opencode-pids.jsonl");
+		if (!existsSync(ledger)) return;
+		for (const line of readFileSync(ledger, "utf8").split("\n")) {
+			let entry: unknown;
+			try {
+				entry = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if (!isRecord(entry)) continue;
+			const pid = entry["pid"];
+			const captured =
+				typeof pid === "number" &&
+				[...this.ownedOpenCode].some(
+					([token, record]) =>
+						record.processIdentity?.supervisorPid === entry["groupPid"] &&
+						this.ownedOpenCodeProcesses.get(token)?.has(pid),
+				);
+			if (captured || this.ownedOpenCode.size === 0) {
+				for (const key of ["pid", "childPid", "groupPid"]) {
+					const observed = entry[key];
+					if (
+						typeof observed === "number" &&
+						Number.isSafeInteger(observed) &&
+						observed > 0
+					)
+						// Observations require termination proof without granting authority.
+						this.observedOpenCodeProcesses.add(observed);
+				}
+			}
+			if (
+				typeof entry["pid"] !== "number" ||
+				typeof entry["childPid"] !== "number" ||
+				!Number.isSafeInteger(entry["childPid"]) ||
+				entry["childPid"] <= 0
 			)
-				this.ownedOpenCode.set(instance.processIdentity.token, instance);
+				continue;
+			for (const [token, record] of this.ownedOpenCode) {
+				const pids = this.ownedOpenCodeProcesses.get(token);
+				if (
+					record.processIdentity?.supervisorPid === entry["groupPid"] &&
+					pids?.has(entry["pid"])
+				)
+					// The isolated ledger adds liveness checks, never signal authority.
+					pids.add(entry["childPid"]);
+			}
 		}
 	}
 
 	ownedOpenCodePids(): number[] {
 		this.rememberManagedOpenCode();
-		return [...this.ownedOpenCode.values()].flatMap((record) =>
-			[record.pid, record.processIdentity?.supervisorPid].filter(
-				(pid): pid is number => pid !== undefined,
-			),
-		);
+		return [...this.ownedOpenCodeProcesses.values()].flatMap((pids) => [
+			...pids,
+		]);
 	}
 
 	runnerPids(): number[] {
@@ -849,8 +1019,20 @@ export class ProcessHarness {
 		}
 		const failures: unknown[] = [];
 		try {
-			if (this.blockCapabilitiesProbe)
+			if (this.blockCapabilitiesProbe) {
 				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
+				writeFileSync(
+					join(this.root, "capabilities-probe-gated-release"),
+					"release",
+				);
+			}
+			for (const project of loadDaemonConfig(this.configDir)?.projects ?? []) {
+				if (!project.path.startsWith(`${this.root}/`)) continue;
+				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
+					const gate = join(project.path, ".conduit", name);
+					if (existsSync(gate)) writeFileSync(`${gate}-release`, "cleanup");
+				}
+			}
 			this.rememberManagedOpenCode();
 		} catch (cause) {
 			failures.push(cause);
@@ -873,24 +1055,49 @@ export class ProcessHarness {
 		}
 		// Retain authenticated ownership across deliberately corrupted configs.
 		// Historical numeric IDs in the fixture ledger can be reused.
-		for (const record of this.ownedOpenCode.values()) {
+		const managedEvidence = new Map<
+			string,
+			(typeof this.managedCleanup)[number]
+		>();
+		let unverifiedManagedOwner = false;
+		for (const [token, record] of this.ownedOpenCode) {
+			const pids = this.ownedOpenCodeProcesses.get(token);
+			if (!record.processIdentity || !pids) {
+				failures.push(
+					new Error(`Managed fixture identity missing at ${this.root}`),
+				);
+				continue;
+			}
+			const evidence = {
+				supervisorPid: record.processIdentity.supervisorPid,
+				controlAuthenticated: false,
+				stopAccepted: false,
+				pids: [] as number[],
+				remainingPids: [] as number[],
+			};
+			this.managedCleanup.push(evidence);
+			managedEvidence.set(token, evidence);
 			try {
 				const owned = await inspectManagedOpenCodeProcess(
 					record.processIdentity,
 				);
-				const stopped = owned
-					? await stopManagedOpenCode({ ...record, pid: owned.pid })
-					: false;
-				if (
-					!stopped &&
-					record.processIdentity &&
-					isProcessAlive(record.processIdentity.supervisorPid)
-				)
+				if (owned) {
+					evidence.controlAuthenticated = true;
+					pids.add(owned.pid);
+					pids.add(owned.launchPid);
+					this.rememberManagedOpenCode();
+					evidence.stopAccepted = await stopManagedOpenCode({
+						...record,
+						pid: owned.pid,
+					});
+				} else if (isProcessAlive(record.processIdentity.supervisorPid)) {
+					unverifiedManagedOwner = true;
 					failures.push(
 						new Error(
 							`Cannot verify managed fixture cleanup; recovery retained at ${this.root}`,
 						),
 					);
+				}
 			} catch (cause) {
 				failures.push(
 					new Error(
@@ -900,6 +1107,36 @@ export class ProcessHarness {
 				);
 			}
 		}
+		const managedDeadline = Date.now() + 15_000;
+		while (
+			!unverifiedManagedOwner &&
+			[...this.ownedOpenCodePids(), ...this.observedOpenCodeProcesses].some(
+				isProcessAlive,
+			) &&
+			Date.now() < managedDeadline
+		)
+			await new Promise<void>((done) => setTimeout(done, 25));
+		for (const [token, evidence] of managedEvidence) {
+			evidence.pids = [...(this.ownedOpenCodeProcesses.get(token) ?? [])];
+			evidence.remainingPids = evidence.pids.filter(isProcessAlive);
+			if (!unverifiedManagedOwner && evidence.remainingPids.length > 0)
+				failures.push(
+					new Error(
+						`Managed fixture processes still alive: ${evidence.remainingPids.join(", ")}; recovery retained at ${this.root}`,
+					),
+				);
+		}
+		const remainingObserved = [...this.observedOpenCodeProcesses].filter(
+			isProcessAlive,
+		);
+		if (!unverifiedManagedOwner && remainingObserved.length > 0)
+			failures.push(
+				new Error(
+					`Observed fixture processes still alive: ${remainingObserved.join(", ")}; recovery retained at ${this.root}`,
+				),
+			);
+		clearInterval(this.ownershipObserver);
+		failures.push(...this.ownershipErrors);
 		try {
 			this.runnerCleanup = await cleanupTestClaudeRunners(
 				this.root,
@@ -969,6 +1206,7 @@ export class ProcessBrowser {
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
 		readonly rpc: BrowserRpc["Type"],
 		originId: string,
+		private readonly projectSlug: string,
 	) {
 		this.originId = originId;
 		ws.on("message", (data) => {
@@ -993,6 +1231,7 @@ export class ProcessBrowser {
 		port: number,
 		sessionId?: string,
 		originId: string = randomUUID(),
+		projectSlug = "process-test",
 	): Promise<ProcessBrowser> {
 		const runtime = browserRpcRuntime(port);
 		const rpc = await runtime
@@ -1002,9 +1241,9 @@ export class ProcessBrowser {
 				throw error;
 			});
 		const ws = new WebSocket(
-			`ws://127.0.0.1:${port}/ws?p=process-test&client=${originId}${sessionId ? `&session=${sessionId}` : ""}`,
+			`ws://127.0.0.1:${port}/ws?p=${projectSlug}&client=${originId}${sessionId ? `&session=${sessionId}` : ""}`,
 		);
-		const browser = new ProcessBrowser(ws, runtime, rpc, originId);
+		const browser = new ProcessBrowser(ws, runtime, rpc, originId, projectSlug);
 		try {
 			await new Promise<void>((done, fail) => {
 				const timer = setTimeout(
@@ -1082,7 +1321,7 @@ export class ProcessBrowser {
 	async createSession(title?: string, instanceId?: string): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				providerId: "claude",
 				...(instanceId
 					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
@@ -1099,7 +1338,7 @@ export class ProcessBrowser {
 		const cursor = this.frames.length;
 		await this.run(
 			this.rpc.CreatePty({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				originId: this.originId,
 			}),
 		);
@@ -1114,7 +1353,7 @@ export class ProcessBrowser {
 		return (
 			await this.run(
 				this.rpc.ListPtys({
-					projectSlug: "process-test",
+					projectSlug: this.projectSlug,
 					originId: this.originId,
 				}),
 			)
@@ -1128,7 +1367,7 @@ export class ProcessBrowser {
 	async resizePty(ptyId: string, cols: number, rows: number): Promise<void> {
 		await this.run(
 			this.rpc.ResizePty({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				originId: this.originId,
 				ptyId,
 				cols,
@@ -1138,13 +1377,13 @@ export class ProcessBrowser {
 	}
 
 	async closePty(ptyId: string): Promise<void> {
-		await this.run(this.rpc.ClosePty({ projectSlug: "process-test", ptyId }));
+		await this.run(this.rpc.ClosePty({ projectSlug: this.projectSlug, ptyId }));
 	}
 
 	async view(sessionId: string): Promise<void> {
 		await this.run(
 			this.rpc.ViewSession({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -1153,7 +1392,7 @@ export class ProcessBrowser {
 
 	async preWarmSession(sessionId: string): Promise<void> {
 		await this.run(
-			this.rpc.PreWarmSession({ projectSlug: "process-test", sessionId }),
+			this.rpc.PreWarmSession({ projectSlug: this.projectSlug, sessionId }),
 		);
 	}
 
@@ -1164,7 +1403,7 @@ export class ProcessBrowser {
 		const cursor = this.frames.length;
 		await this.run(
 			this.rpc.SendMessage({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 				commandId: randomUUID(),
@@ -1189,7 +1428,7 @@ export class ProcessBrowser {
 	): Promise<void> {
 		await this.run(
 			this.rpc.RespondPermission({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				originId: this.originId,
 				commandId: randomUUID(),
 				requestId: String(request["requestId"]),
@@ -1204,7 +1443,7 @@ export class ProcessBrowser {
 	async history(sessionId: string) {
 		return (
 			await this.run(
-				this.rpc.LoadMoreHistory({ projectSlug: "process-test", sessionId }),
+				this.rpc.LoadMoreHistory({ projectSlug: this.projectSlug, sessionId }),
 			)
 		).messages;
 	}
@@ -1222,7 +1461,7 @@ export class ProcessBrowser {
 	async deleteSession(sessionId: string): Promise<void> {
 		await this.run(
 			this.rpc.DeleteSession({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -1232,7 +1471,7 @@ export class ProcessBrowser {
 	async switchAgent(sessionId: string, agentId: string): Promise<void> {
 		await this.run(
 			this.rpc.SwitchAgent({
-				projectSlug: "process-test",
+				projectSlug: this.projectSlug,
 				sessionId,
 				agentId,
 				originId: this.originId,
@@ -1244,7 +1483,7 @@ export class ProcessBrowser {
 		await this.runtime.runPromise(
 			this.rpc
 				.ReloadProviderSession({
-					projectSlug: "process-test",
+					projectSlug: this.projectSlug,
 					sessionId,
 					originId: this.originId,
 					commandId: randomUUID(),
