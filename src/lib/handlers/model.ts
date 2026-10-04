@@ -467,30 +467,40 @@ export const getModelsResponse = (
 				);
 			}
 		}
-		const activeModel = selectedModelMatchesInstance
+		const selectedModel = selectedModelMatchesInstance
 			? (sessionModel ?? fallbackModel)
 			: undefined;
+		const catalogModels = providers.flatMap((p) => p.models);
+		const exactModel =
+			selectedModel &&
+			catalogModels.find(
+				(mod) =>
+					mod.id === selectedModel.modelID ||
+					mod.routingOptions?.some(
+						(option) => option.value === selectedModel.modelID,
+					),
+			);
+		// Stored ids outlive catalog ids: Opus was advertised as `opus[1m]`, now
+		// `opus`. Answer with the catalog's id for the same model, or the picker
+		// can't find it and loses the model's name, effort and context options.
+		const renamedModel =
+			selectedModel && !exactModel
+				? providers
+						.find((p) => p.id === selectedModel.providerID)
+						?.models.find((mod) =>
+							isSameModelIdentity(mod.id, selectedModel.modelID),
+						)
+				: undefined;
+		const activeModel =
+			selectedModel && renamedModel
+				? { ...selectedModel, modelID: renamedModel.id }
+				: selectedModel;
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant = activeId
 			? yield* getVariant(activeId)
 			: yield* getDefaultVariant();
-		let variantList: string[] = [];
-		if (activeModel) {
-			for (const p of providers) {
-				const matchingModel = p.models.find(
-					(mod) =>
-						mod.id === activeModel.modelID ||
-						mod.routingOptions?.some(
-							(option) => option.value === activeModel.modelID,
-						),
-				);
-				if (matchingModel?.variants) {
-					variantList = [...matchingModel.variants];
-					break;
-				}
-			}
-		}
+		const variantList = [...((exactModel ?? renamedModel)?.variants ?? [])];
 		const currentContextWindow = activeId
 			? yield* getContextWindow(activeId)
 			: yield* getDefaultContextWindow();

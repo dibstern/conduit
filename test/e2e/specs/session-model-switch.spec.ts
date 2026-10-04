@@ -38,7 +38,10 @@ test.describe("Claude session model on session switch", () => {
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
-		await sidebar.clickSession(sessionId);
+		// The title end: the row's hover actions cover its centre.
+		await page
+			.locator(`[data-session-id="${sessionId}"]`)
+			.click({ position: { x: 48, y: 12 } });
 		await expect(page).toHaveURL(new RegExp(`${sessionId}$`));
 		await expect(trigger).toHaveAttribute("aria-label", /Fable 5/);
 	});
