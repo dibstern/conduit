@@ -170,27 +170,7 @@ export const CheckingGoal: Story = {
 	},
 };
 
-export const NotYet: Story = {
-	args: { goalReason: "35 of 38 scenarios pass" },
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByTestId("composer-status-elapsed"),
-		).toHaveTextContent("Working 1:05");
-		const reason = canvas.getByTestId("composer-status-goal-reason");
-		await expect(reason).toHaveTextContent(
-			"Not yet: 35 of 38 scenarios pass. Continuing.",
-		);
-		await expect(reason.querySelector("svg")).toBeVisible();
-		const style = getComputedStyle(reason);
-		const expected = new Option().style;
-		expected.color = style.getPropertyValue("--color-status-amber");
-		await expect(style.color).toBe(expected.color);
-	},
-};
-
 export const CheckingGoalLight: Story = {
 	...CheckingGoal,
 	globals: { theme: "light" },
 };
-export const NotYetLight: Story = { ...NotYet, globals: { theme: "light" } };

@@ -136,7 +136,7 @@ export function goalView(
 		const checks = `${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`;
 		return {
 			phase: "pursuing",
-			subtitle: `${goal.condition} · ${checks}${goal.lastReason ? ` · ${goal.lastReason}` : ""}`,
+			subtitle: `${goal.condition} · ${checks}`,
 			tone: "violet",
 			border: "solid",
 			icon: "target",
@@ -145,7 +145,7 @@ export function goalView(
 	if (goal.lastReason) {
 		return {
 			phase: "not_yet",
-			subtitle: `Not yet · ${goal.lastReason} · check ${goal.iterations}`,
+			subtitle: `${goal.condition} · ${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`,
 			tone: "amber",
 			border: "solid",
 			icon: "target",

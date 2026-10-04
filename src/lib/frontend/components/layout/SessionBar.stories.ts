@@ -250,7 +250,7 @@ export const GoalNotYet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Not yet · 35 of 38 scenarios pass · check 2",
+			"All 38 scenarios pass · 2 checks",
 			"--color-status-amber",
 		);
 	},

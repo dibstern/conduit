@@ -9,7 +9,6 @@
 		following = true,
 		onlive,
 		goal,
-		goalReason,
 		class: className = "",
 	}: {
 		startedAt: number | null;
@@ -17,7 +16,6 @@
 		following?: boolean | undefined;
 		onlive?: (() => void) | undefined;
 		goal?: GoalView | undefined;
-		goalReason?: string | undefined;
 		class?: string | undefined;
 	} = $props();
 
@@ -78,10 +76,4 @@
 		{/if}
 		{/if}
 	</div>
-	{#if goal?.phase !== "checking" && goalReason}
-		<div data-testid="composer-status-goal-reason" class="mt-[3px] flex items-start gap-1.5 text-status-amber leading-[1.35]">
-			<Icon name="target" size={12} class="mt-px shrink-0" />
-			<span>Not yet: {goalReason.replace(/\.$/, "")}. Continuing.</span>
-		</div>
-	{/if}
 </div>
