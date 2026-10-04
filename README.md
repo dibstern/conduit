@@ -360,6 +360,11 @@ graph LR
 
 ## Contributing
 
+`pnpm dev:all` rebuilds on save and restarts the running Conduit. Sessions keep
+running through restarts. If no service is running, it starts its own server.
+Use `pnpm dev:frontend` for instant UI hot reload against the running server.
+For a child server, pass options with `pnpm dev:all -- --port 2700`.
+
 Bug fixes and typo corrections are welcome. For feature suggestions, please
 open an issue first:
 [github.com/dibstern/conduit/issues](https://github.com/dibstern/conduit/issues)

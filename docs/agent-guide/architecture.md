@@ -132,6 +132,13 @@ Explicit full stop and project
 removal terminate registered runners after relay disposal. The server refuses
 an occupied configured port before acquiring runtime resources.
 
+`pnpm dev:all` rebuilds on save and restarts the running Conduit while sessions
+keep running. It drives an existing supervised service, or owns a foreground
+child when no service returns after restart. Ctrl-C stops that child and leaves
+an existing service running. Failed builds leave the current server running.
+Use `pnpm dev:frontend` for instant UI hot reload against the running server.
+For a child server, pass options with `pnpm dev:all -- --port 2700`.
+
 `SIGINT` and `SIGTERM` flush config and dispose the server while preserving
 independent runners, terminals and managed OpenCode for re-adoption. The process
 exits 0 after shutdown; a second `SIGINT` exits immediately. `conduit stop` uses

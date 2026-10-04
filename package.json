@@ -22,7 +22,7 @@
 	"scripts": {
 		"dev": "tsx watch src/bin/cli.ts -- serve",
 		"dev:frontend": "vite",
-		"dev:all": "trap 'kill 0' EXIT; tsx watch --ignore 'src/lib/frontend/**' src/bin/cli.ts -- serve & vite & wait",
+		"dev:all": "node scripts/dev.mjs",
 		"build": "node scripts/build.mjs",
 		"build:server": "node scripts/build.mjs server",
 		"build:frontend": "vite build",
