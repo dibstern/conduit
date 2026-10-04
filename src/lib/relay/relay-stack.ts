@@ -707,7 +707,24 @@ export async function createRelayStack(
 			slug: p.slug,
 			title: p.title,
 			directory: p.directory,
+			folders: [p.directory],
 		}));
+
+	const saveProjectRelay: NonNullable<
+		ProjectRelayConfig["saveProject"]
+	> = async (input) => {
+		const main = input.folders[0];
+		if (typeof main !== "string")
+			throw new RelayProjectDirectoryError({
+				directory: "",
+				reason: "missing",
+			});
+		const project = await addProjectRelay(main);
+		return {
+			project: { ...project, folders: [project.directory] },
+			warnings: [],
+		};
+	};
 
 	/** Create a new project relay and register it. */
 	async function addProjectRelay(
@@ -766,7 +783,7 @@ export async function createRelayStack(
 				}),
 				log,
 				getProjects: getProjectList,
-				addProject: addProjectRelay,
+				saveProject: saveProjectRelay,
 				persistenceDbPath,
 				...(pushMgr != null && { pushManager: pushMgr }),
 				...(config.configDir != null && { configDir: config.configDir }),
@@ -807,7 +824,7 @@ export async function createRelayStack(
 		log,
 		noServer: true,
 		getProjects: getProjectList,
-		addProject: addProjectRelay,
+		saveProject: saveProjectRelay,
 		...(pushMgr != null && { pushManager: pushMgr }),
 		...(config.configDir != null && { configDir: config.configDir }),
 		...(config.pollerGatingConfig != null && {

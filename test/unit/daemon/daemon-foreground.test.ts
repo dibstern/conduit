@@ -71,17 +71,13 @@ describe("startForegroundDaemon", () => {
 			expect(daemon.port).toBeGreaterThan(0);
 			expect(daemon.onboardingPort).toBeNull();
 
-			const project = await daemon.addProject(projectDir, "foreground-project");
-			expect(project.slug).toBe("foreground-project");
+			const project = await daemon.addProject(projectDir);
+			expect(project.slug).toBe("project");
 
 			const status = daemon.getStatus();
 			expect(status.projectCount).toBe(1);
-			expect(status.projects.map((p) => p.slug)).toEqual([
-				"foreground-project",
-			]);
-			expect(daemon.getProjects().map((p) => p.slug)).toEqual([
-				"foreground-project",
-			]);
+			expect(status.projects.map((p) => p.slug)).toEqual(["project"]);
+			expect(daemon.getProjects().map((p) => p.slug)).toEqual(["project"]);
 		} finally {
 			await daemon.stop();
 			rmSync(root, { recursive: true, force: true });

@@ -5,6 +5,7 @@ import type {
 	GetSessionSkillsResponse,
 	GetSkillContentResponse,
 	GoalDetails,
+	SaveProjectInput,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
@@ -42,6 +43,7 @@ import type {
 	ResolveClaudeSettingsResponse,
 	RewindSessionResponse,
 	RpcLogLevel,
+	SaveProjectResponse,
 	ScanNowResponse,
 	SendMessageResponse,
 	SetDefaultModelResponse,
@@ -81,21 +83,13 @@ export interface GetProjectsRpcInput {
 	readonly projectSlug: string;
 }
 
-export interface AddProjectRpcInput {
+export interface SaveProjectRpcInput extends SaveProjectInput {
 	readonly projectSlug?: string;
-	readonly directory: string;
-	readonly instanceId?: string;
 }
 
 export interface RemoveProjectRpcInput {
 	readonly projectSlug: string;
 	readonly slug: string;
-}
-
-export interface RenameProjectRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-	readonly title: string;
 }
 
 export interface SetProjectInstanceRpcInput {
@@ -471,20 +465,11 @@ const callGetCommands = (input: GetCommandsRpcInput) =>
 const callGetProjects = (input: GetProjectsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetProjects(input));
 
-const callAddProject = (input: AddProjectRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client.AddProject({
-			projectSlug: input.projectSlug,
-			directory: input.directory,
-			...(input.instanceId != null ? { instanceId: input.instanceId } : {}),
-		}),
-	);
+const callSaveProject = (input: SaveProjectRpcInput) =>
+	callControl(input.projectSlug, (client) => client.SaveProject(input));
 
 const callRemoveProject = (input: RemoveProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RemoveProject(input));
-
-const callRenameProject = (input: RenameProjectRpcInput) =>
-	callControl(input.projectSlug, (client) => client.RenameProject(input));
 
 const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
 	callControl(input.projectSlug, (client) => client.SetProjectInstance(input));
@@ -895,22 +880,16 @@ export async function getProjectsRpc(
 	return await runTransportEffect(callGetProjects(input));
 }
 
-export async function addProjectRpc(
-	input: AddProjectRpcInput,
-): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callAddProject(input));
+export async function saveProjectRpc(
+	input: SaveProjectRpcInput,
+): Promise<SaveProjectResponse> {
+	return await runTransportEffect(callSaveProject(input));
 }
 
 export async function removeProjectRpc(
 	input: RemoveProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
 	return await runTransportEffect(callRemoveProject(input));
-}
-
-export async function renameProjectRpc(
-	input: RenameProjectRpcInput,
-): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callRenameProject(input));
 }
 
 export async function setProjectInstanceRpc(

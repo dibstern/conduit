@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { Context, Effect, FiberMap, type Ref, Runtime } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import {
@@ -41,6 +42,35 @@ import { SessionTitleServiceTag } from "./session-title-service.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
+
+/** Recheck saved folders at launch, shared by sends and speculative warming. */
+export const resolveProjectLaunchFolders = (sessionId: string) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const workspaceRoot = config.projectDir;
+		if (!existsSync(workspaceRoot))
+			return yield* Effect.fail(
+				new RelayError(`Main project folder does not exist: ${workspaceRoot}`, {
+					code: "FILE_NOT_FOUND",
+				}),
+			);
+		const extraFolders: string[] = [];
+		for (const folder of config.extraFolders ?? []) {
+			if (existsSync(folder)) extraFolders.push(folder);
+			else {
+				const wsHandler = yield* WebSocketHandlerTag;
+				// RETRY is the existing informational session notice; it does not
+				// terminate the turn or clear the browser's processing state.
+				wsHandler.sendToSession(sessionId, {
+					type: "error",
+					code: "RETRY",
+					sessionId,
+					message: `Warning: extra folder "${folder}" does not exist and was skipped.`,
+				});
+			}
+		}
+		return { workspaceRoot, extraFolders };
+	});
 
 const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	push: () => Effect.void,
@@ -388,7 +418,7 @@ const prepareEngineTurnInput = (
 	claudeConfigDir: string | undefined,
 ) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
+		const folders = yield* resolveProjectLaunchFolders(resolvedInput.sessionId);
 		const priorHistoryResult = isClaudeDriver(driver)
 			? yield* loadClaudeHistory(resolvedInput.sessionId)
 			: { history: [], loaded: false };
@@ -457,7 +487,7 @@ const prepareEngineTurnInput = (
 						},
 					}
 				: {}),
-			workspaceRoot: config.projectDir ?? "",
+			...folders,
 			...(claudeConfigDir === undefined ? {} : { configDir: claudeConfigDir }),
 			...(goalRow ? { goalState: sessionGoalState(goalRow) } : {}),
 			...(isClaudeDriver(driver)
@@ -552,7 +582,14 @@ const sendViaEngine = (
 			resolvedInput,
 			driver,
 			claudeConfigDir,
+		).pipe(
+			Effect.catchIf(
+				(cause) =>
+					cause instanceof RelayError && cause.code === "FILE_NOT_FOUND",
+				(cause) => handleDispatchFailure(resolvedInput, cause),
+			),
 		);
+		if (!sendTurnInput) return;
 		yield* dispatchEngineTurn(resolvedInput, providerId, sendTurnInput);
 	});
 

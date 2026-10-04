@@ -1,5 +1,10 @@
+import { resolve } from "node:path";
 import type { Request } from "effect/Request";
-import { AddProject, GetStatus } from "../lib/contracts/ws-rpc.js";
+import {
+	GetProjects,
+	GetStatus,
+	SaveProject,
+} from "../lib/contracts/ws-rpc.js";
 import type { CommandContext } from "./cli-command-handlers.js";
 
 export async function handleDefault(ctx: CommandContext): Promise<void> {
@@ -32,8 +37,18 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 
 	let slug: string | undefined;
 	try {
-		const registerResponse = await rpcSend(new AddProject({ directory: cwd }));
-		slug = registerResponse.addedSlug;
+		const directory = resolve(cwd);
+		const { projects } = await rpcSend(new GetProjects({}));
+		const existing = projects.find(
+			(project) => (project.folders?.[0] ?? project.directory) === directory,
+		);
+		const registerResponse = await rpcSend(
+			new SaveProject({
+				...(existing ? { slug: existing.slug } : {}),
+				folders: [directory],
+			}),
+		);
+		slug = registerResponse.savedSlug;
 	} catch {
 		// The default view remains available when project registration fails.
 	}

@@ -34,7 +34,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function snapshot(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(join(harness.projectDir, ".conduit/events.db"), {
+	const db = new Database(harness.projectStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -260,13 +260,19 @@ describe("Claude runner admission socket probes", () => {
 					history: [],
 					providerState: {},
 					workspaceRoot,
+					extraFolders: [],
 					model: { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
 				},
 			},
 			preWarm: {
 				type: "pre-warm" as const,
 				sessionId,
-				input: { sessionId, workspaceRoot, providerState: {} },
+				input: {
+					sessionId,
+					workspaceRoot,
+					extraFolders: [],
+					providerState: {},
+				},
 			},
 			recordPids() {
 				for (const entry of discoverClaudeRunners(workspaceRoot, configDir))

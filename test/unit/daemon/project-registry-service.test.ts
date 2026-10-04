@@ -12,7 +12,6 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
-	addProjectToEffectRegistry,
 	addWithoutRelay,
 	allProjects,
 	broadcastToAll,
@@ -22,6 +21,7 @@ import {
 	markReady,
 	projectInfos,
 	removeProjectFromEffectRegistry,
+	saveProject,
 	waitForRelay,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
@@ -34,6 +34,7 @@ import type { StoredProject } from "../../../src/lib/types.js";
 const testProject: StoredProject = {
 	slug: "test-project",
 	directory: "/tmp/test",
+	folders: ["/tmp/test"],
 	title: "Test Project",
 	lastUsed: Date.now(),
 };
@@ -75,11 +76,16 @@ describe("projectInfos", () => {
 		fixtureDirs.push(directory);
 		const missingDirectory = join(directory, "missing");
 		return Effect.gen(function* () {
-			yield* addWithoutRelay({ ...testProject, directory });
+			yield* addWithoutRelay({
+				...testProject,
+				directory,
+				folders: [directory],
+			});
 			yield* addWithoutRelay({
 				...testProject,
 				slug: "missing",
 				directory: missingDirectory,
+				folders: [missingDirectory],
 			});
 			const projects = yield* projectInfos;
 			expect(projects).toHaveLength(2);
@@ -123,11 +129,17 @@ describe("projectInfos", () => {
 				],
 				{ cwd: directory },
 			);
-			const cached = { ...testProject, slug: "cached", directory };
+			const cached = {
+				...testProject,
+				slug: "cached",
+				directory,
+				folders: [directory],
+			};
 			const uncached = {
 				...testProject,
 				slug: "uncached",
 				directory: join(directory, "other"),
+				folders: [join(directory, "other")],
 			};
 
 			return Effect.gen(function* () {
@@ -150,16 +162,18 @@ describe("projectInfos", () => {
 });
 
 describe("explicit project registration", () => {
-	it.effect("can add the same directory after removal", () =>
-		Effect.gen(function* () {
-			const first = yield* addProjectToEffectRegistry(testProject.directory);
-			yield* removeProjectFromEffectRegistry(first.slug);
+	it.effect("can add the same directory after removal", () => {
+		const directory = mkdtempSync(join(tmpdir(), "conduit-registry-save-"));
+		fixtureDirs.push(directory);
+		return Effect.gen(function* () {
+			const first = yield* saveProject({ folders: [directory] });
+			yield* removeProjectFromEffectRegistry(first.project.slug);
 			expect(yield* allProjects).toEqual([]);
-			const added = yield* addProjectToEffectRegistry(testProject.directory);
-			expect(added.directory).toBe(testProject.directory);
-			expect(yield* allProjects).toEqual([added]);
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
+			const added = yield* saveProject({ folders: [directory] });
+			expect(added.project.directory).toBe(directory);
+			expect(yield* allProjects).toEqual([added.project]);
+		}).pipe(Effect.provide(Layer.fresh(testLayer)));
+	});
 });
 
 describe("broadcastToAll", () => {

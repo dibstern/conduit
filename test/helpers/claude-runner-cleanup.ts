@@ -19,13 +19,10 @@ export function testRunnerAlive(pid: number): boolean {
 }
 
 function registrations(
-	root: string,
+	projectDir: string,
 	configDir: string,
 ): ClaudeRunnerRegistration[] {
-	const directory = prepareClaudeRunnerDirectory(
-		join(root, "project"),
-		configDir,
-	);
+	const directory = prepareClaudeRunnerDirectory(projectDir, configDir);
 	const entries: ClaudeRunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
@@ -59,7 +56,7 @@ function registrations(
 
 // Never signal a PID from a file until the process identifies itself on its socket.
 function requestShutdown(
-	root: string,
+	projectDir: string,
 	entry: ClaudeRunnerRegistration,
 ): Promise<boolean> {
 	return new Promise((done) => {
@@ -80,7 +77,7 @@ function requestShutdown(
 		socket.once("close", finish);
 		socket.once("connect", () =>
 			socket.write(
-				`${JSON.stringify({ type: "hello", protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: join(root, "project"), materializeSubagents: false } })}\n`,
+				`${JSON.stringify({ type: "hello", protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir, materializeSubagents: false } })}\n`,
 			),
 		);
 		socket.on("data", (chunk: Buffer) => {
@@ -138,14 +135,15 @@ export async function cleanupTestClaudeRunners(
 	root: string,
 	knownPids: readonly number[],
 	configDir = join(root, "config"),
+	projectDir = join(root, "project"),
 ) {
-	const entries = registrations(root, configDir);
+	const entries = registrations(projectDir, configDir);
 	const pids = [
 		...new Set([...knownPids, ...entries.map((entry) => entry.pid)]),
 	];
 	for (const entry of entries) {
 		if (!testRunnerAlive(entry.pid)) continue;
-		const verified = await requestShutdown(root, entry);
+		const verified = await requestShutdown(projectDir, entry);
 		await waitForExit([entry.pid], 500);
 		if (verified && testRunnerAlive(entry.pid)) {
 			try {

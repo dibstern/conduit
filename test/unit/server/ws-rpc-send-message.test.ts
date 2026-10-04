@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
@@ -7,6 +8,7 @@ import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limit
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockConfig,
 	makeMockSessionManagerService,
 	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
@@ -60,6 +62,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
 							claudeEventPersistEffect: {
 								persistEvent: () => Effect.void,
@@ -142,6 +145,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
+							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
 							wsHandler,
 							sessionManagerService: makeMockSessionManagerService({
@@ -186,7 +190,10 @@ describe("WsRpcServerLayer SendMessage", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
-							makeTestHandlerLayer({ orchestrationEngine: engine }),
+							makeTestHandlerLayer({
+								config: makeMockConfig({ projectDir: tmpdir() }),
+								orchestrationEngine: engine,
+							}),
 							RateLimiterLive({ maxRequests: 1, windowMs: 60_000 }),
 						),
 					),

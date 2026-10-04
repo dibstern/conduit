@@ -131,7 +131,7 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 				lost: [],
 				active: [4096, 4098],
 			}),
-			AddProject: (params) => ({
+			SaveProject: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
 				projects: [
 					{
@@ -143,14 +143,16 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 					{
 						slug: "test-generator-skill",
 						title: "test-generator-skill",
-						directory: String(params["directory"] ?? ""),
+						directory: String((params["folders"] as string[])[0] ?? ""),
+						folders: params["folders"] as string[],
 						...(typeof params["instanceId"] === "string"
 							? { instanceId: params["instanceId"] }
 							: {}),
 					},
 				],
 				current: "myapp",
-				addedSlug: "test-generator-skill",
+				savedSlug: "test-generator-skill",
+				warnings: [],
 			}),
 			SetProjectInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
@@ -915,7 +917,7 @@ test.describe("Session List: Instance Status Banner", () => {
 });
 
 test.describe("Add Project: Instance Binding", () => {
-	test("AddProject RPC includes selected instanceId", async ({
+	test("SaveProject RPC includes selected instanceId", async ({
 		page,
 		baseURL,
 	}) => {
@@ -937,10 +939,10 @@ test.describe("Add Project: Instance Binding", () => {
 		await page.click("text=Add");
 
 		const request = await control.rpc.waitForRequest(
-			(req) => req.tag === "AddProject",
+			(req) => req.tag === "SaveProject",
 		);
 		expect(request.payload).toMatchObject({
-			directory: "~/src/work/ds/test-generator-skill",
+			folders: ["~/src/work/ds/test-generator-skill"],
 			instanceId: "work",
 		});
 	});

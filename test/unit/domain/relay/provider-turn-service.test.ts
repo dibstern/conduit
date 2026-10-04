@@ -75,6 +75,7 @@ import type {
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
 import {
+	MOCK_PROJECT_DIR,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -292,7 +293,7 @@ const serviceLayer = (input: {
 		Layer.succeed(
 			ConfigTag,
 			makeMockConfig({
-				projectDir: "/test/project",
+				projectDir: MOCK_PROJECT_DIR,
 				...(input.configDir === undefined
 					? {}
 					: { configDir: input.configDir }),
@@ -790,7 +791,7 @@ describe("ProviderTurnService", () => {
 						prompt: "current prompt",
 						history: [],
 						providerState: { resumeSessionId: "prev" },
-						workspaceRoot: "/test/project",
+						workspaceRoot: MOCK_PROJECT_DIR,
 						model: {
 							providerId: "claude",
 							modelId: "claude-sonnet-4-5",

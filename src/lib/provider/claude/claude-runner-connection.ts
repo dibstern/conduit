@@ -421,6 +421,7 @@ export const connectClaudeRunner = (options: {
 						acknowledgedSequence: acknowledged,
 						config: {
 							workspaceRoot: options.deps.workspaceRoot,
+							extraFolders: options.deps.extraFolders ?? [],
 							...(options.deps.daemonConfigDir !== undefined
 								? { daemonConfigDir: options.deps.daemonConfigDir }
 								: {}),

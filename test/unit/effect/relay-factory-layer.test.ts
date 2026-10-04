@@ -136,6 +136,7 @@ describe("RelayFactoryTag", () => {
 			const project = {
 				slug: "test-project",
 				directory: "/tmp/test-project",
+				folders: ["/tmp/test-project"],
 				title: "Test Project",
 			};
 
@@ -170,6 +171,7 @@ describe("RelayFactoryTag", () => {
 							slug: "missing",
 							title: "Missing",
 							directory: missingDirectory,
+							folders: [missingDirectory],
 						},
 						"http://localhost:4096",
 					)
@@ -201,7 +203,12 @@ describe("RelayFactoryTag", () => {
 			stop: async () => undefined,
 		} as ProjectRelay);
 		return Effect.gen(function* () {
-			const project = { slug: "git-project", title: "Git Project", directory };
+			const project = {
+				slug: "git-project",
+				title: "Git Project",
+				directory,
+				folders: [directory],
+			};
 			yield* addWithoutRelay(project);
 			const subscription = yield* subscribeToDaemonEvents;
 			const serverRef = yield* HttpServerRefTag;

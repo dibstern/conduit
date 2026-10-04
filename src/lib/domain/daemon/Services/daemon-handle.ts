@@ -1,12 +1,15 @@
-import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
+import type {
+	ProjectSaveRejected,
+	SaveProjectInput,
+	WsRpcError,
+} from "../../../contracts/ws-rpc.js";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
+import type { FolderIssue } from "../../../project-folders.js";
 import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
-import { generateSlug } from "../../../utils.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
@@ -17,28 +20,33 @@ import {
 	InstanceManagerStateTag,
 } from "./instance-manager-service.js";
 import {
-	addWithoutRelay,
 	allProjects,
-	findByDirectory,
 	getProject,
-	type ProjectAlreadyExists,
 	type ProjectNotFound,
 	ProjectRegistryTag,
+	ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
+	saveProject as saveProjectToRegistry,
 } from "./project-registry-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 export interface EffectDaemonHandle {
 	readonly port: Effect.Effect<number>;
 	readonly onboardingPort: Effect.Effect<number | null>;
-	readonly addProject: (
-		dir: string,
-		slug?: string,
-		instanceId?: string,
-	) => Effect.Effect<StoredProject, ProjectAlreadyExists>;
+	readonly saveProject: (input: SaveProjectInput) => Effect.Effect<
+		{
+			readonly project: StoredProject;
+			readonly warnings: readonly FolderIssue[];
+		},
+		| ProjectSaveRejected
+		| WsRpcError
+		| ProjectNotFound
+		| ClaudeRuntimeError
+		| import("./project-registry-service.js").ProjectAlreadyExists
+	>;
 	readonly removeProject: (
 		slug: string,
-	) => Effect.Effect<void, ProjectNotFound | ClaudeRuntimeError>;
+	) => Effect.Effect<void, ProjectNotFound | ClaudeRuntimeError | WsRpcError>;
 	readonly getStatus: () => Effect.Effect<DaemonStatus>;
 	readonly getProjects: () => Effect.Effect<ReadonlyArray<StoredProject>>;
 	readonly getInstances: () => Effect.Effect<ReadonlyArray<OpenCodeInstance>>;
@@ -48,17 +56,6 @@ export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
 	DaemonHandleTag,
 	EffectDaemonHandle
 >() {}
-
-const normalizeProjectDirectory = (directory: string): string => {
-	const expanded =
-		directory === "~" || directory.startsWith("~/")
-			? directory.replace(/^~/, homedir())
-			: directory;
-	return resolve(expanded);
-};
-
-const titleForDirectory = (directory: string): string =>
-	basename(directory) || "project";
 
 const sortedStatusProjects = (
 	projects: DaemonStatus["projects"],
@@ -78,6 +75,7 @@ export const DaemonHandleLive: Layer.Layer<
 	never,
 	| DaemonConfigRefTag
 	| ProjectRegistryTag
+	| ProjectSaveLockTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| RelayCacheTag
@@ -89,6 +87,7 @@ export const DaemonHandleLive: Layer.Layer<
 	Effect.gen(function* () {
 		const configRef = yield* DaemonConfigRefTag;
 		const projectRef = yield* ProjectRegistryTag;
+		const projectSaveLock = yield* ProjectSaveLockTag;
 		const bus = yield* DaemonEventBusTag;
 		const persistence = yield* ConfigPersistenceTag;
 		const relayCache = yield* RelayCacheTag;
@@ -100,23 +99,8 @@ export const DaemonHandleLive: Layer.Layer<
 		const onboardingPort = Effect.sync(() =>
 			getOnboardingPort(lifecycleContext.onboardingServer),
 		);
-		const addProject = (
-			directory: string,
-			slug?: string,
-			instanceId?: string,
-		) =>
+		const saveProject = (input: SaveProjectInput) =>
 			Effect.gen(function* () {
-				const normalizedDirectory = normalizeProjectDirectory(directory);
-				const existing = yield* findByDirectory(normalizedDirectory).pipe(
-					Effect.provideService(ProjectRegistryTag, projectRef),
-				);
-				if (Option.isSome(existing)) {
-					yield* persistence.requestSave;
-					return existing.value.project;
-				}
-
-				const state = yield* Ref.get(projectRef);
-				const existingSlugs = new Set(HashMap.keys(state));
 				const instances = Array.from(
 					yield* getEffectInstances.pipe(
 						Effect.provideService(InstanceManagerStateTag, instanceState),
@@ -126,27 +110,26 @@ export const DaemonHandleLive: Layer.Layer<
 					(instance) => (instance.driver ?? "opencode") === "opencode",
 				);
 				const resolvedInstanceId =
-					instanceId ??
+					input.instanceId ??
 					opencodeInstances.find((instance) => instance.status === "healthy")
 						?.id ??
 					opencodeInstances[0]?.id;
-				const project: StoredProject = {
-					slug: slug ?? generateSlug(normalizedDirectory, existingSlugs),
-					directory: normalizedDirectory,
-					title: titleForDirectory(normalizedDirectory),
-					lastUsed: Date.now(),
+				const result = yield* saveProjectToRegistry({
+					...input,
 					...(resolvedInstanceId !== undefined && {
 						instanceId: resolvedInstanceId,
 					}),
-				};
-				yield* addWithoutRelay(project).pipe(
+				}).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),
+					Effect.provideService(DaemonStateTag, daemonState),
+					Effect.provideService(RelayCacheTag, relayCache),
+					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 				);
 				yield* persistence.requestSave;
-				return project;
-			}).pipe(Effect.withSpan("daemonHandle.addProject"));
+				return result;
+			}).pipe(Effect.withSpan("daemonHandle.saveProject"));
 
 		const removeProject = (slug: string) =>
 			Effect.gen(function* () {
@@ -155,6 +138,7 @@ export const DaemonHandleLive: Layer.Layer<
 				);
 				yield* removeProjectFromEffectRegistry(slug).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
+					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(RelayCacheTag, relayCache),
 					Effect.provideService(ConfigPersistenceTag, persistence),
@@ -227,7 +211,7 @@ export const DaemonHandleLive: Layer.Layer<
 		return {
 			port,
 			onboardingPort,
-			addProject,
+			saveProject,
 			removeProject,
 			getStatus,
 			getProjects,

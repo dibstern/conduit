@@ -194,6 +194,7 @@ describe.skipIf(process.platform === "win32")(
 					harness.root,
 					[],
 					harness.configDir,
+					harness.projectDir,
 				);
 				evidence["registrationOnlyCleanup"] = cleanup;
 				expect(cleanup.runnerPids).toHaveLength(1);

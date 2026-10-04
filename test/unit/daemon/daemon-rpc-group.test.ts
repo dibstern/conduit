@@ -2,8 +2,8 @@ import { describe, it } from "@effect/vitest";
 import { Either, Schema } from "effect";
 import { expect } from "vitest";
 import {
-	AddProject,
 	RestartWithConfig,
+	SaveProject,
 	SetKeepAwakeCommand,
 	SetPin,
 	WsRpcGroup,
@@ -88,7 +88,7 @@ describe("shared daemon RPC contracts", () => {
 	});
 
 	it("keeps existing project requests on the same contract", () => {
-		const request = new AddProject({ directory: "/tmp/daemon-rpc-project" });
+		const request = new SaveProject({ folders: ["/tmp/daemon-rpc-project"] });
 		expect(
 			Schema.decodeUnknownSync(WsRpcRequest)(
 				Schema.encodeSync(WsRpcRequest)(request),

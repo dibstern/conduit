@@ -44,8 +44,11 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 | Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
 | Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals, activities) are the primary record. Projectors maintain materialized views from the append-only event log. |
-| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, and push settings. |
+| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and project history at `<configDir>/projects/<slug>/events.db`. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
+
+Before relays start, a one-time migration checkpoints and copies legacy `<project>/.conduit/events.db` stores, verifies each copy, and archives the originals as `events.db.migrated`; failed copies keep using the legacy store and retry on the next startup.
+Each storage directory records its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs; removing a project keeps its history.
 
 ## Effect Ownership Guardrails
 

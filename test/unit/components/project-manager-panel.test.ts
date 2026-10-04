@@ -2,10 +2,11 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ProjectManagerPanel from "../../../src/lib/frontend/components/project/ProjectManagerPanel.svelte";
 
-const addProjectRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { directory: string }) => ({
+const saveProjectRpcSpy = vi.hoisted(() =>
+	vi.fn(async (input: { folders: string[] }) => ({
 		projects: [],
-		addedSlug: input.directory,
+		savedSlug: input.folders[0],
+		warnings: [],
 	})),
 );
 const emptyComponent = vi.hoisted(
@@ -15,6 +16,7 @@ const emptyComponent = vi.hoisted(
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => undefined,
+	navigate: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
 	onProject: () => () => undefined,
@@ -24,14 +26,13 @@ vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
 	confirmRemoveProjects: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	addProjectRpc: (input: { directory: string }) => addProjectRpcSpy(input),
-	renameProjectRpc: vi.fn(),
+	saveProjectRpc: (input: { folders: string[] }) => saveProjectRpcSpy(input),
 	listDirectoriesRpc: vi.fn(),
 }));
 
 afterEach(() => {
 	cleanup();
-	addProjectRpcSpy.mockClear();
+	saveProjectRpcSpy.mockClear();
 });
 
 describe("ProjectManagerPanel", () => {
@@ -67,8 +68,8 @@ describe("ProjectManagerPanel", () => {
 		await fireEvent.click(getByText("Add"));
 
 		await waitFor(() =>
-			expect(addProjectRpcSpy).toHaveBeenCalledWith({
-				directory: "/src/new-project",
+			expect(saveProjectRpcSpy).toHaveBeenCalledWith({
+				folders: ["/src/new-project"],
 			}),
 		);
 	});
