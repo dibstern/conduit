@@ -17,12 +17,17 @@ import {
 } from "effect";
 import { WebSocket } from "ws";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
+import {
+	getRestartAvailable,
+	SERVER_BUILD_ID,
+} from "../../../server/build-update.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
 import type { ResolveRpcContext } from "../../../server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
 } from "../../../server/ws-rpc-handler.js";
+import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { ShutdownSignalTag } from "../../daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
@@ -358,6 +363,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 						relay.attach(latest.value.ws, {
 							clientId: payload.originId,
 							skipDefaultSession: true,
+							skipHandshake: true,
 							...(payload.sessionId
 								? { requestedSessionId: payload.sessionId }
 								: {}),
@@ -417,6 +423,21 @@ export const WebSocketRoutingLive: Layer.Layer<
 					yield* daemonWsClients.remove(clientId, ws);
 					return;
 				}
+				yield* Effect.try(() => {
+					ws.send(
+						JSON.stringify({
+							type: "protocol_version",
+							version: WS_PROTOCOL_VERSION,
+							buildId: SERVER_BUILD_ID,
+						}),
+					);
+					ws.send(
+						JSON.stringify({
+							type: "server_update",
+							restartAvailable: getRestartAvailable(),
+						}),
+					);
+				});
 
 				const projects = yield* allProjects.pipe(
 					Effect.provideService(ProjectRegistryTag, projectRegistry),
@@ -449,6 +470,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 				const detach = relay.value.attach(ws, {
 					clientId,
 					skipDefaultSession: true,
+					skipHandshake: true,
 					...(sessionSlug != null &&
 						requestedSessionId != null && { requestedSessionId }),
 				});

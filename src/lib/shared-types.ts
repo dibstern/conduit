@@ -1031,6 +1031,11 @@ const ProtocolVersionSchema = Schema.Struct({
 	buildId: Schema.optional(Schema.String),
 });
 
+const ServerUpdateSchema = Schema.Struct({
+	type: Schema.Literal("server_update"),
+	restartAvailable: Schema.Boolean,
+});
+
 const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
@@ -1188,6 +1193,7 @@ export const RelayMessageSchema = Schema.Union(
 	SystemErrorSchema,
 	ClientCountSchema,
 	ProtocolVersionSchema,
+	ServerUpdateSchema,
 	InputSyncSchema,
 	UpdateAvailableSchema,
 	// Instance Management

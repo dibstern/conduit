@@ -103,6 +103,7 @@ function serviceEnvironment(
 		...options.environment,
 		PATH: "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
 		CONDUIT_CONFIG_DIR: options.paths.configDir,
+		CONDUIT_SERVICE: "1",
 		LC_ALL: "C",
 	};
 }

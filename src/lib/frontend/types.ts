@@ -316,6 +316,7 @@ export interface BannerConfig {
 	icon: string;
 	text: string;
 	dismissible: boolean;
+	summary?: string;
 	link?: string;
 	action?: { label: string; run: () => void };
 }

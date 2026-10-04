@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { RawData, WebSocket } from "ws";
-import { BUILD_ID } from "../build-id.js";
 import { makeHeartbeatFiber } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
 	addClient,
@@ -19,6 +18,7 @@ import {
 	type WsHandlerStateTag,
 } from "../domain/relay/Services/ws-handler-service.js";
 import { type RelayMessage, WS_PROTOCOL_VERSION } from "../shared-types.js";
+import { getRestartAvailable, SERVER_BUILD_ID } from "./build-update.js";
 import type {
 	WebSocketHandlerShape,
 	WsAttachOptions,
@@ -32,9 +32,6 @@ import {
 	parseIncomingMessage,
 	routeMessage,
 } from "./ws-router.js";
-
-// Test override, captured once at process startup rather than per connection.
-const SERVER_BUILD_ID = process.env["CONDUIT_SERVER_BUILD_ID"] ?? BUILD_ID;
 
 type WsEventMap = {
 	client_connected: WsClientConnectedEvent;
@@ -156,7 +153,8 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			ws.close(1001, "Server shutting down");
 			return () => {};
 		}
-		const { clientId, requestedSessionId, skipDefaultSession } = options;
+		const { clientId, requestedSessionId, skipDefaultSession, skipHandshake } =
+			options;
 		let attached = true;
 		// In-flight effects can retain this connection after detach removes the
 		// client from the relay. Revoke their access before another relay attaches.
@@ -208,11 +206,21 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 				// Version first: client_connected listeners start the session-init
 				// flood, and the mismatch check must not trail it.
 				Effect.tap(() =>
-					sendTo(clientId, {
-						type: "protocol_version",
-						version: WS_PROTOCOL_VERSION,
-						buildId: SERVER_BUILD_ID,
-					}),
+					skipHandshake
+						? Effect.void
+						: sendTo(clientId, {
+								type: "protocol_version",
+								version: WS_PROTOCOL_VERSION,
+								buildId: SERVER_BUILD_ID,
+							}),
+				),
+				Effect.tap(() =>
+					skipHandshake
+						? Effect.void
+						: sendTo(clientId, {
+								type: "server_update",
+								restartAvailable: getRestartAvailable(),
+							}),
 				),
 				Effect.tap((clientCount) =>
 					Effect.sync(() => {

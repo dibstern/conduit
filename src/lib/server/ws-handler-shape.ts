@@ -7,6 +7,8 @@ export interface WsAttachOptions {
 	requestedSessionId?: string;
 	/** Leave session selection to the browser when no session was requested. */
 	skipDefaultSession?: boolean;
+	/** The daemon already sent the handshake on this browser connection. */
+	skipHandshake?: boolean;
 }
 
 export interface WsClientConnectedEvent {

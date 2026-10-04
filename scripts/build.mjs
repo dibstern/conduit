@@ -1,10 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { renameSync, rmSync, writeFileSync } from "node:fs";
 
 // One identity for both outputs, without modifying the source dev sentinel.
 const buildId = randomUUID();
 const env = { ...process.env, CONDUIT_BUILD_ID: buildId };
+
+// The previous marker cannot describe outputs being replaced by this build.
+rmSync("dist/build-ready.json", { force: true });
 
 function run(...args) {
 	const result = spawnSync("pnpm", args, { env, stdio: "inherit" });
@@ -19,4 +22,9 @@ writeFileSync(
 	"dist/src/lib/build-id.js",
 	`export const BUILD_ID = ${JSON.stringify(buildId)};\n`,
 );
-if (process.argv[2] !== "server") run("exec", "vite", "build");
+if (process.argv[2] !== "server") {
+	run("exec", "vite", "build");
+	const marker = `dist/build-ready.${process.pid}.tmp`;
+	writeFileSync(marker, JSON.stringify({ buildId }));
+	renameSync(marker, "dist/build-ready.json");
+}

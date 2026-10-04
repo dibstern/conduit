@@ -432,6 +432,15 @@ Object.assign(ClaudeDriver, { create: deps => {
 			cliArgs?: string[];
 			buildId?: string;
 			queryInitializationDelayMs?: number;
+			serviceEnvironment?: Partial<
+				Pick<
+					NodeJS.ProcessEnv,
+					| "CONDUIT_SERVICE"
+					| "CONDUIT_BUILD_READY_PATH"
+					| "CONDUIT_SERVER_BUILD_ID"
+					| "XPC_SERVICE_NAME"
+				>
+			>;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -545,6 +554,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			{
 				cwd: this.projectDir,
 				env: (this.environment = {
+					...options.serviceEnvironment,
 					PATH:
 						this.managedOpenCode || this.foregroundCli
 							? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`

@@ -29,6 +29,7 @@ import {
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
+import { ServerBuildUpdateLive } from "../../../server/build-update.js";
 import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
@@ -869,6 +870,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		InstanceHealthPollingLive,
+		ServerBuildUpdateLive,
 	).pipe(Layer.provideMerge(withWsRelayRouter));
 
 	return scopedFibers;

@@ -171,6 +171,7 @@ describe("service unit generation", () => {
 		expect(unit).toContain("<string>dev.conduit.server</string>");
 		expect(unit).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
 		expect(unit).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+		expect(unit).toContain("<key>CONDUIT_SERVICE</key><string>1</string>");
 		expect(unit).toMatch(
 			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit serve --port 7777<\/string>/,
 		);
@@ -194,6 +195,7 @@ describe("service unit generation", () => {
 		expect(unit).toContain("WantedBy=default.target");
 		expect(unit).toContain(`WorkingDirectory=${cwd}`);
 		expect(unit).toContain(`Environment="CONDUIT_CONFIG_DIR=${configDir}"`);
+		expect(unit).toContain('Environment="CONDUIT_SERVICE=1"');
 		expect(unit).toContain(`StandardOutput=append:${config.paths.stdout}`);
 		expect(unit).toContain(`StandardError=append:${config.paths.stderr}`);
 		expect(unit).not.toMatch(/\/[^\s"]*\/node(?:\s|")/);
