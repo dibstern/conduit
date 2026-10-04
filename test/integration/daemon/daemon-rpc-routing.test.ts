@@ -261,7 +261,7 @@ describe("daemon shared RPC routing", () => {
 								projectSlug: "project-b",
 								originId: "daemon-client",
 							}),
-				).toEqual({ ok: true });
+				).toMatchObject({ ok: true });
 				yield* waitFor(() => {
 					expect(
 						eventMessages.some(

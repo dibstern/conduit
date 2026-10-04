@@ -68,7 +68,10 @@ async function setupWithProjectManagement(
 	let relay: WsMockControl | undefined;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
-			AttachProject: (params) => {
+			AttachProject: async (params) => {
+				// A real attach takes a round trip or two; an instant answer would
+				// hide anything that races it.
+				await new Promise((resolve) => setTimeout(resolve, 300));
 				rpc.setShellRows(
 					sessions.filter(
 						(session) => session.projectSlug === params["projectSlug"],
@@ -89,7 +92,8 @@ async function setupWithProjectManagement(
 				),
 				roots: true,
 			}),
-			ListDaemonSessions: (params) => {
+			ListDaemonSessions: async (params) => {
+				await new Promise((resolve) => setTimeout(resolve, 150));
 				const limit = Number(params["limit"] ?? Infinity);
 				const cursor = params["cursor"] as { id: string } | undefined;
 				const scoped = sessions
@@ -365,6 +369,46 @@ test("clearing the scope after adding a project pages in every session", async (
 	await page.getByRole("button", { name: "Clear project scope" }).click();
 	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
 	await expect(sessions).toHaveCount(before.length);
+});
+
+test("switching projects while the list pages does not fail the switch", async ({
+	page,
+	baseURL,
+}) => {
+	const now = Date.now();
+	// Mostly settled, so each page leaves the pager's sentinel on screen and
+	// paging keeps going while the switch is in flight.
+	const many = ["myapp", "mylib"].flatMap((projectSlug) =>
+		Array.from({ length: 45 }, (_, index) => ({
+			id: `sess-${projectSlug}-${String(index).padStart(2, "0")}`,
+			title: `${projectSlug} ${index}`,
+			status: "idle",
+			projectSlug,
+			updatedAt: now - 1000 - index,
+			messageCount: 0,
+			...(index % 9 === 0 ? {} : { settledAt: now - 500 }),
+		})),
+	);
+	const control = await setupWithProjectManagement(
+		page,
+		baseURL,
+		PROJECT_URL,
+		many,
+	);
+	for (const target of ["mylib", "myapp", "mylib"]) {
+		await page.getByTestId("session-scope-chip").click();
+		await page
+			.getByRole("menuitemradio", { name: new RegExp(`^${target}\\b`) })
+			.click();
+		await control.rpc.waitForRequest(
+			(request) =>
+				request.tag === "AttachProject" &&
+				request.payload["projectSlug"] === target,
+		);
+		await expect(page.getByTestId("session-scope-chip")).toHaveText(target);
+		await page.waitForTimeout(800);
+	}
+	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
 });
 
 test.describe("Directory Autocomplete", () => {
