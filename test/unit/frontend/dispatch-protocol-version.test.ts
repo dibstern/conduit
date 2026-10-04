@@ -99,6 +99,7 @@ describe("protocol_version dispatch", () => {
 			variant: "update",
 			icon: "refresh-cw",
 			text: "Conduit was updated. Reload this tab to keep things working.",
+			summary: "Reload this tab",
 			dismissible: true,
 			action: { label: "Reload", run: expect.any(Function) },
 		});

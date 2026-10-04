@@ -1,5 +1,4 @@
 export {
-	AddProject,
 	AnswerQuestion,
 	CancelSession,
 	type ClaudeSettingsResponse,
@@ -57,7 +56,6 @@ export {
 	RemoveInstance,
 	RemoveProject,
 	RenameInstance,
-	RenameProject,
 	RenameSession,
 	ResizePty,
 	ResolveClaudeSettings,
@@ -66,6 +64,8 @@ export {
 	RewindSession,
 	type RewindSessionResponse,
 	type RpcLogLevel,
+	SaveProject,
+	type SaveProjectResponse,
 	ScanNow,
 	type ScanNowResponse,
 	SendMessage,

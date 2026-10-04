@@ -190,6 +190,7 @@ describe("prefetchSessionCounts", () => {
 										slug: "missing",
 										title: "Missing",
 										directory: join(directory, "missing"),
+										folders: [join(directory, "missing")],
 										instanceId: "i1",
 									},
 								},
@@ -237,6 +238,7 @@ describe("prefetchSessionCounts", () => {
 									project: {
 										slug: "my-project",
 										directory,
+										folders: [directory],
 										title: "My Project",
 										lastUsed: Date.now(),
 										instanceId: "i1",
@@ -268,6 +270,7 @@ describe("prefetchSessionCounts", () => {
 									project: {
 										slug: "orphan",
 										directory,
+										folders: [directory],
 										title: "Orphan",
 										lastUsed: Date.now(),
 										instanceId: "nonexistent",
@@ -311,6 +314,7 @@ describe("prefetchSessionCounts", () => {
 										project: {
 											slug: "my-project",
 											directory,
+											folders: [directory],
 											title: "My Project",
 											lastUsed: Date.now(),
 											instanceId: "i1",
@@ -419,6 +423,7 @@ describe("prefetchSessionCounts", () => {
 											project: {
 												slug: "proj-a",
 												directory,
+												folders: [directory],
 												title: "Project A",
 												lastUsed: Date.now(),
 												instanceId: "i1",
@@ -432,6 +437,7 @@ describe("prefetchSessionCounts", () => {
 											project: {
 												slug: "proj-b",
 												directory,
+												folders: [directory],
 												title: "Project B",
 												lastUsed: Date.now(),
 												instanceId: "i2",
@@ -472,6 +478,7 @@ describe("prefetchSessionCounts", () => {
 										project: {
 											slug: "proj",
 											directory,
+											folders: [directory],
 											title: "Proj",
 											lastUsed: Date.now(),
 											instanceId: "i1",

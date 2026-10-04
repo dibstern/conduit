@@ -23,6 +23,7 @@ import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Serv
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 
 interface MockOpenCode {
@@ -260,8 +261,14 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 	it("wires relay-stack SSE events through Effect persistence into the read model", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-runtime-ingress-"));
 		const projectDir = join(dir, "project");
-		mkdirSync(join(projectDir, ".conduit"), { recursive: true });
-		const dbPath = join(projectDir, ".conduit", "events.db");
+		mkdirSync(projectDir, { recursive: true });
+		mkdirSync(projectStorageDir(dir, "runtime-ingress-smoke"), {
+			recursive: true,
+		});
+		const dbPath = join(
+			projectStorageDir(dir, "runtime-ingress-smoke"),
+			"events.db",
+		);
 		const mock = await createMockOpenCode();
 		const relayServer = createServer();
 		await listenOnRandomPort(relayServer);
@@ -352,8 +359,14 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 		const projectDir = join(dir, "project");
 		const personalSessionId = "sess-relay-personal";
 		const workSessionId = "sess-relay-work";
-		mkdirSync(join(projectDir, ".conduit"), { recursive: true });
-		const dbPath = join(projectDir, ".conduit", "events.db");
+		mkdirSync(projectDir, { recursive: true });
+		mkdirSync(projectStorageDir(dir, "named-runtime-ingress"), {
+			recursive: true,
+		});
+		const dbPath = join(
+			projectStorageDir(dir, "named-runtime-ingress"),
+			"events.db",
+		);
 		const defaultMock = await createMockOpenCode();
 		const workMock = await createMockOpenCode();
 		const personalMock = await createMockOpenCode();

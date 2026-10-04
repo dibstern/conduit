@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
+import type { SaveProjectInput } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	ProjectManagementNotSupported,
 	ProjectManagementServiceError,
@@ -116,6 +117,7 @@ describe("ProjectManagementServiceLive", () => {
 					directory: "/work/proj-1",
 					instanceId: "inst-1",
 					missing: true,
+					folders: ["/work/proj-1"],
 				},
 			]);
 			expect(settingsService.listProjects).not.toHaveBeenCalled();
@@ -150,14 +152,16 @@ describe("ProjectManagementServiceLive", () => {
 
 		return Effect.gen(function* () {
 			const service = yield* ProjectManagementServiceTag;
-			const result = yield* Effect.either(service.add("/work/new"));
+			const result = yield* Effect.either(
+				service.save({ folders: ["/work/new"] }),
+			);
 
 			expect(result._tag).toBe("Left");
 			if (result._tag === "Left") {
 				expect(result.left).toBeInstanceOf(ProjectManagementNotSupported);
 				expect(result.left).toMatchObject({
-					operation: "add",
-					message: "Adding projects is not supported in this mode",
+					operation: "save",
+					message: "Saving projects is not supported in this mode",
 				});
 			}
 		}).pipe(Effect.provide(layer));
@@ -192,29 +196,40 @@ describe("ProjectManagementServiceLive", () => {
 				slug: "proj-1",
 				title: "Old Title",
 				directory: "/work/proj-1",
+				folders: ["/work/proj-1"],
 			},
 		];
-		const setProjectTitle = vi.fn((slug: string, title: string) => {
-			const project = projects.find((candidate) => candidate.slug === slug);
-			if (project) project.title = title;
+		const saveProject = vi.fn(async (input: SaveProjectInput) => {
+			const project = projects.find(
+				(candidate) => candidate.slug === input.slug,
+			);
+			if (!project) throw new Error("Unknown project");
+			project.title = input.title ?? project.title;
+			return { project, warnings: [] };
 		});
 		const layer = makeLayer(
 			makeMockConfig({
 				getProjects: () => projects,
-				setProjectTitle,
+				saveProject,
 			}),
 		);
 
 		return Effect.gen(function* () {
 			const service = yield* ProjectManagementServiceTag;
-			const updated = yield* service.rename("proj-1", "New Title");
+			const input = {
+				slug: "proj-1",
+				title: "New Title",
+				folders: ["/work/proj-1"],
+			};
+			const updated = yield* service.save(input);
 
-			expect(setProjectTitle).toHaveBeenCalledWith("proj-1", "New Title");
-			expect(updated).toEqual([
+			expect(saveProject).toHaveBeenCalledWith(input);
+			expect(updated.projects).toEqual([
 				{
 					slug: "proj-1",
 					title: "New Title",
 					directory: "/work/proj-1",
+					folders: ["/work/proj-1"],
 					missing: true,
 				},
 			]);
@@ -278,6 +293,7 @@ describe("ProjectManagementServiceLive", () => {
 						directory: "/work/proj-1",
 						instanceId: "inst-2",
 						missing: true,
+						folders: ["/work/proj-1"],
 					},
 				]);
 			}).pipe(Effect.provide(layer));

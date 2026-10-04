@@ -309,7 +309,7 @@ function mockConfig(
 	return makeMockConfig({
 		opencodeUrl: "http://localhost:3000",
 		slug: "test-project",
-		projectDir: "/tmp/test",
+		projectDir: tmpdir(),
 		configDir: "/tmp/test-config",
 		...overrides,
 	});
@@ -404,7 +404,7 @@ describe("handleGetProjects", () => {
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "project_list",
-					projects: [{ ...projects[0], missing: true }],
+					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
 					current: "test-project",
 				});
 			}),

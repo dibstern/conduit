@@ -308,6 +308,7 @@ export type BannerVariant =
 	| "update"
 	| "onboarding"
 	| "skip-permissions"
+	| "error"
 	| "warning";
 
 export interface BannerConfig {
@@ -315,8 +316,9 @@ export interface BannerConfig {
 	variant: BannerVariant;
 	icon: string;
 	text: string;
-	dismissible: boolean;
+	/** One line for the collapsed phone header when `text` runs long. */
 	summary?: string;
+	dismissible: boolean;
 	link?: string;
 	action?: { label: string; run: () => void };
 }

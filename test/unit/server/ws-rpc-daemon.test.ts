@@ -1,17 +1,27 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { expect, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 
+const fixtureDirs: string[] = [];
+afterEach(() => {
+	for (const directory of fixtureDirs.splice(0))
+		rmSync(directory, { recursive: true, force: true });
+});
+
 describe("daemon RPC handlers", () => {
 	it.scoped(
 		"serves daemon operations without a project or relay context",
 		() => {
+			const directory = mkdtempSync("/tmp/rpc-first-project-");
+			fixtureDirs.push(directory);
 			const resolve = vi.fn(() => Effect.die("Unexpected relay resolution"));
 			return Effect.gen(function* () {
 				const handlers = yield* DaemonWsRpcHandlersTag;
@@ -19,30 +29,31 @@ describe("daemon RPC handlers", () => {
 					Effect.provide(makeRoutedWsRpcServerLayer(resolve, handlers)),
 				);
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
-				const added = yield* client.AddProject({
-					directory: "/tmp/rpc-first-project",
+				const added = yield* client.SaveProject({
+					folders: [directory],
 				});
-				if (!added.addedSlug) throw new Error("Missing added project slug");
+				if (!added.savedSlug) throw new Error("Missing added project slug");
 				expect(
-					yield* client.GetProjects({ projectSlug: added.addedSlug }),
-				).toMatchObject({ current: added.addedSlug });
+					yield* client.GetProjects({ projectSlug: added.savedSlug }),
+				).toMatchObject({ current: added.savedSlug });
 				expect(
 					(yield* client.GetProjects({ projectSlug: "missing" })).projects,
-				).toMatchObject([{ slug: added.addedSlug }]);
+				).toMatchObject([{ slug: added.savedSlug }]);
 				expect(
-					(yield* client.RenameProject({
-						slug: added.addedSlug,
+					(yield* client.SaveProject({
+						slug: added.savedSlug,
 						title: " Renamed ",
+						folders: [directory],
 					})).projects,
 				).toMatchObject([{ title: "Renamed" }]);
 				expect(
 					(yield* client.SetProjectInstance({
-						slug: added.addedSlug,
+						slug: added.savedSlug,
 						instanceId: "claude",
 					})).projects,
 				).toMatchObject([{ instanceId: "claude" }]);
 				expect(
-					(yield* client.RemoveProject({ slug: added.addedSlug })).projects,
+					(yield* client.RemoveProject({ slug: added.savedSlug })).projects,
 				).toEqual([]);
 				expect((yield* client.ListDaemonSessions({})).sessions).toEqual([]);
 				expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
@@ -121,8 +132,10 @@ describe("daemon RPC handlers", () => {
 
 	it.scoped(
 		"removes a project until the directory is explicitly added again",
-		() =>
-			Effect.gen(function* () {
+		() => {
+			const directory = mkdtempSync("/tmp/rpc-removed-project-");
+			fixtureDirs.push(directory);
+			return Effect.gen(function* () {
 				const handlers = yield* DaemonWsRpcHandlersTag;
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
@@ -134,28 +147,36 @@ describe("daemon RPC handlers", () => {
 				);
 				yield* client.RemoveProject({ slug: "gone" });
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
-				yield* client.AddProject({ directory: "/tmp/gone" });
+				yield* client.SaveProject({ folders: [directory] });
 				expect((yield* client.GetProjects({})).projects).toMatchObject([
-					{ directory: "/tmp/gone" },
+					{ directory },
 				]);
 			}).pipe(
 				Effect.provide(
 					makeDaemonRpcTestLayer([
-						{ slug: "gone", title: "gone", directory: "/tmp/gone" },
+						{ slug: "gone", title: "gone", directory, folders: [directory] },
 					]),
 				),
-			),
+			);
+		},
 	);
 
 	it.scoped(
 		"broadcasts project and instance changes to every existing relay without starting others",
 		() => {
+			const directory = mkdtempSync("/tmp/rpc-project-broadcast-");
+			fixtureDirs.push(directory);
 			const broadcasts = [vi.fn(), vi.fn()] as const;
-			const projects = ["a", "b", "cold"].map((slug) => ({
-				slug,
-				title: slug,
-				directory: `/tmp/${slug}`,
-			}));
+			const projects = ["a", "b", "cold"].map((slug) => {
+				const projectDir = join(directory, slug);
+				mkdirSync(projectDir);
+				return {
+					slug,
+					title: slug,
+					directory: projectDir,
+					folders: [projectDir],
+				};
+			});
 			const factory = vi.fn((slug: string) =>
 				Effect.succeed({
 					slug,
@@ -181,10 +202,11 @@ describe("daemon RPC handlers", () => {
 						),
 					),
 				);
-				yield* client.RenameProject({
+				yield* client.SaveProject({
 					projectSlug: "missing",
 					slug: "a",
 					title: "Renamed",
+					folders: [join(directory, "a")],
 				});
 				yield* client.AddInstance({ name: "Claude", driver: "claude" });
 				yield* Effect.tryPromise(() =>

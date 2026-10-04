@@ -5,7 +5,7 @@
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import {
@@ -59,6 +59,8 @@ export interface DaemonConfig {
 	claudeConfigDir?: string;
 	projects: Array<{
 		path: string;
+		directory?: string;
+		folders?: readonly string[];
 		slug: string;
 		title?: string;
 		addedAt: number;
@@ -82,8 +84,10 @@ export interface DaemonConfig {
 	}>;
 }
 
-const DaemonProjectSchema = Schema.Struct({
+const PersistedProjectSchema = Schema.Struct({
 	path: Schema.String,
+	directory: Schema.optional(Schema.String),
+	folders: Schema.optional(Schema.NonEmptyArray(Schema.String)),
 	slug: Schema.String,
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
@@ -91,6 +95,39 @@ const DaemonProjectSchema = Schema.Struct({
 	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
 	sessionCount: Schema.optional(Schema.Number),
 });
+
+const DaemonProjectSchema = Schema.transform(
+	PersistedProjectSchema,
+	Schema.typeSchema(PersistedProjectSchema),
+	{
+		strict: true,
+		decode: (project) => migrateProjectFolders(project),
+		encode: (project) => project,
+	},
+);
+
+export const migrateProjectFolders = <
+	T extends {
+		readonly path: string;
+		readonly directory?: string | undefined;
+		readonly folders?: readonly string[] | undefined;
+	},
+>(
+	project: T,
+) => {
+	const directory = resolve(
+		project.folders?.[0] ?? project.directory ?? project.path,
+	);
+	return {
+		...project,
+		path: directory,
+		directory,
+		folders: [
+			directory,
+			...(project.folders?.slice(1) ?? []).map((folder) => resolve(folder)),
+		] as const,
+	};
+};
 
 const DaemonInstanceSchema = Schema.Struct({
 	id: Schema.String,
@@ -433,7 +470,8 @@ export async function saveDaemonConfig(
 	ensureDir(dir);
 	const tmpPath = join(dir, `.daemon.json.tmp.${process.pid}.${Date.now()}`);
 	const finalPath = join(dir, "daemon.json");
-	await writeFile(tmpPath, JSON.stringify(config, null, 2), {
+	const projects = config.projects.map(migrateProjectFolders);
+	await writeFile(tmpPath, JSON.stringify({ ...config, projects }, null, 2), {
 		encoding: "utf-8",
 		mode: 0o600,
 	});

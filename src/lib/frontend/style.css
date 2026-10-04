@@ -578,6 +578,13 @@ body:has(dialog:modal) {
 	background: var(--color-bg);
 }
 
+/* The collapsed island carries a one-line summary instead (BannersRow). */
+#app.phone-session
+	#session-chrome:has(#session-bar[data-collapsed="true"])
+	.banners {
+	display: none;
+}
+
 #app.phone-session #messages {
 	padding-top: var(--phone-chrome-clearance, 0px);
 	scroll-padding-top: var(--phone-chrome-clearance, 0px);
@@ -643,10 +650,14 @@ body:has(dialog:modal) {
 	grid-area: views;
 }
 
-/* Desktop keeps the same controls mounted in one row. Nothing grows: the title,
-   its ▾ and chip hug each other on the left, and the title row's auto margin
-   pushes identity, Settle, the status dot and ⋯ to the end, so identity groups
-   with the controls on the right as it does on phones. When space runs out the identity
+/* Desktop keeps the same controls mounted in one row. Only the title row grows:
+   the title, its ▾ and chip hug each other on its left, and its growth pushes
+   identity, Settle, the status dot and ⋯ to the end, so identity groups with
+   the controls on the right as it does on phones. Growing (not an auto margin)
+   gives the background-task line under the title a real box ending before the
+   skills chip, so its chips truncate rather than paint over the controls that
+   follow. The task line takes no intrinsic width, so it never sets the title
+   row's size or floor. When space runs out the identity
    yields first (its large shrink factor) down to its own floor, then the
    title down to its 110px floor. The title row keeps the default `min-width: auto`, so its floor is
    its real contents; a fixed floor smaller than title + ▾ + chip let the
@@ -660,17 +671,17 @@ body:has(dialog:modal) {
 	white-space: nowrap;
 }
 #session-bar[data-compact="false"] #session-bar-title-row {
-	flex: 0 1 auto;
-	margin-inline-end: auto;
+	flex: 1 1 auto;
 }
 #session-bar[data-compact="false"] #session-bar-title {
 	min-width: 110px;
 	flex: 0 1 auto;
 }
+/* The markup's negative block margin stays: the target overhangs instead of
+   making the title line taller, which keeps title + task line inside 48px. */
 #session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
 	min-width: 30px;
 	min-height: 32px;
-	margin: 0;
 }
 #session-bar[data-compact="false"] #session-bar-meta {
 	flex: 0 100 auto;

@@ -36,6 +36,7 @@ export const makeDaemonRpcTestLayer = (
 	factory: RelayFactory = () => Effect.die("Unexpected relay startup"),
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
+		configDir?: string;
 		persistence?: Layer.Layer<
 			ConfigPersistenceTag,
 			never,
@@ -55,7 +56,7 @@ export const makeDaemonRpcTestLayer = (
 		}),
 		makeDaemonStateLive({
 			port: 0,
-			configDir: "/tmp/daemon-rpc-fixture",
+			configDir: options.configDir ?? "/tmp/daemon-rpc-fixture",
 			socketPath: "/tmp/daemon-rpc-fixture/relay.sock",
 		} satisfies Partial<DaemonState>),
 		DaemonLifecycleContextLive("/tmp/daemon-rpc-fixture/relay.sock"),

@@ -260,7 +260,9 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") return { addedSlug: "my-project" };
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "my-project", projects: [], warnings: [] };
 				return { port: 4000, tlsEnabled: false };
 			},
 		});
@@ -268,17 +270,19 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 		expect(cli.state.output).toContain("http://192.168.1.100:4000");
 		expect(cli.state.output).toContain("my-project");
 		expect(cli.state.rpcRequests.map((cmd) => cmd._tag)).toEqual([
-			"AddProject",
+			"GetProjects",
+			"SaveProject",
 			"GetStatus",
 		]);
 	});
 
-	it("registers cwd via AddProject RPC command", async () => {
+	it("registers cwd via SaveProject RPC command", async () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") {
-					return { addedSlug: "my-project" };
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject") {
+					return { savedSlug: "my-project", projects: [], warnings: [] };
 				}
 				return { ok: true };
 			},
@@ -286,10 +290,10 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 
 		await run([], cli);
 
-		const addCmd = cli.state.rpcRequests.find((c) => c._tag === "AddProject");
+		const addCmd = cli.state.rpcRequests.find((c) => c._tag === "SaveProject");
 		expect(addCmd).toBeDefined();
 		assert.exists(addCmd, "expected add command");
-		expect(addCmd.directory).toBe("/home/user/my-project");
+		expect(addCmd.folders).toEqual(["/home/user/my-project"]);
 	});
 
 	it("uses localhost when no network address available", async () => {
@@ -297,7 +301,9 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 			getNetworkAddress: () => null,
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") return { addedSlug: "test" };
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "test", projects: [], warnings: [] };
 				return { ok: true };
 			},
 		});
@@ -311,7 +317,9 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") return { addedSlug: "test" };
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "test", projects: [], warnings: [] };
 				return { ok: true };
 			},
 		});
@@ -325,7 +333,9 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") return { addedSlug: "test" };
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "test", projects: [], warnings: [] };
 				return { ok: true };
 			},
 		});
@@ -335,11 +345,12 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 		expect(cli.state.output).toContain("PIN");
 	});
 
-	it("keeps the default URL when AddProject fails", async () => {
+	it("keeps the default URL when SaveProject fails", async () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") throw new Error("disk full");
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject") throw new Error("disk full");
 				return { port: 2633, tlsEnabled: false };
 			},
 		});
@@ -536,12 +547,13 @@ it.each([
 
 describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	describe("--add", () => {
-		it("sends AddProject with resolved path", async () => {
+		it("sends SaveProject with resolved path", async () => {
 			const cli = createMockCLI({
 				sendRPC: async (cmd) => {
 					cli.state.rpcRequests.push(cmd);
-					if (cmd._tag === "AddProject") {
-						return { addedSlug: "test-project" };
+					if (cmd._tag === "GetProjects") return { projects: [] };
+					if (cmd._tag === "SaveProject") {
+						return { savedSlug: "test-project", projects: [], warnings: [] };
 					}
 					return { ok: true };
 				},
@@ -549,10 +561,12 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 
 			await run(["--add", "/tmp/test-project"], cli);
 
-			const addCmd = cli.state.rpcRequests.find((c) => c._tag === "AddProject");
+			const addCmd = cli.state.rpcRequests.find(
+				(c) => c._tag === "SaveProject",
+			);
 			expect(addCmd).toBeDefined();
 			assert.exists(addCmd, "expected add command");
-			expect(addCmd.directory).toBe("/tmp/test-project");
+			expect(addCmd.folders).toEqual(["/tmp/test-project"]);
 			expect(cli.state.output).toBe("Project added: test-project\n");
 		});
 
@@ -694,7 +708,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 	});
 
 	describe("--title", () => {
-		it("sends GetProjects then RenameProject", async () => {
+		it("sends GetProjects then SaveProject", async () => {
 			const cli = createMockCLI({
 				sendRPC: async (cmd) => {
 					cli.state.rpcRequests.push(cmd);
@@ -710,7 +724,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							],
 						};
 					}
-					if (cmd._tag === "RenameProject") {
+					if (cmd._tag === "SaveProject") {
 						return { ok: true };
 					}
 					return { ok: true };
@@ -720,12 +734,13 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			await run(["--title", "New Title"], cli);
 
 			const titleCmd = cli.state.rpcRequests.find(
-				(c) => c._tag === "RenameProject",
+				(c) => c._tag === "SaveProject",
 			);
 			expect(titleCmd).toBeDefined();
 			assert.exists(titleCmd, "expected title command");
 			expect(titleCmd.slug).toBe("my-project");
 			expect(titleCmd.title).toBe("New Title");
+			expect(titleCmd.folders).toEqual(["/home/user/my-project"]);
 			expect(cli.state.output).toContain("Title updated");
 		});
 
@@ -769,7 +784,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 			expect(cli.state.exitCode).toBe(1);
 		});
 
-		it("shows error when RenameProject RPC fails", async () => {
+		it("shows error when SaveProject RPC fails", async () => {
 			const cli = createMockCLI({
 				sendRPC: async (cmd) => {
 					cli.state.rpcRequests.push(cmd);
@@ -785,7 +800,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							],
 						};
 					}
-					if (cmd._tag === "RenameProject") {
+					if (cmd._tag === "SaveProject") {
 						throw new Error("title too long");
 					}
 					return { ok: true };
@@ -805,7 +820,9 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "AddProject") return { addedSlug: "test" };
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "test", projects: [], warnings: [] };
 				return { ok: true };
 			},
 		});
@@ -820,7 +837,8 @@ describe("T8: Error handling (AC8)", () => {
 	it("prints guidance when the server becomes unreachable before GetStatus", async () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
-				if (cmd._tag === "AddProject") return { addedSlug: "project" };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "project", projects: [], warnings: [] };
 				throw new Error("Connection refused");
 			},
 		});

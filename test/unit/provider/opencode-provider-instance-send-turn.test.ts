@@ -69,6 +69,7 @@ function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 		providerState: {},
 		model: { providerId: "anthropic", modelId: "claude-sonnet" },
 		workspaceRoot: "/tmp/project",
+		extraFolders: [],
 		eventSink: makeStubEventSink(),
 		abortSignal: new AbortController().signal,
 		...overrides,

@@ -63,6 +63,7 @@ import {
 	SessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
 import {
+	MOCK_PROJECT_DIR,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -434,7 +435,7 @@ describe("subscribeShell", () => {
 				});
 				expect(sdkForkSession).toHaveBeenCalledWith(
 					"sdk-parent",
-					expect.objectContaining({ dir: "/test/project" }),
+					expect.objectContaining({ dir: MOCK_PROJECT_DIR }),
 				);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
@@ -598,7 +599,7 @@ describe("subscribeShell", () => {
 					left: { message: expect.stringContaining("Claude transcript") },
 				});
 				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
-					dir: "/test/project",
+					dir: MOCK_PROJECT_DIR,
 				});
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);

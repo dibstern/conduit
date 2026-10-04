@@ -362,6 +362,7 @@ describe("WsRpcServerLayer GetModels", () => {
 						history: [],
 						providerState: {},
 						workspaceRoot: "/tmp/ws",
+						extraFolders: [],
 						eventSink: sink,
 						abortSignal: new AbortController().signal,
 						model: { providerId: "claude", modelId: "sonnet" },

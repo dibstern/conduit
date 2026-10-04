@@ -97,7 +97,7 @@ const makeStaticDir = Effect.acquireRelease(
 const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 	port: Effect.succeed(2633),
 	onboardingPort: Effect.succeed(null),
-	addProject: () => Effect.die("unused"),
+	saveProject: () => Effect.die("unused"),
 	removeProject: (slug: string) => Effect.fail(new ProjectNotFound({ slug })),
 	getStatus: () =>
 		Effect.succeed({
@@ -292,6 +292,7 @@ describe("makeDaemonHttpRouterLive", () => {
 								project: {
 									slug: "alpha",
 									directory: "/work/alpha",
+									folders: ["/work/alpha"],
 									title: "Alpha",
 									lastUsed: 200,
 								},
@@ -304,6 +305,7 @@ describe("makeDaemonHttpRouterLive", () => {
 								project: {
 									slug: "broken",
 									directory: "/work/broken",
+									folders: ["/work/broken"],
 									title: "Broken",
 									lastUsed: 100,
 								},
@@ -387,6 +389,7 @@ describe("makeDaemonHttpRouterLive", () => {
 							project: {
 								slug: "solo",
 								directory: "/work/solo",
+								folders: ["/work/solo"],
 								title: "Solo",
 								lastUsed: 1,
 							},

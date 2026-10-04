@@ -100,6 +100,7 @@ describe("ProviderInstance types", () => {
 			providerState: {},
 			model: { providerId: "anthropic", modelId: "claude-sonnet" },
 			workspaceRoot: "/tmp/project",
+			extraFolders: [],
 			eventSink: mockSink,
 			abortSignal: new AbortController().signal,
 		};
@@ -129,6 +130,7 @@ describe("ProviderInstance types", () => {
 			providerState: {},
 			model: { providerId: "anthropic", modelId: "claude-sonnet" },
 			workspaceRoot: "/tmp/project",
+			extraFolders: [],
 			eventSink: mockSink,
 			abortSignal: new AbortController().signal,
 			variant: "thinking",

@@ -56,6 +56,8 @@
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
 	import BackgroundTasksRow from "../session/BackgroundTasksRow.svelte";
+	import { appBanners } from "../overlays/Banners.svelte";
+	import BannersRow from "../overlays/BannersRow.svelte";
 	import { tasksPanel } from "../session/background-tasks.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
@@ -415,7 +417,8 @@
 	     Expanded, the title chevron opens the session menu.
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	{#if sessionViewState.compact || session}
-	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
+	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
+	<div class="flex min-w-0 items-center gap-1.5">
 		<div class="min-w-0">
 		<h1
 			id="session-bar-title"
@@ -435,9 +438,11 @@
 				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
 			</Button>
 		{/if}
-		{#if backgroundTasks.length > 0}
-			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact={sessionViewState.compact} />
+		{#if backgroundTasks.length > 0 && sessionViewState.compact}
+			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact />
 		{/if}
+		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
+		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>
 		{#if !collapsed}
 			<Button
@@ -510,6 +515,12 @@
 				</Menu>
 			{/if}
 		{/if}
+	</div>
+	<!-- Desktop gives the tasks their own line under the whole title line, as
+	     wide as the free space the title row grows into (style.css). -->
+	{#if backgroundTasks.length > 0 && !sessionViewState.compact}
+		<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact={false} />
+	{/if}
 	</div>
 	{/if}
 

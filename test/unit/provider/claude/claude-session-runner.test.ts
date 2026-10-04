@@ -36,6 +36,7 @@ const send = (
 		history: [],
 		providerState: {},
 		workspaceRoot: "/tmp/ws",
+		extraFolders: [],
 		model: { providerId: "claude", modelId: "sonnet" },
 	},
 });

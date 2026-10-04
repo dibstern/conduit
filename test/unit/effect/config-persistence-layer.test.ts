@@ -187,6 +187,7 @@ describe("ConfigPersistenceLive", () => {
 						{
 							slug: "alpha",
 							directory: "/tmp/alpha",
+							folders: ["/tmp/alpha"],
 							title: "Alpha",
 							lastUsed: 1700000000000,
 							instanceId: "remote-1",
@@ -216,6 +217,8 @@ describe("ConfigPersistenceLive", () => {
 					projects: [
 						{
 							path: "/tmp/alpha",
+							directory: "/tmp/alpha",
+							folders: ["/tmp/alpha"],
 							slug: "alpha",
 							title: "Alpha",
 							addedAt: 1700000000000,

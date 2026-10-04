@@ -10,6 +10,8 @@
 //
 // Relay lifecycle is delegated to RelayCacheTag.
 
+import { execFileSync } from "node:child_process";
+import { lstatSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import {
@@ -24,12 +26,24 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import {
+	ProjectSaveRejected,
+	type SaveProjectInput,
+	WsRpcError,
+} from "../../../contracts/ws-rpc.js";
 import { withCachedProjectGit } from "../../../git/session-git.js";
+import { normalizeProjectTitle } from "../../../handlers/settings.js";
+import {
+	chooseProjectSlug,
+	projectEventsDbPath,
+	projectStorageDir,
+} from "../../../persistence/project-storage.js";
+import { checkFolders, type FolderIssue } from "../../../project-folders.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import type { StoredProject } from "../../../types.js";
-import { generateSlug } from "../../../utils.js";
 import { requestConfigSave } from "./config-persistence-service.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
+import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
@@ -88,7 +102,8 @@ export type ProjectRegistryState = HashMap.HashMap<string, ProjectState>;
 
 const toStoredProject = (project: DaemonProject): StoredProject => ({
 	slug: project.slug,
-	directory: project.path,
+	directory: project.folders?.[0] ?? project.directory ?? project.path,
+	folders: project.folders ?? [project.directory ?? project.path],
 	title: project.title ?? project.slug,
 	lastUsed: project.addedAt,
 	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
@@ -114,6 +129,11 @@ const makeInitialProjectState = (
 export class ProjectRegistryTag extends Context.Tag("ProjectRegistry")<
 	ProjectRegistryTag,
 	Ref.Ref<ProjectRegistryState>
+>() {}
+
+export class ProjectSaveLockTag extends Context.Tag("ProjectSaveLock")<
+	ProjectSaveLockTag,
+	Effect.Semaphore
 >() {}
 
 /** Get a project entry by slug. Returns Option. */
@@ -186,6 +206,7 @@ export const projectInfos = allProjects.pipe(
 			projects.map((project) => ({
 				slug: project.slug,
 				directory: project.directory,
+				folders: project.folders,
 				title: project.title,
 				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
 				...(project.instanceId !== undefined && {
@@ -361,51 +382,55 @@ export const markError = (slug: string, error: string) =>
  * Publishes InstanceRemoved event. No-op if slug not registered.
  */
 export const remove = (slug: string) =>
-	Effect.gen(function* () {
-		const ref = yield* ProjectRegistryTag;
-		const bus = yield* DaemonEventBusTag;
-		const relayCache = yield* RelayCacheTag;
+	Effect.flatMap(ProjectSaveLockTag, (lock) =>
+		lock.withPermits(1)(
+			Effect.gen(function* () {
+				const ref = yield* ProjectRegistryTag;
+				const bus = yield* DaemonEventBusTag;
+				const relayCache = yield* RelayCacheTag;
 
-		const removed = yield* Ref.modify(ref, (state) => {
-			const entry = HashMap.get(state, slug);
-			return [
-				entry,
-				Option.isSome(entry) ? HashMap.remove(state, slug) : state,
-			] as const;
-		});
+				const removed = yield* Ref.modify(ref, (state) => {
+					const entry = HashMap.get(state, slug);
+					return [
+						entry,
+						Option.isSome(entry) ? HashMap.remove(state, slug) : state,
+					] as const;
+				});
 
-		if (Option.isNone(removed)) return;
+				if (Option.isNone(removed)) return;
 
-		yield* Effect.gen(function* () {
-			// Relay disposal only detaches; removal ends every registered runner afterwards.
-			yield* relayCache.invalidate(slug);
-			const state = yield* Ref.get(yield* DaemonStateTag);
-			yield* stopRegisteredClaudeRunners(
-				removed.value.project.directory,
-				state.configDir,
-			);
-		}).pipe(
-			Effect.onError(() =>
-				// Failed removal must remain reachable by retries and a full stop.
-				Ref.update(ref, (state) =>
-					HashMap.has(state, slug)
-						? state
-						: HashMap.set(state, slug, {
-								_tag: "Registering",
-								project: removed.value.project,
-							}),
-				).pipe(Effect.andThen(requestConfigSave)),
-			),
-		);
+				yield* Effect.gen(function* () {
+					// Relay disposal only detaches; removal ends every registered runner afterwards.
+					yield* relayCache.invalidate(slug);
+					const state = yield* Ref.get(yield* DaemonStateTag);
+					yield* stopRegisteredClaudeRunners(
+						removed.value.project.directory,
+						state.configDir,
+					);
+				}).pipe(
+					Effect.onError(() =>
+						// Failed removal must remain reachable by retries and a full stop.
+						Ref.update(ref, (state) =>
+							HashMap.has(state, slug)
+								? state
+								: HashMap.set(state, slug, {
+										_tag: "Registering",
+										project: removed.value.project,
+									}),
+						).pipe(Effect.andThen(requestConfigSave)),
+					),
+				);
 
-		yield* PubSub.publish(
-			bus,
-			DaemonEvent.InstanceRemoved({ instanceId: slug }),
-		);
+				yield* PubSub.publish(
+					bus,
+					DaemonEvent.InstanceRemoved({ instanceId: slug }),
+				);
 
-		yield* requestConfigSave;
-		yield* Effect.logInfo("Project removed");
-	}).pipe(
+				yield* requestConfigSave;
+				yield* Effect.logInfo("Project removed");
+			}),
+		),
+	).pipe(
 		Effect.uninterruptible,
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.remove", {
@@ -419,7 +444,9 @@ export const remove = (slug: string) =>
  */
 export const updateProject = (
 	slug: string,
-	updates: Partial<Pick<StoredProject, "title" | "instanceId">>,
+	updates: Partial<
+		Pick<StoredProject, "title" | "instanceId" | "directory" | "folders">
+	>,
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
@@ -658,29 +685,39 @@ export const isStarting = (slug: string) =>
  */
 export const makeProjectRegistryLive = (
 	initialProjects: ReadonlyArray<StoredProject> = [],
-): Layer.Layer<ProjectRegistryTag> =>
-	Layer.effect(
-		ProjectRegistryTag,
-		Ref.make<ProjectRegistryState>(makeInitialProjectState(initialProjects)),
+): Layer.Layer<ProjectRegistryTag | ProjectSaveLockTag> =>
+	Layer.effectContext(
+		Effect.gen(function* () {
+			const ref = yield* Ref.make<ProjectRegistryState>(
+				makeInitialProjectState(initialProjects),
+			);
+			const lock = yield* Effect.makeSemaphore(1);
+			return Context.make(ProjectRegistryTag, ref).pipe(
+				Context.add(ProjectSaveLockTag, lock),
+			);
+		}),
 	);
 
 export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
-	ProjectRegistryTag,
+	ProjectRegistryTag | ProjectSaveLockTag,
 	never,
 	DaemonStateTag
-> = Layer.effect(
-	ProjectRegistryTag,
+> = Layer.effectContext(
 	Effect.gen(function* () {
 		const stateRef = yield* DaemonStateTag;
 		const state = yield* Ref.get(stateRef);
 		const initialProjects = state.projects.map(toStoredProject);
-		return yield* Ref.make<ProjectRegistryState>(
+		const ref = yield* Ref.make<ProjectRegistryState>(
 			makeInitialProjectState(initialProjects),
+		);
+		const lock = yield* Effect.makeSemaphore(1);
+		return Context.make(ProjectRegistryTag, ref).pipe(
+			Context.add(ProjectSaveLockTag, lock),
 		);
 	}),
 );
 
-const normalizeProjectDirectory = (directory: string): string => {
+export const normalizeProjectDirectory = (directory: string): string => {
 	const expanded =
 		directory === "~" || directory.startsWith("~/")
 			? directory.replace(/^~/, homedir())
@@ -691,29 +728,214 @@ const normalizeProjectDirectory = (directory: string): string => {
 const titleForDirectory = (directory: string): string =>
 	basename(directory) || "project";
 
-export const addProjectToEffectRegistry = (
-	directory: string,
-	instanceId?: string | undefined,
-) =>
-	Effect.gen(function* () {
-		const normalizedDirectory = normalizeProjectDirectory(directory);
-		const existing = yield* findByDirectory(normalizedDirectory);
-		if (Option.isSome(existing)) {
-			return existing.value.project;
-		}
-
-		const projects = yield* allProjects;
-		const existingSlugs = new Set(projects.map((project) => project.slug));
-		const project: StoredProject = {
-			slug: generateSlug(normalizedDirectory, existingSlugs),
-			directory: normalizedDirectory,
-			title: titleForDirectory(normalizedDirectory),
-			lastUsed: Date.now(),
-			...(instanceId !== undefined && { instanceId }),
-		};
-		yield* addWithoutRelay(project);
-		return project;
-	}).pipe(Effect.withSpan("relayCache.addProjectCallback"));
+export const saveProject = (input: SaveProjectInput) =>
+	Effect.flatMap(ProjectSaveLockTag, (lock) =>
+		lock.withPermits(1)(
+			Effect.gen(function* () {
+				const inputs = input.folders.map((folder) =>
+					typeof folder === "string"
+						? { path: normalizeProjectDirectory(folder), create: undefined }
+						: { ...folder, path: normalizeProjectDirectory(folder.path) },
+				);
+				const folders = inputs.map((folder) => folder.path);
+				const projects = yield* allProjects;
+				const existing = projects.find(
+					(project) => project.slug === input.slug,
+				);
+				const { errors, warnings } = checkFolders(
+					folders,
+					projects.filter((project) => project.slug !== input.slug),
+				);
+				const issues: FolderIssue[] = [...errors];
+				if (input.slug !== undefined && existing === undefined) {
+					issues.push({ kind: "unknown-project", slug: input.slug });
+				}
+				for (const folder of inputs) {
+					const disk = yield* Effect.try({
+						try: () =>
+							folder.create ? lstatSync(folder.path) : statSync(folder.path),
+						catch: (cause) => cause,
+					}).pipe(Effect.option);
+					if (folder.create) {
+						if (Option.isSome(disk))
+							issues.push({ kind: "create-exists", path: folder.path });
+					} else if (Option.isNone(disk)) {
+						issues.push({ kind: "missing", path: folder.path });
+					} else if (!disk.value.isDirectory()) {
+						issues.push({ kind: "not-a-folder", path: folder.path });
+					}
+				}
+				if (issues.length > 0)
+					return yield* new ProjectSaveRejected({ issues });
+				const directory = folders[0];
+				if (directory === undefined)
+					return yield* new ProjectSaveRejected({
+						issues: [{ kind: "empty" }],
+					});
+				const title =
+					input.title === undefined
+						? undefined
+						: normalizeProjectTitle(input.title);
+				if (title === "")
+					return yield* new WsRpcError({
+						message: "SaveProject failed: title is required",
+					});
+				const { configDir } = yield* Ref.get(yield* DaemonStateTag);
+				const mainChanged =
+					existing !== undefined && existing.directory !== directory;
+				if (mainChanged) {
+					if (
+						projectEventsDbPath({ configDir, ...existing }) !==
+						resolve(projectStorageDir(configDir, existing.slug), "events.db")
+					) {
+						return yield* new WsRpcError({
+							message:
+								"Project history migration must complete before changing the main folder",
+						});
+					}
+					// A send admitted between this check and the relay swap is not blocked.
+					const count = yield* countRunningProjectSessions(
+						existing,
+						configDir,
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new WsRpcError({
+									message: `Failed to check running sessions: ${formatRelayFailure(cause)}`,
+								}),
+						),
+					);
+					if (count > 0)
+						return yield* new ProjectSaveRejected({
+							issues: [{ kind: "sessions-running", count }],
+						});
+				}
+				const slug =
+					existing?.slug ??
+					(yield* Effect.try({
+						try: () =>
+							chooseProjectSlug({
+								configDir,
+								directory,
+								liveSlugs: new Set(projects.map((project) => project.slug)),
+							}),
+						catch: (cause) =>
+							new WsRpcError({
+								message: `Failed to read project storage: ${formatRelayFailure(cause)}`,
+							}),
+					}));
+				const created: string[] = [];
+				yield* Effect.gen(function* () {
+					for (const folder of inputs) {
+						if (!folder.create) continue;
+						yield* Effect.try({
+							try: () => {
+								mkdirSync(folder.path);
+								created.push(folder.path);
+							},
+							catch: (cause) =>
+								new ProjectSaveRejected({
+									issues: [
+										{
+											kind: "mkdir-failed",
+											path: folder.path,
+											message: formatRelayFailure(cause),
+										},
+									],
+								}),
+						});
+						if (folder.create.gitInit) {
+							yield* Effect.try({
+								try: () =>
+									execFileSync("git", ["init"], {
+										cwd: folder.path,
+										stdio: "pipe",
+										timeout: 30_000,
+									}),
+								catch: (cause) =>
+									new ProjectSaveRejected({
+										issues: [
+											{
+												kind: "git-init-failed",
+												path: folder.path,
+												message: formatRelayFailure(cause),
+											},
+										],
+									}),
+							});
+						}
+					}
+				}).pipe(
+					Effect.onError(() =>
+						Effect.forEach(
+							[...created].reverse(),
+							(path) =>
+								Effect.try({
+									try: () => rmSync(path, { recursive: true, force: true }),
+									catch: (cause) => cause,
+								}).pipe(
+									Effect.catchAll((cause) =>
+										Effect.logWarning(
+											`Failed to remove created folder ${path}: ${formatRelayFailure(cause)}`,
+										),
+									),
+								),
+							{ discard: true },
+						),
+					),
+				);
+				const project: StoredProject = existing
+					? {
+							...existing,
+							directory,
+							folders,
+							...(title !== undefined && { title }),
+						}
+					: {
+							slug,
+							directory,
+							folders,
+							title: title ?? titleForDirectory(directory),
+							lastUsed: Date.now(),
+							...(input.instanceId !== undefined && {
+								instanceId: input.instanceId,
+							}),
+						};
+				if (existing) {
+					yield* updateProject(slug, {
+						directory,
+						folders,
+						title: project.title,
+					});
+				} else {
+					yield* addWithoutRelay(project);
+				}
+				if (
+					existing &&
+					(existing.folders.length !== folders.length ||
+						existing.folders.some((folder, index) => folder !== folders[index]))
+				) {
+					yield* replaceRelay(slug);
+					if (mainChanged) {
+						yield* stopRegisteredClaudeRunners(
+							existing.directory,
+							configDir,
+						).pipe(
+							Effect.catchAllCause((cause) =>
+								Effect.logWarning(
+									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,
+								),
+							),
+						);
+					}
+				}
+				return { project: yield* getProject(slug), warnings };
+			}),
+		),
+	).pipe(
+		Effect.uninterruptible,
+		Effect.withSpan("projectRegistry.saveProject"),
+	);
 
 /** Remove a project from Conduit's persisted registry. */
 export const removeProjectFromEffectRegistry = remove;

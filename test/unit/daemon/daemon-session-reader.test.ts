@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
@@ -12,6 +12,7 @@ import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/da
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
+import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
@@ -48,10 +49,14 @@ const makeProjectStore = (
 		readonly status: "pending" | "resolved";
 	}> = [],
 ): void => {
-	const conduitDirectory = join(projectDirectory, ".conduit");
-	mkdirSync(conduitDirectory, { recursive: true });
+	const storageDirectory = projectStorageDir(
+		dirname(projectDirectory),
+		basename(projectDirectory),
+	);
+	mkdirSync(projectDirectory, { recursive: true });
+	mkdirSync(storageDirectory, { recursive: true });
 	writeEventStore(
-		join(conduitDirectory, "events.db"),
+		join(storageDirectory, "events.db"),
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			for (const session of sessions) {
@@ -104,11 +109,12 @@ describe("listDaemonSessions", () => {
 		makeProjectStore(plainProject, [
 			{ id: "plain-session", title: "Plain", updatedAt: 1 },
 		]);
+		writeFileSync(join(gitProject, "untracked.txt"), "fixture");
 		const cache = createSessionGitCache();
 		return Effect.gen(function* () {
 			yield* Effect.promise(() => cache.refresh(gitProject));
 			yield* Effect.promise(() => cache.refresh(plainProject));
-			const result = yield* listDaemonSessions({}, cache);
+			const result = yield* listDaemonSessions(root, {}, cache);
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
 			).toEqual({ branch: "main", dirty: true });
@@ -118,8 +124,18 @@ describe("listDaemonSessions", () => {
 		}).pipe(
 			Effect.provide(
 				makeProjectRegistryLive([
-					{ slug: "git-project", title: "Git", directory: gitProject },
-					{ slug: "plain-project", title: "Plain", directory: plainProject },
+					{
+						slug: "git-project",
+						title: "Git",
+						directory: gitProject,
+						folders: [gitProject],
+					},
+					{
+						slug: "plain-project",
+						title: "Plain",
+						directory: plainProject,
+						folders: [plainProject],
+					},
 				]),
 			),
 		);
@@ -152,7 +168,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions();
+			const result = yield* listDaemonSessions(root);
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -172,6 +188,7 @@ describe("listDaemonSessions", () => {
 						slug: "project",
 						title: "Project",
 						directory: project,
+						folders: [project],
 					},
 				]),
 			),
@@ -212,7 +229,7 @@ describe("listDaemonSessions", () => {
 			},
 		]);
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions();
+			const result = yield* listDaemonSessions(root);
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -233,7 +250,12 @@ describe("listDaemonSessions", () => {
 		}).pipe(
 			Effect.provide(
 				makeProjectRegistryLive([
-					{ slug: "project", title: "Project", directory: project },
+					{
+						slug: "project",
+						title: "Project",
+						directory: project,
+						folders: [project],
+					},
 				]),
 			),
 		);
@@ -270,7 +292,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions();
+			const result = yield* listDaemonSessions(root);
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -287,6 +309,7 @@ describe("listDaemonSessions", () => {
 						slug: "project",
 						title: "Project",
 						directory: project,
+						folders: [project],
 					},
 				]),
 			),
@@ -334,7 +357,7 @@ describe("listDaemonSessions", () => {
 		);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions();
+			const result = yield* listDaemonSessions(root);
 			const sessions = new Map(
 				result.sessions.map((session) => [session.id, session]),
 			);
@@ -370,6 +393,7 @@ describe("listDaemonSessions", () => {
 						slug: "project",
 						title: "Project",
 						directory: project,
+						folders: [project],
 					},
 				]),
 			),
@@ -388,9 +412,12 @@ describe("listDaemonSessions", () => {
 			mkdirSync(projectA);
 			mkdirSync(projectB);
 			mkdirSync(noStore);
-			mkdirSync(join(unreadableStore, ".conduit"), { recursive: true });
+			mkdirSync(unreadableStore, { recursive: true });
+			mkdirSync(projectStorageDir(root, "unreadable-store"), {
+				recursive: true,
+			});
 			writeFileSync(
-				join(unreadableStore, ".conduit", "events.db"),
+				join(projectStorageDir(root, "unreadable-store"), "events.db"),
 				"not a sqlite database",
 			);
 
@@ -409,7 +436,10 @@ describe("listDaemonSessions", () => {
 			]);
 
 			return Effect.gen(function* () {
-				const result = yield* listDaemonSessions({ limit: 2, roots: true });
+				const result = yield* listDaemonSessions(root, {
+					limit: 2,
+					roots: true,
+				});
 
 				expect(result.sessions).toEqual([
 					{
@@ -455,15 +485,36 @@ describe("listDaemonSessions", () => {
 			}).pipe(
 				Effect.provide(
 					makeProjectRegistryLive([
-						{ slug: "project-a", title: "Project A", directory: projectA },
-						{ slug: "project-b", title: "Project B", directory: projectB },
-						{ slug: "no-store", title: "No store", directory: noStore },
+						{
+							slug: "project-a",
+							title: "Project A",
+							directory: projectA,
+							folders: [projectA],
+						},
+						{
+							slug: "project-b",
+							title: "Project B",
+							directory: projectB,
+							folders: [projectB],
+						},
+						{
+							slug: "no-store",
+							title: "No store",
+							directory: noStore,
+							folders: [noStore],
+						},
 						{
 							slug: "unreadable-store",
 							title: "Unreadable store",
 							directory: unreadableStore,
+							folders: [unreadableStore],
 						},
-						{ slug: "missing", title: "Missing", directory: missing },
+						{
+							slug: "missing",
+							title: "Missing",
+							directory: missing,
+							folders: [missing],
+						},
 					]),
 				),
 			);
@@ -492,9 +543,24 @@ describe("listDaemonSessions", () => {
 			{ id: "c-300", title: "C 300", updatedAt: 300 },
 		]);
 		const registry = makeProjectRegistryLive([
-			{ slug: "project-a", title: "project-a", directory: projectA },
-			{ slug: "project-b", title: "project-b", directory: projectB },
-			{ slug: "project-c", title: "project-c", directory: projectC },
+			{
+				slug: "project-a",
+				title: "project-a",
+				directory: projectA,
+				folders: [projectA],
+			},
+			{
+				slug: "project-b",
+				title: "project-b",
+				directory: projectB,
+				folders: [projectB],
+			},
+			{
+				slug: "project-c",
+				title: "project-c",
+				directory: projectC,
+				folders: [projectC],
+			},
 		]);
 		const expected = [
 			"shared-z",
@@ -507,12 +573,12 @@ describe("listDaemonSessions", () => {
 		];
 
 		return Effect.gen(function* () {
-			const unbounded = yield* listDaemonSessions();
+			const unbounded = yield* listDaemonSessions(root);
 			expect(unbounded.sessions.map((session) => session.id)).toEqual(expected);
 			expect(unbounded.hasMore).toBe(false);
 			expect(unbounded.nextCursor).toBeNull();
 
-			const first = yield* listDaemonSessions({ limit: 2 });
+			const first = yield* listDaemonSessions(root, { limit: 2 });
 			expect(first.sessions.map((session) => session.id)).toEqual(
 				expected.slice(0, 2),
 			);
@@ -526,7 +592,7 @@ describe("listDaemonSessions", () => {
 			let cursor: { updatedAt: number; id: string } | undefined;
 			let finalCursor: { updatedAt: number; id: string } | undefined;
 			for (;;) {
-				const page = yield* listDaemonSessions({
+				const page = yield* listDaemonSessions(root, {
 					limit: 2,
 					...(cursor === undefined ? {} : { cursor }),
 				});
@@ -550,7 +616,7 @@ describe("listDaemonSessions", () => {
 			expect(new Set(collected).size).toBe(expected.length);
 			expect(finalCursor).toBeDefined();
 			if (finalCursor === undefined) return;
-			const pastEnd = yield* listDaemonSessions({
+			const pastEnd = yield* listDaemonSessions(root, {
 				limit: 2,
 				cursor: finalCursor,
 			});
@@ -572,11 +638,16 @@ describe("listDaemonSessions", () => {
 			{ id: "one", title: "One", updatedAt: 100 },
 		]);
 		const registry = makeProjectRegistryLive([
-			{ slug: "project", title: "Project", directory: project },
+			{
+				slug: "project",
+				title: "Project",
+				directory: project,
+				folders: [project],
+			},
 		]);
 
 		return Effect.gen(function* () {
-			const first = yield* listDaemonSessions({ limit: 2 });
+			const first = yield* listDaemonSessions(root, { limit: 2 });
 			expect(first.sessions.map((session) => session.id)).toEqual([
 				"five",
 				"four",
@@ -585,7 +656,7 @@ describe("listDaemonSessions", () => {
 			expect(first.nextCursor).toEqual({ updatedAt: 400, id: "four" });
 			if (first.nextCursor === null) return;
 
-			const second = yield* listDaemonSessions({
+			const second = yield* listDaemonSessions(root, {
 				limit: 2,
 				cursor: first.nextCursor,
 			});
@@ -597,7 +668,7 @@ describe("listDaemonSessions", () => {
 			expect(second.nextCursor).toEqual({ updatedAt: 200, id: "two" });
 			if (second.nextCursor === null) return;
 
-			const final = yield* listDaemonSessions({
+			const final = yield* listDaemonSessions(root, {
 				limit: 2,
 				cursor: second.nextCursor,
 			});
@@ -630,9 +701,24 @@ describe("listDaemonSessions", () => {
 			{ id: "c-other", title: "Not relevant", updatedAt: 800 },
 		]);
 		const registry = makeProjectRegistryLive([
-			{ slug: "project-a", title: "project-a", directory: projectA },
-			{ slug: "project-b", title: "project-b", directory: projectB },
-			{ slug: "project-c", title: "project-c", directory: projectC },
+			{
+				slug: "project-a",
+				title: "project-a",
+				directory: projectA,
+				folders: [projectA],
+			},
+			{
+				slug: "project-b",
+				title: "project-b",
+				directory: projectB,
+				folders: [projectB],
+			},
+			{
+				slug: "project-c",
+				title: "project-c",
+				directory: projectC,
+				folders: [projectC],
+			},
 		]);
 		const expected = [
 			"a-needle-new",
@@ -644,7 +730,7 @@ describe("listDaemonSessions", () => {
 		];
 
 		return Effect.gen(function* () {
-			const allMatches = yield* listDaemonSessions({ search: "nEeDlE" });
+			const allMatches = yield* listDaemonSessions(root, { search: "nEeDlE" });
 			expect(allMatches.sessions.map((session) => session.id)).toEqual(
 				expected,
 			);
@@ -654,7 +740,7 @@ describe("listDaemonSessions", () => {
 			const paged: string[] = [];
 			let cursor: { updatedAt: number; id: string } | undefined;
 			for (;;) {
-				const page = yield* listDaemonSessions({
+				const page = yield* listDaemonSessions(root, {
 					search: "needle",
 					limit: 2,
 					...(cursor === undefined ? {} : { cursor }),
@@ -683,12 +769,22 @@ describe("listDaemonSessions", () => {
 			{ id: "b-needle-old", title: "needle old", updatedAt: 200 },
 		]);
 		const registry = makeProjectRegistryLive([
-			{ slug: "project-a", title: "project-a", directory: projectA },
-			{ slug: "project-b", title: "project-b", directory: projectB },
+			{
+				slug: "project-a",
+				title: "project-a",
+				directory: projectA,
+				folders: [projectA],
+			},
+			{
+				slug: "project-b",
+				title: "project-b",
+				directory: projectB,
+				folders: [projectB],
+			},
 		]);
 
 		return Effect.gen(function* () {
-			const firstPage = yield* listDaemonSessions({
+			const firstPage = yield* listDaemonSessions(root, {
 				scope: "project-b",
 				limit: 2,
 			});
@@ -701,7 +797,7 @@ describe("listDaemonSessions", () => {
 				"project-b",
 			]);
 
-			const secondPage = yield* listDaemonSessions({
+			const secondPage = yield* listDaemonSessions(root, {
 				scope: "project-b",
 				limit: 2,
 				...(firstPage.nextCursor === null
@@ -713,7 +809,7 @@ describe("listDaemonSessions", () => {
 			]);
 			expect(secondPage.hasMore).toBe(false);
 
-			const scopedSearch = yield* listDaemonSessions({
+			const scopedSearch = yield* listDaemonSessions(root, {
 				scope: "project-a",
 				search: "needle",
 			});
@@ -742,7 +838,7 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
-			const result = yield* listDaemonSessions({ search: "%_" });
+			const result = yield* listDaemonSessions(root, { search: "%_" });
 			expect(result.sessions.map((session) => session.id)).toEqual([
 				"literal-a",
 				"literal-b",
@@ -750,9 +846,24 @@ describe("listDaemonSessions", () => {
 		}).pipe(
 			Effect.provide(
 				makeProjectRegistryLive([
-					{ slug: "project-a", title: "A", directory: projectA },
-					{ slug: "project-b", title: "B", directory: projectB },
-					{ slug: "project-c", title: "C", directory: projectC },
+					{
+						slug: "project-a",
+						title: "A",
+						directory: projectA,
+						folders: [projectA],
+					},
+					{
+						slug: "project-b",
+						title: "B",
+						directory: projectB,
+						folders: [projectB],
+					},
+					{
+						slug: "project-c",
+						title: "C",
+						directory: projectC,
+						folders: [projectC],
+					},
 				]),
 			),
 		);
@@ -767,8 +878,12 @@ describe("listDaemonSessions", () => {
 			const unavailable = join(root, "unavailable");
 			mkdirSync(projectA);
 			mkdirSync(projectB);
-			mkdirSync(join(unavailable, ".conduit"), { recursive: true });
-			writeFileSync(join(unavailable, ".conduit", "events.db"), "not sqlite");
+			mkdirSync(unavailable, { recursive: true });
+			mkdirSync(projectStorageDir(root, "unavailable"), { recursive: true });
+			writeFileSync(
+				join(projectStorageDir(root, "unavailable"), "events.db"),
+				"not sqlite",
+			);
 			makeProjectStore(projectA, [
 				{ id: "a-new", title: "A new", updatedAt: 300 },
 				{ id: "a-old", title: "A old", updatedAt: 100 },
@@ -778,7 +893,7 @@ describe("listDaemonSessions", () => {
 			]);
 
 			return Effect.gen(function* () {
-				const result = yield* listDaemonSessions({ limit: 1 });
+				const result = yield* listDaemonSessions(root, { limit: 1 });
 				expect(result.sessions.map((session) => session.id)).toEqual(["a-new"]);
 				expect(result.hasMore).toBe(true);
 				expect(result.availability).toEqual(
@@ -794,12 +909,23 @@ describe("listDaemonSessions", () => {
 			}).pipe(
 				Effect.provide(
 					makeProjectRegistryLive([
-						{ slug: "project-a", title: "A", directory: projectA },
-						{ slug: "project-b", title: "B", directory: projectB },
+						{
+							slug: "project-a",
+							title: "A",
+							directory: projectA,
+							folders: [projectA],
+						},
+						{
+							slug: "project-b",
+							title: "B",
+							directory: projectB,
+							folders: [projectB],
+						},
 						{
 							slug: "unavailable",
 							title: "Unavailable",
 							directory: unavailable,
+							folders: [unavailable],
 						},
 					]),
 				),
@@ -817,6 +943,7 @@ describe("ResolveSession", () => {
 				slug,
 				title: slug,
 				directory: join(root, slug),
+				folders: [join(root, slug)],
 			}));
 			for (const project of projects) {
 				makeProjectStore(project.directory, [
@@ -849,7 +976,11 @@ describe("ResolveSession", () => {
 				expect(yield* client.ResolveSession({ sessionId: "unknown" })).toEqual({
 					projectSlug: null,
 				});
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer(projects)));
+			}).pipe(
+				Effect.provide(
+					makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+				),
+			);
 		},
 	);
 });

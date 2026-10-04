@@ -54,6 +54,7 @@ export interface OrchestrationLayerOptions {
 	) => void;
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
 	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly configDir?: string;
@@ -69,6 +70,7 @@ export interface OrchestrationRuntimeLayerOptions {
 		input: import("../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
 	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
 	readonly projectKey?: string;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
@@ -194,6 +196,7 @@ const createOrchestrationComponentsEffect = (
 				? { onBackgroundTask: options.onBackgroundTask }
 				: {}),
 			workspaceRoot: options.workspaceRoot ?? process.cwd(),
+			extraFolders: options.extraFolders ?? [],
 			...(options.configDir !== undefined
 				? { daemonConfigDir: options.configDir }
 				: {}),
@@ -307,6 +310,7 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.workspaceRoot != null
 					? { workspaceRoot: options.workspaceRoot }
 					: {}),
+				extraFolders: options.extraFolders ?? [],
 				...(options.projectKey != null
 					? { projectKey: options.projectKey }
 					: {}),

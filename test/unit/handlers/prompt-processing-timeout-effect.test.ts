@@ -32,6 +32,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	MOCK_PROJECT_DIR,
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
@@ -40,7 +41,7 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 
 const config = {
 	opencodeUrl: "http://127.0.0.1:1",
-	projectDir: "/tmp/conduit-timeout-test",
+	projectDir: MOCK_PROJECT_DIR,
 	slug: "timeout-test",
 	noServer: true,
 } satisfies Partial<ProjectRelayConfig>;

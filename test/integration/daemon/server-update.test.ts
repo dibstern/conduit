@@ -15,8 +15,8 @@ import { Effect, Layer } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import {
-	AddProject,
 	RemoveProject,
+	SaveProject,
 	SetPin,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -208,10 +208,10 @@ describe("supervised server build updates", () => {
 		mkdirSync(directory);
 		const added = await sendRpcRequest(
 			join(owned.configDir, "relay.sock"),
-			new AddProject({ directory }),
+			new SaveProject({ folders: [directory] }),
 		);
-		if (!added.addedSlug) throw new Error("Second project was not registered");
-		const second = await owned.connect(undefined, undefined, added.addedSlug);
+		if (!added.savedSlug) throw new Error("Second project was not registered");
+		const second = await owned.connect(undefined, undefined, added.savedSlug);
 		const secondInitial = await initialStatus(second, false);
 		const transitions: Array<Record<string, unknown>> = [];
 
@@ -236,7 +236,7 @@ describe("supervised server build updates", () => {
 		}
 
 		await transition(JSON.stringify({ buildId: randomUUID() }), true);
-		const late = await owned.connect(undefined, undefined, added.addedSlug);
+		const late = await owned.connect(undefined, undefined, added.savedSlug);
 		const lateInitial = await initialStatus(late, true);
 		await transition(JSON.stringify({ buildId: BUILD_ID }), false);
 		await transition(JSON.stringify({ buildId: randomUUID() }), true);
@@ -246,7 +246,7 @@ describe("supervised server build updates", () => {
 		scenarios.push({
 			scenario: "project broadcast and marker transitions",
 			generation,
-			projectSlugs: ["process-test", added.addedSlug],
+			projectSlugs: ["process-test", added.savedSlug],
 			firstInitial,
 			secondInitial,
 			lateInitial,

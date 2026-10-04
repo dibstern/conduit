@@ -1,13 +1,19 @@
 import { Context, Data, Effect, Layer } from "effect";
+import {
+	ProjectSaveRejected,
+	type SaveProjectInput,
+} from "../../../contracts/ws-rpc.js";
 import { withCachedProjectGit } from "../../../git/session-git.js";
+import type { FolderIssue } from "../../../project-folders.js";
 import type { ProjectInfo } from "../../../shared-types.js";
 import { ConfigTag } from "./services.js";
 
-type ProjectOperation = "list" | "add" | "remove" | "rename" | "setInstance";
+type ProjectOperation = "list" | "save" | "remove" | "setInstance";
 
-export interface AddProjectResult {
+export interface SaveProjectResult {
 	readonly project: ProjectInfo;
 	readonly projects: ReadonlyArray<ProjectInfo>;
+	readonly warnings: readonly FolderIssue[];
 }
 
 export class ProjectManagementServiceError extends Data.TaggedError(
@@ -30,22 +36,16 @@ export interface ProjectManagementService {
 		ReadonlyArray<ProjectInfo>,
 		ProjectManagementServiceError
 	>;
-	add(
-		directory: string,
-		instanceId?: string | undefined,
+	save(
+		input: SaveProjectInput,
 	): Effect.Effect<
-		AddProjectResult,
-		ProjectManagementServiceError | ProjectManagementNotSupported
+		SaveProjectResult,
+		| ProjectManagementServiceError
+		| ProjectManagementNotSupported
+		| ProjectSaveRejected
 	>;
 	remove(
 		slug: string,
-	): Effect.Effect<
-		ReadonlyArray<ProjectInfo>,
-		ProjectManagementServiceError | ProjectManagementNotSupported
-	>;
-	rename(
-		slug: string,
-		title: string,
 	): Effect.Effect<
 		ReadonlyArray<ProjectInfo>,
 		ProjectManagementServiceError | ProjectManagementNotSupported
@@ -86,29 +86,45 @@ export const ProjectManagementServiceLive: Layer.Layer<
 			return Effect.tryPromise({
 				try: () => Promise.resolve(getProjects()),
 				catch: toError("list"),
-			}).pipe(Effect.map(withCachedProjectGit));
+			}).pipe(
+				Effect.map((projects) =>
+					withCachedProjectGit(
+						projects.map((project) => ({
+							...project,
+							folders: project.folders ?? [project.directory],
+						})),
+					),
+				),
+			);
 		};
 
 		return {
 			currentSlug: () => Effect.succeed(config.slug),
 			list: () =>
 				listConfigProjects().pipe(Effect.map((projects) => projects ?? [])),
-			add: (directory, instanceId) =>
+			save: (input) =>
 				Effect.gen(function* () {
-					const addProject = config.addProject;
-					if (addProject == null) {
+					const saveProject = config.saveProject;
+					if (saveProject == null) {
 						return yield* new ProjectManagementNotSupported({
-							operation: "add",
-							message: "Adding projects is not supported in this mode",
+							operation: "save",
+							message: "Saving projects is not supported in this mode",
 						});
 					}
-					const project = yield* Effect.tryPromise({
-						try: () => addProject(directory, instanceId),
-						catch: toError("add"),
+					const result = yield* Effect.tryPromise({
+						try: () => saveProject(input),
+						catch: (cause) =>
+							cause instanceof ProjectSaveRejected
+								? cause
+								: toError("save")(cause),
 					});
+					const project = {
+						...result.project,
+						folders: result.project.folders ?? [result.project.directory],
+					};
 					const projects =
 						(yield* listConfigProjects()) ?? withCachedProjectGit([project]);
-					return { project, projects };
+					return { project, projects, warnings: result.warnings };
 				}),
 			remove: (slug) =>
 				Effect.gen(function* () {
@@ -122,21 +138,6 @@ export const ProjectManagementServiceLive: Layer.Layer<
 					yield* Effect.tryPromise({
 						try: () => Promise.resolve(removeProject(slug)),
 						catch: toError("remove"),
-					});
-					return (yield* listConfigProjects()) ?? [];
-				}),
-			rename: (slug, title) =>
-				Effect.gen(function* () {
-					const setProjectTitle = config.setProjectTitle;
-					if (setProjectTitle == null) {
-						return yield* new ProjectManagementNotSupported({
-							operation: "rename",
-							message: "Renaming projects is not supported in this mode",
-						});
-					}
-					yield* Effect.try({
-						try: () => setProjectTitle(slug, title),
-						catch: toError("rename"),
 					});
 					return (yield* listConfigProjects()) ?? [];
 				}),

@@ -461,6 +461,7 @@ export interface ProjectInfo {
 	slug: string;
 	title: string;
 	directory: string;
+	folders?: readonly string[];
 	missing?: boolean;
 	git?: SessionGit;
 	clientCount?: number;
@@ -565,6 +566,7 @@ const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	folders: Schema.optional(Schema.Array(Schema.String)),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),

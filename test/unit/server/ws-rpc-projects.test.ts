@@ -18,6 +18,7 @@ const project = {
 	slug: "proj-1",
 	title: "Project 1",
 	directory: "/work/proj-1",
+	folders: ["/work/proj-1"],
 	instanceId: "inst-1",
 	missing: true,
 };
@@ -37,14 +38,17 @@ describe("WsRpcServerLayer project management", () => {
 				},
 			};
 			const config = makeMockConfig({
-				addProject: vi.fn(async () => projectWithGit),
+				saveProject: vi.fn(async () => ({
+					project: projectWithGit,
+					warnings: [],
+				})),
 				getProjects: () => [projectWithGit],
 			});
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
-				const response = yield* client.AddProject({
+				const response = yield* client.SaveProject({
 					projectSlug: project.slug,
-					directory: project.directory,
+					folders: project.folders,
 					instanceId: project.instanceId,
 				});
 				expect(response.projects).toEqual([projectWithGit]);
@@ -60,27 +64,31 @@ describe("WsRpcServerLayer project management", () => {
 	);
 
 	it.effect("adds a project and returns the added slug", () => {
-		const addProject = vi.fn(async () => project);
+		const saveProject = vi.fn(async () => ({ project, warnings: [] }));
 		const config = makeMockConfig({
 			slug: "proj-1",
-			addProject,
+			saveProject,
 			getProjects: () => [project],
 		});
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			const response = yield* client.AddProject({
+			const response = yield* client.SaveProject({
 				projectSlug: "proj-1",
-				directory: "/work/proj-1",
+				folders: ["/work/proj-1"],
 				instanceId: "inst-1",
 			});
 
-			expect(addProject).toHaveBeenCalledWith("/work/proj-1", "inst-1");
+			expect(saveProject).toHaveBeenCalledWith({
+				folders: ["/work/proj-1"],
+				instanceId: "inst-1",
+			});
 			expect(response).toEqual({
 				projectSlug: "proj-1",
 				projects: [project],
 				current: "proj-1",
-				addedSlug: "proj-1",
+				savedSlug: "proj-1",
+				warnings: [],
 			});
 		}).pipe(
 			Effect.scoped,
@@ -131,23 +139,28 @@ describe("WsRpcServerLayer project management", () => {
 
 	it.effect("renames a project and broadcasts the updated list", () => {
 		const renamed = { ...project, title: "Renamed" };
-		const setProjectTitle = vi.fn(() => undefined);
+		const saveProject = vi.fn(async () => ({ project: renamed, warnings: [] }));
 		const wsHandler = makeMockWebSocketHandler();
 		const config = makeMockConfig({
 			slug: "proj-1",
-			setProjectTitle,
+			saveProject,
 			getProjects: () => [renamed],
 		});
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			const response = yield* client.RenameProject({
+			const response = yield* client.SaveProject({
 				projectSlug: "proj-1",
 				slug: "proj-1",
 				title: "Renamed",
+				folders: project.folders,
 			});
 
-			expect(setProjectTitle).toHaveBeenCalledWith("proj-1", "Renamed");
+			expect(saveProject).toHaveBeenCalledWith({
+				slug: "proj-1",
+				title: "Renamed",
+				folders: project.folders,
+			});
 			expect(response.projects).toEqual([renamed]);
 			expect(wsHandler.broadcast).toHaveBeenCalledWith({
 				type: "project_list",

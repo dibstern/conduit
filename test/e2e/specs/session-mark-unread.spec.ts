@@ -175,9 +175,8 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	const titleOrder = await page
 		.locator("#session-bar-title-row")
 		.evaluate((row) =>
-			Array.from(
-				row.children,
-				(child) => child.getAttribute("data-testid") ?? child.id,
+			Array.from(row.querySelectorAll("[data-testid]"), (el) =>
+				el.getAttribute("data-testid"),
 			),
 		);
 	expect(titleOrder.indexOf("session-bar-unread-chip")).toBeGreaterThan(

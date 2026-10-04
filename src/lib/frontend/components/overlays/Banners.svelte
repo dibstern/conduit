@@ -1,33 +1,35 @@
-<!-- Banner bar at top of chat area, driven by uiState.banners.              -->
-<!-- Supports update (green), onboarding (orange), skip-permissions (red),  -->
-<!-- warning (amber/yellow).                                                -->
-<!-- Dismissible banners show a close button that calls removeBanner(id).    -->
+<!-- Banner bar at top of chat area, driven by uiState.banners plus the
+     instance-health warning. Supports update (green), onboarding (orange),
+     skip-permissions and error (red), warning (amber/yellow). Dismissible
+     banners show a close button that calls removeBanner(id). The collapsed
+     phone header shows these as one line instead (BannersRow). -->
 
-<script lang="ts">
+<script module lang="ts">
 	import type { BannerConfig } from "../../types.js";
-	import { uiState, removeBanner } from "../../stores/ui.svelte.js";
+	import { uiState } from "../../stores/ui.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
-	import Icon from "../ui/Icon.svelte";
-	import Button from "../ui/Button.svelte";
-	import TextButton from "../ui/TextButton.svelte";
 	import { assertNever } from "../../../utils.js";
-	let { banners, ondismiss = removeBanner, showHealthWarning = true }: {
-		banners?: BannerConfig[];
-		ondismiss?: (id: string) => void;
-		showHealthWarning?: boolean;
-	} = $props();
-	const visibleBanners = $derived(banners ?? uiState.banners);
 
-	// Show the warning banner only when ALL instances are "unhealthy" — meaning
-	// they should be running but aren't responding to health checks.
-	// "stopped" (intentionally off) and "starting" (booting up) are normal
-	// states that shouldn't trigger an alarm.
+	const INSTANCE_WARNING: BannerConfig = {
+		id: "no-healthy-instances",
+		variant: "error",
+		icon: "alert-triangle",
+		text: "No healthy OpenCode instances",
+		summary: "No healthy instances",
+		dismissible: false,
+		action: {
+			label: "Manage Instances",
+			run: () => window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } })),
+		},
+	};
 
-	const showInstanceWarning = $derived.by(() => {
+	// Warn only when ALL instances are "unhealthy" — meaning they should be
+	// running but aren't responding to health checks. "stopped" (intentionally
+	// off) and "starting" (booting up) are normal states.
+	function instanceWarningShown(): boolean {
 		const instances = instanceState.instances;
 		if (instances.length === 0) return false;
-		// Every instance must be unhealthy (not stopped, not starting, not healthy).
 		if (!instances.every((i) => i.status === "unhealthy")) return false;
 
 		const currentProviderId = discoveryState.currentProviderId;
@@ -39,52 +41,64 @@
 				provider.configured &&
 				provider.models.length > 0,
 		);
-	});
-
-	function handleManageInstances() {
-		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
 	}
 
-	function getVariantClasses(variant: BannerConfig["variant"]): string {
+	/** The app-wide banners, health warning first. Reactive inside $derived. */
+	export function appBanners(): BannerConfig[] {
+		return instanceWarningShown() ? [INSTANCE_WARNING, ...uiState.banners] : uiState.banners;
+	}
+
+	export function bannerTone(variant: BannerConfig["variant"]): string {
 		switch (variant) {
-		case "update":
-			return "bg-success/[0.08] border-success/30 text-success";
+			case "update":
+				return "text-success";
 			case "onboarding":
-				return "bg-accent-bg border-accent/30 text-accent";
+				return "text-accent";
 			case "skip-permissions":
-				return "bg-error/10 border-error/30 text-error";
-		case "warning":
-			return "bg-warning-bg border-warning/30 text-warning";
+			case "error":
+				return "text-error";
+			case "warning":
+				return "text-warning";
 			default:
 				return assertNever(variant);
 		}
 	}
 </script>
 
-{#if (showHealthWarning && showInstanceWarning) || visibleBanners.length > 0}
-	<div class="banners flex flex-col">
-		{#if showHealthWarning && showInstanceWarning}
-			<div class="banner flex items-center gap-2 px-4 py-2 text-xs border-b bg-error/10 border-error/30 text-error">
-				<span class="banner-icon shrink-0">
-					<Icon name="alert-triangle" size={14} />
-				</span>
-				<span class="banner-text flex-1 min-w-0">
-					No healthy OpenCode instances
-				</span>
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<span
-					class="shrink-0 text-current underline cursor-pointer hover:opacity-80"
-					onclick={handleManageInstances}
-				>
-					Manage Instances
-				</span>
-			</div>
-		{/if}
+<script lang="ts">
+	import { removeBanner } from "../../stores/ui.svelte.js";
+	import Icon from "../ui/Icon.svelte";
+	import Button from "../ui/Button.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 
+	let { banners, ondismiss = removeBanner }: {
+		banners?: BannerConfig[];
+		ondismiss?: (id: string) => void;
+	} = $props();
+	const visibleBanners = $derived(banners ?? appBanners());
+
+	function getVariantClasses(variant: BannerConfig["variant"]): string {
+		switch (variant) {
+			case "update":
+				return "bg-success/[0.08] border-success/30";
+			case "onboarding":
+				return "bg-accent-bg border-accent/30";
+			case "skip-permissions":
+			case "error":
+				return "bg-error/10 border-error/30";
+			case "warning":
+				return "bg-warning-bg border-warning/30";
+			default:
+				return assertNever(variant);
+		}
+	}
+</script>
+
+{#if visibleBanners.length > 0}
+	<div class="banners flex flex-col">
 		{#each visibleBanners as banner (banner.id)}
 			<div
-				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)}"
+				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)} {bannerTone(banner.variant)}"
 				data-banner-id={banner.id}
 			>
 				<span class="banner-icon shrink-0">

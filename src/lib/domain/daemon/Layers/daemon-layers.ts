@@ -29,6 +29,7 @@ import {
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
+import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import { ServerBuildUpdateLive } from "../../../server/build-update.js";
 import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
@@ -86,13 +87,15 @@ import {
 } from "../Services/instance-manager-service.js";
 
 import {
-	addProjectToEffectRegistry,
+	broadcastProjectList,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
+	ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
 	replaceRelay as replaceEffectRelay,
+	saveProject,
 	updateProject as updateEffectProject,
 } from "../Services/project-registry-service.js";
 import {
@@ -365,6 +368,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	never,
 	| RelayFactoryTag
 	| ProjectRegistryTag
+	| ProjectSaveLockTag
 	| InstanceManagerStateTag
 	| DaemonConfigRefTag
 	| DaemonEventBusTag
@@ -376,6 +380,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 		Effect.gen(function* () {
 			const relayFactory = yield* RelayFactoryTag;
 			const projectRegistry = yield* ProjectRegistryTag;
+			const projectSaveLock = yield* ProjectSaveLockTag;
 			const instanceState = yield* InstanceManagerStateTag;
 			const configRef = yield* DaemonConfigRefTag;
 			const eventBus = yield* DaemonEventBusTag;
@@ -402,6 +407,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					A,
 					E,
 					| ProjectRegistryTag
+					| ProjectSaveLockTag
 					| DaemonConfigRefTag
 					| DaemonEventBusTag
 					| ConfigPersistenceTag
@@ -414,6 +420,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 				}
 				return effect.pipe(
 					Effect.provideService(ProjectRegistryTag, projectRegistry),
+					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 					Effect.provideService(DaemonConfigRefTag, configRef),
 					Effect.provideService(DaemonEventBusTag, eventBus),
 					Effect.provideService(ConfigPersistenceTag, configPersistence),
@@ -436,22 +443,22 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						});
 					}
 					const projectControls = {
-						addProject: (directory: string, instanceId?: string) =>
+						saveProject: (
+							input: import("../../../contracts/ws-rpc.js").SaveProjectInput,
+						) =>
 							runCallback(
 								provideProjectMutationDeps(
-									addProjectToEffectRegistry(directory, instanceId),
+									saveProject(input).pipe(
+										Effect.tap(() => broadcastProjectList),
+									),
 								),
 							),
 						removeProject: (projectSlug: string) =>
 							runCallback(
 								provideProjectMutationDeps(
-									removeProjectFromEffectRegistry(projectSlug),
-								),
-							),
-						setProjectTitle: (projectSlug: string, title: string) =>
-							runCallback(
-								provideProjectMutationDeps(
-									updateEffectProject(projectSlug, { title }),
+									removeProjectFromEffectRegistry(projectSlug).pipe(
+										Effect.tap(() => broadcastProjectList),
+									),
 								),
 							),
 						setProjectInstance: (projectSlug: string, instanceId: string) =>
@@ -692,7 +699,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
-		Layer.effectDiscard(migrateForkLineage(configDir)),
+		Layer.effectDiscard(
+			migrateProjectStorage(configDir).pipe(
+				Effect.andThen(migrateForkLineage(configDir)),
+			),
+		),
 		DaemonEventBusLive,
 		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
@@ -866,7 +877,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
-		AutoSettleLive,
+		AutoSettleLive(configDir),
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		InstanceHealthPollingLive,

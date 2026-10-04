@@ -35,6 +35,7 @@ import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-s
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
 import { resolveDaemonSession } from "../../daemon/Services/daemon-session-reader.js";
+import { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
 import { DaemonWsClientRegistryTag } from "../../daemon/Services/daemon-ws-client-registry.js";
 import {
 	allProjects,
@@ -266,9 +267,11 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| DaemonWsRpcHandlersTag
 	| DaemonWsClientRegistryTag
 	| ProjectRegistryTag
+	| DaemonStateTag
 	| ShutdownSignalTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
+		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const configRef = yield* DaemonConfigRefTag;
 		const httpServerRef = yield* HttpServerRefTag;
 		const auth = yield* AuthManagerTag;
@@ -443,7 +446,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 					Effect.provideService(ProjectRegistryTag, projectRegistry),
 				);
 				const sessionSlug = requestedSessionId
-					? yield* resolveDaemonSession(requestedSessionId).pipe(
+					? yield* resolveDaemonSession(configDir, requestedSessionId).pipe(
 							Effect.provideService(ProjectRegistryTag, projectRegistry),
 						)
 					: null;

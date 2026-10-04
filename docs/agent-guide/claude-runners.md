@@ -107,6 +107,18 @@ Protocol mismatches still refuse adoption. A different build with the same
 protocol is adopted and scheduled for upgrade after a turn ends. An adopted idle
 runner upgrades without waiting for another prompt.
 
+Project folder changes rebuild the relay. At send admission, the server compares
+an existing runner's launch snapshot with the current main and extra folders.
+An idle, quiescent runner with different folders drains through end-session;
+the send starts a new runner with its last reported resume cursor. A busy runner
+serves the current send and switches on a later send after it becomes idle.
+Pre-warm skips an existing runner with different folders. An adopted runner
+without a launch snapshot continues normally. Changing the main folder also
+stops runners registered under the old folder, since their runtime directory
+uses its hash.
+File mentions, the file browser, terminal cwd and Conduit's Claude settings lookup
+continue to use only the main folder.
+
 ## Runner upgrades
 
 Upgrades reuse the ordinary spawn and pre-warm paths. The old runner keeps serving
@@ -142,6 +154,11 @@ instruction assets prevent this fallback. The old runner keeps serving and the u
 settings are never promoted to the flag tier or filesystem discovery silently
 removed. This conservative limitation remains until the SDK supports replaying
 the original source tiers.
+
+Multi-folder sessions also defer upgrades when ordinary settings files change:
+`claude-runner-settings.ts` refuses settings replay when `additionalDirectories`
+is set. Folder changes use the send-time restart above, so they still take
+effect on the next idle turn without replaying an old settings snapshot.
 
 Registrations distinguish warming candidates and retiring runners. After a
 server crash during replacement, recovery prefers the active runner and stops

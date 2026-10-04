@@ -322,8 +322,11 @@ export const validDaemonRpcRequest: fc.Arbitrary<WsRpcRequest> = fc
 		fc.constant({ _tag: "Shutdown" }),
 		fc.constant({ _tag: "RestartWithConfig" }),
 		fc.record({
-			_tag: fc.constant("AddProject"),
-			directory: fc.string({ minLength: 1, maxLength: 200 }),
+			_tag: fc.constant("SaveProject"),
+			folders: fc.array(fc.string({ minLength: 1, maxLength: 200 }), {
+				minLength: 1,
+				maxLength: 5,
+			}),
 		}),
 		fc.record({
 			_tag: fc.constant("RemoveProject"),
@@ -340,9 +343,13 @@ export const validDaemonRpcRequest: fc.Arbitrary<WsRpcRequest> = fc
 			args: fc.array(fc.string({ maxLength: 30 }), { maxLength: 5 }),
 		}),
 		fc.record({
-			_tag: fc.constant("RenameProject"),
+			_tag: fc.constant("SaveProject"),
 			slug: fc.string({ minLength: 1, maxLength: 50 }),
 			title: fc.string({ minLength: 1, maxLength: 100 }),
+			folders: fc.array(fc.string({ minLength: 1, maxLength: 200 }), {
+				minLength: 1,
+				maxLength: 5,
+			}),
 		}),
 		fc.record({
 			_tag: fc.constant("SetAgent"),
@@ -398,12 +405,11 @@ export const invalidDaemonRpcRequest = fc.oneof(
 					"GetProjects",
 					"Shutdown",
 					"RestartWithConfig",
-					"AddProject",
+					"SaveProject",
 					"RemoveProject",
 					"SetPin",
 					"SetKeepAwake",
 					"SetKeepAwakeCommand",
-					"RenameProject",
 					"SetAgent",
 					"SetDefaultModel",
 					"GetInstances",
@@ -415,7 +421,7 @@ export const invalidDaemonRpcRequest = fc.oneof(
 					"UpdateInstance",
 				].includes(value._tag),
 		),
-	fc.constant({ _tag: "AddProject", directory: "" }),
+	fc.constant({ _tag: "SaveProject", folders: [""] }),
 	fc.constant({ _tag: "AddInstance", name: "", managed: true }),
 );
 
