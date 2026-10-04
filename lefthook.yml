@@ -6,7 +6,9 @@ no_auto_install: true
 pre-commit:
   commands:
     lint:
-      run: pnpm lint
+      # Biome sees only the files being committed, so another session's
+      # unformatted work in progress cannot block this commit.
+      run: pnpm exec biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files} && pnpm lint:rules
     typecheck:
       run: pnpm check
     test:
