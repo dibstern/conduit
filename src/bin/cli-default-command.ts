@@ -5,21 +5,10 @@ import {
 	GetStatus,
 	SaveProject,
 } from "../lib/contracts/ws-rpc.js";
-import type { CommandContext } from "./cli-command-handlers.js";
+import { type CommandContext, handleServe } from "./cli-command-handlers.js";
 
 export async function handleDefault(ctx: CommandContext): Promise<void> {
-	const {
-		args,
-		cwd,
-		stdout,
-		stderr,
-		exit,
-		rpcSend,
-		checkDaemon,
-		getAddr,
-		getTsIP,
-		qr,
-	} = ctx;
+	const { args, stderr, exit, checkDaemon } = ctx;
 
 	if (args.skipPerms && !args.pin) {
 		stderr.write("--dangerously-skip-permissions requires --pin\n");
@@ -27,13 +16,18 @@ export async function handleDefault(ctx: CommandContext): Promise<void> {
 		return;
 	}
 
+	// No server yet: serve in the foreground with cwd registered, like `npx vite`.
+	if (!(await checkDaemon().catch(() => false))) {
+		return handleServe(ctx, () => showProject(ctx));
+	}
+	return showProject(ctx);
+}
+
+async function showProject(ctx: CommandContext): Promise<void> {
+	const { args, cwd, stdout, stderr, exit, rpcSend, getAddr, getTsIP, qr } =
+		ctx;
 	const unavailable =
 		"Server is not running. Run conduit serve or conduit service install.\n";
-	if (!(await checkDaemon().catch(() => false))) {
-		stderr.write(unavailable);
-		exit(1);
-		return;
-	}
 
 	let slug: string | undefined;
 	try {

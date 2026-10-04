@@ -15,7 +15,7 @@
 // PBT: Property-based arg parsing
 
 import fc from "fast-check";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import {
 	type CLIOptions,
 	generateQR,
@@ -29,6 +29,7 @@ import {
 	type WsRpcRequest,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SendRPC } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import type { ForegroundDaemonHandle } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 const SEED = 42;
 const NUM_RUNS = 100;
@@ -78,6 +79,10 @@ function createMockCLI(
 			return {};
 		}) as SendRPC,
 		isDaemonRunning: async () => true,
+		// Never start a real server from a unit test.
+		startForegroundDaemon: async () => {
+			throw new Error("unexpected server start");
+		},
 		generateQR: (url: string) => `[QR:${url}]`,
 		getNetworkAddress: () => "192.168.1.100",
 		getTailscaleIP: () => null,
@@ -243,17 +248,33 @@ describe("Ticket 3.3 — CLI Interface", () => {
 });
 
 describe("T2: Default invocation — register and display (AC1)", () => {
-	it("prints one guidance line when the server is unavailable", async () => {
+	it("serves in the foreground and registers cwd when no server is running", async () => {
+		let stop = (): void => {};
 		const cli = createMockCLI({
 			isDaemonRunning: async () => false,
+			startForegroundDaemon: async () =>
+				({
+					port: 4000,
+					getStatus: () => ({ tlsEnabled: false }),
+					stopped: new Promise<void>((resolve) => {
+						stop = resolve;
+					}),
+				}) as unknown as ForegroundDaemonHandle,
+			sendRPC: async (cmd) => {
+				cli.state.rpcRequests.push(cmd);
+				if (cmd._tag === "GetProjects") return { projects: [] };
+				if (cmd._tag === "SaveProject")
+					return { savedSlug: "my-project", projects: [], warnings: [] };
+				return { port: 4000, tlsEnabled: false };
+			},
 		});
-		await run([], cli);
-		expect(cli.state.errors).toBe(
-			"Server is not running. Run conduit serve or conduit service install.\n",
-		);
-		expect(cli.state.output).toBe("");
-		expect(cli.state.rpcRequests).toHaveLength(0);
-		expect(cli.state.exitCode).toBe(1);
+		const running = run([], cli);
+		await vi.waitFor(() => expect(cli.state.output).toContain("my-project"));
+		expect(cli.state.output).toContain("Conduit (foreground)");
+		expect(cli.state.exitCode).toBeNull();
+		stop();
+		await running;
+		expect(cli.state.exitCode).toBe(0);
 	});
 
 	it("registers cwd and prints its URL without opening a menu", async () => {

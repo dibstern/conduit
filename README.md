@@ -22,8 +22,7 @@ be at your desk.
 
 ```bash
 # Requires: opencode serve (running on port 4096)
-npx conduit-code serve
-# In another terminal, from your project directory:
+# From your project directory; starts the server if none is running:
 npx conduit-code
 ```
 
@@ -272,7 +271,7 @@ An installed user service restarts the server automatically.
 
 ```
 npx conduit-code serve                            Run the server in this terminal
-npx conduit-code                                  Register current directory and print its URL
+npx conduit-code                                  Register current directory (starting the server if needed)
 npx conduit-code --add .                          Register current directory
 npx conduit-code --add /path                      Register project by path
 npx conduit-code --remove                         Unregister current project
