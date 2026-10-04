@@ -67,11 +67,7 @@ const makeDeps = (pushed: string[]) => {
 			ReturnType<typeof createMockSSEWiringDeps>["pushManager"]
 		>,
 	});
-	const {
-		getSessionStatuses: _getSessionStatuses,
-		statusPoller: _statusPoller,
-		...base
-	} = deps;
+	const { statusPoller: _statusPoller, ...base } = deps;
 	const effectDeps = {
 		...base,
 		providerInstanceId: "opencode",

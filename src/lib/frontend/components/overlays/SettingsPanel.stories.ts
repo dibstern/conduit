@@ -6,7 +6,6 @@ import {
 } from "../../stores/composer-preferences.svelte.js";
 import {
 	clearDiscoveryState,
-	discoveryState,
 	handleAgentList,
 	handleModelList,
 	handleVisibilityInfo,

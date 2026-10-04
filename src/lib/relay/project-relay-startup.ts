@@ -426,7 +426,6 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			getSessionStatuses: () => statusPoller.getCurrentStatuses(),
 			listPendingQuestions: () => api.question.list(),
 			listPendingPermissions: () => api.permission.list(),
 			replyPermission: (

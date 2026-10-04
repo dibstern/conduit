@@ -26,7 +26,6 @@ import {
 } from "./claude/claude-subagent-materializer.js";
 import {
 	ClaudeDriver,
-	ClaudeProviderInstance,
 	type ClaudeProviderInstanceDeps,
 } from "./claude/index.js";
 import {

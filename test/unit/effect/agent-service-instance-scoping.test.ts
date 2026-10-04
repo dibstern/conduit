@@ -163,24 +163,25 @@ describe("AgentService instance scoping", () => {
 					agents: [],
 				});
 			}).pipe(Effect.provide(makeLayer())),
-	),
-		it.effect("does not clear a session agent during scoped discovery", () =>
-			Effect.gen(function* () {
-				const service = yield* AgentServiceTag;
-				yield* service.switchAgent({
-					clientId: "client-1",
-					sessionId: "session-1",
-					agentId: "build",
-				});
+	);
 
-				yield* service.listAgents(
-					"session-1",
-					defaultInstanceIdForDriver("claude"),
-				);
+	it.effect("does not clear a session agent during scoped discovery", () =>
+		Effect.gen(function* () {
+			const service = yield* AgentServiceTag;
+			yield* service.switchAgent({
+				clientId: "client-1",
+				sessionId: "session-1",
+				agentId: "build",
+			});
 
-				expect(yield* service.getActiveAgent("session-1")).toBe("build");
-			}).pipe(Effect.provide(makeLayer())),
-		);
+			yield* service.listAgents(
+				"session-1",
+				defaultInstanceIdForDriver("claude"),
+			);
+
+			expect(yield* service.getActiveAgent("session-1")).toBe("build");
+		}).pipe(Effect.provide(makeLayer())),
+	);
 
 	it.effect("returns an empty OpenCode snapshot when discovery fails", () => {
 		const api = makeMockOpenCodeAPI();

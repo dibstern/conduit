@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { ComponentProps } from "svelte";
-	// biome-ignore lint/style/useImportType: rendered in the markup below, which
-	// biome cannot see from the script block; a type-only import breaks the build.
+	// Rendered in the markup below, which biome cannot see from the script block;
+	// a type-only import breaks the build.
+	// biome-ignore lint/style/useImportType: used as a component in the markup
 	import Badge from "../Badge.svelte";
 
 	// Accepts (and ignores) Badge's props so Storybook can type the story's
