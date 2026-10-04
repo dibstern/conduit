@@ -112,6 +112,21 @@ export const getCurrentStatuses = Effect.gen(function* () {
 	return { ...state.previousStatuses };
 }).pipe(Effect.withSpan("statusPoller.getCurrentStatuses"));
 
+/** Busy itself, or an ancestor of a busy session. */
+export const isBusyIn = (
+	statuses: Readonly<Record<string, SessionStatus>>,
+	sessionId: string,
+	parents: ReadonlyMap<string, string> = new Map(),
+): boolean =>
+	busySessionIds(
+		new Map(
+			Object.entries(statuses).map(([id, status]) => [
+				id,
+				{ status: status.type, parentID: parents.get(id) },
+			]),
+		),
+	).has(sessionId);
+
 /** Completion/history guard; source statuses themselves remain unaugmented. */
 export const isProcessing = (
 	sessionId: string,
@@ -120,17 +135,7 @@ export const isProcessing = (
 	Effect.gen(function* () {
 		const ref = yield* PollerStateTag;
 		const state = yield* Ref.get(ref);
-		return busySessionIds(
-			new Map(
-				Object.entries(state.previousStatuses).map(([id, status]) => [
-					id,
-					{
-						status: status.type,
-						parentID: parents.get(id),
-					},
-				]),
-			),
-		).has(sessionId);
+		return isBusyIn(state.previousStatuses, sessionId, parents);
 	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
 
 /**
