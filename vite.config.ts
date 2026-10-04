@@ -67,6 +67,11 @@ function manifestIconPlugin(): Plugin {
 	};
 }
 
+const relayProxy = {
+	target: process.env.CONDUIT_DEV_SERVER ?? "http://localhost:2633",
+	secure: false,
+};
+
 const config = defineConfig({
 	root: "src/lib/frontend",
 	publicDir: "static",
@@ -109,27 +114,16 @@ const config = defineConfig({
 	preview: { proxy: {} },
 	server: {
 		host: "127.0.0.1",
-		// Dev server proxies WS and API to the relay server
+		// Dev server proxies WS and API to the relay server. dev:all points this
+		// at the server it drives, which may serve HTTPS with a local cert.
 		proxy: {
-			"/ws": {
-				target: "ws://localhost:2633",
-				ws: true,
-			},
+			"/ws": { ...relayProxy, ws: true },
 			// Project-specific WebSocket paths (e.g., /p/my-project/ws)
 			// Regex key: Vite interprets keys starting with ^ as RegExp.
-			"^/p/[^/]+/ws": {
-				target: "ws://localhost:2633",
-				ws: true,
-			},
-			"/api": {
-				target: "http://localhost:2633",
-			},
-			"/auth": {
-				target: "http://localhost:2633",
-			},
-			"/health": {
-				target: "http://localhost:2633",
-			},
+			"^/p/[^/]+/ws": { ...relayProxy, ws: true },
+			"/api": relayProxy,
+			"/auth": relayProxy,
+			"/health": relayProxy,
 		},
 	},
 });

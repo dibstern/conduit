@@ -136,7 +136,7 @@ an occupied configured port before acquiring runtime resources.
 keep running. It drives an existing supervised service, or owns a foreground
 child when no service returns after restart. Ctrl-C stops that child and leaves
 an existing service running. Failed builds leave the current server running.
-Use `pnpm dev:frontend` for instant UI hot reload against the running server.
+It also runs Vite, proxied to that server, for instant UI hot reload.
 For a child server, pass options with `pnpm dev:all -- --port 2700`.
 
 `SIGINT` and `SIGTERM` flush config and dispose the server while preserving

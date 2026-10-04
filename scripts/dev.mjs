@@ -13,6 +13,8 @@ let activeBuild;
 let builder;
 let child;
 let childClosed;
+let vite;
+let viteClosed;
 let mode;
 let rpc;
 let resolveStopped;
@@ -32,6 +34,8 @@ function stop() {
 			process.kill(-builder.pid, "SIGTERM");
 		} catch {}
 	}
+	// Vite closes its own esbuild helper; killing the group makes that crash.
+	if (vite?.exitCode === null) vite.kill("SIGTERM");
 	resolveStopped();
 }
 
@@ -134,6 +138,23 @@ async function restart() {
 	}
 }
 
+/** Instant UI reload on top of whichever server dev:all drives. */
+async function startVite() {
+	const { port, tlsEnabled } = await rpc.sendRpcRequest(
+		rpc.DEFAULT_SOCKET_PATH,
+		new rpc.GetStatus({}),
+	);
+	if (stopping) return;
+	const server = `${tlsEnabled ? "https" : "http"}://localhost:${port}`;
+	vite = spawn(process.execPath, ["node_modules/vite/bin/vite.js"], {
+		stdio: "inherit",
+		detached: true,
+		env: { ...process.env, CONDUIT_DEV_SERVER: server },
+	});
+	viteClosed = new Promise((resolve) => vite.once("close", resolve));
+	vite.once("error", fail);
+}
+
 async function rebuild() {
 	do {
 		pending = false;
@@ -151,7 +172,7 @@ async function rebuild() {
 					{ DEFAULT_SOCKET_PATH },
 					{ isDaemonRunning },
 					{ sendRpcRequest },
-					{ RestartWithConfig },
+					{ GetStatus, RestartWithConfig },
 				] = await Promise.all([
 					import("../dist/src/bin/cli-utils.js"),
 					import("../dist/src/lib/daemon/daemon-utils.js"),
@@ -162,6 +183,7 @@ async function rebuild() {
 					DEFAULT_SOCKET_PATH,
 					isDaemonRunning,
 					sendRpcRequest,
+					GetStatus,
 					RestartWithConfig,
 				};
 			}
@@ -169,6 +191,7 @@ async function rebuild() {
 			await restart();
 			if (!stopping) {
 				log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
+				if (!vite) await startVite();
 			}
 		}
 	} while (pending && !stopping);
@@ -222,5 +245,5 @@ try {
 } finally {
 	stop();
 	await activeBuild;
-	await stopChild();
+	await Promise.all([stopChild(), viteClosed]);
 }

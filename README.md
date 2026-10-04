@@ -362,7 +362,8 @@ graph LR
 
 `pnpm dev:all` rebuilds on save and restarts the running Conduit. Sessions keep
 running through restarts. If no service is running, it starts its own server.
-Use `pnpm dev:frontend` for instant UI hot reload against the running server.
+It also runs Vite (printed URL, usually http://127.0.0.1:5173) for instant UI
+hot reload against that server.
 For a child server, pass options with `pnpm dev:all -- --port 2700`.
 
 Bug fixes and typo corrections are welcome. For feature suggestions, please
