@@ -72,11 +72,15 @@ import {
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { resolveSmartDefaultInstances } from "../../../src/lib/domain/daemon/Services/opencode-smart-default.js";
-import { spawnManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
+import {
+	canReuseManagedOpenCode,
+	spawnManagedOpenCode,
+} from "../../../src/lib/instance/managed-opencode-process.js";
 
 const mockProbe = vi.mocked(probeOpenCode);
 const mockInstalled = vi.mocked(isOpencodeInstalled);
 const mockSpawnManagedOpenCode = vi.mocked(spawnManagedOpenCode);
+const mockCanReuse = vi.mocked(canReuseManagedOpenCode);
 const mockFetch = vi.fn<typeof fetch>(async () =>
 	Response.json({ healthy: true, version: "mock-opencode" }),
 );
@@ -152,6 +156,46 @@ describe("daemon auto-start (probe-and-convert)", () => {
 		expect(mockInstalled).not.toHaveBeenCalled();
 	});
 
+	// The supervisor outlives a restart on purpose. Treating its listener as a
+	// stranger's server drops the credentials the relay needs to call it.
+	it("keeps a persisted managed default whose own OpenCode survived the restart", async () => {
+		mockProbe.mockResolvedValue(true);
+		mockCanReuse.mockResolvedValueOnce(true);
+		const survivor = {
+			id: "opencode",
+			name: "opencode",
+			port: 4096,
+			managed: true,
+			pid: 74201,
+			env: { OPENCODE_SERVER_PASSWORD: "managed-secret" },
+		};
+
+		const instances = await Effect.runPromise(
+			resolveSmartDefaultInstances([survivor], { smartDefault: true }),
+		);
+
+		expect(instances).toEqual([survivor]);
+	});
+
+	it("probes an unmanaged default with its own credentials", async () => {
+		mockProbe.mockResolvedValue(true);
+		const external = {
+			id: "opencode",
+			name: "opencode",
+			port: 4096,
+			managed: false,
+			url: "http://localhost:4096",
+			env: { OPENCODE_SERVER_PASSWORD: "external-secret" },
+		};
+
+		const instances = await Effect.runPromise(
+			resolveSmartDefaultInstances([external], { smartDefault: true }),
+		);
+
+		expect(mockProbe.mock.calls).toEqual([[external.url, external.env]]);
+		expect(instances).toEqual([external]);
+	});
+
 	it("probes smartDefaultUrl instead of localhost:4096 when given", async () => {
 		mockProbe.mockResolvedValue(true);
 
@@ -162,7 +206,9 @@ describe("daemon auto-start (probe-and-convert)", () => {
 			}),
 		);
 
-		expect(mockProbe.mock.calls).toEqual([["http://localhost:4297"]]);
+		expect(mockProbe.mock.calls).toEqual([
+			["http://localhost:4297", undefined],
+		]);
 		expect(instances).toEqual([
 			{
 				id: "opencode",

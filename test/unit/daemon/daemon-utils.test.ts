@@ -43,16 +43,41 @@ describe("probeOpenCode", () => {
 		expect(result).toBe(true);
 	});
 
-	it("returns true even when server responds 401 (auth required)", async () => {
-		// Any HTTP response means the server is reachable
+	// A server that rejects our credentials is unusable. Calling it reachable
+	// made smart default point the relay at a listener it could not talk to.
+	it("returns false when server responds 401 (auth required)", async () => {
 		const port = await startMockServer(401);
 		const result = await probeOpenCode(`http://127.0.0.1:${port}`);
-		expect(result).toBe(true);
+		expect(result).toBe(false);
 	});
 
-	it("returns true when server responds 500", async () => {
+	it("returns false when server responds 500", async () => {
 		const port = await startMockServer(500);
 		const result = await probeOpenCode(`http://127.0.0.1:${port}`);
+		expect(result).toBe(false);
+	});
+
+	it("authenticates the health check with the instance password", async () => {
+		const expected = `Basic ${Buffer.from("owner:instance-secret").toString("base64")}`;
+		const port = await new Promise<number>((resolve) => {
+			const server = createHttpServer((req, res) => {
+				res.writeHead(
+					req.url === "/global/health" && req.headers.authorization === expected
+						? 200
+						: 401,
+				);
+				res.end();
+			});
+			servers.push(server);
+			server.listen(0, "127.0.0.1", () => {
+				const addr = server.address();
+				resolve(typeof addr === "object" && addr ? addr.port : 0);
+			});
+		});
+		const result = await probeOpenCode(`http://127.0.0.1:${port}`, {
+			OPENCODE_SERVER_USERNAME: "owner",
+			OPENCODE_SERVER_PASSWORD: "instance-secret",
+		});
 		expect(result).toBe(true);
 	});
 

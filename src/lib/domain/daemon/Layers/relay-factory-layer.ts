@@ -368,16 +368,17 @@ export const RelayFactoryLive = (
 									instance.driver !== "claude" &&
 									instance.id === project.instanceId,
 							) ?? instances.find((instance) => instance.driver !== "claude");
-						const opencodeAuth = selectedInstance?.managed
-							? openCodeAuth(
-									yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
+						// Managed passwords live only in the private process record.
+						const opencodeAuth = openCodeAuth(
+							selectedInstance?.managed
+								? yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
 										Effect.provideService(
 											InstanceManagerStateTag,
 											instanceState,
 										),
-									),
-								)
-							: undefined;
+									)
+								: selectedInstance?.env,
+						);
 						envResolver?.register(project.directory, project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),

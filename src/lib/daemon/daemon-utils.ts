@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { DEFAULT_CONFIG_DIR } from "../env.js";
+import { DEFAULT_CONFIG_DIR, ENV } from "../env.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,16 +22,28 @@ export async function isOpencodeInstalled(): Promise<boolean> {
 }
 
 /**
- * Probe an OpenCode URL to see if anything is listening.
- * Any response (200, 401, etc.) means reachable — only connection
- * failure means unreachable.
+ * Probe an OpenCode URL for a server conduit can actually use. A 401 means
+ * someone else's server, so only an authenticated healthy answer counts.
+ * Credentials fall back to the process env, like the SDK client does.
  */
-export async function probeOpenCode(url: string): Promise<boolean> {
+export async function probeOpenCode(
+	url: string,
+	env?: Record<string, string>,
+): Promise<boolean> {
+	const password = env?.["OPENCODE_SERVER_PASSWORD"] ?? ENV.opencodePassword;
+	const username = env?.["OPENCODE_SERVER_USERNAME"] ?? ENV.opencodeUsername;
 	try {
-		await fetch(`${url}/health`, {
+		const response = await fetch(`${url}/global/health`, {
+			...(password
+				? {
+						headers: {
+							Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
+						},
+					}
+				: {}),
 			signal: AbortSignal.timeout(3_000),
 		});
-		return true;
+		return response.ok;
 	} catch {
 		return false;
 	}

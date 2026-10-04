@@ -9,6 +9,7 @@ import {
 	isOpencodeInstalled,
 	probeOpenCode,
 } from "../../../daemon/daemon-utils.js";
+import { canReuseManagedOpenCode } from "../../../instance/managed-opencode-process.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
 
 /**
@@ -64,8 +65,8 @@ export const defaultInstanceForUrl = (url: string): DaemonInstanceConfig => ({
 const defaultUrlForInstance = (instance: DaemonInstanceConfig): string =>
 	instance.url ?? `http://localhost:${instance.port}`;
 
-const probeReachable = (url: string) =>
-	Effect.tryPromise(() => probeOpenCode(url)).pipe(
+const probeReachable = (url: string, env?: Record<string, string>) =>
+	Effect.tryPromise(() => probeOpenCode(url, env)).pipe(
 		Effect.orElseSucceed(() => false),
 	);
 
@@ -81,7 +82,7 @@ const findAvailablePort = (startFrom: number) =>
 const convertUnreachableDefault = (instance: DaemonInstanceConfig) =>
 	Effect.gen(function* () {
 		const url = defaultUrlForInstance(instance);
-		const reachable = yield* probeReachable(url);
+		const reachable = yield* probeReachable(url, instance.env);
 		if (reachable) return instance;
 
 		const installed = yield* hasOpenCodeBinary;
@@ -106,6 +107,13 @@ const resolvePersistedManagedDefault = (
 	smartDefaultUrl: string,
 ) =>
 	Effect.gen(function* () {
+		// Our supervised OpenCode outlives a restart and may be the listener on
+		// smartDefaultUrl. Keep it managed so its credentials stay in use.
+		const ownSurvivor = yield* Effect.tryPromise(() =>
+			canReuseManagedOpenCode(instance),
+		).pipe(Effect.orElseSucceed(() => false));
+		if (ownSurvivor) return instance;
+
 		const reachable = yield* probeReachable(smartDefaultUrl);
 		if (reachable) {
 			return { ...defaultInstanceForUrl(smartDefaultUrl), name: instance.name };
