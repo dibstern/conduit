@@ -22,6 +22,7 @@ import {
 	sessionGoalState,
 } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
+import { busySessionIds } from "../session-busy.js";
 import type { PermissionId } from "../shared-types.js";
 import { getSessionInputDraft } from "./prompt.js";
 
@@ -248,14 +249,18 @@ const switchClientToSession = (
 
 		wsHandler.setClientSession(clientId, sessionId);
 
-		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
 		const sessionService = yield* SessionManagerServiceTag;
-		wsHandler.sendTo(
-			clientId,
-			yield* sessionService.getSessionFamily(sessionId),
-		);
+		const family = yield* sessionService.getSessionFamily(sessionId);
+		wsHandler.sendTo(clientId, family);
 
-		const isProcessing = pollerIsProcessing || hasActiveTimeout;
+		// The poller is cold until its first poll and never starts without
+		// OpenCode, so the persisted family (children included) also counts.
+		const isProcessing =
+			busySessionIds(
+				new Map(family.sessions.map((session) => [session.id, session])),
+			).has(sessionId) ||
+			(yield* statusPoller.isProcessing(sessionId)) ||
+			hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,

@@ -356,8 +356,9 @@ const executeMonitoringEffectsEffect = (
 					yield* Effect.sync(() =>
 						deps.wsHandler.sendToSession(effect.sessionId, {
 							type: "status",
+							sessionId: effect.sessionId,
 							status: "processing",
-						} as RelayMessage),
+						}),
 					);
 					break;
 

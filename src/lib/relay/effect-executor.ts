@@ -35,8 +35,9 @@ export function executeEffects(
 			case "notify-busy":
 				deps.sendStatusToSession(effect.sessionId, {
 					type: "status",
+					sessionId: effect.sessionId,
 					status: "processing",
-				} as RelayMessage);
+				});
 				break;
 
 			case "notify-idle":

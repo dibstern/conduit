@@ -1905,13 +1905,22 @@ describe("handleClientConnectedEffect — API permission rehydration", () => {
 });
 
 describe("handleClientConnectedEffect — processing status on connect", () => {
-	it("sends status 'processing' when active session is busy", async () => {
+	it("sends status 'processing' from a busy family with a cold poller", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
-			Effect.succeed(true),
-		);
-		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
-			Effect.succeed({ "session-1": { type: "busy" } }),
+		vi.mocked(deps.sessionService.getSessionFamily).mockReturnValue(
+			Effect.succeed({
+				type: "session_family",
+				rootId: "session-1",
+				sessions: [
+					{
+						id: "session-1",
+						title: "Session 1",
+						status: "busy",
+						updatedAt: 0,
+						messageCount: 0,
+					},
+				],
+			}),
 		);
 
 		await runClientInit(deps, "client-1");
