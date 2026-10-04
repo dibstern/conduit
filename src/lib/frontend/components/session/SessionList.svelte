@@ -451,7 +451,6 @@
 	{#if routerState.sessionNotFound}
 		<Banners
 			banners={[{ id: "session-not-found", variant: "warning", icon: "alert-triangle", text: "Session not found. That session no longer exists.", dismissible: true }]}
-			showHealthWarning={false}
 			ondismiss={() => { routerState.sessionNotFound = false; }}
 		/>
 	{/if}

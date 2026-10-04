@@ -33,13 +33,18 @@ import {
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
+import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type {
 	GoalDetails,
 	getGoalDetailsRpc,
 } from "../../transport/ws-rpc-client.js";
-import type { OpenCodeInstance, SessionInfo } from "../../types.js";
+import type {
+	BannerConfig,
+	OpenCodeInstance,
+	SessionInfo,
+} from "../../types.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
 
 let sequence = 0;
@@ -998,30 +1003,38 @@ export const DesktopUnreadAndSettled: Story = {
 	},
 };
 
+const islandBanners: BannerConfig[] = [
+	{
+		id: "build-mismatch",
+		variant: "warning",
+		icon: "refresh-cw",
+		text: "This page and the server have different builds. Restart the server, then reload this tab. Your draft is still here.",
+		summary: "Restart the server",
+		dismissible: false,
+	},
+	{
+		id: "skip-perms-1",
+		variant: "skip-permissions",
+		icon: "shield-off",
+		text: "Permissions are disabled. Tools will run without approval.",
+		dismissible: false,
+	},
+];
+
+function showIslandBanners(): () => void {
+	uiState.banners = islandBanners;
+	return () => {
+		uiState.banners = [];
+	};
+}
+
 /**
  * Phone chrome floats over the transcript, so banner tints (all translucent)
  * need an opaque backing or the messages show through them.
  */
 export const IslandWithBanners: Story = {
-	args: {
-		island: true,
-		banners: [
-			{
-				id: "build-mismatch",
-				variant: "warning",
-				icon: "refresh-cw",
-				text: "This page and the server have different builds. Restart the server, then reload this tab. Your draft is still here.",
-				dismissible: false,
-			},
-			{
-				id: "skip-perms-1",
-				variant: "skip-permissions",
-				icon: "shield-off",
-				text: "Permissions are disabled. Tools will run without approval.",
-				dismissible: false,
-			},
-		],
-	},
+	args: { island: true },
+	beforeEach: showIslandBanners,
 	play: async ({ canvasElement }) => {
 		const ctx = document.createElement("canvas").getContext("2d");
 		const alphaOf = (color: string): number => {
@@ -1045,6 +1058,52 @@ export const IslandWithBanners: Story = {
 			}
 			expect(backed, banner.getAttribute("data-banner-id") ?? "").toBe(true);
 		}
+		expect(
+			canvasElement.querySelector("[data-testid=session-bar-banners-row]"),
+		).toBeNull();
+	},
+};
+
+/**
+ * Collapsed, banners become one line in the island like the goal and task
+ * rows; tapping it opens the full header and its full banners.
+ */
+export const CollapsedWithBanners: Story = {
+	args: { island: true },
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		sessionViewState.atBottom = true;
+		sessionViewState.forcedOpen = false;
+		return showIslandBanners();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const row = canvas.getByTestId("session-bar-banners-row");
+		await expect(row).toHaveTextContent("Restart the server");
+		await expect(row).toHaveClass(/text-warning/);
+		await expect(
+			canvas.getByTestId("session-bar-banners-more"),
+		).toHaveTextContent("+1");
+		// The row sits inside the island rather than under it.
+		const bar = canvas.getByTestId("session-bar").getBoundingClientRect();
+		expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(bar.bottom);
+		for (const banner of canvasElement.querySelectorAll("[data-banner-id]"))
+			await expect(banner).not.toBeVisible();
+	},
+};
+
+export const BannersRowExpands: Story = {
+	...CollapsedWithBanners,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-bar-banners-row"));
+		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(
+			"data-collapsed",
+			"false",
+		);
+		for (const banner of canvasElement.querySelectorAll("[data-banner-id]"))
+			await expect(banner).toBeVisible();
+		expect(canvas.queryByTestId("session-bar-banners-row")).toBeNull();
 	},
 };
 

@@ -56,6 +56,8 @@
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
 	import BackgroundTasksRow from "../session/BackgroundTasksRow.svelte";
+	import { appBanners } from "../overlays/Banners.svelte";
+	import BannersRow from "../overlays/BannersRow.svelte";
 	import { tasksPanel } from "../session/background-tasks.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
@@ -439,6 +441,8 @@
 		{#if backgroundTasks.length > 0 && sessionViewState.compact}
 			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact />
 		{/if}
+		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
+		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>
 		{#if !collapsed}
 			<Button

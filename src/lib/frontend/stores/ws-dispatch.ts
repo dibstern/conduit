@@ -667,6 +667,10 @@ function handleConnectionStatus(
 			msg.status === "reconnecting"
 				? "Reconnecting to OpenCode\u2026"
 				: "OpenCode server disconnected";
+		const summary =
+			msg.status === "reconnecting"
+				? "OpenCode reconnecting\u2026"
+				: "OpenCode disconnected";
 		// Remove first so text updates if status changes (e.g. disconnected -> reconnecting)
 		removeBanner(CONNECTION_BANNER_ID);
 		showBanner({
@@ -674,6 +678,7 @@ function handleConnectionStatus(
 			variant: "warning",
 			icon: "alert-triangle",
 			text,
+			summary,
 			dismissible: false,
 		});
 	}
@@ -696,6 +701,7 @@ function showBuildMismatchBanner(): void {
 		variant: "warning",
 		icon: "refresh-cw",
 		text: "This page and the server have different builds. Restart the server, then reload this tab. Your draft is still here.",
+		summary: "Restart the server",
 		dismissible: false,
 	});
 }
@@ -741,6 +747,7 @@ function showStaleDaemonBanner(): void {
 		variant: "warning",
 		icon: "alert-triangle",
 		text: "The conduit daemon is running an older version than this page — restart the daemon to avoid inconsistent behavior.",
+		summary: "Restart the daemon",
 		dismissible: true,
 	});
 }
@@ -777,6 +784,7 @@ function handleProtocolVersion(version: number): void {
 			variant: "update",
 			icon: "refresh-cw",
 			text: "Conduit was updated. Reload this tab to keep things working.",
+			summary: "Reload this tab",
 			dismissible: true,
 			action: { label: "Reload", run: () => location.reload() },
 		});
@@ -804,6 +812,7 @@ function handleBannerMessage(msg: RelayMessage): void {
 				variant: "skip-permissions",
 				icon: "shield-off",
 				text: "Permissions are being skipped",
+				summary: "Permissions skipped",
 				dismissible: true,
 			});
 			break;

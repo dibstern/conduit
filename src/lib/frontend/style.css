@@ -578,6 +578,13 @@ body:has(dialog:modal) {
 	background: var(--color-bg);
 }
 
+/* The collapsed island carries a one-line summary instead (BannersRow). */
+#app.phone-session
+	#session-chrome:has(#session-bar[data-collapsed="true"])
+	.banners {
+	display: none;
+}
+
 #app.phone-session #messages {
 	padding-top: var(--phone-chrome-clearance, 0px);
 	scroll-padding-top: var(--phone-chrome-clearance, 0px);
