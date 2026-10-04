@@ -194,18 +194,27 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Effort and context window are in-memory too; the latest sent turn's
 		// command payload is their durable record. A choice changed after that
 		// turn was never sent, so it is not restored.
+		// The outbox keeps every prompt ever sent and the driver is synchronous,
+		// so scanning it froze startup for seconds on large stores. Find each
+		// session's latest send_turn through its small receipt row instead, then
+		// read just that one payload by primary key.
 		yield* sql<{
 			session_id: string;
 			variant: string | null;
 			context_window: string | null;
 		}>`
-			SELECT session_id,
-				json_extract(payload_json, '$.variant') AS variant,
-				json_extract(payload_json, '$.contextWindow') AS context_window,
-				MAX(request_sequence)
-			FROM provider_command_outbox
-			WHERE effect_type = 'send_turn'
-			GROUP BY session_id`.pipe(
+			SELECT latest.session_id,
+				json_extract(outbox.payload_json, '$.variant') AS variant,
+				json_extract(outbox.payload_json, '$.contextWindow') AS context_window
+			FROM (
+				SELECT session_id, MAX(side_effect_sequence) AS request_sequence
+				FROM command_receipts
+				WHERE command_type = 'send_turn' AND side_effect_sequence IS NOT NULL
+				GROUP BY session_id
+			) latest
+			JOIN provider_command_outbox outbox
+				ON outbox.request_sequence = latest.request_sequence
+			WHERE outbox.effect_type = 'send_turn'`.pipe(
 			Effect.flatMap((rows) =>
 				Effect.forEach(rows, (row) =>
 					Effect.all([
