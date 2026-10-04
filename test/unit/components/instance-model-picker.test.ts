@@ -148,6 +148,38 @@ describe("InstanceModelPicker", () => {
 		});
 	});
 
+	// Turns persist the API form of the model ("opus[1m]"), and reopening a
+	// session restores that string, while the SDK catalog may advertise only
+	// the bare alias ("opus"). The trigger fell back to the raw id and the
+	// phone tag sliced it to "opu".
+	it.each([
+		[390, "Opus"],
+		[1024, "Opus"],
+	])("labels a restored 1M-window model by its catalog entry at width %i", async (width, expected) => {
+		window.innerWidth = width;
+		handleModelList({
+			type: "model_list",
+			providers: [
+				{
+					...CLAUDE_PROVIDER,
+					models: [{ id: "opus", name: "Opus", provider: "claude" }],
+				},
+			],
+		});
+		handleModelInfo({
+			type: "model_info",
+			model: "opus[1m]",
+			provider: "claude",
+		});
+		const { getByTestId } = render(InstanceModelPicker);
+		await tick();
+		const label = getByTestId("model-picker-trigger")
+			.querySelector(".model-label")
+			?.textContent?.trim();
+		expect(label).toBe(expected);
+		window.innerWidth = 1024;
+	});
+
 	it("refreshes active-provider agents after switching model", async () => {
 		const { container, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));

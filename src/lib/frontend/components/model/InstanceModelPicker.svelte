@@ -23,6 +23,7 @@
 		formatAgentLabel,
 		getActiveAgent,
 		getActiveModel,
+		modelMatchesId,
 		getVisibleAgents,
 		getAvailableInstances,
 		getEffectiveInstanceId,
@@ -248,12 +249,7 @@
 	}
 
 	function isActiveModel(model: Immutable<ModelInfo>): boolean {
-		return (
-			model.id === activeModelId ||
-			!!model.routingOptions?.some(
-				(option) => option.value === activeModelId,
-			)
-		);
+		return modelMatchesId(model, activeModelId);
 	}
 
 	function isDefaultModel(model: Immutable<ModelInfo>): boolean {
