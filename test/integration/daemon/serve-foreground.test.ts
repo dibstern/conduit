@@ -1508,15 +1508,26 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		noPidArtifacts();
 		expect((await harness.runCli(["stop"])).code).toBe(0);
 		await harness.waitForExit();
-		const absentBare = await harness.runCli([]);
-		expect(absentBare.code).toBe(1);
-		expect(absentBare.output).toBe(
-			"Server is not running. Run conduit serve or conduit service install.\n",
-		);
 		expect(existsSync(join(harness.configDir, "relay.sock"))).toBe(false);
+		// With no server, bare conduit serves in the foreground with cwd registered.
+		const bare = harness;
+		await bare.restart({ cliArgs: [] });
+		await vi.waitFor(
+			() => expect(bare.logTail).toContain("Project: process-test"),
+			{ timeout: 10_000 },
+		);
+		const autoServed = await sendRpcRequest(
+			join(harness.configDir, "relay.sock"),
+			new GetStatus({}),
+		);
+		expect(
+			autoServed.projects.find((project) => project.slug === "process-test"),
+		).toBeDefined();
+		expect((await harness.runCli(["stop"])).code).toBe(0);
+		await harness.waitForExit();
 		Object.assign(evidence, {
-			absentBare,
-			absentBareCliGuidance: true,
+			absentBareAutoServes: true,
+			autoServedProjects: autoServed.projects.map((project) => project.slug),
 		});
 	}, 45_000);
 });

@@ -36,7 +36,10 @@ export interface CommandContext {
 	getTsIP: NonNullable<CLIOptions["getTailscaleIP"]>;
 }
 
-export async function handleServe(ctx: CommandContext): Promise<void> {
+export async function handleServe(
+	ctx: CommandContext,
+	onReady?: () => Promise<void>,
+): Promise<void> {
 	const { args, options, stdout, stderr, exit, startForegroundDaemonFn } = ctx;
 	const opencodeUrl = ENV.opencodeUrl || `http://localhost:${args.ocPort}`;
 
@@ -62,6 +65,7 @@ export async function handleServe(ctx: CommandContext): Promise<void> {
 			`  Relay:    ${scheme}://${status.host ?? "localhost"}:${daemon.port}\n`,
 		);
 		stdout.write("  Ready.\n\n");
+		await onReady?.();
 
 		await daemon.stopped;
 		exit(0);

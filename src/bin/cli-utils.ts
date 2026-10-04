@@ -319,8 +319,8 @@ export function generateQR(url: string): string {
 
 export const HELP_TEXT = `Usage: conduit [command] [options]
 
-  With no command, registers the current directory and prints its server URL.
-  Start the server with conduit serve or conduit service install.
+  With no command, registers the current directory and prints its server URL,
+  starting the server in this process first if none is running.
 
 Commands:
   serve                 Run the server in this process until stopped

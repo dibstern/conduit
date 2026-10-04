@@ -1050,6 +1050,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		}
 	}
 
+	get logTail(): string {
+		return this.logs;
+	}
+
 	proof(): unknown {
 		return {
 			root: this.root,
