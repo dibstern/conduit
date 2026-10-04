@@ -17,10 +17,12 @@ import { announceBackgroundWork } from "../domain/relay/Services/session-attenti
 import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
+	setContextWindow,
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
 	setModel,
+	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	PollerPubSubTag,
@@ -183,6 +185,39 @@ function acquireStartupServices(inputs: StartupInputs) {
 				Effect.sync(() =>
 					log.warn(
 						`Could not restore session models: ${formatErrorDetail(error)}`,
+					),
+				),
+			),
+		);
+		// Effort and context window are in-memory too; the latest sent turn's
+		// command payload is their durable record. A choice changed after that
+		// turn was never sent, so it is not restored.
+		yield* sql<{
+			session_id: string;
+			variant: string | null;
+			context_window: string | null;
+		}>`
+			SELECT session_id,
+				json_extract(payload_json, '$.variant') AS variant,
+				json_extract(payload_json, '$.contextWindow') AS context_window,
+				MAX(request_sequence)
+			FROM provider_command_outbox
+			WHERE effect_type = 'send_turn'
+			GROUP BY session_id`.pipe(
+			Effect.flatMap((rows) =>
+				Effect.forEach(rows, (row) =>
+					Effect.all([
+						row.variant ? setVariant(row.session_id, row.variant) : Effect.void,
+						row.context_window
+							? setContextWindow(row.session_id, row.context_window)
+							: Effect.void,
+					]),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.sync(() =>
+					log.warn(
+						`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
 					),
 				),
 			),

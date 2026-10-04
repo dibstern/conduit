@@ -64,3 +64,88 @@ test.describe("Claude session model across a relay restart", () => {
 		}
 	});
 });
+
+test.describe("Claude session effort and context window across a relay restart", () => {
+	test.use({
+		claudeReplay: {
+			turns: [
+				"pong-thinking-text-turn",
+				"pong-thinking-text-turn",
+				"pong-thinking-text-turn",
+			],
+			models: [
+				{
+					id: "claude-fable-5",
+					name: "Claude Fable 5",
+					providerId: "claude",
+					variants: { low: {}, medium: {}, high: {}, max: {} },
+					contextWindowOptions: [
+						{ value: "200k", label: "200k" },
+						{ value: "1m", label: "1M", isDefault: true },
+					],
+				},
+			],
+		},
+	});
+
+	test("the composer still shows the session's effort and window", async ({
+		page,
+		relayUrl,
+		harness,
+	}) => {
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+		const trigger = page.getByTestId("model-picker-trigger");
+		const effort = page.getByTestId("variant-badge");
+		await app.goto(relayUrl);
+		await app.sendMessage("One");
+		await chat.waitForStreamingComplete();
+
+		await effort.click();
+		await page.getByTestId("variant-option-high").click();
+		await expect(effort).toContainText("High");
+		await trigger.click();
+		await page.getByTestId("picker-context-option-200k").click();
+		await page.keyboard.press("Escape");
+		await expect(trigger).toHaveAccessibleName(/context 200k/i);
+		await app.sendMessage("Two");
+		await chat.waitForStreamingComplete();
+
+		// Clear every saved default, so only the session's own history remains.
+		await harness.restart(() =>
+			saveRelaySettings(
+				{
+					defaultModel: "opencode/big-pickle",
+					defaultVariants: { "claude/claude-fable-5": "" },
+				},
+				dirname(harness.eventsDbPath),
+			),
+		);
+		await gotoRelay(page, relayUrl);
+		await expect(page.locator("#connect-overlay")).toBeHidden({
+			timeout: 30_000,
+		});
+		await expect(effort).toContainText("High");
+		await expect(trigger).toHaveAccessibleName(/context 200k/i);
+
+		// The next turn must carry both choices, not the model defaults.
+		await app.sendMessage("Three");
+		await chat.waitForStreamingComplete();
+		const sessionId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+		const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+		try {
+			const row = db
+				.prepare(
+					`SELECT json_extract(payload_json, '$.variant') AS variant,
+					        json_extract(payload_json, '$.contextWindow') AS contextWindow
+					 FROM provider_command_outbox
+					 WHERE session_id = ? AND effect_type = 'send_turn'
+					 ORDER BY request_sequence DESC LIMIT 1`,
+				)
+				.get(sessionId);
+			expect(row).toEqual({ variant: "high", contextWindow: "200k" });
+		} finally {
+			db.close();
+		}
+	});
+});

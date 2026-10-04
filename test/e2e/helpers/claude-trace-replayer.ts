@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
+import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
 export type ClaudeTraceName =
@@ -43,6 +44,8 @@ export interface ClaudeReplayPlan {
 	readonly holdAfterResult?: boolean;
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
+	/** Claude model catalog to advertise instead of the bare trace model. */
+	readonly models?: readonly ModelInfo[];
 }
 
 export interface ClaudeTraceReplayer {
