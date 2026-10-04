@@ -1047,3 +1047,85 @@ export const IslandWithBanners: Story = {
 		}
 	},
 };
+
+// The desktop chips once spilled out of the title column: the ▾ painted over
+// them, and at this width they ran on over the skills chip and the identity.
+export const DesktopBackgroundTasks: Story = {
+	args: { width: 700 },
+	// The chip ages fail contrast (conduit-test-srt8); every other rule stays on.
+	parameters: {
+		a11y: {
+			test: "error",
+			config: { rules: [{ id: "color-contrast", enabled: false }] },
+		},
+	},
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		seedSkills();
+		const firstSeenAt = Date.now() - 6 * 60_000;
+		seedSessions([
+			{
+				...mockSession,
+				backgroundTasks: [
+					{
+						id: "t1",
+						type: "local_bash",
+						description: "Run full gate with baseline orphan check",
+						firstSeenAt,
+					},
+					{
+						id: "t2",
+						type: "local_bash",
+						description: "Codex review of fix commit",
+						firstSeenAt,
+					},
+					{
+						id: "t3",
+						type: "local_bash",
+						description: "Wait for review or gate",
+						firstSeenAt,
+					},
+				],
+			},
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const tasks = canvas.getByTestId("background-tasks-row");
+		const box = (el: Element) => el.getBoundingClientRect();
+		const overlaps = (a: DOMRect, b: DOMRect) =>
+			a.left < b.right &&
+			b.left < a.right &&
+			a.top < b.bottom &&
+			b.top < a.bottom;
+		const chips = box(tasks.firstElementChild ?? tasks);
+		// The ▾'s hit target overhangs by design; its icon is what must clear.
+		const menuIcon = canvas
+			.getByTestId("session-bar-title-menu")
+			.querySelector("svg");
+		for (const el of [
+			menuIcon,
+			...[
+				"session-bar-title",
+				"session-skills-chip",
+				"session-bar-identity",
+			].map((id) => canvas.getByTestId(id)),
+		])
+			expect(
+				overlaps(chips, box(el ?? tasks)),
+				el?.outerHTML.slice(0, 60),
+			).toBe(false);
+		// Where the overhang meets the chips, the chips take the click.
+		const menuBox = box(canvas.getByTestId("session-bar-title-menu"));
+		expect(
+			tasks.contains(
+				document.elementFromPoint(
+					menuBox.left + menuBox.width / 2,
+					menuBox.bottom - 1,
+				),
+			),
+		).toBe(true);
+		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(3);
+		expect(box(canvas.getByTestId("session-bar")).height).toBe(48);
+	},
+};

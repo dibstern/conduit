@@ -415,7 +415,8 @@
 	     Expanded, the title chevron opens the session menu.
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	{#if sessionViewState.compact || session}
-	<div id="session-bar-title-row" class="flex min-w-0 items-center gap-1.5">
+	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
+	<div class="flex min-w-0 items-center gap-1.5">
 		<div class="min-w-0">
 		<h1
 			id="session-bar-title"
@@ -435,8 +436,8 @@
 				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
 			</Button>
 		{/if}
-		{#if backgroundTasks.length > 0}
-			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact={sessionViewState.compact} />
+		{#if backgroundTasks.length > 0 && sessionViewState.compact}
+			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact />
 		{/if}
 		</div>
 		{#if !collapsed}
@@ -510,6 +511,12 @@
 				</Menu>
 			{/if}
 		{/if}
+	</div>
+	<!-- Desktop gives the tasks their own line under the whole title line, as
+	     wide as the free space the title row grows into (style.css). -->
+	{#if backgroundTasks.length > 0 && !sessionViewState.compact}
+		<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact={false} />
+	{/if}
 	</div>
 	{/if}
 
