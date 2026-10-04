@@ -827,7 +827,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (options.skipBrowserProbe || this.realSdk) return;
 		const probe = await ProcessBrowser.connect(this.port);
 		try {
-			const deadline = Date.now() + 2000;
+			// With no OpenCode listening, relay startup spends one SDK retry
+			// window (~3s) confirming that before it acks. A second window means
+			// startup is calling OpenCode again after learning it is down.
+			const deadline = Date.now() + 5000;
 			while (!this.generations.at(-1)?.fakeSdkActive) {
 				if (Date.now() > deadline)
 					throw new Error(

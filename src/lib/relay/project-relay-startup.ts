@@ -108,7 +108,9 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 
 		let defaultModel = initialDefaultModel;
-		if (!defaultModel) {
+		// Each call to an absent server spends the SDK's ~3s retry window, and
+		// Claude projects wait on this startup too.
+		if (!defaultModel && opencodeAvailable) {
 			const configResult = yield* Effect.either(
 				Effect.tryPromise(() => api.config.get()),
 			);
