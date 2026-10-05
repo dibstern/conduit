@@ -10,6 +10,7 @@
 #   ./scripts/update-visual-snapshots.sh macos     # macOS only
 #   ./scripts/update-visual-snapshots.sh linux     # Linux only (requires Docker)
 #   ./scripts/update-visual-snapshots.sh clean      # remove stale snapshots
+#   ./scripts/update-visual-snapshots.sh linux --grep 'Project/ProjectDialog'
 
 set -euo pipefail
 
@@ -19,6 +20,7 @@ SNAP_DIR="$ROOT_DIR/test/visual/components.spec.ts-snapshots"
 VISUAL_CONFIG="test/visual/playwright.config.ts"
 # Only run the screenshot spec — skip behavior-only specs (tool-item, input-area, etc.)
 SCREENSHOT_SPEC="test/visual/components.spec.ts"
+PLAYWRIGHT_ARGS=("${@:2}")
 
 # Resolve Playwright version from the project lockfile
 PW_VERSION=$(node -e "const p=require('$ROOT_DIR/node_modules/@playwright/test/package.json'); console.log(p.version)")
@@ -50,7 +52,7 @@ update_macos() {
   # at all" and the two platforms stay in lockstep.
   VISUAL_STRICT=1 pnpm exec playwright test "$SCREENSHOT_SPEC" \
     --config "$VISUAL_CONFIG" \
-    --update-snapshots
+    --update-snapshots ${PLAYWRIGHT_ARGS[@]+"${PLAYWRIGHT_ARGS[@]}"}
   echo "✓ macOS snapshots updated"
 }
 
@@ -64,8 +66,8 @@ update_linux() {
     exit 1
   fi
 
-  # Pull image if not cached
-  docker pull --platform linux/amd64 "$DOCKER_IMAGE" 2>/dev/null || true
+  # Pull only when missing: a pull of an already-cached image has hung for 40+ min here.
+  docker image inspect "$DOCKER_IMAGE" >/dev/null 2>&1 || docker pull --platform linux/amd64 "$DOCKER_IMAGE"
 
   # VISUAL_STRICT=1 is load-bearing, not belt-and-braces. `--update-snapshots`
   # defaults to mode `changed`, which respects the CONFIGURED tolerance — and the
@@ -80,10 +82,12 @@ update_linux() {
     -v "$ROOT_DIR":/work \
     -w /work \
     -e VISUAL_STRICT=1 \
+    -e VISUAL_WORKERS="${VISUAL_WORKERS:-8}" \
     --platform linux/amd64 \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     "$DOCKER_IMAGE" \
-    bash -c "corepack enable pnpm && npx playwright test $SCREENSHOT_SPEC --config $VISUAL_CONFIG --update-snapshots"
+    bash -c 'corepack enable pnpm && npx playwright test "$@"' bash \
+    "$SCREENSHOT_SPEC" --config "$VISUAL_CONFIG" --update-snapshots ${PLAYWRIGHT_ARGS[@]+"${PLAYWRIGHT_ARGS[@]}"}
 
   echo "✓ Linux snapshots updated"
 }

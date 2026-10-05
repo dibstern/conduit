@@ -8,7 +8,10 @@ import {
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
 import type { RelayMessage } from "../../../shared-types.js";
-import { listDirectoryEntries } from "../../relay/Services/directory-listing-service.js";
+import {
+	findFolders,
+	listDirectoryEntries,
+} from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import {
 	type ConfigPersistenceTag,
@@ -584,6 +587,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						entries: [...result.entries],
 					})),
 				),
+			FindFolders: (request) => run(findFolders(request.query)),
 			DetectProxy: wsRpcHandlers.DetectProxy,
 			SetLogLevel: wsRpcHandlers.SetLogLevel,
 		} satisfies DaemonRpcHandlers;

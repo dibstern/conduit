@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type {
@@ -20,6 +20,7 @@ import type {
 	ClaudeSettingsResponse,
 	CreateSessionResponse,
 	DetectProxyResponse,
+	FindFoldersResponse,
 	ForkSessionResponse,
 	GetAgentsResponse,
 	GetCommandsResponse,
@@ -260,6 +261,11 @@ export interface GetSessionSkillsRpcInput {
 export interface ListDirectoriesRpcInput {
 	readonly projectSlug: string;
 	readonly path: string;
+}
+
+export interface FindFoldersRpcInput {
+	readonly projectSlug?: string;
+	readonly query: string;
 }
 
 export interface SwitchAgentRpcInput {
@@ -640,6 +646,9 @@ const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
 const callListDirectories = (input: ListDirectoriesRpcInput) =>
 	callControl(input.projectSlug, (client) => client.ListDirectories(input));
 
+const callFindFolders = (input: FindFoldersRpcInput) =>
+	callControl(input.projectSlug, (client) => client.FindFolders(input));
+
 const callSwitchAgent = (input: SwitchAgentRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client
@@ -883,7 +892,11 @@ export async function getProjectsRpc(
 export async function saveProjectRpc(
 	input: SaveProjectRpcInput,
 ): Promise<SaveProjectResponse> {
-	return await runTransportEffect(callSaveProject(input));
+	const result = await runTransportEffect(
+		Effect.either(callSaveProject(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function removeProjectRpc(
@@ -1064,6 +1077,12 @@ export async function listDirectoriesRpc(
 	input: ListDirectoriesRpcInput,
 ): Promise<ListDirectoriesResponse> {
 	return await runTransportEffect(callListDirectories(input));
+}
+
+export async function findFoldersRpc(
+	input: FindFoldersRpcInput,
+): Promise<FindFoldersResponse> {
+	return await runTransportEffect(callFindFolders(input));
 }
 
 export async function switchAgentRpc(
