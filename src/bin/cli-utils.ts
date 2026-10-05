@@ -363,8 +363,9 @@ Options:
   --log-level <level>   Set log level: error, warn, info (default), verbose, debug
   --log-format <format> Set output format: pretty (default), json
   --no-https            Disable TLS
-  --tailscale-serve      Serve loopback HTTP behind Tailscale HTTPS
-  --no-tailscale-serve   Disable Tailscale Serve and remove our root handler
+  --tailscale-serve     Serve HTTPS on your tailnet through Tailscale Serve;
+                        persisted in daemon.json for future starts
+  --no-tailscale-serve  Turn Tailscale Serve off and remove Conduit's handler
   --dangerously-skip-permissions
                         Skip permission prompts (requires --pin)
   -h, --help            Show this help

@@ -38,7 +38,8 @@ running at login.
 
 For access beyond your local network, [Tailscale](https://tailscale.com) is
 the cleanest option — encrypted tunnel, no port forwarding, free for personal
-use.
+use. Add `--tailscale-serve` to get HTTPS on your tailnet with nothing to
+install on your phone (see [Push notifications](#push-notifications-https-setup)).
 
 ---
 
@@ -201,7 +202,7 @@ using OAuth.
 - Foreground server with an optional launchd or systemd user service
 - Multi-project support — single port, all registered projects
 - PIN authentication (4–8 digits)
-- HTTPS with auto-generated certificates via mkcert
+- HTTPS through Tailscale Serve, or mkcert certificates on a LAN
 - Keep-awake mode — prevents macOS sleep while sessions are active
 
 </details>
@@ -210,7 +211,40 @@ using OAuth.
 
 ## Push notifications (HTTPS setup)
 
-Push requires HTTPS. One-time setup:
+Push notifications and the home screen app need HTTPS on every device except
+the one running Conduit, where `http://localhost` already counts as secure.
+
+### With Tailscale (recommended)
+
+Tailscale provides a real certificate and renews it, so phones and other
+machines need nothing installed.
+
+1. Once per tailnet, open the [DNS page](https://login.tailscale.com/admin/dns)
+   in the Tailscale admin console and enable MagicDNS and HTTPS Certificates.
+2. Start Conduit with Tailscale Serve:
+
+   ```bash
+   conduit serve --tailscale-serve
+   ```
+
+   Conduit stays on `127.0.0.1` and Tailscale serves it at
+   `https://<machine>.<tailnet>.ts.net:2633`, on the same port Conduit uses.
+   The setting is saved, so later starts and `conduit service install` keep
+   it. `--no-tailscale-serve` turns it off and removes Conduit's handler.
+   Other Tailscale Serve handlers are left alone.
+3. On your phone, open that URL or scan the QR code Conduit prints.
+
+Home screen apps and push subscriptions are tied to the exact address. If you
+used Conduit from another address before, such as `https://100.x.y.z:2633`,
+remove the old home screen app, add it again from the new address, and turn
+notifications on again.
+
+Tailscale certificates are public, so your machine and tailnet names appear in
+public [certificate transparency logs](https://tailscale.com/kb/1153/enabling-https).
+
+### Without Tailscale (LAN)
+
+Use [mkcert](https://github.com/FiloSottile/mkcert) for a local certificate:
 
 ```bash
 brew install mkcert && mkcert -install
@@ -255,8 +289,10 @@ Yes. Agents, models, MCP servers, and project-level configuration all carry
 over as-is.
 
 **"Do I need mkcert for basic use?"**
-No. Conduit works over plain HTTP on localhost. mkcert is only needed for
-HTTPS, which is required for push notifications and LAN access.
+No. Conduit works over plain HTTP on localhost. Other devices need HTTPS for
+push notifications and the home screen app. With Tailscale, use
+`conduit serve --tailscale-serve` instead of mkcert. mkcert is the fallback
+for LAN access without Tailscale.
 
 **"What happens if the server crashes?"**
 The next `conduit serve` re-adopts independent Claude runners, terminals and
@@ -283,6 +319,8 @@ npx conduit-code --title <name>                   Set project display name
 npx conduit-code -p, --port <port>                HTTP port (default: 2633)
 npx conduit-code --oc-port <port>                 OpenCode port (default: 4096)
 npx conduit-code --no-https                       Disable TLS
+npx conduit-code serve --tailscale-serve          HTTPS on your tailnet through Tailscale Serve (saved)
+npx conduit-code serve --no-tailscale-serve       Turn Tailscale Serve off
 npx conduit-code --dangerously-skip-permissions   Bypass permission prompts (PIN required)
 npx conduit-code --log-level <level>              error | warn | info | verbose | debug
 npx conduit-code --log-format <format>            pretty | json
@@ -353,8 +391,8 @@ graph LR
 
 - [OpenCode](https://opencode.ai) — `opencode serve` running (port 4096)
 - Node.js 24.16.0 and pnpm 10.33.4 via mise (`mise trust && mise install`)
-- [mkcert](https://github.com/FiloSottile/mkcert) — push notifications (optional)
-- [Tailscale](https://tailscale.com) — remote access beyond LAN (optional)
+- [Tailscale](https://tailscale.com) — remote access and HTTPS for push notifications (optional)
+- [mkcert](https://github.com/FiloSottile/mkcert) — HTTPS on a LAN without Tailscale (optional)
 
 ---
 
