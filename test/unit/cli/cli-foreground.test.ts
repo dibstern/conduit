@@ -102,7 +102,7 @@ describe("serve handler", () => {
 	});
 
 	it("prints and encodes the ts.net URL after Serve succeeds", async () => {
-		const url = "https://machine.example.ts.net";
+		const url = "https://machine.example.ts.net:2633";
 		mockStartForegroundDaemon.mockResolvedValueOnce({
 			port: 2633,
 			stopped: Promise.resolve(),
