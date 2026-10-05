@@ -94,13 +94,18 @@ test("detail feed renders streamed text once and resumes cached content across s
 	await expect(page.locator(".msg-assistant .md-content")).toContainText(
 		"Hello world",
 	);
-	await page.locator(`#session-list [data-session-id="${b}"]`).click();
+	// The title end: the row's hover actions cover its centre.
+	await page
+		.locator(`#session-list [data-session-id="${b}"]`)
+		.click({ position: { x: 48, y: 12 } });
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "SubscribeSessionDetail" &&
 			request.payload["sessionId"] === b,
 	);
-	await page.locator(`#session-list [data-session-id="${a}"]`).click();
+	await page
+		.locator(`#session-list [data-session-id="${a}"]`)
+		.click({ position: { x: 48, y: 12 } });
 	await expect
 		.poll(
 			() =>
@@ -200,13 +205,18 @@ test("detail catch-up removes a message after returning to a session", async ({
 	await expect(page.locator(".msg-assistant .md-content")).toContainText(
 		"Remove me",
 	);
-	await page.locator(`#session-list [data-session-id="${b}"]`).click();
+	// The title end: the row's hover actions cover its centre.
+	await page
+		.locator(`#session-list [data-session-id="${b}"]`)
+		.click({ position: { x: 48, y: 12 } });
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "SubscribeSessionDetail" &&
 			request.payload["sessionId"] === b,
 	);
-	await page.locator(`#session-list [data-session-id="${a}"]`).click();
+	await page
+		.locator(`#session-list [data-session-id="${a}"]`)
+		.click({ position: { x: 48, y: 12 } });
 	await expect
 		.poll(
 			() =>

@@ -198,10 +198,10 @@ test.describe("Notification → Session Navigation", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// Click session B in the sidebar to switch
+		// Click session B's title end in the sidebar; the row's hover actions cover its centre.
 		await page
 			.locator(`[data-session-id="${SESS_B}"]`)
-			.click({ timeout: 5_000 });
+			.click({ position: { x: 48, y: 12 }, timeout: 5_000 });
 
 		// Verify the frontend sent ViewSession with sess-B
 		const viewRequest = await rpc.waitForRequest((request) => {

@@ -336,7 +336,11 @@ test.describe("server-derived notification indicators", () => {
 
 		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
 
-		await sessionItem(page, SESS_B).click({ timeout: 5_000 });
+		// The title end: the row's hover actions cover its centre.
+		await sessionItem(page, SESS_B).click({
+			position: { x: 48, y: 12 },
+			timeout: 5_000,
+		});
 		await page.waitForFunction(
 			(sessId) => window.location.pathname.includes(`/s/${sessId}`),
 			SESS_B,
