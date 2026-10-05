@@ -1,15 +1,22 @@
 // Claude SDK trace replayer (E2E Claude lane)
 // Plays committed Claude Agent SDK traces (test/fixtures/claude-sdk-traces,
 // real captured wire traffic — see docs/adr/0002) through the Claude runtime's
-// injected queryFactory, one planned trace per sent turn. Failure modes are
-// listed and pinned in test/unit/e2e/claude-trace-replayer.test.ts.
+// injected queryFactory. Failure modes are listed and pinned in
+// test/unit/e2e/claude-trace-replayer.test.ts.
 //
-// Per replayed turn, envelope ids (uuid, assistant message.id, message_start
+// A trace records one or more inputs (command_lifecycle command_uuid,
+// user_message_uuid(s)); older traces record none and count as one. Each sent
+// prompt answers the next recorded input in plan order: the first starts its
+// trace, and each later one releases the hold before that input's
+// command_lifecycle queued frame. Every occurrence of a recorded input id
+// becomes the uuid conduit sent for it, so the runtime settles and places it.
+// A trace that records an interrupt (the SDK's "[Request interrupted by user"
+// user frame) holds before it until interrupt(), which resolves with the
+// receipt the trace implies: the inputs queued and not yet started there.
+//
+// Per replayed trace, envelope ids (uuid, assistant message.id, message_start
 // message.id) are fresh so the translator's dedupe never swallows a repeated
 // turn; session_id is one fresh id per replayer, stable like the SDK's.
-// The recorded input id (command_lifecycle command_uuid, user_message_uuid(s))
-// becomes the uuid of the prompt being answered, so the runtime settles and
-// places that input; older traces carry none and replay unchanged.
 // Content, including tool_use/task ids, is untouched — plan a trace that
 // carries tools at most once per session.
 
@@ -17,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { SDKControlInterruptResponse } from "@anthropic-ai/claude-agent-sdk";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
@@ -26,11 +34,13 @@ export type ClaudeTraceName =
 	| "background-shell-turn"
 	| "extra-folder-read-turn"
 	| "pong-thinking-text-turn"
+	| "second-input-held-to-turn-end"
 	| "skill-loads-turn"
 	| "subagent-task-turn";
 
 export interface ClaudeReplayPlan {
-	/** One committed trace per sent turn, in send order. */
+	/** Committed traces in send order; each answers as many prompts as it
+	 *  records inputs (at least one). */
 	readonly turns: readonly ClaudeTraceName[];
 	/** Pause before every replayed message (e.g. to keep a turn stoppable). */
 	readonly delayMs?: number;
@@ -56,7 +66,7 @@ export interface ClaudeTraceReplayer {
 	readonly sdk: NonNullable<ProjectRelayConfig["claudeSdk"]>;
 	/** Lets a holdAfterResult replay continue past its result. */
 	release(): void;
-	/** Throws unless exactly the planned turns were sent. */
+	/** Throws unless every recorded input was sent and nothing failed. */
 	assertComplete(): void;
 }
 
@@ -65,9 +75,13 @@ const TRACES_DIR = join(
 	"../../fixtures/claude-sdk-traces",
 );
 
-function inputIds(message: SDKMessage): readonly string[] {
+function recordedInputIds(message: SDKMessage): readonly string[] {
 	if (message.type === "command_lifecycle") return [message.command_uuid];
-	if (message.type === "result") return message.user_message_uuids ?? [];
+	if (message.type === "result")
+		return [
+			...(message.user_message_uuid ? [message.user_message_uuid] : []),
+			...(message.user_message_uuids ?? []),
+		];
 	return [];
 }
 
@@ -82,6 +96,24 @@ function envelopeIds(message: SDKMessage): string[] {
 	}
 	return ids;
 }
+
+const INTERRUPTED = "[Request interrupted by user";
+
+function isInterruptMarker(message: SDKMessage): boolean {
+	if (message.type !== "user") return false;
+	const { content } = message.message;
+	return typeof content === "string"
+		? content.startsWith(INTERRUPTED)
+		: content.some(
+				(block) => block.type === "text" && block.text.startsWith(INTERRUPTED),
+			);
+}
+
+/** Where a replay waits: for the prompt answering a later recorded input, or
+ *  for interrupt(), which it answers with the inputs still queued there. */
+type Hold =
+	| { readonly kind: "input"; readonly input: number }
+	| { readonly kind: "interrupt"; readonly stillQueued: readonly number[] };
 
 /** Decode every line up front so a drifted trace fails before any relay starts. */
 function loadTrace(dir: string, name: ClaudeTraceName) {
@@ -98,12 +130,57 @@ function loadTrace(dir: string, name: ClaudeTraceName) {
 			});
 		}
 	});
-	const recordedInputIds = new Set(messages.flatMap(inputIds));
+	const inputIds = [...new Set(messages.flatMap(recordedInputIds))];
+	const holds = new Map<number, Hold>();
+	for (const [input, id] of inputIds.entries()) {
+		if (input === 0) continue;
+		const first = lines.findIndex((line) => line.includes(`"${id}"`));
+		const queued = messages[first];
+		if (queued?.type !== "command_lifecycle" || queued.state !== "queued") {
+			throw new Error(
+				`Claude trace replay: ${file}:${first + 1} references recorded input ${input + 1} before its command_lifecycle queued frame, so its id would be mapped out of order`,
+			);
+		}
+		holds.set(first, { kind: "input", input });
+	}
+	for (const [index, message] of messages.entries()) {
+		if (!isInterruptMarker(message)) continue;
+		// The abort's own user frames (a cancelled tool's result) lead up to it.
+		let start = index;
+		while (messages[start - 1]?.type === "user") start -= 1;
+		const states = (id: string) =>
+			messages
+				.slice(0, start)
+				.flatMap((m) =>
+					m.type === "command_lifecycle" && m.command_uuid === id
+						? [m.state]
+						: [],
+				);
+		holds.set(start, {
+			kind: "interrupt",
+			stillQueued: inputIds.flatMap((id, input) => {
+				const seen = states(id);
+				return seen.length > 0 && seen.every((state) => state === "queued")
+					? [input]
+					: [];
+			}),
+		});
+	}
+	const interrupts = [...holds.values()].filter(
+		(hold) => hold.kind === "interrupt",
+	).length;
 	return {
+		name,
 		lines,
-		inputIds: [...recordedInputIds],
+		holds,
+		inputIds,
+		interrupts,
+		/** Older traces record no input id; they still answer one prompt. */
+		inputCount: Math.max(1, inputIds.length),
+		/** Only a one-input trace without a recorded interrupt may be cut short. */
+		strict: inputIds.length > 1 || interrupts > 0,
 		ids: [...new Set(messages.flatMap(envelopeIds))].filter(
-			(id) => !recordedInputIds.has(id),
+			(id) => !inputIds.includes(id),
 		),
 		sessionIds: [
 			...new Set(messages.flatMap((message) => message.session_id ?? [])),
@@ -113,32 +190,15 @@ function loadTrace(dir: string, name: ClaudeTraceName) {
 
 type Trace = ReturnType<typeof loadTrace>;
 
-function freshTurn(
-	trace: Trace,
-	sessionId: string,
-	promptUuid: string,
-): SDKMessage[] {
-	const replacements = [
-		...trace.inputIds.map((id) => [id, promptUuid] as const),
-		...trace.ids.map(
-			(id) =>
-				[
-					id,
-					id.startsWith("msg_") ? `msg_${randomUUID()}` : randomUUID(),
-				] as const,
-		),
-		...trace.sessionIds.map((id) => [id, sessionId] as const),
+/** Fresh envelope ids for one replay of a trace, and the replayer's session. */
+function freshIds(trace: Trace, sessionId: string): [string, string][] {
+	return [
+		...trace.ids.map((id): [string, string] => [
+			id,
+			id.startsWith("msg_") ? `msg_${randomUUID()}` : randomUUID(),
+		]),
+		...trace.sessionIds.map((id): [string, string] => [id, sessionId]),
 	];
-	return trace.lines.map((line) =>
-		decodeClaudeSDKMessage(
-			JSON.parse(
-				replacements.reduce(
-					(text, [from, to]) => text.replaceAll(`"${from}"`, `"${to}"`),
-					line,
-				),
-			),
-		),
-	);
 }
 
 const unsupported = (method: string) => (): Promise<never> =>
@@ -152,43 +212,123 @@ export function createClaudeTraceReplayer(
 	const traces = plan.turns.map((name) =>
 		loadTrace(plan.tracesDir ?? TRACES_DIR, name),
 	);
+	const recordedInput = (input: number, traceIndex: number) =>
+		`recorded input ${input + 1} of trace ${traceIndex + 1} (${traces[traceIndex]?.name})`;
+	const plannedInputs = traces.flatMap((trace, traceIndex) =>
+		Array.from({ length: trace.inputCount }, (_, input) =>
+			recordedInput(input, traceIndex),
+		),
+	);
 	const sessionId = randomUUID();
 	let sent = 0;
-	let unplannedTurn: Error | undefined;
+	let played = 0;
+	let failure: Error | undefined;
+	const fail = (message: string): Error => {
+		const error = new Error(`Claude trace replay: ${message}`);
+		failure ??= error;
+		return error;
+	};
 	let release = () => {};
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
 	});
 
 	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt, options }) => {
+		const prompts = prompt[Symbol.asyncIterator]();
+		const closed = new AbortController();
+		const whenClosed = new Promise<"closed">((resolve) =>
+			closed.signal.addEventListener("abort", () => resolve("closed"), {
+				once: true,
+			}),
+		);
 		let interrupted = false;
 		let aborted = new AbortController();
+		let playing:
+			| {
+					readonly trace: Trace;
+					/** Sent prompt uuid per recorded input, filled as prompts arrive. */
+					readonly sentIds: string[];
+					readonly interrupts: ((
+						receipt: SDKControlInterruptResponse,
+					) => void)[];
+					asked: number;
+					wake?: () => void;
+			  }
+			| undefined;
 
 		async function* replay(): AsyncGenerator<SDKMessage, void> {
-			for await (const sentPrompt of prompt) {
+			while (true) {
+				const first = await prompts.next();
+				if (first.done) return;
 				sent += 1;
-				const trace = traces[sent - 1];
+				const trace = traces[played];
 				if (!trace) {
-					unplannedTurn ??= new Error(
-						`Claude trace replay: turn ${sent} was sent, but only ${traces.length} planned`,
+					throw fail(
+						`prompt ${sent} was sent, but no recorded input matches it (the plan records ${plannedInputs.length})`,
 					);
-					throw unplannedTurn;
 				}
+				played += 1;
 				interrupted = false;
 				aborted = new AbortController();
-				const messages = freshTurn(
+				const current: NonNullable<typeof playing> = {
 					trace,
-					sessionId,
-					sentPrompt.uuid ?? randomUUID(),
-				);
-				for (const [index, message] of messages.entries()) {
+					sentIds: [first.value.uuid ?? randomUUID()],
+					interrupts: [],
+					asked: 0,
+				};
+				playing = current;
+				const fresh = freshIds(trace, sessionId);
+				for (const [index, line] of trace.lines.entries()) {
+					const hold = trace.holds.get(index);
+					if (hold?.kind === "input") {
+						const next = await Promise.race([prompts.next(), whenClosed]);
+						if (next === "closed" || next.done) {
+							fail(
+								`${recordedInput(hold.input, played - 1)} was never sent: the query closed while the replay held for it`,
+							);
+							return;
+						}
+						sent += 1;
+						current.sentIds[hold.input] = next.value.uuid ?? randomUUID();
+					}
+					if (hold?.kind === "interrupt") {
+						while (current.interrupts.length === 0) {
+							const woken = await Promise.race([
+								new Promise<void>((resolve) => {
+									current.wake = resolve;
+								}),
+								whenClosed,
+							]);
+							if (woken === "closed") return;
+						}
+						current.interrupts.shift()?.({
+							still_queued: hold.stillQueued.map(
+								(input) => current.sentIds[input] ?? "",
+							),
+						});
+					}
 					if (plan.delayMs) await sleep(plan.delayMs);
 					if (interrupted) break;
+					const replacements = [
+						...fresh,
+						...trace.inputIds.flatMap((id, input) => {
+							const to = current.sentIds[input];
+							return to ? [[id, to] as const] : [];
+						}),
+					];
+					const message = decodeClaudeSDKMessage(
+						JSON.parse(
+							replacements.reduce(
+								(text, [from, to]) => text.replaceAll(`"${from}"`, `"${to}"`),
+								line,
+							),
+						),
+					);
 					yield message;
 					if (
 						plan.holdAfterResult &&
 						message.type === "result" &&
-						index < messages.length - 1
+						index < trace.lines.length - 1
 					) {
 						// Only this query's own stop may cut the hold short: the runtime
 						// also opens and closes spare (pre-warmed) queries.
@@ -223,14 +363,29 @@ export function createClaudeTraceReplayer(
 							},
 						);
 				}
+				playing = undefined;
 			}
 		}
 
 		return Object.assign(replay(), {
-			// Stop mid-turn: drop the rest of the current trace. The runtime
-			// persists turn.interrupted itself and ignores any post-interrupt
-			// result, so no SDK error result is synthesized here.
-			interrupt: async () => {
+			// A trace's recorded interrupt is answered with the receipt it implies.
+			// Otherwise Stop mid-turn drops the rest of a one-input trace: the
+			// runtime persists turn.interrupted itself and ignores any
+			// post-interrupt result, so no SDK error result is synthesized here.
+			interrupt: async (): Promise<SDKControlInterruptResponse | undefined> => {
+				const current = playing;
+				if (current && current.asked < current.trace.interrupts) {
+					current.asked += 1;
+					return new Promise((resolve) => {
+						current.interrupts.push(resolve);
+						current.wake?.();
+					});
+				}
+				if (current?.trace.strict) {
+					throw fail(
+						`interrupt() arrived during ${current.trace.name}, which records no further interrupt`,
+					);
+				}
 				interrupted = true;
 				aborted.abort();
 				return undefined;
@@ -238,6 +393,7 @@ export function createClaudeTraceReplayer(
 			close: () => {
 				interrupted = true;
 				aborted.abort();
+				closed.abort();
 			},
 			// Settings the runtime syncs before each turn; traces are fixed.
 			setModel: async () => {},
@@ -283,10 +439,11 @@ export function createClaudeTraceReplayer(
 		},
 		release,
 		assertComplete() {
-			if (unplannedTurn) throw unplannedTurn;
-			if (sent < traces.length) {
+			if (failure) throw failure;
+			const unsent = plannedInputs[sent];
+			if (unsent) {
 				throw new Error(
-					`Claude trace replay played ${sent} of ${traces.length} planned turns`,
+					`Claude trace replay: ${unsent} was never sent (${sent} of ${plannedInputs.length} planned inputs were sent)`,
 				);
 			}
 		},

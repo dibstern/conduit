@@ -4,9 +4,9 @@
  * pnpm build
  * RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
  *   test/e2e/provider/claude-replay-trace-capture.test.ts
- * Each capture is copied over its fixture only after the turn finished and the
- * trace shows the SDK echoing the sent input id. Review the traces before
- * committing them.
+ * Each capture is copied over its fixture only after every turn finished and the
+ * trace shows the SDK echoing each sent input id, in send order. Review the
+ * traces before committing them.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -46,7 +46,8 @@ const redact = (raw: Raw): Raw =>
 async function capture(options: {
 	fixture: string;
 	modelId: string;
-	prompt: string;
+	/** Later prompts are sent once the first turn reports a tool running. */
+	prompts: readonly [string, ...string[]];
 	expectReply: string;
 	setup?: (projectDir: string) => void;
 }): Promise<void> {
@@ -70,22 +71,27 @@ async function capture(options: {
 			}),
 		);
 		const cursor = browser.frames.length;
-		const commandId = randomUUID();
-		await Effect.runPromise(
-			browser.rpc
-				.SendMessage({
-					projectSlug: "process-test",
-					sessionId,
-					originId: browser.originId,
-					commandId,
-					text: options.prompt,
-				})
-				.pipe(Effect.timeout(15_000)),
-		);
+		const [firstPrompt, ...laterPrompts] = options.prompts;
+		const commandIds = options.prompts.map(() => randomUUID());
+		const send = (text: string, commandId: string) =>
+			Effect.runPromise(
+				browser.rpc
+					.SendMessage({
+						projectSlug: "process-test",
+						sessionId,
+						originId: browser.originId,
+						commandId,
+						text,
+					})
+					.pipe(Effect.timeout(240_000)),
+			);
+		await send(firstPrompt, commandIds[0] ?? "");
+		const laterSends: Promise<unknown>[] = [];
 		const answered = new Set<unknown>();
 		await vi.waitFor(
 			async () => {
-				for (const { message } of browser.frames.slice(cursor)) {
+				const frames = browser.frames.slice(cursor);
+				for (const { message } of frames) {
 					if (
 						message["type"] !== "permission_request" ||
 						answered.has(message["requestId"])
@@ -94,18 +100,24 @@ async function capture(options: {
 					answered.add(message["requestId"]);
 					await browser.answerApproval(message, "allow");
 				}
+				if (
+					laterSends.length < laterPrompts.length &&
+					frames.some(({ message }) => message["type"] === "tool_executing")
+				) {
+					// Mid-turn: the first turn is running its tool.
+					for (const [index, text] of laterPrompts.entries())
+						laterSends.push(send(text, commandIds[index + 1] ?? ""));
+				}
 				expect(
-					browser.frames
-						.slice(cursor)
-						.some(
-							({ message }) =>
-								message["type"] === "done" &&
-								message["sessionId"] === sessionId,
-						),
-				).toBe(true);
+					frames.filter(
+						({ message }) =>
+							message["type"] === "done" && message["sessionId"] === sessionId,
+					),
+				).toHaveLength(options.prompts.length);
 			},
 			{ timeout: 240_000, interval: 100 },
 		);
+		await Promise.all(laterSends);
 		const reply = browser.frames
 			.slice(cursor)
 			.filter(
@@ -124,20 +136,27 @@ async function capture(options: {
 			.filter((line) => line.trim() !== "")
 			.map((line) => redact(JSON.parse(line) as Raw));
 		const trace = rawLines.map(decodeClaudeSDKMessage);
-		// The input went out with uuid = commandId; the SDK names it back.
+		// Each input went out with uuid = its commandId; the SDK names them back,
+		// in send order, whether it folds them into one result or not.
 		const lifecycle = trace.filter(
 			(message): message is ClaudeSDKCommandLifecycleMessage =>
 				message.type === "command_lifecycle",
 		);
-		expect(lifecycle.map((message) => message.state)).toEqual(
-			expect.arrayContaining(["started", "completed"]),
-		);
+		for (const commandId of commandIds) {
+			expect(
+				lifecycle
+					.filter((message) => message.command_uuid === commandId)
+					.map((message) => message.state),
+			).toEqual(expect.arrayContaining(["started", "completed"]));
+		}
+		expect([
+			...new Set(lifecycle.map((message) => message.command_uuid)),
+		]).toEqual(commandIds);
 		expect(
-			lifecycle.every((message) => message.command_uuid === commandId),
-		).toBe(true);
-		expect(trace.find((message) => message.type === "result")).toMatchObject({
-			user_message_uuids: [commandId],
-		});
+			trace.flatMap((message) =>
+				message.type === "result" ? (message.user_message_uuids ?? []) : [],
+			),
+		).toEqual(commandIds);
 		writeFileSync(
 			join(TRACES, `${options.fixture}.jsonl`),
 			rawLines.map((line) => `${JSON.stringify(line)}\n`).join(""),
@@ -161,7 +180,24 @@ describe.skipIf(!RUN_EXPENSIVE)(
 				capture({
 					fixture: "pong-thinking-text-turn",
 					modelId: "claude-fable-5",
-					prompt: "Hello, reply with just the word pong",
+					prompts: ["Hello, reply with just the word pong"],
+					expectReply: "pong",
+				}),
+			{ timeout: 300_000 },
+		);
+
+		// Conduit's turn admission gate holds the mid-turn send until the first
+		// turn ends, so the SDK sees the second input only then: two results.
+		it(
+			"captures second-input-held-to-turn-end",
+			() =>
+				capture({
+					fixture: "second-input-held-to-turn-end",
+					modelId: "claude-fable-5",
+					prompts: [
+						"Use the Bash tool to run exactly `sleep 8; echo A-DONE`. After it finishes, reply with one short sentence that includes A-DONE.",
+						"Now reply with just the word pong",
+					],
 					expectReply: "pong",
 				}),
 			{ timeout: 300_000 },
@@ -173,8 +209,9 @@ describe.skipIf(!RUN_EXPENSIVE)(
 				capture({
 					fixture: "subagent-task-turn",
 					modelId: "claude-sonnet-5",
-					prompt:
+					prompts: [
 						"Use the Agent tool in the foreground (run_in_background false) to ask a subagent to read package.json and report its name field. Wait for its result, then reply starting with exactly 'The subagent reports' followed by what it found.",
+					],
 					expectReply: "The subagent reports",
 					setup: (projectDir) => {
 						mkdirSync(projectDir, { recursive: true });

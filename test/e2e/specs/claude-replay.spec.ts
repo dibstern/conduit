@@ -242,6 +242,65 @@ test.describe("Claude replay lane", () => {
 		});
 	});
 
+	test.describe("two inputs, the second sent mid-turn", () => {
+		// Recorded through conduit, whose turn gate holds the mid-turn send until
+		// the first turn ends, so the trace queues input 2 after result 1. The
+		// replayer holds that queued frame until conduit pushes the second prompt.
+		// The delay keeps the first turn running long enough to send into it.
+		test.use({
+			claudeReplay: { turns: ["second-input-held-to-turn-end"], delayMs: 60 },
+		});
+
+		test("both inputs are answered in order, each tagged with its command id", async ({
+			page,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			const sessionId = decodeURIComponent(
+				harness.projectUrl.slice("/s/".length),
+			);
+			const sends = recordSends(page);
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+
+			await app.sendMessage("First");
+			await chat.waitForToolBlock();
+			await expect(chat.stopBtn).toBeVisible();
+			await app.sendMessage("Second");
+			await expect.poll(() => sends.length).toBe(2);
+			expect(countEvents(harness.eventsDbPath, "turn.completed")).toBe(0);
+
+			await expect
+				.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
+				.toBe(2);
+			await chat.waitForStreamingComplete();
+			await expect(chat.userMessages).toHaveText([/\bFirst\b/, /\bSecond\b/]);
+			await expect(chat.assistantMessages).toHaveText([/A-DONE/, /pong/i]);
+
+			const commandIds = sends.map((send) => send.commandId);
+			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+			try {
+				const rows = db
+					.prepare(
+						`SELECT id, input_id, text FROM messages
+						WHERE session_id = ? AND role = 'user' ORDER BY rowid`,
+					)
+					.all(sessionId);
+				await testInfo.attach("two-input-id-proof.json", {
+					body: JSON.stringify({ commandIds, rows }, null, 2),
+					contentType: "application/json",
+				});
+				expect(rows).toEqual([
+					{ id: commandIds[0], input_id: commandIds[0], text: "First" },
+					{ id: commandIds[1], input_id: commandIds[1], text: "Second" },
+				]);
+			} finally {
+				db.close();
+			}
+		});
+	});
+
 	test.describe("sub-agent trace", () => {
 		test.use({ claudeReplay: { turns: ["subagent-task-turn"] } });
 
