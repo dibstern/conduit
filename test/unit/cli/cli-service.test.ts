@@ -18,6 +18,7 @@ import {
 	type ServiceOptions,
 	type ServiceRunner,
 } from "../../../src/bin/cli-service.js";
+import { getVersion } from "../../../src/lib/version.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
 	const original = await importOriginal<typeof import("node:child_process")>();
@@ -171,6 +172,7 @@ describe("service unit generation", () => {
 		expect(unit).toContain("<string>dev.conduit.server</string>");
 		expect(unit).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
 		expect(unit).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+		expect(unit).toContain("<key>CONDUIT_SERVICE</key><string>1</string>");
 		expect(unit).toMatch(
 			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit serve --port 7777<\/string>/,
 		);
@@ -194,6 +196,7 @@ describe("service unit generation", () => {
 		expect(unit).toContain("WantedBy=default.target");
 		expect(unit).toContain(`WorkingDirectory=${cwd}`);
 		expect(unit).toContain(`Environment="CONDUIT_CONFIG_DIR=${configDir}"`);
+		expect(unit).toContain('Environment="CONDUIT_SERVICE=1"');
 		expect(unit).toContain(`StandardOutput=append:${config.paths.stdout}`);
 		expect(unit).toContain(`StandardError=append:${config.paths.stderr}`);
 		expect(unit).not.toMatch(/\/[^\s"]*\/node(?:\s|")/);
@@ -416,6 +419,35 @@ describe.each([
 		expect(runner.exec).toHaveBeenCalledWith(
 			config.shell,
 			["-l", "-c", "command -v node >/dev/null 2>&1"],
+			expect.objectContaining({ HOME: homeDir }),
+		);
+	});
+
+	it("runs a pinned npx package when installed from the npx cache", async () => {
+		const { runner, config, files } = fakeRunner(platform);
+		const npxEntry =
+			"/home/test/.npm/_npx/0a1b2c/node_modules/conduit-code/dist/src/bin/cli.js";
+		const execute = runner.exec.getMockImplementation();
+		runner.exec.mockImplementation(async (command, args) => {
+			if (command === config.shell && args[2]?.includes("command -v conduit")) {
+				return { code: 1, stdout: "", stderr: "" };
+			}
+			if (!execute) throw new Error("Missing fake execution");
+			return execute(command, args);
+		});
+		const output = await runServiceCommand(
+			"install",
+			{ ...config, cliEntry: npxEntry },
+			runner,
+		);
+		const pinned = `conduit-code@${getVersion()}`;
+		expect(output).toContain(`npx --yes ${pinned}`);
+		const unit = files.get(config.paths.unitFile);
+		expect(unit).toContain(`exec npx --yes ${pinned}`);
+		expect(unit).not.toContain(npxEntry);
+		expect(runner.exec).toHaveBeenCalledWith(
+			config.shell,
+			["-l", "-c", "command -v npx >/dev/null 2>&1"],
 			expect.objectContaining({ HOME: homeDir }),
 		);
 	});

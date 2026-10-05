@@ -52,7 +52,7 @@ export const composerEffortHandlers: StepHandler[] = [
 				match[1] === "word" ? "composer-word-effort" : "variant-badge",
 			);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
-			await button.click({ delay: 500 });
+			await button.click({ delay: 1000 });
 			await expect(world.page.getByTestId("variant-dropdown")).toBeVisible();
 		},
 	},
@@ -85,7 +85,7 @@ export const composerEffortHandlers: StepHandler[] = [
 				) {
 					// Hold, as a phone user would. Shift+F10 leaves a keyboard focus
 					// ring on the chip, which then lands in the visual baselines.
-					await button.click({ delay: 500 });
+					await button.click({ delay: 1000 });
 				} else {
 					await button.click();
 				}

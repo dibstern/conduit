@@ -2,8 +2,9 @@ import { execFile } from "node:child_process";
 import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, userInfo } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getVersion } from "../lib/version.js";
 import type { CommandContext } from "./cli-command-handlers.js";
 import { DEFAULT_CONFIG_DIR, type ParsedArgs } from "./cli-utils.js";
 
@@ -103,6 +104,7 @@ function serviceEnvironment(
 		...options.environment,
 		PATH: "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
 		CONDUIT_CONFIG_DIR: options.paths.configDir,
+		CONDUIT_SERVICE: "1",
 		LC_ALL: "C",
 	};
 }
@@ -358,25 +360,35 @@ export async function runServiceCommand(
 		environment,
 	);
 	if (found.code !== 0) {
-		if (!(await runner.exists(options.cliEntry))) {
+		// npm can delete its npx cache at any time, so a service pointing into it
+		// breaks at a later login. Let npx re-fetch this exact version instead.
+		const viaNpx = options.cliEntry.includes(`${sep}_npx${sep}`);
+		const launcher = viaNpx ? "npx" : "node";
+		if (!viaNpx && !(await runner.exists(options.cliEntry))) {
 			throw new Error(
 				`Conduit is absent from the login shell PATH and the installed CLI entry is missing: ${options.cliEntry}. Install conduit-code first.`,
 			);
 		}
-		const node = await runner.exec(
+		const probe = await runner.exec(
 			options.shell,
-			["-l", "-c", "command -v node >/dev/null 2>&1"],
+			["-l", "-c", `command -v ${launcher} >/dev/null 2>&1`],
 			environment,
 		);
-		if (node.code !== 0)
+		if (probe.code !== 0)
 			throw new Error(
-				"Neither conduit nor node is available on the login shell PATH.",
+				`Neither conduit nor ${launcher} is available on the login shell PATH.`,
 			);
+		const npxPackage = `conduit-code@${getVersion()}`;
 		unit = generateServiceUnit({
 			...options,
-			command: ["node", options.cliEntry, ...options.command.slice(1)],
+			command: [
+				...(viaNpx ? ["npx", "--yes", npxPackage] : ["node", options.cliEntry]),
+				...options.command.slice(1),
+			],
 		});
-		warning = `Warning: conduit is not on the login shell PATH; using node ${options.cliEntry}. Node is resolved through the login shell PATH.\n`;
+		warning = viaNpx
+			? `Note: conduit is not installed globally, so the service runs npx --yes ${npxPackage}. npx downloads it again if npm's cache is cleared.\n`
+			: `Warning: conduit is not on the login shell PATH; using node ${options.cliEntry}. Node is resolved through the login shell PATH.\n`;
 	}
 	await runner.mkdir(dirname(paths.unitFile));
 	await runner.mkdir(paths.configDir);

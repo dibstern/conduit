@@ -4,7 +4,6 @@ import { Effect, Schema, type Scope, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
-	AddProject,
 	AnswerQuestion,
 	CancelSession,
 	ClosePty,
@@ -39,12 +38,12 @@ import {
 	RemoveInstance,
 	RemoveProject,
 	RenameInstance,
-	RenameProject,
 	RenameSession,
 	ResizePty,
 	ResolveClaudeSettings,
 	RespondPermission,
 	RewindSession,
+	SaveProject,
 	ScanNow,
 	SendMessage,
 	SessionInfoSchema,
@@ -140,6 +139,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 								slug: "demo",
 								title: "Demo",
 								directory: "/tmp/demo",
+								folders: ["/tmp/demo"],
 							},
 						],
 						current: "demo",
@@ -159,35 +159,30 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						hasMore: false,
 						nextCursor: null,
 					}),
-				AddProject: (request) =>
+				SaveProject: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						projects: [
 							{
-								slug: "new-project",
-								title: "New Project",
-								directory: request.directory,
+								slug: request.slug ?? "new-project",
+								title: request.title ?? "New Project",
+								directory:
+									typeof request.folders[0] === "string"
+										? request.folders[0]
+										: (request.folders[0]?.path ?? ""),
+								folders: request.folders.map((folder) =>
+									typeof folder === "string" ? folder : folder.path,
+								),
 							},
 						],
 						current: "demo",
-						addedSlug: "new-project",
+						savedSlug: request.slug ?? "new-project",
+						warnings: [],
 					}),
 				RemoveProject: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						projects: [],
-						current: "demo",
-					}),
-				RenameProject: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						projects: [
-							{
-								slug: request.slug,
-								title: request.title,
-								directory: "/tmp/demo",
-							},
-						],
 						current: "demo",
 					}),
 				SetProjectInstance: (request) =>
@@ -198,6 +193,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 								slug: request.slug,
 								title: "Demo",
 								directory: "/tmp/demo",
+								folders: ["/tmp/demo"],
 								instanceId: request.instanceId,
 							},
 						],
@@ -767,9 +763,11 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetCommands")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetProjects")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListDaemonSessions")).toBe(true);
-		expect(WsRpcGroup.requests.has("AddProject")).toBe(true);
+		expect(WsRpcGroup.requests.has("SaveProject")).toBe(true);
 		expect(WsRpcGroup.requests.has("RemoveProject")).toBe(true);
-		expect(WsRpcGroup.requests.has("RenameProject")).toBe(true);
+		expect(
+			[...WsRpcGroup.requests.keys()].filter((tag) => tag === "SaveProject"),
+		).toHaveLength(1);
 		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("StartInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("StopInstance")).toBe(true);
@@ -881,6 +879,7 @@ describe("browser WebSocket RPC contract", () => {
 							slug: "demo",
 							title: "Demo",
 							directory: "/tmp/demo",
+							folders: ["/tmp/demo"],
 						},
 					],
 					current: "demo",
@@ -907,12 +906,12 @@ describe("browser WebSocket RPC contract", () => {
 					nextCursor: null,
 				});
 
-				const addedProject = yield* client.AddProject({
+				const addedProject = yield* client.SaveProject({
 					projectSlug: "demo",
-					directory: "/tmp/new-project",
+					folders: ["/tmp/new-project"],
 					instanceId: "inst-1",
 				});
-				expect(addedProject.addedSlug).toBe("new-project");
+				expect(addedProject.savedSlug).toBe("new-project");
 				expect(addedProject.projects[0]?.directory).toBe("/tmp/new-project");
 
 				expect(
@@ -926,10 +925,11 @@ describe("browser WebSocket RPC contract", () => {
 					current: "demo",
 				});
 
-				const renamedProject = yield* client.RenameProject({
+				const renamedProject = yield* client.SaveProject({
 					projectSlug: "demo",
 					slug: "demo",
 					title: "Renamed Demo",
+					folders: ["/tmp/demo"],
 				});
 				expect(renamedProject.projects[0]?.title).toBe("Renamed Demo");
 
@@ -1335,11 +1335,11 @@ describe("browser WebSocket RPC contract", () => {
 			"ListDaemonSessions",
 		);
 		expect(
-			new AddProject({
+			new SaveProject({
 				projectSlug: "demo",
-				directory: "/tmp/new-project",
+				folders: ["/tmp/new-project"],
 			})._tag,
-		).toBe("AddProject");
+		).toBe("SaveProject");
 		expect(
 			new RemoveProject({
 				projectSlug: "demo",
@@ -1347,12 +1347,13 @@ describe("browser WebSocket RPC contract", () => {
 			})._tag,
 		).toBe("RemoveProject");
 		expect(
-			new RenameProject({
+			new SaveProject({
 				projectSlug: "demo",
 				slug: "demo",
 				title: "Renamed Demo",
+				folders: ["/tmp/demo"],
 			})._tag,
-		).toBe("RenameProject");
+		).toBe("SaveProject");
 		expect(
 			new SetProjectInstance({
 				projectSlug: "demo",

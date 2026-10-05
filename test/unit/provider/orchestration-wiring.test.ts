@@ -1,4 +1,5 @@
 // test/unit/provider/orchestration-wiring.test.ts
+import { tmpdir } from "node:os";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
@@ -247,7 +248,7 @@ describe("Orchestration wiring", () => {
 		const client = makeStubClient();
 		const layer = await makeScopedOrchestrationView({
 			client,
-			workspaceRoot: "/my/project",
+			workspaceRoot: tmpdir(),
 		});
 
 		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);

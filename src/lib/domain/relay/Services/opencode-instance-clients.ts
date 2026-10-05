@@ -90,7 +90,7 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 					(instance) => instance.id === instanceId,
 				);
 				const auth =
-					instance?.managed && instance.driver !== "claude"
+					instance && instance.driver !== "claude"
 						? openCodeAuth(instance.env)
 						: undefined;
 				const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);

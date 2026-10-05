@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
 import { afterEach, expect } from "vitest";
@@ -104,6 +105,8 @@ describe("DaemonHandleTag", () => {
 		() => {
 			const configDir = mkdtempSync("/tmp/daemon-handle-");
 			fixtureDirs.push(configDir);
+			const projectDir = join(configDir, "new-project");
+			mkdirSync(projectDir);
 			const lifecycleContext = makeDaemonLifecycleContext("/tmp/relay.sock");
 			lifecycleContext.clientCount = 7;
 			const relayHealthBySlug = new Map([
@@ -190,18 +193,21 @@ describe("DaemonHandleTag", () => {
 					{
 						slug: "existing",
 						directory: "/tmp/existing",
+						folders: ["/tmp/existing"],
 						title: "Existing",
 						lastUsed: 100,
 					},
 					{
 						slug: "second",
 						directory: "/tmp/second",
+						folders: ["/tmp/second"],
 						title: "Second",
 						lastUsed: 90,
 					},
 					{
 						slug: "uncached",
 						directory: "/tmp/uncached",
+						folders: ["/tmp/uncached"],
 						title: "Uncached",
 						lastUsed: 80,
 					},
@@ -248,17 +254,16 @@ describe("DaemonHandleTag", () => {
 				expect(initialOnboardingPort).toBeNull();
 				expect(instances.map((instance) => instance.id)).toEqual(["default"]);
 
-				const added = yield* handle.addProject(
-					"/tmp/new-project",
-					"custom-slug",
-					"default",
-				);
-				expect(added.slug).toBe("custom-slug");
-				expect(added.instanceId).toBe("default");
+				const added = yield* handle.saveProject({
+					folders: [projectDir],
+					instanceId: "default",
+				});
+				expect(added.project.slug).toBe("new-project");
+				expect(added.project.instanceId).toBe("default");
 				const projects = yield* handle.getProjects();
 				expect(projects.map((project) => project.slug).sort()).toEqual([
-					"custom-slug",
 					"existing",
+					added.project.slug,
 					"second",
 					"uncached",
 				]);
@@ -267,7 +272,7 @@ describe("DaemonHandleTag", () => {
 				const afterRemove = yield* handle.getStatus();
 				expect(afterRemove.projectCount).toBe(3);
 				expect(afterRemove.projects.map((project) => project.slug)).toEqual([
-					"custom-slug",
+					"new-project",
 					"second",
 					"uncached",
 				]);

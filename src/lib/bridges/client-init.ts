@@ -35,6 +35,7 @@ import {
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
+import { busySessionIds } from "../session-busy.js";
 import { findContextWindowOptions } from "../shared-types.js";
 import type { OpenCodeInstance, ProviderInfo } from "../types.js";
 
@@ -131,14 +132,21 @@ const switchClientToSessionForInitEffect = (
 
 		wsHandler.setClientSession(clientId, sessionId);
 
-		const pollerIsProcessing = yield* statusPoller.isProcessing(sessionId);
 		const sessionService = yield* SessionManagerServiceTag;
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
+		// The poller is cold until its first poll and never starts without
+		// OpenCode, so the persisted family (children included) also counts.
+		const isProcessing =
+			busySessionIds(
+				new Map(family.sessions.map((session) => [session.id, session])),
+			).has(sessionId) ||
+			(yield* statusPoller.isProcessing(sessionId)) ||
+			hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
-			status: pollerIsProcessing || hasActiveTimeout ? "processing" : "idle",
+			status: isProcessing ? "processing" : "idle",
 		});
 		return family;
 	});

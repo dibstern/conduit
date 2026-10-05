@@ -152,15 +152,15 @@ export const sessionGoalHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert session goal subtitle",
-		match: /^the session goal subtitle reads (.+)$/,
+		match: /^the (amber )?session goal subtitle reads (.+)$/,
 		run: async ({ world, match }) => {
 			const subtitle = world.page.getByTestId("session-goal-subtitle");
-			await expect(subtitle).toHaveText(match[1] ?? "");
-			const presentation = await subtitle.evaluate((el) => {
+			await expect(subtitle).toHaveText(match[2] ?? "");
+			const presentation = await subtitle.evaluate((el, amber) => {
 				const style = getComputedStyle(el);
 				const expected = new Option().style;
 				const label = el.textContent?.trim() ?? "";
-				const token = label.startsWith("Not yet · ")
+				const token = amber
 					? "--color-status-amber"
 					: label.startsWith("Goal met")
 						? "--color-status-green"
@@ -173,7 +173,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 					icon: el.querySelector("svg") !== null,
 					ellipsis: text ? getComputedStyle(text).textOverflow : null,
 				};
-			});
+			}, match[1] !== undefined);
 			expect(presentation.color).toBe(presentation.tone);
 			expect(presentation.icon).toBe(true);
 			expect(presentation.ellipsis).toBe("ellipsis");
@@ -270,22 +270,12 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert not yet goal reason",
-		match: /^the composer goal reason reads (.+)$/,
+		name: "assert composer status omits text",
+		match: /^the composer status header does not include (.+)$/,
 		run: async ({ world, match }) => {
-			const reason = world.page.getByTestId("composer-status-goal-reason");
-			await expect(reason).toHaveText(match[1] ?? "");
-			await expect(reason.locator("svg")).toBeVisible();
-			await expect
-				.poll(() =>
-					reason.evaluate((el) => {
-						const style = getComputedStyle(el);
-						const expected = new Option().style;
-						expected.color = style.getPropertyValue("--color-status-amber");
-						return style.color === expected.color;
-					}),
-				)
-				.toBe(true);
+			const header = world.page.getByTestId("composer-status-header");
+			await expect(header).toBeVisible();
+			await expect(header).not.toContainText(match[1] ?? "");
 		},
 	},
 	{

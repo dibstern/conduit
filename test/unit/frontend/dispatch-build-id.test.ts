@@ -1,11 +1,27 @@
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+	WsRpcClient,
+	WsRpcClients,
+	WsRpcSockets,
+} from "../../../src/lib/frontend/transport/shared-client.js";
+import type { BannerConfig } from "../../../src/lib/frontend/types.js";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 
 const mocks = vi.hoisted(() => ({
 	refreshAppShell: vi.fn<() => Promise<void>>(),
 	persistInputDraft: vi.fn<() => Promise<boolean>>(),
-	showBanner: vi.fn(),
+	showBanner: vi.fn<(config: BannerConfig) => void>(),
 	removeBanner: vi.fn(),
+	showToast: vi.fn(),
+	restartWithConfig:
+		vi.fn<
+			(
+				input: Parameters<WsRpcClient["RestartWithConfig"]>[0],
+			) => Effect.Effect<{
+				readonly ok: true;
+			}>
+		>(),
 	reload: vi.fn(),
 	inputSyncState: { reloadPending: false },
 }));
@@ -28,12 +44,32 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
-	showToast: vi.fn(),
+	showToast: mocks.showToast,
 	showBanner: mocks.showBanner,
 	removeBanner: mocks.removeBanner,
 	setClientCount: vi.fn(),
 	updateContextPercent: vi.fn(),
 }));
+vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
+	const { Effect } = await import("effect");
+	const { WsRpcClients } = await import(
+		"../../../src/lib/frontend/transport/shared-client.js"
+	);
+	return {
+		runTransportEffect: <A, E>(effect: Effect.Effect<A, E, WsRpcClients>) =>
+			Effect.runPromise(
+				Effect.provideService(effect, WsRpcClients, {
+					forProject: () => {
+						const control: Pick<WsRpcClient, "RestartWithConfig"> = {
+							RestartWithConfig:
+								mocks.restartWithConfig as WsRpcClient["RestartWithConfig"],
+						};
+						return Effect.succeed({ control } as WsRpcSockets);
+					},
+				}),
+			),
+	};
+});
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 describe("build ID dispatch", () => {
@@ -45,6 +81,9 @@ describe("build ID dispatch", () => {
 		vi.clearAllMocks();
 		mocks.refreshAppShell.mockReset().mockResolvedValue(undefined);
 		mocks.persistInputDraft.mockReset().mockResolvedValue(true);
+		mocks.restartWithConfig
+			.mockReset()
+			.mockImplementation(() => Effect.succeed({ ok: true as const }));
 		mocks.inputSyncState.reloadPending = false;
 		const entries = new Map<string, string>();
 		vi.stubGlobal("sessionStorage", {
@@ -92,6 +131,169 @@ describe("build ID dispatch", () => {
 			buildId,
 		});
 	}
+
+	function serverUpdate(restartAvailable: boolean) {
+		handleMessage({ type: "server_update", restartAvailable });
+	}
+
+	function restartAction() {
+		const banner = mocks.showBanner.mock.calls
+			.map(([config]) => config)
+			.reverse()
+			.find((config) => config.id === "server-update");
+		expect(banner?.action?.label).toBe("Restart");
+		if (!banner?.action) throw new Error("No server restart action");
+		return banner.action.run;
+	}
+
+	it("shows the restart action when a server build is ready after a project UI reset", async () => {
+		serverUpdate(true);
+		const { onProjectAttached } = await import(
+			"../../../src/lib/frontend/stores/ws-listeners.js"
+		);
+		const unsubscribe = onProjectAttached(() => mocks.showBanner.mockClear());
+		handleMessage({ type: "project_attached", slug: "test-project" });
+		unsubscribe();
+		expect(mocks.showBanner).toHaveBeenCalledWith({
+			id: "server-update",
+			variant: "update",
+			icon: "refresh-cw",
+			text: "A new conduit build is ready. Restart the server to load it. Sessions and terminals keep running.",
+			summary: "New build ready",
+			dismissible: true,
+			action: { label: "Restart", run: expect.any(Function) },
+		});
+	});
+
+	it("removes the banner and disables its stale action when restart is unavailable", async () => {
+		serverUpdate(true);
+		const run = restartAction();
+		serverUpdate(false);
+		await run();
+		expect(mocks.removeBanner).toHaveBeenCalledWith("server-update");
+		expect(mocks.restartWithConfig).not.toHaveBeenCalled();
+	});
+
+	it("restarts through the RPC with no config and removes the banner on success", async () => {
+		serverUpdate(true);
+		await restartAction()();
+		expect(mocks.restartWithConfig).toHaveBeenCalledExactlyOnceWith({});
+		expect(mocks.removeBanner).toHaveBeenCalledWith("server-update");
+		expect(mocks.showToast).toHaveBeenCalledWith("Restarting conduit…");
+	});
+
+	it("ignores repeated restart clicks during and after an accepted request", async () => {
+		let finishRestart!: () => void;
+		const pending = new Promise<{ readonly ok: true }>((resolve) => {
+			finishRestart = () => resolve({ ok: true });
+		});
+		mocks.restartWithConfig.mockImplementation(() =>
+			Effect.promise(() => pending),
+		);
+		serverUpdate(true);
+		const run = restartAction();
+		const first = run();
+		const second = run();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(1);
+		serverUpdate(false);
+		serverUpdate(true);
+		const third = run();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(1);
+		serverUpdate(false);
+		finishRestart();
+		await Promise.all([first, second, third]);
+		handleMessage({ type: "project_attached", slug: "test-project" });
+		serverUpdate(true);
+		await run();
+		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(1);
+	});
+
+	it("restores the restart action after an error so it can be retried", async () => {
+		mocks.restartWithConfig.mockImplementationOnce(() =>
+			Effect.promise(() => Promise.reject(new Error("restart rejected"))),
+		);
+		serverUpdate(true);
+		const run = restartAction();
+		mocks.showBanner.mockClear();
+		await run();
+		expect(mocks.showToast).toHaveBeenCalledWith(
+			expect.stringContaining("restart rejected"),
+			{ variant: "error" },
+		);
+		await restartAction()();
+		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(2);
+		expect(mocks.showToast).toHaveBeenCalledWith("Restarting conduit…");
+	});
+
+	it("does not restore an obsolete restart banner when a pending request fails", async () => {
+		let failRestart!: () => void;
+		const pending = new Promise<{ readonly ok: true }>((_resolve, reject) => {
+			failRestart = () => reject(new Error("restart rejected"));
+		});
+		mocks.restartWithConfig.mockImplementation(() =>
+			Effect.promise(() => pending),
+		);
+		serverUpdate(true);
+		const request = restartAction()();
+		await vi.advanceTimersByTimeAsync(0);
+		serverUpdate(false);
+		mocks.showBanner.mockClear();
+		failRestart();
+		await request;
+		expect(mocks.showBanner).not.toHaveBeenCalled();
+	});
+
+	it("suppresses a build mismatch while restart is available and restores it when unavailable", () => {
+		sessionStorage.setItem("conduit-build-reload:B", "1");
+		handshake();
+		expect(mocks.showBanner).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "build-mismatch" }),
+		);
+		serverUpdate(true);
+		expect(mocks.removeBanner).toHaveBeenCalledWith("build-mismatch");
+		mocks.showBanner.mockClear();
+		handshake();
+		expect(mocks.showBanner).not.toHaveBeenCalled();
+		serverUpdate(false);
+		expect(mocks.showBanner).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "build-mismatch" }),
+		);
+	});
+
+	it("does not restore a mismatch after the server reports a matching build", () => {
+		sessionStorage.setItem("conduit-build-reload:B", "1");
+		handshake();
+		serverUpdate(true);
+		handshake("A");
+		mocks.showBanner.mockClear();
+		serverUpdate(false);
+		expect(mocks.showBanner).not.toHaveBeenCalled();
+	});
+
+	it("keeps automatic draft-saving reloads working while restart is available", async () => {
+		serverUpdate(true);
+		handshake();
+		await vi.runAllTimersAsync();
+		expect(mocks.refreshAppShell).toHaveBeenCalledTimes(1);
+		expect(mocks.persistInputDraft).toHaveBeenCalledTimes(1);
+		expect(mocks.reload).toHaveBeenCalledTimes(1);
+	});
+
+	it("defers a failed reload warning until restart is unavailable", async () => {
+		mocks.persistInputDraft.mockResolvedValueOnce(false);
+		serverUpdate(true);
+		handshake();
+		mocks.showBanner.mockClear();
+		await vi.runAllTimersAsync();
+		expect(mocks.showBanner).not.toHaveBeenCalled();
+		serverUpdate(false);
+		expect(mocks.showBanner).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "build-mismatch" }),
+		);
+		expect(mocks.reload).not.toHaveBeenCalled();
+	});
 
 	it.each([
 		"worker update",

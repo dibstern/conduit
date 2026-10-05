@@ -461,6 +461,7 @@ export interface ProjectInfo {
 	slug: string;
 	title: string;
 	directory: string;
+	folders?: readonly string[];
 	missing?: boolean;
 	git?: SessionGit;
 	clientCount?: number;
@@ -565,6 +566,7 @@ const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	folders: Schema.optional(Schema.Array(Schema.String)),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
@@ -1031,6 +1033,11 @@ const ProtocolVersionSchema = Schema.Struct({
 	buildId: Schema.optional(Schema.String),
 });
 
+const ServerUpdateSchema = Schema.Struct({
+	type: Schema.Literal("server_update"),
+	restartAvailable: Schema.Boolean,
+});
+
 const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
@@ -1188,6 +1195,7 @@ export const RelayMessageSchema = Schema.Union(
 	SystemErrorSchema,
 	ClientCountSchema,
 	ProtocolVersionSchema,
+	ServerUpdateSchema,
 	InputSyncSchema,
 	UpdateAvailableSchema,
 	// Instance Management

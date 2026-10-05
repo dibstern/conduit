@@ -3,11 +3,10 @@
 import { resolve } from "node:path";
 import type { Request } from "effect/Request";
 import {
-	AddProject,
 	GetProjects,
 	GetStatus,
 	RemoveProject,
-	RenameProject,
+	SaveProject,
 	SetPin,
 	Shutdown,
 } from "../lib/contracts/ws-rpc.js";
@@ -37,7 +36,10 @@ export interface CommandContext {
 	getTsIP: NonNullable<CLIOptions["getTailscaleIP"]>;
 }
 
-export async function handleServe(ctx: CommandContext): Promise<void> {
+export async function handleServe(
+	ctx: CommandContext,
+	onReady?: () => Promise<void>,
+): Promise<void> {
 	const { args, options, stdout, stderr, exit, startForegroundDaemonFn } = ctx;
 	const opencodeUrl = ENV.opencodeUrl || `http://localhost:${args.ocPort}`;
 
@@ -63,6 +65,7 @@ export async function handleServe(ctx: CommandContext): Promise<void> {
 			`  Relay:    ${scheme}://${status.host ?? "localhost"}:${daemon.port}\n`,
 		);
 		stdout.write("  Ready.\n\n");
+		await onReady?.();
 
 		await daemon.stopped;
 		exit(0);
@@ -175,8 +178,17 @@ export async function handleAdd(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		const response = await rpcSend(new AddProject({ directory: addDir }));
-		stdout.write(`Project added: ${response.addedSlug ?? addDir}\n`);
+		const { projects } = await rpcSend(new GetProjects({}));
+		const existing = projects.find(
+			(project) => (project.folders?.[0] ?? project.directory) === addDir,
+		);
+		const response = await rpcSend(
+			new SaveProject({
+				...(existing ? { slug: existing.slug } : {}),
+				folders: [addDir],
+			}),
+		);
+		stdout.write(`Project added: ${response.savedSlug}\n`);
 	} catch (err) {
 		stderr.write(`Failed to add project: ${formatErrorDetail(err)}\n`);
 		exit(1);
@@ -282,7 +294,9 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 		exit(1);
 		return;
 	}
-	const match = listResponse.projects.find((p) => p.directory === cwd);
+	const match = listResponse.projects.find(
+		(project) => (project.folders?.[0] ?? project.directory) === resolve(cwd),
+	);
 
 	if (!match) {
 		stderr.write(`Current directory is not registered: ${cwd}\n`);
@@ -291,7 +305,13 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 	}
 
 	try {
-		await rpcSend(new RenameProject({ slug: match.slug, title: args.title }));
+		await rpcSend(
+			new SaveProject({
+				slug: match.slug,
+				title: args.title,
+				folders: match.folders ?? [match.directory],
+			}),
+		);
 		stdout.write(`Title updated: ${args.title}\n`);
 	} catch (err) {
 		stderr.write(`Failed to set title: ${formatErrorDetail(err)}\n`);

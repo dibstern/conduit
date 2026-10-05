@@ -4,6 +4,7 @@
 // Two-tier dispatcher routes per-session events by event.sessionId
 // via routePerSession. Global events handled by handleMessage directly.
 
+import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { notificationContent } from "../../notification-content.js";
 import {
@@ -11,6 +12,8 @@ import {
 	type PerSessionEventType,
 	WS_PROTOCOL_VERSION,
 } from "../../shared-types.js";
+import { runTransportEffect } from "../transport/runtime.js";
+import { WsRpcClients } from "../transport/shared-client.js";
 import type {
 	GetFileContentResponse,
 	GetFileListResponse,
@@ -74,6 +77,7 @@ import { handleProjectList } from "./project.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
+	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
 import {
@@ -305,6 +309,7 @@ export function handleMessage(msg: RelayMessage): void {
 				activity.replayGeneration++;
 		attachedProjectState.slug = msg.slug;
 		for (const listener of projectAttachedListeners) listener(msg.slug);
+		handleServerUpdate(serverUpdateAvailable);
 		return;
 	}
 	// Per-session events are routed by event.sessionId to the correct
@@ -425,6 +430,10 @@ export function handleMessage(msg: RelayMessage): void {
 		case "protocol_version":
 			handleProtocolVersion(msg.version);
 			handleBuildId(msg.buildId);
+			break;
+		case "server_update":
+			if (!msg.restartAvailable) serverRestartAccepted = false;
+			handleServerUpdate(msg.restartAvailable);
 			break;
 		case "connection_status":
 			handleConnectionStatus(msg);
@@ -693,9 +702,16 @@ const PROTOCOL_VERSION_GRACE_MS = 10_000;
 let protocolVersionTimer: ReturnType<typeof setTimeout> | null = null;
 
 const BUILD_MISMATCH_BANNER_ID = "build-mismatch";
+const SERVER_UPDATE_BANNER_ID = "server-update";
 let buildReloadPending = false;
+let buildMismatchWarning = false;
+let serverUpdateAvailable = false;
+let serverRestartInFlight = false;
+let serverRestartAccepted = false;
 
 function showBuildMismatchBanner(): void {
+	buildMismatchWarning = true;
+	if (serverUpdateAvailable) return;
 	showBanner({
 		id: BUILD_MISMATCH_BANNER_ID,
 		variant: "warning",
@@ -706,10 +722,69 @@ function showBuildMismatchBanner(): void {
 	});
 }
 
+function showServerUpdateBanner(): void {
+	showBanner({
+		id: SERVER_UPDATE_BANNER_ID,
+		variant: "update",
+		icon: "refresh-cw",
+		text: "A new conduit build is ready. Restart the server to load it. Sessions and terminals keep running.",
+		summary: "New build ready",
+		dismissible: true,
+		action: {
+			label: "Restart",
+			run: async () => {
+				if (
+					!serverUpdateAvailable ||
+					serverRestartInFlight ||
+					serverRestartAccepted
+				)
+					return;
+				serverRestartInFlight = true;
+				try {
+					await runTransportEffect(
+						Effect.gen(function* () {
+							const clients = yield* WsRpcClients;
+							const { control } = yield* clients.forProject(
+								getCurrentSlug() ?? "",
+							);
+							return yield* control.RestartWithConfig({});
+						}),
+					);
+					serverRestartAccepted = true;
+					removeBanner(SERVER_UPDATE_BANNER_ID);
+					showToast("Restarting conduit…");
+				} catch (error: unknown) {
+					const reason =
+						error instanceof Error ? error.message : "the daemon rejected it.";
+					showToast(`Failed to restart conduit: ${reason}`, {
+						variant: "error",
+					});
+					if (serverUpdateAvailable) showServerUpdateBanner();
+				} finally {
+					serverRestartInFlight = false;
+				}
+			},
+		},
+	});
+}
+
+function handleServerUpdate(restartAvailable: boolean): void {
+	serverUpdateAvailable = restartAvailable;
+	if (restartAvailable) {
+		removeBanner(BUILD_MISMATCH_BANNER_ID);
+		if (!serverRestartInFlight && !serverRestartAccepted)
+			showServerUpdateBanner();
+	} else {
+		removeBanner(SERVER_UPDATE_BANNER_ID);
+		if (buildMismatchWarning) showBuildMismatchBanner();
+	}
+}
+
 function handleBuildId(serverBuildId: string | undefined): void {
 	if (buildReloadPending) return;
 	const action = claimBuildReload(BUILD_ID, serverBuildId);
 	if (action === "current") {
+		buildMismatchWarning = false;
 		removeBanner(BUILD_MISMATCH_BANNER_ID);
 		return;
 	}

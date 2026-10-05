@@ -180,11 +180,7 @@ it.each([
 				? [{ id: "p1", sessionID: "s1", permission: "bash" }]
 				: [],
 	});
-	const {
-		getSessionStatuses: _statuses,
-		statusPoller: _poller,
-		...base
-	} = deps;
+	const { statusPoller: _poller, ...base } = deps;
 	const callbacks: {
 		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
 	} = {
@@ -279,11 +275,7 @@ it.each([
 		},
 	});
 	const warn = vi.spyOn(deps.log, "warn");
-	const {
-		getSessionStatuses: _statuses,
-		statusPoller: _poller,
-		...base
-	} = deps;
+	const { statusPoller: _poller, ...base } = deps;
 	const callbacks: {
 		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
 	} = {
@@ -357,11 +349,7 @@ it("recovery skips a question answered while the preceding push is in flight", a
 			},
 		},
 	});
-	const {
-		getSessionStatuses: _statuses,
-		statusPoller: _poller,
-		...base
-	} = deps;
+	const { statusPoller: _poller, ...base } = deps;
 	const callbacks: {
 		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
 	} = {

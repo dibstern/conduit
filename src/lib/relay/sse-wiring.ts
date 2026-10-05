@@ -86,10 +86,6 @@ export interface SSEWiringDeps {
 	pushManager?: PushNotificationSender;
 	log: Logger;
 	pipelineLog: Logger;
-	/** Optional: current session statuses for processing flags. */
-	getSessionStatuses?: () => Effect.Effect<
-		Record<string, import("../instance/sdk-types.js").SessionStatus>
-	>;
 	/** Optional: REST client for rehydrating pending questions on reconnect */
 	listPendingQuestions?: () => Promise<
 		Array<{ id: string; [key: string]: unknown }>
@@ -561,12 +557,7 @@ function questionAskedPush(
 	};
 }
 
-const refreshSessionListAfterUpdateEffect = (
-	deps: SSEWiringDeps,
-	statuses:
-		| Record<string, import("../instance/sdk-types.js").SessionStatus>
-		| undefined,
-) =>
+const refreshSessionListAfterUpdateEffect = (deps: SSEWiringDeps) =>
 	Effect.gen(function* () {
 		const sessionService = yield* SessionManagerServiceTag;
 		yield* sessionService
@@ -604,10 +595,7 @@ const handleSSEEventAfterPendingEffect = (
 				}
 			}
 
-			const statuses = deps.getSessionStatuses
-				? yield* deps.getSessionStatuses()
-				: undefined;
-			yield* refreshSessionListAfterUpdateEffect(deps, statuses);
+			yield* refreshSessionListAfterUpdateEffect(deps);
 		}
 
 		if (isSessionErrorEvent(event)) {

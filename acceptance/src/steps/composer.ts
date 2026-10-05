@@ -253,7 +253,7 @@ export const composerHandlers: StepHandler[] = [
 					: "permission-mode-badge",
 			);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
-			await button.click({ delay: 500 });
+			await button.click({ delay: 1000 });
 			await expect(
 				world.page.getByTestId("permission-mode-dropdown"),
 			).toBeVisible();

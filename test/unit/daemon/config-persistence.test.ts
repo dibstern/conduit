@@ -174,7 +174,16 @@ describe("saveDaemonConfig", () => {
 		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 
-		expect(loaded).toEqual(config);
+		expect(loaded).toEqual({
+			...config,
+			projects: [
+				{
+					...config.projects[0],
+					directory: "/home/user/project",
+					folders: ["/home/user/project"],
+				},
+			],
+		});
 	});
 });
 

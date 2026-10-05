@@ -68,7 +68,10 @@ async function setupWithProjectManagement(
 	let relay: WsMockControl | undefined;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
-			AttachProject: (params) => {
+			AttachProject: async (params) => {
+				// A real attach takes a round trip or two; an instant answer would
+				// hide anything that races it.
+				await new Promise((resolve) => setTimeout(resolve, 300));
 				rpc.setShellRows(
 					sessions.filter(
 						(session) => session.projectSlug === params["projectSlug"],
@@ -89,7 +92,8 @@ async function setupWithProjectManagement(
 				),
 				roots: true,
 			}),
-			ListDaemonSessions: (params) => {
+			ListDaemonSessions: async (params) => {
+				await new Promise((resolve) => setTimeout(resolve, 150));
 				const limit = Number(params["limit"] ?? Infinity);
 				const cursor = params["cursor"] as { id: string } | undefined;
 				const scoped = sessions
@@ -121,15 +125,33 @@ async function setupWithProjectManagement(
 					entries: getMockDirectories(path),
 				};
 			},
-			RenameProject: (params) => {
-				const slug = String(params["slug"] ?? "");
-				const title = String(params["title"] ?? "");
+			SaveProject: (params) => {
+				const slug = String(params["slug"] ?? "new-project");
+				const title = String(params["title"] ?? "new-project");
+				const folders = params["folders"] as string[];
 				return {
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
-					projects: baseProjects().map((project) =>
-						project.slug === slug ? { ...project, title } : project,
-					),
+					projects: params["slug"]
+						? baseProjects().map((project) =>
+								project.slug === slug
+									? { ...project, title, folders }
+									: project,
+							)
+						: [
+								...baseProjects(),
+								{
+									slug,
+									title,
+									directory: folders[0] ?? "/src/new-project",
+									folders,
+									...(typeof params["instanceId"] === "string"
+										? { instanceId: params["instanceId"] }
+										: {}),
+								},
+							],
 					current: "myapp",
+					savedSlug: slug,
+					warnings: [],
 				};
 			},
 			RemoveProject: (params) => {
@@ -140,22 +162,6 @@ async function setupWithProjectManagement(
 					current: "myapp",
 				};
 			},
-			AddProject: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				projects: [
-					...baseProjects(),
-					{
-						slug: "new-project",
-						title: "new-project",
-						directory: String(params["directory"] ?? "/src/new-project"),
-						...(typeof params["instanceId"] === "string"
-							? { instanceId: params["instanceId"] }
-							: {}),
-					},
-				],
-				current: "myapp",
-				addedSlug: "new-project",
-			}),
 		},
 	});
 	rpc.setShellRows(
@@ -298,9 +304,9 @@ test("adds a project through the projects panel", async ({ page, baseURL }) => {
 	await panel.getByRole("combobox").fill("/src/new-project");
 	await panel.getByRole("button", { name: "Add", exact: true }).click();
 	const request = await control.rpc.waitForRequest(
-		(req) => req.tag === "AddProject",
+		(req) => req.tag === "SaveProject",
 	);
-	expect(request.payload).toMatchObject({ directory: "/src/new-project" });
+	expect(request.payload).toMatchObject({ folders: ["/src/new-project"] });
 	await expect(panel).toBeHidden();
 	await openProjectsPanel(page);
 	await expect(panel.getByTestId("project-item")).toHaveCount(3);
@@ -365,6 +371,46 @@ test("clearing the scope after adding a project pages in every session", async (
 	await page.getByRole("button", { name: "Clear project scope" }).click();
 	await expect(sessions.filter({ hasText: "Library session" })).toHaveCount(1);
 	await expect(sessions).toHaveCount(before.length);
+});
+
+test("switching projects while the list pages does not fail the switch", async ({
+	page,
+	baseURL,
+}) => {
+	const now = Date.now();
+	// Mostly settled, so each page leaves the pager's sentinel on screen and
+	// paging keeps going while the switch is in flight.
+	const many = ["myapp", "mylib"].flatMap((projectSlug) =>
+		Array.from({ length: 45 }, (_, index) => ({
+			id: `sess-${projectSlug}-${String(index).padStart(2, "0")}`,
+			title: `${projectSlug} ${index}`,
+			status: "idle",
+			projectSlug,
+			updatedAt: now - 1000 - index,
+			messageCount: 0,
+			...(index % 9 === 0 ? {} : { settledAt: now - 500 }),
+		})),
+	);
+	const control = await setupWithProjectManagement(
+		page,
+		baseURL,
+		PROJECT_URL,
+		many,
+	);
+	for (const target of ["mylib", "myapp", "mylib"]) {
+		await page.getByTestId("session-scope-chip").click();
+		await page
+			.getByRole("menuitemradio", { name: new RegExp(`^${target}\\b`) })
+			.click();
+		await control.rpc.waitForRequest(
+			(request) =>
+				request.tag === "AttachProject" &&
+				request.payload["projectSlug"] === target,
+		);
+		await expect(page.getByTestId("session-scope-chip")).toHaveText(target);
+		await page.waitForTimeout(800);
+	}
+	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
 });
 
 test.describe("Directory Autocomplete", () => {
@@ -675,11 +721,12 @@ test.describe("Project Rename", () => {
 		await expect(renameInput).not.toBeVisible();
 
 		const request = await control.rpc.waitForRequest(
-			(req) => req.tag === "RenameProject",
+			(req) => req.tag === "SaveProject",
 		);
 		expect(request.payload).toMatchObject({
 			slug: "mylib",
 			title: "My Library",
+			folders: ["/src/mylib"],
 		});
 	});
 
@@ -706,7 +753,7 @@ test.describe("Project Rename", () => {
 		await page.waitForTimeout(300);
 		const renameRequests = control.rpc
 			.getRequests()
-			.filter((request) => request.tag === "RenameProject");
+			.filter((request) => request.tag === "SaveProject");
 		expect(renameRequests).toHaveLength(0);
 	});
 

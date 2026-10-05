@@ -13,6 +13,7 @@ function makeProject(slug: string, dir?: string): StoredProject {
 	return {
 		slug,
 		directory: dir ?? `/test/${slug}`,
+		folders: [dir ?? `/test/${slug}`],
 		title: slug,
 		lastUsed: Date.now(),
 	};

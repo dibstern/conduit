@@ -72,7 +72,7 @@
 		// Subscribe to live PTY output (high-throughput, bypasses Svelte reactivity)
 		const unsubOutput = onOutput(ptyId, (data: string, replace?: boolean) => {
 			// Queue cancellation and reset after any earlier writes, before replay.
-			xterm.write(replace ? "\x18\x1bc" + data : data);
+			xterm.write(replace ? `\x18\x1bc${data}` : data);
 		});
 
 		// Send initial dimensions to server

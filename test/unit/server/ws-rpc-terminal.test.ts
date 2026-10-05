@@ -10,6 +10,7 @@ import type {
 import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	MOCK_PROJECT_DIR,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
@@ -136,7 +137,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				).toEqual({ ok: true });
 				expect(api.pty.create).not.toHaveBeenCalled();
 				expect(localPty.create).toHaveBeenCalledWith({
-					cwd: "/test/project",
+					cwd: MOCK_PROJECT_DIR,
 				});
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "pty_created",

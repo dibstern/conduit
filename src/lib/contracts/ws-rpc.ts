@@ -1,5 +1,6 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
+import type { FolderIssue } from "../project-folders.js";
 import {
 	SessionGitSchema,
 	type SessionInfo,
@@ -145,6 +146,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	directory: Schema.String,
+	folders: Schema.optional(Schema.Array(Schema.String)),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
@@ -436,7 +438,82 @@ export const ProjectMutationResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
 	current: Schema.optional(Schema.String),
-	addedSlug: Schema.optional(Schema.String),
+});
+
+export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
+	Schema.Struct({ kind: Schema.Literal("empty") }),
+	Schema.Struct({ kind: Schema.Literal("duplicate"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("main-taken"),
+		path: Schema.String,
+		slug: Schema.String,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("nested"),
+		path: Schema.String,
+		parent: Schema.String,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("unknown-project"),
+		slug: Schema.String,
+	}),
+	Schema.Struct({ kind: Schema.Literal("missing"), path: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("not-a-folder"), path: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("create-exists"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("mkdir-failed"),
+		path: Schema.String,
+		message: Schema.String,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("git-init-failed"),
+		path: Schema.String,
+		message: Schema.String,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("sessions-running"),
+		count: Schema.Number,
+	}),
+);
+
+export const ProjectFolderInputSchema = Schema.Union(
+	NonEmptyString,
+	Schema.Struct({
+		path: NonEmptyString,
+		create: Schema.Struct({ gitInit: Schema.Boolean }),
+	}),
+);
+
+export type ProjectFolderInput = typeof ProjectFolderInputSchema.Type;
+export interface SaveProjectInput {
+	readonly slug?: string | undefined;
+	readonly title?: string | undefined;
+	readonly folders: readonly ProjectFolderInput[];
+	readonly instanceId?: string | undefined;
+}
+
+export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
+	"ProjectSaveRejected",
+	{ issues: Schema.Array(FolderIssueSchema) },
+) {
+	get message(): string {
+		return this.issues
+			.map((issue) => {
+				if ("message" in issue)
+					return `${issue.kind}: ${issue.path}: ${issue.message}`;
+				if ("path" in issue) return `${issue.kind}: ${issue.path}`;
+				if ("slug" in issue) return `${issue.kind}: ${issue.slug}`;
+				if ("count" in issue) return `${issue.kind}: ${issue.count}`;
+				return issue.kind;
+			})
+			.join("; ");
+	}
+}
+
+export const SaveProjectResponseSchema = Schema.Struct({
+	...ProjectMutationResponseSchema.fields,
+	savedSlug: Schema.String,
+	warnings: Schema.Array(FolderIssueSchema),
 });
 
 export const InstanceListResponseSchema = Schema.Struct({
@@ -571,6 +648,7 @@ export type GetCommandsResponse = typeof GetCommandsResponseSchema.Type;
 export type ProjectInfo = typeof ProjectInfoSchema.Type;
 export type GetProjectsResponse = typeof GetProjectsResponseSchema.Type;
 export type ProjectMutationResponse = typeof ProjectMutationResponseSchema.Type;
+export type SaveProjectResponse = typeof SaveProjectResponseSchema.Type;
 export type OpenCodeInstance = typeof OpenCodeInstanceSchema.Type;
 export type InstanceListResponse = typeof InstanceListResponseSchema.Type;
 export type GetInstanceStatusResponse =
@@ -744,14 +822,16 @@ export class GetProjects extends Schema.TaggedRequest<GetProjects>()(
 	},
 ) {}
 
-export class AddProject extends Schema.TaggedRequest<AddProject>()(
-	"AddProject",
+export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
+	"SaveProject",
 	{
-		failure: WsRpcError,
-		success: ProjectMutationResponseSchema,
+		failure: Schema.Union(WsRpcError, ProjectSaveRejected),
+		success: SaveProjectResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
-			directory: NonEmptyString,
+			slug: Schema.optional(NonEmptyString),
+			title: Schema.optional(NonEmptyString),
+			folders: Schema.Array(ProjectFolderInputSchema),
 			instanceId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -765,19 +845,6 @@ export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
-		},
-	},
-) {}
-
-export class RenameProject extends Schema.TaggedRequest<RenameProject>()(
-	"RenameProject",
-	{
-		failure: WsRpcError,
-		success: ProjectMutationResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			slug: NonEmptyString,
-			title: NonEmptyString,
 		},
 	},
 ) {}
@@ -1667,9 +1734,8 @@ export const WsRpcRequest = Schema.Union(
 	GetSkillContent,
 	GetSessionSkills,
 	GetModels,
-	AddProject,
+	SaveProject,
 	RemoveProject,
-	RenameProject,
 	SetProjectInstance,
 	StartInstance,
 	StopInstance,
@@ -1775,9 +1841,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetSkillContent),
 	Rpc.fromTaggedRequest(GetSessionSkills),
 	Rpc.fromTaggedRequest(GetModels),
-	Rpc.fromTaggedRequest(AddProject),
+	Rpc.fromTaggedRequest(SaveProject),
 	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(RenameProject),
 	Rpc.fromTaggedRequest(SetProjectInstance),
 	Rpc.fromTaggedRequest(StartInstance),
 	Rpc.fromTaggedRequest(StopInstance),

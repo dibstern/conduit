@@ -1217,6 +1217,7 @@ export const makeProcessClaudeSessionRunner = (
 				let admitted: RunnerChild | undefined;
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
+				let latestResumeSessionId: string | undefined;
 				return Effect.gen(function* () {
 					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
@@ -1251,6 +1252,41 @@ export const makeProcessClaudeSessionRunner = (
 										),
 									);
 								const existing = children.get(sessionId);
+								if (
+									existing &&
+									(command.type === "send-turn" || command.type === "pre-warm")
+								) {
+									const launch = existing.upgrade.state?.snapshot?.input;
+									const previousExtra = launch?.extraFolders ?? [];
+									const nextExtra = command.input.extraFolders ?? [];
+									const foldersChanged =
+										launch !== undefined &&
+										(launch.workspaceRoot !== command.input.workspaceRoot ||
+											previousExtra.length !== nextExtra.length ||
+											previousExtra.some(
+												(folder, index) => folder !== nextExtra[index],
+											));
+									if (foldersChanged && command.type === "pre-warm")
+										return { entry: undefined, draining: false };
+									if (
+										foldersChanged &&
+										!existing.failure &&
+										!existing.recovering &&
+										!existing.stopping &&
+										!existing.idleExiting &&
+										existing.ending === 0 &&
+										existing.commandsInFlight === 0 &&
+										existing.upgrade.state?.quiescent === true
+									) {
+										existing.endingReleased = yield* Deferred.make<void>();
+										existing.ending++;
+										return {
+											entry: existing,
+											draining: true,
+											retire: existing,
+										};
+									}
+								}
 								if (
 									command.type === "pre-warm" &&
 									existing &&
@@ -1323,6 +1359,26 @@ export const makeProcessClaudeSessionRunner = (
 						);
 						entry = selection.entry;
 						draining = selection.draining;
+						if (selection.retire) {
+							const retiring = selection.retire;
+							yield* runner
+								.executeEffect({ type: "end-session", sessionId })
+								.pipe(
+									Effect.ensuring(
+										Effect.gen(function* () {
+											if (--retiring.ending === 0 && retiring.endingReleased)
+												yield* Deferred.succeed(
+													retiring.endingReleased,
+													undefined,
+												);
+										}),
+									),
+									Effect.uninterruptible,
+								);
+							latestResumeSessionId =
+								retiring.upgrade.state?.resumeSessionId ??
+								latestResumeSessionId;
+						}
 						// Old cleanup is session-wide. Finish it before a replacement
 						// can register interactions or publish a new busy status.
 						if (entry && draining)
@@ -1331,6 +1387,9 @@ export const makeProcessClaudeSessionRunner = (
 									? selection.admission
 									: entry.drained,
 							);
+						if (entry && draining)
+							latestResumeSessionId =
+								entry.upgrade.state?.resumeSessionId ?? latestResumeSessionId;
 					} while (draining);
 					if (!entry) return;
 					child = entry;
@@ -1358,7 +1417,16 @@ export const makeProcessClaudeSessionRunner = (
 									// Only an agent switch consumes history. Keep it server-side
 									// until requested rather than serializing it on every warm send.
 									historyOnDemand: true,
-									input: { ...command.input, history: [] },
+									input: {
+										...command.input,
+										history: [],
+										providerState: latestResumeSessionId
+											? {
+													...command.input.providerState,
+													resumeSessionId: latestResumeSessionId,
+												}
+											: command.input.providerState,
+									},
 									...(entry.upgrade.state?.frozen
 										? {
 												claudeSettingsOverrides:
@@ -1460,6 +1528,9 @@ export const makeProcessClaudeSessionRunner = (
 					Effect.ensuring(
 						Effect.sync(() => {
 							if (!admitted) return;
+							latestResumeSessionId =
+								admitted.upgrade.state?.resumeSessionId ??
+								latestResumeSessionId;
 							admitted.commandsInFlight--;
 							upgrade(admittedSessionId, admitted);
 							admitted = undefined;
@@ -1521,5 +1592,6 @@ export const makeProcessClaudeSessionRunner = (
 				);
 			}
 		}
-		return new ProcessClaudeSessionRunner();
+		const runner = new ProcessClaudeSessionRunner();
+		return runner;
 	});

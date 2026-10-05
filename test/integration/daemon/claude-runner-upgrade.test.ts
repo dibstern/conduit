@@ -35,7 +35,7 @@ function sdkProof(harness: ProcessHarness): ProcessMark[] {
 }
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(join(harness.projectDir, ".conduit/events.db"), {
+	const db = new Database(harness.projectStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -73,7 +73,7 @@ function queryFor(harness: ProcessHarness, pid: number) {
 }
 
 function childFinalizerResult(harness: ProcessHarness) {
-	const db = new Database(join(harness.projectDir, ".conduit/events.db"), {
+	const db = new Database(harness.projectStorePath(), {
 		readonly: true,
 	});
 	try {
@@ -1053,7 +1053,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const expectedResume =
 			cursorSource === "incoming" ? randomUUID() : originalQuery.sessionId;
 		if (cursorSource === "incoming") {
-			const db = new Database(join(harness.projectDir, ".conduit/events.db"));
+			const db = new Database(harness.projectStorePath());
 			try {
 				db.prepare(
 					"INSERT INTO provider_state (session_id, key, value) VALUES (?, 'resumeSessionId', ?)",

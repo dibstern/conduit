@@ -21,8 +21,8 @@ Scenario Outline: Claude continues working after a failed goal check
   And the composer status clock is frozen
   When Claude sets the goal <condition>
   And Claude reports the goal check <reason>
-  Then the session goal subtitle reads <condition> · 1 check · <reason>
-  And the composer goal reason reads Not yet: <reason>. Continuing.
+  Then the session goal subtitle reads <condition> · 1 check
+  And the composer status header does not include <reason>
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent
 
@@ -36,7 +36,7 @@ Scenario Outline: An idle failed check has an amber subtitle
   When Claude sets the goal <condition>
   And Claude reports the goal check <reason>
   And Claude is idle
-  Then the session goal subtitle reads Not yet · <reason> · check 1
+  Then the amber session goal subtitle reads <condition> · 1 check
   And the composer status header is not visible
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent

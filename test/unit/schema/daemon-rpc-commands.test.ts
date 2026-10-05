@@ -29,14 +29,14 @@ describe("Daemon RPC command schema validation", () => {
 		).toBe(true);
 	});
 
-	it("decodes add_project command", () => {
-		const raw = { _tag: "AddProject", directory: "/home/user/project" };
+	it("decodes save_project command", () => {
+		const raw = { _tag: "SaveProject", folders: ["/home/user/project"] };
 		const result = Schema.decodeUnknownEither(WsRpcRequest)(raw);
 		expect(Either.isRight(result)).toBe(true);
 	});
 
-	it("rejects add_project with empty directory", () => {
-		const raw = { _tag: "AddProject", directory: "" };
+	it("rejects save_project with an empty folder path", () => {
+		const raw = { _tag: "SaveProject", folders: [""] };
 		const result = Schema.decodeUnknownEither(WsRpcRequest)(raw);
 		expect(Either.isLeft(result)).toBe(true);
 	});
@@ -49,7 +49,7 @@ describe("Daemon RPC command schema validation", () => {
 
 	it("decodes a parsed tagged JSON request", () => {
 		const result = Schema.decodeUnknownEither(WsRpcRequest)(
-			JSON.parse('{"_tag":"AddProject","directory":"/home/user/project"}'),
+			JSON.parse('{"_tag":"SaveProject","folders":["/home/user/project"]}'),
 		);
 		expect(Either.isRight(result)).toBe(true);
 	});
@@ -118,18 +118,20 @@ describe("Daemon RPC command schema validation", () => {
 
 	it("decodes set_project_title", () => {
 		const result = Schema.decodeUnknownEither(WsRpcRequest)({
-			_tag: "RenameProject",
+			_tag: "SaveProject",
 			slug: "proj",
 			title: "My Title",
+			folders: ["/home/user/project"],
 		});
 		expect(Either.isRight(result)).toBe(true);
 	});
 
 	it("rejects set_project_title with empty slug", () => {
 		const result = Schema.decodeUnknownEither(WsRpcRequest)({
-			_tag: "RenameProject",
+			_tag: "SaveProject",
 			slug: "",
 			title: "foo",
+			folders: ["/home/user/project"],
 		});
 		expect(Either.isLeft(result)).toBe(true);
 	});

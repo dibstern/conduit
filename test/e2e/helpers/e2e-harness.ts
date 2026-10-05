@@ -215,7 +215,7 @@ export async function createReplayHarness(
 	if (claudeReplayer) {
 		// Capability discovery would otherwise spawn the real Claude CLI.
 		__setProbeOverrideForTesting(async () => ({
-			models: [
+			models: options.claudeReplay?.models ?? [
 				{
 					id: CLAUDE_TRACE_MODEL,
 					name: "Claude Fable 5",

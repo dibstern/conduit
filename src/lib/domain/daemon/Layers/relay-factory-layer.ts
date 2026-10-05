@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import { resolve } from "node:path";
+import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Cause,
@@ -26,6 +26,11 @@ import {
 } from "effect";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
+import {
+	projectEventsDbPath,
+	projectStorageDir,
+	writeProjectStorageOwner,
+} from "../../../persistence/project-storage.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
@@ -108,9 +113,8 @@ export interface RelayFactory {
 }
 
 export interface RelayFactoryProjectControls {
-	readonly addProject: NonNullable<ProjectRelayConfig["addProject"]>;
+	readonly saveProject: NonNullable<ProjectRelayConfig["saveProject"]>;
 	readonly removeProject: NonNullable<ProjectRelayConfig["removeProject"]>;
-	readonly setProjectTitle: NonNullable<ProjectRelayConfig["setProjectTitle"]>;
 	readonly setProjectInstance: NonNullable<
 		ProjectRelayConfig["setProjectInstance"]
 	>;
@@ -195,7 +199,7 @@ export const RelayFactoryLive = (
 				ProjectRelayConfig["listDaemonSessions"]
 			> = (options) =>
 				runCallback(
-					listEffectDaemonSessions(options).pipe(
+					listEffectDaemonSessions(configDir, options).pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 					),
 				);
@@ -314,17 +318,32 @@ export const RelayFactoryLive = (
 								reason: `Project directory does not exist: ${project.directory}`,
 							});
 						}
-						const conduitDir = resolve(project.directory, ".conduit");
+						const dbPath = projectEventsDbPath({ configDir, ...project });
+						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
-							try: () => mkdirSync(conduitDir, { recursive: true }),
+							try: () => {
+								mkdirSync(storageDir, { recursive: true });
+								writeProjectStorageOwner(
+									configDir,
+									project.slug,
+									project.directory,
+								);
+							},
 							catch: (cause) =>
 								new RelayFactoryError({
-									reason: `Failed to create .conduit directory at ${conduitDir}`,
+									reason: `Failed to prepare project storage at ${storageDir}`,
 									cause,
 								}),
-						});
-
-						const dbPath = resolve(conduitDir, "events.db");
+						}).pipe(
+							Effect.catchAll((error) =>
+								dbPath === join(storageDir, "events.db")
+									? Effect.fail(error)
+									: Effect.logWarning(
+											"Using legacy project history after storage setup failed",
+											{ projectSlug: project.slug, cause: error },
+										),
+							),
+						);
 
 						// Dynamic import to avoid circular dependency at module load time
 						const { createProjectRelay } = yield* Effect.tryPromise({
@@ -349,16 +368,17 @@ export const RelayFactoryLive = (
 									instance.driver !== "claude" &&
 									instance.id === project.instanceId,
 							) ?? instances.find((instance) => instance.driver !== "claude");
-						const opencodeAuth = selectedInstance?.managed
-							? openCodeAuth(
-									yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
+						// Managed passwords live only in the private process record.
+						const opencodeAuth = openCodeAuth(
+							selectedInstance?.managed
+								? yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
 										Effect.provideService(
 											InstanceManagerStateTag,
 											instanceState,
 										),
-									),
-								)
-							: undefined;
+									)
+								: selectedInstance?.env,
+						);
 						envResolver?.register(project.directory, project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
@@ -376,6 +396,7 @@ export const RelayFactoryLive = (
 									opencodeUrl,
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.directory,
+									extraFolders: project.folders.slice(1),
 									...(envResolver && {
 										shellEnv: (directory: string) => envResolver.get(directory),
 										prepareShellEnv: (directory: string) =>
@@ -411,9 +432,8 @@ export const RelayFactoryLive = (
 										pushManager: relayPushSender,
 									}),
 									...(projectControls != null && {
-										addProject: projectControls.addProject,
+										saveProject: projectControls.saveProject,
 										removeProject: projectControls.removeProject,
-										setProjectTitle: projectControls.setProjectTitle,
 										setProjectInstance: projectControls.setProjectInstance,
 									}),
 								});

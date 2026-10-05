@@ -65,7 +65,6 @@ export function applyProjectMutationResponse(
 		type: "project_list",
 		projects: toProjectInfoList(response.projects),
 		...(response.current != null ? { current: response.current } : {}),
-		...(response.addedSlug != null ? { addedSlug: response.addedSlug } : {}),
 	});
 }
 
@@ -112,6 +111,7 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		directory: project.directory,
+		...(project.folders != null ? { folders: [...project.folders] } : {}),
 		...(project.git != null ? { git: project.git } : {}),
 		...(project.clientCount != null
 			? { clientCount: project.clientCount }

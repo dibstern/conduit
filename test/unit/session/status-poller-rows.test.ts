@@ -22,13 +22,8 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
-it("the poller returns source statuses without parent or message-activity augmentation", async () => {
-	const api = makeMockOpenCodeAPI();
-	vi.spyOn(api.session, "statuses").mockResolvedValue({
-		parent: { type: "idle" },
-		child: { type: "busy" },
-	});
-	const layer = StatusPollerLive.pipe(
+const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
+	StatusPollerLive.pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
 				makePersistenceEffectLayer(":memory:"),
@@ -45,14 +40,40 @@ it("the poller returns source statuses without parent or message-activity augmen
 			),
 		),
 	);
+
+const insertParentAndBusyChild = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+		VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1)`;
+	yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at)
+		VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2)`;
+});
+
+// The poller only runs when OpenCode is reachable. After a restart without it,
+// a Claude turn still running in its runner must not read as idle to browsers.
+it("a poller that never started reads busy from the event store", async () => {
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1)`;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at)
-					VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2)`;
+				yield* insertParentAndBusyChild;
+				const poller = yield* StatusPollerTag;
+				expect(yield* poller.isProcessing("child")).toBe(true);
+				expect(yield* poller.isProcessing("parent")).toBe(true);
+			}),
+		).pipe(Effect.provide(pollerLayer(makeMockOpenCodeAPI()))),
+	);
+});
+
+it("the poller returns source statuses without parent or message-activity augmentation", async () => {
+	const api = makeMockOpenCodeAPI();
+	vi.spyOn(api.session, "statuses").mockResolvedValue({
+		parent: { type: "idle" },
+		child: { type: "busy" },
+	});
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				yield* insertParentAndBusyChild;
 				const poller = yield* StatusPollerTag;
 				yield* poller.markMessageActivity("content-only");
 				yield* poller.start();
@@ -77,6 +98,6 @@ it("the poller returns source statuses without parent or message-activity augmen
 				const finished = yield* poller.isProcessing("parent");
 				expect(finished).toBe(false);
 			}),
-		).pipe(Effect.provide(layer)),
+		).pipe(Effect.provide(pollerLayer(api))),
 	);
 });

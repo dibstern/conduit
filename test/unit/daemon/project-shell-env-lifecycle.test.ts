@@ -95,6 +95,7 @@ describe("daemon project shell env lifecycle", () => {
 						slug: "added",
 						title: "Added",
 						directory: added,
+						folders: [added],
 						shellEnv: { overrides: { PROJECT_CONFIG: "added" } },
 					});
 					yield* Effect.tryPromise(() =>

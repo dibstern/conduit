@@ -570,6 +570,7 @@ const main = Effect.gen(function* () {
 						launchInput = {
 							sessionId: input.sessionId,
 							workspaceRoot: input.workspaceRoot,
+							extraFolders: input.extraFolders ?? [],
 							providerState: input.providerState,
 							...(input.model ? { model: input.model } : {}),
 							...(input.configDir ? { configDir: input.configDir } : {}),
@@ -630,6 +631,9 @@ const main = Effect.gen(function* () {
 								const input = command.input;
 								const options: Options = frozenSnapshot?.options ?? {
 									cwd: input.workspaceRoot,
+									...(input.extraFolders?.length > 0
+										? { additionalDirectories: [...input.extraFolders] }
+										: {}),
 									settingSources: ["user", "project", "local"],
 									settings: buildClaudeFlagSettings(
 										command.claudeSettingsOverrides,

@@ -17,10 +17,12 @@ import { announceBackgroundWork } from "../domain/relay/Services/session-attenti
 import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
+	setContextWindow,
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
 	setModel,
+	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	PollerPubSubTag,
@@ -106,7 +108,9 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 
 		let defaultModel = initialDefaultModel;
-		if (!defaultModel) {
+		// Each call to an absent server spends the SDK's ~3s retry window, and
+		// Claude projects wait on this startup too.
+		if (!defaultModel && opencodeAvailable) {
 			const configResult = yield* Effect.either(
 				Effect.tryPromise(() => api.config.get()),
 			);
@@ -183,6 +187,48 @@ function acquireStartupServices(inputs: StartupInputs) {
 				Effect.sync(() =>
 					log.warn(
 						`Could not restore session models: ${formatErrorDetail(error)}`,
+					),
+				),
+			),
+		);
+		// Effort and context window are in-memory too; the latest sent turn's
+		// command payload is their durable record. A choice changed after that
+		// turn was never sent, so it is not restored.
+		// The outbox keeps every prompt ever sent and the driver is synchronous,
+		// so scanning it froze startup for seconds on large stores. Find each
+		// session's latest send_turn through its small receipt row instead, then
+		// read just that one payload by primary key.
+		yield* sql<{
+			session_id: string;
+			variant: string | null;
+			context_window: string | null;
+		}>`
+			SELECT latest.session_id,
+				json_extract(outbox.payload_json, '$.variant') AS variant,
+				json_extract(outbox.payload_json, '$.contextWindow') AS context_window
+			FROM (
+				SELECT session_id, MAX(side_effect_sequence) AS request_sequence
+				FROM command_receipts
+				WHERE command_type = 'send_turn' AND side_effect_sequence IS NOT NULL
+				GROUP BY session_id
+			) latest
+			JOIN provider_command_outbox outbox
+				ON outbox.request_sequence = latest.request_sequence
+			WHERE outbox.effect_type = 'send_turn'`.pipe(
+			Effect.flatMap((rows) =>
+				Effect.forEach(rows, (row) =>
+					Effect.all([
+						row.variant ? setVariant(row.session_id, row.variant) : Effect.void,
+						row.context_window
+							? setContextWindow(row.session_id, row.context_window)
+							: Effect.void,
+					]),
+				),
+			),
+			Effect.catchAll((error) =>
+				Effect.sync(() =>
+					log.warn(
+						`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
 					),
 				),
 			),
@@ -391,7 +437,6 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			getSessionStatuses: () => statusPoller.getCurrentStatuses(),
 			listPendingQuestions: () => api.question.list(),
 			listPendingPermissions: () => api.permission.list(),
 			replyPermission: (

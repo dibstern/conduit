@@ -126,7 +126,8 @@ async function main(): Promise<void> {
 		smartDefault: false,
 		// An unreachable unmanaged placeholder also keeps the relay's legacy
 		// OpenCode pollers away from a developer's localhost:4096 instance.
-		opencodeUrl: "http://127.0.0.1:0",
+		opencodeUrl:
+			process.env["CONDUIT_TEST_OPENCODE_URL"] ?? "http://127.0.0.1:0",
 		keepAwake: false,
 		logLevel: "error",
 	});
@@ -135,7 +136,7 @@ async function main(): Promise<void> {
 		await activeDaemon.stop();
 		process.exit(0);
 	}
-	await activeDaemon.addProject(join(root, "project"), "process-test");
+	await activeDaemon.addProject(join(root, "process-test"));
 	process.send({
 		channel: "conduit-process-test",
 		kind: "ready",

@@ -839,7 +839,6 @@
 					startedAt={currentChat().turnStartedAt}
 					{activity}
 					{goal}
-					goalReason={working ? goalFacts?.goal?.lastReason : undefined}
 					following={sessionViewState.atBottom}
 					onlive={requestTranscriptFollow}
 					class="-mx-1.5 -mt-1.5 mb-1.5"

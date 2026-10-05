@@ -69,7 +69,7 @@ describe("executeEffects", () => {
 		];
 		executeEffects(effects, deps);
 		expect(deps.calls["sendStatusToSession"]).toEqual([
-			["s1", { type: "status", status: "processing" }],
+			["s1", { type: "status", sessionId: "s1", status: "processing" }],
 		]);
 	});
 

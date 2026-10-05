@@ -138,6 +138,7 @@ export function createProjectRelayLayers({
 		}),
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+		extraFolders: config.extraFolders ?? [],
 		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});

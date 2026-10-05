@@ -16,6 +16,7 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Layer, Schema } from "effect";
 import { loadDaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
+import { projectEventsDbPath } from "../project-storage.js";
 
 class ForkLineageImportError extends Data.TaggedError(
 	"ForkLineageImportError",
@@ -83,15 +84,20 @@ export const migrateForkLineage = (configDir: string) =>
 					}
 				}
 				if (!hasSidecar && archiveText === undefined) return undefined;
-				const projects = new Set(
-					loadDaemonConfig(configDir)?.projects.map((project) => project.path),
+				const projects = new Map(
+					loadDaemonConfig(configDir)?.projects.map((project) => [
+						project.path,
+						{ slug: project.slug, directory: project.path },
+					]),
 				);
 				const recentPath = join(configDir, "recent.json");
 				if (existsSync(recentPath)) {
 					for (const project of deserializeRecent(
 						readFileSync(recentPath, "utf8"),
 					)) {
-						projects.add(project.directory);
+						if (!projects.has(project.directory)) {
+							projects.set(project.directory, project);
+						}
 					}
 				}
 				return { path, archive, archiveText, hasSidecar, entries, projects };
@@ -103,8 +109,8 @@ export const migrateForkLineage = (configDir: string) =>
 		const { path, archive, archiveText, hasSidecar, entries, projects } =
 			source;
 		const remaining = new Set(entries.keys());
-		for (const project of projects) {
-			const filename = join(project, ".conduit", "events.db");
+		for (const project of projects.values()) {
+			const filename = projectEventsDbPath({ configDir, ...project });
 			if (!existsSync(filename)) continue;
 			const sqliteLayer = SqliteNode.layer({ filename }).pipe(
 				Layer.provide(Reactivity.layer),

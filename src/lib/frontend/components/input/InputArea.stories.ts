@@ -424,9 +424,10 @@ export const GoalChecking: Story = {
 export const GoalNotYetWorking: Story = {
 	beforeEach: () => setupGoal("not_yet"),
 	play: async ({ canvasElement }) => {
+		// The reason lives in the goal details; the composer stays one line.
 		await expect(
-			within(canvasElement).getByTestId("composer-status-goal-reason"),
-		).toHaveTextContent("Not yet: 35 of 38 scenarios pass. Continuing.");
+			within(canvasElement).getByTestId("composer-status-header"),
+		).not.toHaveTextContent("35 of 38 scenarios pass");
 	},
 };
 

@@ -22,8 +22,7 @@ be at your desk.
 
 ```bash
 # Requires: opencode serve (running on port 4096)
-npx conduit-code serve
-# In another terminal, from your project directory:
+# From your project directory; starts the server if none is running:
 npx conduit-code
 ```
 
@@ -272,7 +271,7 @@ An installed user service restarts the server automatically.
 
 ```
 npx conduit-code serve                            Run the server in this terminal
-npx conduit-code                                  Register current directory and print its URL
+npx conduit-code                                  Register current directory (starting the server if needed)
 npx conduit-code --add .                          Register current directory
 npx conduit-code --add /path                      Register project by path
 npx conduit-code --remove                         Unregister current project
@@ -360,6 +359,12 @@ graph LR
 ---
 
 ## Contributing
+
+`pnpm dev:all` rebuilds on save and restarts the running Conduit. Sessions keep
+running through restarts. If no service is running, it starts its own server.
+It also runs Vite (printed URL, usually http://127.0.0.1:5173) for instant UI
+hot reload against that server.
+For a child server, pass options with `pnpm dev:all -- --port 2700`.
 
 Bug fixes and typo corrections are welcome. For feature suggestions, please
 open an issue first:

@@ -188,6 +188,7 @@ export interface SendTurnInput {
 	 */
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;
+	readonly extraFolders: readonly string[];
 	readonly configDir?: string;
 	/** Projected Claude goal facts and cumulative usage seed a reopened SDK query. */
 	readonly goalState?: SessionGoalChangedPayload;
@@ -206,6 +207,7 @@ export type PreWarmSessionInput = Pick<
 	SendTurnInput,
 	| "sessionId"
 	| "workspaceRoot"
+	| "extraFolders"
 	| "providerState"
 	| "model"
 	| "configDir"

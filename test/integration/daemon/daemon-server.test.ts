@@ -94,7 +94,7 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 			const runningDaemon = d;
 			const port = runningDaemon.port;
 
-			await runningDaemon.addProject(projectDir, slug);
+			await runningDaemon.addProject(projectDir);
 			expect(
 				runningDaemon
 					.getStatus()
@@ -181,7 +181,9 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 
 		// Add a project with no usable OpenCode instance. Relay startup should
 		// fail through the Effect-owned relay cache without closing the daemon socket.
-		await d.addProject("/home/user/error-app", "error-app");
+		const directory = join(tmpDir, "error-app");
+		mkdirSync(directory);
+		await d.addProject(directory);
 		const slug = "error-app";
 		const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?p=${slug}`);
 		const messages: string[] = [];

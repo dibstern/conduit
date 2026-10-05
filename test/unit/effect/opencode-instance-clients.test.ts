@@ -174,6 +174,94 @@ describe("OpenCodeInstanceClients", () => {
 		expect(wiredInstanceId).toBe("work-oc");
 	}, 8_000);
 
+	// A demoted managed default keeps its password in env. Without it every
+	// call is a 401 and the relay treats OpenCode as unavailable.
+	it("authenticates an unmanaged instance with its configured password", async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "opencode-instance-clients-"));
+		tempDirs.push(configDir);
+		const daemonConfig: DaemonConfig = {
+			pid: 1234,
+			port: 2633,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+			instances: [
+				{
+					id: "work-oc",
+					name: "Work OpenCode",
+					port: 0,
+					managed: false,
+					driver: "opencode",
+					url: "http://named-instance.invalid",
+					env: {
+						OPENCODE_SERVER_USERNAME: "owner",
+						OPENCODE_SERVER_PASSWORD: "instance-secret",
+					},
+				},
+			],
+		};
+		writeFileSync(join(configDir, "daemon.json"), JSON.stringify(daemonConfig));
+		const authorizations: Array<string | null> = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const request = new Request(input, init);
+				authorizations.push(request.headers.get("authorization"));
+				if (request.url.includes("/event")) {
+					return new Response(
+						new ReadableStream<Uint8Array>({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode(
+										`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+									),
+								);
+							},
+						}),
+						{ status: 200, headers: { "Content-Type": "text/event-stream" } },
+					);
+				}
+				return Response.json({
+					state: "/test/state",
+					config: "/test/config",
+					worktree: "/test",
+					directory: "/test",
+				});
+			}),
+		);
+
+		const layer = OpenCodeInstanceClientsLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					Layer.succeed(
+						ConfigTag,
+						makeMockConfig({ configDir, projectDir: "/test/project" }),
+					),
+					Layer.succeed(LoggerTag, makeMockLogger()),
+				),
+			),
+		);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const clients = yield* OpenCodeInstanceClientsTag;
+					yield* clients.registerStreamWirer(() => Effect.void);
+					yield* clients.clientFor("work-oc");
+				}).pipe(Effect.provide(layer)),
+			),
+		);
+
+		expect(authorizations.length).toBeGreaterThan(0);
+		expect(new Set(authorizations)).toEqual(
+			new Set([
+				`Basic ${Buffer.from("owner:instance-secret").toString("base64")}`,
+			]),
+		);
+	}, 8_000);
+
 	it("holds the connect window open across a transport error and connects on retry", async () => {
 		const configDir = mkdtempSync(join(tmpdir(), "opencode-instance-clients-"));
 		tempDirs.push(configDir);

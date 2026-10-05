@@ -78,7 +78,7 @@ const test = base.extend<{
 	buildDaemon: async ({ browserName: _browserName }, use) => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-build-id-"));
 		const staticDir = join(root, "frontend");
-		mkdirSync(join(root, "project"));
+		mkdirSync(join(root, "build-id-test"));
 		cpSync(resolve("dist/frontend"), staticDir, { recursive: true });
 		// Simulate an older worker that caches a shell. The mismatch must replace
 		// it, clear its cache, and navigate through the current network-only SW.

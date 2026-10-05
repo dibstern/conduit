@@ -7,7 +7,7 @@ Scenario Outline: A goal follows the session on desktop and disappears when clea
   And the composer has a violet goal border
   And the goal transcript notice reads Goal set · <condition>
   When Claude reports the goal check <reason>
-  Then the session goal subtitle reads <condition> · 1 check · <reason>
+  Then the session goal subtitle reads <condition> · 1 check
   And the composer has a violet goal border
   And the goal transcript notice reads Goal set · <condition>
   And the layout region visually matches <baseline> at <threshold> percent
@@ -27,7 +27,7 @@ Scenario Outline: A goal follows the session on a phone and disappears when clea
   And the composer has a violet goal border
   And the goal transcript notice reads Goal set · <condition>
   When Claude reports the goal check <reason>
-  Then the session goal subtitle reads <condition> · 1 check · <reason>
+  Then the session goal subtitle reads <condition> · 1 check
   And the composer has a violet goal border
   And the goal transcript notice reads Goal set · <condition>
   And the layout region visually matches <baseline> at <threshold> percent

@@ -5,6 +5,7 @@ import {
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { resolveProjectLaunchFolders } from "../domain/relay/Services/provider-turn-dispatch.js";
 import {
 	ConfigTag,
 	OrchestrationEngineTag,
@@ -55,9 +56,10 @@ export const preWarmSession = (sessionId: string) =>
 			(yield* engine.getProviderForSessionEffect(sessionId)) !== providerId
 		)
 			return;
+		const folders = yield* resolveProjectLaunchFolders(sessionId);
 		yield* instance.preWarmSessionEffect({
 			sessionId,
-			workspaceRoot: config.projectDir ?? "",
+			...folders,
 			providerState: state,
 			...(model
 				? { model: { providerId: model.providerID, modelId: model.modelID } }

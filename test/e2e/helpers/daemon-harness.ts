@@ -42,8 +42,6 @@ export interface DaemonHarnessOptions {
 	opencodeUrl?: string;
 	/** Directory to register as a project (default: process.cwd()) */
 	projectDir?: string;
-	/** Custom slug for the project (default: auto-generated from directory) */
-	projectSlug?: string;
 	/** Max ms to wait for healthy instance (default: 15_000) */
 	healthTimeout?: number;
 }
@@ -100,7 +98,7 @@ export async function createDaemonHarness(
 	});
 
 	// Register a project so the browser has a route to navigate to
-	const project = await daemon.addProject(projectDir, opts?.projectSlug);
+	const project = await daemon.addProject(projectDir);
 	const projectSlug = project.slug;
 
 	// Wait for the default instance to become healthy.

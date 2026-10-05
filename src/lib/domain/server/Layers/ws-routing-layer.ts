@@ -17,12 +17,17 @@ import {
 } from "effect";
 import { WebSocket } from "ws";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
+import {
+	getRestartAvailable,
+	SERVER_BUILD_ID,
+} from "../../../server/build-update.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
 import type { ResolveRpcContext } from "../../../server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
 } from "../../../server/ws-rpc-handler.js";
+import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { ShutdownSignalTag } from "../../daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
@@ -30,6 +35,7 @@ import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-s
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
 import { resolveDaemonSession } from "../../daemon/Services/daemon-session-reader.js";
+import { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
 import { DaemonWsClientRegistryTag } from "../../daemon/Services/daemon-ws-client-registry.js";
 import {
 	allProjects,
@@ -261,9 +267,11 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| DaemonWsRpcHandlersTag
 	| DaemonWsClientRegistryTag
 	| ProjectRegistryTag
+	| DaemonStateTag
 	| ShutdownSignalTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
+		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const configRef = yield* DaemonConfigRefTag;
 		const httpServerRef = yield* HttpServerRefTag;
 		const auth = yield* AuthManagerTag;
@@ -358,6 +366,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 						relay.attach(latest.value.ws, {
 							clientId: payload.originId,
 							skipDefaultSession: true,
+							skipHandshake: true,
 							...(payload.sessionId
 								? { requestedSessionId: payload.sessionId }
 								: {}),
@@ -417,12 +426,27 @@ export const WebSocketRoutingLive: Layer.Layer<
 					yield* daemonWsClients.remove(clientId, ws);
 					return;
 				}
+				yield* Effect.try(() => {
+					ws.send(
+						JSON.stringify({
+							type: "protocol_version",
+							version: WS_PROTOCOL_VERSION,
+							buildId: SERVER_BUILD_ID,
+						}),
+					);
+					ws.send(
+						JSON.stringify({
+							type: "server_update",
+							restartAvailable: getRestartAvailable(),
+						}),
+					);
+				});
 
 				const projects = yield* allProjects.pipe(
 					Effect.provideService(ProjectRegistryTag, projectRegistry),
 				);
 				const sessionSlug = requestedSessionId
-					? yield* resolveDaemonSession(requestedSessionId).pipe(
+					? yield* resolveDaemonSession(configDir, requestedSessionId).pipe(
 							Effect.provideService(ProjectRegistryTag, projectRegistry),
 						)
 					: null;
@@ -449,6 +473,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 				const detach = relay.value.attach(ws, {
 					clientId,
 					skipDefaultSession: true,
+					skipHandshake: true,
 					...(sessionSlug != null &&
 						requestedSessionId != null && { requestedSessionId }),
 				});

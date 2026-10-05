@@ -17,6 +17,7 @@ import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
 	DEFAULT_RECONCILIATION_INTERVAL_MS,
 	getCurrentStatuses,
+	isBusyIn,
 	isProcessing,
 	PollerPubSubTag,
 	PollerStateTag,
@@ -237,7 +238,17 @@ export const StatusPollerLive: Layer.Layer<
 					const parents = new Map(
 						HashMap.toEntries((yield* Ref.get(sessionState)).cachedParentMap),
 					);
-					return yield* pollerState(isProcessing(sessionId, parents));
+					if ((yield* Ref.get(stateRef)).initialized) {
+						return yield* pollerState(isProcessing(sessionId, parents));
+					}
+					// The poller only runs alongside OpenCode and is empty until its
+					// first poll. A Claude turn that outlived a restart would read as
+					// idle to every reconnecting browser, so a cold cache defers to
+					// the event store.
+					const statuses = yield* readProjectedStatuses().pipe(
+						Effect.orElseSucceed(() => ({})),
+					);
+					return isBusyIn(statuses, sessionId, parents);
 				}),
 			// Pre-status rendering activity belongs to the client session view.
 			markMessageActivity: () => Effect.void,

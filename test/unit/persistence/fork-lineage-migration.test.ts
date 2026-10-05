@@ -17,6 +17,7 @@ import { expect, it, vi } from "vitest";
 import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { migrateForkLineage } from "../../../src/lib/persistence/migrations/fork-lineage-import.js";
+import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 
 function makePersistenceEffectLayer(filename: string) {
 	const sqlite = SqliteNode.layer({ filename }).pipe(
@@ -88,10 +89,11 @@ it.each([
 it("repairs an archived boundary whose event is present but timestamp is missing", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-repair-"));
 	const project = join(dir, "project");
-	const filename = join(project, ".conduit", "events.db");
+	const filename = join(projectStorageDir(dir, "project"), "events.db");
 	const archive = join(dir, "fork-metadata-unresolved.json");
 	try {
-		mkdirSync(join(project, ".conduit"), { recursive: true });
+		mkdirSync(project, { recursive: true });
+		mkdirSync(projectStorageDir(dir, "project"), { recursive: true });
 		writeFileSync(
 			join(dir, "recent.json"),
 			serializeRecent([{ directory: project, slug: "project", lastUsed: 1 }]),
@@ -242,7 +244,8 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			}),
 		);
 		for (const [i, project] of projects.entries()) {
-			mkdirSync(join(project, ".conduit"), { recursive: true });
+			mkdirSync(project, { recursive: true });
+			mkdirSync(projectStorageDir(dir, String(i)), { recursive: true });
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -253,13 +256,15 @@ it("imports all known projects before deleting the sidecar, without appending hi
 						VALUES (${`message-${i}`}, ${`parent-${i}`}, 'assistant', 'answer', 100, 100)`;
 				}).pipe(
 					Effect.provide(
-						makePersistenceEffectLayer(join(project, ".conduit/events.db")),
+						makePersistenceEffectLayer(
+							join(projectStorageDir(dir, String(i)), "events.db"),
+						),
 					),
 				),
 			);
 		}
 		await Effect.runPromise(migrateForkLineage(dir));
-		for (const [i, project] of projects.entries()) {
+		for (const [i] of projects.entries()) {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -279,7 +284,9 @@ it("imports all known projects before deleting the sidecar, without appending hi
 					]);
 				}).pipe(
 					Effect.provide(
-						makePersistenceEffectLayer(join(project, ".conduit/events.db")),
+						makePersistenceEffectLayer(
+							join(projectStorageDir(dir, String(i)), "events.db"),
+						),
 					),
 				),
 			);
@@ -324,9 +331,10 @@ for (const kind of [
 it("retrying an incomplete import does not advance an already imported session", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-retry-"));
 	const project = join(dir, "project");
-	const filename = join(project, ".conduit", "events.db");
+	const filename = join(projectStorageDir(dir, "project"), "events.db");
 	try {
-		mkdirSync(join(project, ".conduit"), { recursive: true });
+		mkdirSync(project, { recursive: true });
+		mkdirSync(projectStorageDir(dir, "project"), { recursive: true });
 		writeFileSync(
 			join(dir, "recent.json"),
 			serializeRecent([
@@ -334,9 +342,10 @@ it("retrying an incomplete import does not advance an already imported session",
 				{ directory: join(dir, "broken"), slug: "broken", lastUsed: 1 },
 			]),
 		);
-		mkdirSync(join(dir, "broken", ".conduit"), { recursive: true });
+		mkdirSync(join(dir, "broken"), { recursive: true });
+		mkdirSync(projectStorageDir(dir, "broken"), { recursive: true });
 		writeFileSync(
-			join(dir, "broken", ".conduit", "events.db"),
+			join(projectStorageDir(dir, "broken"), "events.db"),
 			"not a database",
 		);
 		writeFileSync(
@@ -390,7 +399,7 @@ it("retires unmatched lineage to a startup archive instead of keeping the active
 it("retries archived lineage when an unavailable project returns and merges live entries", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fork-migration-returning-"));
 	const project = join(dir, "project");
-	const filename = join(project, ".conduit", "events.db");
+	const filename = join(projectStorageDir(dir, "project"), "events.db");
 	const sidecar = join(dir, "fork-metadata.json");
 	const archive = join(dir, "fork-metadata-unresolved.json");
 	try {
@@ -408,7 +417,8 @@ it("retries archived lineage when an unavailable project returns and merges live
 			sidecar,
 			JSON.stringify({ later: { parentID: "parent", forkMessageId: "point" } }),
 		);
-		mkdirSync(join(project, ".conduit"), { recursive: true });
+		mkdirSync(project, { recursive: true });
+		mkdirSync(projectStorageDir(dir, "project"), { recursive: true });
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;

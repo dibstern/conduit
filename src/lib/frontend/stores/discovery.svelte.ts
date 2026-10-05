@@ -294,10 +294,22 @@ export function getAllModels(): readonly Immutable<ModelInfo>[] {
 export function getActiveModel(
 	currentId = discoveryState.currentModelId,
 ): Immutable<ModelInfo> | undefined {
-	return getAllModels().find(
-		(m) =>
-			m.id === currentId ||
-			m.routingOptions?.some((option) => option.value === currentId),
+	return getAllModels().find((m) => modelMatchesId(m, currentId));
+}
+
+/** Whether `modelId` names this catalog entry. A trailing `[1m]` is Claude's
+ *  request-side context-window marker, not identity: turns persist the API
+ *  form ("opus[1m]") and a reopened session restores it, while the catalog may
+ *  advertise the bare alias ("opus") or the suffixed form. */
+export function modelMatchesId(
+	model: Immutable<ModelInfo>,
+	modelId: string | null | undefined,
+): boolean {
+	if (!modelId) return false;
+	const identity = (id: string) => id.replace(/\[1m\]$/i, "");
+	return (
+		identity(model.id) === identity(modelId) ||
+		!!model.routingOptions?.some((option) => option.value === modelId)
 	);
 }
 
@@ -423,12 +435,8 @@ export function selectInstance(instanceId: string): void {
 	}
 	const groups = getProviderGroupsForInstance(instanceId);
 	const models = groups.flatMap((g) => g.models);
-	const currentInScope = models.some(
-		(m) =>
-			m.id === discoveryState.currentModelId ||
-			m.routingOptions?.some(
-				(option) => option.value === discoveryState.currentModelId,
-			),
+	const currentInScope = models.some((m) =>
+		modelMatchesId(m, discoveryState.currentModelId),
 	);
 	if (currentInScope) return;
 	const preferred =
@@ -460,10 +468,8 @@ export function formatModelName(model: Immutable<ModelInfo>): string {
 }
 
 export function getModelDisplayName(modelId: string): string {
-	const model = getAllModels().find(
-		(candidate) =>
-			candidate.id === modelId ||
-			candidate.routingOptions?.some((option) => option.value === modelId),
+	const model = getAllModels().find((candidate) =>
+		modelMatchesId(candidate, modelId),
 	);
 	return model ? formatModelName(model) : modelId;
 }
