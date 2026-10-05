@@ -90,6 +90,7 @@ type ClaudeSDKReadStreamContentBlock =
 				| "text_editor_code_execution_tool_result"
 				| "tool_search_tool_result"
 				| "mcp_tool_result"
+				| "mcp_tool_listing"
 				| "container_upload"
 				| "compaction"
 				| "fallback";
@@ -151,6 +152,7 @@ function isClaudeSDKReadStreamContentBlock(
 		case "text_editor_code_execution_tool_result":
 		case "tool_search_tool_result":
 		case "mcp_tool_result":
+		case "mcp_tool_listing":
 		case "container_upload":
 		case "compaction":
 		case "fallback":

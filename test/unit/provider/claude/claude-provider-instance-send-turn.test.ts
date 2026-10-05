@@ -471,6 +471,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						cache_creation: null,
 						cache_creation_input_tokens: null,
 						cache_read_input_tokens: null,
+						fallback_credit: null,
 						inference_geo: null,
 						input_tokens: 0,
 						iterations: null,
