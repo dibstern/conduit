@@ -1,19 +1,20 @@
 // SDK Factory (Effect-based)
-// Creates a configured OpencodeClient from @opencode-ai/sdk.
+// Creates a configured OpencodeClient from @opencode-ai/sdk/v2.
 // Wires up fetchWithRetry (Effect-based), auth headers (for both
-// REST and SSE), and returns {client, fetch, authHeaders} so GapEndpoints and
+// REST and SSE), and returns {client, fetch, authHeaders} so transports and
 // OpenCodeAPI can reuse the same authenticated transport.
 
 import {
 	createOpencodeClient,
 	type OpencodeClient,
-} from "@opencode-ai/sdk/client";
+} from "@opencode-ai/sdk/v2/client";
 import { Effect } from "effect";
 import {
 	fetchWithRetry,
 	type RetryFetchOptions,
 } from "../domain/relay/Services/retry-fetch.js";
 import { ENV } from "../env.js";
+import { OpenCodeApiError } from "../errors.js";
 
 export interface SdkFactoryOptions {
 	baseUrl: string;
@@ -41,7 +42,7 @@ function runRetryFetchAtFetchBoundary(
  * Creates an authenticated OpenCode SDK client.
  *
  * Construction is synchronous; the returned fetch callback remains Promise-shaped
- * because the OpenCode SDK and GapEndpoints both call the standard Fetch API.
+ * because the OpenCode SDK and other transports call the standard Fetch API.
  */
 export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 	const baseFetch: typeof fetch =
@@ -62,28 +63,47 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 
 	// Auth strategy (Audit v3):
 	// - SDK calls _fetch(request) with ONE arg — Request already has auth from config.headers
-	// - GapEndpoints call fetch(url, init) with TWO args — add auth manually
+	// - URL/init calls need auth injected manually
 	const authFetch: typeof fetch = authValue
 		? async (input, init) => {
 				// SDK path: single Request arg, auth already set via config.headers
 				if (input instanceof Request && !init) {
 					return baseFetch(input);
 				}
-				// GapEndpoints path: (url, init) — inject auth header
+				// URL/init path: inject auth header
 				const headers = new Headers(init?.headers);
 				headers.set("Authorization", authValue);
 				return baseFetch(input, { ...init, headers });
 			}
 		: baseFetch;
 
-	// The SDK's fetch type is (request: Request) => ReturnType<typeof fetch>,
-	// but createOpencodeClient internally wraps it. We pass our dual-signature
-	// authFetch which handles both SDK (single Request) and GapEndpoints (url, init) calls.
-	const clientConfig: Parameters<typeof createOpencodeClient>[0] = {
-		baseUrl: options.baseUrl,
-		fetch: authFetch as (request: Request) => ReturnType<typeof fetch>,
-		headers: authHeaders,
-	};
+	// Preserve both SDK Request calls and URL/init calls on the same transport.
+	const clientConfig: NonNullable<Parameters<typeof createOpencodeClient>[0]> =
+		{
+			baseUrl: options.baseUrl,
+			fetch: async (input, init) => {
+				const response = await authFetch(input, init);
+				// v2's HTML interceptor discards the response. Preserve HTTP errors
+				// and malformed successes before it can lose their status/body.
+				if (response.headers.get("Content-Type") === "text/html") {
+					throw new OpenCodeApiError({
+						message: "OpenCode returned HTML instead of JSON",
+						endpoint:
+							response.url ||
+							(input instanceof Request ? input.url : String(input)),
+						responseStatus: response.status,
+						responseBody: response.ok
+							? { parseDetails: "Expected JSON but received text/html" }
+							: await response.text(),
+					});
+				}
+				return response;
+			},
+			headers: authHeaders,
+			// Parse at OpenCodeAPI's validated boundary so malformed JSON retains
+			// its HTTP response/status instead of becoming a connection error.
+			parseAs: "text",
+		};
 	if (options.directory) {
 		clientConfig.directory = options.directory;
 	}

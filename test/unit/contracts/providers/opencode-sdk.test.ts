@@ -16,7 +16,6 @@ import {
 	OpenCodePermissionReplyRequestSchema,
 	OpenCodeProjectSchema,
 	OpenCodeProviderListResponseSchema,
-	OpenCodeQuestionRejectRequestSchema,
 	OpenCodeQuestionReplyRequestSchema,
 	OpenCodeSessionDetailSchema,
 	OpenCodeSessionPromptRequestSchema,
@@ -517,14 +516,9 @@ describe("OpenCode provider contract schemas", () => {
 				}),
 			),
 		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeQuestionRejectRequestSchema)({}),
-			),
-		).toBe(true);
 	});
 
-	it("validates gap endpoint response envelopes Conduit reads", () => {
+	it("validates permission and question response envelopes Conduit reads", () => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodePendingPermissionSchema)({

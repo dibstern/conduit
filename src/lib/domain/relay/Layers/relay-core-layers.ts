@@ -1,5 +1,4 @@
 import { Effect, Layer } from "effect";
-import { GapEndpoints } from "../../../instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClientEffect } from "../../../instance/sdk-factory.js";
 import { createLogger } from "../../../logger.js";
@@ -25,11 +24,7 @@ export const OpenCodeAPILive: Layer.Layer<OpenCodeAPITag, never, ConfigTag> =
 		OpenCodeAPITag,
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			const {
-				client: sdkClient,
-				fetch: sdkFetch,
-				authHeaders,
-			} = yield* createSdkClientEffect({
+			const { client: sdkClient, authHeaders } = yield* createSdkClientEffect({
 				baseUrl: config.opencodeUrl,
 				...(config.opencodeAuth !== undefined
 					? { auth: config.opencodeAuth }
@@ -40,15 +35,8 @@ export const OpenCodeAPILive: Layer.Layer<OpenCodeAPITag, never, ConfigTag> =
 					}),
 			});
 
-			const gapEndpoints = new GapEndpoints({
-				baseUrl: config.opencodeUrl,
-				fetch: sdkFetch,
-				headers: authHeaders,
-			});
-
 			return new OpenCodeAPI({
 				sdk: sdkClient,
-				gapEndpoints,
 				baseUrl: config.opencodeUrl,
 				authHeaders,
 			});

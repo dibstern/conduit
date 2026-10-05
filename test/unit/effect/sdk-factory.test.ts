@@ -40,7 +40,7 @@ describe("Effect-based SDK factory", () => {
 		expect(callCount).toBe(2);
 	});
 
-	it("keeps SDK auth headers separate from GapEndpoints auth injection", async () => {
+	it("keeps SDK auth headers separate from URL/init auth injection", async () => {
 		const requests: Array<{
 			input: RequestInfo | URL;
 			init: RequestInit | undefined;

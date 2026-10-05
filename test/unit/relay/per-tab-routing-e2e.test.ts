@@ -18,6 +18,7 @@ import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
@@ -235,6 +236,8 @@ async function createTestHarness(): Promise<TestHarness> {
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
 	const relayPort = (relayServer.address() as { port: number }).port;
 	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-per-tab-"));
+	// Select the mock OpenCode provider instead of the relay's Claude default.
+	saveRelaySettings({ defaultModel: "openai/gpt-4" }, persistenceDir);
 
 	const relay = await createProjectRelay({
 		httpServer: relayServer,
