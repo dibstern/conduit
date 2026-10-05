@@ -36,7 +36,7 @@ import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-se
 import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
-import { findContextWindowOptions } from "../shared-types.js";
+import { findCatalogModel } from "../shared-types.js";
 import type { OpenCodeInstance, ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
@@ -508,31 +508,20 @@ const sendProvidersAndSettingsEffect = (
 				const activeModel = activeId
 					? (activeModelOverride ?? activeSessionModel)
 					: activeModelOverride;
-				const activeModelId = activeModel?.modelID;
-				let availableVariants: string[] = [];
-				if (activeModelId) {
-					for (const p of providers) {
-						const model = p.models.find(
-							(m: { id: string; variants?: string[] }) =>
-								m.id === activeModelId,
-						);
-						if (model?.variants) {
-							availableVariants = model.variants;
-							break;
-						}
-					}
-				}
+				// After a restart this snapshot is all an open tab gets, and a
+				// session restored from `opus[1m]` must still find today's `opus`.
+				const catalogModel = findCatalogModel(providers, activeModel);
 				wsHandler.sendTo(clientId, {
 					type: "variant_info",
 					variant: currentVariant,
-					variants: availableVariants,
+					variants: catalogModel?.variants ?? [],
 				});
 				wsHandler.sendTo(clientId, {
 					type: "context_window_info",
 					contextWindow: activeId
 						? yield* getContextWindow(activeId)
 						: yield* getDefaultContextWindow(),
-					options: findContextWindowOptions(providers, activeModelId),
+					options: catalogModel?.contextWindowOptions ?? [],
 				});
 				wsHandler.sendTo(clientId, {
 					type: "permission_mode_info",
