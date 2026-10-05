@@ -216,6 +216,7 @@ describe("in-process Claude session runner", () => {
 									id: "background-1",
 									type: "local_bash",
 									description: "Watch tests",
+									firstSeenAt: expect.any(Number),
 								},
 							],
 						},

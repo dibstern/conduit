@@ -1,7 +1,7 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
 import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, TestClock, TestContext } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type ProviderRuntimeEvent,
@@ -2223,7 +2223,7 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {
-		const liveness = makeSessionBackgroundLiveness(undefined, () => 100);
+		const liveness = makeSessionBackgroundLiveness(undefined, () => 200);
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
 			onBackgroundTask: liveness.record,
@@ -2232,13 +2232,18 @@ describe("ClaudeEventTranslator", () => {
 			tasks: ReadonlyArray<Record<string, unknown>>,
 			n: number,
 		) =>
-			runTranslate(trackingTranslator, ctx, {
-				type: "system",
-				subtype: "background_tasks_changed",
-				tasks,
-				uuid: `00000000-0000-0000-0000-00000000040${n}`,
-				session_id: "sdk-sess",
-			} as unknown as SDKMessage);
+			Effect.runPromise(
+				Effect.gen(function* () {
+					yield* TestClock.setTime(100);
+					yield* trackingTranslator.translate(ctx, {
+						type: "system",
+						subtype: "background_tasks_changed",
+						tasks,
+						uuid: `00000000-0000-0000-0000-00000000040${n}`,
+						session_id: "sdk-sess",
+					} as unknown as SDKMessage);
+				}).pipe(Effect.provide(TestContext.TestContext)),
+			);
 		const bash = {
 			task_id: "bash",
 			task_type: "local_bash",

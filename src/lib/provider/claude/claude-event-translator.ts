@@ -21,7 +21,7 @@
  * All payloads match the EventPayloadMap interfaces.
  */
 import { randomUUID } from "node:crypto";
-import { Effect } from "effect";
+import { Clock, Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
@@ -275,6 +275,8 @@ export class ClaudeEventTranslator {
 	private readonly ledger = new AssistantTextLedger();
 	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
+	// The runner outlives server restarts, and the SDK provides no start time.
+	private backgroundTaskFirstSeenAt = new Map<string, number>();
 	// Per-request usage of the LAST main-chain assistant message. The SDK's
 	// result.usage is cumulative across every API request in the turn (cache
 	// reads re-count the whole prompt per tool round), so it wildly overstates
@@ -690,21 +692,28 @@ export class ClaudeEventTranslator {
 				// The full live set, replacing the previous one. Ambient tasks
 				// (watchers, housekeeping) are not activity, per the SDK.
 				case "background_tasks_changed": {
+					const now = yield* Clock.currentTimeMillis;
+					const tasks = message.tasks
+						.filter(
+							(task) =>
+								!task.ambient &&
+								task.task_type !== "plan" &&
+								task.task_type !== "plan_mode",
+						)
+						.map((task) => ({
+							id: task.task_id,
+							type: task.task_type,
+							description: task.description,
+							firstSeenAt:
+								this.backgroundTaskFirstSeenAt.get(task.task_id) ?? now,
+						}));
+					this.backgroundTaskFirstSeenAt = new Map(
+						tasks.map((task) => [task.id, task.firstSeenAt]),
+					);
 					const transition = this.deps.onBackgroundTask?.({
 						sessionId: ctx.sessionId,
 						kind: "snapshot",
-						tasks: message.tasks
-							.filter(
-								(task) =>
-									!task.ambient &&
-									task.task_type !== "plan" &&
-									task.task_type !== "plan_mode",
-							)
-							.map((task) => ({
-								id: task.task_id,
-								type: task.task_type,
-								description: task.description,
-							})),
+						tasks,
 					});
 					if (transition) yield* transition;
 					return;

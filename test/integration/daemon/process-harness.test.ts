@@ -215,7 +215,8 @@ describe("foreground daemon process harness", () => {
 				await vi.waitFor(
 					async () => {
 						states[restart + 1] = await sessionBackground(browser, sessionId);
-						expect(states[restart + 1]).toEqual(expected);
+						// Start time included, so the elapsed timer doesn't reset.
+						expect(states[restart + 1]).toEqual(states[0]);
 					},
 					{ timeout: 5000 },
 				);
