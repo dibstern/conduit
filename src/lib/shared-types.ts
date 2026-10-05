@@ -794,6 +794,9 @@ const DoneSchema = Schema.Struct({
 	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.Number,
+	/** The assistant message whose turn this ends, when known. A done for a
+	 *  message the browser already finalised is late and ends nothing. */
+	messageId: Schema.optional(Schema.String),
 });
 
 const SessionListSchema = Schema.Struct({

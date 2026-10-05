@@ -57,6 +57,7 @@ const makeReadQuery = (
 	countPendingApprovalsBySession: () => Effect.succeed([]),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+	readInboxState: () => Effect.succeed(undefined),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),

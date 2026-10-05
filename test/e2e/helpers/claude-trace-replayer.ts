@@ -55,6 +55,12 @@ export interface ClaudeReplayPlan {
 	 * the test decides when.
 	 */
 	readonly holdAfterResult?: boolean;
+	/**
+	 * Plan indexes (0-based) of turns whose result reports an upstream failure:
+	 * a success result with is_error, the shape the SDK gives an API error that
+	 * outlasted its retries.
+	 */
+	readonly failTurns?: readonly number[];
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
 	/** Claude model catalog to advertise instead of the bare trace model. */
@@ -324,7 +330,15 @@ export function createClaudeTraceReplayer(
 							),
 						),
 					);
-					yield message;
+					yield plan.failTurns?.includes(played - 1) &&
+					message.type === "result" &&
+					message.subtype === "success"
+						? {
+								...message,
+								is_error: true,
+								result: "API Error: 529 overloaded",
+							}
+						: message;
 					if (
 						plan.holdAfterResult &&
 						message.type === "result" &&

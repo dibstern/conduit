@@ -35,6 +35,7 @@ import { SessionEventBusTag } from "./session-event-bus.js";
  * - `transcriptMessage`: a projected transcript message — what this source
  *   streams, base and delta alike.
  * - `pendingInput`: an input conduit holds for the session, queued or steering.
+ * - `inbox`: the session's inbox state (paused), computed on read.
  * - `event`: a raw committed event. Still on the wire for the browser's legacy
  *   delta arm, which conduit-test-ni8.5.20 retires; nothing produces it here.
  */
@@ -113,11 +114,12 @@ export const subscribeSessionDetail = (options: {
 							// Pending inputs ride the same window, bounded by the version
 							// this read reports. A base read carries every one still
 							// pending, whatever transcript page it returns.
+							const through = range?.through ?? result.version;
 							const pending = yield* readQuery.readPendingInputs(
 								options.sessionId,
 								{
 									...(range?.after === undefined ? {} : { after: range.after }),
-									through: range?.through ?? result.version,
+									through,
 								},
 							);
 							const inputs = pending.rows.map(({ version, ...input }) => ({
@@ -127,6 +129,24 @@ export const subscribeSessionDetail = (options: {
 								} satisfies SessionDetailItem,
 								version,
 							}));
+							// The inbox state moves with the session row. A base read always
+							// carries it; a window carries it when the row moved inside it.
+							const inbox = yield* readQuery.readInboxState(options.sessionId);
+							const inboxRows =
+								inbox &&
+								(range === undefined ||
+									(inbox.version > (range.after ?? -1) &&
+										inbox.version <= through))
+									? [
+											{
+												item: {
+													_tag: "inbox" as const,
+													inbox: { paused: inbox.paused },
+												} satisfies SessionDetailItem,
+												version: Math.min(inbox.version, through),
+											},
+										]
+									: [];
 							return {
 								// The adapter gets exactly these rows, so index `i` is still row `i`.
 								// That is what lets each item keep the version its row
@@ -142,6 +162,7 @@ export const subscribeSessionDetail = (options: {
 										version: result.messages[index]?.version ?? result.version,
 									})),
 									...inputs,
+									...inboxRows,
 								],
 								version: result.version,
 								...(range === undefined

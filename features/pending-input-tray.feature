@@ -44,6 +44,29 @@ Examples:
   | phone    | Also run the Linux baselines afterwards | Compare these two screenshots and tell me which spacing matches the design | pending-tray-two-phone   | 98        |
   | desktop  | Also run the Linux baselines afterwards | Compare these two screenshots and tell me which spacing matches the design | pending-tray-two-desktop | 98        |
 
+Scenario Outline: a stopped turn pauses the queue until Resume
+  Given the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  When the open session starts working
+  And the mock relay queues <first>
+  And the mock relay queues <second>
+  Then pending-input row 1 offers Edit and Remove
+  And pending-input row 2 offers Edit and Remove
+  And the pending-input tray does not show Paused
+  When the open session goes idle
+  And the queue pauses
+  Then the pending-input tray shows Paused
+  And the pending-input tray has 2 rows
+  And the composer region visually matches <baseline> at <threshold> percent
+  When the queue resumes
+  Then the pending-input tray does not show Paused
+
+Examples:
+  | viewport | first                                  | second                                                                  | baseline                    | threshold |
+  | phone    | Also run the Linux baselines afterwards | Compare these two screenshots and tell me which spacing matches the design | pending-tray-paused-phone   | 98        |
+  | desktop  | Also run the Linux baselines afterwards | Compare these two screenshots and tell me which spacing matches the design | pending-tray-paused-desktop | 98        |
+
 Scenario Outline: the send button queues while working and sends when idle
   Given the viewport is a <viewport>
   And a session already exists on the Claude harness

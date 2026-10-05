@@ -66,6 +66,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"question.resolved", // Same, or by the turn that answers a recovered question
 	"input.admitted", // Relay-owned: the Session Inbox commits it when a send is admitted
 	"input.sent", // Relay-owned: committed with the send_turn outbox row at handoff
+	"input.cancelled", // Relay-owned: the Session Inbox commits it when a queued input is removed
 ] as const satisfies readonly CanonicalEventType[];
 
 // All canonical event types MUST appear in exactly one of the two arrays.

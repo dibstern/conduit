@@ -14,6 +14,7 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
+import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
@@ -501,6 +502,8 @@ export async function startProjectRelay(inputs: StartupInputs) {
 						yield* startSseConsumers(inputs, services, monitoring);
 					const gate = yield* RelayCommandGateTag;
 					yield* gate.markReady();
+					// Providers are registered and recovered; queued inputs may drain.
+					yield* (yield* SessionInboxTag).start;
 				}).pipe(
 					Effect.onExit((exit) =>
 						Exit.isFailure(exit) ? Effect.sync(stopMonitoring) : Effect.void,

@@ -5,6 +5,11 @@ import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../../domain/relay/Services/services.js";
+import {
+	type SessionInbox,
+	type SessionInboxOutcome,
+	SessionInboxTag,
+} from "../../domain/relay/Services/session-inbox.js";
 import { persistSessionPermissionMode } from "../../domain/relay/Services/session-manager-permission-mode.js";
 import {
 	getPermissionMode,
@@ -23,6 +28,24 @@ import {
 import { ProviderRegistryTag } from "../../provider/provider-registry.js";
 import type { PermissionId } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+
+const inboxCommand = <E>(
+	name: string,
+	run: (inbox: SessionInbox) => Effect.Effect<SessionInboxOutcome, E, never>,
+) =>
+	SessionInboxTag.pipe(
+		Effect.flatMap(run),
+		Effect.map((outcome) =>
+			outcome === "accepted"
+				? { ok: true as const }
+				: { ok: false as const, reason: outcome },
+		),
+		Effect.catchAll((error) =>
+			Effect.fail(
+				new WsRpcError({ message: `${name} failed: ${String(error)}` }),
+			),
+		),
+	);
 
 export const conversationHandlers = {
 	SwitchPermissionMode: (request) =>
@@ -150,6 +173,22 @@ export const conversationHandlers = {
 				),
 			),
 		),
+	"input.cancel": (request) =>
+		inboxCommand("input.cancel", (inbox) =>
+			inbox.cancel({
+				clientId: "rpc",
+				sessionId: request.sessionId,
+				inputId: request.inputId,
+			}),
+		),
+	"input.sendNow": (request) =>
+		inboxCommand("input.sendNow", (inbox) =>
+			inbox.sendNow({
+				clientId: request.originId ?? "rpc",
+				sessionId: request.sessionId,
+				inputId: request.inputId,
+			}),
+		),
 	SyncInputDraft: (request) =>
 		syncInputDraftForSession({
 			sessionId: request.sessionId,
@@ -176,6 +215,8 @@ export const conversationHandlers = {
 	| "AnswerQuestion"
 	| "RejectQuestion"
 	| "input.submit"
+	| "input.cancel"
+	| "input.sendNow"
 	| "SyncInputDraft"
 	| "CancelSession"
 >;

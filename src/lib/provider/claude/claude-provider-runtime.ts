@@ -398,36 +398,45 @@ export class ClaudeProviderRuntime {
 	>();
 
 	readonly recoverEffect = Effect.gen(this, function* () {
-		if (!this.runner.recoverEffect) return;
 		const sql = yield* SqlClient.SqlClient;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const pending = yield* PendingInteractionServiceTag;
-		this.recoveredSink = (sessionId) =>
-			makeRecoveredClaudeEventSink({
-				sessionId,
-				sql,
-				ingestion,
-				pending,
-				onRegistered: (id) => {
-					const ready = this.recoveredRequests.get(id);
-					return ready ? Deferred.succeed(ready, undefined) : Effect.void;
-				},
-			});
-		yield* this.runner.recoverEffect;
-		const registrations = yield* Effect.try(() =>
-			discoverClaudeRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
-		).pipe(
-			Effect.catchAll((error) =>
-				Effect.logError("Could not verify Claude runner ownership", error).pipe(
-					Effect.as(undefined),
+		// An in-process runner's turns ended with the relay that ran them, so
+		// every running command is unclaimed. Runner processes may outlive it.
+		let claimed = new Set<string>();
+		if (this.runner.recoverEffect) {
+			this.recoveredSink = (sessionId) =>
+				makeRecoveredClaudeEventSink({
+					sessionId,
+					sql,
+					ingestion,
+					pending,
+					onRegistered: (id) => {
+						const ready = this.recoveredRequests.get(id);
+						return ready ? Deferred.succeed(ready, undefined) : Effect.void;
+					},
+				});
+			yield* this.runner.recoverEffect;
+			const registrations = yield* Effect.try(() =>
+				discoverClaudeRunners(
+					this.deps.workspaceRoot,
+					this.deps.daemonConfigDir,
 				),
-			),
-		);
-		// Discovery errors are not proof that a running command has no owner.
-		if (!registrations) return;
+			).pipe(
+				Effect.catchAll((error) =>
+					Effect.logError(
+						"Could not verify Claude runner ownership",
+						error,
+					).pipe(Effect.as(undefined)),
+				),
+			);
+			// Discovery errors are not proof that a running command has no owner.
+			if (!registrations) return;
+			claimed = new Set(registrations.map((runner) => runner.sessionId));
+		}
 		yield* settleUnclaimedClaudeRunnerCommands(
 			sql,
-			new Set(registrations.map((runner) => runner.sessionId)),
+			claimed,
 			(sinkId, turn, failure) =>
 				Effect.gen(function* () {
 					let persistenceError: ProviderRuntimeIngestionError | undefined;

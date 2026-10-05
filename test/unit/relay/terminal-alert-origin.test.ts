@@ -60,13 +60,23 @@ describe("terminal alert origins", () => {
 		expect(translatedFirst).toMatchObject({
 			kind: "emit",
 			messages: expect.arrayContaining([
-				{ type: "done", code: 0, alertId: '["s1","m1","done"]' },
+				{
+					type: "done",
+					code: 0,
+					alertId: '["s1","m1","done"]',
+					messageId: "m1",
+				},
 			]),
 		});
 		expect(translatedSecond).toMatchObject({
 			kind: "emit",
 			messages: expect.arrayContaining([
-				{ type: "done", code: 0, alertId: '["s1","m2","done"]' },
+				{
+					type: "done",
+					code: 0,
+					alertId: '["s1","m2","done"]',
+					messageId: "m2",
+				},
 			]),
 		});
 		expect(replayedFirst).toEqual(translatedFirst);

@@ -121,6 +121,7 @@ export function translateDomainEventToRelay(
 						event.data.messageId || event.eventId,
 						"done",
 					]),
+					...doneMessage(event.data.messageId),
 				},
 			);
 		}
@@ -147,6 +148,7 @@ export function translateDomainEventToRelay(
 						event.data.messageId || event.eventId,
 						"done",
 					]),
+					...doneMessage(event.data.messageId),
 				},
 			);
 		}
@@ -160,6 +162,7 @@ export function translateDomainEventToRelay(
 					event.data.messageId || event.eventId,
 					"done",
 				]),
+				...doneMessage(event.data.messageId),
 			});
 
 		case "turn.model_resolved":
@@ -167,6 +170,7 @@ export function translateDomainEventToRelay(
 
 		case "input.admitted":
 		case "input.sent":
+		case "input.cancelled":
 			return silent(
 				"persistence-only; browsers read pending inputs from the detail stream",
 			);
@@ -252,6 +256,11 @@ function emit(
 	...messages: UntaggedRelayMessage[]
 ): DomainEventRelayTranslation {
 	return { kind: "emit", messages };
+}
+
+/** A turn's done names its assistant message so a late copy ends nothing. */
+function doneMessage(messageId: string): { messageId?: string } {
+	return messageId ? { messageId } : {};
 }
 
 function silent(reason: string): DomainEventRelayTranslation {

@@ -390,6 +390,20 @@ export interface ReadQueryEffect {
 		},
 		ReadQueryEffectError | SqlError
 	>;
+
+	/**
+	 * The session's inbox state, computed on read. A queue is paused while
+	 * inputs wait behind a latest turn that was stopped or failed; the next
+	 * turn that ends normally un-pauses it. `version` is the session row's,
+	 * which every turn end and pending-input write stamps. Undefined for a
+	 * session that has never held an input, which has no queue to pause.
+	 */
+	readonly readInboxState: (
+		sessionId: string,
+	) => Effect.Effect<
+		{ readonly paused: boolean; readonly version: number } | undefined,
+		ReadQueryEffectError
+	>;
 }
 
 export interface PendingInputRow {
@@ -1097,6 +1111,25 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const readInboxState = (sessionId: string) =>
+		sql<{ paused: number; version: number }>`
+			SELECT version,
+				EXISTS (SELECT 1 FROM pending_inputs
+					WHERE session_id = ${sessionId} AND state = 'queued')
+				AND (SELECT state FROM turns WHERE session_id = ${sessionId}
+					ORDER BY requested_at DESC, rowid DESC LIMIT 1)
+					IN ('interrupted', 'error') AS paused
+			FROM sessions WHERE id = ${sessionId}
+				AND EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId})`.pipe(
+			Effect.map(([row]) =>
+				row ? { paused: row.paused === 1, version: row.version } : undefined,
+			),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({ operation: "readInboxState", cause }),
+			),
+		);
+
 	const readPendingInputs = (
 		sessionId: string,
 		range: { readonly after?: number; readonly through: number },
@@ -1185,5 +1218,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readSessionTranscript,
 		getLatestTurnModelExecution,
 		readPendingInputs,
+		readInboxState,
 	} satisfies ReadQueryEffect;
 });

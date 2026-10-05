@@ -535,6 +535,7 @@ describe("SessionManager Effect", () => {
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),

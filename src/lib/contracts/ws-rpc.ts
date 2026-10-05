@@ -264,6 +264,12 @@ export const SessionDetailItemSchema = Schema.Union(
 			admittedAt: Schema.Number,
 		}),
 	}),
+	// The session's inbox state, computed on read. Paused: inputs wait behind
+	// a turn that was stopped or failed, until Resume or a normal turn.
+	Schema.Struct({
+		_tag: Schema.Literal("inbox"),
+		inbox: Schema.Struct({ paused: Schema.Boolean }),
+	}),
 );
 
 // Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
@@ -418,6 +424,15 @@ export const SubmitInputResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
 	sessionId: Schema.String,
 });
+
+/** Ok, or the input already started (or never existed): it cannot be changed. */
+export const InboxCommandResponseSchema = Schema.Union(
+	Schema.Struct({ ok: Schema.Literal(true) }),
+	Schema.Struct({
+		ok: Schema.Literal(false),
+		reason: Schema.Literal("already_started"),
+	}),
+);
 
 export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -720,6 +735,7 @@ export type ListDaemonSessionsResponse =
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
 export type SubmitInputResponse = typeof SubmitInputResponseSchema.Type;
+export type InboxCommandResponse = typeof InboxCommandResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
@@ -1639,6 +1655,35 @@ export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
 	},
 ) {}
 
+/** Remove a queued input (the tray's Remove, and Edit before refilling). */
+export class CancelInput extends Schema.TaggedRequest<CancelInput>()(
+	"input.cancel",
+	{
+		failure: WsRpcError,
+		success: InboxCommandResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			inputId: NonEmptyString,
+		},
+	},
+) {}
+
+/** Hand a queued input off now; Resume calls it on the oldest row. */
+export class SendInputNow extends Schema.TaggedRequest<SendInputNow>()(
+	"input.sendNow",
+	{
+		failure: WsRpcError,
+		success: InboxCommandResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			inputId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SyncInputDraft extends Schema.TaggedRequest<SyncInputDraft>()(
 	"SyncInputDraft",
 	{
@@ -1789,6 +1834,8 @@ export const WsRpcRequest = Schema.Union(
 	LoadMoreHistory,
 	RewindSession,
 	SubmitInput,
+	CancelInput,
+	SendInputNow,
 	SyncInputDraft,
 	CancelSession,
 	SetLogLevel,
@@ -1896,6 +1943,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
 	Rpc.fromTaggedRequest(SubmitInput),
+	Rpc.fromTaggedRequest(CancelInput),
+	Rpc.fromTaggedRequest(SendInputNow),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
 	Rpc.fromTaggedRequest(SetLogLevel),

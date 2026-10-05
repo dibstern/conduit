@@ -235,6 +235,9 @@ const processAndApplyDoneEffect = (
 			code: 0,
 			...(originId && {
 				alertId: JSON.stringify([sessionId, originId, "done"]),
+				// Usually the turn's assistant message. Sent after the next turn
+				// started, it lets the browser tell this done is late.
+				messageId: originId,
 			}),
 		};
 		const doneViewers = deps.wsHandler.getClientsForSession(sessionId);

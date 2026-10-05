@@ -512,6 +512,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				"input.submit": (request) =>
 					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
+				"input.cancel": () => Effect.succeed({ ok: true as const }),
+				"input.sendNow": () => Effect.succeed({ ok: true as const }),
 				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
 				SetLogLevel: () => Effect.succeed({ ok: true as const }),

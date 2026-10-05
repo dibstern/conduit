@@ -213,6 +213,9 @@ export function applyTranscriptEnvelope(
 				pending: envelope.rows
 					.flatMap((item) => (item._tag === "pendingInput" ? [item.input] : []))
 					.sort(pendingOrder),
+				paused: envelope.rows.some(
+					(item) => item._tag === "inbox" && item.inbox.paused,
+				),
 				hwm: envelope.sequence,
 				hasMore: envelope.hasMore ?? false,
 				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
@@ -230,6 +233,8 @@ export function applyTranscriptEnvelope(
 					].sort(pendingOrder),
 				};
 			}
+			if (envelope.item._tag === "inbox")
+				return { ...entry, hwm, paused: envelope.item.inbox.paused };
 			if (envelope.item._tag !== "transcriptMessage") return { ...entry, hwm };
 			const row = toHistoryMessage(envelope.item.message);
 			const held = entry.rows.some((old) => old.id === row.id);

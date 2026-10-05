@@ -30,6 +30,7 @@ import type {
 	GetProjectsResponse,
 	GetTodoResponse,
 	GetToolContentResponse,
+	InboxCommandResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
 	ListDirectoriesResponse,
@@ -1258,6 +1259,30 @@ export async function sendMessageRpc(
 	input: SendMessageRpcInput,
 ): Promise<SubmitInputResponse> {
 	return await runTransportEffect(callSendMessage(input));
+}
+
+export interface InboxCommandRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
+/** Remove a queued input; rejected once it has started. */
+export async function cancelInputRpc(
+	input: InboxCommandRpcInput,
+): Promise<InboxCommandResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.input.cancel(input)),
+	);
+}
+
+/** Send a queued input now: on an idle session this resumes the queue. */
+export async function sendInputNowRpc(
+	input: InboxCommandRpcInput,
+): Promise<InboxCommandResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.input.sendNow(input)),
+	);
 }
 
 export async function syncInputDraftRpc(

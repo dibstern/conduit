@@ -975,11 +975,25 @@ export const makeTurnProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
+				const stopped = yield* sql<OwnedRow>`
+					UPDATE turns
+					SET state = 'interrupted', completed_at = ${event.createdAt}
+					WHERE assistant_message_id = ${event.data.messageId}
+					RETURNING session_id`;
+				if (stopped.length > 0) return owners(stopped);
+				// Stopped before its first assistant message, no turn carries the id
+				// yet. Left open, the turn would keep the session busy for good.
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
+						WHERE id = (
+							SELECT id FROM turns
+							WHERE session_id = ${event.sessionId}
+								AND state IN ('pending', 'running')
+							ORDER BY requested_at DESC
+							LIMIT 1
+						)
 						RETURNING session_id`,
 				);
 			}
@@ -1255,7 +1269,12 @@ export const makeProviderProjector = (): EffectProjector => ({
 // can report it gone. Its owning session moves with every write.
 export const makeInputProjector = (): EffectProjector => ({
 	name: "input",
-	handles: ["input.admitted", "input.sent", "message.created"],
+	handles: [
+		"input.admitted",
+		"input.sent",
+		"input.cancelled",
+		"message.created",
+	],
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -1285,6 +1304,15 @@ export const makeInputProjector = (): EffectProjector => ({
 									AND state IN ('pending', 'running')
 							) THEN 'steering' ELSE 'removed' END,
 							version = ${ctx.version}
+						WHERE input_id = ${event.data.inputId} AND state = 'queued'
+						RETURNING session_id`,
+				);
+			}
+
+			if (isEventType(event, "input.cancelled")) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs SET state = 'removed', version = ${ctx.version}
 						WHERE input_id = ${event.data.inputId} AND state = 'queued'
 						RETURNING session_id`,
 				);

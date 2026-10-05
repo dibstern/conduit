@@ -110,6 +110,7 @@ const makeLayer = (options: {
 					countPendingApprovalsBySession: () => Effect.succeed([]),
 					getSessionMessagesWithParts: () => Effect.succeed([]),
 					readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+					readInboxState: () => Effect.succeed(undefined),
 					readSessionTranscriptPage: () =>
 						options.failRead
 							? Effect.fail(readFailure)

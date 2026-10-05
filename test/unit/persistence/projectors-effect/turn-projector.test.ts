@@ -689,8 +689,7 @@ describe("TurnProjector", () => {
 			expect(row?.completed_at).toBe(now + 2000);
 		});
 
-		// Effect projector diverges: an unmatched interruption does not fall back to the latest open turn.
-		it.fails("falls back to the latest open turn when messageId matches nothing", async () => {
+		it("falls back to the latest open turn when messageId matches nothing", async () => {
 			await project(
 				makeStored(
 					"message.created",

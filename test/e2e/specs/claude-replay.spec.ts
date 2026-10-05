@@ -21,6 +21,15 @@ function countEvents(dbPath: string | undefined, type: string): number {
 	}
 }
 
+function queryDb<T>(dbPath: string, sql: string, ...params: string[]): T[] {
+	const db = new DatabaseSync(dbPath, { readOnly: true });
+	try {
+		return db.prepare(sql).all(...params) as T[];
+	} finally {
+		db.close();
+	}
+}
+
 type Send = { commandId: string; sessionId: string; text: string };
 
 /** Records the browser's input.submit requests. Register before navigation so
@@ -607,6 +616,476 @@ test.describe("Claude replay lane", () => {
 			} finally {
 				await context.close();
 			}
+		});
+	});
+
+	test.describe("managing the queue", () => {
+		const trayRows = (p: Page) => p.getByTestId("pending-input-row");
+		const trayTexts = (p: Page) =>
+			trayRows(p).getByTestId("pending-input-text");
+		const row = (p: Page, text: string) =>
+			trayRows(p).filter({
+				has: p.getByTestId("pending-input-text").getByText(text, {
+					exact: true,
+				}),
+			});
+		const sessionOf = (harness: { projectUrl: string }) =>
+			decodeURIComponent(harness.projectUrl.slice("/s/".length));
+		/** Event, outbox and turn rows of the session, for assertions and proof. */
+		const ledger = (dbPath: string, sessionId: string) => ({
+			events: queryDb<{ type: string; input_id: string | null }>(
+				dbPath,
+				`SELECT type, json_extract(data, '$.inputId') AS input_id FROM events
+				WHERE session_id = ? AND type IN ('input.admitted', 'input.sent',
+					'input.cancelled', 'turn.completed', 'turn.interrupted', 'turn.error')
+				ORDER BY sequence`,
+				sessionId,
+			),
+			outbox: queryDb<{ command_id: string }>(
+				dbPath,
+				`SELECT command_id FROM provider_command_outbox
+				WHERE session_id = ? AND effect_type = 'send_turn'
+				ORDER BY request_sequence`,
+				sessionId,
+			).map((r) => r.command_id),
+			turns: queryDb<{ state: string; user_message_id: string }>(
+				dbPath,
+				`SELECT state, user_message_id FROM turns WHERE session_id = ?
+				ORDER BY requested_at, rowid`,
+				sessionId,
+			),
+		});
+		const inputsOf = (
+			rows: readonly { type: string; input_id: string | null }[],
+			type: string,
+		) => rows.filter((r) => r.type === type).map((r) => r.input_id);
+
+		test.describe("remove and edit", () => {
+			// One planned turn: the replayer fails the test if a removed or
+			// edited input is ever sent.
+			test.use({
+				claudeReplay: { turns: ["pong-thinking-text-turn"], delayMs: 500 },
+			});
+
+			test("Remove and Edit drop queued rows on every client and send neither", async ({
+				page,
+				browser,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(90_000);
+				const sessionId = sessionOf(harness);
+				const sends = recordSends(page);
+				const app = new AppPage(page);
+				const chat = new ChatPage(page);
+				await app.goto(relayUrl);
+				const context = await browser.newContext({
+					viewport: page.viewportSize(),
+				});
+				try {
+					const other = await context.newPage();
+					await new AppPage(other).goto(relayUrl);
+
+					await app.sendMessage("Alpha");
+					await expect(chat.stopBtn).toBeVisible();
+					await app.sendMessage("Bravo");
+					await app.sendMessage("Charlie");
+					await expect.poll(() => sends.length).toBe(3);
+					const [a, b, c] = sends.map((send) => send.commandId);
+					for (const p of [page, other])
+						await expect(trayTexts(p)).toHaveText([/^Bravo$/, /^Charlie$/]);
+
+					await row(page, "Bravo").getByTestId("pending-input-remove").click();
+					for (const p of [page, other])
+						await expect(trayTexts(p)).toHaveText([/^Charlie$/]);
+
+					await expect(app.input).toHaveValue("");
+					await row(page, "Charlie").getByTestId("pending-input-edit").click();
+					await expect(app.input).toHaveValue("Charlie");
+					for (const p of [page, other])
+						await expect(trayRows(p)).toHaveCount(0);
+					// Both left the tray while Alpha's turn was still running.
+					expect(countEvents(harness.eventsDbPath, "turn.completed")).toBe(0);
+
+					await expect
+						.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
+						.toBe(1);
+					await chat.waitForStreamingComplete();
+					await expect(chat.userMessages).toHaveText([/\bAlpha\b/]);
+					const proof = ledger(harness.eventsDbPath, sessionId);
+					await testInfo.attach("queue-remove-edit-proof.json", {
+						body: JSON.stringify({ inputs: { a, b, c }, ...proof }, null, 2),
+						contentType: "application/json",
+					});
+					expect(proof.outbox).toEqual([a]);
+					expect(inputsOf(proof.events, "input.sent")).toEqual([a]);
+					expect(inputsOf(proof.events, "input.cancelled")).toEqual([b, c]);
+				} finally {
+					await context.close();
+				}
+			});
+		});
+
+		test.describe("stop and resume", () => {
+			test.use({
+				claudeReplay: {
+					turns: [
+						"pong-thinking-text-turn",
+						"pong-thinking-text-turn",
+						"pong-thinking-text-turn",
+					],
+					delayMs: 300,
+				},
+			});
+
+			test("Stop with a queue pauses it; Resume sends the oldest and the rest drains", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(90_000);
+				const dbPath = harness.eventsDbPath;
+				const sessionId = sessionOf(harness);
+				const sends = recordSends(page);
+				const app = new AppPage(page);
+				const chat = new ChatPage(page);
+				await app.goto(relayUrl);
+
+				await app.sendMessage("Alpha");
+				await expect(chat.stopBtn).toBeVisible();
+				await app.sendMessage("Bravo");
+				await app.sendMessage("Charlie");
+				await expect.poll(() => sends.length).toBe(3);
+				const [a, b, c] = sends.map((send) => send.commandId);
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/, /^Charlie$/]);
+				await expect(page.getByTestId("pending-input-paused")).toHaveCount(0);
+
+				await chat.stopBtn.click();
+				await expect
+					.poll(() => countEvents(dbPath, "turn.interrupted"))
+					.toBe(1);
+				await expect(page.getByTestId("pending-input-paused")).toContainText(
+					"Paused",
+				);
+				// Nothing drains on its own while paused.
+				await page.waitForTimeout(1_500);
+				const paused = ledger(dbPath, sessionId);
+				expect(inputsOf(paused.events, "input.sent")).toEqual([a]);
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/, /^Charlie$/]);
+
+				await page.getByTestId("pending-input-resume").click();
+				await expect(trayTexts(page)).toHaveText([/^Charlie$/]);
+				await expect(page.getByTestId("pending-input-paused")).toHaveCount(0);
+				// Bravo's normal end un-pauses the queue: Charlie follows unprompted.
+				await expect
+					.poll(() => countEvents(dbPath, "turn.completed"), {
+						timeout: 30_000,
+					})
+					.toBe(2);
+				await chat.waitForStreamingComplete();
+				await expect(trayRows(page)).toHaveCount(0);
+				await expect(chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+					/\bCharlie\b/,
+				]);
+				const proof = ledger(dbPath, sessionId);
+				await testInfo.attach("queue-stop-resume-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b, c }, whilePaused: paused, final: proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+				expect(proof.outbox).toEqual([a, b, c]);
+				expect(proof.turns.map((t) => t.state)).toEqual([
+					"interrupted",
+					"completed",
+					"completed",
+				]);
+			});
+		});
+
+		test.describe("a failed turn", () => {
+			// Alpha's result reports an upstream API failure.
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+					delayMs: 300,
+					failTurns: [0],
+				},
+			});
+
+			test("pauses the queue until Resume", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const dbPath = harness.eventsDbPath;
+				const sessionId = sessionOf(harness);
+				const sends = recordSends(page);
+				const app = new AppPage(page);
+				const chat = new ChatPage(page);
+				await app.goto(relayUrl);
+
+				await app.sendMessage("Alpha");
+				await expect(chat.stopBtn).toBeVisible();
+				await app.sendMessage("Bravo");
+				await expect.poll(() => sends.length).toBe(2);
+				const [a, b] = sends.map((send) => send.commandId);
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+
+				await expect.poll(() => countEvents(dbPath, "turn.error")).toBe(1);
+				await expect(page.getByTestId("pending-input-paused")).toBeVisible();
+				await page.waitForTimeout(1_500);
+				const paused = ledger(dbPath, sessionId);
+				expect(inputsOf(paused.events, "input.sent")).toEqual([a]);
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+
+				await page.getByTestId("pending-input-resume").click();
+				await expect.poll(() => countEvents(dbPath, "turn.completed")).toBe(1);
+				await chat.waitForStreamingComplete();
+				await expect(trayRows(page)).toHaveCount(0);
+				const proof = ledger(dbPath, sessionId);
+				await testInfo.attach("queue-failed-turn-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b }, whilePaused: paused, final: proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+				expect(proof.turns.map((t) => t.state)).toEqual(["error", "completed"]);
+				expect(proof.outbox).toEqual([a, b]);
+			});
+		});
+
+		test.describe("a row that already started", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+					delayMs: 100,
+				},
+			});
+
+			test("Remove and Edit say it started, leave the composer alone and send it once", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const dbPath = harness.eventsDbPath;
+				const sessionId = sessionOf(harness);
+				// A lagging client: while held, nothing the server sends reaches the
+				// page, so Bravo's row stays on screen after Bravo has started.
+				let holding = false;
+				const held: (() => void)[] = [];
+				let replies = 0;
+				await page.routeWebSocket(/\/rpc$/, (ws) => {
+					const server = ws.connectToServer();
+					server.onMessage((message) => {
+						if (
+							typeof message === "string" &&
+							message.includes("already_started")
+						)
+							replies += 1;
+						if (holding) held.push(() => ws.send(message));
+						else ws.send(message);
+					});
+				});
+				const app = new AppPage(page);
+				const chat = new ChatPage(page);
+				await app.goto(relayUrl);
+
+				await app.sendMessage("Alpha");
+				await expect(chat.stopBtn).toBeVisible();
+				await app.sendMessage("Bravo");
+				const admitted = () =>
+					inputsOf(ledger(dbPath, sessionId).events, "input.admitted");
+				await expect.poll(() => admitted().length).toBe(2);
+				const [a, b] = admitted();
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+
+				holding = true;
+				await expect
+					.poll(() => inputsOf(ledger(dbPath, sessionId).events, "input.sent"))
+					.toEqual([a, b]);
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+				await row(page, "Bravo").getByTestId("pending-input-remove").click();
+				await row(page, "Bravo").getByTestId("pending-input-edit").click();
+				await expect.poll(() => replies).toBe(2);
+				holding = false;
+				for (const send of held.splice(0)) send();
+
+				await expect(
+					page.getByText("That message already started").first(),
+				).toBeVisible();
+				await expect(trayRows(page)).toHaveCount(0);
+				await expect(app.input).toHaveValue("");
+				await expect.poll(() => countEvents(dbPath, "turn.completed")).toBe(2);
+				await chat.waitForStreamingComplete();
+				await expect(chat.userMessages).toHaveText([/\bAlpha\b/, /\bBravo\b/]);
+				const proof = ledger(dbPath, sessionId);
+				await testInfo.attach("queue-already-started-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b }, replies, ...proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+				expect(proof.outbox).toEqual([a, b]);
+				expect(inputsOf(proof.events, "input.sent")).toEqual([a, b]);
+				expect(inputsOf(proof.events, "input.cancelled")).toEqual([]);
+			});
+		});
+
+		test.describe("a restart that cuts the running turn off", () => {
+			// The in-process runner dies with the relay, so the running turn can
+			// never finish. (The daemon lane covers a turn that survives a restart.)
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+					delayMs: 500,
+				},
+			});
+
+			test("closes the turn and pauses the queue it leaves behind", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(90_000);
+				const dbPath = harness.eventsDbPath;
+				const sessionId = sessionOf(harness);
+				const sends = recordSends(page);
+				const app = new AppPage(page);
+				const chat = new ChatPage(page);
+				await app.goto(relayUrl);
+
+				await app.sendMessage("Alpha");
+				await expect(chat.stopBtn).toBeVisible();
+				await app.sendMessage("Bravo");
+				await expect.poll(() => sends.length).toBe(2);
+				const [a, b] = sends.map((send) => send.commandId);
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+				const before = ledger(dbPath, sessionId);
+
+				await harness.restart();
+				await expect(page.getByTestId("pending-input-paused")).toBeVisible({
+					timeout: 30_000,
+				});
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+				await expect(chat.stopBtn).toBeHidden();
+				await page.waitForTimeout(1_500);
+				const restarted = ledger(dbPath, sessionId);
+				// Shutdown may interrupt the turn first; otherwise recovery closes it
+				// as an error. Either way it was cut off and the queue pauses.
+				const cutOff = restarted.turns.map((t) => t.state);
+				expect(cutOff).toHaveLength(1);
+				expect(["interrupted", "error"]).toContain(cutOff[0]);
+				expect(inputsOf(restarted.events, "input.sent")).toEqual([a]);
+
+				await page.getByTestId("pending-input-resume").click();
+				await expect
+					.poll(() => countEvents(dbPath, "turn.completed"), {
+						timeout: 30_000,
+					})
+					.toBe(1);
+				await chat.waitForStreamingComplete();
+				await expect(trayRows(page)).toHaveCount(0);
+				const proof = ledger(dbPath, sessionId);
+				await testInfo.attach("queue-restart-cut-off-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b }, before, restarted, final: proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+				expect(proof.outbox).toEqual([a, b]);
+				expect(proof.turns.map((t) => t.state)).toEqual([
+					...cutOff,
+					"completed",
+				]);
+			});
+		});
+
+		test.describe("a late done for the turn before", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+					delayMs: 300,
+				},
+			});
+
+			test("does not end the queued turn that started after it", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const dbPath = harness.eventsDbPath;
+				const sessionId = sessionOf(harness);
+				const sends = recordSends(page);
+				const app = new AppPage(page);
+				const chat = new ChatPage(page);
+				await app.goto(relayUrl);
+
+				await app.sendMessage("Alpha");
+				await expect(chat.stopBtn).toBeVisible();
+				await app.sendMessage("Bravo");
+				await expect.poll(() => sends.length).toBe(2);
+				const [a, b] = sends.map((send) => send.commandId);
+
+				// Bravo is streaming once its assistant message shows.
+				await expect(chat.assistantMessages).toHaveCount(2, {
+					timeout: 20_000,
+				});
+				const [alphaTurn] = queryDb<{ assistant_message_id: string }>(
+					dbPath,
+					"SELECT assistant_message_id FROM turns WHERE user_message_id = ?",
+					a ?? "",
+				);
+				const alphaAssistant = alphaTurn?.assistant_message_id;
+				expect(alphaAssistant).toMatch(/\S/);
+				expect(countEvents(dbPath, "turn.completed")).toBe(1);
+				await expect(chat.stopBtn).toBeVisible();
+
+				// The monitoring layer's synthetic done for Alpha, arriving late.
+				harness.stack.wsHandler.sendToSession(sessionId, {
+					type: "done",
+					sessionId,
+					code: 0,
+					alertId: JSON.stringify([sessionId, alphaAssistant, "done"]),
+					...(alphaAssistant ? { messageId: alphaAssistant } : {}),
+				});
+				await page.waitForTimeout(1_000);
+				const stopAfterLateDone = await chat.stopBtn.isVisible();
+				const completedAfterLateDone = countEvents(dbPath, "turn.completed");
+				expect(completedAfterLateDone).toBe(1);
+				expect(stopAfterLateDone).toBe(true);
+
+				await expect.poll(() => countEvents(dbPath, "turn.completed")).toBe(2);
+				await chat.waitForStreamingComplete();
+				await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
+				await testInfo.attach("late-done-proof.json", {
+					body: JSON.stringify(
+						{
+							inputs: { a, b },
+							lateDoneMessageId: alphaAssistant,
+							stopAfterLateDone,
+							completedAfterLateDone,
+							final: ledger(dbPath, sessionId),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+			});
 		});
 	});
 

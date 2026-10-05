@@ -119,6 +119,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			// Relay-owned Session Inbox facts; no provider produces them.
 			"input.admitted",
 			"input.sent",
+			"input.cancelled",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>

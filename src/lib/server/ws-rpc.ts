@@ -19,6 +19,7 @@ import { terminalsHandlers } from "./ws-rpc/terminals.js";
 export {
 	AnswerQuestion,
 	AttachProject,
+	CancelInput,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,
@@ -94,6 +95,7 @@ export {
 	type SaveProjectResponse,
 	ScanNow,
 	type ScanNowResponse,
+	SendInputNow,
 	type SessionInfo,
 	SetAgent,
 	SetClaudeSettings,

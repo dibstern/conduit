@@ -13,7 +13,8 @@ type PendingInput = {
 };
 type DetailItem =
 	| { _tag: "transcriptMessage"; message: HistoryMessage }
-	| { _tag: "pendingInput"; input: PendingInput };
+	| { _tag: "pendingInput"; input: PendingInput }
+	| { _tag: "inbox"; inbox: { paused: boolean } };
 type DetailEnvelope =
 	| { _tag: "snapshot"; rows: DetailItem[]; sequence: number; hasMore: boolean }
 	| { _tag: "upsert"; item: DetailItem; sequence: number }
@@ -23,6 +24,7 @@ type Listener = (sessionId: string, envelope: DetailEnvelope) => void;
 interface SessionProjection {
 	rows: Map<string, HistoryMessage>;
 	pending: Map<string, PendingInput>;
+	paused: boolean;
 	sequence: number;
 	hasMore: boolean;
 	assistantId: string | null;
@@ -44,6 +46,7 @@ function session(page: Page, sessionId: string): SessionProjection {
 		projection = {
 			rows: new Map(),
 			pending: new Map(),
+			paused: false,
 			sequence: 0,
 			hasMore: false,
 			assistantId: null,
@@ -84,6 +87,7 @@ const snapshot = (state: SessionProjection): DetailEnvelope => {
 			...[...state.pending.values()].map(
 				(input): DetailItem => ({ _tag: "pendingInput", input }),
 			),
+			{ _tag: "inbox", inbox: { paused: state.paused } },
 		],
 		sequence: state.sequence,
 		hasMore: state.hasMore || rows.length > 50,
@@ -206,6 +210,17 @@ export function projectLegacyRelayMessage(
 		listeners.get(page)?.(sessionId, {
 			_tag: "upsert",
 			item: { _tag: "pendingInput", input },
+			sequence,
+		});
+		return;
+	}
+	// Mock-only: the server's derived pause, carried on the inbox arm.
+	if (event.type === "mock_inbox" && typeof event["paused"] === "boolean") {
+		state.paused = event["paused"];
+		const sequence = ++state.sequence;
+		listeners.get(page)?.(sessionId, {
+			_tag: "upsert",
+			item: { _tag: "inbox", inbox: { paused: state.paused } },
 			sequence,
 		});
 		return;

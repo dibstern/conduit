@@ -655,6 +655,18 @@
 		}
 	}
 
+	/** Edit on a queued row: its text and images come back to the composer. */
+	function takeBackQueuedInput(text: string, images: readonly string[]) {
+		inputText = inputText.trim() ? `${inputText}\n\n${text}` : text;
+		handleInput();
+		cursorPos = inputText.length;
+		pendingImages = [
+			...pendingImages,
+			...images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl, name: "image", size: dataUrl.length })),
+		];
+		textareaEl?.focus();
+	}
+
 	function removePendingImage(id: string) {
 		pendingImages = pendingImages.filter((img) => img.id !== id);
 	}
@@ -829,7 +841,11 @@
 			</div>
 		{/if}
 
-		<PendingInputTray inputs={currentChat().transcript?.pending ?? []} />
+		<PendingInputTray
+			inputs={currentChat().transcript?.pending ?? []}
+			paused={currentChat().transcript?.paused ?? false}
+			onEdit={takeBackQueuedInput}
+		/>
 
 		<div
 			id="input-row"

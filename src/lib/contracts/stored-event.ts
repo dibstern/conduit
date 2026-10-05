@@ -50,6 +50,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"input.admitted",
 	"input.sent",
+	"input.cancelled",
 	"session.created",
 	"session.renamed",
 	"session.read",
@@ -262,6 +263,11 @@ export interface InputSentPayload {
 	readonly inputId: string;
 }
 
+export interface InputCancelledPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
 export interface TurnModelResolvedPayload {
 	readonly requestedModel?: string;
 	readonly expectedModel?: string;
@@ -459,6 +465,7 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"input.admitted": InputAdmittedPayload;
 	"input.sent": InputSentPayload;
+	"input.cancelled": InputCancelledPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.read": SessionReadPayload;
@@ -815,6 +822,11 @@ const InputSentPayloadSchema = Schema.Struct({
 	inputId: Schema.String,
 });
 
+const InputCancelledPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+});
+
 const SessionCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	title: Schema.String,
@@ -1031,6 +1043,10 @@ const InputSentEventSchema = eventEnvelope(
 	"input.sent",
 	InputSentPayloadSchema,
 );
+const InputCancelledEventSchema = eventEnvelope(
+	"input.cancelled",
+	InputCancelledPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -1124,7 +1140,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// Canonical Event Schema (Union of all 42 event types)
+// Canonical Event Schema (Union of all 43 event types)
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -1146,6 +1162,7 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	InputAdmittedEventSchema,
 	InputSentEventSchema,
+	InputCancelledEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionReadEventSchema,

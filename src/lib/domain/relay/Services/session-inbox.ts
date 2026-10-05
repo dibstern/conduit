@@ -6,9 +6,10 @@
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Effect, Layer, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Schema, Stream } from "effect";
 import {
 	type InputAdmittedPayload,
+	type InputCancelledPayload,
 	type InputDelivery,
 	type InputRequest,
 	InputRequestSchema,
@@ -55,11 +56,14 @@ export type InboxCommand =
 			readonly delivery: InputDelivery;
 			readonly request: InputRequest;
 	  }
+	| { readonly _tag: "Cancel"; readonly inputId: string }
+	| { readonly _tag: "SendNow"; readonly inputId: string }
 	| { readonly _tag: "Drain" };
 
 export type InboxEvent =
 	| { readonly type: "input.admitted"; readonly data: InputAdmittedPayload }
-	| { readonly type: "input.sent"; readonly data: InputSentPayload };
+	| { readonly type: "input.sent"; readonly data: InputSentPayload }
+	| { readonly type: "input.cancelled"; readonly data: InputCancelledPayload };
 
 export type InboxDecision =
 	| {
@@ -74,6 +78,13 @@ const sent = (sessionId: string, inputId: string): InboxEvent => ({
 	type: "input.sent",
 	data: { sessionId, inputId },
 });
+
+// Only a queued input can be removed or sent now; anything else has started
+// (or never existed, which the browser cannot tell apart from started).
+const ALREADY_STARTED: InboxDecision = {
+	_tag: "Rejected",
+	reason: "already_started",
+};
 
 export function decideInbox(
 	sessionId: string,
@@ -100,6 +111,30 @@ export function decideInbox(
 				_tag: "Accepted",
 				events: [admitted, sent(sessionId, handoff.inputId)],
 				handoff,
+			};
+		}
+		case "Cancel": {
+			const { inputId } = command;
+			if (!view.queued.some((input) => input.inputId === inputId))
+				return ALREADY_STARTED;
+			return {
+				_tag: "Accepted",
+				events: [{ type: "input.cancelled", data: { sessionId, inputId } }],
+			};
+		}
+		case "SendNow": {
+			const input = view.queued.find(
+				(queued) => queued.inputId === command.inputId,
+			);
+			if (!input) return ALREADY_STARTED;
+			// Steering a busy session arrives in a later ticket; until then the
+			// input keeps its place in the queue.
+			if (!idle) return { _tag: "Accepted", events: [] };
+			// Paused or not, an idle session hands this input off.
+			return {
+				_tag: "Accepted",
+				events: [sent(sessionId, input.inputId)],
+				handoff: input,
 			};
 		}
 		case "Drain": {
@@ -134,11 +169,29 @@ export type SessionInboxError =
 	| ClaudeEventPersistFailure
 	| SendTurnError;
 
+export interface SessionInboxTarget {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
+export type SessionInboxOutcome = "accepted" | "already_started";
+
 export interface SessionInbox {
 	/** Admit an input; `handedOff` is true when this input was sent at once. */
 	readonly submit: (
 		input: SessionInboxSubmitInput,
 	) => Effect.Effect<{ readonly handedOff: boolean }, SessionInboxError>;
+	/** Remove a queued input before it is sent. */
+	readonly cancel: (
+		target: SessionInboxTarget,
+	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
+	/** Hand a queued input off now; the only way to restart a paused queue. */
+	readonly sendNow: (
+		target: SessionInboxTarget,
+	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
+	/** Start draining once the relay's providers are registered and recovered. */
+	readonly start: Effect.Effect<void>;
 }
 
 export class SessionInboxTag extends Context.Tag("SessionInbox")<
@@ -250,6 +303,11 @@ export const SessionInboxLive = Layer.scoped(
 					if (events.length > 0) yield* persist.persistEvents(events);
 					return;
 				}
+				const wasQueued = !decision.events.some(
+					(event) =>
+						event.type === "input.admitted" &&
+						event.data.inputId === handoff.inputId,
+				);
 				// input.sent commits with the handoff's send_turn outbox row.
 				const { request } = handoff;
 				yield* providerTurnService
@@ -272,7 +330,55 @@ export const SessionInboxLive = Layer.scoped(
 						events,
 					})
 					.pipe(Effect.provideService(OverridesStateTag, overrides));
+				// sendTurn reports a failure it could not place (no provider, no
+				// model) to the session and leaves no trace, so a queued input would
+				// be retried on every advance. Place it as a failed turn instead: it
+				// leaves the tray, and the queue behind it pauses.
+				if (!wasQueued) return;
+				const [unsent] = yield* sql<{ n: number }>`SELECT 1 AS n
+					FROM pending_inputs WHERE input_id = ${handoff.inputId} AND state = 'queued'`;
+				if (!unsent) return;
+				log.warn(
+					`session=${sessionId} input=${handoff.inputId} queued handoff failed before it was sent; pausing the queue`,
+				);
+				const meta = provider ? { provider: provider.provider } : {};
+				yield* persist.persistUserMessage(sessionId, request.text, {
+					messageId: handoff.inputId,
+					inputId: handoff.inputId,
+					...meta,
+				});
+				yield* persist.persistEvent(
+					canonicalEvent(
+						"turn.error",
+						sessionId,
+						{
+							messageId: handoff.inputId,
+							userMessageId: handoff.inputId,
+							error: "This queued message could not be sent",
+						},
+						meta,
+					),
+				);
 			});
+
+		const act =
+			(command: "Cancel" | "SendNow") => (target: SessionInboxTarget) =>
+				serialised(target.sessionId)(
+					Effect.gen(function* () {
+						const view = yield* readView(target.sessionId);
+						const decision = decideInbox(target.sessionId, view, {
+							_tag: command,
+							inputId: target.inputId,
+						});
+						yield* commit(target.sessionId, decision, {
+							clientId: target.clientId,
+							errorDelivery: "session",
+						});
+						return decision._tag === "Rejected"
+							? decision.reason
+							: ("accepted" as const);
+					}),
+				);
 
 		const drain = (sessionId: string) =>
 			serialised(sessionId)(
@@ -311,9 +417,13 @@ export const SessionInboxLive = Layer.scoped(
 
 		// Subscribe before the startup sweep so no advance falls between them. A
 		// dropped advance may have named any session, so it sweeps them all.
+		// Nothing drains before start: a handoff before the providers are
+		// registered would fail and pause a queue for no reason.
 		const advances = yield* bus.subscribeAdvances();
+		const ready = yield* Deferred.make<void>();
 		yield* Effect.forkScoped(
-			drainSessions().pipe(
+			Deferred.await(ready).pipe(
+				Effect.zipRight(drainSessions()),
 				Effect.zipRight(
 					Stream.runForEach(advances, (advance) =>
 						advance.dropped
@@ -327,6 +437,9 @@ export const SessionInboxLive = Layer.scoped(
 		);
 
 		return {
+			start: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
+			cancel: act("Cancel"),
+			sendNow: act("SendNow"),
 			submit: (input) =>
 				serialised(input.sessionId)(
 					Effect.gen(function* () {

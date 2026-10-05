@@ -1,5 +1,6 @@
 export {
 	AnswerQuestion,
+	CancelInput,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,
@@ -34,6 +35,7 @@ export {
 	GetToolContent,
 	type GetToolContentResponse,
 	type GoalDetails,
+	type InboxCommandResponse,
 	type InstanceListResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
@@ -68,6 +70,7 @@ export {
 	type SaveProjectResponse,
 	ScanNow,
 	type ScanNowResponse,
+	SendInputNow,
 	type SessionInfo,
 	SetClaudeSettings,
 	SetDefaultModel,

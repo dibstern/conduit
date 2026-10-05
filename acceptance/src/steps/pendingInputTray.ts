@@ -54,6 +54,39 @@ export const pendingInputTrayHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "pause or resume the queue",
+		match: /^the queue (pauses|resumes)$/,
+		run: async ({ world, match }) => {
+			requireRelayControl(world.page).sendMessage({
+				type: "mock_inbox",
+				sessionId: sessionIdOf(world.page),
+				paused: match[1] === "pauses",
+			});
+		},
+	},
+	{
+		name: "assert tray paused header",
+		match: /^the pending-input tray (shows|does not show) Paused$/,
+		run: async ({ world, match }) => {
+			const header = world.page.getByTestId("pending-input-paused");
+			if (match[1] === "shows") {
+				await expect(header).toContainText("Paused");
+				await expect(header.getByTestId("pending-input-resume")).toHaveText(
+					"Resume",
+				);
+			} else await expect(header).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert tray row actions",
+		match: /^pending-input row ([0-9]+) offers Edit and Remove$/,
+		run: async ({ world, match }) => {
+			const row = rows(world.page).nth(Number(match[1]) - 1);
+			await expect(row.getByTestId("pending-input-edit")).toBeVisible();
+			await expect(row.getByTestId("pending-input-remove")).toBeVisible();
+		},
+	},
+	{
 		name: "assert tray hidden",
 		match: /^the pending-input tray is not visible$/,
 		run: async ({ world }) => {

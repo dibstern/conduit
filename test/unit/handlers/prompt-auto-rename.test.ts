@@ -100,6 +100,7 @@ const makeReadQuery = (
 		Effect.succeed({ messages: [], version: 0 }),
 	),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+	readInboxState: () => Effect.succeed(undefined),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),

@@ -51,6 +51,8 @@ export type SessionMessages = {
 		project: string;
 		/** Inputs conduit holds for the session, oldest first: the tray. */
 		pending: PendingInput[];
+		/** The queue stopped draining because the last turn did not end normally. */
+		paused?: boolean;
 	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;
@@ -754,8 +756,20 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 export function handleDone(
 	activity: SessionActivity,
 	messages: SessionMessages,
-	_msg: Extract<RelayMessage, { type: "done" }>,
+	msg: Extract<RelayMessage, { type: "done" }>,
 ): void {
+	// A done names the assistant message whose turn it ends. One already
+	// finalised, or one from before the message now streaming, is late: the
+	// queue may have started the next turn, which it must not end.
+	const id = msg.messageId;
+	if (
+		id &&
+		(activity.doneMessageIds.has(id) ||
+			(activity.currentMessageId !== null &&
+				id !== activity.currentMessageId &&
+				activity.seenMessageIds.has(id)))
+	)
+		return;
 	applyTerminalTurn(activity, messages);
 }
 

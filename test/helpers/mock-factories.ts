@@ -1184,6 +1184,10 @@ export const PassThroughSessionInbox = Layer.effect(
 						Effect.provideService(OverridesStateTag, overrides),
 						Effect.as({ handedOff: true }),
 					),
+			// Nothing ever queues here, so nothing can be removed or sent now.
+			cancel: () => Effect.succeed("already_started" as const),
+			sendNow: () => Effect.succeed("already_started" as const),
+			start: Effect.void,
 		};
 	}),
 );
