@@ -691,6 +691,52 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
+			if (prompt === "restart-background-work") {
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: [
+						{
+							task_id: "restart-background-task",
+							task_type: "local_bash",
+							description: "Background restart proof",
+							ambient: false,
+						},
+					],
+				} as unknown as SDKMessage;
+				mark({
+					kind: "background-work",
+					phase: "started",
+					queryId,
+					pid: process.pid,
+					at: process.hrtime.bigint().toString(),
+				});
+				if (proof) {
+					const change = join(dirname(proof), "restart-background-change");
+					while (!existsSync(change) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed || readFileSync(change, "utf8") === "end") return;
+					yield {
+						type: "system",
+						subtype: "background_tasks_changed",
+						session_id: sessionId,
+						uuid: randomUUID(),
+						tasks:
+							readFileSync(change, "utf8") === "replace"
+								? [
+										{
+											task_id: "replacement-background-task",
+											task_type: "local_agent",
+											description: "Latest background snapshot",
+											ambient: false,
+										},
+									]
+								: [],
+					} as unknown as SDKMessage;
+				}
+			}
 			if (prompt === "upgrade-background-work" && proof) {
 				const release = join(dirname(proof), "release-upgrade-background");
 				while (!existsSync(release) && !closed)

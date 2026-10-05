@@ -44,6 +44,7 @@ import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
 import { buildClaudeFlagSettings } from "../lib/provider/claude/claude-sdk-settings.js";
 import type {
 	ClaudeSessionFailure,
+	ClaudeSessionOutput,
 	ClaudeSessionRunner,
 } from "../lib/provider/claude/claude-session-runner.js";
 import { fromSdkPermissionMode } from "../lib/provider/claude/permission-mode-map.js";
@@ -147,6 +148,9 @@ const main = Effect.gen(function* () {
 	let shellEnv: Readonly<Record<string, string | undefined>> = process.env;
 	let initializing = false;
 	const spool = new ClaudeRunnerSpool(`${socketPath}.spool`);
+	let backgroundSnapshot:
+		| Extract<ClaudeSessionOutput, { type: "background-task" }>
+		| undefined;
 	let snapshot: ClaudeRunnerSettingsSnapshot | undefined;
 	let frozenSnapshot: ClaudeRunnerSettingsSnapshot | undefined;
 	let fileSettings: ClaudeRunnerFileSettings | undefined;
@@ -398,6 +402,13 @@ const main = Effect.gen(function* () {
 										onSubagentFinalizationComplete: reportUpgradeState,
 									},
 									(output) => {
+										if (output.type === "background-task") {
+											backgroundSnapshot =
+												output.transition.kind === "snapshot" &&
+												output.transition.tasks.length > 0
+													? output
+													: undefined;
+										}
 										idle?.activity(output);
 										activeOutputs++;
 										reportUpgradeState();
@@ -482,6 +493,7 @@ const main = Effect.gen(function* () {
 						peer.destroy();
 						return;
 					}
+					const firstAttachment = !attached;
 					attached = true;
 					if (retiring && !message.preserveRole) {
 						retiring = false;
@@ -489,6 +501,17 @@ const main = Effect.gen(function* () {
 						register();
 					}
 					spool.attach(peer, message.acknowledgedSequence);
+					// The server lost its in-memory level state, even for acked outputs.
+					// Replay the current snapshot after the backlog, with a fresh sequence.
+					// Receipt-failure retries on this connection only need the backlog.
+					if (firstAttachment)
+						runFork(
+							Effect.suspend(() =>
+								backgroundSnapshot
+									? spool.emit(backgroundSnapshot)
+									: Effect.void,
+							).pipe(Effect.orDie),
+						);
 					reportedQuiescent = undefined;
 					reportUpgradeState();
 				} else if (message.type === "output-reply") {
