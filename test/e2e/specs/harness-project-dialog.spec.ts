@@ -274,3 +274,131 @@ test("keeps a failed creation inline and the draft correctable", async ({
 	await expect(dialog).toBeHidden();
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("notes");
 });
+
+// Failure cases: suggestions could leak a missing recent folder, list a plain
+// or hidden sibling, mislabel git, repeat a folder found both ways, ignore the
+// text filter, or break path autocomplete; the dialog could hide them or fail
+// to add a picked one.
+function seedSuggestions(harness: ProcessHarness) {
+	const elsewhere = join(harness.root, "elsewhere");
+	const folder = (path: string, git: boolean) => {
+		mkdirSync(git ? join(path, ".git") : path, { recursive: true });
+		return path;
+	};
+	const recentRepo = folder(join(elsewhere, "Alpha-recent"), true);
+	const recentPlain = folder(join(elsewhere, "beta-recent"), false);
+	const both = folder(join(harness.root, "alpha-both"), true);
+	const sibling = folder(join(harness.root, "alpha-sibling"), true);
+	folder(join(harness.root, "alpha-plain"), false);
+	folder(join(harness.root, ".alpha-hidden"), true);
+	writeFileSync(
+		join(harness.configDir, "recent.json"),
+		JSON.stringify({
+			recentProjects: [
+				{ directory: recentRepo, slug: "alpha-recent", lastUsed: 4 },
+				{ directory: recentPlain, slug: "beta-recent", lastUsed: 3 },
+				{ directory: join(elsewhere, "alpha-gone"), slug: "gone", lastUsed: 2 },
+				{ directory: both, slug: "alpha-both", lastUsed: 1 },
+			],
+		}),
+	);
+	return { recentRepo, recentPlain, both, sibling };
+}
+
+test("FindFolders suggests recent and sibling folders for text and matches paths", async ({
+	harness,
+}, testInfo) => {
+	const { recentRepo, recentPlain, both, sibling } = seedSuggestions(harness);
+	const browser = await harness.connect();
+	const find = (query: string) =>
+		Effect.runPromise(browser.rpc.FindFolders({ query }));
+	const all = await find("");
+	expect(all.entries).toEqual([
+		{ path: recentRepo, isGitRepo: true, reason: "recent", exists: true },
+		{ path: recentPlain, isGitRepo: false, reason: "recent", exists: true },
+		{ path: both, isGitRepo: true, reason: "recent", exists: true },
+		{ path: sibling, isGitRepo: true, reason: "sibling", exists: true },
+	]);
+	const alpha = await find("ALPHA");
+	expect(alpha.entries.map((entry) => [entry.path, entry.reason])).toEqual([
+		[recentRepo, "recent"],
+		[both, "recent"],
+		[sibling, "sibling"],
+	]);
+	const beta = await find(" beta ");
+	expect(beta.entries).toEqual([
+		{ path: recentPlain, isGitRepo: false, reason: "recent", exists: true },
+	]);
+	expect((await find("nothing-matches")).entries).toEqual([]);
+	const path = await find(join(harness.root, "alpha-"));
+	expect(path.entries).toEqual([
+		{ path: both, isGitRepo: true, reason: "match", exists: true },
+		{
+			path: join(harness.root, "alpha-plain"),
+			isGitRepo: false,
+			reason: "match",
+			exists: true,
+		},
+		{ path: sibling, isGitRepo: true, reason: "match", exists: true },
+		{
+			path: join(harness.root, "alpha-"),
+			isGitRepo: false,
+			reason: "match",
+			exists: false,
+		},
+	]);
+	// Removing a project is what makes its folders "recent", main first.
+	const gamma = ["gamma-main", "gamma-extra"].map((name) => {
+		mkdirSync(join(harness.root, "elsewhere", name));
+		return realpathSync(join(harness.root, "elsewhere", name));
+	});
+	const saved = await Effect.runPromise(
+		browser.rpc.SaveProject({ title: "Gamma", folders: gamma }),
+	);
+	const slug = saved.savedSlug;
+	if (!slug) throw new Error("SaveProject did not return the new slug");
+	expect((await find("gamma")).entries).toEqual([]);
+	await Effect.runPromise(browser.rpc.RemoveProject({ slug }));
+	const removed = await find("gamma");
+	expect(removed.entries).toEqual(
+		gamma.map((folder) => ({
+			path: folder,
+			isGitRepo: false,
+			reason: "recent",
+			exists: true,
+		})),
+	);
+	writeFileSync(
+		testInfo.outputPath("find-folders.json"),
+		JSON.stringify({ all, alpha, beta, path, removed }, null, 2),
+	);
+});
+
+test("opening the dialog shows suggestions and clicking one adds a folder row", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { recentRepo, recentPlain, sibling } = seedSuggestions(harness);
+	const dialog = await openDialog(page, harness);
+	const suggestions = dialog.getByRole("group", { name: "Suggestions" });
+	const option = (path: string) =>
+		suggestions.getByRole("option", { name: path, exact: true });
+	await expect(option(recentRepo)).toContainText("recent · git");
+	await expect(option(recentPlain)).toContainText("recent");
+	await expect(option(sibling)).toContainText("git");
+	await expect(suggestions.getByRole("option")).toHaveCount(4);
+	await page.screenshot({ path: testInfo.outputPath("suggestions-open.png") });
+	await option(sibling).click();
+	await expect(dialog.getByTestId("project-folder-row")).toHaveAttribute(
+		"aria-label",
+		`Main folder: ${sibling}`,
+	);
+	await expect(dialog.getByLabel("Project name")).toHaveValue("alpha-sibling");
+	await expect(option(sibling)).toHaveCount(0);
+	await dialog.getByRole("combobox", { name: "Add folder" }).fill("beta");
+	await expect(suggestions.getByRole("option")).toHaveCount(1);
+	await expect(option(recentPlain)).toBeVisible();
+	await page.screenshot({
+		path: testInfo.outputPath("suggestion-added.png"),
+	});
+});

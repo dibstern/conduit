@@ -74,7 +74,10 @@
 	let lookupVersion = 0;
 	let saveVersion = 0;
 
-	const matches = $derived(entries.filter((entry) => entry.exists));
+	// Plain text (or nothing) asks for suggestions; a path asks for matches.
+	const isPathQuery = $derived(/^[/~]/.test(query));
+	const drafted = $derived(new Set(draft.folders.map(folderPath)));
+	const matches = $derived(entries.filter((entry) => entry.exists && (isPathQuery || !drafted.has(entry.path))));
 	const newFolder = $derived(entries.find((entry) => !entry.exists));
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
 	const expanded = $derived(choices.length > 0);
@@ -135,7 +138,8 @@
 		lookupError = "";
 		searching = false;
 		activeIndex = 0;
-		if (!open || !(currentQuery.startsWith("/") || currentQuery.startsWith("~"))) return;
+		if (!open) return;
+		const pathQuery = /^[/~]/.test(currentQuery);
 		searching = true;
 		const timer = setTimeout(() => {
 			void finder({ query: currentQuery }).then(
@@ -146,7 +150,8 @@
 				},
 				(error: unknown) => {
 					if (version !== lookupVersion) return;
-					lookupError = error instanceof Error ? error.message : "Couldn't find folders. Try again.";
+					// Suggestions are a convenience; only a failed path lookup is worth an error.
+					if (pathQuery) lookupError = error instanceof Error ? error.message : "Couldn't find folders. Try again.";
 					searching = false;
 				},
 			);
@@ -175,7 +180,7 @@
 		changeFolders(result.draft);
 		addIssues = result.errors;
 		query = "";
-		entries = [];
+		activeIndex = 0;
 		gitInit = true;
 	}
 
@@ -270,7 +275,7 @@
 						bind:value={query}
 						size="content"
 						class={`h-[32px] py-[6px] pl-[28px] font-mono ${expanded ? "pr-[56px] max-md:pr-[8px] pointer-coarse:pr-[8px]" : "pr-[8px]"} text-[12px] max-md:h-[44px] max-md:text-[16px]`}
-						placeholder="Type a folder path, / or ~"
+						placeholder="Search folders, or type / or ~"
 						role="combobox"
 						aria-label="Add folder"
 						aria-autocomplete="list"
@@ -291,13 +296,14 @@
 					<div class="relative">
 						<DetachedListbox id={listboxId} ariaLabel="Folder matches" class="overflow-y-auto" style={isPhone ? undefined : `max-height: 200px; scroll-padding-bottom: ${newFolder ? 34 : 0}px;`}>
 							{#if matches.length}
-								<div role="group" aria-label="Matches">
-									<div class="px-[8px] pt-[4px] pb-[2px] font-mono text-[9px] uppercase tracking-widest text-text-muted">Matches</div>
+								<div role="group" aria-label={isPathQuery ? "Matches" : "Suggestions"}>
+									<div class="px-[8px] pt-[4px] pb-[2px] font-mono text-[9px] uppercase tracking-widest text-text-muted">{isPathQuery ? "Matches" : "Suggestions"}</div>
 									{#each matches as entry, index (entry.path)}
+										{@const meta = [entry.reason === "recent" && "recent", entry.isGitRepo && "git"].filter(Boolean).join(" · ")}
 										<Button role="option" id={optionId(index)} aria-selected={activeIndex === index} tabindex={-1} ariaLabel={entry.path} variant={activeIndex === index ? "accent-soft" : "ghost"} tone="default" size="content" align="start" class="w-full min-h-[30px] gap-[7px] px-[8px] py-[6px] text-left font-mono text-[11px] max-md:min-h-[44px]" onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = index} onclick={() => choose(entry)}>
 											<Icon name={entry.isGitRepo ? "git-branch" : "folder"} size={13} class="shrink-0 text-text-muted" />
 											{@render pathLabel(entry.path)}
-											{#if entry.isGitRepo}<span class="shrink-0 text-[10px] text-text-secondary">git</span>{/if}
+											{#if meta}<span class="shrink-0 text-[10px] text-text-secondary">{meta}</span>{/if}
 										</Button>
 									{/each}
 								</div>
