@@ -1562,8 +1562,8 @@ export class ClaudeEventTranslator {
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.interrupted", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty means "the running one".
+						messageId: this.currentAssistantMessageId || "",
 					}),
 				);
 				yield* this.endTurn(ctx);

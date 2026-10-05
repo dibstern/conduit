@@ -201,6 +201,103 @@ test.describe("Turn working clock", () => {
 		);
 	});
 
+	test.describe("a prompt queued behind a running one", () => {
+		test.use({
+			claudeReplay: {
+				// Distinct traces: a replay keeps tool ids, and a repeat would merge.
+				turns: ["extra-folder-read-turn", "skill-loads-turn"],
+				delayMs: 1_000,
+				joinOpenTurn: true,
+			},
+		});
+		test.describe.configure({ timeout: 120_000 });
+
+		test("waiting in the queue is not work, and Stop ends the queued prompt", async ({
+			page,
+			relayUrl,
+		}, testInfo) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			await page.mouse.move(0, 0);
+			const sentA = Date.now();
+			await app.sendMessage("Read the extra folder");
+			await expectMatchingClocks(page, 1);
+			const sentB = Date.now();
+			await app.sendMessage("Load the skill");
+
+			// B takes over at A's next model round; the composer then times B.
+			const composer = async () =>
+				clockSeconds((await readClocks(page)).composer ?? "0:00");
+			let lastA = await composer();
+			await expect
+				.poll(
+					async () => {
+						const now = await composer();
+						const dropped = now < lastA;
+						lastA = Math.max(lastA, now);
+						return dropped;
+					},
+					{ timeout: 45_000, intervals: [250] },
+				)
+				.toBe(true);
+			const takeover = Date.now();
+			const firstB = await composer();
+			// Timed from its send, B would already read the time it sat queued.
+			const queuedSeconds = (takeover - sentB) / 1000;
+			expect(queuedSeconds).toBeGreaterThan(4);
+			expect(firstB).toBeLessThanOrEqual(queuedSeconds - 3);
+
+			// Stop during B, once its panel is up.
+			await expect(page.locator(".turn-activity")).toHaveCount(2, {
+				timeout: 45_000,
+			});
+			await chat.stopBtn.click();
+			const stoppedAt = Date.now();
+			await chat.waitForStreamingComplete();
+			await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
+			await page.screenshot({
+				path: testInfo.outputPath("queued-stopped.png"),
+			});
+
+			const headers = page.locator(".turn-activity .turn-activity-toggle");
+			const worked = async () =>
+				(await headers.allInnerTexts()).map(workedSeconds);
+			await expect(headers.last()).toContainText("Worked for");
+			await expect(headers.first()).toContainText("Worked for");
+			const [workedA = -1, workedB = -1] = await worked();
+			expect(workedA).toBeLessThanOrEqual(
+				Math.ceil((takeover - sentA) / 1000) + 1,
+			);
+			expect(workedB).toBeLessThanOrEqual(
+				Math.ceil((stoppedAt - takeover) / 1000) + 2,
+			);
+			await page.waitForTimeout(3_000);
+			expect(await worked()).toEqual([workedA, workedB]);
+
+			// History agrees: both turns settled, and the running one is the
+			// prompt the composer times from.
+			await gotoRelay(page, page.url());
+			await expect(page.locator("#connect-overlay")).toBeHidden({
+				timeout: 30_000,
+			});
+			await expect(headers.last()).toContainText("Worked for");
+			await expect(page.getByText("no prompt to time from")).toHaveCount(0);
+			await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
+			const afterReload = await worked();
+			expect(Math.abs((afterReload[0] ?? -9) - workedA)).toBeLessThanOrEqual(1);
+			expect(Math.abs((afterReload[1] ?? -9) - workedB)).toBeLessThanOrEqual(1);
+			writeFileSync(
+				testInfo.outputPath("queued-readings.json"),
+				JSON.stringify(
+					{ queuedSeconds, firstB, workedA, workedB, afterReload },
+					null,
+					2,
+				),
+			);
+		});
+	});
+
 	test.describe("waiting on the user", () => {
 		test.use({
 			claudeReplay: {
