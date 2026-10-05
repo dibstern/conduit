@@ -33,36 +33,6 @@ const rpcLayer = WsRpcServerLayer.pipe(
 	Layer.provideMerge(makeTestHandlerLayer()),
 );
 
-describe("WsRpcServerLayer ListDirectories", () => {
-	it.effect(
-		"returns directory autocomplete entries from the directory service",
-		() =>
-			Effect.gen(function* () {
-				const root = yield* tempDirectory;
-				yield* tryFs(() => mkdir(join(root, "personal")));
-				yield* tryFs(() => mkdir(join(root, "projects")));
-				yield* tryFs(() => mkdir(join(root, "work")));
-
-				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* client.ListDirectories({
-					projectSlug: "project-a",
-					path: `${root}/p`,
-				});
-
-				expect(result).toEqual({
-					projectSlug: "project-a",
-					path: `${root}/p`,
-					entries: [`${root}/personal/`, `${root}/projects/`],
-				});
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(
-					WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
-				),
-			),
-	);
-});
-
 describe("WsRpcServerLayer FindFolders", () => {
 	it.effect("returns existing matches and the missing typed path", () =>
 		Effect.gen(function* () {

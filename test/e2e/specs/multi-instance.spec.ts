@@ -131,29 +131,6 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 				lost: [],
 				active: [4096, 4098],
 			}),
-			SaveProject: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						directory: "/src/myapp",
-						instanceId: "personal",
-					},
-					{
-						slug: "test-generator-skill",
-						title: "test-generator-skill",
-						directory: String((params["folders"] as string[])[0] ?? ""),
-						folders: params["folders"] as string[],
-						...(typeof params["instanceId"] === "string"
-							? { instanceId: params["instanceId"] }
-							: {}),
-					},
-				],
-				current: "myapp",
-				savedSlug: "test-generator-skill",
-				warnings: [],
-			}),
 			SetProjectInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
 				projects: [
@@ -177,19 +154,6 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 }
 
 /**
- * Return to the list route on a phone. This is a no-op on desktop and when the
- * test already starts at `/`.
- */
-
-async function showSessionListOnMobile(page: Page): Promise<void> {
-	const back = page.locator("[data-testid='session-bar-back']");
-	if (await back.isVisible()) {
-		await back.click();
-	}
-	await page.locator("#sidebar").waitFor({ state: "visible" });
-}
-
-/**
  * Settings lives in the list overflow or session title sheet on a phone,
  * and in the session bar overflow on desktop.
  */
@@ -210,94 +174,13 @@ async function openSettingsPanel(page: Page): Promise<void> {
 	await page.getByTestId("overflow-settings").click();
 }
 
-/** Open project management from the scope menu or phone list bar. */
-async function openProjectsPanel(page: Page): Promise<void> {
-	await showSessionListOnMobile(page);
-	const overflow = page.getByTestId("list-bar-overflow");
-	if (await overflow.isVisible()) {
-		await overflow.click();
-		await page.getByTestId("list-overflow-projects").click();
-	} else {
-		await page.getByTestId("session-scope-chip").click();
-		await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	}
-	await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
+/** The status dot of one instance in the header badge's dropdown. */
+function instanceDot(page: Page, name: string) {
+	return page
+		.locator("[data-testid='instance-selector-dropdown']")
+		.getByRole("menuitemradio", { name })
+		.locator("[data-testid='instance-status-dot']");
 }
-
-// Group 1: ProjectManagerPanel Instance Grouping (IMPLEMENTED)
-
-test.describe("ProjectManagerPanel: Instance Grouping", () => {
-	test("groups projects by instance when multiple instances exist", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-
-		// Instance group headers have specific styling
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
-		await expect(instanceHeaders).toHaveCount(2);
-		await expect(instanceHeaders.nth(0)).toContainText("Personal");
-		await expect(instanceHeaders.nth(1)).toContainText("Work");
-	});
-
-	test("shows flat list when single instance", async ({ page, baseURL }) => {
-		await setupSingleInstance(page, baseURL);
-		await openProjectsPanel(page);
-
-		// No instance group headers
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
-		await expect(instanceHeaders).toHaveCount(0);
-	});
-
-	test("shows instance status color in group header", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
-
-		// Personal = healthy = green dot
-		const personalDot = instanceHeaders
-			.nth(0)
-			.locator("[data-testid='instance-status-dot']");
-		await expect(personalDot).toHaveClass(/bg-green-500/);
-
-		// Work = unhealthy = red dot
-		const workDot = instanceHeaders
-			.nth(1)
-			.locator("[data-testid='instance-status-dot']");
-		await expect(workDot).toHaveClass(/bg-red-500/);
-	});
-
-	test("updates instance status color on instance_status message", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
-		const workDot = instanceHeaders
-			.nth(1)
-			.locator("[data-testid='instance-status-dot']");
-		await expect(workDot).toHaveClass(/bg-red-500/);
-
-		// Send status update: work becomes healthy
-		control.sendMessage(workInstanceHealthy);
-		await expect(workDot).toHaveClass(/bg-green-500/);
-	});
-});
 
 // Group 2: Header Instance Badge (IMPLEMENTED)
 
@@ -396,16 +279,12 @@ test.describe("Instance Store: Reactivity", () => {
 	test("instance_list message populates UI", async ({ page, baseURL }) => {
 		await setupMultiInstance(page, baseURL);
 
-		// Header badge proves store → UI reactivity
+		// The header badge and its dropdown both read the instance store.
 		const badge = page.locator("[data-testid='instance-badge']");
 		await expect(badge).toBeVisible();
-
-		// ProjectManagerPanel grouping proves store → ProjectManagerPanel
-		await openProjectsPanel(page);
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
-		await expect(instanceHeaders).toHaveCount(2);
+		await badge.click();
+		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
+		await expect(dropdown.getByRole("menuitemradio")).toHaveCount(2);
 	});
 
 	test("instance_status updates single instance without affecting others", async ({
@@ -413,31 +292,24 @@ test.describe("Instance Store: Reactivity", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
+		await page.locator("[data-testid='instance-badge']").click();
+		const personalDot = instanceDot(page, "Personal");
+		const workDot = instanceDot(page, "Work");
 
 		// Personal = green, Work = red initially
-		await expect(
-			instanceHeaders.nth(0).locator("[data-testid='instance-status-dot']"),
-		).toHaveClass(/bg-green-500/);
-		await expect(
-			instanceHeaders.nth(1).locator("[data-testid='instance-status-dot']"),
-		).toHaveClass(/bg-red-500/);
+		await expect(personalDot).toHaveClass(/bg-green-500/);
+		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// Update only Work to healthy
 		control.sendMessage(workInstanceHealthy);
+		await expect(workDot).toHaveClass(/bg-green-500/);
 
-		// Work should now be green
+		// Personal should STILL be green, in the dropdown and on the badge
+		await expect(personalDot).toHaveClass(/bg-green-500/);
 		await expect(
-			instanceHeaders.nth(1).locator("[data-testid='instance-status-dot']"),
-		).toHaveClass(/bg-green-500/);
-
-		// Personal should STILL be green
-		await expect(
-			instanceHeaders.nth(0).locator("[data-testid='instance-status-dot']"),
+			page.locator(
+				"[data-testid='instance-badge'] [data-testid='instance-status-dot']",
+			),
 		).toHaveClass(/bg-green-500/);
 	});
 
@@ -460,14 +332,8 @@ test.describe("Instance Store: Reactivity", () => {
 test.describe("Status Color Mapping", () => {
 	test("each status maps to correct color", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-
-		const instanceHeaders = page.locator(
-			"[data-testid='instance-group-header']",
-		);
-		const workDot = instanceHeaders
-			.nth(1)
-			.locator("[data-testid='instance-status-dot']");
+		await page.locator("[data-testid='instance-badge']").click();
+		const workDot = instanceDot(page, "Work");
 
 		// unhealthy (initial) = red
 		await expect(workDot).toHaveClass(/bg-red-500/);
@@ -750,35 +616,6 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 	});
 });
 
-test.describe("Project-Instance Binding", () => {
-	test("add project form includes instance selector", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-		const addBtn = page.getByText("Add project");
-		await addBtn.click();
-		const instanceSelect = page.locator(
-			"select[name='instance'], #instance-selector",
-		);
-		await expect(instanceSelect).toBeVisible();
-	});
-
-	test("instance selector defaults to first healthy instance", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-		await page.getByText("Add project").click();
-		const instanceSelect = page.locator(
-			"select[name='instance'], #instance-selector",
-		);
-		await expect(instanceSelect).toContainText("Personal");
-	});
-});
-
 test.describe("Session List: Instance Status Banner", () => {
 	test("banner when no healthy instances", async ({ page, baseURL }) => {
 		// Custom init with all instances unhealthy
@@ -913,38 +750,6 @@ test.describe("Session List: Instance Status Banner", () => {
 
 		// Banner should disappear
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
-	});
-});
-
-test.describe("Add Project: Instance Binding", () => {
-	test("SaveProject RPC includes selected instanceId", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupMultiInstance(page, baseURL);
-		await openProjectsPanel(page);
-		await page.getByText("Add project").click();
-
-		// Fill directory
-		await page.fill(
-			"[data-testid='sidebar-projects-panel'] input[type='text']",
-			"~/src/work/ds/test-generator-skill",
-		);
-
-		// Select "Work" instance
-		const instanceSelect = page.locator("#instance-selector");
-		await instanceSelect.selectOption("work");
-
-		// Click "Add"
-		await page.click("text=Add");
-
-		const request = await control.rpc.waitForRequest(
-			(req) => req.tag === "SaveProject",
-		);
-		expect(request.payload).toMatchObject({
-			folders: ["~/src/work/ds/test-generator-skill"],
-			instanceId: "work",
-		});
 	});
 });
 

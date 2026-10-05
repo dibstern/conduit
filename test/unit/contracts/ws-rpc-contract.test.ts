@@ -27,7 +27,6 @@ import {
 	GetToolContent,
 	InstanceListResponseSchema,
 	ListDaemonSessions,
-	ListDirectories,
 	ListPtys,
 	LoadMoreHistory,
 	LoadMoreHistoryResponseSchema,
@@ -332,12 +331,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				AnswerQuestion: () => Effect.succeed({ ok: true as const }),
 				RejectQuestion: () => Effect.succeed({ ok: true as const }),
 				FindFolders: () => Effect.succeed({ entries: [] }),
-				ListDirectories: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						path: request.path,
-						entries: ["/tmp/demo/"],
-					}),
 				SwitchAgent: () => Effect.succeed({ ok: true as const }),
 				SwitchContextWindow: (request) =>
 					Effect.succeed({
@@ -787,7 +780,6 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("RespondPermission")).toBe(true);
 		expect(WsRpcGroup.requests.has("AnswerQuestion")).toBe(true);
 		expect(WsRpcGroup.requests.has("RejectQuestion")).toBe(true);
-		expect(WsRpcGroup.requests.has("ListDirectories")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchContextWindow")).toBe(true);
@@ -1022,16 +1014,6 @@ describe("browser WebSocket RPC contract", () => {
 						ptyId: "pty-1",
 					}),
 				).toEqual({ ok: true });
-
-				const directories = yield* client.ListDirectories({
-					projectSlug: "demo",
-					path: "/tmp/",
-				});
-				expect(directories).toEqual({
-					projectSlug: "demo",
-					path: "/tmp/",
-					entries: ["/tmp/demo/"],
-				});
 
 				const todo = yield* client.GetTodo({ projectSlug: "demo" });
 				expect(todo).toEqual({
@@ -1466,9 +1448,6 @@ describe("browser WebSocket RPC contract", () => {
 				toolId: "que-1",
 			})._tag,
 		).toBe("RejectQuestion");
-		expect(
-			new ListDirectories({ projectSlug: "demo", path: "/tmp/" })._tag,
-		).toBe("ListDirectories");
 		expect(new GetTodo({ projectSlug: "demo" })._tag).toBe("GetTodo");
 		expect(
 			new SwitchAgent({

@@ -33,7 +33,6 @@ import type {
 	GetToolContentResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
-	ListDirectoriesResponse,
 	LoadMoreHistoryResponse,
 	PermissionDecision,
 	PermissionPersistScope,
@@ -256,11 +255,6 @@ export interface GetSkillContentRpcInput {
 export interface GetSessionSkillsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
-}
-
-export interface ListDirectoriesRpcInput {
-	readonly projectSlug: string;
-	readonly path: string;
 }
 
 export interface FindFoldersRpcInput {
@@ -642,9 +636,6 @@ const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 
 const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetSessionSkills(input));
-
-const callListDirectories = (input: ListDirectoriesRpcInput) =>
-	callControl(input.projectSlug, (client) => client.ListDirectories(input));
 
 const callFindFolders = (input: FindFoldersRpcInput) =>
 	callControl(input.projectSlug, (client) => client.FindFolders(input));
@@ -1071,12 +1062,6 @@ export async function getSessionSkillsRpc(
 	input: GetSessionSkillsRpcInput,
 ): Promise<GetSessionSkillsResponse> {
 	return await runTransportEffect(callGetSessionSkills(input));
-}
-
-export async function listDirectoriesRpc(
-	input: ListDirectoriesRpcInput,
-): Promise<ListDirectoriesResponse> {
-	return await runTransportEffect(callListDirectories(input));
 }
 
 export async function findFoldersRpc(

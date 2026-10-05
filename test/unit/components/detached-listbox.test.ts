@@ -74,7 +74,7 @@ describe("DetachedListbox", () => {
 	});
 
 	// CommandMenu and FileMenu used to wear `rounded-xl` here while
-	// DirectoryAutocomplete and every portaled overlay wore `rounded-lg`, so the
+	// the old directory autocomplete and every portaled overlay wore `rounded-lg`, so the
 	// primitive carried a `radius` prop to let them. The split ran along file
 	// ownership rather than anything a reader could see, so it collapsed
 	// (conduit-test-de3.6). This asserts the collapse: one corner for every

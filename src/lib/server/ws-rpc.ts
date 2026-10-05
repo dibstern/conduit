@@ -65,8 +65,6 @@ export {
 	type InstanceListResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
-	ListDirectories,
-	type ListDirectoriesResponse,
 	ListPtys,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
@@ -217,7 +215,6 @@ export type DaemonRpcName =
 	| "SetAutoSettleSetting"
 	| "ScanNow"
 	| "DetectProxy"
-	| "ListDirectories"
 	| "FindFolders"
 	| "ListDaemonSessions"
 	| "SetLogLevel"

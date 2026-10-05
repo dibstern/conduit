@@ -59,10 +59,6 @@ describe("daemon RPC handlers", () => {
 				expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
 					projectSlug: null,
 				});
-				expect(
-					(yield* client.ListDirectories({ path: "/nonexistent-directory/" }))
-						.entries,
-				).toEqual([]);
 				expect((yield* client.ScanNow({})).active).toEqual([]);
 				expect(
 					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,

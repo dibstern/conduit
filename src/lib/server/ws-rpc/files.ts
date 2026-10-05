@@ -26,24 +26,6 @@ export const filesHandlers = {
 					}),
 			),
 		),
-	ListDirectories: (request) =>
-		Effect.gen(function* () {
-			const directoryListing = yield* DirectoryListingServiceTag;
-			const result = yield* directoryListing.list(request.path);
-			return {
-				projectSlug: request.projectSlug,
-				path: result.path,
-				entries: [...result.entries],
-			};
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `ListDirectories failed: ${String(error)}`,
-					}),
-				),
-			),
-		),
 	GetTodo: (request) =>
 		getTodoState().pipe(
 			Effect.map((items) => ({
@@ -148,7 +130,6 @@ export const filesHandlers = {
 		}).pipe(Effect.catchAll(mapRpcFailure("GetSkillContent"))),
 } satisfies Pick<
 	WsRpcHandlerMap,
-	| "ListDirectories"
 	| "FindFolders"
 	| "GetTodo"
 	| "GetFileTree"

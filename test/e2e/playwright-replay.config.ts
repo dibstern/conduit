@@ -23,8 +23,8 @@ export default defineConfig({
 		"notification-session-nav.spec.ts",
 		// playwright-notification-reducer.config.ts: Vite preview with a mocked WebSocket.
 		"notification-reducer-indicators.spec.ts",
-		// playwright-project-management.config.ts: Vite preview with a mocked WebSocket.
-		"project-management.spec.ts",
+		// playwright-project-scope.config.ts: Vite preview with a mocked WebSocket.
+		"project-scope.spec.ts",
 		// playwright-question-flow.config.ts: Vite preview with a mocked WebSocket.
 		"question-flow.spec.ts",
 		// playwright-subagent.config.ts: Vite preview with a mocked WebSocket.

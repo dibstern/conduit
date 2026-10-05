@@ -39,8 +39,6 @@ export {
 	type InstanceListResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
-	ListDirectories,
-	type ListDirectoriesResponse,
 	ListPtys,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,

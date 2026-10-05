@@ -601,12 +601,6 @@ export const PtyListResponseSchema = Schema.Struct({
 	ptys: Schema.Array(PtyInfoSchema),
 });
 
-export const ListDirectoriesResponseSchema = Schema.Struct({
-	projectSlug: Schema.optional(Schema.String),
-	path: Schema.String,
-	entries: Schema.Array(Schema.String),
-});
-
 export const FindFoldersResponseSchema = Schema.Struct({
 	entries: Schema.Array(
 		Schema.Struct({
@@ -689,7 +683,6 @@ export type ScanNowResponse = typeof ScanNowResponseSchema.Type;
 export type DetectProxyResponse = typeof DetectProxyResponseSchema.Type;
 export type PtyInfo = typeof PtyInfoSchema.Type;
 export type PtyListResponse = typeof PtyListResponseSchema.Type;
-export type ListDirectoriesResponse = typeof ListDirectoriesResponseSchema.Type;
 export type FindFoldersResponse = typeof FindFoldersResponseSchema.Type;
 export type TodoItem = typeof TodoItemSchema.Type;
 export type GetTodoResponse = typeof GetTodoResponseSchema.Type;
@@ -1060,18 +1053,6 @@ export class ClosePty extends Schema.TaggedRequest<ClosePty>()("ClosePty", {
 		ptyId: NonEmptyString,
 	},
 }) {}
-
-export class ListDirectories extends Schema.TaggedRequest<ListDirectories>()(
-	"ListDirectories",
-	{
-		failure: WsRpcError,
-		success: ListDirectoriesResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			path: Schema.String,
-		},
-	},
-) {}
 
 export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
 	"FindFolders",
@@ -1747,7 +1728,6 @@ export const WsRpcRequest = Schema.Union(
 	GetAgents,
 	GetCommands,
 	GetProjects,
-	ListDirectories,
 	FindFolders,
 	GetTodo,
 	SwitchAgent,
@@ -1855,7 +1835,6 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetAgents),
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),
-	Rpc.fromTaggedRequest(ListDirectories),
 	Rpc.fromTaggedRequest(FindFolders),
 	Rpc.fromTaggedRequest(GetTodo),
 	Rpc.fromTaggedRequest(SwitchAgent),

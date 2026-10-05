@@ -24,7 +24,6 @@ async function openDialog(
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
 	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
 	await expect(dialog).toBeVisible();
-	await expect(page.getByTestId("sidebar-projects-panel")).toBeHidden();
 	return dialog;
 }
 

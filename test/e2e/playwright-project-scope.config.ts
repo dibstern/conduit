@@ -1,11 +1,11 @@
-// Tests directory autocomplete, project rename, and project delete flows.
+// Project scope: URL scoping, switching, the Add project dialog and removal.
 // Uses WS mock — no real OpenCode or relay needed.
 
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: "project-management.spec.ts",
+	testMatch: "project-scope.spec.ts",
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,

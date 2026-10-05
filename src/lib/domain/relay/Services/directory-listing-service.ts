@@ -10,7 +10,7 @@ const MAX_FOLDER_ENTRIES = 20;
 
 type DirectoryListOperation = "read" | "stat";
 
-export interface DirectoryListingResult {
+interface DirectoryListingResult {
 	readonly path: string;
 	readonly entries: ReadonlyArray<string>;
 }
@@ -24,7 +24,6 @@ export class DirectoryListingServiceError extends Data.TaggedError(
 }> {}
 
 export interface DirectoryListingService {
-	list(path: string): Effect.Effect<DirectoryListingResult>;
 	find(
 		query: string,
 	): Effect.Effect<FindFoldersResponse, DirectoryListingServiceError>;
@@ -78,13 +77,6 @@ const readDirectoryEntries = (
 
 		return { path: rawPath, entries };
 	});
-
-export const listDirectoryEntries = (
-	rawPath: string,
-): Effect.Effect<DirectoryListingResult> =>
-	readDirectoryEntries(rawPath).pipe(
-		Effect.catchAll(() => Effect.succeed({ path: rawPath, entries: [] })),
-	);
 
 const isMissing = (cause: unknown): boolean =>
 	typeof cause === "object" &&
@@ -264,6 +256,5 @@ export const findFolders = (
 
 export const DirectoryListingServiceLive: Layer.Layer<DirectoryListingServiceTag> =
 	Layer.succeed(DirectoryListingServiceTag, {
-		list: listDirectoryEntries,
 		find: findFolders,
 	});
