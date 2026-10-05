@@ -1,13 +1,30 @@
 {
-	"view_session_model_info_success": [
+	"view_session_metadata_success": [
 		{
 			"channel": "sendTo",
 			"clientId": "client-1",
 			"message": {
-				"type": "model_info",
+				"type": "session_family",
+				"rootId": "session-1",
+				"sessions": []
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "status",
 				"sessionId": "session-1",
-				"model": "gpt-4",
-				"provider": "openai"
+				"status": "idle"
+			}
+		},
+		{
+			"channel": "sendTo",
+			"clientId": "client-1",
+			"message": {
+				"type": "session.goal_changed",
+				"sessionId": "session-1",
+				"goal": null
 			}
 		}
 	],

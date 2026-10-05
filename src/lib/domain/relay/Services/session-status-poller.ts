@@ -450,6 +450,8 @@ export interface SessionStatusPollerService {
 	drain(): Effect.Effect<void>;
 	/** Get the most recently polled statuses. */
 	getCurrentStatuses(): Effect.Effect<Record<string, SessionStatus>>;
+	/** Ownership from the last SQLite status read, separate from status values. */
+	getSessionProviders(): Effect.Effect<ReadonlyMap<string, string>>;
 	/** Check if a specific session is currently processing (busy or retry). */
 	isProcessing(sessionId: string): Effect.Effect<boolean>;
 	/** Retired compatibility hook; activity is derived by the client. */

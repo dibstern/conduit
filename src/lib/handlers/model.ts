@@ -446,29 +446,8 @@ export const getModelsResponse = (
 			);
 		}
 
-		// Send model_info: prefer session's model, fall back to relay-side selection
-		let sessionModel: ModelOverride | undefined;
-		if (
-			activeId &&
-			selectedModelMatchesInstance &&
-			selectedDriver === "opencode"
-		) {
-			const sessionResult = yield* Effect.either(
-				modelService.getSession(activeId),
-			);
-			if (sessionResult._tag === "Right" && sessionResult.right.modelID) {
-				sessionModel = {
-					modelID: sessionResult.right.modelID,
-					providerID: sessionResult.right.providerID ?? "",
-				};
-			} else if (sessionResult._tag === "Left") {
-				log.warn(
-					`client=${input.clientId ?? "rpc"} session=${activeId ?? "?"} Failed to get session model info: ${formatErrorDetail(sessionResult.left)}`,
-				);
-			}
-		}
 		const selectedModel = selectedModelMatchesInstance
-			? (sessionModel ?? fallbackModel)
+			? fallbackModel
 			: undefined;
 		const catalogModel = findCatalogModel(providers, selectedModel);
 		// A stored `opus[1m]` answers as the catalog's `opus`, so the client

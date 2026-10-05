@@ -19,7 +19,6 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	getContextWindow,
 	getDefaultContextWindow,
@@ -159,7 +158,6 @@ const resolveAndReplaySessionEffect = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionService = yield* SessionManagerServiceTag;
-		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
 
 		// An unknown requested id selects no session, never the default: the
@@ -202,7 +200,6 @@ const resolveAndReplaySessionEffect = (
 		}
 
 		const familyIds = new Set<string>(activeId ? [activeId] : []);
-		let activeSessionModel: ModelOverride | undefined;
 		if (activeId) {
 			const family = yield* switchClientToSessionForInitEffect(
 				clientId,
@@ -210,48 +207,14 @@ const resolveAndReplaySessionEffect = (
 			);
 			for (const session of family?.sessions ?? []) familyIds.add(session.id);
 
-			const sessionInfoResult = yield* Effect.either(
-				modelService.getSession(activeId),
-			);
-			if (sessionInfoResult._tag === "Right") {
-				const session = sessionInfoResult.right;
-				if (session.modelID) {
-					activeSessionModel = {
-						modelID: session.modelID,
-						providerID: session.providerID ?? "",
-					};
-					wsHandler.sendTo(clientId, {
-						type: "model_info",
-						sessionId: activeId,
-						model: session.modelID,
-						provider: session.providerID ?? "",
-					});
-				} else {
-					const fallbackModel = yield* getModel(activeId);
-					if (fallbackModel) {
-						wsHandler.sendTo(clientId, {
-							type: "model_info",
-							sessionId: activeId,
-							model: fallbackModel.modelID,
-							provider: fallbackModel.providerID,
-						});
-					}
-				}
-			} else {
-				yield* Effect.sync(() =>
-					log.warn(
-						`Failed to load session info for ${activeId}: ${sessionInfoResult.left}`,
-					),
-				);
-				const fallbackModel = yield* getModel(activeId);
-				if (fallbackModel) {
-					wsHandler.sendTo(clientId, {
-						type: "model_info",
-						sessionId: activeId,
-						model: fallbackModel.modelID,
-						provider: fallbackModel.providerID,
-					});
-				}
+			const sessionModel = yield* getModel(activeId);
+			if (sessionModel) {
+				wsHandler.sendTo(clientId, {
+					type: "model_info",
+					sessionId: activeId,
+					model: sessionModel.modelID,
+					provider: sessionModel.providerID,
+				});
 			}
 		}
 
@@ -259,7 +222,6 @@ const resolveAndReplaySessionEffect = (
 			activeId,
 			validatedRequestedSessionId,
 			familyIds,
-			activeSessionModel,
 		};
 	});
 
@@ -455,7 +417,6 @@ const sendAgentListEffect = (clientId: string, activeId: string | undefined) =>
 const sendProvidersAndSettingsEffect = (
 	clientId: string,
 	activeId: string | undefined,
-	activeSessionModel: ModelOverride | undefined,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -502,12 +463,9 @@ const sendProvidersAndSettingsEffect = (
 				const currentVariant = activeId
 					? yield* getVariant(activeId)
 					: yield* getDefaultVariant();
-				const activeModelOverride = activeId
+				const activeModel = activeId
 					? yield* getModel(activeId)
 					: yield* getDefaultModel();
-				const activeModel = activeId
-					? (activeModelOverride ?? activeSessionModel)
-					: activeModelOverride;
 				// After a restart this snapshot is all an open tab gets, and a
 				// session restored from `opus[1m]` must still find today's `opus`.
 				const catalogModel = findCatalogModel(providers, activeModel);
@@ -667,20 +625,15 @@ export const handleClientConnectedEffect = (
 	options: ClientInitEffectOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const { activeId, familyIds, activeSessionModel } =
-			yield* resolveAndReplaySessionEffect(
-				clientId,
-				requestedSessionId,
-				options,
-			);
+		const { activeId, familyIds } = yield* resolveAndReplaySessionEffect(
+			clientId,
+			requestedSessionId,
+			options,
+		);
 		yield* pushViewedFamiliesForInitEffect(clientId);
 		yield* replayPendingPermissionsEffect(clientId);
 		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
 		yield* sendAgentListEffect(clientId, activeId);
-		yield* sendProvidersAndSettingsEffect(
-			clientId,
-			activeId,
-			activeSessionModel,
-		);
+		yield* sendProvidersAndSettingsEffect(clientId, activeId);
 		yield* replayTerminalsInstancesAndUpdateEffect(clientId, options);
 	});

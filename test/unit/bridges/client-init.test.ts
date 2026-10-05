@@ -9,10 +9,7 @@ import type {
 	PendingQuestion,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import type {
-	OpenCodeModelService,
-	OpenCodeSessionDetail,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import type { OpenCodeModelService } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	OpenCodeModelServiceTag,
 	StatusPollerTag,
@@ -139,6 +136,7 @@ function makeReadQuery(
 		getGoalDetails: () =>
 			Effect.succeed({ checks: [], tokensSinceStart: null }),
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+		getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 		getSessionsForReconciliation: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed([])),
 		listSessionInfos: () => Effect.succeed([]),
@@ -171,18 +169,6 @@ function makeClientInitEffectLayer(
 		...sessionManagerOverrides,
 	});
 	const modelService: OpenCodeModelService = {
-		getSession: vi.fn(() =>
-			Effect.succeed({
-				id: "session-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Session 1",
-				version: "1.0.0",
-				time: { created: 0, updated: 0 },
-				modelID: "gpt-4",
-				providerID: "openai",
-			}),
-		),
 		listProviders: vi.fn(() =>
 			Effect.succeed({ providers: [], defaults: {}, connected: [] }),
 		),
@@ -476,7 +462,7 @@ describe("handleClientConnectedEffect — session selection", () => {
 });
 
 describe("handleClientConnectedEffect — model info", () => {
-	it("loads session and provider models through the Effect model service", async () => {
+	it("loads relay model state and providers without an OpenCode session lookup", async () => {
 		const deps = applyTestDefaults(makeClientInitEffectLayer());
 		vi.mocked(deps.client.session.get).mockRejectedValue(
 			new Error("legacy session.get should not be used"),
@@ -484,20 +470,18 @@ describe("handleClientConnectedEffect — model info", () => {
 		vi.mocked(deps.client.provider.list).mockRejectedValue(
 			new Error("legacy provider.list should not be used"),
 		);
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.succeed({
-				id: "session-1",
-				modelID: "gpt-4",
-				providerID: "openai",
-			} as OpenCodeSessionDetail),
-		);
 		vi.mocked(deps.modelService.listProviders).mockReturnValue(
 			Effect.succeed(TEST_PROVIDERS),
 		);
 
-		await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			setModel("session-1", { providerID: "openai", modelID: "gpt-4" }),
+		);
 
-		expect(deps.modelService.getSession).toHaveBeenCalledWith("session-1");
 		expect(deps.modelService.listProviders).toHaveBeenCalledOnce();
 		expect(deps.client.session.get).not.toHaveBeenCalled();
 		expect(deps.client.provider.list).not.toHaveBeenCalled();
@@ -526,10 +510,16 @@ describe("handleClientConnectedEffect — model info", () => {
 		});
 	});
 
-	it("sends model_info when session has modelID", async () => {
+	it("sends model_info from the relay default model", async () => {
 		const deps = makeClientInitEffectLayer();
 
-		await runClientInit(deps, "client-1");
+		await runClientInit(
+			deps,
+			"client-1",
+			undefined,
+			undefined,
+			setDefaultModel({ providerID: "openai", modelID: "gpt-4" }),
+		);
 
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
@@ -539,14 +529,8 @@ describe("handleClientConnectedEffect — model info", () => {
 		});
 	});
 
-	it("sends model_info from Effect override state when session has no model", async () => {
+	it("sends model_info from Effect override state", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.succeed({
-				id: "s1",
-				modelID: "",
-			} as OpenCodeSessionDetail),
-		);
 		await runClientInit(
 			deps,
 			"client-1",
@@ -563,10 +547,10 @@ describe("handleClientConnectedEffect — model info", () => {
 		});
 	});
 
-	it("sends Effect override model_info as fallback when getSession fails", async () => {
+	it("sends Effect override model_info when OpenCode session reads are unavailable", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.fail(new Cause.UnknownException(new Error("session fail"))),
+		vi.mocked(deps.client.session.get).mockRejectedValue(
+			new Error("OpenCode session reads are unavailable"),
 		);
 		await runClientInit(
 			deps,
@@ -576,6 +560,7 @@ describe("handleClientConnectedEffect — model info", () => {
 			setModel("session-1", { providerID: "anthropic", modelID: "claude-3" }),
 		);
 
+		expect(deps.client.session.get).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
 			expect.objectContaining({
@@ -592,14 +577,8 @@ describe("handleClientConnectedEffect — model info", () => {
 		});
 	});
 
-	it("does not send model_info when neither session nor override state have model", async () => {
+	it("does not send model_info when relay model state is unset", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.succeed({
-				id: "s1",
-				modelID: "",
-			} as OpenCodeSessionDetail),
-		);
 		// overrides.model is already undefined by default
 
 		await runClientInit(deps, "client-1");
@@ -949,16 +928,6 @@ describe("handleClientConnectedEffect — model list", () => {
 					],
 				}),
 			),
-		);
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.succeed({
-				id: "session-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Session 1",
-				version: "1.0.0",
-				time: { created: 0, updated: 0 },
-			}),
 		);
 		vi.mocked(deps.modelService.listProviders).mockReturnValue(
 			Effect.succeed({
@@ -1477,14 +1446,15 @@ describe("handleClientConnectedEffect — pending questions", () => {
 });
 
 describe("handleClientConnectedEffect — error resilience", () => {
-	it("continues sending remaining data when getSession fails", async () => {
+	it("continues sending remaining data when OpenCode session reads are unavailable", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.fail(new Cause.UnknownException(new Error("session fail"))),
+		vi.mocked(deps.client.session.get).mockRejectedValue(
+			new Error("OpenCode session reads are unavailable"),
 		);
 
 		await runClientInit(deps, "client-1");
 
+		expect(deps.client.session.get).not.toHaveBeenCalled();
 		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
@@ -1498,9 +1468,6 @@ describe("handleClientConnectedEffect — error resilience", () => {
 
 	it("does not crash when all API calls fail", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.modelService.getSession).mockReturnValue(
-			Effect.fail(new Cause.UnknownException(new Error("fail"))),
-		);
 		vi.mocked(deps.sessionService.pushViewerFamilies).mockReturnValue(
 			Effect.fail(
 				new SessionManagerError({

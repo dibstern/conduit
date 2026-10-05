@@ -103,6 +103,18 @@ describe("executeEffects", () => {
 		expect(deps.calls["processAndApplyDone"]).toEqual([["s1", true, 42]]);
 	});
 
+	it("clear-processing clears idle state without processing a synthetic done", () => {
+		const deps = createMockDeps();
+		executeEffects(
+			[{ effect: "clear-processing", sessionId: "claude-1" }],
+			deps,
+		);
+		expect(deps.calls["clearProcessingTimeout"]).toEqual([["claude-1"]]);
+		expect(deps.calls["clearMessageActivity"]).toEqual([["claude-1"]]);
+		expect(deps.calls["processAndApplyDone"]).toEqual([]);
+		expect(deps.calls["sendStatusToSession"]).toEqual([]);
+	});
+
 	it("processes multiple effects in order", () => {
 		const deps = createMockDeps();
 		const order: string[] = [];
