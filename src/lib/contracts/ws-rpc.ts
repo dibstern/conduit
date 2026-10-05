@@ -234,6 +234,19 @@ export const HistoryMessageSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
 	modelExecution: Schema.optional(ModelExecutionSchema),
+	turnTiming: Schema.optional(
+		Schema.Struct({
+			startedAt: Schema.Number,
+			endedAt: Schema.optional(Schema.Number),
+			waits: Schema.Array(
+				Schema.Struct({
+					id: Schema.String,
+					from: Schema.Number,
+					to: Schema.optional(Schema.Number),
+				}),
+			),
+		}),
+	),
 }).pipe(
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );

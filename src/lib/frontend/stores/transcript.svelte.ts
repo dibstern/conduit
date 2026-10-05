@@ -125,6 +125,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 		time,
 		cost,
 		modelExecution,
+		turnTiming,
 		...base
 	} = source;
 	const tokens = record(sourceTokens);
@@ -144,6 +145,21 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 					},
 				}),
 		...(cost === undefined ? {} : { cost }),
+		...(turnTiming === undefined
+			? {}
+			: {
+					turnTiming: {
+						startedAt: turnTiming.startedAt,
+						...(turnTiming.endedAt === undefined
+							? {}
+							: { endedAt: turnTiming.endedAt }),
+						waits: turnTiming.waits.map((wait) => ({
+							id: wait.id,
+							from: wait.from,
+							...(wait.to === undefined ? {} : { to: wait.to }),
+						})),
+					},
+				}),
 		...(modelExecution === undefined
 			? {}
 			: {
@@ -324,6 +340,9 @@ export function deriveTranscriptMessages(
 		)
 			waitingUserIds.add(row.id);
 	}
+	// A prompt that arrives live is queued only behind a turn still running;
+	// the session turns busy for the prompt itself before its row lands.
+	let earlierTurnOpen = false;
 	for (const row of entry.rows) {
 		// A user row is created before its parts arrive. Showing it empty would
 		// mark its uuid as seen and so block adopting the optimistic send.
@@ -365,6 +384,7 @@ export function deriveTranscriptMessages(
 					carriedAdditions.set(row.id, carried);
 				} else if (
 					!carried &&
+					earlierTurnOpen &&
 					options.live &&
 					options.active &&
 					options.newUserIds?.has(row.id)
@@ -378,6 +398,9 @@ export function deriveTranscriptMessages(
 			}
 			projected.push(reuseIfEqual(next, previousByUuid.get(item.uuid)));
 		}
+		if (row.role === "user")
+			earlierTurnOpen =
+				row.turnTiming !== undefined && row.turnTiming.endedAt === undefined;
 	}
 	const projectedUuids = new Set(projected.map((item) => item.uuid));
 	const after = new Map<string, ChatMessage[]>();

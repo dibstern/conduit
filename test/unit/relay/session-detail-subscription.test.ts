@@ -499,15 +499,15 @@ describe("subscribeSessionDetail", () => {
 				resumeFromSequence: cursor,
 			});
 
-			// Detail is append-only, so the version alone is enough: no row it
-			// serves can have disappeared while the client was away.
-			const [first, second] = yield* takeN(q, 2);
+			// Timing writes also refresh the prompt the client already holds.
+			const [first, prompt, second] = yield* takeN(q, 3);
 			const boundary = yield* Queue.take(q);
 			expect(boundary).toEqual({ _tag: "synchronized" });
-			expect([expectMessage(first).id, expectMessage(second).id]).toEqual([
-				"m1",
-				"m2",
-			]);
+			expect([
+				expectMessage(first).id,
+				expectMessage(prompt).id,
+				expectMessage(second).id,
+			]).toEqual(["m1", "m0", "m2"]);
 			// Each replayed message carries the version of the commit that wrote
 			// it, not the counter the replay happened to read. That is what lets a
 			// client recognise a row it already holds as the SAME envelope rather

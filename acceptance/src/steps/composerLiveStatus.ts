@@ -14,6 +14,27 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "start composer turn",
+		match: /^the mock relay starts a composer turn$/,
+		run: async ({ world }) => {
+			const createdAt = await world.page.evaluate(() => Date.now());
+			const relay = requireRelayControl(world.page);
+			relay.sendMessage({
+				type: "user_message",
+				sessionId: "sess-mockup-001",
+				messageId: `composer-status-user-${createdAt}`,
+				text: "Start a composer turn.",
+				createdAt,
+			});
+			relay.sendMessage({
+				type: "status",
+				status: "processing",
+				sessionId: "sess-mockup-001",
+			});
+			await world.page.locator("#stop").waitFor({ state: "visible" });
+		},
+	},
+	{
 		name: "advance composer status clock",
 		match: /^the composer status clock advances by ([0-9]+) seconds$/,
 		run: async ({ world, match }) => {

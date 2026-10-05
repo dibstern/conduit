@@ -998,13 +998,17 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 			const newest = yield* readQuery.readSessionTranscriptPage("s1", {
 				limit: 1,
 			});
-			const newestCursor = newest.messages[0];
+			const newestCursor = newest.messages.at(-1);
 			if (!newestCursor) throw new Error("expected newest message");
 			const oldest = yield* readQuery.readSessionTranscriptPage("s1", {
 				before: newestCursor.id,
 				limit: 1,
 			});
-			expect(newest.hasMore).toBe(true);
+			expect(newest.messages.map((message) => message.id)).toEqual([
+				"m-a",
+				"m-b",
+			]);
+			expect(newest.hasMore).toBe(false);
 			expect(oldest.hasMore).toBe(false);
 			expect(oldest.version).toBe(7);
 			expect(oldest.messages).toMatchObject([

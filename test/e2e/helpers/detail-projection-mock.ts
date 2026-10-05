@@ -174,7 +174,12 @@ export function projectLegacyRelayMessage(
 		upsert(page, sessionId, {
 			id,
 			role: "user",
-			time: { created: Date.now() + state.sequence },
+			time: {
+				created:
+					typeof event["createdAt"] === "number"
+						? event["createdAt"]
+						: Date.now() + state.sequence,
+			},
 			parts: [{ id: `${id}-text`, type: "text", text: event["text"] }],
 		});
 		return;
@@ -293,7 +298,13 @@ export function projectLegacyRelayMessage(
 		if (message)
 			upsert(page, sessionId, {
 				...message,
-				time: { ...message.time, completed: Date.now() },
+				time: {
+					...message.time,
+					completed:
+						typeof event["createdAt"] === "number"
+							? event["createdAt"]
+							: Date.now(),
+				},
 				...(typeof event["cost"] === "number" ? { cost: event["cost"] } : {}),
 			});
 		if (event.type === "done") {

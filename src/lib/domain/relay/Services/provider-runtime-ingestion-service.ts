@@ -14,6 +14,7 @@ import type {
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import {
 	commitClaudeRunnerOutput,
+	createClaudeRunnerPermissionReplies,
 	currentClaudeRunnerOutput,
 	currentClaudeRunnerPermissionReply,
 	ownsClaudeRunnerAttachment,
@@ -191,8 +192,10 @@ export const makeProviderRuntimeIngestionLive = (
 						let appended = true;
 						const beforeCommit = Effect.gen(function* () {
 							yield* ingestOptions.beforeCommit ?? Effect.void;
-							if (permissionReply)
+							if (permissionReply) {
+								yield* createClaudeRunnerPermissionReplies(sql);
 								yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
+							}
 						});
 						const afterCommit = Effect.gen(function* () {
 							if (appended) {

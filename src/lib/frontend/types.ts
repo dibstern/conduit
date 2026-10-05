@@ -117,6 +117,7 @@ export interface UserMessage {
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
 	modelExecution?: ModelExecution;
+	turnTiming?: HistoryMessage["turnTiming"];
 }
 
 export interface AssistantMessage {

@@ -27,6 +27,14 @@ export const currentClaudeRunnerPermissionReply = FiberRef.unsafeMake<
 	| undefined
 >(undefined);
 
+// Ingestion writes this table for every Claude runner, including in-process
+// ones that never build a receipt store, so both owners create it.
+export const createClaudeRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
+	sql`CREATE TABLE IF NOT EXISTS claude_runner_permission_replies (
+		session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
+		PRIMARY KEY (session_id, request_id)
+	)`;
+
 export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		yield* sql`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
@@ -42,10 +50,7 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 			runner_id TEXT NOT NULL, sequence INTEGER NOT NULL, result_json TEXT NOT NULL,
 			PRIMARY KEY (runner_id, sequence)
 		)`;
-		yield* sql`CREATE TABLE IF NOT EXISTS claude_runner_permission_replies (
-			session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
-			PRIMARY KEY (session_id, request_id)
-		)`;
+		yield* createClaudeRunnerPermissionReplies(sql);
 		const read = (runnerId: string) =>
 			sql<{
 				sequence: number;

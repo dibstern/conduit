@@ -7,7 +7,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
-	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
@@ -220,7 +219,6 @@ const switchClientToSession = (
 		if (!sessionId) return;
 
 		const wsHandler = yield* WebSocketHandlerTag;
-		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
 		const hasActiveTimeout = yield* hasActiveProcessingTimeout(sessionId);
 
@@ -230,14 +228,13 @@ const switchClientToSession = (
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
 
-		// The poller is cold until its first poll and never starts without
-		// OpenCode, so the persisted family (children included) also counts.
+		// The persisted family (children included) is the live status. The
+		// poller only holds a copy up to one poll old, which would leave a
+		// just-stopped session reading busy after a reload.
 		const isProcessing =
 			busySessionIds(
 				new Map(family.sessions.map((session) => [session.id, session])),
-			).has(sessionId) ||
-			(yield* statusPoller.isProcessing(sessionId)) ||
-			hasActiveTimeout;
+			).has(sessionId) || hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
@@ -601,7 +598,9 @@ export const loadMoreHistoryForSession = ({
 		});
 		return {
 			sessionId,
-			messages: messageRowsToHistory(page.messages, { pageSize: 50 }).messages,
+			messages: messageRowsToHistory(page.messages, {
+				pageSize: page.messages.length,
+			}).messages,
 			hasMore: page.hasMore,
 		};
 	});
