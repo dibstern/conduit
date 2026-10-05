@@ -573,9 +573,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 		relayUrl,
 	}) => {
 		await new AppPage(page).goto(relayUrl);
-		const viewsButton = page.getByTestId("session-bar-views-button");
-		await viewsButton.click();
-		await page.getByTestId("session-bar-view-files").click();
+		const overflowButton = page.getByTestId("session-bar-island-overflow");
+		await overflowButton.click();
+		await page.getByTestId("overflow-view-files").click();
 		await page
 			.locator("#sidebar-panel-files .fb-entry:not([aria-expanded])")
 			.first()
@@ -587,27 +587,26 @@ test.describe("Sidebar Layout — Mobile", () => {
 			.click();
 		await expect(page.locator("#file-viewer")).toBeHidden();
 		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
-		await viewsButton.click();
-		await expect(page.getByTestId("session-bar-view-files")).toHaveAttribute(
+		await overflowButton.click();
+		await expect(page.getByTestId("overflow-view-files")).toHaveAttribute(
 			"aria-checked",
 			"true",
 		);
 	});
 
-	test("mobile: Views, collapsed overflow, and title menus use bottom sheets", async ({
+	test("mobile: expanded overflow, collapsed overflow, and title menus use bottom sheets", async ({
 		page,
 		relayUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		await new AppPage(page).goto(relayUrl);
 		const bar = page.getByTestId("session-bar");
-		const overflow = page.getByTestId("session-bar-island-overflow");
-		const viewsButton = page.getByTestId("session-bar-views-button");
+		const overflowButton = page.getByTestId("session-bar-island-overflow");
 		const titleChevron = page.getByTestId("session-bar-title-menu");
-		const menu = page.getByTestId("session-bar-views-sheet");
+		const menu = page.getByTestId("session-bar-island-menu");
 		const before = await bar.boundingBox();
-		await expect(overflow).toHaveCount(0);
-		await viewsButton.click();
+		await expect(overflowButton).toBeVisible();
+		await overflowButton.click();
 		await expect(menu).toBeVisible();
 		const sheet = await menu.boundingBox();
 		expect(sheet).not.toBeNull();
@@ -628,8 +627,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(items.nth(0)).toHaveAttribute("aria-checked", "true");
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
-		await expect(viewsButton).toBeFocused();
-		await viewsButton.click();
+		await expect(overflowButton).toBeFocused();
+		await overflowButton.click();
 		await expect(page.getByTestId("menu-sheet-scrim")).not.toHaveClass(
 			/pointer-events-none/,
 		);
@@ -649,7 +648,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.locator("#settings-panel")).toBeVisible();
 		await page.getByTestId("settings-close-btn").click();
 
-		await viewsButton.click();
+		await overflowButton.click();
 		await menu.getByRole("menuitemradio", { name: "Terminal" }).click();
 		await expect(page.locator("#terminal-panel")).toBeVisible();
 		await expect(menu).toBeHidden();
@@ -660,14 +659,14 @@ test.describe("Sidebar Layout — Mobile", () => {
 			.poll(() =>
 				page.evaluate(
 					() =>
-						document.activeElement?.id === "session-bar-views-button" ||
+						document.activeElement?.id === "session-bar-more" ||
 						document
 							.getElementById("terminal-panel")
 							?.contains(document.activeElement) === true,
 				),
 			)
 			.toBe(true);
-		await viewsButton.click();
+		await overflowButton.click();
 		await menu.getByRole("menuitemradio", { name: "Chat" }).click();
 		const messages = page.locator("#messages");
 		await messages.evaluate((element) => {
@@ -693,8 +692,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		});
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
 		const collapsedBefore = await bar.boundingBox();
-		await expect(viewsButton).toHaveCount(0);
-		await overflow.click();
+		await expect(overflowButton).toBeVisible();
+		await overflowButton.click();
 		const overflowMenu = page.getByTestId("session-bar-island-menu");
 		await expect(
 			overflowMenu.getByRole("menuitemradio", { name: "Chat" }),
@@ -769,20 +768,21 @@ test.describe("Sidebar Layout — Mobile", () => {
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		await new AppPage(page).goto(relayUrl);
-		const viewsButton = page.getByTestId("session-bar-views-button");
-		const sheet = page.getByTestId("session-bar-views-sheet");
+		const overflowButton = page.getByTestId("session-bar-island-overflow");
+		const sheet = page.getByTestId("session-bar-island-menu");
+		await expect(page.getByTestId("session-bar-views-button")).toHaveCount(0);
 		await expect(page.locator("#session-bar-views")).toHaveCount(0);
-		await viewsButton.click();
+		await overflowButton.click();
 		const items = sheet.getByRole("menuitemradio");
 		await expect(items).toHaveCount(4);
 		for (const name of ["Chat", "Terminal", "Diff", "Files"]) {
 			await expect(sheet.getByRole("menuitemradio", { name })).toBeVisible();
 		}
-		const chat = page.getByTestId("session-bar-view-chat");
-		const terminal = page.getByTestId("session-bar-view-terminal");
-		const files = page.getByTestId("session-bar-view-files");
+		const chat = page.getByTestId("overflow-view-chat");
+		const terminal = page.getByTestId("overflow-view-terminal");
+		const files = page.getByTestId("overflow-view-files");
 		await expect(chat).toHaveAttribute("aria-checked", "true");
-		await expect(page.getByTestId("session-bar-view-diff")).toHaveAttribute(
+		await expect(page.getByTestId("overflow-view-diff")).toHaveAttribute(
 			"aria-disabled",
 			"true",
 		);
@@ -807,11 +807,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 		expect(scrollTop).toBeGreaterThan(0);
 		const probe = page.getByTestId("transcript-position-probe");
 		const probeBefore = await probe.boundingBox();
-		await viewsButton.click();
+		await overflowButton.click();
 		await terminal.click();
 		await expect(sheet).toBeHidden();
 		await expect(page.locator("#terminal-panel")).toBeVisible();
-		await viewsButton.click();
+		await overflowButton.click();
 		await expect(terminal).toHaveAttribute("aria-checked", "true");
 		await chat.click();
 		await expect(messages).toBeVisible();
@@ -821,7 +821,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 			Math.abs((probeAfter?.y ?? 0) - (probeBefore?.y ?? 0)),
 		).toBeLessThanOrEqual(1);
 
-		await viewsButton.click();
+		await overflowButton.click();
 		await files.click();
 		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
 		const folder = page
@@ -830,17 +830,17 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(folder).toBeVisible();
 		await folder.click();
 		await expect(folder).toHaveAttribute("aria-expanded", "true");
-		await viewsButton.click();
+		await overflowButton.click();
 		await chat.click();
-		await viewsButton.click();
+		await overflowButton.click();
 		await files.click();
 		await expect(folder).toHaveAttribute("aria-expanded", "true");
 
-		await viewsButton.click();
+		await overflowButton.click();
 		await chat.click();
 		await page.setViewportSize({ width: 320, height: 852 });
-		await expect(viewsButton).toBeVisible();
-		await viewsButton.click();
+		await expect(overflowButton).toBeVisible();
+		await overflowButton.click();
 		await expect(sheet.getByRole("menuitemradio")).toHaveCount(4);
 		await page.keyboard.press("Escape");
 		expect(
@@ -868,7 +868,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"data-collapsed",
 			"true",
 		);
-		await expect(viewsButton).toHaveCount(0);
+		await expect(overflowButton).toBeVisible();
 	});
 
 	test("mobile: long-title two-row bar switches views at 390px", async ({
@@ -878,8 +878,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await new AppPage(page).goto(relayUrl);
 		const bar = page.getByTestId("session-bar");
-		const viewsButton = page.getByTestId("session-bar-views-button");
-		const sheet = page.getByTestId("session-bar-views-sheet");
+		const overflowButton = page.getByTestId("session-bar-island-overflow");
+		const sheet = page.getByTestId("session-bar-island-menu");
 		const titleMenuButton = page.getByTestId("session-bar-title-menu");
 		await titleMenuButton.click();
 		const actions = page.getByTestId("session-action-sheet");
@@ -894,7 +894,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		);
 		const backBox = await page.getByTestId("session-bar-back").boundingBox();
 		const titleBox = await page.getByTestId("session-bar-title").boundingBox();
-		const hitTarget = await viewsButton.evaluate((button) => {
+		const hitTarget = await overflowButton.evaluate((button) => {
 			const box = button.getBoundingClientRect();
 			const target = getComputedStyle(button, "::before");
 			const width = Number.parseFloat(target.width);
@@ -914,21 +914,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.locator("#session-bar-views")).toHaveCount(0);
 		await expect(page.getByTestId("session-bar-overflow")).toHaveCount(0);
 
-		await viewsButton.click();
-		const chat = page.getByTestId("session-bar-view-chat");
+		await overflowButton.click();
+		const chat = page.getByTestId("overflow-view-chat");
 		await expect(chat).toHaveAttribute("role", "menuitemradio");
 		await expect(chat).toHaveAttribute("aria-checked", "true");
-		await expect(page.getByTestId("session-bar-view-diff")).toHaveAttribute(
+		await expect(page.getByTestId("overflow-view-diff")).toHaveAttribute(
 			"aria-disabled",
 			"true",
 		);
 		for (const view of ["terminal", "files", "chat"] as const) {
-			await page.getByTestId(`session-bar-view-${view}`).click();
+			await page.getByTestId(`overflow-view-${view}`).click();
 			await expect(sheet).toBeHidden();
-			await viewsButton.click();
-			await expect(
-				page.getByTestId(`session-bar-view-${view}`),
-			).toHaveAttribute("aria-checked", "true");
+			await overflowButton.click();
+			await expect(page.getByTestId(`overflow-view-${view}`)).toHaveAttribute(
+				"aria-checked",
+				"true",
+			);
 		}
 		await page.keyboard.press("Escape");
 		const messages = page.locator("#messages");
@@ -946,8 +947,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 			element.scrollTop = element.scrollHeight;
 		});
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
-		await expect(viewsButton).toHaveCount(0);
-		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
+		await expect(overflowButton).toBeVisible();
+		await expect(page.getByTestId("session-bar-views-button")).toHaveCount(0);
 	});
 
 	test("mobile: visible list and projects controls have 44px touch targets", async ({

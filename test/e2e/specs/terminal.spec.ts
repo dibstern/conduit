@@ -13,8 +13,8 @@ test.describe("Terminal Panel", () => {
 	}) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await new AppPage(page).goto(relayUrl);
-		await page.getByTestId("session-bar-views-button").click();
-		await page.getByTestId("session-bar-view-terminal").click();
+		await page.getByTestId("session-bar-island-overflow").click();
+		await page.getByTestId("overflow-view-terminal").click();
 		const panel = page.locator("#terminal-panel");
 		await expect(panel).toBeVisible();
 		await expect.poll(async () => (await panel.boundingBox())?.width).toBe(390);

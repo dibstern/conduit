@@ -66,7 +66,7 @@ test.describe("phone session island", () => {
 			scroller.scrollTop -= 60;
 		});
 		await expect(bar).toHaveAttribute("data-collapsed", "false");
-		await expect(page.getByTestId("session-bar-views-button")).toBeVisible();
+		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
 		const after = await probe.evaluate(
 			(element) => element.getBoundingClientRect().top,
 		);
@@ -87,7 +87,7 @@ test.describe("phone session island", () => {
 			"data-collapsed",
 			"false",
 		);
-		await expect(page.getByTestId("session-bar-views-button")).toBeVisible();
+		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
 		await page.locator("#messages").evaluate((scroller) => {
 			scroller.scrollTop -= 60;
 		});
@@ -108,11 +108,11 @@ test.describe("phone session island", () => {
 			.locator(".debug-panel")
 			.getByRole("button", { name: "Close panel" })
 			.click();
-		await page.getByTestId("session-bar-views-button").tap();
-		await expect(page.getByTestId("session-bar-views-sheet")).toBeVisible();
+		await page.getByTestId("session-bar-island-overflow").tap();
+		await expect(page.getByTestId("session-bar-island-menu")).toBeVisible();
 		// The views sheet must stay open through this observation window.
 		await page.waitForTimeout(100);
-		await expect(page.getByTestId("session-bar-views-sheet")).toBeVisible();
+		await expect(page.getByTestId("session-bar-island-menu")).toBeVisible();
 		await page.keyboard.press("Escape");
 		await addProbeMessages(page);
 		await pinToBottom(page);
@@ -240,10 +240,10 @@ test.describe("phone session island", () => {
 			height: scroller.clientHeight,
 			top: scroller.scrollTop,
 		}));
-		await page.getByTestId("session-bar-views-button").tap();
-		await page.getByTestId("session-bar-view-files").click();
-		await page.getByTestId("session-bar-views-button").tap();
-		await page.getByTestId("session-bar-view-chat").click();
+		await page.getByTestId("session-bar-island-overflow").tap();
+		await page.getByTestId("overflow-view-files").click();
+		await page.getByTestId("session-bar-island-overflow").tap();
+		await page.getByTestId("overflow-view-chat").click();
 		const after = await page.locator("#messages").evaluate((scroller) => ({
 			height: scroller.clientHeight,
 			top: scroller.scrollTop,
@@ -256,15 +256,13 @@ test.describe("phone session island", () => {
 		relayUrl,
 	}) => {
 		await gotoRelay(page, relayUrl);
-		await page.getByTestId("session-bar-views-button").tap();
-		await page.getByTestId("session-bar-view-terminal").click();
+		await page.getByTestId("session-bar-island-overflow").tap();
+		await page.getByTestId("overflow-view-terminal").click();
 		await expect(page.getByTestId("session-bar")).toHaveAttribute(
 			"data-collapsed",
 			"false",
 		);
-		await expect(page.getByTestId("session-bar-island-overflow")).toHaveCount(
-			0,
-		);
+		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
 		await expect
 			.poll(
 				async () =>
