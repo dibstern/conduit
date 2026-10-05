@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
@@ -315,11 +316,21 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 	let harness: TestHarness;
 
 	beforeAll(async () => {
+		// Client init also discovers Claude capabilities; keep the relay off the live SDK.
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		harness = await createTestHarness();
 	}, 15_000);
 
 	afterAll(async () => {
-		if (harness) await harness.stop();
+		try {
+			if (harness) await harness.stop();
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	}, 10_000);
 
 	it("client receives initial state on connect", async () => {
