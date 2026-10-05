@@ -10,6 +10,7 @@ const emptyComponent = vi.hoisted(
 );
 const wsLifecycleHarness = vi.hoisted(() => ({
 	onAttachCallbacks: [] as Array<(slug: string) => void>,
+	onSynchronizedCallbacks: [] as Array<(slug: string) => void>,
 }));
 
 // Layout components
@@ -158,6 +159,10 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 	attachSessionList: vi.fn(),
 	detachSessionList: vi.fn(),
+	onShellSynchronized: vi.fn((callback: (slug: string) => void) => {
+		wsLifecycleHarness.onSynchronizedCallbacks.push(callback);
+		return () => {};
+	}),
 	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
 	currentSearchQuery: vi.fn(() => null),
 	refreshSessionList: vi.fn(async () => {}),
@@ -313,6 +318,7 @@ describe("ChatLayout WS lifecycle", () => {
 			},
 		);
 		wsLifecycleHarness.onAttachCallbacks = [];
+		wsLifecycleHarness.onSynchronizedCallbacks = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.
 		vi.stubGlobal("localStorage", {
@@ -350,11 +356,12 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(connect).toHaveBeenCalledWith();
 	});
 
-	it("does not toast when optional discovery RPCs fail on attach", async () => {
+	it("does not toast when optional discovery RPCs fail after shell synchronization", async () => {
 		render(ChatLayout);
 
 		expect(onProjectAttached).toHaveBeenCalledTimes(1);
 		attach("test-project");
+		wsLifecycleHarness.onSynchronizedCallbacks[0]?.("test-project");
 		await Promise.resolve();
 		await Promise.resolve();
 

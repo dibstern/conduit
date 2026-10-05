@@ -54,7 +54,7 @@
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { attachSessionList, detachSessionList } from "../../stores/session-list.svelte.js";
+	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
@@ -352,7 +352,7 @@
 		let attachGeneration = 0;
 		const unsubscribe = onProjectAttached((slug) => {
 			if (requestedProject === slug) requestedProject = null;
-			const generation = ++attachGeneration;
+			attachGeneration++;
 			if (slug !== previousSlug) {
 				clearMessages();
 				clearSessionState();
@@ -370,6 +370,10 @@
 			// First page only. The cross-project read is keyset-paged now; the
 			// sidebar's scroll sentinel asks for the rest.
 			attachSessionList(slug);
+		});
+		const unsubscribeShell = onShellSynchronized((slug) => {
+			if (slug !== previousSlug) return;
+			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			// With no session in the route, scope the agent fetch to the
 			// client-persisted harness draft so the agent list matches the
@@ -432,6 +436,7 @@
 			attachGeneration++;
 			detachSessionList();
 			unsubscribe();
+			unsubscribeShell();
 			clearNavigateToSession();
 			interruptStream();
 			disconnect();

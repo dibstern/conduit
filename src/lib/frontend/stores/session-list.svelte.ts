@@ -101,6 +101,14 @@ export const sessionList: SessionListView = {
 let attachGeneration = 0;
 let shellFiber: RuntimeFiber<void, unknown> | null = null;
 let attachedProject: ProjectRef | null = null;
+const shellSynchronizedListeners = new Set<(project: ProjectRef) => void>();
+
+export function onShellSynchronized(
+	fn: (project: ProjectRef) => void,
+): () => void {
+	shellSynchronizedListeners.add(fn);
+	return () => shellSynchronizedListeners.delete(fn);
+}
 
 async function stopShell(): Promise<void> {
 	const fiber = shellFiber;
@@ -110,7 +118,6 @@ async function stopShell(): Promise<void> {
 
 export function attachSessionList(project: ProjectRef): void {
 	const generation = ++attachGeneration;
-	void loadDaemonSessions();
 	if (attachedProject !== project) setShellFeedStatus({ _tag: "cold" });
 	attachedProject = project;
 	void stopShell().then(async () => {
@@ -141,7 +148,14 @@ export function attachSessionList(project: ProjectRef): void {
 							Effect.sync(() => {
 								if (generation !== attachGeneration) return;
 								applySessionChange(change);
-								if (change._tag === "synchronized") flushPendingSeen(project);
+								if (change._tag === "synchronized") {
+									flushPendingSeen(project);
+									// Unary reads fail fast while the control socket is down; this
+									// marker rides that socket, so it is up. Repeats on every resume.
+									void loadDaemonSessions();
+									for (const listener of shellSynchronizedListeners)
+										listener(project);
+								}
 							}),
 					),
 				),
