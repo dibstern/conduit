@@ -60,7 +60,7 @@ describe("Tailscale Serve CLI", () => {
 	});
 
 	it("uses the ts.net URL in the project banner and QR", async () => {
-		const url = "https://machine.example.ts.net";
+		const url = "https://machine.example.ts.net:2633";
 		const qr = vi.fn((value: string) => `[QR:${value}]`);
 		const cli = createMockCLI({
 			generateQR: qr,
