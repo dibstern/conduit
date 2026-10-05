@@ -227,9 +227,9 @@ describe("triggerNotifications", () => {
 		});
 
 		expect(notificationInstances).toHaveLength(1);
-		expect(notificationInstances[0]?.title).toBe("Task Complete");
+		expect(notificationInstances[0]?.title).toBe("Response complete");
 		expect(notificationInstances[0]?.options.body).toBe(
-			"Agent has finished processing.",
+			"Agent finished its response.",
 		);
 		expect(notificationInstances[0]?.options.tag).toBe("opencode-done");
 	});

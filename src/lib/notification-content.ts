@@ -20,8 +20,8 @@ export function notificationContent(
 	switch (msg.type) {
 		case "done":
 			return {
-				title: "Task Complete",
-				body: "Agent has finished processing.",
+				title: "Response complete",
+				body: "Agent finished its response.",
 				tag: "opencode-done",
 			};
 		case "error":
