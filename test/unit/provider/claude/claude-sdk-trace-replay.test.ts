@@ -250,14 +250,15 @@ describe("Claude SDK captured-trace replay", () => {
 			expect(emittedParts(sink.events)).toEqual(streamedParts(rawLines));
 
 			// A snapshot that does not extend the stream is dropped, never
-			// re-sliced — and says so. The committed subagent trace carries one
-			// such block: a MessageDisplay hook prepended a "[HH:MM:SS]" marker
-			// to the final assistant text on its way through the SDK.
+			// re-sliced — and says so. The subagent-message-display-hook trace
+			// (the pre-command_lifecycle subagent capture) carries one such block:
+			// a MessageDisplay hook prepended a "[HH:MM:SS]" marker to the final
+			// assistant text on its way through the SDK.
 			for (const warning of warnings) {
 				expect(warning).toContain("(prepended)");
 			}
 			expect(warnings).toHaveLength(
-				file === "subagent-task-turn.jsonl" ? 1 : 0,
+				file === "subagent-message-display-hook-turn.jsonl" ? 1 : 0,
 			);
 		});
 	});

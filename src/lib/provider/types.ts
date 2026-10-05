@@ -91,7 +91,16 @@ export interface EventSink {
 	noteActivity?(): void;
 }
 
-export type TurnStatus = "completed" | "error" | "interrupted" | "cancelled";
+/**
+ * `joined`: the provider folded this input into a turn another input owns.
+ * That input's result finalises the turn; a joined input finalises nothing.
+ */
+export type TurnStatus =
+	| "completed"
+	| "error"
+	| "interrupted"
+	| "cancelled"
+	| "joined";
 
 export interface TurnTokens {
 	readonly input: number;

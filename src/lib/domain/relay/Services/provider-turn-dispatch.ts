@@ -279,6 +279,9 @@ const handleDispatchResult = (
 		const wsHandler = yield* WebSocketHandlerTag;
 		// The interrupter already sent done; finalizing again can end a newer turn.
 		if (result.status === "interrupted" && !result.error) return;
+		// One provider result finalises once: the input that owns it does that,
+		// so an input it folded in finalises nothing.
+		if (result.status === "joined") return;
 
 		// Other non-`completed` terminal statuses (error / cancelled / orphaned)
 		// must finalize the turn: a completed turn's `done` arrives via the

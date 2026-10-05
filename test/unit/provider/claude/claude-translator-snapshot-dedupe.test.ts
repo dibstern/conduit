@@ -10,11 +10,6 @@
 // - content_block_stop for a plain text block used to emit tool.completed with
 //   messageId = the part's own uuid, which the ingress pipeline expanded into a
 //   phantom "Unknown" tool and a phantom empty assistant message row.
-// - Queued sends: the SDK holds one long streaming turn open across queued user
-//   prompts (no `result` in between), so the translator funnelled the reply to
-//   a queued message into the PREVIOUS turn's assistant message. Enqueueing a
-//   prompt now marks a boundary on the session context; the next message_start
-//   starts a fresh assistant message.
 
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -235,34 +230,6 @@ describe("assistant snapshot vs stream dedupe", () => {
 				expect(messageId).toBe("msg_A");
 			}
 		}
-	});
-
-	it("starts a new assistant message after a queued prompt boundary", async () => {
-		await replayIncidentTurn("msg_A");
-
-		// No `result` arrives between turns (the SDK holds the streaming turn
-		// open for queued input). Enqueueing the next prompt marks the boundary.
-		ctx.pendingAssistantBoundary = true;
-
-		await feed(
-			streamEvent({ type: "message_start", message: { id: "msg_B" } }),
-			streamEvent({
-				type: "content_block_start",
-				index: 0,
-				content_block: { type: "text", text: "" },
-			}),
-			streamEvent({
-				type: "content_block_delta",
-				index: 0,
-				delta: { type: "text_delta", text: "Re-running the gathering." },
-			}),
-		);
-
-		const partsB = textPartsOf("msg_B");
-		expect([...partsB.values()]).toEqual(["Re-running the gathering."]);
-		// Turn 1's message must not have absorbed turn 2's text.
-		const partsA = textPartsOf("msg_A");
-		expect([...partsA.values()]).toEqual([TEXT]);
 	});
 
 	// A MessageDisplay hook (the message-timestamps plugin) rewrites assistant

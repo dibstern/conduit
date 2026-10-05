@@ -220,7 +220,8 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.left);
 			}
 			const turn = result.right;
-			if (turn.status !== "completed") {
+			// A joined input was delivered and answered by another input's turn.
+			if (turn.status !== "completed" && turn.status !== "joined") {
 				// Provider-declared failure delivered on the success channel (e.g.
 				// TurnResult { status: "error" | "interrupted" }). Record the true
 				// failed outcome durably so restart replay never synthesizes a

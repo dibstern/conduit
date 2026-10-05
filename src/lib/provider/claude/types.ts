@@ -14,6 +14,7 @@
  */
 
 import type { Effect } from "effect";
+import type { ClaudeSDKCommandLifecycleMessage } from "../../contracts/providers/claude-agent-sdk.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
@@ -54,7 +55,11 @@ import type {
 
 // active_goal is declared by the SDK separately from its iterator's union.
 // Accept it if a future CLI forwards this currently internal envelope.
-export type SDKMessage = SDKStreamMessage | SDKActiveGoalMessage;
+// command_lifecycle is emitted by the CLI but not yet declared by the SDK.
+export type SDKMessage =
+	| SDKStreamMessage
+	| SDKActiveGoalMessage
+	| ClaudeSDKCommandLifecycleMessage;
 
 // Keep SDK query controls while allowing the wire vocabulary accepted above.
 export type Query = Omit<
@@ -212,11 +217,6 @@ export interface ClaudeSessionContext {
 	lastAssistantUuid: string | undefined;
 	turnCount: number;
 	stopped: boolean;
-	/** Set when a user prompt is enqueued while the SDK's streaming turn is
-	 *  still open (no `result` arrives between queued sends). The next
-	 *  message_start then starts a fresh assistant message instead of merging
-	 *  the reply into the previous turn's message. */
-	pendingAssistantBoundary?: boolean;
 }
 
 /**

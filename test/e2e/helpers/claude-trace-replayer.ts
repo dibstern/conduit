@@ -7,6 +7,9 @@
 // Per replayed turn, envelope ids (uuid, assistant message.id, message_start
 // message.id) are fresh so the translator's dedupe never swallows a repeated
 // turn; session_id is one fresh id per replayer, stable like the SDK's.
+// The recorded input id (command_lifecycle command_uuid, user_message_uuid(s))
+// becomes the uuid of the prompt being answered, so the runtime settles and
+// places that input; older traces carry none and replay unchanged.
 // Content, including tool_use/task ids, is untouched — plan a trace that
 // carries tools at most once per session.
 
@@ -62,6 +65,12 @@ const TRACES_DIR = join(
 	"../../fixtures/claude-sdk-traces",
 );
 
+function inputIds(message: SDKMessage): readonly string[] {
+	if (message.type === "command_lifecycle") return [message.command_uuid];
+	if (message.type === "result") return message.user_message_uuids ?? [];
+	return [];
+}
+
 function envelopeIds(message: SDKMessage): string[] {
 	const ids: string[] = message.uuid ? [message.uuid] : [];
 	if (message.type === "assistant") ids.push(message.message.id);
@@ -89,9 +98,13 @@ function loadTrace(dir: string, name: ClaudeTraceName) {
 			});
 		}
 	});
+	const recordedInputIds = new Set(messages.flatMap(inputIds));
 	return {
 		lines,
-		ids: [...new Set(messages.flatMap(envelopeIds))],
+		inputIds: [...recordedInputIds],
+		ids: [...new Set(messages.flatMap(envelopeIds))].filter(
+			(id) => !recordedInputIds.has(id),
+		),
 		sessionIds: [
 			...new Set(messages.flatMap((message) => message.session_id ?? [])),
 		],
@@ -100,8 +113,13 @@ function loadTrace(dir: string, name: ClaudeTraceName) {
 
 type Trace = ReturnType<typeof loadTrace>;
 
-function freshTurn(trace: Trace, sessionId: string): SDKMessage[] {
+function freshTurn(
+	trace: Trace,
+	sessionId: string,
+	promptUuid: string,
+): SDKMessage[] {
 	const replacements = [
+		...trace.inputIds.map((id) => [id, promptUuid] as const),
 		...trace.ids.map(
 			(id) =>
 				[
@@ -147,7 +165,7 @@ export function createClaudeTraceReplayer(
 		let aborted = new AbortController();
 
 		async function* replay(): AsyncGenerator<SDKMessage, void> {
-			for await (const _prompt of prompt) {
+			for await (const sentPrompt of prompt) {
 				sent += 1;
 				const trace = traces[sent - 1];
 				if (!trace) {
@@ -158,7 +176,11 @@ export function createClaudeTraceReplayer(
 				}
 				interrupted = false;
 				aborted = new AbortController();
-				const messages = freshTurn(trace, sessionId);
+				const messages = freshTurn(
+					trace,
+					sessionId,
+					sentPrompt.uuid ?? randomUUID(),
+				);
 				for (const [index, message] of messages.entries()) {
 					if (plan.delayMs) await sleep(plan.delayMs);
 					if (interrupted) break;

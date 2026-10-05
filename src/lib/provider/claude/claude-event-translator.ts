@@ -501,6 +501,11 @@ export class ClaudeEventTranslator {
 			switch (message.type) {
 				case "active_goal":
 					return;
+				case "command_lifecycle":
+					// A started input is answered by a new assistant message, even
+					// when the SDK folds it into a turn that is still streaming.
+					if (message.state === "started") this.currentAssistantMessageId = "";
+					return;
 				case "system":
 					return yield* this.translateSystem(ctx, message);
 				case "stream_event":
@@ -1138,16 +1143,7 @@ export class ClaudeEventTranslator {
 			// back to its own per-block UUID — creating dozens of separate messages
 			// in the persistence layer instead of one cohesive assistant message.
 			const msgId = event.message.id;
-			// A queued prompt was enqueued mid-turn (the SDK keeps one streaming
-			// turn open across queued sends, so no `result` reset happens): the
-			// next API round answers the queued message — start a fresh
-			// assistant message instead of merging into the previous one.
-			const boundary =
-				ctx.pendingAssistantBoundary === true &&
-				Boolean(msgId) &&
-				msgId !== this.currentAssistantMessageId;
-			if (boundary) ctx.pendingAssistantBoundary = false;
-			if (msgId && (boundary || !this.currentAssistantMessageId)) {
+			if (msgId && !this.currentAssistantMessageId) {
 				this.currentAssistantMessageId = msgId;
 				// Emit message.created so MessageProjector creates the row
 				// and TurnProjector can link the turn to its assistant message.
@@ -1432,16 +1428,7 @@ export class ClaudeEventTranslator {
 			}
 
 			const snapshotId = this.assistantSnapshotMessageId(message);
-			let messageId: string;
-			if (
-				ctx.pendingAssistantBoundary === true &&
-				snapshotId !== this.currentAssistantMessageId
-			) {
-				ctx.pendingAssistantBoundary = false;
-				messageId = snapshotId;
-			} else {
-				messageId = this.currentAssistantMessageId || snapshotId;
-			}
+			const messageId = this.currentAssistantMessageId || snapshotId;
 			this.currentAssistantMessageId = messageId;
 			// A turn with partial messages has already opened this scope from
 			// `message_start`, so this is a no-op there; a turn without them

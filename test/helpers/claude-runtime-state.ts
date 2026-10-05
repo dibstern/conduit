@@ -4,6 +4,7 @@ import type {
 	ClaudeProviderRuntime,
 	ClaudeProviderRuntimeState,
 } from "../../src/lib/provider/claude/claude-provider-runtime.js";
+import { addTurnWaiter } from "../../src/lib/provider/claude/claude-runtime-turn.js";
 import type { ClaudeSessionContext } from "../../src/lib/provider/claude/types.js";
 import type { TurnResult } from "../../src/lib/provider/types.js";
 
@@ -73,8 +74,32 @@ export function setClaudeRuntimeTurnWaitersForTest(
 	Effect.runSync(
 		Ref.update(stateRefFor(instance), (state) => ({
 			...state,
-			turnWaiters: HashMap.set(state.turnWaiters, sessionId, waiters),
+			turnWaiters: HashMap.set(
+				state.turnWaiters,
+				sessionId,
+				new Map(
+					waiters.map((deferred, index) => [
+						`test-waiter-${index}`,
+						{ deferred, started: false },
+					]),
+				),
+			),
 		})),
+	);
+}
+
+/** Registers a sent input the way a mid-turn handoff will (ticket .7). */
+export function addClaudeRuntimeTurnWaiterForTest(
+	instance: ClaudeProviderInstance,
+	sessionId: string,
+	inputId: string,
+	deferred: Deferred.Deferred<TurnResult, Error>,
+): void {
+	Effect.runSync(
+		addTurnWaiter(stateRefFor(instance), sessionId, inputId, {
+			deferred,
+			started: false,
+		}),
 	);
 }
 

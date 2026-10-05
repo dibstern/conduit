@@ -77,22 +77,26 @@ function promptQueue() {
 	};
 }
 
+// A turn can carry frames after its result (command_lifecycle completed), so
+// read the planned trace's length, stopping early only if the stream ends.
 async function readTurn(
 	iterator: AsyncIterator<SDKMessage, void>,
+	name: ClaudeTraceName = "pong-thinking-text-turn",
 ): Promise<SDKMessage[]> {
 	const messages: SDKMessage[] = [];
-	while (true) {
+	while (messages.length < traceLineCount(name)) {
 		const next = await iterator.next();
 		if (next.done) return messages;
 		messages.push(next.value);
-		if (next.value.type === "result") return messages;
 	}
+	return messages;
 }
 
 function envelopeIds(messages: readonly SDKMessage[]): string[] {
 	return messages.flatMap((message) => {
 		const ids = [message.uuid ?? "", message.session_id ?? ""];
 		if (message.type === "assistant") ids.push(message.message.id);
+		if (message.type === "command_lifecycle") ids.push(message.command_uuid);
 		if (
 			message.type === "stream_event" &&
 			message.event.type === "message_start"
@@ -122,12 +126,14 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("first");
 		const first = await readTurn(iterator);
 		prompts.push("second");
-		const second = await readTurn(iterator);
+		const second = await readTurn(iterator, "subagent-task-turn");
 		prompts.close();
 
 		expect(first).toHaveLength(traceLineCount("pong-thinking-text-turn"));
 		expect(second).toHaveLength(traceLineCount("subagent-task-turn"));
-		expect(first.at(-1)).toMatchObject({ type: "result", result: "pong" });
+		expect(first.find((message) => message.type === "result")).toMatchObject({
+			result: "pong",
+		});
 		expect(await iterator.next()).toEqual({ done: true, value: undefined });
 		replayer.assertComplete();
 	});
@@ -156,7 +162,7 @@ describe("createClaudeTraceReplayer", () => {
 		// stable across turns of one session, like the SDK's, but is not the
 		// captured one (that could resolve a real transcript on this machine).
 		const sessionId = turns[0]?.[0]?.session_id;
-		expect(sessionId).not.toBe("6198d280-a44f-49f4-a2ad-cb1af4102adf");
+		expect(sessionId).not.toBe("cfc5d5a4-e87b-4ca1-a1d1-f9d73ff47324");
 		const perTurn = turns.map(
 			(turn) =>
 				new Set(

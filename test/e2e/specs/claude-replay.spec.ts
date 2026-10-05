@@ -200,7 +200,7 @@ test.describe("Claude replay lane", () => {
 				for (const app of apps) await app.goto(relayUrl);
 
 				// Sent back to back, the second send normally lands mid-turn, so the runner
-				// holds it and places it at gate release.
+				// holds it and places it when the SDK reports it started.
 				for (const app of apps) await app.sendMessage("Same");
 				for (const recorded of sends) {
 					await expect.poll(() => recorded.length).toBe(1);

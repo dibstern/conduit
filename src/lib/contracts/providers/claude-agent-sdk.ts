@@ -444,6 +444,9 @@ const ClaudeSDKResultBaseFields = {
 	terminal_reason: Schema.optional(Schema.String),
 	fast_mode_state: Schema.optional(Schema.Literal("off", "cooldown", "on")),
 	origin: Schema.optional(ClaudeSDKMessageOriginSchema),
+	// The input ids (sent as each user message's `uuid`) this result answers.
+	user_message_uuid: Schema.optional(Schema.String),
+	user_message_uuids: Schema.optional(Schema.Array(Schema.String)),
 	...ClaudeUuidSessionFields,
 };
 
@@ -895,8 +898,24 @@ export const ClaudeSDKActiveGoalMessageSchema = Schema.Struct({
 	...ClaudeUuidSessionFields,
 });
 
+/**
+ * Per-input lifecycle the CLI emits for every uuid-stamped user message
+ * (`msg_lifecycle_v1`). The installed SDK's types do not declare it yet.
+ */
+export const ClaudeSDKCommandLifecycleMessageSchema = Schema.Struct({
+	type: Schema.Literal("command_lifecycle"),
+	command_uuid: Schema.String,
+	state: Schema.Literal("queued", "started", "cancelled", "completed"),
+	...ClaudeUuidSessionFields,
+});
+
+export type ClaudeSDKCommandLifecycleMessage = Schema.Schema.Type<
+	typeof ClaudeSDKCommandLifecycleMessageSchema
+>;
+
 export const ClaudeSDKMessageSchema = Schema.Union(
 	ClaudeSDKActiveGoalMessageSchema,
+	ClaudeSDKCommandLifecycleMessageSchema,
 	ClaudeSDKAssistantMessageSchema,
 	ClaudeSDKInboundUserMessageSchema,
 	ClaudeSDKResultMessageSchema,
@@ -1205,12 +1224,13 @@ const decodeClaudeSDKOptionsJsonShapeEnvelope = Schema.decodeUnknownSync(
 
 export function decodeClaudeSDKMessage(
 	raw: unknown,
-): SDKMessage | SDKActiveGoalMessage {
+): SDKMessage | SDKActiveGoalMessage | ClaudeSDKCommandLifecycleMessage {
 	// The schema validates the SDK envelope fields Conduit consumes while
 	// intentionally leaving nested provider-owned payloads opaque.
 	return decodeClaudeSDKMessageEnvelope(raw) as
 		| SDKMessage
-		| SDKActiveGoalMessage;
+		| SDKActiveGoalMessage
+		| ClaudeSDKCommandLifecycleMessage;
 }
 
 export function decodeClaudeSDKUserMessage(raw: unknown): SDKUserMessage {

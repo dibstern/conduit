@@ -40,7 +40,10 @@ import {
 	Ref,
 	type Scope,
 } from "effect";
-import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
+import type {
+	ClaudeSDKCommandLifecycleMessage,
+	ClaudeSDKPermissionMode,
+} from "../../contracts/providers/claude-agent-sdk.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestionError,
@@ -108,14 +111,18 @@ import {
 	setSetupLock,
 } from "./claude-runtime-state.js";
 import {
+	addTurnWaiter,
 	buildUserMessage,
+	cancelTurnWaiterEffect,
 	hasPendingTurn,
-	pushTurnDeferred,
+	pendingTurnWaiters,
 	rejectTurnIfPendingEffect,
+	removeTurnWaiter,
 	resolveErrorTurnEffect,
 	resolveTurnEffect,
 	settleQueuedTurnDeferredsEffect,
-	shiftTurnDeferred,
+	startTurnWaiter,
+	type TurnWaiters,
 } from "./claude-runtime-turn.js";
 import {
 	asError,
@@ -217,10 +224,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 export interface ClaudeProviderRuntimeState {
 	readonly sessions: HashMap.HashMap<string, ClaudeSessionContext>;
 	readonly setupLocks: HashMap.HashMap<string, Deferred.Deferred<void, Error>>;
-	readonly turnWaiters: HashMap.HashMap<
-		string,
-		ReadonlyArray<Deferred.Deferred<TurnResult, Error>>
-	>;
+	readonly turnWaiters: HashMap.HashMap<string, TurnWaiters>;
 	readonly endedStreams: HashSet.HashSet<string>;
 	readonly shutdownAfterTurn: HashSet.HashSet<string>;
 }
@@ -541,7 +545,8 @@ export class ClaudeProviderRuntime {
 				(inFlight) =>
 					Effect.gen(this, function* () {
 						// An idle send is placed before the runner hop, as fast as a
-						// local write; the runner places a held send at gate release.
+						// local write; the runner places a held send when the SDK
+						// starts it (command_lifecycle: started).
 						if (inFlight === 0)
 							yield* this.placeUserMessageEffect({
 								sessionId,
@@ -1686,7 +1691,10 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			yield* markStreamLive(this.stateRef, sessionId);
 
 			const deferred = yield* Deferred.make<TurnResult, Error>();
-			yield* pushTurnDeferred(this.stateRef, sessionId, deferred);
+			yield* addTurnWaiter(this.stateRef, sessionId, input.inputId, {
+				deferred,
+				started: false,
+			});
 
 			// Set session lock synchronously before any effectful boundary.
 			const setupLock = yield* Deferred.make<void, Error>();
@@ -2029,17 +2037,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			}
 			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
 				Effect.gen(this, function* () {
-					const state = yield* getState(this.stateRef);
-					const pendingTurns = getOrUndefined(
-						HashMap.get(state.turnWaiters, ctx.sessionId),
+					// Wait for the prior turn to finish, but never inherit its
+					// failure: a rejected turn A must not reject turn B. The
+					// liveness checks below decide whether B may still proceed.
+					const priorTurns = yield* pendingTurnWaiters(
+						this.stateRef,
+						ctx.sessionId,
 					);
-					const priorTurn = pendingTurns?.[0];
-					if (priorTurn) {
-						// Wait for the prior turn to finish, but never inherit its
-						// failure: a rejected turn A must not reject turn B. The
-						// liveness checks below decide whether B may still proceed.
-						yield* Deferred.await(priorTurn).pipe(Effect.ignore);
-					}
+					yield* Effect.forEach(
+						priorTurns.values(),
+						(prior) => Deferred.await(prior.deferred).pipe(Effect.ignore),
+						{ discard: true },
+					);
 
 					if (
 						ctx.stopped ||
@@ -2072,15 +2081,20 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						variant: input.variant,
 					});
 					setExpectedApiModelId(ctx, expectedApiModelId);
-					yield* this.placeUserMessageEffect(input);
 
 					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
 					yield* Effect.uninterruptible(
 						Effect.gen(this, function* () {
-							yield* pushTurnDeferred(
+							// A held send is placed when the SDK starts it.
+							yield* addTurnWaiter(
 								this.stateRef,
 								ctx.sessionId,
-								turnDeferred,
+								input.inputId,
+								{
+									deferred: turnDeferred,
+									started: false,
+									unplaced: input,
+								},
 							);
 							ctx.currentTurnId = input.inputId;
 							// Marks the turn as started so a system/init arriving before
@@ -2092,14 +2106,14 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							ctx.cumulativeTokens =
 								input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
 							yield* this.releaseSinkEffect(priorSink);
-							// Marks the assistant-message boundary: if the SDK's streaming
-							// turn is still open, no `result` resets the translator, and
-							// this reply would otherwise merge into the previous message.
-							ctx.pendingAssistantBoundary = true;
 							yield* ctx.promptQueue.enqueue(userMessage).pipe(
 								Effect.catchAll((cause) =>
 									Effect.gen(this, function* () {
-										yield* shiftTurnDeferred(this.stateRef, ctx.sessionId);
+										yield* removeTurnWaiter(
+											this.stateRef,
+											ctx.sessionId,
+											input.inputId,
+										);
 										ctx.turnInFlight = false;
 										return yield* Effect.fail(cause);
 									}),
@@ -2259,6 +2273,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					),
 				);
 				if (decodedMessage === undefined) continue;
+				if (decodedMessage.type === "command_lifecycle") {
+					yield* this.handleCommandLifecycleEffect(ctx, decodedMessage);
+				}
 				if (yield* pushForwardedSubagentMessageEffect(ctx, decodedMessage)) {
 					continue;
 				}
@@ -2278,6 +2295,44 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
 				}
 			}
+		});
+	}
+
+	/**
+	 * `started` places a held input's message before any of its output;
+	 * `cancelled` before `started` resolves the input cancelled. `queued` and
+	 * `completed` carry nothing a result does not.
+	 */
+	private handleCommandLifecycleEffect(
+		ctx: ClaudeSessionContext,
+		message: ClaudeSDKCommandLifecycleMessage,
+	): Effect.Effect<void> {
+		return Effect.gen(this, function* () {
+			if (message.state === "cancelled") {
+				yield* cancelTurnWaiterEffect(
+					this.stateRef,
+					ctx.sessionId,
+					message.command_uuid,
+				);
+				return;
+			}
+			if (message.state !== "started") return;
+			const unplaced = yield* startTurnWaiter(
+				this.stateRef,
+				ctx.sessionId,
+				message.command_uuid,
+			);
+			if (!unplaced) return;
+			// The stream outlives one input: a failed placement must not end it.
+			yield* this.placeUserMessageEffect(unplaced).pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`Session ${ctx.sessionId}: placing input ${message.command_uuid} failed: ${formatErrorDetail(error)}`,
+						),
+					),
+				),
+			);
 		});
 	}
 
