@@ -17,6 +17,7 @@ const existing = [app, docs, site, `${app}/packages/sdk`];
 async function findFolders({
 	query,
 }: FindFoldersRpcInput): Promise<FindFoldersResponse> {
+	if (!/^[/~]/.test(query)) return { entries: [] };
 	return {
 		entries: [
 			...existing
@@ -40,6 +41,18 @@ async function findFolders({
 		],
 	};
 }
+
+const suggestions: FindFoldersResponse["entries"] = [
+	{ path: app, isGitRepo: true, reason: "recent", exists: true },
+	{
+		path: "/Users/dev/notes",
+		isGitRepo: false,
+		reason: "recent",
+		exists: true,
+	},
+	{ path: site, isGitRepo: true, reason: "sibling", exists: true },
+	{ path: `${root}/infra`, isGitRepo: true, reason: "sibling", exists: true },
+];
 
 const meta = {
 	title: "Project/ProjectDialog",
@@ -268,5 +281,37 @@ export const KeyboardSave: Story = {
 			title: "conduit-docs",
 			folders: [docs, { path: notes, create: { gitInit: true } }],
 		});
+	},
+};
+
+export const SuggestionsOpen: Story = {
+	args: {
+		findFolders: async ({ query }: FindFoldersRpcInput) => ({
+			entries: suggestions.filter((entry) =>
+				entry.path.toLowerCase().includes(query.toLowerCase()),
+			),
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const group = await canvas.findByRole("group", { name: "Suggestions" });
+		await expect(
+			canvas.getByRole("combobox", { name: "Add folder" }),
+		).toHaveAttribute("aria-expanded", "true");
+		const option = (path: string) =>
+			within(group).getByRole("option", { name: path });
+		await expect(option(app)).toHaveTextContent("recent · git");
+		await expect(option("/Users/dev/notes")).toHaveTextContent(/recent$/);
+		await expect(option(site)).toHaveTextContent(/git$/);
+		await expect(option(site)).not.toHaveTextContent("recent");
+		await userEvent.click(option(site));
+		await expect(canvas.getByTestId("project-folder-row")).toHaveAttribute(
+			"aria-label",
+			`Main folder: ${site}`,
+		);
+		await expect(
+			within(group).queryByRole("option", { name: site }),
+		).toBeNull();
+		await expect(within(group).getAllByRole("option")).toHaveLength(3);
 	},
 };

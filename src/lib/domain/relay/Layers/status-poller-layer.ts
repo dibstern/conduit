@@ -9,7 +9,6 @@ import {
 	canonicalEvent,
 	type SessionStatusValue,
 } from "../../../persistence/events.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
@@ -23,7 +22,6 @@ import {
 	PollerStateTag,
 	poll,
 	type ReconciliationDeps,
-	reconcileNow,
 	type SessionStatusPollerService,
 } from "../Services/session-status-poller.js";
 
@@ -46,7 +44,6 @@ export const StatusPollerLive: Layer.Layer<
 	never,
 	| ConfigTag
 	| LoggerTag
-	| OpenCodeAPITag
 	| PollerPubSubTag
 	| PollerStateTag
 	| RelayStatusSnapshotTag
@@ -59,7 +56,6 @@ export const StatusPollerLive: Layer.Layer<
 > = Layer.scoped(
 	StatusPollerTag,
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 		const stateRef = yield* PollerStateTag;
@@ -79,9 +75,7 @@ export const StatusPollerLive: Layer.Layer<
 			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 		);
 		const reconciliationDeps: ReconciliationDeps = {
-			getRestStatuses: () => Effect.tryPromise(() => api.session.statuses()),
-			getProjectedSessions: (reportedIds) =>
-				readQuery.getSessionsForReconciliation(reportedIds),
+			getProjectedSessions: () => readQuery.getSessionsForReconciliation([]),
 			getSessionsAwaitingUser: () =>
 				Effect.all([
 					pendingInteractions.listPendingQuestions(),
@@ -268,7 +262,6 @@ export const StatusPollerLive: Layer.Layer<
 			markMessageActivity: () => Effect.void,
 			clearMessageActivity: () => Effect.void,
 			notifySSEIdle: () => forkPoll,
-			reconcileNow: () => reconcileNow(reconciliationDeps),
 		};
 		yield* Effect.addFinalizer(() => service.drain());
 		return service;

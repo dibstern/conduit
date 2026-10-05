@@ -47,7 +47,6 @@ export type StatusPollerShape = Pick<
 	| "markMessageActivity"
 	| "notifySSEIdle"
 	| "on"
-	| "reconcileNow"
 	| "start"
 	| "stop"
 >;

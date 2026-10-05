@@ -11,10 +11,7 @@ import {
 	type SessionAlert,
 } from "../domain/relay/Services/alert-ledger.js";
 import type { OpenCodeRuntimeIngressResult } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
-import type {
-	PendingPermissionRecoveryInput,
-	PendingPermissionRequestInput,
-} from "../domain/relay/Services/pending-interaction-service.js";
+import type { PendingPermissionRequestInput } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
@@ -86,18 +83,9 @@ export interface SSEWiringDeps {
 	pushManager?: PushNotificationSender;
 	log: Logger;
 	pipelineLog: Logger;
-	/** Optional: REST client for rehydrating pending questions on reconnect */
-	listPendingQuestions?: () => Promise<
-		Array<{ id: string; [key: string]: unknown }>
-	>;
-	/** Optional: REST client for rehydrating pending permissions on reconnect */
-	listPendingPermissions?: () => Promise<
-		Array<{ id: string; permission: string; [key: string]: unknown }>
-	>;
-	/** Optional: notify status poller of SSE status events and reconnects. */
+	/** Optional: notify status poller of SSE idle events. */
 	statusPoller?: {
 		notifySSEIdle(sessionId: string): Effect.Effect<void>;
-		reconcileNow?(): Effect.Effect<void>;
 	};
 	/** Project slug for push notification routing */
 	slug?: string;
@@ -426,54 +414,6 @@ function opencodeModeCoversAsk(
 	if (mode === "full") return true;
 	if (mode === "acceptEdits") return permissionType === "edit";
 	return false;
-}
-
-function permissionRecoveryInputs(
-	pendingPermissions: Array<{
-		id: string;
-		permission: string;
-		[key: string]: unknown;
-	}>,
-): PendingPermissionRecoveryInput[] {
-	return pendingPermissions.map((p) => {
-		const sessionId = typeof p["sessionID"] === "string" ? p["sessionID"] : "";
-		const patterns = Array.isArray(p["patterns"])
-			? (p["patterns"] as string[])
-			: undefined;
-		const metadata =
-			typeof p["metadata"] === "object" && p["metadata"] !== null
-				? (p["metadata"] as Record<string, unknown>)
-				: undefined;
-		const always = Array.isArray(p["always"])
-			? (p["always"] as string[])
-			: undefined;
-		return {
-			id: p.id,
-			permission: p.permission,
-			sessionId,
-			...(patterns ? { patterns } : {}),
-			...(metadata ? { metadata } : {}),
-			...(always ? { always } : {}),
-		};
-	});
-}
-
-function broadcastRecoveredPermissions(
-	deps: SSEWiringDeps,
-	recovered: readonly PendingPermission[],
-): Extract<RelayMessage, { type: "permission_request" }>[] {
-	return recovered.map((perm) => {
-		const message: RelayMessage = {
-			type: "permission_request",
-			sessionId: perm.sessionId,
-			requestId: perm.requestId,
-			toolName: perm.toolName,
-			toolInput: perm.toolInput,
-			always: perm.always ?? [],
-		};
-		deps.wsHandler.broadcast(message);
-		return message;
-	});
 }
 
 /**
@@ -809,103 +749,7 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 interface SSEConsumerCallbacks {
 	handleEvent(event: SSEEvent): void;
 	onReconnect?(): void;
-	reconcileOnConnected(): void;
-	recoverPendingPermissions(
-		pendingPermissions: Array<{
-			id: string;
-			permission: string;
-			[key: string]: unknown;
-		}>,
-	): void;
-	recoverPendingQuestions(
-		pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
-	): void;
 }
-
-function broadcastRecoveredQuestions(
-	deps: SSEWiringDeps,
-	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
-): Extract<RelayMessage, { type: "ask_user" }>[] {
-	const messages: Extract<RelayMessage, { type: "ask_user" }>[] = [];
-	for (const pq of pendingQuestions) {
-		const rawQuestions = pq["questions"] as
-			| Array<{
-					question?: string;
-					header?: string;
-					options?: Array<{
-						label?: string;
-						description?: string;
-					}>;
-					multiple?: boolean;
-					custom?: boolean;
-			  }>
-			| undefined;
-		if (!Array.isArray(rawQuestions)) continue;
-
-		const questions = mapQuestionFields(rawQuestions);
-		const tool = pq["tool"] as { callID?: string } | undefined;
-		const toolCallId = tool?.callID;
-
-		const qSessionId = pq["sessionID"] as string | undefined;
-		const askMsg: RelayMessage = {
-			type: "ask_user" as const,
-			sessionId: qSessionId ?? "",
-			toolId: pq.id,
-			questions,
-			...(toolCallId ? { toolUseId: toolCallId } : {}),
-		};
-
-		if (qSessionId) {
-			deps.wsHandler.sendToSession(qSessionId, askMsg);
-		} else {
-			deps.wsHandler.broadcast(askMsg);
-		}
-		messages.push(askMsg);
-	}
-	return messages;
-}
-
-const recoverPendingQuestionsEffect = (
-	deps: SSEWiringDeps,
-	pendingQuestions: Array<{ id: string; [key: string]: unknown }>,
-) =>
-	Effect.gen(function* () {
-		const messages = yield* Effect.sync(() =>
-			broadcastRecoveredQuestions(deps, pendingQuestions),
-		);
-		if (deps.pushManager) {
-			for (const message of messages) {
-				// An earlier push may have waited while another device answered this
-				// question. Recheck the provider immediately before its own attempt.
-				const listPendingQuestions = deps.listPendingQuestions;
-				if (listPendingQuestions) {
-					const stillPending = yield* Effect.tryPromise(
-						listPendingQuestions,
-					).pipe(
-						Effect.map((pending) =>
-							pending.some((question) => question.id === message.toolId),
-						),
-						Effect.catchAll((error) =>
-							Effect.sync(() => {
-								deps.log.warn(
-									`Failed to recheck pending question ${message.toolId}; pushing anyway`,
-									error.cause,
-								);
-								return true;
-							}),
-						),
-					);
-					if (!stillPending) continue;
-				}
-				yield* sendPushForEventEffect(
-					deps.pushManager,
-					message,
-					deps.log,
-					buildPushContext(deps.slug, message.sessionId),
-				);
-			}
-		}
-	});
 
 function wireSSEConsumerWithCallbacks(
 	deps: SSEWiringDeps,
@@ -914,14 +758,9 @@ function wireSSEConsumerWithCallbacks(
 ): void {
 	const { log } = deps;
 
-	// Generation counter: incremented on each SSE connect. Async rehydration
-	// callbacks compare their captured generation against the current value
-	// and bail if a newer connect has superseded them (prevents duplicate
-	// broadcasts on rapid reconnect).
-	let rehydrationGen = 0;
-
+	// Pending prompts and missed status are recovered upstream by OpenCode
+	// Instances and arrive as ordinary stream events.
 	consumer.on("connected", () => {
-		const gen = ++rehydrationGen;
 		log.info("Connected to OpenCode event stream");
 
 		callbacks.onReconnect?.();
@@ -930,52 +769,6 @@ function wireSSEConsumerWithCallbacks(
 			type: "connection_status",
 			status: "connected",
 		});
-
-		callbacks.reconcileOnConnected();
-
-		// Rehydrate pending permissions from OpenCode API on (re)connect.
-		// Broadcast each recovered permission to all connected clients.
-		if (deps.listPendingPermissions) {
-			deps
-				.listPendingPermissions()
-				.then((pendingPermissions) => {
-					if (gen !== rehydrationGen) return; // superseded
-					log.debug(
-						`listPendingPermissions returned ${pendingPermissions.length} permission(s)`,
-					);
-					if (pendingPermissions.length === 0) return;
-					log.info(
-						`Rehydrating ${pendingPermissions.length} pending permission(s) from API`,
-					);
-					callbacks.recoverPendingPermissions(pendingPermissions);
-				})
-				.catch((err: unknown) =>
-					log.warn(`Failed to rehydrate pending permissions: ${err}`),
-				);
-		}
-
-		// Rehydrate pending questions from OpenCode API on (re)connect.
-		// Route each question only to clients viewing its session.
-		if (deps.listPendingQuestions) {
-			deps
-				.listPendingQuestions()
-				.then((pendingQuestions) => {
-					if (gen !== rehydrationGen) return; // superseded
-					log.debug(
-						`listPendingQuestions returned ${pendingQuestions.length} question(s)`,
-					);
-
-					callbacks.recoverPendingQuestions(pendingQuestions);
-					if (pendingQuestions.length > 0) {
-						log.info(
-							`Rehydrating ${pendingQuestions.length} pending question(s) from API`,
-						);
-					}
-				})
-				.catch((err: unknown) =>
-					log.warn(`Failed to rehydrate pending questions: ${err}`),
-				);
-		}
 	});
 
 	consumer.on("disconnected", (err) => {
@@ -1057,68 +850,6 @@ export const wireSSEConsumerEffect = (
 									),
 								),
 						);
-				},
-				reconcileOnConnected: () => {
-					if (deps.statusPoller?.reconcileNow) {
-						runFork(
-							deps.statusPoller
-								.reconcileNow()
-								.pipe(
-									Effect.catchAllCause((cause) =>
-										Effect.sync(() =>
-											deps.log.warn(
-												`SSE reconnect reconciliation failed: ${Cause.pretty(cause)}`,
-											),
-										),
-									),
-								),
-						);
-					}
-				},
-				recoverPendingPermissions: (pendingPermissions) => {
-					runFork(
-						Effect.gen(function* () {
-							const pendingInteractions = yield* PendingInteractionServiceTag;
-							const recovered =
-								yield* pendingInteractions.recoverPendingPermissions(
-									permissionRecoveryInputs(pendingPermissions),
-								);
-							const messages = yield* Effect.sync(() =>
-								broadcastRecoveredPermissions(deps, recovered),
-							);
-							if (deps.pushManager) {
-								for (const message of messages) {
-									yield* sendPushForEventEffect(
-										deps.pushManager,
-										message,
-										deps.log,
-										buildPushContext(deps.slug, message.sessionId),
-									);
-								}
-							}
-						}).pipe(
-							Effect.catchAllCause((cause) =>
-								Effect.sync(() =>
-									deps.log.warn(
-										`Failed to recover pending permissions: ${Cause.pretty(cause)}`,
-									),
-								),
-							),
-						),
-					);
-				},
-				recoverPendingQuestions: (pendingQuestions) => {
-					runFork(
-						recoverPendingQuestionsEffect(deps, pendingQuestions).pipe(
-							Effect.catchAllCause((cause) =>
-								Effect.sync(() =>
-									deps.log.warn(
-										`Failed to recover pending questions: ${Cause.pretty(cause)}`,
-									),
-								),
-							),
-						),
-					);
 				},
 			});
 		});

@@ -18,7 +18,6 @@ import { Chunk, Deferred, Effect, Layer, Stream } from "effect";
 import { expect, it, vi } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
@@ -43,7 +42,6 @@ import {
 	makeSessionTitleServiceLive,
 	SessionTitleServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-title-service.js";
-import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -94,12 +92,8 @@ async function* assistantTitle(text: string): AsyncIterable<unknown> {
 	yield { type: "assistant", message: { content: [{ type: "text", text }] } };
 }
 
-type RestStatuses = Awaited<ReturnType<OpenCodeAPI["session"]["statuses"]>>;
-
-/** The poller layer, real persistence behind it, with REST answers we choose. */
-const makeStatusPollerLayer = (dbPath: string, restStatuses: RestStatuses) => {
-	const api = makeMockOpenCodeAPI();
-	vi.spyOn(api.session, "statuses").mockResolvedValue(restStatuses);
+/** The poller layer with real persistence behind it. */
+const makeStatusPollerLayer = (dbPath: string) => {
 	const bus = makeSessionEventBusLive();
 	return Layer.provideMerge(
 		StatusPollerLive,
@@ -108,7 +102,6 @@ const makeStatusPollerLayer = (dbPath: string, restStatuses: RestStatuses) => {
 			makePersistenceEffectLayer(dbPath, createAllEffectProjectors(), bus),
 			Layer.succeed(ConfigTag, makeMockConfig({ persistenceDbPath: dbPath })),
 			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(OpenCodeAPITag, api),
 			makePollerStateLive(),
 			makePollerPubSubLive(),
 			RelayStatusSnapshotLive,
@@ -293,35 +286,10 @@ it("persistSessionPermissionMode advances the version of the session it edits", 
 	});
 });
 
-it("the status poller's corrective write advances the version", async () => {
-	await withTempDb(async (dbPath) => {
-		const layer = makeStatusPollerLayer(dbPath, {
-			// REST disagrees with the projected row, which is what makes
-			// reconciliation inject a corrective session.status event.
-			corrected: { type: "idle" },
-		});
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					yield* (yield* ProjectionRunnerEffectTag).recover();
-					yield* seedBusySession("corrected", Date.now());
-					const poller = yield* StatusPollerTag;
-
-					const announced = yield* announcedDuring(poller.reconcileNow());
-
-					expect(yield* versionOf("corrected")).toBeGreaterThan(0);
-					expect(announced).toContain("corrected");
-				}).pipe(Effect.provide(layer), Effect.orDie),
-			),
-		);
-	});
-});
-
 it("the status poller's staleness write advances the version", async () => {
 	await withTempDb(async (dbPath) => {
-		// REST knows nothing about the session, so only the staleness pass can
-		// fire: busy for far longer than the 30-minute threshold.
-		const layer = makeStatusPollerLayer(dbPath, {});
+		// Busy for far longer than the 30-minute threshold.
+		const layer = makeStatusPollerLayer(dbPath);
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -329,7 +297,10 @@ it("the status poller's staleness write advances the version", async () => {
 					yield* seedBusySession("stale", 0);
 					const poller = yield* StatusPollerTag;
 
-					const announced = yield* announcedDuring(poller.reconcileNow());
+					// The first poll runs the staleness pass.
+					const announced = yield* announcedDuring(
+						poller.notifySSEIdle("stale"),
+					);
 
 					expect(yield* versionOf("stale")).toBeGreaterThan(0);
 					expect(announced).toContain("stale");

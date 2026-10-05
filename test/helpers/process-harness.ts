@@ -900,6 +900,46 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.openCodeTestCommand("close-streams", {});
 	}
 
+	/** Serve a status from /session/status and emit it as session.status. */
+	async setOpenCodeStatus(
+		directory: string,
+		sessionID: string,
+		status: { type: "busy" | "idle" | "retry"; [key: string]: unknown },
+	): Promise<void> {
+		await this.openCodeTestCommand("set-status", {
+			directory,
+			sessionID,
+			status,
+		});
+	}
+
+	/** Serve a pending prompt from /permission or /question and emit it as asked. */
+	async addOpenCodePrompt(
+		kind: "permission" | "question",
+		directory: string,
+		item: { id: string; sessionID: string; [key: string]: unknown },
+	): Promise<void> {
+		await this.openCodeTestCommand(`add-${kind}`, { directory, item });
+	}
+
+	/** Record but do not emit matching events from then on. */
+	async dropOpenCodeEvents(
+		rules: readonly { type: string; status?: string }[],
+	): Promise<void> {
+		await this.openCodeTestCommand("drop-events", { rules });
+	}
+
+	opencodeDroppedEvents(): unknown[] {
+		const file = join(this.configDir, "fake-opencode-dropped-events.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map((line): unknown => JSON.parse(line))
+			: [];
+	}
+
 	private async openCodeTestCommand(
 		command: string,
 		body: unknown,

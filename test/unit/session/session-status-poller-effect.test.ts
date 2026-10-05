@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Ref } from "effect";
-import { expect, vi } from "vitest";
+import { Effect, Layer, Ref } from "effect";
+import { expect } from "vitest";
 import {
 	getCurrentStatuses,
 	isProcessing,
@@ -12,12 +12,8 @@ import {
 	makePollerStateLive,
 	PollerStateTag,
 	poll,
-	reconcile,
-	reconcileNow,
-	type StatusCorrection,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { readSessionStatusesFromEffect } from "../../../src/lib/session/session-status-effect.js";
 
 const makeTestLayer = () =>
@@ -26,160 +22,11 @@ const makeTestLayer = () =>
 	);
 
 describe("SessionStatusPoller Effect", () => {
-	it.effect(
-		"reconciliation reads only non-idle or reported rows and re-reads after corrections",
-		() => {
-			const dir = mkdtempSync(join(tmpdir(), "conduit-reconcile-read-"));
-			return Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const queries = yield* ReadQueryEffectTag;
-				const now = Date.now();
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES ('idle', 'opencode', '', 'idle', 0, 0),
-				('reactivated', 'opencode', '', 'idle', 0, 0),
-				('completed', 'opencode', '', 'busy', 0, 0),
-				('stale', 'claude', '', 'busy', 0, 0),
-				('retry', 'opencode', '', 'retry', 0, 0),
-				('fresh', 'opencode', '', 'busy', 0, ${now})`;
-				const ids = ["reactivated", "completed", "missing"];
-				const before = yield* queries.listSessions();
-				const narrowed = yield* queries.getSessionsForReconciliation(ids);
-				expect(narrowed).toEqual(
-					before
-						.filter((row) => row.status !== "idle" || ids.includes(row.id))
-						.map(({ id, status, updated_at }) => ({ id, status, updated_at })),
-				);
-				const reads: string[][] = [];
-				const injected: Array<{ sessionId: string; status: string }> = [];
-				yield* reconcileNow({
-					getRestStatuses: () =>
-						Effect.succeed({
-							reactivated: { type: "busy" },
-							completed: { type: "idle" },
-							missing: { type: "busy" },
-						}),
-					getSessionsAwaitingUser: () => Effect.succeed(new Set<string>()),
-					getProjectedSessions: (reportedIds) =>
-						queries.getSessionsForReconciliation(reportedIds).pipe(
-							Effect.tap((rows) =>
-								Effect.sync(() => {
-									reads.push(rows.map((row) => row.id));
-								}),
-							),
-						),
-					injectCorrectiveEvent: (sessionId, status) =>
-						Effect.gen(function* () {
-							injected.push({ sessionId, status });
-							yield* sql`UPDATE sessions SET status = ${status}, updated_at = ${now} WHERE id = ${sessionId}`;
-						}),
-				});
-				expect(injected).toEqual([
-					{ sessionId: "reactivated", status: "busy" },
-					{ sessionId: "completed", status: "idle" },
-					{ sessionId: "stale", status: "idle" },
-				]);
-				expect(reads).toHaveLength(2);
-				expect(reads[0]).not.toContain("idle");
-				expect(reads[1]).not.toContain("completed");
-				expect(reads[1]).toContain("reactivated");
-			}).pipe(
-				Effect.provide(makePersistenceEffectLayer(join(dir, "events.db"))),
-				Effect.ensuring(
-					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
-				),
-			);
-		},
-	);
-	const mockApi = {
-		getSessionStatuses: vi.fn().mockReturnValue(
-			Effect.succeed([
-				{ id: "s1", status: "idle" },
-				{ id: "s2", status: "busy" },
-			]),
-		),
-	};
-
-	const mockDb = {
-		getSessionStatuses: vi.fn().mockReturnValue(
-			Effect.succeed([
-				{ id: "s1", status: "idle" },
-				{ id: "s2", status: "idle" }, // Mismatch — API says busy, DB says idle
-			]),
-		),
-	};
-
 	it.effect("initializes with empty state", () =>
 		Effect.gen(function* () {
 			const ref = yield* PollerStateTag;
 			const result = yield* Ref.get(ref);
 			expect(Object.keys(result.previousStatuses).length).toBe(0);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect("reconcile detects status mismatches", () =>
-		Effect.gen(function* () {
-			const corrections: StatusCorrection[] = [];
-			const applyCorrection = vi.fn((c: StatusCorrection) => {
-				corrections.push(c);
-				return Effect.succeed(undefined);
-			});
-			yield* reconcile(mockDb, mockApi, applyCorrection);
-			expect(corrections.length).toBeGreaterThanOrEqual(1);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect("reconcile caps correction concurrency without dropping work", () =>
-		Effect.gen(function* () {
-			const sessionCount = 12;
-			const maxAllowedConcurrency = 8;
-			const dbSessions = Array.from({ length: sessionCount }, (_, index) => ({
-				id: `s${index}`,
-				status: "idle",
-			}));
-			const apiSessions = dbSessions.map((session) => ({
-				...session,
-				status: "busy",
-			}));
-			const current = yield* Ref.make(0);
-			const maxObserved = yield* Ref.make(0);
-			const processed = yield* Ref.make<ReadonlyArray<string>>([]);
-			const firstCorrectionStarted = yield* Deferred.make<void>();
-			const releaseCorrections = yield* Deferred.make<void>();
-			const applyCorrection = (correction: StatusCorrection) =>
-				Effect.gen(function* () {
-					const inFlight = yield* Ref.updateAndGet(current, (n) => n + 1);
-					yield* Ref.update(maxObserved, (n) => Math.max(n, inFlight));
-					yield* Deferred.succeed(firstCorrectionStarted, void 0).pipe(
-						Effect.ignore,
-					);
-					yield* Deferred.await(releaseCorrections);
-					yield* Ref.update(processed, (ids) => [...ids, correction.sessionId]);
-					yield* Ref.update(current, (n) => n - 1);
-				});
-
-			const fiber = yield* Effect.fork(
-				reconcile(
-					{
-						getSessionStatuses: () => Effect.succeed(dbSessions),
-					},
-					{
-						getSessionStatuses: () => Effect.succeed(apiSessions),
-					},
-					applyCorrection,
-				),
-			);
-			yield* Deferred.await(firstCorrectionStarted);
-			for (let index = 0; index < maxAllowedConcurrency; index++) {
-				yield* Effect.yieldNow();
-			}
-			expect(yield* Ref.get(maxObserved)).toBe(maxAllowedConcurrency);
-			yield* Deferred.succeed(releaseCorrections, void 0);
-			yield* Fiber.join(fiber);
-
-			expect(yield* Ref.get(maxObserved)).toBeLessThanOrEqual(
-				maxAllowedConcurrency,
-			);
-			expect(new Set(yield* Ref.get(processed)).size).toBe(sessionCount);
 		}).pipe(Effect.provide(makeTestLayer())),
 	);
 
@@ -224,53 +71,26 @@ describe("SessionStatusPoller Effect", () => {
 		},
 	);
 
-	it.effect("reconcileNow reads projected sessions from an Effect", () =>
-		Effect.gen(function* () {
-			const injected: Array<{ sessionId: string; status: string }> = [];
-
-			yield* reconcileNow({
-				getRestStatuses: () =>
-					Effect.succeed({
-						"session-effect-reconcile": { type: "idle" as const },
-					}),
-				getSessionsAwaitingUser: () => Effect.succeed(new Set<string>()),
-				getProjectedSessions: () =>
-					Effect.succeed([
-						{
-							id: "session-effect-reconcile",
-							status: "busy",
-							updated_at: Date.now(),
-						},
-					]),
-				injectCorrectiveEvent: (sessionId, status) =>
-					Effect.sync(() => {
-						injected.push({ sessionId, status });
-					}),
-			});
-
-			expect(injected).toEqual([
-				{ sessionId: "session-effect-reconcile", status: "idle" },
-			]);
-		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
 	it.effect("staleness check skips sessions waiting on the user", () =>
 		Effect.gen(function* () {
 			const injected: Array<{ sessionId: string; status: string }> = [];
 			const longAgo = Date.now() - 31 * 60_000;
 
-			yield* reconcileNow({
-				getRestStatuses: () => Effect.succeed({}),
-				getProjectedSessions: () =>
-					Effect.succeed([
-						{ id: "asking", status: "busy", updated_at: longAgo },
-						{ id: "hung", status: "busy", updated_at: longAgo },
-					]),
-				getSessionsAwaitingUser: () => Effect.succeed(new Set(["asking"])),
-				injectCorrectiveEvent: (sessionId, status) =>
-					Effect.sync(() => {
-						injected.push({ sessionId, status });
-					}),
+			// The first poll runs the staleness pass.
+			yield* poll({
+				getRawStatuses: () => Effect.succeed({}),
+				reconciliation: {
+					getProjectedSessions: () =>
+						Effect.succeed([
+							{ id: "asking", status: "busy", updated_at: longAgo },
+							{ id: "hung", status: "busy", updated_at: longAgo },
+						]),
+					getSessionsAwaitingUser: () => Effect.succeed(new Set(["asking"])),
+					injectCorrectiveEvent: (sessionId, status) =>
+						Effect.sync(() => {
+							injected.push({ sessionId, status });
+						}),
+				},
 			});
 
 			expect(injected).toEqual([{ sessionId: "hung", status: "idle" }]);

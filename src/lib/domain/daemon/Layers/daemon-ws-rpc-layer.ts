@@ -1,7 +1,12 @@
 import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 import { hashPin } from "../../../auth.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
-import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
+import {
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+	loadRecentProjects,
+	syncRecentProjects,
+} from "../../../daemon/config-persistence.js";
+import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type DaemonRpcHandlers,
@@ -333,7 +338,24 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			RemoveProject: (request) =>
 				run(
 					Effect.gen(function* () {
+						const removed = (yield* allProjects).find(
+							(project) => project.slug === request.slug,
+						);
 						yield* removeProjectFromEffectRegistry(request.slug);
+						// Removed folders feed the dialog's "recent" suggestions. Reversed
+						// so the main folder ends up first; a failed write must not fail
+						// the removal.
+						if (removed)
+							yield* Effect.try(() =>
+								syncRecentProjects(
+									[...removed.folders].reverse().map((folder) => ({
+										path: folder,
+										slug: removed.slug,
+										...(removed.title ? { title: removed.title } : {}),
+									})),
+									configDir,
+								),
+							).pipe(Effect.ignore);
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),
@@ -587,7 +609,18 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						entries: [...result.entries],
 					})),
 				),
-			FindFolders: (request) => run(findFolders(request.query)),
+			FindFolders: (request) =>
+				run(
+					Effect.gen(function* () {
+						const projects = yield* allProjects;
+						return yield* findFolders(request.query, {
+							recent: getRecent(loadRecentProjects(configDir)).map(
+								(project) => project.directory,
+							),
+							projectFolders: projects.flatMap((project) => project.folders),
+						});
+					}),
+				),
 			DetectProxy: wsRpcHandlers.DetectProxy,
 			SetLogLevel: wsRpcHandlers.SetLogLevel,
 		} satisfies DaemonRpcHandlers;

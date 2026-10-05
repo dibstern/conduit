@@ -81,7 +81,6 @@ function createHarness(
 			markMessageActivity: vi.fn(),
 			clearMessageActivity: vi.fn(),
 			notifySSEIdle: vi.fn(),
-			reconcileNow: vi.fn(async () => {}),
 		},
 		pollerManager: {
 			startPolling,
@@ -767,7 +766,6 @@ async function createEffectHarness(
 			markMessageActivity: unused,
 			clearMessageActivity: unused,
 			notifySSEIdle: unused,
-			reconcileNow: unused,
 		}),
 		makePollerStateLive(),
 		makeOverridesStateLive(),

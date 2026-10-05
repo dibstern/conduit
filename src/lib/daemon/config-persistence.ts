@@ -506,24 +506,24 @@ export function syncRecentProjects(
 	const dir = resolveDir(configDir);
 	ensureDir(dir);
 
-	const recentPath = join(dir, "recent.json");
-
-	// Load existing recent projects
-	let existing: RecentProject[] = [];
-	try {
-		const data = readFileSync(recentPath, "utf-8");
-		existing = deserializeRecent(data);
-	} catch {
-		// File doesn't exist or is corrupt — start fresh
-	}
-
 	// Merge new projects into existing list using the addRecent function
-	let merged = existing;
+	let merged = loadRecentProjects(dir);
 	const now = Date.now();
 	for (const project of projects) {
 		merged = addRecent(merged, project.path, project.slug, project.title, now);
 	}
 
 	// Write back
-	writeFileSync(recentPath, serializeRecent(merged), "utf-8");
+	writeFileSync(join(dir, "recent.json"), serializeRecent(merged), "utf-8");
+}
+
+/** Read recent.json; a missing or corrupt file is an empty list. */
+export function loadRecentProjects(configDir?: string): RecentProject[] {
+	try {
+		return deserializeRecent(
+			readFileSync(join(resolveDir(configDir), "recent.json"), "utf-8"),
+		);
+	} catch {
+		return [];
+	}
 }

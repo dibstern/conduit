@@ -4,6 +4,7 @@ import { Effect, Either, Layer, Schema, Stream } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
+import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClientEffect } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
 import { SSEStream, type SSEStreamOptions } from "../../../relay/sse-stream.js";
@@ -16,6 +17,16 @@ import {
 	type OpenCodeInstanceEvent,
 	OpenCodeInstancesTag,
 } from "../Services/opencode-instances-service.js";
+import {
+	createOpenCodeReconciler,
+	type OpenCodePayload,
+	type OpenCodeReconcileClient,
+} from "./opencode-instances-reconcile.js";
+
+/** Stream source plus the directory-scoped reads used for recovery. */
+export type OpenCodeInstancesApi = SSEStreamOptions["api"] & {
+	readonly reconcile?: OpenCodeReconcileClient;
+};
 
 // Pin the transport envelope, not the SDK's event vocabulary. `sync` frames
 // have syncEvent instead of properties; preserve the entire inner payload.
@@ -36,7 +47,7 @@ const decodeEnvelope = Schema.decodeUnknownEither(
 );
 
 export const makeOpenCodeInstancesLive = <R>(
-	api: Effect.Effect<SSEStreamOptions["api"], never, R>,
+	api: Effect.Effect<OpenCodeInstancesApi, never, R>,
 	log: Logger = createLogger("daemon").child("opencode"),
 ) =>
 	Layer.scoped(
@@ -66,7 +77,7 @@ export const makeOpenCodeInstancesLive = <R>(
 				paths.set(directory, canonical);
 				return canonical;
 			};
-			let currentApi: SSEStreamOptions["api"] | undefined;
+			let currentApi: OpenCodeInstancesApi | undefined;
 			const source = new SSEStream({
 				api: {
 					event: {
@@ -90,6 +101,24 @@ export const makeOpenCodeInstancesLive = <R>(
 			const broadcast = (event: OpenCodeInstanceEvent) => {
 				for (const subscriber of subscribers) subscriber.send(event);
 			};
+			const emitToDirectory = (directory: string, payload: OpenCodePayload) => {
+				let delivered = false;
+				for (const subscriber of subscribers) {
+					if (!subscriber.directories.has(directory)) continue;
+					subscriber.send({
+						_tag: "event",
+						instanceId,
+						payload,
+						health: source.getHealth(),
+					});
+					delivered = true;
+				}
+				return delivered;
+			};
+			const reconciler = createOpenCodeReconciler({
+				emit: emitToDirectory,
+				log,
+			});
 			source.on("connected", () => {
 				connection = {
 					_tag: "connection",
@@ -98,6 +127,11 @@ export const makeOpenCodeInstancesLive = <R>(
 					health: source.getHealth(),
 				};
 				broadcast(connection);
+				if (currentApi?.reconcile)
+					void reconciler.reconcile(
+						currentApi.reconcile,
+						[...subscribers].flatMap(({ directories }) => [...directories]),
+					);
 			});
 			source.on("disconnected", (error) => {
 				connection = {
@@ -147,22 +181,10 @@ export const makeOpenCodeInstancesLive = <R>(
 					directory !== undefined && isAbsolute(directory)
 						? normalize(directory)
 						: undefined;
-				let delivered = false;
-				for (const subscriber of subscribers) {
-					if (
-						canonical !== undefined &&
-						subscriber.directories.has(canonical)
-					) {
-						subscriber.send({
-							_tag: "event",
-							instanceId,
-							payload,
-							health: source.getHealth(),
-						});
-						delivered = true;
-					}
-				}
-				if (!delivered)
+				const delivered =
+					canonical !== undefined && emitToDirectory(canonical, payload);
+				if (delivered) reconciler.observe(canonical, payload);
+				else
 					log.debug("Dropping OpenCode event for unsubscribed directory", {
 						directory,
 						type: payload.type,
@@ -193,6 +215,7 @@ export const makeOpenCodeInstancesLive = <R>(
 													Effect.gen(function* () {
 														subscribers.delete(member);
 														if (subscribers.size === 0) {
+															reconciler.reset();
 															yield* source.drainEffect();
 															currentApi = undefined;
 															connection = {
@@ -221,6 +244,19 @@ export const makeOpenCodeInstancesLive = <R>(
 												...connection,
 												health: source.getHealth(),
 											});
+											// Late subscribers missed the connect-time reconcile.
+											if (connection.state === "connected" && nextApi.reconcile)
+												void reconciler.reconcile(
+													nextApi.reconcile,
+													subscriber.directories,
+													(_directory, payload) =>
+														subscriber.send({
+															_tag: "event",
+															instanceId,
+															payload,
+															health: source.getHealth(),
+														}),
+												);
 										}
 										return subscriber;
 									}),
@@ -233,7 +269,7 @@ export const makeOpenCodeInstancesLive = <R>(
 	);
 
 export const OpenCodeInstancesLive = Layer.suspend(() => {
-	let cached: { key: string; api: SSEStreamOptions["api"] } | undefined;
+	let cached: { key: string; api: OpenCodeInstancesApi } | undefined;
 	return makeOpenCodeInstancesLive(
 		Effect.gen(function* () {
 			const instances = Array.from(yield* getInstances);
@@ -260,13 +296,14 @@ export const OpenCodeInstancesLive = Layer.suspend(() => {
 			// resolves current daemon configuration and can replace a stale endpoint.
 			const key = JSON.stringify([url, auth?.username, auth?.password]);
 			if (cached?.key === key) return cached.api;
-			const { client } = yield* createSdkClientEffect({
+			const { client, authHeaders } = yield* createSdkClientEffect({
 				baseUrl: url,
 				...(auth ? { auth } : {}),
 			});
 			const api = {
 				event: { subscribe: (options) => client.global.event(options) },
-			} satisfies SSEStreamOptions["api"];
+				reconcile: new OpenCodeAPI({ sdk: client, baseUrl: url, authHeaders }),
+			} satisfies OpenCodeInstancesApi;
 			cached = { key, api };
 			return api;
 		}),

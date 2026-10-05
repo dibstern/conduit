@@ -108,12 +108,100 @@ const statPath = (
 		),
 	);
 
+const isGitRepo = (
+	path: string,
+): Effect.Effect<boolean, DirectoryListingServiceError> =>
+	statPath(join(path, ".git")).pipe(
+		Effect.map(
+			(git) =>
+				Option.isSome(git) && (git.value.isDirectory() || git.value.isFile()),
+		),
+	);
+
+type FolderEntry = FindFoldersResponse["entries"][number];
+
+/** What plain-text queries suggest from: recent.json and every project folder. */
+export interface FolderSuggestionSources {
+	readonly recent: readonly string[];
+	readonly projectFolders: readonly string[];
+}
+
+/**
+ * Existing folders from the recent-projects list, then git repos one level
+ * beside each project folder, whose names contain `text`. One readdir per
+ * distinct parent; nothing else on disk is scanned. Unreadable paths are
+ * skipped rather than failing the lookup.
+ */
+const suggestFolders = (
+	text: string,
+	sources: FolderSuggestionSources,
+): Effect.Effect<FindFoldersResponse> =>
+	Effect.gen(function* () {
+		const needle = text.toLowerCase();
+		const named = (path: string) =>
+			basename(path).toLowerCase().includes(needle);
+		// Folders already in a project are never suggested, recent or sibling.
+		const inProject = new Set(sources.projectFolders);
+		const recent = yield* Effect.forEach(
+			sources.recent.filter((path) => !inProject.has(path) && named(path)),
+			(path) =>
+				Effect.gen(function* () {
+					const stats = yield* statPath(path);
+					if (Option.isNone(stats) || !stats.value.isDirectory()) return [];
+					const git = yield* isGitRepo(path);
+					return [
+						{ path, isGitRepo: git, reason: "recent", exists: true } as const,
+					];
+				}).pipe(Effect.orElseSucceed(() => [])),
+			{ concurrency: 8 },
+		);
+		const siblings = yield* Effect.forEach(
+			new Set(sources.projectFolders.map((folder) => dirname(folder))),
+			(parent) =>
+				Effect.tryPromise(() => readdir(parent, { withFileTypes: true })).pipe(
+					Effect.map((dirents) =>
+						dirents
+							.filter(
+								(dirent) =>
+									dirent.isDirectory() && !dirent.name.startsWith("."),
+							)
+							.map((dirent) => join(parent, dirent.name))
+							.filter((path) => !inProject.has(path) && named(path))
+							.sort((a, b) => a.localeCompare(b)),
+					),
+					Effect.orElseSucceed((): string[] => []),
+				),
+			{ concurrency: 8 },
+		);
+		const repos = yield* Effect.filter(
+			siblings.flat(),
+			(path) => isGitRepo(path).pipe(Effect.orElseSucceed(() => false)),
+			{ concurrency: 8 },
+		);
+		const unique = new Map<string, FolderEntry>();
+		for (const entry of [
+			...recent.flat(),
+			...repos.map(
+				(path) =>
+					({ path, isGitRepo: true, reason: "sibling", exists: true }) as const,
+			),
+		]) {
+			if (!unique.has(entry.path)) unique.set(entry.path, entry);
+		}
+		return { entries: [...unique.values()].slice(0, MAX_FOLDER_ENTRIES) };
+	});
+
+/**
+ * A query starting with / or ~ autocompletes that path; any other text filters
+ * the folder suggestions built from `sources`.
+ */
 export const findFolders = (
 	query: string,
+	sources: FolderSuggestionSources = { recent: [], projectFolders: [] },
 ): Effect.Effect<FindFoldersResponse, DirectoryListingServiceError> =>
 	Effect.gen(function* () {
 		if (!query.startsWith("/") && !query.startsWith("~"))
-			return { entries: [] };
+			return yield* suggestFolders(query.trim(), sources);
 		if (query.startsWith("~") && query !== "~" && !query.startsWith("~/")) {
 			return yield* Effect.fail(
 				new DirectoryListingServiceError({
@@ -149,7 +237,7 @@ export const findFolders = (
 			.filter((entry) => entry !== path)
 			.slice(0, MAX_FOLDER_ENTRIES - 1);
 		const candidates = exists ? [path, ...matches] : [...matches, path];
-		const entries: Array<FindFoldersResponse["entries"][number]> = [];
+		const entries: FolderEntry[] = [];
 		for (const candidate of candidates) {
 			const directory =
 				candidate === path ? requested : yield* statPath(candidate);
@@ -164,11 +252,9 @@ export const findFolders = (
 				continue;
 			}
 			if (!directory.value.isDirectory()) continue;
-			const git = yield* statPath(join(candidate, ".git"));
 			entries.push({
 				path: candidate,
-				isGitRepo:
-					Option.isSome(git) && (git.value.isDirectory() || git.value.isFile()),
+				isGitRepo: yield* isGitRepo(candidate),
 				reason: "match",
 				exists: true,
 			});

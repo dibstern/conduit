@@ -789,7 +789,6 @@ export function makeMockStatusPoller(
 		markMessageActivity: vi.fn(() => Effect.void),
 		clearMessageActivity: vi.fn(() => Effect.void),
 		notifySSEIdle: vi.fn(() => Effect.void),
-		reconcileNow: vi.fn(() => Effect.void),
 		...overrides,
 	};
 }

@@ -13,7 +13,6 @@ import {
 	Data,
 	Duration,
 	Effect,
-	HashMap,
 	Layer,
 	PubSub,
 	Ref,
@@ -25,7 +24,6 @@ import { busySessionIds } from "../../../session-busy.js";
 
 export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
 
-const STATUS_CORRECTION_CONCURRENCY = 8;
 const POLLER_EVENT_BUFFER_CAPACITY = 64;
 const STATUS_RECONCILIATION_MAX_RETRIES = 5;
 
@@ -36,23 +34,10 @@ const STATUS_RECONCILIATION_MAX_RETRIES = 5;
  */
 const SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
-/** Status correction needed: DB and API disagree. */
-export interface StatusCorrection {
-	sessionId: string;
-	expected: string;
-	actual: string;
-}
-
 /** Payload published on the changed PubSub. */
 export interface PollerChangedEvent {
 	readonly statuses: Record<string, SessionStatus>;
 	readonly statusesChanged: boolean;
-}
-
-/** Session status info for reconciliation (flat id+status). */
-export interface SessionStatusInfo {
-	id: string;
-	status: string;
 }
 
 export interface PollerState {
@@ -138,32 +123,6 @@ export const isProcessing = (
 		return isBusyIn(state.previousStatuses, sessionId, parents);
 	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
 
-/**
- * Compute corrections needed: DB statuses that disagree with API statuses.
- * The API is treated as the source of truth.
- */
-export const diffStatuses = (
-	_previous: HashMap.HashMap<string, string>,
-	dbStatuses: SessionStatusInfo[],
-	apiStatuses: SessionStatusInfo[],
-): StatusCorrection[] => {
-	const apiMap = HashMap.fromIterable(
-		apiStatuses.map((s) => [s.id, s.status] as const),
-	);
-	const corrections: StatusCorrection[] = [];
-	for (const dbSession of dbStatuses) {
-		const apiStatus = HashMap.get(apiMap, dbSession.id);
-		if (apiStatus._tag === "Some" && apiStatus.value !== dbSession.status) {
-			corrections.push({
-				sessionId: dbSession.id,
-				expected: apiStatus.value,
-				actual: dbSession.status,
-			});
-		}
-	}
-	return corrections;
-};
-
 /** Check if any session's status type changed or sessions were added/removed. */
 const hasChanged = (
 	prev: Record<string, SessionStatus>,
@@ -185,38 +144,6 @@ const hasChanged = (
 	return false;
 };
 
-/**
- * Single reconciliation pass: fetch DB + API statuses, diff, apply corrections,
- * then update the Ref with the latest API statuses.
- */
-export const reconcile = (
-	db: { getSessionStatuses: () => Effect.Effect<SessionStatusInfo[]> },
-	api: { getSessionStatuses: () => Effect.Effect<SessionStatusInfo[]> },
-	applyCorrection: (c: StatusCorrection) => Effect.Effect<void>,
-) =>
-	Effect.gen(function* () {
-		const ref = yield* PollerStateTag;
-		const state = yield* Ref.get(ref);
-
-		const dbSessions = yield* db.getSessionStatuses();
-		const apiSessions = yield* api
-			.getSessionStatuses()
-			.pipe(Effect.retry(Schedule.once));
-
-		const prevMap = HashMap.fromIterable(
-			Object.entries(state.previousStatuses).map(
-				([id, s]) => [id, s.type] as const,
-			),
-		);
-
-		const corrections = diffStatuses(prevMap, dbSessions, apiSessions);
-
-		yield* Effect.forEach(corrections, applyCorrection, {
-			concurrency: STATUS_CORRECTION_CONCURRENCY,
-			discard: true,
-		});
-	}).pipe(Effect.withSpan("statusPoller.reconcile"));
-
 // Poll (full cycle)
 
 /** Dependencies for a poll cycle. */
@@ -227,7 +154,7 @@ export interface PollDeps<E = unknown, R = never> {
 		E,
 		R
 	>;
-	/** REST reconciliation deps (optional). */
+	/** Stale-busy reconciliation deps (optional). */
 	readonly reconciliation?: ReconciliationDeps;
 }
 
@@ -319,13 +246,7 @@ export const poll = <E, R>(deps: PollDeps<E, R>) =>
 	);
 
 export interface ReconciliationDeps {
-	readonly getRestStatuses: () => Effect.Effect<
-		Record<string, SessionStatus>,
-		unknown
-	>;
-	readonly getProjectedSessions: (
-		reportedIds: readonly string[],
-	) => Effect.Effect<
+	readonly getProjectedSessions: () => Effect.Effect<
 		ReadonlyArray<{
 			id: string;
 			status: string;
@@ -343,35 +264,9 @@ export interface ReconciliationDeps {
 
 const runReconciliation = (deps: ReconciliationDeps) =>
 	Effect.gen(function* () {
-		// REST reconciliation
-		yield* Effect.gen(function* () {
-			const restStatuses = yield* deps.getRestStatuses();
-			const sessions = yield* deps.getProjectedSessions(
-				Object.keys(restStatuses),
-			);
-			const projectedMap = new Map<string, string>();
-			for (const session of sessions) {
-				projectedMap.set(session.id, session.status);
-			}
-			for (const [sessionId, restStatus] of Object.entries(restStatuses)) {
-				const projectedStatus = projectedMap.get(sessionId);
-				if (!projectedStatus) continue;
-				if (restStatus.type !== projectedStatus) {
-					yield* Effect.log(
-						`reconciliation: status mismatch for session=${sessionId.slice(0, 12)}: REST=${restStatus.type} projected=${projectedStatus} — injecting corrective event`,
-					);
-					yield* deps.injectCorrectiveEvent(sessionId, restStatus.type);
-				}
-			}
-		}).pipe(
-			Effect.catchAll((e) =>
-				Effect.log(`reconciliation check failed: ${String(e)}`),
-			),
-		);
-
 		// Staleness check
 		yield* Effect.gen(function* () {
-			const sessions = yield* deps.getProjectedSessions([]);
+			const sessions = yield* deps.getProjectedSessions();
 			const awaitingUser = yield* deps.getSessionsAwaitingUser();
 			const now = Date.now();
 			for (const session of sessions) {
@@ -393,14 +288,6 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 			),
 		);
 	}).pipe(Effect.withSpan("statusPoller.runReconciliation"));
-
-/** One-shot reconciliation for SSE reconnect. */
-export const reconcileNow = (deps: ReconciliationDeps) =>
-	runReconciliation(deps).pipe(
-		Effect.catchAll((e) => Effect.log(`reconcileNow failed: ${String(e)}`)),
-		Effect.annotateLogs("component", "status-poller"),
-		Effect.withSpan("statusPoller.reconcileNow"),
-	);
 
 /**
  * Start a long-running reconciliation loop as a scoped fiber.
@@ -460,6 +347,4 @@ export interface SessionStatusPollerService {
 	clearMessageActivity(sessionId: string): Effect.Effect<void>;
 	/** Notify that SSE delivered a session.status:idle event. */
 	notifySSEIdle(sessionId: string): Effect.Effect<void>;
-	/** One-shot reconciliation on SSE reconnect. */
-	reconcileNow(): Effect.Effect<void>;
 }

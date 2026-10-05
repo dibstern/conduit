@@ -612,7 +612,7 @@ export const FindFoldersResponseSchema = Schema.Struct({
 		Schema.Struct({
 			path: Schema.String,
 			isGitRepo: Schema.Boolean,
-			reason: Schema.Literal("match"),
+			reason: Schema.Literal("recent", "sibling", "match"),
 			exists: Schema.Boolean,
 		}),
 	),

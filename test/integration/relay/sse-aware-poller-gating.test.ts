@@ -64,7 +64,6 @@ interface MockOpenCode {
 	sessionStatuses: Record<string, { type: string; [key: string]: unknown }>;
 	sessionList: SessionDef[];
 	messageRequestCounts: Record<string, number>;
-	statusRequestCount: number;
 	injectSSE(event: { type: string; properties: Record<string, unknown> }): void;
 	getMessageRequestCount(sessionId: string): number;
 	resetMessageRequestCounts(): void;
@@ -90,7 +89,6 @@ async function createMockOpenCode(
 	}
 
 	const messageRequestCounts: Record<string, number> = {};
-	let statusRequestCount = 0;
 	const toOpenCodeSession = (session: SessionDef) => ({
 		id: session.id,
 		projectID: "proj-test",
@@ -153,7 +151,6 @@ async function createMockOpenCode(
 		}
 
 		if (url.pathname === "/session/status") {
-			statusRequestCount++;
 			res.end(JSON.stringify(sessionStatuses));
 			return;
 		}
@@ -205,9 +202,6 @@ async function createMockOpenCode(
 		sessionStatuses,
 		sessionList,
 		messageRequestCounts,
-		get statusRequestCount() {
-			return statusRequestCount;
-		},
 		injectSSE(event) {
 			const data = JSON.stringify({
 				directory: process.cwd(),
@@ -410,14 +404,9 @@ async function createTestHarness(
 /** Only used for windows that assert activity stays absent. */
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function waitForStatusPollCycles(mock: MockOpenCode, cycles = 4) {
-	const before = mock.statusRequestCount;
-	await vi.waitFor(
-		() => {
-			expect(mock.statusRequestCount).toBeGreaterThanOrEqual(before + cycles);
-		},
-		{ timeout: 3000 },
-	);
+/** The status poller reads SQLite only, so cycles are measured in time. */
+async function waitForStatusPollCycles(_mock: MockOpenCode, cycles = 4) {
+	await wait(cycles * TEST_STATUS_POLL_MS + TEST_STATUS_POLL_MS / 2);
 }
 
 /** Helper: connect client and switch to a session */
@@ -707,15 +696,7 @@ describe("Group 2: SSE dynamics", () => {
 			},
 			{ timeout: 3000 },
 		);
-		const statusBefore = harness.mock.statusRequestCount;
-		await vi.waitFor(
-			() => {
-				expect(harness.mock.statusRequestCount).toBeGreaterThan(
-					statusBefore + 1,
-				);
-			},
-			{ timeout: 3000 },
-		);
+		await waitForStatusPollCycles(harness.mock, 2);
 
 		// Measure rate with SSE
 		harness.mock.resetMessageRequestCounts();
