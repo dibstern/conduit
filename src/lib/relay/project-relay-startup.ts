@@ -1,8 +1,8 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Exit, Runtime } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsTag } from "../domain/relay/Services/opencode-instance-clients.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { RelayCommandGateTag } from "../domain/relay/Services/relay-command-gate.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
@@ -287,16 +287,16 @@ function acquireStartupServices(inputs: StartupInputs) {
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
-		const instanceClients = yield* OpenCodeInstanceClientsTag;
+		const instances = yield* OpenCodeInstancesTag;
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
 			(sessionId, instanceId, signal) =>
 				Effect.gen(function* () {
-					const client = (yield* instanceClients.clientFor(instanceId)) ?? api;
+					const client = yield* instances.use(instanceId);
 					return yield* Effect.tryPromise(() =>
 						client.session.messages(sessionId, { signal }),
 					);
-				}),
+				}).pipe(Effect.scoped),
 		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
@@ -450,18 +450,14 @@ function startSseConsumers(
 			opencodeRuntimeIngress,
 		};
 		yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
-		yield* sseStream.connectEffect();
-		// Named OpenCode instances: lazily created
-		// per-instance SSE streams join the SAME pipeline — turn
-		// completion via wireSSEToInstance, streaming/persistence via
-		// wireSSEConsumerEffect. Pending prompt and status recovery runs in
-		// OpenCode Instances for the default instance only (accepted
-		// degradation), and the
-		// ingress translator reset stays owned by the default stream's
-		// reconnects so a named stream's (re)connect cannot reset
-		// in-flight default-session ingestion state.
-		const instanceClients = yield* OpenCodeInstanceClientsTag;
-		yield* instanceClients.registerStreamWirer((stream, instanceId) =>
+		// Other OpenCode instances delivering events for this project join the
+		// SAME pipeline — turn completion via wireSSEToInstance,
+		// streaming/persistence via wireSSEConsumerEffect. Pending prompt and
+		// status recovery runs per instance stream in OpenCode Instances, and
+		// the ingress translator reset stays owned by the selected instance's
+		// reconnects so another instance's (re)connect cannot reset in-flight
+		// default-session ingestion state.
+		yield* sseStream.wireInstanceStreams((stream, instanceId) =>
 			Effect.gen(function* () {
 				yield* Effect.sync(() =>
 					orchestration.wireSSEToInstance((event, handler) => {
@@ -477,6 +473,7 @@ function startSseConsumers(
 				);
 			}),
 		);
+		yield* sseStream.connectEffect();
 	});
 }
 

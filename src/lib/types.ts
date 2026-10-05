@@ -146,8 +146,10 @@ export interface ProjectRelayConfig {
 	opencodeUrl: string;
 	/** Credentials of the OpenCode instance selected for this relay. */
 	opencodeAuth?: { username: string; password: string };
-	/** Daemon-owned default OpenCode event subscription shared by project relays. */
+	/** Daemon-owned OpenCode Instances module shared by project relays. */
 	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
+	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
+	openCodeInstanceId?: string;
 	/** Project working directory */
 	projectDir: string;
 	/** Additional Claude workspace folders, fixed for this relay's lifetime. */

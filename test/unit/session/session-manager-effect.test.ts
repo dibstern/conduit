@@ -6,8 +6,8 @@ import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
@@ -63,6 +63,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -101,8 +102,9 @@ describe("SessionManager Effect", () => {
 			Layer.succeed(BackgroundLivenessTag, () => undefined),
 			RelayStatusSnapshotLive,
 			makeOverridesStateLive(),
-			OpenCodeInstanceClientsLive.pipe(
-				Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+			Layer.succeed(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({ opencode: mockApi }),
 			),
 		);
 	};

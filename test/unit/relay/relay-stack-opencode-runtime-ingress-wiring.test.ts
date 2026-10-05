@@ -17,7 +17,7 @@ import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { OpenCodeInstanceClientsTag } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -434,9 +434,9 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 
 			await relay.effectRuntime.runtime.runPromise(
 				Effect.gen(function* () {
-					const instanceClients = yield* OpenCodeInstanceClientsTag;
-					yield* instanceClients.clientFor("work-oc");
-					yield* instanceClients.clientFor("personal-oc");
+					const instances = yield* OpenCodeInstancesTag;
+					yield* Effect.scoped(instances.use("work-oc"));
+					yield* Effect.scoped(instances.use("personal-oc"));
 				}),
 			);
 

@@ -15,6 +15,7 @@ import {
 	Option,
 	Queue,
 	Ref,
+	Stream,
 	TestClock,
 } from "effect";
 import { assert, expect, vi } from "vitest";
@@ -28,13 +29,12 @@ import {
 	DaemonEventBusLive,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import {
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import {
-	type OpenCodeInstanceClients,
-	OpenCodeInstanceClientsLive,
-	OpenCodeInstanceClientsTag,
-} from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	PendingSendOwnershipLive,
@@ -113,6 +113,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
@@ -363,19 +364,21 @@ const sessionConfigLayer = Layer.succeed(
 	makeMockConfig({ configDir: "/tmp/conduit-session-manager-tests" }),
 );
 const sessionLoggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+const openCodeApi = makeMockOpenCodeAPI();
 const requiredSessionServices = Layer.mergeAll(
 	makePersistenceEffectLayer(":memory:"),
 	PendingSendOwnershipLive,
 	Layer.succeed(AgentServiceTag, makeMockAgentService()),
 	sessionConfigLayer,
 	sessionLoggerLayer,
-	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+	Layer.succeed(OpenCodeAPITag, openCodeApi),
 	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 	Layer.succeed(BackgroundLivenessTag, () => undefined),
 	RelayStatusSnapshotLive,
 	makeOverridesStateLive(),
-	OpenCodeInstanceClientsLive.pipe(
-		Layer.provide(Layer.mergeAll(sessionConfigLayer, sessionLoggerLayer)),
+	Layer.succeed(
+		OpenCodeInstancesTag,
+		makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 	),
 	Layer.succeed(
 		OrchestrationEngineTag,
@@ -992,6 +995,10 @@ describe("SessionManagerService", () => {
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: api }),
+					),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					Layer.succeed(ConfigTag, relayConfig),
 					makeSessionManagerStateLive(),
@@ -1085,11 +1092,12 @@ describe("SessionManagerService", () => {
 				version: "1.0.0",
 				time: { created: 10, updated: 10 },
 			});
-			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const use = vi.fn(() => Effect.succeed(namedApi));
 			const instanceClients = {
-				clientFor,
-				registerStreamWirer: () => Effect.void,
-			} satisfies OpenCodeInstanceClients;
+				events: () => Stream.empty,
+				use,
+				ifRunning: () => Effect.succeedNone,
+			} satisfies OpenCodeInstances;
 			const engine = new OrchestrationEngine({
 				registry: new ProviderRegistry(),
 			});
@@ -1104,7 +1112,7 @@ describe("SessionManagerService", () => {
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile),
-					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1143,7 +1151,7 @@ describe("SessionManagerService", () => {
 					}
 				});
 
-				expect(clientFor).toHaveBeenCalledWith("work-oc");
+				expect(use).toHaveBeenCalledWith("work-oc");
 				expect(api.session.create).not.toHaveBeenCalled();
 				expect(namedApi.session.create).toHaveBeenCalledWith({
 					title: "Named",
@@ -1275,11 +1283,12 @@ describe("SessionManagerService", () => {
 				);
 				throw new Error("upstream delete unavailable");
 			});
-			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const use = vi.fn(() => Effect.succeed(namedApi));
 			const instanceClients = {
-				clientFor,
-				registerStreamWirer: () => Effect.void,
-			} satisfies OpenCodeInstanceClients;
+				events: () => Stream.empty,
+				use,
+				ifRunning: () => Effect.succeedNone,
+			} satisfies OpenCodeInstances;
 			const dispatchObservations: ReturnType<typeof readTombstoneFirstState>[] =
 				[];
 			const dispatch = vi.fn(() =>
@@ -1302,7 +1311,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile),
-					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1605,11 +1614,12 @@ describe("SessionManagerService", () => {
 			deleteError.stack =
 				"Error: named instance unavailable\nUNIQUE_DELETE_STACK_SENTINEL";
 			vi.spyOn(namedApi.session, "delete").mockRejectedValue(deleteError);
-			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const use = vi.fn(() => Effect.succeed(namedApi));
 			const instanceClients = {
-				clientFor,
-				registerStreamWirer: () => Effect.void,
-			} satisfies OpenCodeInstanceClients;
+				events: () => Stream.empty,
+				use,
+				ifRunning: () => Effect.succeedNone,
+			} satisfies OpenCodeInstances;
 			const dispatch = vi.fn(async () => undefined);
 			const engine = withDispatchEffect({ dispatch });
 			engine.bindSession(sessionId, "work-oc");
@@ -1623,7 +1633,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile),
-					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1704,9 +1714,10 @@ describe("SessionManagerService", () => {
 				}),
 			);
 			const instanceClients = {
-				clientFor: vi.fn(() => Effect.succeed(namedApi)),
-				registerStreamWirer: () => Effect.void,
-			} satisfies OpenCodeInstanceClients;
+				events: () => Stream.empty,
+				use: vi.fn(() => Effect.succeed(namedApi)),
+				ifRunning: () => Effect.succeedNone,
+			} satisfies OpenCodeInstances;
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => undefined),
 			});
@@ -1721,7 +1732,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile),
-					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1773,9 +1784,10 @@ describe("SessionManagerService", () => {
 			}),
 		);
 		const instanceClients = {
-			clientFor: vi.fn(() => Effect.succeed(namedApi)),
-			registerStreamWirer: () => Effect.void,
-		} satisfies OpenCodeInstanceClients;
+			events: () => Stream.empty,
+			use: vi.fn(() => Effect.succeed(namedApi)),
+			ifRunning: () => Effect.succeedNone,
+		} satisfies OpenCodeInstances;
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => undefined),
 		});
@@ -1790,7 +1802,7 @@ describe("SessionManagerService", () => {
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 				makePersistenceEffectLayer(dbFile),
-				Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+				Layer.succeed(OpenCodeInstancesTag, instanceClients),
 				Layer.succeed(OrchestrationEngineTag, engine),
 			),
 		);
@@ -1960,11 +1972,12 @@ describe("SessionManagerService", () => {
 			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
 			const namedApi = makeMockOpenCodeAPI();
 			vi.spyOn(namedApi.session, "delete").mockResolvedValue(undefined);
-			const clientFor = vi.fn(() => Effect.succeed(namedApi));
+			const use = vi.fn(() => Effect.succeed(namedApi));
 			const instanceClients = {
-				clientFor,
-				registerStreamWirer: () => Effect.void,
-			} satisfies OpenCodeInstanceClients;
+				events: () => Stream.empty,
+				use,
+				ifRunning: () => Effect.succeedNone,
+			} satisfies OpenCodeInstances;
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
@@ -1975,7 +1988,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					persistenceLayer,
-					Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					engineLayer,
 				),
 			);
@@ -1998,7 +2011,7 @@ describe("SessionManagerService", () => {
 				expect(
 					yield* engine.getProviderForSessionEffect(sessionId),
 				).toBeUndefined();
-				expect(clientFor).toHaveBeenCalledWith("work-oc");
+				expect(use).toHaveBeenCalledWith("work-oc");
 				expect(namedApi.session.delete).toHaveBeenCalledWith(sessionId);
 				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
 			}).pipe(
@@ -2033,11 +2046,12 @@ describe("SessionManagerService", () => {
 				engine.bindSession(sessionId, "work-oc");
 				const bindSession = vi.spyOn(engine, "bindSession");
 				const api = makeMockOpenCodeAPI();
-				const clientFor = vi.fn(() => neverSettles);
+				const use = vi.fn(() => neverSettles);
 				const instanceClients = {
-					clientFor,
-					registerStreamWirer: () => Effect.void,
-				} satisfies OpenCodeInstanceClients;
+					events: () => Stream.empty,
+					use,
+					ifRunning: () => Effect.succeedNone,
+				} satisfies OpenCodeInstances;
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
@@ -2048,7 +2062,7 @@ describe("SessionManagerService", () => {
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile),
-						Layer.succeed(OpenCodeInstanceClientsTag, instanceClients),
+						Layer.succeed(OpenCodeInstancesTag, instanceClients),
 						Layer.succeed(OrchestrationEngineTag, engine),
 					),
 				);

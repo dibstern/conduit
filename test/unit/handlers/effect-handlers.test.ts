@@ -1,6 +1,6 @@
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import {
 	PendingSendOwnershipLive,
 	PendingSendOwnershipTag,
@@ -165,6 +165,7 @@ import {
 	makeMockSessionManagerShape,
 	makeMockSessionTitleService,
 	makeMockStatusPoller,
+	makeOpenCodeInstancesStub,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
@@ -3416,17 +3417,21 @@ describe("sendMessageToSession", () => {
 				const ws = mockWsHandler();
 				const configLayer = Layer.succeed(ConfigTag, mockConfig());
 				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+				const openCodeApi = makeMockOpenCodeAPI();
 				const serviceLayer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(OpenCodeAPITag, openCodeApi),
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, ws),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
-						OpenCodeInstanceClientsLive.pipe(Layer.provide(Layer.merge(configLayer, loggerLayer))),
+						Layer.succeed(
+	OpenCodeInstancesTag,
+	makeOpenCodeInstancesStub({ opencode: openCodeApi }),
+),
 						makeSessionManagerStateLive(),
 						PendingSendOwnershipLive,
 						DaemonEventBusLive,

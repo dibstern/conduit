@@ -3,13 +3,9 @@ import { tmpdir } from "node:os";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import {
-	ConfigTag,
-	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
@@ -23,22 +19,18 @@ import {
 	type OrchestrationLayerOptions,
 } from "../../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import {
-	makeMockConfig,
-	makeMockLogger,
-} from "../../helpers/mock-factories.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 function orchestrationDeps(
 	persistence: ReturnType<typeof makePersistenceEffectLayer>,
 	client: OpenCodeAPI,
 ) {
-	const config = Layer.succeed(ConfigTag, makeMockConfig());
-	const logger = Layer.succeed(LoggerTag, makeMockLogger());
 	return Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, client),
 		persistence,
-		OpenCodeInstanceClientsLive.pipe(
-			Layer.provide(Layer.merge(config, logger)),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 		makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 	);

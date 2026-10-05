@@ -1,16 +1,104 @@
 import { Context, Effect, Fiber, Layer, Stream } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import type { Logger } from "../../../logger.js";
 import type {
 	SSEStreamCallbacks,
 	SSEStreamPort,
 } from "../../../relay/sse-stream.js";
 import type { ConnectionHealth } from "../../../types.js";
-import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import {
+	type OpenCodeInstanceEvent,
+	OpenCodeInstancesTag,
+} from "../../daemon/Services/opencode-instances-service.js";
 import { ConfigTag } from "./services.js";
+
+export interface RelayOpenCodeStream extends SSEStreamPort {
+	/**
+	 * Wires a port for every other OpenCode instance that delivers events for
+	 * this project. Each port is wired on that instance's first event.
+	 */
+	wireInstanceStreams<R>(
+		wirer: (
+			stream: SSEStreamPort,
+			instanceId: string,
+		) => Effect.Effect<void, never, R>,
+	): Effect.Effect<void, never, R>;
+}
 
 export class SSEStreamTag extends Context.Tag("SSEStream")<
 	SSEStreamTag,
-	SSEStreamPort
+	RelayOpenCodeStream
 >() {}
+
+const makeChannel = (log: Logger | undefined) => {
+	const callbacks: {
+		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
+	} = {
+		event: [],
+		connected: [],
+		disconnected: [],
+		reconnecting: [],
+		error: [],
+		heartbeat: [],
+	};
+	let health: ConnectionHealth = {
+		connected: false,
+		lastEventAt: null,
+		reconnectCount: 0,
+		stale: false,
+	};
+	const notify = (callback: () => void) => {
+		try {
+			callback();
+		} catch (error) {
+			log?.warn("OpenCode SSE subscriber callback failed", error);
+		}
+	};
+	return {
+		on: <K extends keyof SSEStreamCallbacks>(
+			event: K,
+			callback: SSEStreamCallbacks[K],
+		) => {
+			callbacks[event].push(callback);
+		},
+		getHealth: () => health,
+		isConnected: () => health.connected,
+		markDisconnected: () => {
+			health = { ...health, connected: false, stale: false };
+		},
+		dispatch: (message: OpenCodeInstanceEvent) => {
+			health = message.health;
+			switch (message._tag) {
+				case "event":
+					for (const callback of callbacks.event)
+						notify(() => callback(message.payload));
+					break;
+				case "heartbeat":
+					for (const callback of callbacks.heartbeat) notify(callback);
+					break;
+				case "connection":
+					if (message.state === "connected") {
+						for (const callback of callbacks.connected) notify(callback);
+					} else if (message.state === "disconnected") {
+						for (const callback of callbacks.disconnected)
+							notify(() => callback(message.error));
+						const error = message.error;
+						if (error)
+							for (const callback of callbacks.error)
+								notify(() => callback(error));
+					} else {
+						for (const callback of callbacks.reconnecting)
+							notify(() =>
+								callback({
+									attempt: message.attempt ?? 0,
+									delay: message.delay ?? 0,
+								}),
+							);
+					}
+			}
+		},
+	};
+};
 
 export const SSEStreamLive: Layer.Layer<
 	SSEStreamTag,
@@ -24,96 +112,73 @@ export const SSEStreamLive: Layer.Layer<
 		const log = config.log;
 		const scope = yield* Effect.scope;
 		const gate = yield* Effect.makeSemaphore(1);
-		const callbacks: {
-			[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
-		} = {
-			event: [],
-			connected: [],
-			disconnected: [],
-			reconnecting: [],
-			error: [],
-			heartbeat: [],
-		};
-		let health: ConnectionHealth = {
-			connected: false,
-			lastEventAt: null,
-			reconnectCount: 0,
-			stale: false,
-		};
+		// The relay view tags the selected instance with the default id.
+		const selectedId = defaultInstanceIdForDriver("opencode");
+		const main = makeChannel(log);
+		const others = new Map<string, ReturnType<typeof makeChannel>>();
+		let wirer:
+			| ((stream: SSEStreamPort, instanceId: string) => Effect.Effect<void>)
+			| undefined;
+		const route = (message: OpenCodeInstanceEvent) =>
+			Effect.gen(function* () {
+				if (message.instanceId === selectedId) return main.dispatch(message);
+				let channel = others.get(message.instanceId);
+				if (!channel) {
+					if (message._tag !== "event" || !wirer) return;
+					const created = makeChannel(log);
+					others.set(message.instanceId, created);
+					yield* wirer(
+						{
+							on: created.on,
+							getHealth: created.getHealth,
+							isConnected: created.isConnected,
+							// The OpenCode Instances module owns the stream lifecycle.
+							connectEffect: () => Effect.void,
+							disconnectEffect: () => Effect.void,
+							drainEffect: () => Effect.void,
+						},
+						message.instanceId,
+					);
+					channel = created;
+				}
+				channel.dispatch(message);
+			});
 		let fiber: Fiber.RuntimeFiber<void> | undefined;
-		const notify = (callback: () => void) => {
-			try {
-				callback();
-			} catch (error) {
-				log?.warn("OpenCode SSE subscriber callback failed", error);
-			}
-		};
 		const disconnectEffect = () =>
 			gate.withPermits(1)(
 				Effect.gen(function* () {
 					if (fiber) yield* Fiber.interrupt(fiber);
 					fiber = undefined;
-					health = { ...health, connected: false, stale: false };
+					main.markDisconnected();
 				}),
 			);
 		yield* Effect.addFinalizer(disconnectEffect);
 		return {
-			on: <K extends keyof SSEStreamCallbacks>(
-				event: K,
-				callback: SSEStreamCallbacks[K],
-			) => {
-				callbacks[event].push(callback);
-			},
-			getHealth: () => health,
-			isConnected: () => health.connected,
+			on: main.on,
+			getHealth: main.getHealth,
+			isConnected: main.isConnected,
 			connectEffect: () =>
 				gate.withPermits(1)(
 					Effect.gen(function* () {
 						if (fiber) return;
 						fiber = yield* Effect.forkIn(
-							Stream.runForEach(
-								instances.events([config.projectDir]),
-								(message) =>
-									Effect.sync(() => {
-										health = message.health;
-										switch (message._tag) {
-											case "event":
-												for (const callback of callbacks.event)
-													notify(() => callback(message.payload));
-												break;
-											case "heartbeat":
-												for (const callback of callbacks.heartbeat)
-													notify(callback);
-												break;
-											case "connection":
-												if (message.state === "connected") {
-													for (const callback of callbacks.connected)
-														notify(callback);
-												} else if (message.state === "disconnected") {
-													for (const callback of callbacks.disconnected)
-														notify(() => callback(message.error));
-													const error = message.error;
-													if (error)
-														for (const callback of callbacks.error)
-															notify(() => callback(error));
-												} else {
-													for (const callback of callbacks.reconnecting)
-														notify(() =>
-															callback({
-																attempt: message.attempt ?? 0,
-																delay: message.delay ?? 0,
-															}),
-														);
-												}
-										}
-									}),
-							),
+							Stream.runForEach(instances.events([config.projectDir]), route),
 							scope,
 						);
 					}),
 				),
 			disconnectEffect,
 			drainEffect: disconnectEffect,
-		} satisfies SSEStreamPort;
+			wireInstanceStreams: <R>(
+				register: (
+					stream: SSEStreamPort,
+					instanceId: string,
+				) => Effect.Effect<void, never, R>,
+			) =>
+				Effect.map(Effect.context<R>(), (context) => {
+					wirer = (stream, instanceId) =>
+						register(stream, instanceId).pipe(Effect.provide(context));
+				}),
+		} satisfies RelayOpenCodeStream;
 	}),
 );

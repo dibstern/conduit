@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { makeRelayCacheLayer } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
@@ -31,6 +31,7 @@ import type {
 	OpenCodeInstance,
 	ProjectInfo,
 } from "../../../src/lib/shared-types.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 
@@ -39,7 +40,7 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 }));
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
-	Layer.succeed(OpenCodeInstancesTag, { events: () => Stream.empty }),
+	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
 	Layer.succeed(PortScannerTag, {
 		getKnownPorts: () => Effect.succeed(new Set<number>()),
@@ -271,7 +272,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			Layer.provide(
 				Layer.mergeAll(
 					InstanceHealthCheckLive,
-					Layer.succeed(OpenCodeInstancesTag, { events: () => Stream.empty }),
+					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,
@@ -413,7 +414,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						},
 					]),
 					makeInstanceManagerStateLive(),
-					Layer.succeed(OpenCodeInstancesTag, { events: () => Stream.empty }),
+					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					Layer.succeed(PortScannerTag, {
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),

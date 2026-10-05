@@ -125,7 +125,7 @@ const server = createServer(async (request, response) => {
 	if (body)
 		appendFileSync(
 			join(configDir, "fake-opencode-request-bodies.jsonl"),
-			`${JSON.stringify({ method: request.method, path, body })}\n`,
+			`${JSON.stringify({ pid: process.pid, method: request.method, path, body })}\n`,
 		);
 	if (path === "/test/emit-event" && request.method === "POST") {
 		emit(JSON.parse(body));

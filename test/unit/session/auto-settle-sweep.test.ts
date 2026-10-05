@@ -6,8 +6,8 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
@@ -37,6 +37,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 const DAY = 86_400_000;
@@ -51,20 +52,22 @@ describe("relay automatic settlement sweep", () => {
 				makeMockConfig({ configDir: dir, projectDir: dir }),
 			);
 			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+			const openCodeApi = makeMockOpenCodeAPI();
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					makeSessionManagerStateLive(),
 					PendingSendOwnershipLive,
-					Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Layer.succeed(OpenCodeAPITag, openCodeApi),
 					loggerLayer,
 					configLayer,
 					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 					Layer.succeed(BackgroundLivenessTag, () => undefined),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
-					OpenCodeInstanceClientsLive.pipe(
-						Layer.provide(Layer.merge(configLayer, loggerLayer)),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(join(dir, "events.db")),

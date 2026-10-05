@@ -371,9 +371,6 @@ export const RelayFactoryLive = (
 									instance.driver !== "claude" &&
 									instance.id === project.instanceId,
 							) ?? instances.find((instance) => instance.driver !== "claude");
-						const defaultInstance = instances.find(
-							({ driver }) => (driver ?? "opencode") === "opencode",
-						);
 						// Managed passwords live only in the private process record.
 						const opencodeAuth = openCodeAuth(
 							selectedInstance?.managed
@@ -400,8 +397,9 @@ export const RelayFactoryLive = (
 								creation = createProjectRelay({
 									httpServer,
 									opencodeUrl,
-									...(selectedInstance?.id === defaultInstance?.id
-										? { openCodeInstances }
+									openCodeInstances,
+									...(selectedInstance
+										? { openCodeInstanceId: selectedInstance.id }
 										: {}),
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.folders[0],

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Queue, Ref, Stream } from "effect";
+import { Effect, Layer, Option, Queue, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
@@ -34,6 +34,7 @@ import {
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
 const createProjectRelayMock = vi.hoisted(() =>
@@ -113,7 +114,7 @@ describe("RelayFactoryTag", () => {
 	const factoryLayer = RelayFactoryLive("/tmp/test-conduit").pipe(
 		Layer.provideMerge(configLayer),
 		Layer.provide(
-			Layer.succeed(OpenCodeInstancesTag, { events: () => Stream.empty }),
+			Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 		),
 	);
 

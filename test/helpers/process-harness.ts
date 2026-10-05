@@ -861,6 +861,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 						.map(
 							(line) =>
 								JSON.parse(line) as {
+									pid?: number;
 									method: string;
 									path: string;
 									body: string;

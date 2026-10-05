@@ -1,9 +1,9 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import {
 	BackgroundLivenessTag,
 	ConfigTag,
@@ -24,20 +24,23 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 const configLayer = Layer.succeed(ConfigTag, makeMockConfig());
 const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+const openCodeApi = makeMockOpenCodeAPI();
 const relayStateTestLayer = RelayStateLive.pipe(
 	Layer.provide(
 		Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(OpenCodeAPITag, openCodeApi),
 			configLayer,
 			loggerLayer,
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 			Layer.succeed(BackgroundLivenessTag, () => undefined),
-			OpenCodeInstanceClientsLive.pipe(
-				Layer.provide(Layer.merge(configLayer, loggerLayer)),
+			Layer.succeed(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 			),
 			Layer.succeed(
 				OrchestrationEngineTag,
