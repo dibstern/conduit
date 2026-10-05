@@ -64,6 +64,35 @@ it("a poller that never started reads busy from the event store", async () => {
 	);
 });
 
+it("keeps Claude status observation and exposes ownership separately", async () => {
+	const api = makeMockOpenCodeAPI();
+	vi.spyOn(api.session, "statuses").mockResolvedValue({
+		"opencode-1": { type: "busy" },
+	});
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
+						('claude-1', 'claude', 'Claude', 'busy', 2, 2)`;
+				const poller = yield* StatusPollerTag;
+				yield* poller.start();
+				expect(yield* poller.getCurrentStatuses()).toEqual({
+					"opencode-1": { type: "busy" },
+					"claude-1": { type: "busy" },
+				});
+				expect(yield* poller.getSessionProviders()).toEqual(
+					new Map([
+						["opencode-1", "opencode"],
+						["claude-1", "claude"],
+					]),
+				);
+			}),
+		).pipe(Effect.provide(pollerLayer(api))),
+	);
+});
+
 it("the poller returns source statuses without parent or message-activity augmentation", async () => {
 	const api = makeMockOpenCodeAPI();
 	vi.spyOn(api.session, "statuses").mockResolvedValue({

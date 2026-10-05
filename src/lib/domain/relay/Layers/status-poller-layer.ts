@@ -110,10 +110,23 @@ export const StatusPollerLive: Layer.Layer<
 					),
 				]),
 		};
+		const sessionProviders = yield* Ref.make<ReadonlyMap<string, string>>(
+			new Map(),
+		);
 		const readProjectedStatuses = (): Effect.Effect<
 			Record<string, SessionStatus>,
 			unknown
-		> => readQuery.getAllSessionStatuses().pipe(Effect.map(toStatusRecord));
+		> =>
+			Effect.gen(function* () {
+				const rows = yield* readQuery.getAllSessionStatusesWithProviders();
+				yield* Ref.set(
+					sessionProviders,
+					new Map(rows.map((row) => [row.id, row.provider])),
+				);
+				return toStatusRecord(
+					Object.fromEntries(rows.map((row) => [row.id, row.status])),
+				);
+			});
 		const pollerState = <A, E, R>(
 			effect: Effect.Effect<A, E, R | PollerStateTag>,
 		) => effect.pipe(Effect.provideService(PollerStateTag, stateRef));
@@ -233,6 +246,7 @@ export const StatusPollerLive: Layer.Layer<
 			stop: () => Ref.set(started, false),
 			drain: () => Ref.set(started, false),
 			getCurrentStatuses: () => pollerState(getCurrentStatuses),
+			getSessionProviders: () => Ref.get(sessionProviders),
 			isProcessing: (sessionId) =>
 				Effect.gen(function* () {
 					const parents = new Map(

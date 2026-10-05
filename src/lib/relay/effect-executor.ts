@@ -40,12 +40,15 @@ export function executeEffects(
 				});
 				break;
 
+			case "clear-processing":
 			case "notify-idle":
-				deps.processAndApplyDone(
-					effect.sessionId,
-					effect.isSubagent,
-					effect.busySince,
-				);
+				if (effect.effect === "notify-idle") {
+					deps.processAndApplyDone(
+						effect.sessionId,
+						effect.isSubagent,
+						effect.busySince,
+					);
+				}
 				deps.clearProcessingTimeout(effect.sessionId);
 				deps.clearMessageActivity(effect.sessionId);
 				break;

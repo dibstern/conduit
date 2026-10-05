@@ -233,6 +233,11 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
+	readonly getAllSessionStatusesWithProviders: () => Effect.Effect<
+		readonly Pick<SessionRow, "id" | "status" | "provider">[],
+		ReadQueryEffectError | SqlError
+	>;
+
 	readonly getSessionsForReconciliation: (
 		reportedIds: readonly string[],
 	) => Effect.Effect<
@@ -491,6 +496,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "getSession",
 							cause: e,
 						}),
+			),
+		);
+
+	const getAllSessionStatusesWithProviders = () =>
+		sql<Pick<SessionRow, "id" | "status" | "provider">>`
+			SELECT id, status, provider FROM sessions`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getAllSessionStatusesWithProviders",
+						cause,
+					}),
 			),
 		);
 
@@ -1094,6 +1111,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getGoalDetails,
 		getAllSessionStatuses,
+		getAllSessionStatusesWithProviders,
 		listSessions,
 		listSessionInfos,
 		getSessionLineage,

@@ -784,6 +784,7 @@ export function makeMockStatusPoller(
 		stop: vi.fn(() => Effect.void),
 		drain: vi.fn(() => Effect.void),
 		getCurrentStatuses: vi.fn(() => Effect.succeed({})),
+		getSessionProviders: vi.fn(() => Effect.succeed(new Map())),
 		isProcessing: vi.fn(() => Effect.succeed(false)),
 		markMessageActivity: vi.fn(() => Effect.void),
 		clearMessageActivity: vi.fn(() => Effect.void),

@@ -7,14 +7,12 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
-	OpenCodeModelService,
 	PollerManagerShape,
 	SessionManagerShape,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeModelServiceTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -25,6 +23,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
+	setDefaultModel,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -53,7 +52,6 @@ import {
 function makeSessionMetadataLayer(options: {
 	readonly api?: OpenCodeAPI;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
-	readonly modelService?: OpenCodeModelService;
 	readonly sessionMgr?: SessionManagerShape;
 	readonly sessionManagerService?: SessionManagerService;
 	readonly clientSession?: string;
@@ -63,32 +61,12 @@ function makeSessionMetadataLayer(options: {
 		makeHandlerOpenCodeAPI({
 			session: {
 				get: vi.fn(async () => {
-					throw new Error("session.get must come from model service");
+					throw new Error("session metadata must not call session.get");
 				}),
 			},
 			permission: { list: vi.fn(async () => []) },
 			question: { list: vi.fn(async () => []) },
 		});
-	const modelService =
-		options.modelService ??
-		({
-			listProviders: vi.fn(() =>
-				Effect.succeed({ connected: [], defaults: {}, providers: [] }),
-			),
-			getSession: vi.fn(() =>
-				Effect.succeed({
-					id: "session-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Session 1",
-					version: "1.0.0",
-					time: { created: 0, updated: 0 },
-					modelID: "gpt-4",
-					providerID: "openai",
-				}),
-			),
-			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
-		} satisfies OpenCodeModelService);
 	const wsHandler = makeMockWebSocketHandler(
 		options.clientSession === undefined
 			? {}
@@ -114,7 +92,6 @@ function makeSessionMetadataLayer(options: {
 	const baseLayer = Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:"),
 		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(OpenCodeModelServiceTag, modelService),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		Layer.succeed(LoggerTag, logger),
@@ -128,13 +105,12 @@ function makeSessionMetadataLayer(options: {
 	return {
 		api,
 		logger,
-		modelService,
 		wsHandler,
 		layer: baseLayer,
 	};
 }
 
-describe("session handlers with Effect-native model service", () => {
+describe("session handler metadata", () => {
 	for (const changed of [true, false]) {
 		it.effect(`refreshes viewed families only when changed=${changed}`, () => {
 			const service = makeMockSessionManagerService({
@@ -222,6 +198,7 @@ describe("session handlers with Effect-native model service", () => {
 			getGoalDetails: () =>
 				Effect.succeed({ checks: [], tokensSinceStart: null }),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -296,25 +273,28 @@ describe("session handlers with Effect-native model service", () => {
 		);
 	}
 
-	it.effect("loads session model metadata through the model service", () => {
-		const { api, modelService, wsHandler, layer } = makeSessionMetadataLayer(
-			{},
-		);
+	it.effect(
+		"sends session metadata without querying OpenCode session models",
+		() => {
+			const { api, wsHandler, layer } = makeSessionMetadataLayer({});
 
-		return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(modelService.getSession).toHaveBeenCalledWith("session-1");
-				expect(api.session.get).not.toHaveBeenCalled();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_info",
-					sessionId: "session-1",
-					model: "gpt-4",
-					provider: "openai",
-				});
-			}),
-		);
-	});
+			return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(api.session.get).not.toHaveBeenCalled();
+					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
+						type: "session.goal_changed",
+						sessionId: "session-1",
+						goal: null,
+					});
+					expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type: "model_info" }),
+					);
+				}),
+			);
+		},
+	);
 
 	it.effect(
 		"reports processing when the Effect timeout state has an active turn",
@@ -490,7 +470,7 @@ describe("session handlers with Effect-native model service", () => {
 	});
 
 	it.effect(
-		"logs model metadata lookup failures and still sends session lists",
+		"logs permission metadata lookup failures and still sends session lists",
 		() => {
 			const legacySendSessionLists = vi.fn(async () => {
 				throw new Error("legacy session manager sendDual should not be called");
@@ -499,20 +479,16 @@ describe("session handlers with Effect-native model service", () => {
 				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const logger = makeMockLogger();
-			const modelService: OpenCodeModelService = {
-				listProviders: vi.fn(() =>
-					Effect.succeed({ connected: [], defaults: {}, providers: [] }),
-				),
-				getSession: vi.fn(() =>
-					Effect.tryPromise(async () => {
-						throw new Error("session metadata unavailable");
+			const api = makeHandlerOpenCodeAPI({
+				permission: {
+					list: vi.fn(async () => {
+						throw new Error("permission metadata unavailable");
 					}),
-				),
-				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
-			};
+				},
+			});
 			const { wsHandler, layer } = makeSessionMetadataLayer({
 				logger,
-				modelService,
+				api,
 				sessionMgr: makeMockSessionManagerShape({
 					sendSessionLists: legacySendSessionLists,
 				}),
@@ -523,7 +499,9 @@ describe("session handlers with Effect-native model service", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(logger.warn).toHaveBeenCalledWith(
-						expect.stringContaining("Failed to get model info for session-1:"),
+						expect.stringContaining(
+							"Failed to replay pending permissions for session-1:",
+						),
 					);
 					expect(wsHandler.sendTo).not.toHaveBeenCalledWith("client-1", {
 						type: "model_info",
@@ -537,37 +515,26 @@ describe("session handlers with Effect-native model service", () => {
 		},
 	);
 
-	it.effect("does not send model_info when the session has no model id", () => {
-		const modelService: OpenCodeModelService = {
-			listProviders: vi.fn(() =>
-				Effect.succeed({ connected: [], defaults: {}, providers: [] }),
-			),
-			getSession: vi.fn(() =>
-				Effect.succeed({
-					id: "session-1",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "Session 1",
-					version: "1.0.0",
-					time: { created: 0, updated: 0 },
-				}),
-			),
-			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
-		};
-		const { wsHandler, layer } = makeSessionMetadataLayer({ modelService });
+	it.effect(
+		"session selection does not resend model_info even with a relay default",
+		() => {
+			const { api, wsHandler, layer } = makeSessionMetadataLayer({});
 
-		return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(modelService.getSession).toHaveBeenCalledWith("session-1");
-				expect(wsHandler.sendTo).not.toHaveBeenCalledWith("client-1", {
-					type: "model_info",
-					model: "gpt-4",
-					provider: "openai",
-				});
-			}),
-		);
-	});
+			return Effect.gen(function* () {
+				yield* setDefaultModel({ providerID: "openai", modelID: "gpt-4" });
+				yield* handleViewSession("client-1", { sessionId: "session-1" });
+			}).pipe(
+				Effect.provide(layer),
+				Effect.tap(() => {
+					expect(api.session.get).not.toHaveBeenCalled();
+					expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
+						"client-1",
+						expect.objectContaining({ type: "model_info" }),
+					);
+				}),
+			);
+		},
+	);
 });
 
 // A switch also fires on restore, reload and reconnect, so it writes no read

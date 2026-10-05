@@ -44,7 +44,7 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
-		"loads providers and active-session model info without requiring the Promise OpenCode API tag",
+		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -70,18 +70,6 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn((sessionId: string) =>
-					Effect.succeed({
-						id: sessionId,
-						projectID: "project-1",
-						directory: "/tmp/project",
-						title: "Session 1",
-						version: "1.0.0",
-						time: { created: 0, updated: 0 },
-						modelID: "gpt-4",
-						providerID: "openai",
-					}),
-				),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -96,11 +84,16 @@ describe("model handlers with Effect-native model service", () => {
 				makeOverridesStateLive(),
 			);
 
-			return sendModelsStateToClient("client-1").pipe(
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				yield* sendModelsStateToClient("client-1");
+			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
-					expect(modelService.getSession).toHaveBeenCalledWith("session-1");
 					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "model_info",
 						sessionId: "session-1",
@@ -138,7 +131,6 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const engine = withDispatchEffect({
@@ -172,7 +164,6 @@ describe("model handlers with Effect-native model service", () => {
 				yield* sendModelsStateToClient("client-1");
 
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(modelService.getSession).not.toHaveBeenCalled();
 				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 					type: "model_list",
 					providers: [
@@ -233,7 +224,6 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -298,7 +288,6 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -363,7 +352,6 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 

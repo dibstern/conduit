@@ -20,6 +20,7 @@ export function assembleContext(
 	parentMap: ReadonlyMap<string, string>,
 	hasViewers: (sessionId: string) => boolean,
 	now: number,
+	providerStreamsLifecycle = false,
 ): SessionEvalContext {
 	return {
 		now,
@@ -28,6 +29,7 @@ export function assembleContext(
 		lastSSEEventAt: sseTracker.getLastEventAt(sessionId),
 		isSubagent: parentMap.has(sessionId),
 		hasViewers: hasViewers(sessionId),
+		providerStreamsLifecycle,
 	};
 }
 
@@ -41,13 +43,45 @@ export function evaluateSession(
 	readonly effects: readonly MonitoringEffect[];
 } {
 	const isBusy = ctx.status.type === "busy" || ctx.status.type === "retry";
+	const effects: MonitoringEffect[] = [];
+	if (ctx.providerStreamsLifecycle) {
+		if (current.phase === "busy-polling") {
+			effects.push({
+				effect: "stop-poller",
+				sessionId,
+				reason: isBusy
+					? "provider-now-covering"
+					: ctx.hasViewers
+						? "idle-has-viewers"
+						: "idle-no-viewers",
+			});
+		}
+		if (!isBusy) {
+			if (current.phase !== "idle") {
+				effects.push({ effect: "clear-processing", sessionId });
+			}
+			return { phase: { phase: "idle" }, effects };
+		}
+		if (current.phase === "idle") {
+			effects.push({ effect: "notify-busy", sessionId });
+		}
+		return {
+			phase:
+				current.phase === "busy-provider-covered"
+					? current
+					: {
+							phase: "busy-provider-covered",
+							busySince: current.phase === "idle" ? ctx.now : current.busySince,
+						},
+			effects,
+		};
+	}
 	const sse: SSECoverage = deriveSSECoverage(
 		ctx.sseConnected,
 		ctx.lastSSEEventAt,
 		ctx.now,
 		config.sseActiveThresholdMs,
 	);
-	const effects: MonitoringEffect[] = [];
 
 	switch (current.phase) {
 		case "idle": {
@@ -69,6 +103,7 @@ export function evaluateSession(
 			};
 		}
 
+		case "busy-provider-covered":
 		case "busy-grace": {
 			if (!isBusy) {
 				effects.push({
@@ -313,7 +348,9 @@ export function evaluateAll(
 					reason: "session-deleted",
 				});
 			}
-			if (phase.phase !== "idle") {
+			if (phase.phase === "busy-provider-covered") {
+				effects.push({ effect: "clear-processing", sessionId });
+			} else if (phase.phase !== "idle") {
 				effects.push({
 					effect: "notify-idle",
 					sessionId,

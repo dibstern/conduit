@@ -6,7 +6,6 @@ import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-i
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeModelServiceTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -48,7 +47,7 @@ interface ForkSessionPayload {
 }
 
 /**
- * Send metadata (model info, permissions, questions, viewed family) to a client.
+ * Send metadata (permissions, questions, viewed family) to a client.
  * These are supplementary data to the transcript and selection RPCs.
  */
 const sendSessionMetadata = (clientId: string, id: string) =>
@@ -56,7 +55,6 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const modelService = yield* OpenCodeModelServiceTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const family = yield* sessionManagerService.getSessionFamily(id);
@@ -74,27 +72,6 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		// Run all metadata sends concurrently, catching errors individually
 		yield* Effect.all(
 			[
-				// Model info
-				Effect.gen(function* () {
-					const session = yield* modelService.getSession(id);
-					if (session.modelID) {
-						wsHandler.sendTo(clientId, {
-							type: "model_info",
-							sessionId: id,
-							model: session.modelID,
-							provider: session.providerID ?? "",
-						});
-					}
-				}).pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to get model info for ${id}: ${err instanceof Error ? err.message : err}`,
-							),
-						),
-					),
-				),
-
 				// Pending permissions (service + API)
 				Effect.gen(function* () {
 					const bridgePending =

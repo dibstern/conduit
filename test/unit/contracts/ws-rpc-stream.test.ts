@@ -102,6 +102,7 @@ const makeLayer = (options: {
 					getGoalDetails: () =>
 						Effect.succeed({ checks: [], tokensSinceStart: null }),
 					getAllSessionStatuses: () => Effect.succeed({}),
+					getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 					listSessions: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),
