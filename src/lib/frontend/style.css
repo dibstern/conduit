@@ -541,18 +541,18 @@ body:has(dialog:modal) {
 
 /* On phones, the grid moves the title beside the back control in the island.
    The <h1> stays mounted throughout. Expanded, row 1 is back then a
-   right-aligned group of identity and Views, and the title owns row 2. DOM,
-   focus, and visual order match: identity and Views come before the title on
+   right-aligned segmented group and overflow, and the title owns row 2. DOM,
+   focus, and visual order match: the group and overflow precede the title on
    phones and after it on desktop.
 
    `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` floors at its content's
    width, and the title and the project identity both have to be allowed to
-   truncate instead of pushing the back control or Views off the edge. */
+   truncate instead of pushing the back control or overflow off the edge. */
 #session-bar {
 	display: grid;
 	grid-template-columns: auto minmax(0, 1fr) auto;
 	grid-template-areas:
-		"back  meta  views"
+		"back  meta  more"
 		"title title title";
 	align-items: center;
 	column-gap: 6px;
@@ -646,9 +646,6 @@ body:has(dialog:modal) {
 #session-bar-more {
 	grid-area: more;
 }
-#session-bar-views-button {
-	grid-area: views;
-}
 
 /* Desktop keeps the same controls mounted in one row. Only the title row grows:
    the title, its ▾ and chip hug each other on its left, and its growth pushes
@@ -685,14 +682,9 @@ body:has(dialog:modal) {
 }
 #session-bar[data-compact="false"] #session-bar-meta {
 	flex: 0 100 auto;
-	/* Yield first, but keep a readable stub of the branch; the narrowest
-	   container query hides it outright rather than squeezing it to nothing. */
-	min-width: 96px;
-	/* A floor for yielding, never padding: a shorter identity keeps its own
-	   width so the skills chip before it sits flush. Browsers without
-	   calc-size() keep the plain floor and show a gap instead. */
-	min-width: calc-size(max-content, min(size, 96px));
-	overflow: hidden;
+	/* Floor at the contents' minimum (the pill's 4-letter floor plus the fixed
+	   controls), so the title yields next instead of the controls overflowing. */
+	min-width: auto;
 }
 #session-bar[data-compact="false"] #session-bar-settle {
 	flex: none;
@@ -704,9 +696,6 @@ body:has(dialog:modal) {
 @container session-bar (max-width: 600px) {
 	#client-count-badge {
 		display: none;
-	}
-	#session-bar-meta [data-testid="session-bar-identity"] {
-		max-width: 96px;
 	}
 }
 @container session-bar (max-width: 500px) {
@@ -722,9 +711,6 @@ body:has(dialog:modal) {
 	}
 }
 @container session-bar (max-width: 390px) {
-	#session-bar-meta.desktop-session-identity {
-		display: none;
-	}
 	#session-bar-title-row [data-testid="session-bar-state-chip"] {
 		min-width: 28px;
 		min-height: 32px;

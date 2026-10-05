@@ -68,10 +68,10 @@ for (const mode of [
 				await page.getByTestId("session-bar-settle").hover();
 				await expect(page.getByRole("tooltip")).toContainText("s · ⌘⇧E");
 			} else {
-				await page.getByTestId("session-bar-views-button").tap();
+				await page.getByTestId("session-bar-island-overflow").tap();
 				await expect(
 					page
-						.getByTestId("session-bar-views-sheet")
+						.getByTestId("session-bar-island-menu")
 						.locator(".shortcut-hint")
 						.first(),
 				).toBeHidden();

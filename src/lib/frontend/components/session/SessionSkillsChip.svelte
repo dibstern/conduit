@@ -23,7 +23,7 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { presentation }: { presentation: "sheet" | "popover" } = $props();
+	let { presentation, segmented = false }: { presentation: "sheet" | "popover"; segmented?: boolean } = $props();
 	const menuId = $props.id();
 	let open = $state(false);
 	let detailName = $state<string | null>(null);
@@ -182,15 +182,16 @@
 		data-testid="session-skills-menu"
 	>
 		{#snippet trigger({ props })}
-			<!-- Sized like Views beside it; touchTarget gives the 44px phone hit area. -->
+			<!-- The group owns the border; the phone hit area stays 44px. -->
 			<Button
 				{...props}
 				id="session-skills-chip"
-				variant="secondary"
-				size="sm"
+				variant={segmented ? "ghost" : "secondary"}
+				size={segmented ? "content" : "sm"}
 				icon="sparkles"
+				iconSize={segmented ? 12 : 14}
 				touchTarget
-				class="shrink-0 tabular-nums"
+				class="shrink-0 tabular-nums {segmented ? 'h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium' : ''}"
 				ariaLabel={label}
 				title={label}
 				data-testid="session-skills-chip"
