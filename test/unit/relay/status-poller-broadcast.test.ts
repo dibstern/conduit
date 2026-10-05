@@ -42,6 +42,7 @@ interface MockOpenCode {
 
 async function createMockOpenCode(): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
+	let eventId = 0;
 	// All sessions start idle
 	const sessionStatuses: Record<string, { type: string }> = {
 		"sess-A": { type: "idle" },
@@ -86,13 +87,15 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 	function handler(req: IncomingMessage, res: ServerResponse) {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
-		if (url.pathname === "/event") {
+		if (url.pathname === "/global/event") {
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
 				Connection: "keep-alive",
 			});
-			res.write(": heartbeat\n\n");
+			res.write(
+				`data: ${JSON.stringify({ payload: { id: "evt_connected", type: "server.connected", properties: {} } })}\n\n`,
+			);
 			sseClients.add(res);
 			req.on("close", () => sseClients.delete(res));
 			return;
@@ -201,7 +204,10 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		sseClients,
 		sessionStatuses,
 		injectSSE(event) {
-			const data = JSON.stringify(event);
+			const data = JSON.stringify({
+				directory: process.cwd(),
+				payload: { id: `evt_${++eventId}`, ...event },
+			});
 			for (const client of sseClients) {
 				client.write(`data: ${data}\n\n`);
 			}

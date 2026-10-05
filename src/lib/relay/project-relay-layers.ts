@@ -1,5 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { makeOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -59,6 +61,7 @@ import {
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { createSdkClientEffect } from "../instance/sdk-factory.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
@@ -220,8 +223,22 @@ export function createProjectRelayLayers({
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
+	const sharedInstances = config.openCodeInstances;
+	const openCodeInstancesLayer = sharedInstances
+		? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
+		: makeOpenCodeInstancesLive(
+				createSdkClientEffect({
+					baseUrl: config.opencodeUrl,
+					...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
+				}).pipe(
+					Effect.map(({ client }) => ({
+						event: { subscribe: (options) => client.global.event(options) },
+					})),
+				),
+				config.log?.child("opencode"),
+			);
 	const sseStreamLayer = SSEStreamLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, loggerLayer)),
+		Layer.provide(Layer.mergeAll(openCodeInstancesLayer, configLayer)),
 	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
