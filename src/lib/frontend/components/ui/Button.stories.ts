@@ -25,7 +25,10 @@ const meta = {
 		tone: { control: "select", options: BUTTON_TONES },
 		hoverFill: { control: "select", options: BUTTON_HOVER_FILLS },
 		disabledStyle: { control: "select", options: BUTTON_DISABLED_STYLES },
-		size: { control: "inline-radio", options: ["sm", "md", "content"] },
+		size: {
+			control: "inline-radio",
+			options: ["sm", "md", "segment", "content"],
+		},
 		icon: { control: "text" },
 		iconOnly: { control: "boolean" },
 		loading: { control: "boolean" },

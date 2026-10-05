@@ -49,8 +49,8 @@
 	{#snippet trigger({ props })}
 		<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
-		<span class="inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="content" touchTarget align="start"
-			class="git-pill h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium {sessionViewState.compact ? 'git-pill-phone' : ''}"
+		<span class="inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start"
+			class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''}"
 			style={`min-width: ${minimumWidth}`}
 			title={label} ariaLabel={`Checkout: ${label}`} data-testid="session-bar-identity">
 			<span class="flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
