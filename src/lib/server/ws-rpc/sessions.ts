@@ -72,6 +72,7 @@ export const sessionsHandlers = {
 				...(request.search !== undefined ? { search: request.search } : {}),
 				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 				...(request.scope !== undefined ? { scope: request.scope } : {}),
+				...(request.exclude !== undefined ? { exclude: request.exclude } : {}),
 			});
 			return {
 				projectSlug: request.projectSlug,

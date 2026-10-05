@@ -18,7 +18,11 @@ import type {
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
 import { sessionFamilyQuery } from "../session-family-query.js";
-import { messageRowsToHistory } from "../session-history-adapter.js";
+import {
+	messageRowsToHistory,
+	toolOutputText,
+} from "../session-history-adapter.js";
+import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
 const decodeGoalState = Schema.decodeUnknownSync(
 	Schema.parseJson(SessionGoalChangedPayloadSchema),
@@ -480,7 +484,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const rows = yield* sql<{ content: string }>`
 				SELECT content FROM tool_content WHERE tool_id = ${toolId}`;
-			return rows[0]?.content;
+			if (rows[0]) return rows[0].content;
+			// Nothing writes tool_content any more: the part keeps the whole
+			// output, and transcripts ship a preview of it.
+			const parts = yield* sql<{ result: string }>`
+				SELECT result FROM message_parts
+				WHERE type = 'tool' AND call_id = ${toolId} AND result IS NOT NULL
+				LIMIT 1`;
+			return parts[0] && toolOutputText(parts[0].result);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -687,28 +698,47 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (opts) =>
 		Effect.gen(function* () {
-			const [rows, lineage, approvals, projectedStatuses] = yield* Effect.all([
-				listSessions(opts),
-				getSessionLineage(),
+			const rows = yield* listSessions(opts);
+			// Roll-ups (busy, unread, pending counts) only need the listed rows and
+			// their descendants. Reading lineage and status for every session made
+			// each page cost a full scan of the store, twice.
+			const [family, approvals] = yield* Effect.all([
+				sql<{
+					id: string;
+					parent_id: string | null;
+					status: string;
+					unread: number;
+				}>`
+					WITH RECURSIVE family(id) AS (
+						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
+						UNION
+						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
+					)
+					SELECT id, parent_id, status, unread FROM sessions JOIN family USING (id)`,
 				countPendingApprovalsBySession(),
-				getAllSessionStatuses(),
-			]);
+			]).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ReadQueryEffectError
+						? cause
+						: new ReadQueryEffectError({
+								operation: "listSessionInfos",
+								cause,
+							}),
+				),
+			);
 			const pending = pendingApprovalCountsByType(approvals);
 			return sessionRowsToSessionInfoList(rows, {
 				parentMap: new Map(
-					lineage.rows.flatMap((row) =>
+					family.flatMap((row) =>
 						row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
 					),
 				),
 				unreadSessionIds: new Set(
-					lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
+					family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 				),
 				statuses: {
 					...Object.fromEntries(
-						Object.entries(projectedStatuses).map(([id, type]) => [
-							id,
-							{ type },
-						]),
+						family.map((row) => [row.id, { type: row.status }]),
 					),
 					...opts?.statuses,
 				},
@@ -721,31 +751,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		});
 
 	const listPendingClaudeQuestionTools = () =>
-		sql<PendingClaudeQuestionToolRow>`
-			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
-			FROM message_parts mp
-			JOIN messages m ON m.id = mp.message_id
-			JOIN sessions s ON s.id = m.session_id
-			WHERE s.provider = 'claude'
-				AND mp.type = 'tool'
-				AND mp.tool_name = 'AskUserQuestion'
-				AND mp.status IN ('started', 'running', 'pending')
-				-- A later user message means the conversation moved on (e.g. after a
-				-- crash), so the question is abandoned rather than still pending.
-				AND NOT EXISTS (
-					SELECT 1 FROM messages later
-					WHERE later.session_id = m.session_id
-						AND later.role = 'user'
-						AND later.created_at > m.created_at
-				)`.pipe(
-			Effect.mapError(
-				(cause) =>
-					new ReadQueryEffectError({
-						operation: "listPendingClaudeQuestionTools",
-						cause,
-					}),
-			),
-		);
+		sql
+			.unsafe<PendingClaudeQuestionToolRow>(pendingClaudeQuestionToolsQuery)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({
+							operation: "listPendingClaudeQuestionTools",
+							cause,
+						}),
+				),
+			);
 
 	const getPendingClaudeQuestionTool = (sessionId: string, callId: string) =>
 		sql<PendingClaudeQuestionToolRow>`

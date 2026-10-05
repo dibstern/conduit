@@ -231,7 +231,8 @@ export const listDaemonSessions = (
 	Effect.gen(function* () {
 		const projects = (yield* allProjects).filter(
 			(project) =>
-				options.scope === undefined || project.slug === options.scope,
+				(options.scope === undefined || project.slug === options.scope) &&
+				project.slug !== options.exclude,
 		);
 		const limit =
 			options.limit === undefined

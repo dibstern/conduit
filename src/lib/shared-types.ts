@@ -331,6 +331,9 @@ export interface DaemonSessionQueryOptions {
 	/** Read one project only. Filtering the merged page instead would leave a
 	 *  scoped list with a handful of rows per page, and paging would stall. */
 	readonly scope?: string;
+	/** Skip one project. The browser already holds its own project's roots
+	 *  from the shell feed, so those rows would only be fetched and dropped. */
+	readonly exclude?: string;
 }
 
 export interface DaemonSessionCursor {
@@ -417,6 +420,9 @@ export interface HistoryMessagePart {
 		status?: ToolStatus;
 		input?: unknown;
 		output?: string;
+		/** `output` is a preview; GetToolContent serves the full text. */
+		isTruncated?: boolean;
+		fullContentLength?: number;
 		error?: string;
 		[key: string]: unknown;
 	};

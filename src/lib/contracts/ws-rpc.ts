@@ -1454,6 +1454,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			search: Schema.optional(Schema.String),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
 			scope: Schema.optional(NonEmptyString),
+			exclude: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}

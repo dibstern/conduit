@@ -115,6 +115,7 @@ export const subscribeSessionDetail = (options: {
 								// carries instead of borrowing the read's counter.
 								rows: messageRowsToHistory(result.messages, {
 									pageSize: result.messages.length,
+									toolOutputPreview: true,
 								}).messages.map((message, index) => ({
 									item: {
 										_tag: "transcriptMessage" as const,

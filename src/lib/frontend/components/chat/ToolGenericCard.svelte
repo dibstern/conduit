@@ -3,63 +3,26 @@
 
 <script lang="ts">
 	import type { ToolMessage } from "../../types.js";
-	import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../../ui-constants.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
-	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	import Button from "../ui/Button.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 	import Surface from "../ui/Surface.svelte";
+	import ToolOutputMore from "./ToolOutputMore.svelte";
 
 	let { message }: {
 		message: ToolMessage;
 	} = $props();
 
 	let expanded = $state(false);
-	let loadingFullContent = $state(false);
-	let loadingTimeout: ReturnType<typeof setTimeout> | undefined;
 	const glowClass = $derived.by(() => {
 		if (message.status === "error") return "glow-tool-error";
 		if (message.status === "completed") return "glow-brand-b";
 		if (message.status === "running") return "glow-tool-running";
 		return "";
-	});
-
-	function formatKB(length: number): string {
-		return `${(length / 1024).toFixed(1)} KB`;
-	}
-
-	function requestFullContent() {
-		const slug = getCurrentSlug();
-		if (!slug) return;
-		loadingFullContent = true;
-		clearTimeout(loadingTimeout);
-		loadingTimeout = setTimeout(() => {
-			loadingFullContent = false;
-		}, TOOL_CONTENT_LOAD_TIMEOUT_MS);
-		void getToolContentRpc({ projectSlug: slug, toolId: message.id })
-			.then((response) => {
-				applyToolContentResponse(response);
-				loadingFullContent = false;
-				clearTimeout(loadingTimeout);
-			})
-			.catch(() => {
-				loadingFullContent = false;
-				clearTimeout(loadingTimeout);
-			});
-	}
-
-	$effect(() => {
-		if (!message.isTruncated) {
-			loadingFullContent = false;
-			clearTimeout(loadingTimeout);
-		}
 	});
 
 	function handleToggle() {
@@ -187,25 +150,6 @@
 			{#if bashCommand}<span class="text-text-muted">$ {bashCommand}</span>{#if message.result}{"\n\n"}{/if}{/if}{#if message.result}{message.result}{/if}
 		</Surface>
 
-		{#if message.isTruncated && message.result}
-			<div class="flex items-center gap-2 mx-2.5 mt-1 mb-1 text-xs text-text-dimmer">
-				<span class="font-mono">
-					Showing {formatKB(message.result.length)} of {formatKB(message.fullContentLength ?? message.result.length)}
-				</span>
-				<Button
-					variant="accent-soft"
-					size="content"
-					class="px-2 py-0.5 rounded text-xs font-medium"
-					onclick={requestFullContent}
-					disabled={loadingFullContent}
-				>
-					{#if loadingFullContent}
-						Loading…
-					{:else}
-						Show full output
-					{/if}
-				</Button>
-			</div>
-		{/if}
+		<ToolOutputMore {message} class="mx-2.5 mt-1 mb-1" />
 	{/if}
 </div>

@@ -32,6 +32,8 @@ import {
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	STARTUP_RESTORE_INDEXES_MIGRATION,
+	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -995,6 +997,12 @@ export const effectMigrationEntries = {
 		if (columns.some((column) => column.name === "goal_state")) return;
 		yield* executeSqlStatements(readMigrationSql(SESSION_GOALS_MIGRATION));
 	}),
+	"0031_startup_restore_indexes": executeSqlStatements(
+		readMigrationSql(STARTUP_RESTORE_INDEXES_MIGRATION),
+	),
+	"0032_tool_call_index": executeSqlStatements(
+		readMigrationSql(TOOL_CALL_INDEX_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

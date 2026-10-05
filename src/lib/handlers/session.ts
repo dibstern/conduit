@@ -600,6 +600,7 @@ export const loadMoreHistoryForSession = ({
 			sessionId,
 			messages: messageRowsToHistory(page.messages, {
 				pageSize: page.messages.length,
+				toolOutputPreview: true,
 			}).messages,
 			hasMore: page.hasMore,
 		};
