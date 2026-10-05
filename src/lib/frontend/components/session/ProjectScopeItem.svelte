@@ -1,5 +1,6 @@
 <!-- One project in the scope picker. Three ways to remove it, all through the -->
 <!-- same confirm: the ✕ on hover, a left swipe on touch, or Delete/Backspace. -->
+<!-- The pencil beside it, or F2, opens the project in the Edit dialog.        -->
 
 <script lang="ts">
 	import { onDestroy } from "svelte";
@@ -9,9 +10,10 @@
 	import Icon from "../ui/Icon.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 
-	let { project, onremove }: {
+	let { project, onremove, onedit }: {
 		project: ProjectInfo;
 		onremove: (slug: string) => void;
+		onedit: (project: ProjectInfo) => void;
 	} = $props();
 
 	// A touch release can still fire a click on the row; that click must not
@@ -56,7 +58,13 @@
 		if (remove) onremove(project.slug);
 	}
 
+	// F2, not a letter: letters belong to the menu's typeahead.
 	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === "F2") {
+			event.preventDefault();
+			onedit(project);
+			return;
+		}
 		if (event.key !== "Delete" && event.key !== "Backspace") return;
 		event.preventDefault();
 		onremove(project.slug);
@@ -93,7 +101,7 @@
 		value={project.slug}
 		class="group min-h-[44px] md:min-h-0 {offset < 0 ? 'bg-bg-alt' : ''} {dragging ? '' : 'transition-transform duration-150 motion-reduce:transition-none'}"
 		style="touch-action: pan-y; transform: translateX({offset}px);"
-		aria-keyshortcuts="Delete"
+		aria-keyshortcuts="Delete F2"
 		onkeydown={handleKeydown}
 	>
 		<!-- The token beside each name teaches the typed form by use. -->
@@ -101,6 +109,28 @@
 			<span class="truncate">{project.title || project.slug}</span>
 			<span class="flex shrink-0 items-center gap-[6px]">
 			<span class="font-mono text-xs text-text-dimmer">project:{project.slug}</span>
+			<!-- Same reveal as the ✕ on desktop; touch has no hover, so phones and
+			     coarse pointers always show it, with a 44px hit area on phones. -->
+			<Button
+				variant="toolbar"
+				size="content"
+				iconOnly
+				icon="pencil"
+				iconSize={11}
+				touchTarget
+				class="h-[16px] w-[16px] shrink-0 rounded-full md:pointer-fine:invisible md:group-hover:visible md:group-data-highlighted:visible"
+				title="Edit project"
+				ariaLabel="Edit {project.title || project.slug}"
+				aria-hidden="true"
+				tabindex={-1}
+				data-testid="session-scope-edit"
+				onpointerdown={(event: PointerEvent) => event.stopPropagation()}
+				onpointerup={(event: PointerEvent) => event.stopPropagation()}
+				onclick={(event: MouseEvent) => {
+					event.stopPropagation();
+					onedit(project);
+				}}
+			/>
 			<!-- Desktop holds its slot while hidden so nothing shifts on hover;
 			     phones swipe instead. Pointer-only: keyboard users press Delete
 			     on the row, so the button stays out of the focus order and the

@@ -26,11 +26,21 @@ const withFolders = (
 	name: draft.nameEdited ? draft.name : mainName(folders),
 });
 
-export const createDraft = (): ProjectDraft => ({
-	name: "",
-	nameEdited: false,
-	folders: [],
-});
+/** An empty draft for Add, or one prefilled from an existing project for Edit. */
+export const createDraft = (project?: {
+	title: string;
+	folders?: readonly string[];
+	directory?: string;
+}): ProjectDraft => {
+	if (!project) return { name: "", nameEdited: false, folders: [] };
+	const folders =
+		project.folders ?? (project.directory ? [project.directory] : []);
+	return {
+		name: project.title || mainName(folders),
+		nameEdited: true,
+		folders,
+	};
+};
 
 export const addFolder = (draft: ProjectDraft, folder: ProjectFolderInput) => {
 	const folders = [...draft.folders, folder];

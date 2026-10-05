@@ -315,3 +315,55 @@ export const SuggestionsOpen: Story = {
 		await expect(within(group).getAllByRole("option")).toHaveLength(3);
 	},
 };
+
+const editedProject = {
+	slug: "conduit",
+	title: "Conduit",
+	directory: app,
+	folders: [app, docs],
+};
+
+export const Edit: Story = {
+	args: {
+		project: editedProject,
+		projects: [editedProject],
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.getByRole("dialog", { name: "Edit project" }),
+		).toBeVisible();
+		await expect(
+			canvas
+				.getAllByTestId("project-folder-row")
+				.map((row) => row.getAttribute("aria-label")),
+		).toEqual([`Main folder: ${app}`, `Extra folder: ${docs}`]);
+		const name = canvas.getByRole("textbox", { name: "Project name" });
+		await expect(name).toHaveValue("Conduit");
+		const save = canvas.getByRole("button", { name: "Save" });
+		await expect(save).toBeDisabled();
+		await expect(canvas.queryByRole("alert")).toBeNull();
+		await userEvent.type(
+			canvas.getByRole("combobox", { name: "Add folder" }),
+			notes,
+		);
+		await userEvent.click(
+			await canvas.findByRole("option", { name: /New folder/ }),
+		);
+		await expect(save).toBeEnabled();
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Remove folder: ${notes}` }),
+		);
+		await expect(save).toBeDisabled();
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Make main: ${docs}` }),
+		);
+		await expect(name).toHaveValue("Conduit");
+		await userEvent.click(save);
+		await expect(args["saveProject"]).toHaveBeenCalledWith({
+			slug: "conduit",
+			title: "Conduit",
+			folders: [docs, app],
+		});
+	},
+};

@@ -70,6 +70,7 @@ const LIGHT_STORY_IDS = new Set([
 	"project-projectdialog--errors",
 	"project-projectdialog--warnings",
 	"project-projectdialog--suggestions-open",
+	"project-projectdialog--edit",
 	"session-sessionverbitems--sheet",
 	"layout-sessionbar--collapsed",
 	"layout-sessionbar--overflow-menu-open",

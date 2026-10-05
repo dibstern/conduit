@@ -11,6 +11,7 @@
 		check,
 		createDraft,
 		folderPath,
+		isDirty,
 		makeMain,
 		removeFolder,
 		rename,
@@ -34,6 +35,7 @@
 
 	let {
 		open,
+		project,
 		projects = [],
 		onclose,
 		onsaved,
@@ -42,6 +44,8 @@
 		saveProject = saveProjectRpc,
 	}: {
 		open: boolean;
+		/** Opens the dialog in Edit mode for this project. */
+		project?: ProjectInfo | undefined;
 		projects?: readonly ProjectInfo[];
 		onclose: () => void;
 		onsaved?: (response: SaveProjectResponse) => void;
@@ -81,13 +85,16 @@
 	const newFolder = $derived(entries.find((entry) => !entry.exists));
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
 	const expanded = $derived(choices.length > 0);
-	const issues = $derived(check(draft, projects));
+	const original = $derived(createDraft(project));
+	const issues = $derived(check(draft, projects.filter(({ slug }) => slug !== project?.slug)));
 	const errors = $derived([
 		...(draft.folders.length || attemptedSave ? issues.errors : []),
 		...addIssues,
 		...saveIssues,
 	]);
-	const canSave = $derived(!saving && issues.errors.length === 0 && !issues.nameError);
+	const canSave = $derived(
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original)),
+	);
 
 	onMount(() => {
 		const phone = window.matchMedia("(max-width: 767px)");
@@ -116,7 +123,7 @@
 			saveVersion++;
 			return;
 		}
-		draft = createDraft();
+		draft = original;
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -200,13 +207,17 @@
 	async function save(): Promise<void> {
 		if (saving) return;
 		attemptedSave = true;
-		if (issues.errors.length || issues.nameError) return;
+		if (!canSave) return;
 		const version = ++saveVersion;
 		saving = true;
 		saveIssues = [];
 		saveError = "";
 		try {
-			const response = await saveProject({ title: draft.name, folders: draft.folders });
+			const response = await saveProject({
+				...(project ? { slug: project.slug } : {}),
+				title: draft.name,
+				folders: draft.folders,
+			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
 			onclose();
@@ -261,7 +272,7 @@
 		onkeydown={handleKeydown}
 	>
 		<header class="flex shrink-0 items-center gap-[8px]">
-			<h2 id={titleId} class="flex-1 text-[14px] font-semibold text-text">Add project</h2>
+			<h2 id={titleId} class="flex-1 text-[14px] font-semibold text-text">{project ? "Edit project" : "Add project"}</h2>
 			<div class="w-[150px] min-w-0">
 				<TextInput aria-label="Project name" aria-describedby={issues.nameError ? `${uid}-name-error` : undefined} invalid={Boolean(issues.nameError)} placeholder="Project name" size="content" class="h-[28px] px-[8px] text-[12px] max-md:h-[44px] max-md:text-[16px]" value={draft.name} disabled={saving} oninput={(event) => changed(rename(draft, event.currentTarget.value))} />
 			</div>
@@ -356,7 +367,7 @@
 		</div>
 		<footer class="flex shrink-0 justify-end gap-[7px] pt-[2px] max-md:pb-[env(safe-area-inset-bottom)]">
 			<Button variant="secondary" size="md" class="max-md:min-h-[44px]" disabled={saving} onclick={onclose}>Cancel</Button>
-			<Button variant="primary" size="md" ariaLabel="Add project" class="max-md:min-h-[44px]" loading={saving} disabled={!canSave} onclick={() => void save()}>Add project <span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span></Button>
+			<Button variant="primary" size="md" ariaLabel={project ? "Save" : "Add project"} class="max-md:min-h-[44px]" loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} <span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span></Button>
 		</footer>
 	</Surface>
 </Dialog>
