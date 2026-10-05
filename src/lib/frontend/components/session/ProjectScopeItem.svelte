@@ -134,14 +134,16 @@
 			<!-- Desktop holds its slot while hidden so nothing shifts on hover;
 			     phones swipe instead. Pointer-only: keyboard users press Delete
 			     on the row, so the button stays out of the focus order and the
-			     a11y tree. Press events stop here or the row would select. -->
+			     a11y tree. Press events stop here or the row would select.
+			     layout="flow": Button's default inline-flex would beat `hidden`. -->
 			<Button
 				variant="toolbar"
 				size="content"
 				iconOnly
 				icon="x"
 				iconSize={11}
-				class="hidden h-[16px] w-[16px] shrink-0 rounded-full md:flex md:invisible md:group-hover:visible md:group-data-highlighted:visible"
+				layout="flow"
+				class="hidden h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full md:flex md:invisible md:group-hover:visible md:group-data-highlighted:visible"
 				title="Remove project"
 				ariaLabel="Remove {project.title || project.slug}"
 				aria-hidden="true"
