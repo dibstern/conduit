@@ -258,6 +258,56 @@ describe("OpenCode v2 SDK boundary", () => {
 		expect(onSseError).not.toHaveBeenCalled();
 	});
 
+	it("keeps the event stream open past the REST retry timeout", async () => {
+		// Regression: the retry fetch's per-attempt timeout aborted the stream,
+		// flapping the "Reconnecting to OpenCode" banner every 10s.
+		// Like real fetch, an init signal overrides the Request's own.
+		const baseFetch: typeof fetch = async (input, init) => {
+			const signal = init?.signal ?? (input as Request).signal;
+			const body = new ReadableStream<Uint8Array>({
+				start(controller) {
+					const timer = setTimeout(() => {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"server.connected","properties":{}}\n\n',
+							),
+						);
+					}, 100);
+					signal.addEventListener("abort", () => {
+						clearTimeout(timer);
+						controller.error(signal.reason);
+					});
+				},
+			});
+			return new Response(body, {
+				headers: { "Content-Type": "text/event-stream" },
+			});
+		};
+		const factory = createSdkClient({
+			baseUrl: "http://opencode.test",
+			retry: { timeout: 20, retries: 0, baseFetch },
+		});
+		const api = new OpenCodeAPI({
+			sdk: factory.client,
+			baseUrl: "http://opencode.test",
+			authHeaders: factory.authHeaders,
+		});
+		const controller = new AbortController();
+		const onSseError = vi.fn();
+		const { stream } = await api.event.subscribe({
+			signal: controller.signal,
+			sseMaxRetryAttempts: 1,
+			onSseError,
+		});
+		expect((await stream.next()).value).toEqual({
+			type: "server.connected",
+			properties: {},
+		});
+		expect(onSseError).not.toHaveBeenCalled();
+		controller.abort();
+		await stream.return();
+	});
+
 	it("lets conduit own SSE reconnection after one transport failure", async () => {
 		const { api, transport } = makeApi(() => {
 			throw new TypeError("stream failed");

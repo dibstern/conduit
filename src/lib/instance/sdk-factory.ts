@@ -38,6 +38,12 @@ function runRetryFetchAtFetchBoundary(
 	return Effect.runPromise(fetchWithRetry(input, init, retry));
 }
 
+// The SDK sends SSE requests as a plain Request with no Accept header, so the
+// endpoint path is the only signal. Every SDK path ending in /event is SSE.
+function isEventStream(request: Request): boolean {
+	return new URL(request.url).pathname.endsWith("/event");
+}
+
 /**
  * Creates an authenticated OpenCode SDK client.
  *
@@ -49,6 +55,12 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 		options.fetch ??
 		((input: RequestInfo | URL, init?: RequestInit) =>
 			runRetryFetchAtFetchBoundary(input, init, options.retry ?? {}));
+
+	// The event stream lives for hours, so it must skip fetchWithRetry: its
+	// per-attempt timeout would abort the stream, and conduit owns reconnection.
+	// Auth already rides on the SDK Request via config.headers.
+	const streamFetch: typeof fetch =
+		options.fetch ?? options.retry?.baseFetch ?? globalThis.fetch;
 
 	const password = options.auth?.password ?? ENV.opencodePassword;
 	const username = options.auth?.username ?? ENV.opencodeUsername;
@@ -82,6 +94,9 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 		{
 			baseUrl: options.baseUrl,
 			fetch: async (input, init) => {
+				if (input instanceof Request && isEventStream(input)) {
+					return streamFetch(input, init);
+				}
 				const response = await authFetch(input, init);
 				// v2's HTML interceptor discards the response. Preserve HTTP errors
 				// and malformed successes before it can lose their status/body.
