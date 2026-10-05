@@ -5,6 +5,7 @@
 // ws-dispatch.ts resolves the correct session slot by event.sessionId.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import type { FeedStatus } from "../transport/supervise.js";
 import type {
 	ChatMessage,
@@ -13,7 +14,6 @@ import type {
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
-	UserMessage,
 } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 import { createFrontendLogger } from "../utils/logger.js";
@@ -26,7 +26,6 @@ export type SessionActivity = {
 	phase: ChatPhase;
 	/** Wall-clock start of the active turn, retained across view remounts. */
 	turnStartedAt: number | null;
-	turnEpoch: number;
 	turnGeneration: number;
 	endedGeneration: number;
 	terminalTurnIds: ReadonlySet<string>;
@@ -50,10 +49,8 @@ export type SessionMessages = {
 		cursor?: string;
 		status: FeedStatus;
 		project: string;
-		carriedUsers: Map<
-			string,
-			Pick<UserMessage, "sentDuringEpoch" | "inputId" | "images">
-		>;
+		/** Inputs conduit holds for the session, oldest first: the tray. */
+		pending: PendingInput[];
 	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;
@@ -62,6 +59,12 @@ export type SessionMessages = {
 	historyLoading: boolean;
 	toolRegistry: ToolRegistry;
 };
+
+/** One `pendingInput` row of the session-detail stream. */
+export type PendingInput = Extract<
+	Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"],
+	{ _tag: "pendingInput" }
+>["input"];
 
 // Composite read shape for the chat view. NEVER instantiated as storage.
 export type SessionChatState = SessionActivity & SessionMessages;
@@ -72,7 +75,6 @@ export function createEmptySessionActivity(): SessionActivity {
 	return {
 		phase: "idle",
 		turnStartedAt: null,
-		turnEpoch: 0,
 		turnGeneration: 0,
 		endedGeneration: -1,
 		terminalTurnIds: new Set(),
@@ -301,7 +303,7 @@ export type ChatPhase = "idle" | "processing" | "streaming";
 
 export type LoadLifecycle = "empty" | "loading" | "ready";
 
-/** The six fields the legacy global mirror ever exposed. */
+/** The fields the legacy global mirror still exposes. */
 type ChatMirror = Readonly<
 	Pick<
 		SessionChatState,
@@ -309,7 +311,6 @@ type ChatMirror = Readonly<
 		| "currentAssistantText"
 		| "phase"
 		| "loadLifecycle"
-		| "turnEpoch"
 		| "currentMessageId"
 	>
 >;
@@ -334,9 +335,6 @@ export const chatState: ChatMirror = Object.freeze({
 	},
 	get loadLifecycle() {
 		return currentChat().loadLifecycle;
-	},
-	get turnEpoch() {
-		return currentChat().turnEpoch;
 	},
 	get currentMessageId() {
 		return currentChat().currentMessageId;
@@ -582,8 +580,7 @@ export function setMessages(
  *
  *  Called from `dispatchChatEvent` for every event that carries a
  *  messageId.  When the id changes, the previous turn is finalized
- *  (if streaming), turnEpoch is bumped (clearing "Queued" shimmers),
- *  and the new messageId is recorded.
+ *  (if streaming) and the new messageId is recorded.
  *
  *  No-op when the messageId is the same as the current one. */
 // seenMessageIds: per-session only (activity.seenMessageIds). Module-level set removed in Task 6.
@@ -609,15 +606,13 @@ export function advanceTurnIfNewMessage(
 	}
 
 	// Already seen this messageId — just update currentMessageId (it may
-	// have changed back from a different message) but don't bump epoch.
+	// have changed back from a different message) but start no new turn.
 	if (activity.seenMessageIds.has(messageId)) {
 		activity.currentMessageId = messageId;
 		return;
 	}
 
 	activity.seenMessageIds.add(messageId);
-	const previousTurnAlreadyEnded =
-		activity.endedGeneration === activity.turnGeneration;
 	activity.turnGeneration++;
 
 	// Finalize any in-progress assistant streaming from the previous turn.
@@ -627,23 +622,6 @@ export function advanceTurnIfNewMessage(
 			activity.doneMessageIds.add(finalizedId);
 		}
 		phaseToProcessing(activity);
-	}
-
-	// Bump turnEpoch — clears "Queued" shimmer on user messages sent
-	// during the previous turn (sentDuringEpoch < turnEpoch).
-	// A terminal event may already have released the previous turn's queue.
-	// Only infer a missing boundary when it has not been applied yet. Do not
-	// require having seen the previous reply: a tab that joined mid-turn never
-	// did, and Claude starts a queued prompt's reply without ending the turn.
-	if (!previousTurnAlreadyEnded) {
-		activity.turnEpoch++;
-		log.debug(
-			"advanceTurn NEW messageId=%s prev=%s turnEpoch=%d phase=%s",
-			messageId,
-			activity.currentMessageId,
-			activity.turnEpoch,
-			activity.phase,
-		);
 	}
 
 	activity.currentMessageId = messageId;
@@ -855,7 +833,7 @@ export function applyTerminalTurn(
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
 	// messageId against it. Resetting to null makes every post-done turn
-	// look like the first message in a fresh session, skipping turnEpoch++.
+	// look like the first message in a fresh session.
 	// Only clearMessages (session switch) should reset it.
 
 	// Request scroll before phaseToIdle so the content-change effect scrolls
@@ -863,7 +841,6 @@ export function applyTerminalTurn(
 	// phase to "idle" synchronously, so when the batched effect fires,
 	// isProcessing() is false and the guard skips the scroll.
 	requestScrollOnNextContent();
-	activity.turnEpoch++;
 	phaseToIdle(activity);
 	return true;
 }
@@ -974,66 +951,6 @@ export function handleCompaction(
 	}
 }
 
-/** Add a user message to the chat.
- *  When `sentWhileProcessing` is true the message records the current
- *  `turnEpoch` in `sentDuringEpoch` — a write-once, immutable fact.
- *  The UI derives the "Queued" shimmer reactively from this value
- *  and the live `turnEpoch`; no clearing/mutation is ever needed.
- *
- *  During replay, defensively finalizes any in-progress assistant message
- *  so that subsequent delta events create a new AssistantMessage block.
- *  During live streaming (sentWhileProcessing=true), the assistant message
- *  is left unfinalized so deltas keep updating it in-place and the queued
- *  user message stays at the bottom instead of splitting the response. */
-export function addUserMessage(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	text: string,
-	images?: string[],
-	sentWhileProcessing?: boolean,
-	inputId?: string,
-): void {
-	// Finalize the in-progress assistant message only during replay,
-	// where user_message events can appear between delta events without
-	// an intervening done event.  During live streaming the assistant
-	// message stays unfinalized so subsequent deltas continue updating
-	// it and the queued user message stays at the end.
-	if (!sentWhileProcessing && messages.currentAssistantText) {
-		flushAndFinalizeAssistant(activity, messages);
-		phaseToIdle(activity);
-	}
-
-	const msg: UserMessage = {
-		type: "user",
-		uuid: generateUuid(),
-		...(inputId != null && { inputId }),
-		text,
-		createdAt: Date.now(),
-		...(images != null && { images }),
-		...(sentWhileProcessing ? { sentDuringEpoch: activity.turnEpoch } : {}),
-	};
-	if (sentWhileProcessing) {
-		log.debug(
-			"addUserMessage queued msg sentDuringEpoch=%d turnEpoch=%d currentMessageId=%s phase=%s",
-			activity.turnEpoch,
-			activity.turnEpoch,
-			activity.currentMessageId,
-			activity.phase,
-		);
-	}
-
-	// A user message should always scroll to bottom — it's a direct user
-	// action, never a background event. When the session is idle (e.g.
-	// between turns), isProcessing() is false and the content-change
-	// effect guard would skip the scroll without this request.
-	// Skip while the transcript is loading; its ready transition handles scrolling.
-	if (messages.loadLifecycle !== "loading") {
-		requestScrollOnNextContent();
-	}
-
-	setMessages(messages, [...getMessages(messages), msg]);
-}
-
 /** Prepend older messages (from history) before existing messages.
  *  Used when paginating older messages or loading REST history. */
 export function prependMessages(
@@ -1108,7 +1025,6 @@ export function clearMessages(): void {
 		if (activity) {
 			activity.phase = "idle";
 			activity.turnStartedAt = null;
-			activity.turnEpoch = 0;
 			activity.turnGeneration = 0;
 			activity.endedGeneration = -1;
 			activity.terminalTurnIds = new Set();

@@ -35,7 +35,7 @@ const empty = (): TranscriptEntry => ({
 	hwm: null,
 	hasMore: false,
 	status: { _tag: "live" },
-	carriedUsers: new Map(),
+	pending: [],
 });
 const lost = () =>
 	new RpcClientError({ reason: "Protocol", message: "scripted drop" });

@@ -21,7 +21,8 @@
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
-	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
+	import PendingInputTray from "./PendingInputTray.svelte";
+	import { currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		discoveryState,
@@ -93,12 +94,7 @@
 		for (let i = chat.messages.length - 1; i >= 0; i--) {
 			const part = chat.messages[i];
 			if (!part) continue;
-			if (part.type === "user") {
-				// A queued steering message doesn't end the current activity.
-				if (part.sentDuringEpoch != null && part.sentDuringEpoch >= chat.turnEpoch) continue;
-				return "";
-			}
-			if (part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
+			if (part.type === "user" || part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
 			if (part.type === "thinking" && !part.done) return "Thinking";
 			// Projected rows report every ordinary tool as completed, so the
 			// missing result is what marks the tool still in flight.
@@ -131,7 +127,6 @@
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		isProcessing() ? "Reply to steer…" :
 		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
 
@@ -332,7 +327,7 @@
 			? "Reply"
 			: isProcessing()
 				? "Queue message"
-				: "Send message",
+				: "Send",
 	);
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
 	const compacting = $derived.by(() => {
@@ -488,9 +483,8 @@
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
-		// Always send immediately — OpenCode queues server-side when busy.
-		// When the LLM is processing, `sentDuringEpoch` is recorded so the
-		// UI can derive the "Queued" shimmer reactively.
+		// Always send immediately: conduit queues a busy send in the session's
+		// tray, and the transcript shows the message once the adapter places it.
 		let sid = sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
@@ -522,9 +516,12 @@
 				creatingSession = false;
 			}
 		}
-		const { activity, messages } = getOrCreateSessionSlot(sid);
 		const commandId = crypto.randomUUID();
-		addUserMessage(activity, messages, messageText, imageUrls, isProcessing(), commandId);
+		if (!isProcessing()) {
+			// The turn starts now, before its placed message arrives to date it.
+			getOrCreateSessionSlot(sid).activity.turnStartedAt = Date.now();
+			requestScrollOnNextContent();
+		}
 		const sentToSessionId = sid;
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
@@ -831,6 +828,8 @@
 				{/if}
 			</div>
 		{/if}
+
+		<PendingInputTray inputs={currentChat().transcript?.pending ?? []} />
 
 		<div
 			id="input-row"

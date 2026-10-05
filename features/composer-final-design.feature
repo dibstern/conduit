@@ -43,7 +43,7 @@ Scenario Outline: working composer shows a solid stop with a small square
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   When the open session starts working
-  Then the composer placeholder reads Reply to steer…
+  Then the composer placeholder reads Ask Claude…
   And stop is a 32 pixel square filled with the text colour around a 10 pixel square
   And send is hidden while the field is empty
   And the composer region visually matches <baseline> at <threshold> percent

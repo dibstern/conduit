@@ -53,7 +53,7 @@ describe("chat phase and transcript lifecycle", () => {
 			status: "idle",
 		});
 		expect(activity.phase).toBe("idle");
-		expect(activity.turnEpoch).toBe(1);
+		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 
 	it("done is idempotent after a status transition", () => {
@@ -70,6 +70,6 @@ describe("chat phase and transcript lifecycle", () => {
 			sessionId: "phase-test",
 			code: 0,
 		});
-		expect(activity.turnEpoch).toBe(1);
+		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 });

@@ -17,8 +17,6 @@ vi.mock("dompurify", () => ({
 
 import {
 	addSystemMessage,
-	addUserMessage,
-	advanceTurnIfNewMessage,
 	chatState,
 	clearMessages,
 	handleCompaction,
@@ -40,7 +38,6 @@ import type {
 	ResultMessage,
 	UserMessage as UserMsg,
 } from "../../../src/lib/frontend/types.js";
-import { isQueued } from "../../../src/lib/frontend/utils/turns.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 let ta: SessionActivity;
@@ -168,28 +165,6 @@ describe("handleError", () => {
 	});
 });
 
-describe("addUserMessage", () => {
-	it("adds a user message", () => {
-		addUserMessage(ta, tm, "hello");
-		expect(chatState.messages).toHaveLength(1);
-		const firstMessage = chatState.messages[0];
-		assert.exists(firstMessage, "expected user message");
-		expect(firstMessage.type).toBe("user");
-		if (firstMessage.type === "user") {
-			expect(firstMessage.text).toBe("hello");
-		}
-	});
-
-	it("includes images when provided", () => {
-		addUserMessage(ta, tm, "look", ["img1.png"]);
-		const firstMessage = chatState.messages[0];
-		assert.exists(firstMessage, "expected user message");
-		if (firstMessage.type === "user") {
-			expect(firstMessage.images).toEqual(["img1.png"]);
-		}
-	});
-});
-
 describe("addSystemMessage", () => {
 	it("adds an info system message by default", () => {
 		addSystemMessage(ta, tm, "info text");
@@ -264,36 +239,10 @@ describe("handleCompaction", () => {
 	});
 });
 
-describe("queued user message (sentDuringEpoch)", () => {
-	it("addUserMessage sets sentDuringEpoch when sent while processing", () => {
-		addUserMessage(ta, tm, "hello", undefined, true);
-		expect(chatState.messages).toHaveLength(1);
-		const msg = chatState.messages[0];
-		assert.exists(msg, "expected error message");
-		expect(msg.type).toBe("user");
-		expect((msg as UserMsg).sentDuringEpoch).toBe(chatState.turnEpoch);
-	});
-
-	it("addUserMessage defaults sentDuringEpoch to undefined", () => {
-		addUserMessage(ta, tm, "hello");
-		const msg = chatState.messages[0];
-		assert.exists(msg, "expected user message");
-		expect((msg as UserMsg).sentDuringEpoch).toBeUndefined();
-	});
-
-	// Claude starts a queued prompt's reply without ending the turn, and a tab
-	// that joined mid-turn never saw the reply that was already running.
-	it("stops being queued once its reply starts, even after joining mid-turn", () => {
+describe("clearMessages", () => {
+	it("resets all state", () => {
 		phaseToProcessing(ta);
-		addUserMessage(ta, tm, "follow-up", undefined, true);
-		const user = tm.messages.at(-1) as UserMsg;
-		expect(isQueued(user, ta.turnEpoch, true)).toBe(true);
-		advanceTurnIfNewMessage(ta, tm, "msg_reply_to_follow_up");
-		expect(isQueued(user, ta.turnEpoch, true)).toBe(false);
-	});
-
-	it("clearMessages resets all state", () => {
-		addUserMessage(ta, tm, "test", undefined, true);
+		addSystemMessage(ta, tm, "test");
 		clearMessages();
 		expect(chatState.messages).toHaveLength(0);
 		expect(isProcessing()).toBe(false);
@@ -307,7 +256,7 @@ describe("prependMessages", () => {
 	});
 
 	it("prepends messages before existing messages", () => {
-		addUserMessage(ta, tm, "live message");
+		tm.messages = [{ type: "user", uuid: "l1", text: "live message" }];
 		const older = [
 			{ type: "user" as const, uuid: "h1", text: "older message" },
 		];
@@ -326,7 +275,7 @@ describe("prependMessages", () => {
 	});
 
 	it("no-ops on empty input", () => {
-		addUserMessage(ta, tm, "existing");
+		tm.messages = [{ type: "user", uuid: "e1", text: "existing" }];
 		prependMessages(ta, tm, []);
 		expect(chatState.messages).toHaveLength(1);
 	});

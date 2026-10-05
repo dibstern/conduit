@@ -5,7 +5,15 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 
-type DetailItem = { _tag: "transcriptMessage"; message: HistoryMessage };
+type PendingInput = {
+	inputId: string;
+	state: "queued" | "steering";
+	request: { text: string; images?: string[]; modelUserSelected: boolean };
+	admittedAt: number;
+};
+type DetailItem =
+	| { _tag: "transcriptMessage"; message: HistoryMessage }
+	| { _tag: "pendingInput"; input: PendingInput };
 type DetailEnvelope =
 	| { _tag: "snapshot"; rows: DetailItem[]; sequence: number; hasMore: boolean }
 	| { _tag: "upsert"; item: DetailItem; sequence: number }
@@ -14,6 +22,7 @@ type Listener = (sessionId: string, envelope: DetailEnvelope) => void;
 
 interface SessionProjection {
 	rows: Map<string, HistoryMessage>;
+	pending: Map<string, PendingInput>;
 	sequence: number;
 	hasMore: boolean;
 	assistantId: string | null;
@@ -34,6 +43,7 @@ function session(page: Page, sessionId: string): SessionProjection {
 	if (!projection) {
 		projection = {
 			rows: new Map(),
+			pending: new Map(),
 			sequence: 0,
 			hasMore: false,
 			assistantId: null,
@@ -69,7 +79,12 @@ const snapshot = (state: SessionProjection): DetailEnvelope => {
 	const rows = sortedRows(state);
 	return {
 		_tag: "snapshot",
-		rows: rows.slice(-50).map(item),
+		rows: [
+			...rows.slice(-50).map(item),
+			...[...state.pending.values()].map(
+				(input): DetailItem => ({ _tag: "pendingInput", input }),
+			),
+		],
 		sequence: state.sequence,
 		hasMore: state.hasMore || rows.length > 50,
 	};
@@ -164,6 +179,48 @@ export function projectLegacyRelayMessage(
 			if (messages || Array.isArray(events))
 				listener(sessionId, snapshot(state));
 		}
+		return;
+	}
+	// Mock-only: the server's pending-input rows, which the browser renders as
+	// the tray above the composer.
+	if (
+		event.type === "mock_pending_input" &&
+		typeof event["inputId"] === "string" &&
+		typeof event["text"] === "string"
+	) {
+		const images = event["images"];
+		const input: PendingInput = {
+			inputId: event["inputId"],
+			state: event["state"] === "steering" ? "steering" : "queued",
+			request: {
+				text: event["text"],
+				...(Array.isArray(images) ? { images: images.map(String) } : {}),
+				modelUserSelected: false,
+			},
+			admittedAt:
+				state.pending.get(event["inputId"])?.admittedAt ??
+				Date.now() + state.sequence,
+		};
+		state.pending.set(input.inputId, input);
+		const sequence = ++state.sequence;
+		listeners.get(page)?.(sessionId, {
+			_tag: "upsert",
+			item: { _tag: "pendingInput", input },
+			sequence,
+		});
+		return;
+	}
+	if (
+		event.type === "mock_pending_input_removed" &&
+		typeof event["inputId"] === "string"
+	) {
+		state.pending.delete(event["inputId"]);
+		const sequence = ++state.sequence;
+		listeners.get(page)?.(sessionId, {
+			_tag: "remove",
+			id: `input:${event["inputId"]}`,
+			sequence,
+		});
 		return;
 	}
 	if (event.type === "user_message" && typeof event["text"] === "string") {

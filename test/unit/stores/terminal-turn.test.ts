@@ -35,7 +35,7 @@ function projectedTurn() {
 		hwm: null,
 		hasMore: false,
 		status: { _tag: "live" },
-		carriedUsers: new Map(),
+		pending: [],
 	};
 	const entry = applyTranscriptEnvelope(empty, {
 		_tag: "upsert",
@@ -59,11 +59,7 @@ function projectedTurn() {
 			},
 		},
 	});
-	slot.messages.messages = deriveTranscriptMessages(entry, [], {
-		live: true,
-		active: true,
-		turnEpoch: 0,
-	}).messages;
+	slot.messages.messages = deriveTranscriptMessages(entry, []);
 	chat.seedRegistryFromMessages(
 		slot.activity,
 		slot.messages,
@@ -91,9 +87,9 @@ it.each([
 			message: "failed",
 		},
 	};
-	const before = activity.turnEpoch;
 	handleMessage(events[order[0]]);
-	expect(activity.turnEpoch).toBe(before + 1);
+	const ended = activity.endedGeneration;
+	expect(ended).toBe(activity.turnGeneration);
 	expect(messages.messages).toEqual(
 		expect.arrayContaining([
 			expect.objectContaining({ type: "assistant", finalized: true }),
@@ -104,7 +100,7 @@ it.each([
 	const finalized = messages.messages;
 	handleMessage(events[order[1]]);
 	handleMessage(events[order[2]]);
-	expect(activity.turnEpoch).toBe(before + 1);
+	expect(activity.endedGeneration).toBe(ended);
 	expect(messages.messages).toBe(finalized);
 });
 
@@ -112,10 +108,10 @@ it("durable terminal replay does not repeat the transition or alert", () => {
 	const { activity, messages } = projectedTurn();
 	chat.phaseCurrentSessionToIdle();
 	const finalized = messages.messages;
-	const epoch = activity.turnEpoch;
+	const ended = activity.endedGeneration;
 	handleMessage({ type: "status", sessionId: "s", status: "idle" });
 	expect(chat.applyTerminalTurn(activity, messages)).toBe(false);
-	expect(activity.turnEpoch).toBe(epoch);
+	expect(activity.endedGeneration).toBe(ended);
 	expect(messages.messages).toBe(finalized);
 	expect(triggerNotifications).not.toHaveBeenCalled();
 });

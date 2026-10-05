@@ -457,6 +457,159 @@ test.describe("Claude replay lane", () => {
 		});
 	});
 
+	test.describe("the pending-input tray", () => {
+		// 20 messages a turn at 500ms keeps Alpha's turn running for ~10s: long
+		// enough to queue two inputs, reload and open a second browser in it.
+		test.use({
+			claudeReplay: {
+				turns: [
+					"pong-thinking-text-turn",
+					"pong-thinking-text-turn",
+					"pong-thinking-text-turn",
+				],
+				delayMs: 500,
+			},
+		});
+
+		test("shows inputs queued mid-turn until each starts, across reloads and browsers", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			test.setTimeout(120_000);
+			const turnsCompleted = () =>
+				countEvents(harness.eventsDbPath, "turn.completed");
+			const trayRows = (p: Page) =>
+				p.locator('[data-testid="pending-input-row"]');
+			const trayTexts = (p: Page) =>
+				trayRows(p).locator('[data-testid="pending-input-text"]');
+			// Every text the tray ever showed in this page load.
+			await page.addInitScript(() => {
+				const seen = new Set<string>();
+				Object.assign(window, { __seenPending: seen });
+				new MutationObserver(() => {
+					for (const el of document.querySelectorAll(
+						'[data-testid="pending-input-text"]',
+					)) {
+						seen.add(el.textContent ?? "");
+					}
+				}).observe(document, {
+					childList: true,
+					subtree: true,
+					characterData: true,
+				});
+			});
+			const seenPending = () =>
+				page.evaluate(() =>
+					[
+						...(window as unknown as { __seenPending: Set<string> })
+							.__seenPending,
+					].sort(),
+				);
+			const sends = recordSends(page);
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+
+			// An idle send is placed at once: its message shows long before the
+			// reply, and it never passes through the tray.
+			await app.input.fill("Alpha");
+			await expect(app.sendBtn).toHaveAccessibleName("Send");
+			await app.sendBtn.click();
+			await expect(chat.userMessages).toHaveText([/\bAlpha\b/]);
+			expect(turnsCompleted()).toBe(0);
+
+			await expect(chat.stopBtn).toBeVisible();
+			await app.input.fill("Bravo");
+			await expect(app.sendBtn).toHaveAccessibleName("Queue message");
+			await app.sendBtn.click();
+			await app.sendMessage("Charlie");
+			await expect.poll(() => sends.length).toBe(3);
+			const [a, b, c] = sends.map((send) => send.commandId);
+
+			const queued = [/^Bravo$/, /^Charlie$/];
+			await expect(trayTexts(page)).toHaveText(queued);
+			await expect(
+				trayRows(page).locator('[data-testid="pending-input-state"]'),
+			).toHaveText(["Queued", "Queued"]);
+			expect(
+				await trayRows(page).evaluateAll((rows) =>
+					rows.map((row) => row.getAttribute("data-input-id")),
+				),
+			).toEqual([b, c]);
+			await expect(chat.userMessages).toHaveText([/\bAlpha\b/]);
+			const seenBeforeReload = await seenPending();
+			expect(seenBeforeReload).toEqual(["Bravo", "Charlie"]);
+			const completedBeforeReload = turnsCompleted();
+
+			await page.reload();
+			await app.layout.waitFor({ state: "attached" });
+			await expect(trayTexts(page)).toHaveText(queued);
+
+			const context = await browser.newContext({
+				viewport: page.viewportSize(),
+			});
+			try {
+				const other = await context.newPage();
+				await new AppPage(other).goto(relayUrl);
+				await expect(trayTexts(other)).toHaveText(queued);
+				// Every check above ran while Alpha's turn was still going.
+				const completedAfterSecondBrowser = turnsCompleted();
+				expect(completedAfterSecondBrowser).toBe(0);
+
+				// Each queued input leaves the tray when its turn starts, which is
+				// only after the ~10s turn before it ends.
+				await expect(trayTexts(page)).toHaveText([/^Charlie$/], {
+					timeout: 20_000,
+				});
+				const completedWhenBravoLeft = turnsCompleted();
+				expect(completedWhenBravoLeft).toBeGreaterThanOrEqual(1);
+				await expect(trayRows(page)).toHaveCount(0, { timeout: 20_000 });
+				const completedWhenCharlieLeft = turnsCompleted();
+				expect(completedWhenCharlieLeft).toBeGreaterThanOrEqual(2);
+
+				await expect.poll(turnsCompleted).toBe(3);
+				for (const p of [page, other]) {
+					const view = new ChatPage(p);
+					await view.waitForStreamingComplete();
+					await expect(trayRows(p)).toHaveCount(0);
+					await expect(view.userMessages).toHaveText([
+						/\bAlpha\b/,
+						/\bBravo\b/,
+						/\bCharlie\b/,
+					]);
+					await expect(view.assistantMessages).toHaveText([
+						/pong/i,
+						/pong/i,
+						/pong/i,
+					]);
+				}
+
+				await testInfo.attach("pending-tray-proof.json", {
+					body: JSON.stringify(
+						{
+							inputs: { a, b, c },
+							seenInTrayBeforeReload: seenBeforeReload,
+							turnsCompleted: {
+								beforeReload: completedBeforeReload,
+								afterSecondBrowser: completedAfterSecondBrowser,
+								whenBravoLeftTray: completedWhenBravoLeft,
+								whenCharlieLeftTray: completedWhenCharlieLeft,
+							},
+							userMessages: await chat.userMessages.allTextContents(),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+			} finally {
+				await context.close();
+			}
+		});
+	});
+
 	test.describe("sub-agent trace", () => {
 		test.use({ claudeReplay: { turns: ["subagent-task-turn"] } });
 

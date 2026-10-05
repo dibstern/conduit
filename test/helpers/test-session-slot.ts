@@ -37,7 +37,6 @@ export function testActivity(sessionId?: string): SessionActivity {
 	const a: SessionActivity = {
 		phase: "idle",
 		turnStartedAt: null,
-		turnEpoch: 0,
 		turnGeneration: 0,
 		endedGeneration: -1,
 		terminalTurnIds: new Set(),

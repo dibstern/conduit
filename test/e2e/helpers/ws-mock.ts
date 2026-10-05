@@ -262,7 +262,11 @@ export class WsMockControl {
 
 	/** Send a message to the connected client (for mid-test injections). */
 	sendMessage(msg: MockMessage): void {
-		if (msg.type === "mock_transcript_snapshot") {
+		if (
+			msg.type === "mock_transcript_snapshot" ||
+			msg.type === "mock_pending_input" ||
+			msg.type === "mock_pending_input_removed"
+		) {
 			projectLegacyRelayMessage(this.page, msg);
 			return;
 		}

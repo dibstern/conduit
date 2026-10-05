@@ -245,9 +245,6 @@ function routePerSession(event: PerSessionEvent): void {
 			if (event.name.toLowerCase() === "skill")
 				refreshSessionSkills(event.sessionId);
 			break;
-		case "user_message":
-			refreshSessionSkills(event.sessionId);
-			break;
 		case "tool_result": {
 			if (sessionSkillsState.loads.some((load) => load.running))
 				refreshSessionSkills(event.sessionId);

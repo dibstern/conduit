@@ -125,26 +125,12 @@ describe("WsRpcServerLayer input.submit", () => {
 					status: "processing",
 				},
 			});
-			expect(calls).toContainEqual({
-				channel: "sendTo",
-				clientId: "tab-a",
-				message: {
-					type: "user_message",
-					sessionId: "session-1",
-					text: "hello",
-					originId: "browser-tab-a",
-				},
-			});
-			expect(calls).toContainEqual({
-				channel: "sendTo",
-				clientId: "tab-b",
-				message: {
-					type: "user_message",
-					sessionId: "session-1",
-					text: "hello",
-					originId: "browser-tab-a",
-				},
-			});
+			// The sender and every other tab see the message once it is placed.
+			expect(calls).not.toContainEqual(
+				expect.objectContaining({
+					message: expect.objectContaining({ type: "user_message" }),
+				}),
+			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

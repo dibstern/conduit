@@ -52,7 +52,7 @@ describe("EMPTY_ACTIVITY", () => {
 
 	it("has default idle values", () => {
 		expect(EMPTY_ACTIVITY.phase).toBe("idle");
-		expect(EMPTY_ACTIVITY.turnEpoch).toBe(0);
+		expect(EMPTY_ACTIVITY.turnGeneration).toBe(0);
 		expect(EMPTY_ACTIVITY.currentMessageId).toBeNull();
 		expect(EMPTY_ACTIVITY.replayGeneration).toBe(0);
 	});
@@ -129,7 +129,7 @@ describe("EMPTY_MESSAGES", () => {
 describe("EMPTY_STATE (composeChatState-wrapped)", () => {
 	it("reads from frozen activity tier", () => {
 		expect(EMPTY_STATE.phase).toBe("idle");
-		expect(EMPTY_STATE.turnEpoch).toBe(0);
+		expect(EMPTY_STATE.turnGeneration).toBe(0);
 		expect(EMPTY_STATE.currentMessageId).toBeNull();
 	});
 

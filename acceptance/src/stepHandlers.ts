@@ -14,6 +14,7 @@ import { composerWordsHandlers } from "./steps/composerWords.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
+import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
@@ -38,6 +39,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerFieldWidthHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
+	...pendingInputTrayHandlers,
 	...composerPickerHandlers,
 	...composerWordsHandlers,
 	...composerContextWarningHandlers,

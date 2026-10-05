@@ -348,5 +348,6 @@
 		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
 		"requires": "size=\"segment\""
 	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\"."
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\".",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: items-center,mt-2,queued-shimmer,text-text-muted": "conduit-test-jyr9.5 deletes the queued-send shimmer label under a user message. Queued sends now wait in the pending-input tray above the composer (PendingInputTray.svelte), so the transcript never shows an unplaced message and the label, its layout and its animation go."
 }

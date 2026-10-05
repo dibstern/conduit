@@ -42,6 +42,6 @@ it("routes done to the named background session", () => {
 	phaseToProcessing(b.activity);
 	handleMessage({ type: "done", sessionId: "B", code: 0 });
 	expect(b.activity.phase).toBe("idle");
-	expect(b.activity.turnEpoch).toBe(1);
-	expect(a.activity.turnEpoch).toBe(0);
+	expect(b.activity.endedGeneration).toBe(b.activity.turnGeneration);
+	expect(a.activity.endedGeneration).toBe(-1);
 });

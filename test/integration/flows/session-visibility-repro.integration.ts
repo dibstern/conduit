@@ -505,18 +505,6 @@ describe("Integration: Session Visibility Repros", () => {
 		console.log(`[REPRO-C] materialized ${localId} -> ${newId}`);
 		expect(newId).not.toBe(localId);
 
-		// Bug 1 (server contract): the echo for the materialized session must be
-		// renderable by the sender — the optimistic copy lives in the OLD slot,
-		// so the echo must NOT carry the sender's originId.
-		const userMsg = await client1.waitFor("user_message", {
-			predicate: (m) => m["sessionId"] === newId,
-		});
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-C] user_message originId=${String(userMsg["originId"])}`,
-		);
-		expect(userMsg["originId"]).toBeUndefined();
-
 		// Bug 2: the viewed family after materialization includes the session.
 		const list = await client1.waitFor("session_family", {
 			predicate: (m) => m["rootId"] === newId,

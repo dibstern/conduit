@@ -10,7 +10,6 @@ import type {
 	HistoryMessage,
 	HistoryMessagePart,
 	ToolStatus,
-	UserMessage,
 } from "../types.js";
 import { historyToChatMessages } from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
@@ -18,13 +17,14 @@ import {
 	advanceTurnIfNewMessage,
 	getOrCreateSessionSlot,
 	historyState,
-	isLlmActive,
+	type PendingInput,
 	restoreContextFromMessages,
 	type SessionMessages,
 	seedRegistryFromMessages,
 	sessionMessages,
 } from "./chat.svelte.js";
 import { sessionState } from "./session.svelte.js";
+import { refreshSessionSkills } from "./session-skills.svelte.js";
 
 type ProjectRef = string;
 export type TranscriptEntry = NonNullable<SessionMessages["transcript"]>;
@@ -194,6 +194,8 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 
 const rowOrder = (a: HistoryMessage, b: HistoryMessage): number =>
 	(a.time?.created ?? 0) - (b.time?.created ?? 0) || a.id.localeCompare(b.id);
+const pendingOrder = (a: PendingInput, b: PendingInput): number =>
+	a.admittedAt - b.admittedAt || a.inputId.localeCompare(b.inputId);
 
 /** The server sends whole rows. Keep the held page contiguous below its floor. */
 export function applyTranscriptEnvelope(
@@ -208,12 +210,26 @@ export function applyTranscriptEnvelope(
 					.filter((item) => item._tag === "transcriptMessage")
 					.map((item) => toHistoryMessage(item.message))
 					.sort(rowOrder),
+				pending: envelope.rows
+					.flatMap((item) => (item._tag === "pendingInput" ? [item.input] : []))
+					.sort(pendingOrder),
 				hwm: envelope.sequence,
 				hasMore: envelope.hasMore ?? false,
 				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
 			};
 		case "upsert": {
 			const hwm = Math.max(entry.hwm ?? 0, envelope.sequence);
+			if (envelope.item._tag === "pendingInput") {
+				const input = envelope.item.input;
+				return {
+					...entry,
+					hwm,
+					pending: [
+						...entry.pending.filter((old) => old.inputId !== input.inputId),
+						input,
+					].sort(pendingOrder),
+				};
+			}
 			if (envelope.item._tag !== "transcriptMessage") return { ...entry, hwm };
 			const row = toHistoryMessage(envelope.item.message);
 			const held = entry.rows.some((old) => old.id === row.id);
@@ -237,6 +253,9 @@ export function applyTranscriptEnvelope(
 				...entry,
 				hwm: Math.max(entry.hwm ?? 0, envelope.sequence),
 				rows: entry.rows.filter((row) => row.id !== envelope.id),
+				pending: entry.pending.filter(
+					(input) => `input:${input.inputId}` !== envelope.id,
+				),
 			};
 		case "synchronized":
 			return entry;
@@ -297,89 +316,23 @@ function mergeSticky(
 	return reuseIfEqual(merged, previous);
 }
 
-/** Reuse unchanged row items; keep local errors and optimistic sends in place. */
+/** Reuse unchanged row items; keep local items (errors, notices) in place. */
 export function deriveTranscriptMessages(
 	entry: TranscriptEntry,
 	previous: ChatMessage[],
-	options: {
-		live: boolean;
-		active: boolean;
-		turnEpoch: number;
-		newUserIds?: ReadonlySet<string>;
-	},
-): { messages: ChatMessage[]; carried: TranscriptEntry["carriedUsers"] } {
+): ChatMessage[] {
 	const previousByUuid = new Map(previous.map((item) => [item.uuid, item]));
 	const projected: ChatMessage[] = [];
-	const adoptedUuids = new Set<string>();
-	const carriedAdditions: TranscriptEntry["carriedUsers"] = new Map();
-	// After a reload nothing local remembers a queued send, but the rows do.
-	const waitingUserIds = new Set<string>();
-	let reply: HistoryMessage | undefined;
 	for (const row of entry.rows) {
-		if (row.role === "assistant") {
-			reply = row;
-			waitingUserIds.clear();
-		} else if (
-			reply &&
-			(reply.time?.completed ?? Number.POSITIVE_INFINITY) >
-				(row.time?.created ?? Number.POSITIVE_INFINITY)
-		)
-			waitingUserIds.add(row.id);
-	}
-	for (const row of entry.rows) {
-		// A user row is created before its parts arrive. Showing it empty would
-		// mark its uuid as seen and so block adopting the optimistic send.
+		// A user row is created before its parts arrive; an empty bubble says nothing.
 		if (row.role === "user" && !row.parts?.length) continue;
 		let items = convertedRows.get(row);
 		if (!items) {
 			items = historyToChatMessages([row], renderMarkdown, entry.rows, uuidFor);
 			convertedRows.set(row, items);
 		}
-		for (const item of items) {
-			let next = mergeSticky(item, previousByUuid.get(item.uuid));
-			if (next.type === "user") {
-				const inputId = row.inputId;
-				let carried = entry.carriedUsers.get(row.id);
-				const optimistic =
-					!previousByUuid.has(item.uuid) &&
-					!carried &&
-					inputId !== undefined &&
-					previous.find(
-						(old): old is UserMessage =>
-							old.type === "user" &&
-							old.inputId === inputId &&
-							!adoptedUuids.has(old.uuid),
-					);
-				if (optimistic) {
-					adoptedUuids.add(optimistic.uuid);
-					carried = {
-						...carried,
-						...(optimistic.sentDuringEpoch === undefined
-							? {}
-							: { sentDuringEpoch: optimistic.sentDuringEpoch }),
-						...(optimistic.inputId === undefined
-							? {}
-							: { inputId: optimistic.inputId }),
-						...(optimistic.images === undefined
-							? {}
-							: { images: optimistic.images }),
-					};
-					carriedAdditions.set(row.id, carried);
-				} else if (
-					!carried &&
-					options.live &&
-					options.active &&
-					options.newUserIds?.has(row.id)
-				) {
-					carried = { sentDuringEpoch: options.turnEpoch };
-					carriedAdditions.set(row.id, carried);
-				}
-				if (carried) next = { ...next, ...carried };
-				if (waitingUserIds.has(row.id))
-					next = { ...next, waitingBehindReply: true };
-			}
-			projected.push(reuseIfEqual(next, previousByUuid.get(item.uuid)));
-		}
+		for (const item of items)
+			projected.push(mergeSticky(item, previousByUuid.get(item.uuid)));
 	}
 	const projectedUuids = new Set(projected.map((item) => item.uuid));
 	const after = new Map<string, ChatMessage[]>();
@@ -390,7 +343,6 @@ export function deriveTranscriptMessages(
 			anchor = item.uuid;
 			continue;
 		}
-		if (adoptedUuids.has(item.uuid)) continue;
 		// A removed projected row must disappear, not become a local item.
 		if (item.uuid.includes("/")) continue;
 		if (anchor && projectedUuids.has(anchor)) {
@@ -399,19 +351,15 @@ export function deriveTranscriptMessages(
 			after.set(anchor, group);
 		} else atEnd.push(item);
 	}
-	return {
-		messages: projected
-			.flatMap((item) => [item, ...(after.get(item.uuid) ?? [])])
-			.concat(atEnd),
-		carried: carriedAdditions,
-	};
+	return projected
+		.flatMap((item) => [item, ...(after.get(item.uuid) ?? [])])
+		.concat(atEnd);
 }
 
 let viewed: { project: ProjectRef; sessionId: string | null } | null = null;
 let generation = 0;
 let fiber: RuntimeFiber<void, unknown> | null = null;
 let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
-const pendingUsers = new Set<string>();
 const paging = new Map<string, Promise<void>>();
 
 function cancelFrame(): void {
@@ -423,25 +371,18 @@ function cancelFrame(): void {
 		cancelAnimationFrame(pendingFrame);
 	else clearTimeout(pendingFrame);
 	pendingFrame = null;
-	pendingUsers.clear();
 }
 
 function install(
 	sessionId: string,
 	slot: ReturnType<typeof getOrCreateSessionSlot>,
-	newUserIds?: ReadonlySet<string>,
 ): void {
 	const entry = slot.messages.transcript;
 	if (!entry || sessionMessages.get(sessionId) !== slot.messages) return;
-	const derived = deriveTranscriptMessages(entry, slot.messages.messages, {
-		live: entry.status._tag === "live",
-		active: isLlmActive(slot.activity.phase, slot.messages.loadLifecycle),
-		turnEpoch: slot.activity.turnEpoch,
-		...(newUserIds === undefined ? {} : { newUserIds }),
-	});
-	slot.messages.messages = derived.messages;
-	for (const [id, carried] of derived.carried)
-		entry.carriedUsers.set(id, carried);
+	slot.messages.messages = deriveTranscriptMessages(
+		entry,
+		slot.messages.messages,
+	);
 	slot.messages.historyHasMore = entry.hasMore;
 	slot.messages.loadLifecycle = "ready";
 	if (sessionState.currentId === sessionId)
@@ -481,7 +422,7 @@ export function viewTranscript(
 				hasMore: false,
 				status: { _tag: "cold" },
 				project,
-				carriedUsers: new Map(),
+				pending: [],
 			};
 			slot.messages.loadLifecycle = "loading";
 		} else {
@@ -524,7 +465,7 @@ export function viewTranscript(
 								)
 									return;
 								const before = slot.messages.transcript;
-								const newUserIds = new Set<string>();
+								let newUserMessage = false;
 								let newAssistantId: string | null = null;
 								if (
 									envelope._tag === "upsert" &&
@@ -533,12 +474,10 @@ export function viewTranscript(
 									const row = envelope.item.message;
 									const held = before.rows.find((old) => old.id === row.id);
 									// A user row is new when it first has parts to show.
-									if (
+									newUserMessage =
 										row.role === "user" &&
-										row.parts?.length &&
-										!held?.parts?.length
-									)
-										newUserIds.add(row.id);
+										!!row.parts?.length &&
+										!held?.parts?.length;
 									if (
 										!held &&
 										row.role === "assistant" &&
@@ -561,26 +500,25 @@ export function viewTranscript(
 										slot.messages,
 										newAssistantId,
 									);
+								// A message may name a skill; the chip reloads the session's skills.
+								if (newUserMessage) refreshSessionSkills(sessionId);
 								if (
 									envelope._tag === "snapshot" ||
 									envelope._tag === "synchronized"
 								) {
-									const users = new Set([...pendingUsers, ...newUserIds]);
 									cancelFrame();
-									install(sessionId, slot, users);
+									install(sessionId, slot);
 								} else if (pendingFrame === null) {
-									for (const id of newUserIds) pendingUsers.add(id);
 									const render = () => {
 										pendingFrame = null;
 										if (currentGeneration === generation)
-											install(sessionId, slot, pendingUsers);
-										pendingUsers.clear();
+											install(sessionId, slot);
 									};
 									pendingFrame =
 										typeof requestAnimationFrame === "function"
 											? requestAnimationFrame(render)
 											: setTimeout(render, FRAME_FALLBACK_DELAY_MS);
-								} else for (const id of newUserIds) pendingUsers.add(id);
+								}
 							}),
 					),
 				),

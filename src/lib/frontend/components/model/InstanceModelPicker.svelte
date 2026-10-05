@@ -148,10 +148,11 @@
 		if (sessionState.currentId) draftChosen = false;
 	});
 	$effect(() => {
-		const turnEpoch = currentChat().turnEpoch;
+		// Refetch once each turn ends.
+		const endedGeneration = currentChat().endedGeneration;
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (turnEpoch === 0 || !projectSlug || !sessionId) return;
+		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
 		void getModelsRpc({ projectSlug, sessionId })
 			.then((response) => {

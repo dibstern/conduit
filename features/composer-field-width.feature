@@ -23,7 +23,7 @@ Scenario Outline: placeholders are never cut off in idle or working states
 Examples:
   | status     | placeholder                                                                        | baseline                            | threshold |
   | idle       | Ask Claude…                                                                        | composer-field-placeholder-phone    | 98        |
-  | processing | Reply to steer…                                                                    | composer-field-working-empty-phone  | 98        |
+  | processing | Ask Claude…                                                                        | composer-field-working-empty-phone  | 98        |
   | idle       | Ask anything. / to use skills, @ to mention files, including a very long file path. | composer-field-long-placeholder-phone | 98      |
   | idle       | Message to un-settle…                                                              | composer-field-settled-phone        | 98        |
   | idle       | Message to wake…                                                                   | composer-field-snoozed-phone        | 98        |

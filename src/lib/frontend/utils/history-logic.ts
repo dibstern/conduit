@@ -389,10 +389,3 @@ export function historyToChatMessages(
 				}));
 	});
 }
-
-// History Queued Flag (REMOVED)
-// `applyHistoryQueuedFlag` was removed: it wrote the old mutable `queued`
-// boolean which no longer exists on UserMessage (replaced by the immutable
-// `sentDuringEpoch` + derived-state pattern). The queued visual is now
-// handled entirely by addUserMessage (write-once sentDuringEpoch) and the
-// $derived check in UserMessage.svelte.

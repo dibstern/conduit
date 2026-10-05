@@ -138,7 +138,6 @@ export const conversationHandlers = {
 				commandId: request.inputId,
 				delivery: request.delivery,
 				...(request.images ? { images: request.images } : {}),
-				...(request.originId ? { originId: request.originId } : {}),
 				errorDelivery: "session",
 			});
 			return { ok: true as const, sessionId: sessionId ?? request.sessionId };

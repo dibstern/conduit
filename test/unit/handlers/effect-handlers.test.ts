@@ -3476,27 +3476,6 @@ describe("sendMessageToSession", () => {
 			},
 		);
 	}
-	function makeLayer(
-		ws: WebSocketHandlerShape,
-		prepareTurnSession: ProviderTurnService["prepareTurnSession"],
-		sendTurn: ProviderTurnService["sendTurn"] = () => Effect.void,
-	) {
-		const providerTurnService: ProviderTurnService = {
-			prepareTurnSession,
-			sendTurn,
-			interruptTurn: vi.fn(() => Effect.void),
-		};
-		return Layer.mergeAll(
-			Layer.succeed(ProviderTurnServiceTag, providerTurnService),
-			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, mockLogger()),
-			Layer.succeed(ConfigTag, mockConfig()),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			PendingInteractionServiceLive,
-			makeOverridesStateLive(),
-		);
-	}
 
 	it.effect("sends the message when unsnooze bookkeeping fails", () => {
 		const sendTurn = vi.fn(() => Effect.void);
@@ -3534,67 +3513,6 @@ describe("sendMessageToSession", () => {
 			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
 		);
 	});
-
-	it.effect(
-		"omits originId when preparing the turn changes the session id",
-		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
-			const layer = makeLayer(
-				ws,
-				vi.fn(() => Effect.succeed("session-new")),
-			);
-
-			return sendMessageToSession({
-				clientId: "client-1",
-				sessionId: "session-old",
-				text: "first message",
-				originId: "origin-1",
-				commandId: "command-1",
-			}).pipe(
-				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "user_message",
-						sessionId: "session-new",
-						text: "first message",
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"preserves originId when preparing the turn keeps the session id",
-		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
-			const layer = makeLayer(
-				ws,
-				vi.fn((input) => Effect.succeed(input.sessionId)),
-			);
-
-			return sendMessageToSession({
-				clientId: "client-1",
-				sessionId: "session-1",
-				text: "next message",
-				originId: "origin-1",
-				commandId: "command-2",
-			}).pipe(
-				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "user_message",
-						sessionId: "session-1",
-						text: "next message",
-						originId: "origin-1",
-					});
-				}),
-			);
-		},
-	);
 });
 
 describe("cancelSessionById", () => {
@@ -4403,7 +4321,6 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				yield* sendMessageToSession({
 					clientId: "client-1",
-					originId: "browser-rejected",
 					sessionId: "session-rejected",
 					text: "First prompt",
 					commandId: "cmd-dispatch-rejection",

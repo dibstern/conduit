@@ -853,12 +853,6 @@ describe("built-dist Claude runner lifecycle", () => {
 		} else await browser.reloadSession(sessionId);
 		const cursor = browser.frames.length;
 		const replacement = browser.send(sessionId, "approval-overlap-recovery");
-		await browser.waitFor(
-			(message) =>
-				message["type"] === "user_message" &&
-				message["text"] === "approval-overlap-recovery",
-			cursor,
-		);
 		const approval = await browser.waitFor(
 			(message) => message["type"] === "permission_request",
 			cursor,

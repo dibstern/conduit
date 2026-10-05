@@ -39,7 +39,7 @@ function projectTool(name: "Task" | "Read") {
 		hwm: null,
 		hasMore: false,
 		status: { _tag: "live" },
-		carriedUsers: new Map(),
+		pending: [],
 	};
 	const projected = applyTranscriptEnvelope(entry, {
 		_tag: "upsert",
@@ -61,11 +61,7 @@ function projectTool(name: "Task" | "Read") {
 			},
 		},
 	});
-	slot.messages.messages = deriveTranscriptMessages(projected, [], {
-		live: true,
-		active: true,
-		turnEpoch: 0,
-	}).messages;
+	slot.messages.messages = deriveTranscriptMessages(projected, []);
 	seedRegistryFromMessages(
 		slot.activity,
 		slot.messages,

@@ -100,21 +100,7 @@ export interface UserMessage {
 	type: "user";
 	uuid: string;
 	messageId?: string;
-	/** The send this message belongs to; the placed row carries the same id. */
-	inputId?: string;
 	text: string;
-	images?: string[];
-	/** The `turnEpoch` at which this message was sent, present only when it
-	 *  was sent while the LLM was already processing (queued server-side).
-	 *  Write-once / immutable — set in `addUserMessage`, never mutated.
-	 *  The UI derives the "Queued" shimmer reactively:
-	 *    `sentDuringEpoch != null && turnEpoch <= sentDuringEpoch`
-	 *  The shimmer clears automatically when `handleDone` increments `turnEpoch`. */
-	sentDuringEpoch?: number;
-	/** Rows show the reply above was still being written after this was sent,
-	 *  and no reply has started below it. Rederived on every render, so it
-	 *  survives a reload, which `sentDuringEpoch` does not. */
-	waitingBehindReply?: true;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
 	modelExecution?: ModelExecution;

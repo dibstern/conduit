@@ -53,12 +53,12 @@ function makeMessages(overrides?: Partial<SessionMessages>): SessionMessages {
 describe("composeChatState Proxy", () => {
 	describe("get trap", () => {
 		it("routes activity keys to the activity tier", () => {
-			const activity = makeActivity({ phase: "streaming", turnEpoch: 42 });
+			const activity = makeActivity({ phase: "streaming", turnGeneration: 42 });
 			const messages = makeMessages();
 			const state = composeChatState(activity, messages);
 
 			expect(state.phase).toBe("streaming");
-			expect(state.turnEpoch).toBe(42);
+			expect(state.turnGeneration).toBe(42);
 			expect(state.currentMessageId).toBeNull();
 		});
 
@@ -107,7 +107,7 @@ describe("composeChatState Proxy", () => {
 		it("returns true for activity keys", () => {
 			const state = composeChatState(makeActivity(), makeMessages());
 			expect("phase" in state).toBe(true);
-			expect("turnEpoch" in state).toBe(true);
+			expect("turnGeneration" in state).toBe(true);
 			expect("doneMessageIds" in state).toBe(true);
 			expect("seenMessageIds" in state).toBe(true);
 			expect("replayGeneration" in state).toBe(true);
@@ -158,7 +158,7 @@ describe("composeChatState Proxy", () => {
 		});
 
 		it("Object.entries iterates all fields", () => {
-			const activity = makeActivity({ phase: "processing", turnEpoch: 5 });
+			const activity = makeActivity({ phase: "processing", turnGeneration: 5 });
 			const messages = makeMessages({ contextPercent: 50 });
 			const state = composeChatState(activity, messages);
 
@@ -166,7 +166,7 @@ describe("composeChatState Proxy", () => {
 			const entryMap = new Map(entries);
 
 			expect(entryMap.get("phase")).toBe("processing");
-			expect(entryMap.get("turnEpoch")).toBe(5);
+			expect(entryMap.get("turnGeneration")).toBe(5);
 			expect(entryMap.get("contextPercent")).toBe(50);
 		});
 	});

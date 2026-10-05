@@ -43,9 +43,7 @@ export interface SendMessageToSessionInput {
 	readonly sessionId: string | undefined;
 	readonly text: string;
 	readonly images?: readonly string[];
-	readonly originId?: string;
 	readonly commandId: string;
-	readonly excludeClientId?: string;
 	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
 	/** Only `queue` is honoured for now; a steer is queued like any input. */
@@ -58,7 +56,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
-		const { clientId, text, images, originId, excludeClientId } = input;
+		const { clientId, text, images } = input;
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
@@ -132,7 +130,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const contextWindow = yield* getContextWindow(activeId);
 
 		const inbox = yield* SessionInboxTag;
-		const { handedOff } = yield* inbox.submit({
+		yield* inbox.submit({
 			clientId,
 			sessionId: activeId,
 			inputId: input.commandId,
@@ -148,20 +146,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			},
 			...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
 		});
-
-		// Send user_message to OTHER clients viewing this session
-		if (handedOff) {
-			for (const targetId of wsHandler.getClientsForSession(activeId)) {
-				if (targetId !== excludeClientId) {
-					wsHandler.sendTo(targetId, {
-						type: "user_message",
-						sessionId: activeId,
-						text,
-						...(originId && originalActiveId === activeId ? { originId } : {}),
-					});
-				}
-			}
-		}
 		return activeId;
 	});
 
@@ -188,7 +172,6 @@ export const handleMessage = (
 			text: payload.text,
 			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
-			excludeClientId: clientId,
 			missingSessionClientId: clientId,
 		});
 	});

@@ -68,7 +68,6 @@ describe("chatState is read-only", () => {
 			{ loadLifecycle: "ready" },
 			{ messages: [] },
 			{ currentAssistantText: "x" },
-			{ turnEpoch: 7 },
 			{ currentMessageId: "msg_1" },
 		]) {
 			expect(() => Object.assign(chatState, patch)).toThrow(TypeError);
@@ -116,7 +115,6 @@ describe("chatState reflects the current session's slot", () => {
 		expect(chatState.messages).toEqual([]);
 		expect(chatState.phase).toBe("idle");
 		expect(chatState.loadLifecycle).toBe("empty");
-		expect(chatState.turnEpoch).toBe(0);
 		expect(chatState.currentMessageId).toBeNull();
 	});
 });
@@ -153,7 +151,6 @@ function userMessage(text: string) {
 		text,
 		html: text,
 		createdAt: 0,
-		sentDuringEpoch: 0,
 	};
 }
 

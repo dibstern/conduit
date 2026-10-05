@@ -2,14 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	applyTranscriptEnvelope,
-	deriveTranscriptMessages as derive,
+	deriveTranscriptMessages,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
 } from "../../../src/lib/frontend/types.js";
-import { isQueued } from "../../../src/lib/frontend/utils/turns.js";
 
 vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 	renderMarkdown: (text: string) => text,
@@ -36,7 +35,7 @@ const entry = (): TranscriptEntry => ({
 	hwm: null,
 	hasMore: false,
 	status: { _tag: "live" },
-	carriedUsers: new Map(),
+	pending: [],
 });
 const snapshot = (
 	rows: HistoryMessage[],
@@ -48,8 +47,6 @@ const snapshot = (
 	hasMore,
 	rows: rows.map(item),
 });
-const deriveTranscriptMessages = (...args: Parameters<typeof derive>) =>
-	derive(...args).messages;
 
 describe("transcript detail reducer", () => {
 	it("replaces a snapshot, upserts whole rows, removes held rows, and advances the HWM", () => {
@@ -93,11 +90,7 @@ describe("transcript detail reducer", () => {
 			entry(),
 			snapshot([row("a", 1, "A"), row("b", 2, "B")], 1),
 		);
-		const first = deriveTranscriptMessages(initial, [], {
-			live: false,
-			active: false,
-			turnEpoch: 0,
-		});
+		const first = deriveTranscriptMessages(initial, []);
 		expect(first.map((message) => message.uuid)).toEqual([
 			"a/a-part",
 			"b/b-part",
@@ -108,21 +101,16 @@ describe("transcript detail reducer", () => {
 			sequence: 2,
 			item: item(row("b", 2, "B2")),
 		});
-		const second = deriveTranscriptMessages(
-			updated,
-			[finalized, ...first.slice(1)],
-			{
-				live: true,
-				active: false,
-				turnEpoch: 0,
-			},
-		);
+		const second = deriveTranscriptMessages(updated, [
+			finalized,
+			...first.slice(1),
+		]);
 		expect(second[0]).toBe(finalized);
 		expect(second[1]).not.toBe(first[1]);
 		expect(second[1]).toMatchObject({ rawText: "B2", finalized: false });
 	});
 
-	it("anchors local items and adopts only the first matching optimistic user", () => {
+	it("anchors local items after the row they followed", () => {
 		const user: HistoryMessage = {
 			id: "user-1",
 			role: "user",
@@ -134,63 +122,54 @@ describe("transcript detail reducer", () => {
 			entry(),
 			snapshot([row("a", 1, "A")], 1),
 		);
-		const first = deriveTranscriptMessages(initial, [], {
-			live: false,
-			active: false,
-			turnEpoch: 0,
-		});
+		const first = deriveTranscriptMessages(initial, []);
 		const local: ChatMessage = {
 			type: "system",
 			uuid: "local-error",
 			text: "error",
 			variant: "error",
 		};
-		const optimistic: ChatMessage = {
-			type: "user",
-			uuid: "optimistic",
-			text: "hello",
-			inputId: "input-1",
-			sentDuringEpoch: 3,
-		};
 		const next = applyTranscriptEnvelope(initial, {
 			_tag: "upsert",
 			sequence: 2,
 			item: item(user),
 		});
-		const projected = deriveTranscriptMessages(
-			next,
-			[...first, local, optimistic],
-			{
-				live: true,
-				active: true,
-				turnEpoch: 4,
-				newUserIds: new Set(["user-1"]),
+		expect(
+			deriveTranscriptMessages(next, [...first, local]).map(
+				(message) => message.uuid,
+			),
+		).toEqual(["a/a-part", "local-error", "user-1/user"]);
+	});
+
+	it("holds pending inputs oldest first and drops one when it is removed", () => {
+		const pending = (inputId: string, admittedAt: number) => ({
+			_tag: "pendingInput" as const,
+			input: {
+				inputId,
+				state: "queued" as const,
+				admittedAt,
+				request: { text: inputId, modelUserSelected: false },
 			},
-		);
-		expect(projected.map((message) => message.uuid)).toEqual([
-			"a/a-part",
-			"local-error",
-			"user-1/user",
-		]);
-		expect(projected[2]).toMatchObject({
-			inputId: "input-1",
-			sentDuringEpoch: 3,
 		});
-		const replayed = deriveTranscriptMessages(
-			{
-				...next,
-				carriedUsers: new Map([
-					["user-1", { inputId: "input-1", sentDuringEpoch: 3 }],
-				]),
-			},
-			projected,
-			{
-				live: false,
-				active: true,
-				turnEpoch: 8,
-			},
-		);
-		expect(replayed[2]).toMatchObject({ sentDuringEpoch: 3 });
+		const first = applyTranscriptEnvelope(entry(), {
+			_tag: "snapshot",
+			sequence: 1,
+			rows: [pending("b", 2), item(row("a", 1, "A"))],
+		});
+		expect(first.rows.map((message) => message.id)).toEqual(["a"]);
+		expect(first.pending.map((input) => input.inputId)).toEqual(["b"]);
+		const added = applyTranscriptEnvelope(first, {
+			_tag: "upsert",
+			sequence: 2,
+			item: pending("a", 1),
+		});
+		expect(added.pending.map((input) => input.inputId)).toEqual(["a", "b"]);
+		const removed = applyTranscriptEnvelope(added, {
+			_tag: "remove",
+			id: "input:a",
+			sequence: 3,
+		});
+		expect(removed.pending.map((input) => input.inputId)).toEqual(["b"]);
 	});
 
 	it("retains thinking completion and advanced tool state on a row refresh", () => {
@@ -213,11 +192,7 @@ describe("transcript detail reducer", () => {
 			entry(),
 			snapshot([original], 1),
 		);
-		const first = deriveTranscriptMessages(firstState, [], {
-			live: false,
-			active: false,
-			turnEpoch: 0,
-		});
+		const first = deriveTranscriptMessages(firstState, []);
 		const sticky = first.map((message): ChatMessage => {
 			if (message.type === "thinking")
 				return { ...message, done: true, duration: 42 };
@@ -247,11 +222,7 @@ describe("transcript detail reducer", () => {
 				],
 			}),
 		});
-		const second = deriveTranscriptMessages(refreshed, sticky, {
-			live: true,
-			active: true,
-			turnEpoch: 1,
-		});
+		const second = deriveTranscriptMessages(refreshed, sticky);
 		expect(second.find((message) => message.type === "thinking")).toMatchObject(
 			{ done: true, duration: 42, text: "why now" },
 		);
@@ -260,169 +231,5 @@ describe("transcript detail reducer", () => {
 			input: { path: "a" },
 			metadata: { sessionId: "child" },
 		});
-	});
-
-	it("infers queued user only for a live new row", () => {
-		const user: HistoryMessage = {
-			id: "u",
-			role: "user",
-			parts: [{ id: "p", type: "text", text: "hello" }],
-		};
-		const state = applyTranscriptEnvelope(entry(), snapshot([user], 1));
-		const catchup = deriveTranscriptMessages(state, [], {
-			live: false,
-			active: true,
-			turnEpoch: 2,
-			newUserIds: new Set(["u"]),
-		});
-		expect(catchup[0]).not.toHaveProperty("sentDuringEpoch");
-		const live = deriveTranscriptMessages(state, [], {
-			live: true,
-			active: true,
-			turnEpoch: 2,
-			newUserIds: new Set(["u"]),
-		});
-		expect(live[0]).toMatchObject({ sentDuringEpoch: 2 });
-		const optimistic: ChatMessage = {
-			type: "user",
-			uuid: "local",
-			text: "hello",
-			inputId: "input-local",
-		};
-		const reconciled = deriveTranscriptMessages(state, [...live, optimistic], {
-			live: true,
-			active: true,
-			turnEpoch: 3,
-		});
-		expect(reconciled).toHaveLength(2);
-		expect(reconciled[1]).toBe(optimistic);
-	});
-
-	// After a reload nothing local remembers the send; the rows still show it.
-	it("restores a queued prompt from a reply still being written above it", () => {
-		const prompt = (id: string, created: number): HistoryMessage => ({
-			id,
-			role: "user",
-			time: { created },
-			parts: [{ id: `${id}-text`, type: "text", text: id }],
-		});
-		const reply = (id: string, created: number, completed?: number) => ({
-			...row(id, created, id),
-			time: { created, ...(completed === undefined ? {} : { completed }) },
-		});
-		// A reload renders while the transcript is still loading, before the busy
-		// status arrives, so the rows alone must carry the fact.
-		const queued = (rows: HistoryMessage[], processing = true) =>
-			deriveTranscriptMessages(
-				applyTranscriptEnvelope(entry(), snapshot(rows, 1)),
-				[],
-				{ live: false, active: false, turnEpoch: 3 },
-			)
-				.filter((message) => message.type === "user")
-				.map((message) => isQueued(message, 3, processing));
-
-		// Claude stamps a row's last write as `completed`; OpenCode omits it mid-run.
-		expect(
-			queued([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)]),
-		).toEqual([false, true]);
-		expect(
-			queued([prompt("one", 1), reply("a", 2), prompt("next", 10)]),
-		).toEqual([false, true]);
-		// The reply had finished before the prompt was sent.
-		expect(
-			queued([prompt("one", 1), reply("a", 2, 5), prompt("next", 10)]),
-		).toEqual([false, false]);
-		// The prompt has started: its own reply is below it.
-		expect(
-			queued([
-				prompt("one", 1),
-				reply("a", 2, 50),
-				prompt("next", 10),
-				reply("b", 60),
-			]),
-		).toEqual([false, false]);
-		// Nothing is running any more.
-		expect(
-			queued([prompt("one", 1), reply("a", 2, 50), prompt("next", 10)], false),
-		).toEqual([false, false]);
-	});
-
-	it("does not adopt a repeated send into an older projected user row", () => {
-		const user = (id: string): HistoryMessage => ({
-			id,
-			role: "user",
-			inputId: `input-${id}`,
-			parts: [{ id: `${id}-text`, type: "text", text: "yes" }],
-		});
-		const first = applyTranscriptEnvelope(entry(), snapshot([user("old")], 1));
-		const shown = derive(first, [], { live: true, active: true, turnEpoch: 1 });
-		const optimistic: ChatMessage = {
-			type: "user",
-			uuid: "local",
-			text: "yes",
-			inputId: "input-new",
-		};
-		const waiting = derive(first, [...shown.messages, optimistic], {
-			live: true,
-			active: true,
-			turnEpoch: 2,
-		});
-		expect(waiting.messages).toHaveLength(2);
-		expect(waiting.messages[1]).toBe(optimistic);
-		expect(waiting.carried.size).toBe(0);
-		const second = applyTranscriptEnvelope(first, {
-			_tag: "upsert",
-			sequence: 2,
-			item: item(user("new")),
-		});
-		const adopted = derive(second, waiting.messages, {
-			live: true,
-			active: true,
-			turnEpoch: 2,
-			newUserIds: new Set(["new"]),
-		});
-		expect(adopted.messages.map((message) => message.uuid)).toEqual([
-			"new/user",
-			"old/user",
-		]);
-		expect(adopted.carried.has("new")).toBe(true);
-		expect(first.carriedUsers.size).toBe(0);
-	});
-
-	it("adopts a send whose row is created before its text part", () => {
-		const optimistic: ChatMessage = {
-			type: "user",
-			uuid: "local",
-			text: "hi",
-			inputId: "input-u",
-		};
-		const created = applyTranscriptEnvelope(entry(), {
-			_tag: "upsert",
-			sequence: 1,
-			item: item({ id: "u", role: "user", inputId: "input-u", parts: [] }),
-		});
-		const waiting = derive(created, [optimistic], {
-			live: true,
-			active: true,
-			turnEpoch: 1,
-		});
-		expect(waiting.messages).toEqual([optimistic]);
-		const texted = applyTranscriptEnvelope(created, {
-			_tag: "upsert",
-			sequence: 2,
-			item: item({
-				id: "u",
-				role: "user",
-				inputId: "input-u",
-				parts: [{ id: "u-text", type: "text", text: "hi" }],
-			}),
-		});
-		const adopted = derive(texted, waiting.messages, {
-			live: true,
-			active: true,
-			turnEpoch: 1,
-		});
-		expect(adopted.messages.map((message) => message.uuid)).toEqual(["u/user"]);
-		expect(adopted.carried.has("u")).toBe(true);
 	});
 });

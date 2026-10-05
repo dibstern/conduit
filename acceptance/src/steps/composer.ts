@@ -104,18 +104,14 @@ export const composerHandlers: StepHandler[] = [
 				throw new Error("Mock relay controls were not initialised");
 			}
 
-			const sendRequest = await rpcControl.waitForRequest(
+			await rpcControl.waitForRequest(
 				(request) =>
 					request.tag === "input.submit" && request.payload["text"] === message,
 			);
-			// Echo the sender's originId like the real relay: the sending tab
-			// ignores its own broadcast and keeps its local echo (no duplicate).
+			// Stand in for the adapter placing the sent message: the browser keeps
+			// no copy of its own, so the transcript shows it only once placed.
 			await relayControl.sendMessages([
-				{
-					type: "user_message",
-					text: message,
-					originId: sendRequest.payload["originId"],
-				},
+				{ type: "user_message", text: message },
 			]);
 		},
 	},
