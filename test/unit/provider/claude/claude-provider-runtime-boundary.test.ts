@@ -172,6 +172,7 @@ describe("Claude provider runtime boundary", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-overrides-one",
+					inputId: "turn-1",
 					model: { providerId: "claude", modelId: "sonnet" },
 				}),
 			),
@@ -184,6 +185,7 @@ describe("Claude provider runtime boundary", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-overrides-two",
+					inputId: "turn-2",
 					model: { providerId: "claude", modelId: "sonnet" },
 				}),
 			),

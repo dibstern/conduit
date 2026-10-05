@@ -8,6 +8,7 @@ import {
 	type StoredEvent,
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
+import { EventStoreEffectTag } from "./event-store-effect.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
 	"ClaudeEventPersistEffectError",
@@ -170,6 +171,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		);
 
 	const commitAndSignal = yield* makeCommitAndSignal;
+	const eventStore = yield* EventStoreEffectTag;
 
 	const mapPersistError =
 		(operation: string) =>
@@ -212,41 +214,51 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		text: string,
 		options?: { readonly publish?: boolean; readonly messageId?: string },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
-		Effect.gen(function* () {
-			yield* requireSession(
-				sessionId,
-				"persistUserMessage",
-				"existing-session",
-			);
-
-			const now = Date.now();
-			const userMsgId = options?.messageId ?? crypto.randomUUID();
-			yield* commitAndSignal(
-				[
-					canonicalEvent(
-						"message.created",
-						sessionId,
-						{
-							messageId: userMsgId,
-							role: "user",
+		commitAndSignal
+			.write(
+				(project) =>
+					Effect.gen(function* () {
+						yield* requireSession(
 							sessionId,
-						},
-						{ provider: "claude", createdAt: now },
-					),
-					canonicalEvent(
-						"text.delta",
-						sessionId,
-						{
-							messageId: userMsgId,
-							partId: `${userMsgId}-0`,
-							text,
-						},
-						{ provider: "claude", createdAt: now },
-					),
-				],
+							"persistUserMessage",
+							"existing-session",
+						);
+						// The check and append share the seam's transaction on redispatch.
+						if (options?.messageId) {
+							const existing = yield* sql<{ readonly id: string }>`
+								SELECT id FROM messages WHERE id = ${options.messageId} LIMIT 1`;
+							if (existing.length > 0) return;
+						}
+
+						const now = Date.now();
+						const userMsgId = options?.messageId ?? crypto.randomUUID();
+						const stored = yield* eventStore.appendBatch([
+							canonicalEvent(
+								"message.created",
+								sessionId,
+								{
+									messageId: userMsgId,
+									role: "user",
+									sessionId,
+								},
+								{ provider: "claude", createdAt: now },
+							),
+							canonicalEvent(
+								"text.delta",
+								sessionId,
+								{
+									messageId: userMsgId,
+									partId: `${userMsgId}-0`,
+									text,
+								},
+								{ provider: "claude", createdAt: now },
+							),
+						]);
+						yield* project(stored);
+					}),
 				options,
-			);
-		}).pipe(Effect.mapError(mapPersistError("persistUserMessage")));
+			)
+			.pipe(Effect.mapError(mapPersistError("persistUserMessage")));
 
 	const ensureClaudeSubagentSession: ClaudeEventPersistEffect["ensureClaudeSubagentSession"] =
 		(input) =>

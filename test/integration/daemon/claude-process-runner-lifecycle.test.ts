@@ -254,8 +254,7 @@ describe("Claude runner admission socket probes", () => {
 				aborted: false,
 				input: {
 					sessionId,
-					turnId: "probe-turn",
-					userMessageId: "probe-user",
+					inputId: "probe-user",
 					prompt: "admission-respawn",
 					history: [],
 					providerState: {},

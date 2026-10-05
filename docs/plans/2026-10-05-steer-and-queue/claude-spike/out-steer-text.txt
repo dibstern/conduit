@@ -1,0 +1,17 @@
+  0.0s >>> SEND A {} "Without using any tools, write a 250-word story about a lighthouse ke
+  0.6s lifecycle A queued 
+  0.6s lifecycle A started 
+  0.6s system/init caps=["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1"]
+  1.8s stream message_start id=FJhe8wdB umu=A umus=[A]
+  2.6s >>> SEND B {"priority":"next"} "Also: end your next reply with the word BANANA."
+  2.6s lifecycle B queued 
+  7.1s assistant id=FJhe8wdB umu=A umus=[A] [text:"Elias had tended the Harrow Point light for thirty-one wint]
+  7.2s RESULT success turns=1 umu=A umus=[A] text="Elias had tended the Harrow Point light for thirty-one winters, and in all that
+  7.2s lifecycle A completed 
+  7.2s lifecycle B started 
+  7.2s system/init caps=["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1"]
+  8.0s stream message_start id=WmsQKNm8 umu=B umus=[B]
+  8.7s assistant id=WmsQKNm8 umu=B umus=[B] [text:"Understood. I'll end this reply with that word, as you aske]
+  8.7s RESULT success turns=1 umu=B umus=[B] text="Understood. I'll end this reply with that word, as you asked.\n\nBANANA"
+  8.7s === END (got 2 results) results=2
+rc=0

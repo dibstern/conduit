@@ -180,7 +180,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
-					turnId: "t1",
+					inputId: "t1",
 					prompt: "hello",
 					history: [],
 					providerState: {},
@@ -207,7 +207,7 @@ describe("OrchestrationEngine", () => {
 					providerId: "unknown",
 					input: {
 						sessionId: "s1",
-						turnId: "t1",
+						inputId: "t1",
 						prompt: "hello",
 						history: [],
 						providerState: {},
@@ -230,7 +230,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
-					turnId: "t1",
+					inputId: "t1",
 					prompt: "hello",
 					history: [],
 					providerState: {},
@@ -551,7 +551,7 @@ describe("OrchestrationEngine", () => {
 					providerId: "opencode",
 					input: {
 						sessionId: "s1",
-						turnId: "t1",
+						inputId: "t1",
 						prompt: "hello",
 						history: [],
 						providerState: {},
@@ -645,7 +645,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
-					turnId: "t1",
+					inputId: "t1",
 					prompt: "hello",
 					history: [],
 					providerState: {},
@@ -677,7 +677,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "opencode",
 				input: {
 					sessionId: "s1",
-					turnId: "t1",
+					inputId: "t1",
 					prompt: "hello",
 					history: [],
 					providerState: {},
@@ -764,7 +764,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-1",
-					turnId: "int-turn-1",
+					inputId: "int-turn-1",
 					prompt: "Integration test prompt",
 					workspaceRoot: claudeWorkspace,
 					model: { providerId: "claude", modelId: "sonnet" },
@@ -802,7 +802,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-bind",
-					turnId: "int-turn-1",
+					inputId: "int-turn-1",
 					workspaceRoot: claudeWorkspace,
 					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
@@ -869,7 +869,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-err",
-					turnId: "int-turn-err",
+					inputId: "int-turn-err",
 					workspaceRoot: claudeWorkspace,
 					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,
@@ -908,7 +908,7 @@ describe("OrchestrationEngine", () => {
 					providerId: "thrower",
 					input: {
 						sessionId: "s-crash",
-						turnId: "t1",
+						inputId: "t1",
 						prompt: "hello",
 						history: [],
 						providerState: {},
@@ -945,7 +945,7 @@ describe("OrchestrationEngine", () => {
 					providerId: "sync-thrower",
 					input: {
 						sessionId: "s-sync-crash",
-						turnId: "t1",
+						inputId: "t1",
 						prompt: "hello",
 						history: [],
 						providerState: {},
@@ -1019,7 +1019,7 @@ describe("OrchestrationEngine", () => {
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "int-session-erred",
-					turnId: "int-turn-erred",
+					inputId: "int-turn-erred",
 					workspaceRoot: claudeWorkspace,
 					model: { providerId: "claude", modelId: "sonnet" },
 					eventSink: sink,

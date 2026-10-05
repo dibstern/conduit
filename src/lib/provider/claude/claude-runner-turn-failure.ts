@@ -41,7 +41,7 @@ export function failClaudeRunnerTurn(
 	sinkId: string,
 	turn: {
 		sessionId: string;
-		userMessageId?: string;
+		inputId?: string;
 		messageId: string;
 		terminal: boolean;
 	},
@@ -70,7 +70,7 @@ export function failClaudeRunnerTurn(
 					turn.sessionId,
 					turn.messageId,
 					new Error(failure.message),
-					turn.userMessageId,
+					turn.inputId,
 				),
 			});
 		}

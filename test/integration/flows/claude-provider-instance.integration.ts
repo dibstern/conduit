@@ -199,7 +199,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		const sink = createMockEventSink();
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-integ-full",
-			turnId: "turn-integ-1",
+			inputId: "turn-integ-1",
 			prompt: "Read the file",
 			eventSink: sink,
 			workspaceRoot: workspace,
@@ -433,7 +433,7 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-integ-perm",
-			turnId: "turn-perm-1",
+			inputId: "turn-perm-1",
 			prompt: "Run the command",
 			eventSink: sink,
 			workspaceRoot: workspace,

@@ -621,9 +621,7 @@ const main = Effect.gen(function* () {
 					if (command.type === "send-turn") {
 						bindings.set(command.sinkId, {
 							sessionId: command.input.sessionId,
-							...(command.input.commandId !== undefined
-								? { commandId: command.input.commandId }
-								: {}),
+							commandId: message.commandId,
 						});
 					}
 					reportUpgradeState();

@@ -357,7 +357,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					});
 					yield* instance.sendTurnEffect({
 						sessionId,
-						turnId: `${sessionId}-turn`,
+						inputId: `${sessionId}-turn`,
 						prompt: "Use Sonnet with a 1M context window",
 						history: [],
 						providerState: {},

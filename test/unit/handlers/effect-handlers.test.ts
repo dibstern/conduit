@@ -4098,6 +4098,7 @@ describe("handleMessage", () => {
 					type: "send_turn",
 					providerId: "claude",
 					input: expect.objectContaining({
+						inputId: "cmd-context-window",
 						contextWindow: "1m",
 					}),
 				}),
@@ -4318,6 +4319,7 @@ describe("handleMessage", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
+							inputId: "cmd-sqlite-history",
 							history: [
 								expect.objectContaining({
 									role: "user",
@@ -4613,6 +4615,7 @@ describe("handleMessage", () => {
 						providerId: "opencode",
 						input: expect.objectContaining({
 							sessionId: "ses-opencode-created",
+							inputId: "cmd-materialize-opencode",
 							prompt: "Test query",
 							model: {
 								providerId: "opencode",

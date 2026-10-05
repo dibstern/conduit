@@ -1,0 +1,20 @@
+  0.0s >>> SEND A {} "Use the Bash tool to run exactly `sleep 15; echo A-DONE`. After it fi
+  2.0s lifecycle A queued 
+  2.0s lifecycle A started 
+  2.1s system/init caps=["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1"]
+  2.8s stream message_start id=MMqfZV1Q umu=A umus=[A]
+  3.4s assistant id=MMqfZV1Q umu=A umus=[A] [tool_use:Bash]
+  5.4s >>> SEND B {"priority":"next"} "Also: end your next reply with the word BANANA."
+  5.4s lifecycle B queued 
+  6.9s !!! interrupt()
+  6.9s !!! receipt {"still_queued":["e69cc771-a6ae-4350-8cb0-8eb25ce16f84"]}
+  6.9s user uuid=51b3d72f replay=false synthetic=false prio=- [tool_result]
+  6.9s user uuid=2b878db7 replay=false synthetic=false prio=- [text:"[Request interrupted by user for tool use]"]
+  6.9s RESULT error_during_execution turns=3 umu=A umus=[A] text=""
+  6.9s lifecycle A cancelled 
+  6.9s lifecycle B started 
+  6.9s system/init caps=["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1"]
+  7.8s stream message_start id=1N3SqzdC umu=B umus=[B]
+  7.8s assistant id=1N3SqzdC umu=B umus=[B] [text:"The command wasn't run because you rejected the tool use, s]
+  7.8s RESULT success turns=1 umu=B umus=[B] text="The command wasn't run because you rejected the tool use, so I'm waiting for yo
+  7.8s === END (got 2 results) results=2

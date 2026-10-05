@@ -94,7 +94,7 @@ describe("ProviderInstance types", () => {
 
 		const input: SendTurnInput = {
 			sessionId: "s1",
-			turnId: "t1",
+			inputId: "t1",
 			prompt: "hello",
 			history: [],
 			providerState: {},
@@ -106,7 +106,7 @@ describe("ProviderInstance types", () => {
 		};
 
 		expect(input.sessionId).toBe("s1");
-		expect(input.turnId).toBe("t1");
+		expect(input.inputId).toBe("t1");
 		expect(input.eventSink).toBe(mockSink);
 		expect(Effect.isEffect(mockSink.push({} as never))).toBe(true);
 		expect(typeof mockSink.resolvePermission).toBe("function");
@@ -124,7 +124,7 @@ describe("ProviderInstance types", () => {
 
 		const input: SendTurnInput = {
 			sessionId: "s1",
-			turnId: "t1",
+			inputId: "t1",
 			prompt: "hello",
 			history: [],
 			providerState: {},

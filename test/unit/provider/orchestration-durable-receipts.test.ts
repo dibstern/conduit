@@ -75,7 +75,7 @@ function sendTurnCommand(
 		providerId: overrides.providerId ?? "opencode",
 		input: {
 			sessionId: "session-1",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: overrides.prompt ?? "hello",
 			history: [],
 			providerState: {},

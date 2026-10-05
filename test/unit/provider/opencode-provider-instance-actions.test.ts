@@ -292,7 +292,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 			const turnPromise = Effect.runPromise(
 				instance.sendTurnEffect({
 					sessionId: "s1",
-					turnId: "t1",
+					inputId: "t1",
 					prompt: "hello",
 					history: [],
 					providerState: {},

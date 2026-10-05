@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { Context, Effect, FiberMap, type Ref, Runtime } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
@@ -441,14 +440,14 @@ const prepareEngineTurnInput = (
 			isClaudeDriver(driver) &&
 			priorHistoryResult.loaded &&
 			priorHistory.length === 0;
-		const userMessageId = isClaudeDriver(driver) ? randomUUID() : undefined;
+		const inputId = resolvedInput.commandId;
 
 		yield* isClaudeDriver(driver)
 			? maybePersistClaudeUserMessage({
 					sessionId: resolvedInput.sessionId,
 					text: resolvedInput.text,
 					isFirstClaudeMessage,
-					...(userMessageId ? { messageId: userMessageId } : {}),
+					messageId: inputId,
 				})
 			: Effect.void;
 
@@ -474,8 +473,7 @@ const prepareEngineTurnInput = (
 					resolvedInput.model.providerID === CLAUDE_PROVIDER_ID));
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
-			turnId: randomUUID(),
-			...(userMessageId ? { userMessageId } : {}),
+			inputId,
 			prompt: resolvedInput.text,
 			history: priorHistory,
 			providerState,
@@ -564,8 +562,9 @@ const dispatchEngineTurn = (
 		);
 		yield* FiberMap.run(
 			dispatchFibers,
-			`${resolvedInput.sessionId}:${sendTurnInput.turnId}`,
+			`${resolvedInput.sessionId}:${sendTurnInput.inputId}`,
 			dispatchProgram,
+			{ onlyIfMissing: true },
 		).pipe(Effect.asVoid);
 	});
 

@@ -271,7 +271,7 @@ export const makeProcessClaudeSessionRunner = (
 			{
 				sessionId: string;
 				history: readonly HistoryMessage[];
-				userMessageId?: string;
+				inputId?: string;
 				messageId: string;
 				terminal: boolean;
 				pending: boolean;
@@ -460,7 +460,7 @@ export const makeProcessClaudeSessionRunner = (
 						const output =
 							received.type === "event" &&
 							received.event.type === "turn.error" &&
-							binding?.userMessageId &&
+							binding?.inputId &&
 							received.event.sessionId === binding.sessionId &&
 							isRecord(received.event.data)
 								? {
@@ -469,7 +469,7 @@ export const makeProcessClaudeSessionRunner = (
 											...received.event,
 											data: {
 												...received.event.data,
-												userMessageId: binding.userMessageId,
+												userMessageId: binding.inputId,
 											},
 										},
 									}
@@ -539,21 +539,22 @@ export const makeProcessClaudeSessionRunner = (
 							? []
 							: (hello.bindings ?? [])) {
 							let history: readonly HistoryMessage[] = [];
-							let userMessageId: string | undefined;
+							let inputId: string | undefined;
 							let messageId = "";
 							let terminal = false;
 							let pending = false;
 							if (sql) {
 								const rows = yield* sql<{
 									payload_json: string;
+									input_id: string | null;
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
 									state: string | null;
-								}>`SELECT outbox.payload_json, outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
+								}>`SELECT outbox.payload_json, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id, outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
 									FROM provider_command_outbox outbox
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
-										AND turns.user_message_id = json_extract(outbox.payload_json, '$.userMessageId')
+										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 									WHERE outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("restore runner history", cause),
@@ -564,10 +565,9 @@ export const makeProcessClaudeSessionRunner = (
 								if (row) {
 									const payload = JSON.parse(row.payload_json) as {
 										history?: readonly HistoryMessage[];
-										userMessageId?: string;
 									};
 									history = payload.history ?? [];
-									userMessageId = payload.userMessageId;
+									inputId = row.input_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
 									messageId = row.assistant_message_id ?? "";
 									terminal =
@@ -576,11 +576,14 @@ export const makeProcessClaudeSessionRunner = (
 										row.state !== "running";
 									pending =
 										row.status === "running" &&
-										binding.sinkId ===
+										(binding.sinkId ===
 											claudeRunnerSinkId(
 												binding.commandId ?? binding.sinkId,
 												row.attempt_count,
-											);
+											) ||
+											(inputId !== undefined &&
+												binding.sinkId ===
+													claudeRunnerSinkId(inputId, row.attempt_count)));
 								}
 							}
 							const completed = pending
@@ -590,7 +593,7 @@ export const makeProcessClaudeSessionRunner = (
 							sinks.set(binding.sinkId, {
 								sessionId,
 								history,
-								...(userMessageId ? { userMessageId } : {}),
+								...(inputId ? { inputId } : {}),
 								messageId,
 								terminal,
 								pending,
@@ -1080,6 +1083,12 @@ export const makeProcessClaudeSessionRunner = (
 									},
 									() => closing,
 									deps,
+									(commandId, inputId, attempt) => {
+										const sinkId = claudeRunnerSinkId(inputId, attempt);
+										return sinks.has(sinkId)
+											? sinkId
+											: claudeRunnerSinkId(commandId, attempt);
+									},
 								).pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("recover runner commands", cause),
@@ -1097,9 +1106,7 @@ export const makeProcessClaudeSessionRunner = (
 										binding = {
 											sessionId: registration.sessionId,
 											history: command.input.history,
-											...(command.input.userMessageId
-												? { userMessageId: command.input.userMessageId }
-												: {}),
+											inputId: command.input.inputId,
 											messageId: command.messageId,
 											terminal: command.terminal,
 											pending: true,
@@ -1202,9 +1209,7 @@ export const makeProcessClaudeSessionRunner = (
 						? {
 								sessionId: command.input.sessionId,
 								history: command.input.history,
-								...(command.input.userMessageId
-									? { userMessageId: command.input.userMessageId }
-									: {}),
+								inputId: command.input.inputId,
 								messageId: "",
 								terminal: false,
 								pending: true,
@@ -1448,10 +1453,28 @@ export const makeProcessClaudeSessionRunner = (
 										},
 									}
 								: command;
-					const commandId =
-						command.type === "send-turn"
-							? (command.input.commandId ?? randomUUID())
-							: randomUUID();
+					let commandId =
+						command.type === "send-turn" ? command.input.inputId : randomUUID();
+					if (
+						command.type === "send-turn" &&
+						sql &&
+						command.input.commandAttempt !== undefined
+					) {
+						// A legacy retry can retain an outbox command id distinct from
+						// its normalized input id. Preserve it for runner reattachment.
+						const rows = yield* sql<{
+							command_id: string;
+						}>`SELECT command_id FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+								AND status = 'running' AND attempt_count = ${command.input.commandAttempt}
+								AND COALESCE(json_extract(payload_json, '$.inputId'), json_extract(payload_json, '$.userMessageId'), json_extract(payload_json, '$.commandId'), json_extract(payload_json, '$.turnId')) = ${command.input.inputId}
+							ORDER BY request_sequence LIMIT 1`.pipe(
+							Effect.mapError((cause) =>
+								claudeRunnerFailure("resolve runner command", cause),
+							),
+						);
+						commandId = rows[0]?.command_id ?? commandId;
+					}
 					if (command.type === "end-session") {
 						const bindings = [...sinks.values()].filter(
 							(binding) => binding.sessionId === sessionId,

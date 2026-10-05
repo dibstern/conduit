@@ -110,7 +110,7 @@ describe("Claude permission mode mapping", () => {
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: "s1",
-						turnId: "turn-1",
+						inputId: "turn-1",
 						eventSink: createMockEventSink(),
 						model: { providerId: "claude", modelId: SONNET },
 					}),
@@ -151,7 +151,7 @@ describe("Claude permission mode mapping", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s1",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: createMockEventSink(),
 					model: { providerId: "claude", modelId: SONNET },
 					permissionMode: "full",
@@ -191,7 +191,7 @@ describe("Claude permission mode mapping", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s1",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: createMockEventSink(),
 					model: { providerId: "claude", modelId: SONNET },
 					permissionMode: "ask",

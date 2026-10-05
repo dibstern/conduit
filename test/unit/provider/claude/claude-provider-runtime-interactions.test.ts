@@ -349,7 +349,7 @@ describe("Claude runner interaction transport", () => {
 					expect(
 						(yield* runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
-								turnId: "turn-2",
+								inputId: "turn-2",
 								model: { providerId: "claude", modelId: "sonnet" },
 							}),
 						)).status,

@@ -69,7 +69,7 @@ function makeStubEventSink(): EventSink & {
 function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 	return {
 		sessionId: "s1",
-		turnId: "t1",
+		inputId: "t1",
 		prompt: "Write hello world",
 		history: [],
 		providerState: {},
@@ -209,7 +209,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 	it("resolves concurrent prompts on one session from one completion", async () => {
 		const firstResultPromise = Effect.runPromise(
 			instance
-				.sendTurnEffect(makeSendTurnInput({ turnId: "t1", prompt: "first" }))
+				.sendTurnEffect(makeSendTurnInput({ inputId: "t1", prompt: "first" }))
 				.pipe(
 					Effect.timeoutFail({
 						duration: "500 millis",
@@ -219,7 +219,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		);
 		const secondResultPromise = Effect.runPromise(
 			instance
-				.sendTurnEffect(makeSendTurnInput({ turnId: "t2", prompt: "second" }))
+				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
 					Effect.timeoutFail({
 						duration: "500 millis",
@@ -269,7 +269,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const firstResultPromise = Effect.runPromise(
 			instance.sendTurnEffect(
-				makeSendTurnInput({ turnId: "t1", prompt: "first" }),
+				makeSendTurnInput({ inputId: "t1", prompt: "first" }),
 			),
 		);
 		await vi.waitFor(() => {
@@ -278,7 +278,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const secondResultPromise = Effect.runPromise(
 			instance
-				.sendTurnEffect(makeSendTurnInput({ turnId: "t2", prompt: "second" }))
+				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
 					Effect.timeoutFail({
 						duration: "500 millis",

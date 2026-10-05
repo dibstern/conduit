@@ -314,7 +314,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-one",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: sink1,
 				}),
 			),
@@ -323,7 +323,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-two",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					eventSink: sink2,
 				}),
 			),
@@ -411,7 +411,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const sink = createMockEventSink();
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-multi",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First message",
 			eventSink: sink,
 		});
@@ -426,7 +426,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// Second turn - should reuse the query
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-multi",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second message",
 			eventSink: sink,
 		});
@@ -561,7 +561,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-multi-sink",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: sinkA,
 				}),
 			),
@@ -572,7 +572,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-multi-sink",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					eventSink: sinkB,
 				}),
 			),
@@ -641,7 +641,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "parent-session",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					workspaceRoot: workspace,
 					eventSink: sink,
 				}),
@@ -826,7 +826,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: parentSessionId,
-					turnId: "turn-live",
+					inputId: "turn-live",
 					workspaceRoot: workspace,
 					eventSink: sink,
 				}),
@@ -1041,7 +1041,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: parentSessionId,
-					turnId: "turn-live-transcript",
+					inputId: "turn-live-transcript",
 					workspaceRoot: workspace,
 					eventSink: sink,
 				}),
@@ -1269,6 +1269,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "parent-sink-snapshot",
+					inputId: "turn-1",
 					workspaceRoot: workspace,
 					eventSink: sink1,
 				}),
@@ -1282,6 +1283,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: "parent-sink-snapshot",
+						inputId: "turn-2",
 						workspaceRoot: workspace,
 						eventSink: sink2,
 					}),
@@ -1772,7 +1774,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					agent: "Explore",
 					eventSink: sink,
 				}),
@@ -1784,7 +1786,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					agent: "Plan",
 					eventSink: sink,
 				}),
@@ -1844,7 +1846,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-history",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					agent: "Explore",
 					eventSink: sink,
 				}),
@@ -1855,7 +1857,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-history",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					prompt: "Apply the same fix to the other file.",
 					agent: "Plan",
 					eventSink: sink,
@@ -1946,7 +1948,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-no-history",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					agent: "Explore",
 					eventSink: sink,
 				}),
@@ -1956,7 +1958,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-no-history",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					prompt: "Fresh agent prompt.",
 					agent: "Plan",
 					eventSink: sink,
@@ -2024,7 +2026,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-active-agent",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					agent: "Explore",
 					eventSink: sink,
 				}),
@@ -2036,7 +2038,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-active-agent",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					agent: "Plan",
 					eventSink: sink,
 				}),
@@ -2545,7 +2547,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-context-switch",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "200k",
@@ -2569,7 +2571,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-context-switch",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: "claude-sonnet-4-6" },
 					contextWindow: "1m",
@@ -2597,7 +2599,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeRawBaseSendTurnInput({
 					sessionId: "session-context-switch",
-					turnId: "turn-3",
+					inputId: "turn-3",
 					eventSink: sink,
 					contextWindow: "200k",
 				}),
@@ -2937,13 +2939,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const sink = createMockEventSink();
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-concurrent",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 			eventSink: sink,
 		});
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-concurrent",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 			eventSink: sink,
 		});
@@ -2971,12 +2973,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-concurrent-setup-fail",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 		});
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-concurrent-setup-fail",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 		});
 
@@ -3165,7 +3167,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// First turn
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-multi-result",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 			eventSink: sink,
 		});
@@ -3178,7 +3180,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// Second turn
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-multi-result",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 			eventSink: sink,
 		});
@@ -3250,7 +3252,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// First turn completes normally
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-interrupt-2nd",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 			eventSink: sink,
 		});
@@ -3260,7 +3262,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// Second turn - enqueue, then interrupt
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-interrupt-2nd",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 			eventSink: sink,
 		});
@@ -3339,7 +3341,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// First turn with sinkA
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-sink-swap",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 			eventSink: sinkA,
 		});
@@ -3351,7 +3353,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// Second turn with sinkB
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-sink-swap",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 			eventSink: sinkB,
 		});
@@ -3402,13 +3404,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const inputA = makeBaseSendTurnInput({
 			sessionId: "session-alpha",
-			turnId: "turn-a",
+			inputId: "turn-a",
 			prompt: "Hello from A",
 			eventSink: sinkA,
 		});
 		const inputB = makeBaseSendTurnInput({
 			sessionId: "session-beta",
-			turnId: "turn-b",
+			inputId: "turn-b",
 			prompt: "Hello from B",
 			eventSink: sinkB,
 		});
@@ -3603,7 +3605,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// First turn creates session
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-evict",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 			eventSink: sink,
 		});
@@ -3625,7 +3627,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// Second turn after a stop should evict + create a new query
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-evict",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 			eventSink: sink,
 		});
@@ -3924,7 +3926,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const sink = createMockEventSink();
 		const input1 = makeBaseSendTurnInput({
 			sessionId: "session-crash-between",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "First",
 			eventSink: sink,
 		});
@@ -3942,7 +3944,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		// Either way, the provider instance should not hang or throw unhandled.
 		const input2 = makeBaseSendTurnInput({
 			sessionId: "session-crash-between",
-			turnId: "turn-2",
+			inputId: "turn-2",
 			prompt: "Second",
 			eventSink: sink,
 		});

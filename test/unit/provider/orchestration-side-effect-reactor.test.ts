@@ -79,7 +79,7 @@ describe("ProviderSideEffectReactor", () => {
 			expect(sendTurn).toHaveBeenCalledTimes(1);
 			expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
 				sessionId: "session-1",
-				turnId: "turn-1",
+				inputId: "legacy-user-1",
 				prompt: "hello",
 				workspaceRoot: "/repo",
 			});
@@ -799,6 +799,7 @@ function seedSendTurnOutbox(
 					JSON.stringify({
 						sessionId: "session-1",
 						turnId: "turn-1",
+						userMessageId: "legacy-user-1",
 						prompt: "hello",
 						history: [],
 						providerState: {},

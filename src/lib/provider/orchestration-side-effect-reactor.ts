@@ -367,7 +367,6 @@ export class ProviderSideEffectReactor {
 				const payload = yield* this.parseSendTurnPayload(row);
 				return yield* instance.sendTurnEffect({
 					...payload,
-					commandId: row.command_id,
 					...(driver === "claude" ? { commandAttempt } : {}),
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
@@ -434,11 +433,27 @@ export class ProviderSideEffectReactor {
 			try: (): unknown => JSON.parse(row.payload_json),
 			catch: toParseFailure,
 		}).pipe(
-			Effect.flatMap((payload) =>
-				isSendTurnOutboxPayload(payload)
-					? Effect.succeed(payload)
-					: Effect.fail(toParseFailure("Invalid send_turn outbox payload")),
-			),
+			Effect.flatMap((payload) => {
+				if (!isRecord(payload))
+					return Effect.fail(
+						toParseFailure("Invalid send_turn outbox payload"),
+					);
+				const inputId =
+					payload["inputId"] ??
+					payload["userMessageId"] ??
+					payload["commandId"] ??
+					payload["turnId"];
+				const {
+					turnId: _turnId,
+					userMessageId: _userMessageId,
+					commandId: _commandId,
+					...input
+				} = payload;
+				const normalized = { ...input, inputId };
+				return isSendTurnOutboxPayload(normalized)
+					? Effect.succeed(normalized)
+					: Effect.fail(toParseFailure("Invalid send_turn outbox payload"));
+			}),
 		);
 	}
 
@@ -617,7 +632,7 @@ function isSendTurnOutboxPayload(
 	if (!isRecord(value)) return false;
 	return (
 		typeof value["sessionId"] === "string" &&
-		typeof value["turnId"] === "string" &&
+		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
 		Array.isArray(value["history"]) &&
 		isRecord(value["providerState"]) &&

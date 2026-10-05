@@ -5,6 +5,7 @@ import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
 	type ClaudeRunnerSocket,
 	claudeRunnerSinkId,
+	normalizeClaudeSessionTurn,
 } from "./claude-runner-protocol.js";
 import type {
 	ClaudeSessionFailure,
@@ -16,16 +17,16 @@ const runningClaudeCommands = (sql: SqlClient.SqlClient, sessionId?: string) =>
 		session_id: string;
 		command_id: string;
 		payload_json: string;
-		user_message_id: string | null;
+		input_id: string | null;
 		attempt_count: number;
 		assistant_message_id: string | null;
 		state: string | null;
 	}>`SELECT outbox.session_id, outbox.command_id, outbox.payload_json,
-		json_extract(outbox.payload_json, '$.userMessageId') AS user_message_id,
+		COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
 		outbox.attempt_count, turns.assistant_message_id, turns.state
 		FROM provider_command_outbox outbox
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
-			AND turns.user_message_id = json_extract(outbox.payload_json, '$.userMessageId')
+			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 		WHERE outbox.provider_id = 'claude' AND outbox.status = 'running' AND outbox.effect_type = 'send_turn'
 			AND (${sessionId ?? null} IS NULL OR outbox.session_id = ${sessionId ?? null})
 		ORDER BY outbox.request_sequence`;
@@ -41,16 +42,24 @@ export const recoverClaudeRunnerCommands = (
 	) => Effect.Effect<void>,
 	closing: () => boolean,
 	deps: ClaudeSessionRunnerDeps,
+	resolveSinkId?: (
+		commandId: string,
+		inputId: string,
+		attempt: number,
+	) => string,
 ) =>
 	Effect.gen(function* () {
 		const rows = yield* runningClaudeCommands(sql, sessionId);
 		return rows.map((row) => {
-			const sinkId = claudeRunnerSinkId(row.command_id, row.attempt_count);
 			const input = {
-				...(JSON.parse(row.payload_json) as ClaudeSessionTurn),
-				commandId: row.command_id,
+				...normalizeClaudeSessionTurn(
+					JSON.parse(row.payload_json) as ClaudeSessionTurn,
+				),
 				commandAttempt: row.attempt_count,
 			};
+			const sinkId =
+				resolveSinkId?.(row.command_id, input.inputId, row.attempt_count) ??
+				claudeRunnerSinkId(row.command_id, row.attempt_count);
 			return {
 				sinkId,
 				input,
@@ -116,7 +125,7 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 		sinkId: string,
 		turn: {
 			sessionId: string;
-			userMessageId?: string;
+			inputId?: string;
 			messageId: string;
 			terminal: boolean;
 		},
@@ -137,9 +146,7 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 				claudeRunnerSinkId(row.command_id, row.attempt_count),
 				{
 					sessionId: row.session_id,
-					...(row.user_message_id
-						? { userMessageId: row.user_message_id }
-						: {}),
+					...(row.input_id ? { inputId: row.input_id } : {}),
 					messageId: row.assistant_message_id ?? "",
 					terminal:
 						row.state !== null &&

@@ -579,7 +579,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 							aborted: false,
 							input: {
 								...(JSON.parse(command.payload_json) as ClaudeSessionTurn),
-								commandId: command.command_id,
 								commandAttempt: command.attempt_count,
 							},
 						},

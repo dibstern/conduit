@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
+import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type { TurnResult } from "../types.js";
 import type { ClaudeRunnerUpgradeState } from "./claude-runner-upgrade.js";
 import type {
@@ -11,6 +12,7 @@ import type {
 	ClaudeSessionFailure,
 	ClaudeSessionOutput,
 	ClaudeSessionOutputReply,
+	ClaudeSessionTurn,
 } from "./claude-session-runner.js";
 
 export const CLAUDE_RUNNER_PROTOCOL_VERSION = 5;
@@ -112,6 +114,24 @@ export type ClaudeRunnerMessage =
 			readonly preserveRole?: boolean;
 	  };
 
+export function normalizeClaudeSessionTurn(
+	input: Omit<ClaudeSessionTurn, "inputId"> & {
+		readonly inputId?: string;
+		readonly userMessageId?: string;
+		readonly commandId?: string;
+		readonly turnId?: string;
+	},
+): ClaudeSessionTurn {
+	const { inputId, userMessageId, commandId, turnId, ...turn } = input;
+	const id = inputId ?? userMessageId ?? commandId ?? turnId;
+	if (id === undefined)
+		throw new ClaudeBoundaryError({
+			operation: "decodeRunnerTurn",
+			cause: "Claude turn input id is required",
+		});
+	return { ...turn, inputId: id };
+}
+
 export function claudeRunnerHelloFailure(
 	hello: ClaudeRunnerHello,
 	peer: "server" | "runner",
@@ -179,7 +199,17 @@ export class ClaudeRunnerSocket {
 		const lines = createInterface({ input: socket, crlfDelay: Infinity });
 		lines.on("line", (line) => {
 			try {
-				const message = JSON.parse(line) as ClaudeRunnerMessage;
+				const decoded = JSON.parse(line) as ClaudeRunnerMessage;
+				const message =
+					decoded.type === "command" && decoded.command.type === "send-turn"
+						? {
+								...decoded,
+								command: {
+									...decoded.command,
+									input: normalizeClaudeSessionTurn(decoded.command.input),
+								},
+							}
+						: decoded;
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
@@ -230,8 +260,25 @@ export class ClaudeRunnerSocket {
 	}
 
 	write(message: ClaudeRunnerMessage): void {
-		if (!this.socket.destroyed)
-			this.socket.write(`${JSON.stringify(message)}\n`);
+		if (this.socket.destroyed) return;
+		// Runners can outlive the daemon. Older builds read these aliases for
+		// turn correlation and report commandId in their attachment bindings.
+		const frame =
+			message.type === "command" && message.command.type === "send-turn"
+				? {
+						...message,
+						command: {
+							...message.command,
+							input: {
+								...message.command.input,
+								turnId: message.command.input.inputId,
+								userMessageId: message.command.input.inputId,
+								commandId: message.commandId,
+							},
+						},
+					}
+				: message;
+		this.socket.write(`${JSON.stringify(frame)}\n`);
 	}
 
 	get closed(): boolean {

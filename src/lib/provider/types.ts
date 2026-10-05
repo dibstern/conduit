@@ -170,14 +170,11 @@ export interface HistoryMessage {
 }
 
 export interface SendTurnInput {
-	/** Durable outbox identity, forwarded to a process session runner. */
-	readonly commandId?: string;
-	/** Persisted user-message owner for process-runner failure events. */
-	readonly userMessageId?: string;
+	/** Per-send identity, shared by the outbox command and Claude message/turn. */
+	readonly inputId: string;
 	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
 	readonly commandAttempt?: number;
 	readonly sessionId: string;
-	readonly turnId: string;
 	readonly prompt: string;
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;

@@ -1,0 +1,22 @@
+  0.0s >>> SEND A {} "Use the Bash tool to run exactly `sleep 15; echo A-DONE`. After it fi
+  0.6s lifecycle A queued 
+  0.6s lifecycle A started 
+  0.6s system/init caps=["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1"]
+  1.7s stream message_start id=5v81QCiK umu=A umus=[A]
+  2.3s assistant id=5v81QCiK umu=A umus=[A] [tool_use:Bash]
+  4.3s >>> SEND B {"priority":"later"} "Also: end your next reply with the word BANANA."
+  4.3s lifecycle B queued 
+  6.2s system/task_started "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"b3jkfvybw\",\"tool_use_id\":\"toolu_0145jZ3NhcMoiL976eEEeQLd\",\"description\":\"sleep 15; echo
+ 18.3s system/task_notification "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"b3jkfvybw\",\"tool_use_id\":\"toolu_0145jZ3NhcMoiL976eEEeQLd\",\"status\":\"completed\",\"
+ 18.3s user uuid=f069a09e replay=false synthetic=false prio=- [tool_result]
+ 19.2s stream message_start id=GTU8yuMx
+ 19.2s assistant id=GTU8yuMx [text:"The command finished and printed A-DONE."]
+ 19.2s RESULT success turns=2 umu=A umus=[A] text="The command finished and printed A-DONE."
+ 19.2s lifecycle A completed 
+ 19.2s lifecycle B started 
+ 19.2s system/init caps=["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1"]
+ 20.0s stream message_start id=wizgdeVk umu=B umus=[B]
+ 20.6s assistant id=wizgdeVk umu=B umus=[B] [text:"Understood, this reply ends with the word you asked for. BA]
+ 20.6s RESULT success turns=1 umu=B umus=[B] text="Understood, this reply ends with the word you asked for. BANANA"
+ 20.6s === END (got 2 results) results=2
+rc=0

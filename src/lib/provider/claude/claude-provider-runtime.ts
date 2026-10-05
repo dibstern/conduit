@@ -526,10 +526,7 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
-			const sinkId = claudeRunnerSinkId(
-				input.commandId ?? randomUUID(),
-				input.commandAttempt,
-			);
+			const sinkId = claudeRunnerSinkId(input.inputId, input.commandAttempt);
 			this.sinks.set(sinkId, eventSink);
 			this.reportSinkForTesting("allocated", sinkId, input.sessionId);
 			const aborted = Effect.async<void>((resume) => {
@@ -1458,7 +1455,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		const attributes = {
 			providerId: this.providerId,
 			sessionId: input.sessionId,
-			turnId: input.turnId,
+			turnId: input.inputId,
 		};
 		return this.mapProviderFailure(
 			"sendTurn",
@@ -1668,8 +1665,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					subagentPollers: new Map(),
 					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
-					currentTurnId: input.turnId,
-					turnInFlight: input.turnId !== undefined,
+					currentTurnId: input.inputId,
+					turnInFlight: true,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
@@ -1977,7 +1974,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 								ctx.sessionId,
 								turnDeferred,
 							);
-							ctx.currentTurnId = input.turnId;
+							ctx.currentTurnId = input.inputId;
 							// Marks the turn as started so a system/init arriving before
 							// the first assistant chunk cannot report the session idle.
 							ctx.turnInFlight = true;
