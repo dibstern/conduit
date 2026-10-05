@@ -190,6 +190,7 @@ function makeReadQueryEffect(
 		readSessionTranscript: vi.fn(() =>
 			Effect.succeed({ messages: [], version: 0 }),
 		),
+		readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getSessionLineage: vi.fn(() =>
 			Effect.succeed({
 				rows: rows.map(({ id, parent_id, unread }) => ({

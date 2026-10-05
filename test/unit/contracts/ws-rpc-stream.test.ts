@@ -136,6 +136,7 @@ const makeLayer = (options: {
 												version: range.after + 1,
 											},
 								),
+					readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 					readSessionList: () =>
 						options.failRead
 							? Effect.fail(readFailure)

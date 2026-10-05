@@ -40,10 +40,8 @@ export {
 	type MessageListener,
 	onFileBrowser,
 	onFileHistory,
-	onPlanMode,
 	onProject,
 	onProjectAttached,
-	planModeListeners,
 	projectListeners,
 } from "./ws-listeners.js";
 export {

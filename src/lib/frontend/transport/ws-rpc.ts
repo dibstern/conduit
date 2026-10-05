@@ -87,6 +87,7 @@ export {
 	StartInstance,
 	StopInstance,
 	SubscribeSessionDetail,
+	SubscribeSessionTodos,
 	SubscribeShell,
 	SwitchAgent,
 	SwitchContextWindow,

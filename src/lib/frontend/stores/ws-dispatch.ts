@@ -104,11 +104,7 @@ import {
 	handlePtyList,
 	handlePtyOutput,
 } from "./terminal.svelte.js";
-import {
-	clearTodoState,
-	handleTodoState,
-	updateTodosFromToolResult,
-} from "./todo.svelte.js";
+import { clearTodoState } from "./todo.svelte.js";
 import {
 	removeBanner,
 	setClientCount,
@@ -121,7 +117,6 @@ import {
 import {
 	fileBrowserListeners,
 	fileHistoryListeners,
-	planModeListeners,
 	projectAttachedListeners,
 	projectListeners,
 } from "./ws-listeners.js";
@@ -249,19 +244,10 @@ function routePerSession(event: PerSessionEvent): void {
 		case "user_message":
 			refreshSessionSkills(event.sessionId);
 			break;
-		case "tool_result": {
+		case "tool_result":
 			if (sessionSkillsState.loads.some((load) => load.running))
 				refreshSessionSkills(event.sessionId);
-			// If this was a TodoWrite result, also update the todo store.
-			const msgs = getMessages(messages);
-			const toolMsg = msgs.find(
-				(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
-			);
-			if (toolMsg?.name === "TodoWrite" && !event.is_error && event.content) {
-				updateTodosFromToolResult(event.content);
-			}
 			break;
-		}
 		case "done": {
 			handleDone(activity, messages, event);
 			refreshSessionSkills(event.sessionId);
@@ -449,13 +435,6 @@ export function handleMessage(msg: RelayMessage): void {
 			handleInputSyncReceived(msg);
 			break;
 
-		case "plan_enter":
-		case "plan_exit":
-		case "plan_content":
-		case "plan_approval":
-			for (const fn of planModeListeners) fn(msg);
-			break;
-
 		// File Tree (@ autocomplete)
 		case "file_tree":
 			handleFileTree(msg as { type: "file_tree"; entries: unknown });
@@ -481,10 +460,6 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		case "daemon_sessions_changed":
 			void refreshSessionList();
-			break;
-
-		case "todo_state":
-			handleTodoState(msg);
 			break;
 
 		// Now routed through routePerSession (per-session events).

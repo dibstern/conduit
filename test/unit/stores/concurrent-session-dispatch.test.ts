@@ -254,7 +254,6 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"pty_list",
 			"pty_created",
 			"file_tree",
-			"todo_state",
 		];
 		for (const type of globalTypes) {
 			const msg = { type } as RelayMessage;

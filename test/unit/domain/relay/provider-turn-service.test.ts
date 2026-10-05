@@ -216,6 +216,7 @@ const makeReadQuery = (
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),
 	),
+	readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 });
 

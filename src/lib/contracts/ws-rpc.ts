@@ -1819,9 +1819,30 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	stream: true,
 });
 
+/** One session's todo list: the items its newest TodoWrite left behind. */
+export const SessionTodosSchema = Schema.Struct({
+	sessionId: Schema.String,
+	items: Schema.Array(TodoItemSchema),
+});
+export type SessionTodos = typeof SessionTodosSchema.Type;
+const SessionTodosEnvelopeSchema = EnvelopeSchema(SessionTodosSchema);
+export type SessionTodosEnvelope = typeof SessionTodosEnvelopeSchema.Type;
+
+export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
+	payload: {
+		projectSlug: NonEmptyString,
+		sessionId: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: SessionTodosEnvelopeSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
+	SubscribeSessionTodos,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),

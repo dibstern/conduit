@@ -4,6 +4,7 @@ import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
+import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import { getSessionInputDraft } from "../handlers/prompt.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
@@ -116,6 +117,7 @@ export {
 	StartInstance,
 	StopInstance,
 	SubscribeSessionDetail,
+	SubscribeSessionTodos,
 	SubscribeShell,
 	SwitchAgent,
 	SwitchContextWindow,
@@ -177,6 +179,22 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					(error) =>
 						new WsRpcError({
 							message: `SubscribeSessionDetail failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribeSessionTodos: (request) =>
+		Rpc.fork(
+			subscribeSessionTodos({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeSessionTodos failed: ${String(error)}`,
 						}),
 				),
 			),
@@ -336,5 +354,14 @@ export const makeRoutedWsRpcServerLayer = (
 					? encodeSessionDetail(source)
 					: source;
 			}),
+		SubscribeSessionTodos: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeSessionTodos({
+					sessionId: request.sessionId,
+					...(request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence }),
+				}),
+			),
 	});
 };

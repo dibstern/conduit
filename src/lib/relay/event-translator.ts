@@ -6,8 +6,6 @@ import type {
 	AskUserQuestion,
 	PartType,
 	RelayMessage,
-	TodoItem,
-	TodoStatus,
 	ToolName,
 	ToolStatus,
 } from "../types.js";
@@ -29,7 +27,6 @@ import {
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
 	isSessionStatusEvent,
-	isTodoUpdatedEvent,
 	sessionErrorText,
 } from "./opencode-events.js";
 
@@ -840,19 +837,13 @@ export function createTranslator(
 				};
 			}
 
-			// Todo updated
+			// The todo list is projected from the TodoWrite tool part and served
+			// by the session's todo subscription (conduit-test-ni8.10).
 			if (eventType === "todo.updated") {
-				if (!isTodoUpdatedEvent(event)) {
-					return { ok: false, reason: "todo updated: invalid event" };
-				}
-				const items: TodoItem[] = (event.properties.todos ?? []).map(
-					(t, i) => ({
-						id: `todo-${i}`,
-						subject: t.content,
-						status: (t.status as TodoStatus) ?? "pending",
-					}),
-				);
-				return { ok: true, messages: [{ type: "todo_state", items }] };
+				return {
+					ok: false,
+					reason: "todo.updated served by SubscribeSessionTodos",
+				};
 			}
 
 			// Known event types handled by bridge/SSE wiring, not translator

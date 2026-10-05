@@ -74,6 +74,37 @@ describe("subscription RPC contracts", () => {
 		}
 	});
 
+	it("exposes a session-scoped todo stream through the frontend", () => {
+		const member = Contracts.SubscribeSessionTodos;
+		expect(Contracts.WsRpcGroup.requests.get("SubscribeSessionTodos")).toBe(
+			member,
+		);
+		expect(Frontend.SubscribeSessionTodos).toBe(member);
+		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
+		const payload = { projectSlug: "project", sessionId: "session-1" };
+		expect(decodePayload(payload)).toEqual(payload);
+		// Scope is an argument, never ambient: no session, no subscription.
+		expect(() => decodePayload({ projectSlug: "project" })).toThrow();
+		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
+		const decode = Schema.decodeUnknownSync(member.successSchema.success);
+		const item = {
+			sessionId: "session-1",
+			items: [{ id: "t1", subject: "Plan", status: "pending" }],
+		};
+		expect(decode({ _tag: "upsert", item, sequence: 3 })).toEqual({
+			_tag: "upsert",
+			item,
+			sequence: 3,
+		});
+		expect(() =>
+			decode({
+				_tag: "upsert",
+				item: { ...item, items: [{ id: "t1", subject: "x", status: "nope" }] },
+				sequence: 3,
+			}),
+		).toThrow();
+	});
+
 	it("exposes a resumable shell stream of session envelopes through the frontend", () => {
 		const member = Contracts.SubscribeShell;
 		expect(member).toBeDefined();

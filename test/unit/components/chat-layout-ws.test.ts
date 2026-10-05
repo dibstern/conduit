@@ -127,7 +127,6 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		clearNavigateToSession: vi.fn(),
 		initSWMessageListener: vi.fn(),
 		reconcilePushActive: vi.fn(async () => {}),
-		onPlanMode: vi.fn(() => () => {}),
 		wsSend: vi.fn(),
 		wsState: { status: "connected", statusText: "" },
 	};
@@ -189,6 +188,7 @@ vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({
 	todoState: { items: [] },
 	clearTodoState: vi.fn(),
+	viewTodos: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/file-tree.svelte.js", () => ({

@@ -262,9 +262,35 @@ const sessionList = {
 	search: true,
 } as const;
 
+const todoEnvelopes = [
+	{
+		_tag: "snapshot",
+		rows: [{ sessionId: "session-1", items: [] }],
+		sequence: 7,
+	},
+	{ _tag: "synchronized" },
+	{
+		_tag: "upsert",
+		item: {
+			sessionId: "session-1",
+			items: [
+				{ id: "t1", subject: "Plan", status: "completed" },
+				{
+					id: "t2",
+					subject: "Build",
+					description: "the subscription",
+					status: "in_progress",
+				},
+			],
+		},
+		sequence: 8,
+	},
+] as const;
+
 const group = RpcGroup.make(
 	Contracts.SubscribeShell,
 	Contracts.SubscribeSessionDetail,
+	Contracts.SubscribeSessionTodos,
 	Rpc.fromTaggedRequest(Contracts.SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(Contracts.GetClaudeSettings),
 	Rpc.fromTaggedRequest(Contracts.SetClaudeSettings),
@@ -326,6 +352,14 @@ const handlers = group.toLayer({
 			resumeFromSequence: 39,
 		});
 		return Rpc.fork(Stream.fromIterable(detailEnvelopes));
+	},
+	SubscribeSessionTodos: (payload) => {
+		expect(payload).toEqual({
+			projectSlug: "project",
+			sessionId: "session-1",
+			resumeFromSequence: 7,
+		});
+		return Rpc.fork(Stream.fromIterable(todoEnvelopes));
 	},
 	SubscribeShell: (payload) => {
 		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
@@ -524,6 +558,35 @@ it("session_list keeps notification state and required status on sessions", asyn
 			Effect.gen(function* () {
 				const { client } = yield* connect;
 				expect(yield* client.SessionListProbe()).toEqual(sessionList);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribeSessionTodos preserves the session id and todo items through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, clientFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribeSessionTodos({
+						projectSlug: "project",
+						sessionId: "session-1",
+						resumeFromSequence: 7,
+					}),
+				);
+				expect(Array.from(result)).toEqual(todoEnvelopes);
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "SubscribeSessionTodos",
+						payload: {
+							projectSlug: "project",
+							sessionId: "session-1",
+							resumeFromSequence: 7,
+						},
+					}),
+				);
 			}),
 		).pipe(Effect.timeout("3 seconds")),
 	);

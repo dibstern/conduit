@@ -26,7 +26,6 @@
 	import RewindBanner from "../overlays/RewindBanner.svelte";
 	import TodoOverlay from "../todo/TodoOverlay.svelte";
 	import TerminalPanel from "../terminal/TerminalPanel.svelte";
-	import PlanMode from "../chat/PlanMode.svelte";
 	import FileViewer from "../file/FileViewer.svelte";
 	import Button from "../ui/Button.svelte";
 	import {
@@ -47,8 +46,6 @@
 		clearNavigateToSession,
 		initSWMessageListener,
 		reconcilePushActive,
-		onPlanMode,
-		wsSend,
 	} from "../../stores/ws.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
@@ -57,14 +54,13 @@
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
-	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
+	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
-	import type { RelayMessage } from "../../types.js";
 	import {
 		observeOpenSession,
 		trackSeen,
@@ -75,12 +71,6 @@
 	let settingsVisible = $state(false);
 	let settingsInitialTab = $state("notifications");
 	let debugPanelVisible = $state(false);
-	let planModeData = $state<{
-		mode: "enter" | "exit" | "content" | "approval" | null;
-		content: string;
-		onApprove?: () => void;
-		onReject?: () => void;
-	}>({ mode: null, content: "" });
 
 	const TERMINAL_MIN_HEIGHT = 100;
 	const TERMINAL_MAX_RATIO = 0.7; // 70% of parent height
@@ -338,7 +328,7 @@
 		document.addEventListener("touchend", onEnd);
 	}
 
-	// Todo items (from reactive todo store, updated by SSE + tool results)
+	// Todo items (the viewed session's todo subscription)
 
 	const todoItems = $derived(todoState.items);
 
@@ -361,7 +351,6 @@
 				clearTodoState();
 				clearFileTreeState();
 				resetProjectUI();
-				planModeData = { mode: null, content: "" };
 				previousSlug = slug;
 			}
 			// Fetch current version for sidebar footer
@@ -451,8 +440,14 @@
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? sessionState.currentId : null;
-		untrack(() => viewTranscript(project, sessionId));
-		return () => viewTranscript(project, null);
+		untrack(() => {
+			viewTranscript(project, sessionId);
+			viewTodos(project, sessionId);
+		});
+		return () => {
+			viewTranscript(project, null);
+			viewTodos(project, null);
+		};
 	});
 	$effect(() => {
 		const route = getCurrentRoute();
@@ -501,35 +496,6 @@
 			if (!event.persisted) void disposeRuntime();
 		});
 	}
-
-	$effect(() => {
-		const unsub = onPlanMode((msg: RelayMessage) => {
-			switch (msg.type) {
-				case "plan_enter":
-					planModeData = { mode: "enter", content: "" };
-					break;
-				case "plan_exit":
-					planModeData = { mode: null, content: "" };
-					break;
-				case "plan_content":
-					planModeData = {
-						...planModeData,
-						mode: "content",
-						content: msg.content ?? "",
-					};
-					break;
-				case "plan_approval":
-					planModeData = {
-						...planModeData,
-						mode: "approval",
-						onApprove: () => wsSend({ type: "plan_approve" }),
-						onReject: () => wsSend({ type: "plan_reject" }),
-					};
-					break;
-			}
-		});
-		return unsub;
-	});
 
 	// A full-screen phone terminal has no room for the todo overlay.
 	$effect(() => {
@@ -689,16 +655,6 @@
 
 			<!-- Todo Sticky Overlay -->
 			<TodoOverlay items={todoItems} />
-
-			<!-- Plan Mode UI -->
-			{#if planModeData.mode}
-				<PlanMode
-					mode={planModeData.mode}
-					content={planModeData.content}
-					{...planModeData.onApprove != null ? { onApprove: planModeData.onApprove } : {}}
-					{...planModeData.onReject != null ? { onReject: planModeData.onReject } : {}}
-				/>
-			{/if}
 
 			<!-- Rewind Banner -->
 			{#if uiState.rewindActive}

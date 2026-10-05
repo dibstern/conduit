@@ -100,7 +100,6 @@ describe("shouldCache", () => {
 			"file_changed",
 			"permission_request",
 			"permission_resolved",
-			"todo_state",
 			"pty_created",
 			"pty_output",
 			"status",

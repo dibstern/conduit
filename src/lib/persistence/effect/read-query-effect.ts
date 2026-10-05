@@ -5,7 +5,11 @@ import {
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
-import type { GoalDetails } from "../../contracts/ws-rpc.js";
+import type {
+	GoalDetails,
+	SessionTodos,
+	TodoItem,
+} from "../../contracts/ws-rpc.js";
 import type { SessionBackground } from "../../session/background-liveness.js";
 import type { SessionAttention, SessionInfo } from "../../shared-types.js";
 import type {
@@ -381,6 +385,30 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
+	/**
+	 * One session's todo list: the items its newest completed TodoWrite left
+	 * behind, as one row. Todos are not a table of their own; they are the
+	 * TodoWrite tool parts the message projector already keeps, so they inherit
+	 * the owning message's version and survive a reload with the transcript.
+	 *
+	 * A ranged read answers with the row only when a TodoWrite message (or a
+	 * removed message) moved inside `range`, at the newest such version, so an
+	 * ordinary text delta in the session costs one indexed probe and no row.
+	 */
+	readonly readSessionTodos: (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	) => Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionTodos;
+				readonly version: number;
+			}[];
+			readonly version: number;
+		},
+		ReadQueryEffectError | SqlError
+	>;
+
 	readonly getLatestTurnModelExecution: (
 		sessionId: string,
 	) => Effect.Effect<
@@ -401,6 +429,65 @@ type MessageWithTurnModelRow = MessageRow & {
 	turn_started_at: number | null;
 	turn_completed_at: number | null;
 	turn_waits: string;
+};
+
+const TODO_STATUSES: readonly TodoItem["status"][] = [
+	"pending",
+	"in_progress",
+	"completed",
+	"cancelled",
+];
+
+const parseStoredJson = (text: string | null): unknown => {
+	if (text === null) return undefined;
+	try {
+		const value: unknown = JSON.parse(text);
+		// A provider's text output is stored as a JSON string, and OpenCode's
+		// todowrite output is itself JSON.
+		return typeof value === "string" ? parseStoredJson(value) : value;
+	} catch {
+		return undefined;
+	}
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The todo list a TodoWrite carried: its input's `todos` (stored canonically
+ * as `{ tool: "Unknown", raw }`), else the list OpenCode echoes as its output.
+ * Items speak `content` on the wire and `subject` here. `undefined` when
+ * neither side holds a list.
+ */
+const todoWriteItems = (
+	input: string | null,
+	result: string | null,
+): TodoItem[] | undefined => {
+	const listOf = (value: unknown): unknown[] | undefined =>
+		Array.isArray(value)
+			? value
+			: !isRecord(value)
+				? undefined
+				: Array.isArray(value["todos"])
+					? value["todos"]
+					: listOf(value["raw"]);
+	const list =
+		listOf(parseStoredJson(input)) ?? listOf(parseStoredJson(result));
+	return list?.filter(isRecord).map((todo, index) => {
+		const status = TODO_STATUSES.find((known) => known === todo["status"]);
+		const description = todo["description"];
+		return {
+			id:
+				typeof todo["id"] === "string" && todo["id"]
+					? todo["id"]
+					: `todo-${index}`,
+			subject: String(todo["subject"] ?? todo["content"] ?? ""),
+			...(typeof description === "string" && description
+				? { description }
+				: {}),
+			status: status ?? "pending",
+		};
+	});
 };
 
 function groupMessagesWithPartsAndTurnModels(
@@ -1167,6 +1254,82 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const readSessionTodos = (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	): Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionTodos;
+				readonly version: number;
+			}[];
+			readonly version: number;
+		},
+		ReadQueryEffectError | SqlError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const floor = range?.after ?? BEFORE_FIRST_VERSION;
+					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const moved =
+						range === undefined
+							? undefined
+							: ((yield* sql<{ moved: number | null }>`
+						SELECT MAX(v) AS moved FROM (
+							SELECT messages.version AS v FROM messages
+							JOIN message_parts mp ON mp.message_id = messages.id
+							WHERE messages.session_id = ${sessionId}
+								AND messages.version > ${floor} AND messages.version <= ${ceiling}
+								AND mp.tool_name = 'TodoWrite'
+							UNION ALL
+							SELECT version AS v FROM message_tombstones
+							WHERE session_id = ${sessionId}
+								AND version > ${floor} AND version <= ${ceiling}
+						)`)[0]?.moved ?? null);
+					if (moved === null) return { rows: [], version };
+					// The newest few writes are plenty: the first one that still
+					// parses is the list, and older ones are history.
+					const writes = yield* sql<{
+						input: string | null;
+						result: string | null;
+						version: number;
+					}>`
+						SELECT mp.input, mp.result, messages.version
+						FROM message_parts mp
+						JOIN messages ON messages.id = mp.message_id
+						WHERE messages.session_id = ${sessionId}
+							AND messages.version <= ${ceiling}
+							AND mp.tool_name = 'TodoWrite' AND mp.status = 'completed'
+						ORDER BY messages.created_at DESC, messages.id DESC, mp.sort_order DESC
+						LIMIT 10`;
+					const items =
+						writes
+							.map((write) => todoWriteItems(write.input, write.result))
+							.find((parsed) => parsed !== undefined) ?? [];
+					return {
+						rows: [
+							{
+								item: { sessionId, items },
+								version: moved ?? writes[0]?.version ?? 0,
+							},
+						],
+						version,
+					};
+				}),
+			)
+			.pipe(
+				Effect.mapError((e) =>
+					e instanceof ReadQueryEffectError
+						? e
+						: new ReadQueryEffectError({
+								operation: "readSessionTodos",
+								cause: e,
+							}),
+				),
+			);
+
 	const getLatestTurnModelExecution = (
 		sessionId: string,
 	): Effect.Effect<
@@ -1212,6 +1375,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readSessionTranscriptPage,
 		readSessionList,
 		readSessionTranscript,
+		readSessionTodos,
 		getLatestTurnModelExecution,
 	} satisfies ReadQueryEffect;
 });

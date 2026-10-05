@@ -104,7 +104,6 @@ describe("shouldCache", () => {
 			"permission_resolved",
 			"file_changed",
 			"session_list",
-			"todo_state",
 			"pty_created",
 			"pty_output",
 			// status events are sent directly via wsHandler, never through the

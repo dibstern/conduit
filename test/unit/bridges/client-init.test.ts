@@ -141,6 +141,7 @@ function makeReadQuery(
 		listSessions: vi.fn(() => Effect.succeed([])),
 		listSessionInfos: () => Effect.succeed([]),
 		readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),
+		readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 		readSessionList: () => Effect.succeed({ rows: [], version: 0 }),
 		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 		getSessionFamily: () => Effect.succeed([]),

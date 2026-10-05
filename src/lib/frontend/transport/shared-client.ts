@@ -102,6 +102,15 @@ const makeSubscriptions = (
 					.pipe(decodeSessionDetail),
 			{ from: options.resumeFromSequence },
 		),
+	/** One session's todo list. Low-rate, so it rides the control socket. */
+	todos: (options: { readonly sessionId: string }) =>
+		resumeStream((resumeFromSequence) =>
+			sockets.control.SubscribeSessionTodos({
+				projectSlug,
+				sessionId: options.sessionId,
+				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+			}),
+		),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */

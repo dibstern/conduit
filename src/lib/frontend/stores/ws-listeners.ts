@@ -6,7 +6,6 @@ import type { RelayMessage } from "../types.js";
 
 export type MessageListener = (msg: RelayMessage) => void;
 
-export const planModeListeners = new Set<MessageListener>();
 export const fileBrowserListeners = new Set<MessageListener>();
 export const fileHistoryListeners = new Set<MessageListener>();
 export const projectListeners = new Set<MessageListener>();
@@ -16,12 +15,6 @@ export const projectAttachedListeners = new Set<(slug: string) => void>();
 export function onProjectAttached(fn: (slug: string) => void): () => void {
 	projectAttachedListeners.add(fn);
 	return () => projectAttachedListeners.delete(fn);
-}
-
-/** Subscribe to plan mode messages. Returns unsubscribe function. */
-export function onPlanMode(fn: MessageListener): () => void {
-	planModeListeners.add(fn);
-	return () => planModeListeners.delete(fn);
 }
 
 /** Subscribe to file browser messages. Returns unsubscribe function. */

@@ -612,13 +612,6 @@ const PtyInfoSchema = Schema.Struct({
 	pid: Schema.Number,
 });
 
-const TodoItemSchema = Schema.Struct({
-	id: Schema.String,
-	subject: Schema.String,
-	description: Schema.optional(Schema.String),
-	status: Schema.Literal("pending", "in_progress", "completed", "cancelled"),
-});
-
 const FileVersionSchema = Schema.Struct({
 	id: Schema.String,
 	path: Schema.String,
@@ -958,31 +951,9 @@ const PtyListSchema = Schema.Struct({
 	ptys: Schema.Array(PtyInfoSchema),
 });
 
-const TodoStateSchema = Schema.Struct({
-	type: Schema.Literal("todo_state"),
-	items: Schema.Array(TodoItemSchema),
-});
-
 const ConnectionStatusSchema = Schema.Struct({
 	type: Schema.Literal("connection_status"),
 	status: Schema.Literal("disconnected", "reconnecting", "connected"),
-});
-
-const PlanEnterSchema = Schema.Struct({
-	type: Schema.Literal("plan_enter"),
-});
-
-const PlanExitSchema = Schema.Struct({
-	type: Schema.Literal("plan_exit"),
-});
-
-const PlanContentSchema = Schema.Struct({
-	type: Schema.Literal("plan_content"),
-	content: Schema.String,
-});
-
-const PlanApprovalSchema = Schema.Struct({
-	type: Schema.Literal("plan_approval"),
 });
 
 const SkipPermissionsSchema = Schema.Struct({
@@ -1195,15 +1166,8 @@ export const RelayMessageSchema = Schema.Union(
 	PtyExitedSchema,
 	PtyDeletedSchema,
 	PtyListSchema,
-	// Todo
-	TodoStateSchema,
 	// Connection status
 	ConnectionStatusSchema,
-	// Plan mode
-	PlanEnterSchema,
-	PlanExitSchema,
-	PlanContentSchema,
-	PlanApprovalSchema,
 	// Banners
 	SkipPermissionsSchema,
 	BannerSchema,
