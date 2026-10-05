@@ -33,8 +33,8 @@ describe("sendPushForEvent", () => {
 
 		expect(push.sendToAll).toHaveBeenCalledWith({
 			type: "done",
-			title: "Task Complete",
-			body: "Agent has finished processing.",
+			title: "Response complete",
+			body: "Agent finished its response.",
 			tag: "opencode-done",
 		});
 	});

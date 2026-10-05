@@ -56,6 +56,7 @@ import {
 	stopInstance as stopEffectInstance,
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import {
 	broadcastProjectList,
 	broadcastToAll,
@@ -155,6 +156,7 @@ export const RelayFactoryLive = (
 	| PortScannerTag
 	| VersionCheckerTag
 	| PushManagerTag
+	| OpenCodeInstancesTag
 > =>
 	Layer.effect(
 		RelayFactoryTag,
@@ -173,6 +175,7 @@ export const RelayFactoryLive = (
 			const portScanner = yield* PortScannerTag;
 			const versionChecker = yield* VersionCheckerTag;
 			const pushManager = yield* PushManagerTag;
+			const openCodeInstances = yield* OpenCodeInstancesTag;
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -368,6 +371,9 @@ export const RelayFactoryLive = (
 									instance.driver !== "claude" &&
 									instance.id === project.instanceId,
 							) ?? instances.find((instance) => instance.driver !== "claude");
+						const defaultInstance = instances.find(
+							({ driver }) => (driver ?? "opencode") === "opencode",
+						);
 						// Managed passwords live only in the private process record.
 						const opencodeAuth = openCodeAuth(
 							selectedInstance?.managed
@@ -394,6 +400,9 @@ export const RelayFactoryLive = (
 								creation = createProjectRelay({
 									httpServer,
 									opencodeUrl,
+									...(selectedInstance?.id === defaultInstance?.id
+										? { openCodeInstances }
+										: {}),
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.directory,
 									extraFolders: project.folders.slice(1),

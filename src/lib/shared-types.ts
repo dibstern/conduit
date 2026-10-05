@@ -1381,6 +1381,7 @@ export interface SetupInfoResponse {
 	httpUrl: string;
 	hasCert: boolean;
 	lanMode: boolean;
+	publicUrl: string | null;
 }
 
 export interface HealthResponse {

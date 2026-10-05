@@ -33,6 +33,7 @@
 	let httpUrl = $state("");
 	let hasCert = $state(false);
 	let lanMode = $state(false);
+	let publicUrl = $state<string | null>(null);
 	let loading = $state(true);
 
 	let platform: PlatformInfo = $state({
@@ -244,6 +245,7 @@
 			httpUrl = initialSetupInfo.httpUrl;
 			hasCert = initialSetupInfo.hasCert;
 			lanMode = initialSetupInfo.lanMode;
+			publicUrl = initialSetupInfo.publicUrl;
 		} else {
 			try {
 				const resp = await fetch("/api/setup-info");
@@ -252,6 +254,7 @@
 				httpUrl = info.httpUrl ?? "";
 				hasCert = !!info.hasCert;
 				lanMode = !!info.lanMode;
+				publicUrl = info.publicUrl ?? null;
 			} catch {
 				// Fallback: use current location
 				httpsUrl = location.origin;
@@ -332,6 +335,7 @@
 					isDesktop={platform.isDesktop}
 					isSafari={platform.isSafari}
 					isIPad={platform.isIPad}
+					showReinstallNote={publicUrl !== null}
 					onnextstep={nextStep}
 				/>
 			{/if}

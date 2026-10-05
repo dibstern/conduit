@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Queue, Ref } from "effect";
+import { Effect, Layer, Option, Queue, Ref, Stream } from "effect";
 import { expect, vi } from "vitest";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
@@ -26,6 +26,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	addWithoutRelay,
 	makeProjectRegistryLive,
@@ -111,6 +112,9 @@ describe("RelayFactoryTag", () => {
 	// It requires DaemonConfigRefTag from the caller.
 	const factoryLayer = RelayFactoryLive("/tmp/test-conduit").pipe(
 		Layer.provideMerge(configLayer),
+		Layer.provide(
+			Layer.succeed(OpenCodeInstancesTag, { events: () => Stream.empty }),
+		),
 	);
 
 	it.effect("resolves from the Layer", () =>

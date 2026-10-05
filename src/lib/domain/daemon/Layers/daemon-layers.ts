@@ -85,7 +85,6 @@ import {
 	type PollerFibersTag,
 	startInitialUnmanagedInstanceHealthPollers,
 } from "../Services/instance-manager-service.js";
-
 import {
 	broadcastProjectList,
 	getProject,
@@ -115,6 +114,7 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
+import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import {
@@ -818,8 +818,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		configDir,
 	).pipe(Layer.provideMerge(withConfigPersistence));
 
-	const registries = RelayFactoryLive(configDir).pipe(
+	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
 		Layer.provideMerge(withManagedOpenCodeServers),
+	);
+	const registries = RelayFactoryLive(configDir).pipe(
+		Layer.provideMerge(withOpenCodeInstances),
 	);
 
 	const withRelayCache = makeRelayCacheLayer().pipe(

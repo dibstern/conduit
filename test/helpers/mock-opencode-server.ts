@@ -84,6 +84,10 @@ export class MockOpenCodeServer {
 	private normalizedQueues = new Map<string, QueuedRestResponse[]>();
 	private ptyQueues = new Map<string, PtyInteraction[]>();
 	private sseClients = new Set<ServerResponse>();
+	private globalSseClients = new Set<ServerResponse>();
+	private sessionDirectories = new Map<string, string>();
+	private defaultDirectory = process.cwd();
+	private eventCounter = 0;
 	private keepaliveIntervals = new Set<ReturnType<typeof setInterval>>();
 
 	/** Counter for generating unique PTY IDs when no recording exists. */
@@ -222,6 +226,7 @@ export class MockOpenCodeServer {
 		this.ptyCounter = 0;
 		this.dynamicPtyIds.clear();
 		this.injectedSessions.clear();
+		this.sessionDirectories.clear();
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sseIdleSessions.clear();
@@ -319,11 +324,9 @@ export class MockOpenCodeServer {
 		type = "session.updated",
 		properties: Record<string, unknown> = {},
 	): void {
-		const payload = JSON.stringify({ type, properties });
-		const frame = `data: ${payload}\n\n`;
 		for (const client of this.sseClients) {
 			if (!client.writableEnded) {
-				client.write(frame);
+				this.writeSse(client, type, properties);
 			}
 		}
 	}
@@ -468,6 +471,15 @@ export class MockOpenCodeServer {
 	): Promise<void> {
 		const path = req.url ?? "/";
 		const method = req.method ?? "GET";
+		const requestDirectory =
+			new URL(path, "http://mock").searchParams.get("directory") ??
+			req.headers["x-opencode-directory"];
+		if (typeof requestDirectory === "string") {
+			this.defaultDirectory = decodeURIComponent(requestDirectory);
+			const sessionId = /^\/session\/([^/?]+)(?:\/|\?|$)/.exec(path)?.[1];
+			if (sessionId)
+				this.sessionDirectories.set(sessionId, this.defaultDirectory);
+		}
 
 		// Log all incoming requests for diagnostics (skip noisy status polls)
 		if (!(method === "GET" && path === "/session/status")) {
@@ -475,7 +487,12 @@ export class MockOpenCodeServer {
 		}
 
 		// SSE endpoint (strip query params — SDK may append ?directory=...)
-		if ((path.split("?")[0] ?? path) === "/event" && method === "GET") {
+		if (
+			["/event", "/global/event"].includes(path.split("?")[0] ?? path) &&
+			method === "GET"
+		) {
+			if (path.split("?")[0] === "/global/event")
+				this.globalSseClients.add(res);
 			this.handleSse(res);
 			return;
 		}
@@ -601,6 +618,8 @@ export class MockOpenCodeServer {
 					body["title"] = title;
 				}
 				const sessionId = body["id"] as string;
+				if (sessionId)
+					this.sessionDirectories.set(sessionId, this.defaultDirectory);
 				// Track the title so GET /session renames queue-entry responses too
 				if (sessionId && title !== "Untitled") {
 					this.renamedSessions.set(sessionId, title);
@@ -950,9 +969,7 @@ export class MockOpenCodeServer {
 		// Real OpenCode's first SSE frame is always server.connected; conduit
 		// treats the first yielded event (not the HTTP accept) as its connect
 		// signal, so the mock must be faithful here.
-		res.write(
-			`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
-		);
+		this.writeSse(res, "server.connected", {});
 
 		// Real OpenCode emits server.heartbeat as a data event every 10s
 		// (Stream.tick in its event route). A comment keepalive would yield no
@@ -960,9 +977,7 @@ export class MockOpenCodeServer {
 		// harness connection that idles past 30s.
 		const interval = setInterval(() => {
 			if (!res.writableEnded) {
-				res.write(
-					`data: ${JSON.stringify({ type: "server.heartbeat", properties: {} })}\n\n`,
-				);
+				this.writeSse(res, "server.heartbeat", {});
 			}
 		}, 10_000);
 		this.keepaliveIntervals.add(interval);
@@ -972,10 +987,38 @@ export class MockOpenCodeServer {
 
 		res.on("close", () => {
 			this.sseClients.delete(res);
+			this.globalSseClients.delete(res);
 			this.diag("sse_disconnect", `clients=${this.sseClients.size}`);
 			clearInterval(interval);
 			this.keepaliveIntervals.delete(interval);
 		});
+	}
+
+	private writeSse(
+		client: ServerResponse,
+		type: string,
+		properties: Record<string, unknown>,
+	): void {
+		if (!this.globalSseClients.has(client)) {
+			client.write(`data: ${JSON.stringify({ type, properties })}\n\n`);
+			return;
+		}
+		const info = properties["info"] as
+			| { id?: string; sessionID?: string }
+			| undefined;
+		const part = properties["part"] as { sessionID?: string } | undefined;
+		const sessionId =
+			properties["sessionID"] ?? part?.sessionID ?? info?.sessionID ?? info?.id;
+		const directory =
+			typeof sessionId === "string"
+				? (this.sessionDirectories.get(sessionId) ?? this.defaultDirectory)
+				: this.defaultDirectory;
+		const payload = { id: `evt_mock_${++this.eventCounter}`, type, properties };
+		const envelope =
+			type === "server.connected" || type === "server.heartbeat"
+				? { payload }
+				: { directory, project: "global", payload };
+		client.write(`data: ${JSON.stringify(envelope)}\n\n`);
 	}
 
 	/**
@@ -1044,16 +1087,10 @@ export class MockOpenCodeServer {
 					? this.rewriteSessionIds(event.properties, sessionIdMap)
 					: event.properties;
 
-				const payload = JSON.stringify({
-					type: event.type,
-					properties,
-				});
-				const frame = `data: ${payload}\n\n`;
-
 				let delivered = false;
 				for (const client of this.sseClients) {
 					if (!client.writableEnded) {
-						client.write(frame);
+						this.writeSse(client, event.type, properties);
 						delivered = true;
 					}
 				}

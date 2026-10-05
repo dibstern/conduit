@@ -308,6 +308,7 @@ export function startOnboardingServer(
 									httpUrl,
 									hasCert: true,
 									lanMode,
+									publicUrl: null,
 								} satisfies SetupInfoResponse),
 							);
 							return;

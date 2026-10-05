@@ -44,7 +44,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
 		// SSE event stream
-		if (url.pathname === "/event") {
+		if (url.pathname === "/global/event") {
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
@@ -54,7 +54,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			// Real OpenCode's first SSE frame is always server.connected; conduit
 			// treats the first yielded event as its connect signal.
 			res.write(
-				`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+				`data: ${JSON.stringify({ payload: { id: "evt_connected", type: "server.connected", properties: {} } })}\n\n`,
 			);
 			sseClients.add(res);
 			req.on("close", () => sseClients.delete(res));

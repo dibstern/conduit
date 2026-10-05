@@ -849,7 +849,82 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	opencodeRequestBodies() {
-		return this.recordedOpenCode?.requestBodies ?? [];
+		const file = join(this.configDir, "fake-opencode-request-bodies.jsonl");
+		return (
+			this.recordedOpenCode?.requestBodies ??
+			(existsSync(file)
+				? readFileSync(file, "utf8")
+						.trim()
+						.split("\n")
+						.filter(Boolean)
+						.map(
+							(line) =>
+								JSON.parse(line) as {
+									method: string;
+									path: string;
+									body: string;
+								},
+						)
+				: [])
+		);
+	}
+
+	opencodeStreamConnections() {
+		const file = join(this.configDir, "fake-opencode-stream-connections.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as {
+								pid: number;
+								at: number;
+								action: "open" | "close";
+								connectionId: number;
+								path: string;
+							},
+					)
+			: [];
+	}
+
+	async emitOpenCodeEvent(
+		envelope: unknown,
+		instanceId: string = defaultInstanceIdForDriver("opencode"),
+	): Promise<void> {
+		await this.openCodeTestCommand("emit-event", envelope, instanceId);
+	}
+
+	async closeOpenCodeStreams(): Promise<void> {
+		await this.openCodeTestCommand("close-streams", {});
+	}
+
+	private async openCodeTestCommand(
+		command: string,
+		body: unknown,
+		instanceId: string = defaultInstanceIdForDriver("opencode"),
+	): Promise<void> {
+		const instance = loadDaemonConfig(this.configDir)?.instances?.find(
+			({ id }) => id === instanceId,
+		);
+		if (!instance?.port)
+			throw new Error(`No fake OpenCode instance ${instanceId}`);
+		const response = await fetch(
+			`http://127.0.0.1:${instance.port}/test/${command}`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Basic ${Buffer.from(`${instance.env?.["OPENCODE_SERVER_USERNAME"] ?? "opencode"}:${instance.env?.["OPENCODE_SERVER_PASSWORD"]}`).toString("base64")}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(body),
+				signal: AbortSignal.timeout(2000),
+			},
+		);
+		if (!response.ok)
+			throw new Error(`Fake OpenCode ${command}: ${response.status}`);
+		await response.arrayBuffer();
 	}
 
 	claudeOptions(): readonly {
