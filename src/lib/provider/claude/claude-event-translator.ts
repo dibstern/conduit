@@ -313,6 +313,7 @@ export class ClaudeEventTranslator {
 				return Effect.void;
 			}
 			this.announcedMessageIds.add(messageId);
+			ctx.activeAssistantMessageId = messageId;
 			return this.push(
 				ctx,
 				makeProviderRuntimeEvent("message.created", ctx.sessionId, {
@@ -404,6 +405,7 @@ export class ClaudeEventTranslator {
 				}),
 			);
 			ctx.turnInFlight = false;
+			ctx.activeAssistantMessageId = "";
 			this.resetInFlightState();
 		});
 	}

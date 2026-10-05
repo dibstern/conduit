@@ -15,10 +15,12 @@ export function makeClaudeRunnerIdleExit(
 ) {
 	let lastActivityAt = Date.now();
 	let turns = 0;
+	let sdkTurnInFlight = false;
 	let backgroundWork = false;
 	const timer = setInterval(
 		() => {
-			if (turns > 0 || backgroundWork || hasHeldWork?.()) return;
+			if (turns > 0 || sdkTurnInFlight || backgroundWork || hasHeldWork?.())
+				return;
 			// Resolve configuration on the background sweep, never on send or output.
 			const days = loadDaemonConfig(configDir)?.autoSettleAfterDays;
 			const idleWindowMs =
@@ -39,7 +41,13 @@ export function makeClaudeRunnerIdleExit(
 	);
 	return {
 		get quiescent() {
-			return turns === 0 && !backgroundWork && !hasHeldWork?.();
+			return (
+				turns === 0 && !sdkTurnInFlight && !backgroundWork && !hasHeldWork?.()
+			);
+		},
+		setTurnInFlight(inFlight: boolean) {
+			sdkTurnInFlight = inFlight;
+			lastActivityAt = Date.now();
 		},
 		beginTurn() {
 			turns++;

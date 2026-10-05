@@ -344,8 +344,12 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "turn.interrupted": {
+			// An empty ID targets a running turn that has no assistant message yet.
 			return singleEvent(event, state, "turn.interrupted", {
-				messageId: messageIdFromDataOrState(event, data, state),
+				messageId:
+					typeof data["messageId"] === "string"
+						? data["messageId"]
+						: messageIdFromDataOrState(event, data, state),
 			});
 		}
 
