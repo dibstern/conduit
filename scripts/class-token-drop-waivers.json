@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/session/GitIdentity.svelte :: leading-none,max-w-full,pl-[4px],px-[4px],shrink,shrink-[10000],text-sm": "conduit-test-fnrs implements approved session-header variant B: the plain text identity becomes a 22px segmented git control with literal 10px type, 5px gaps, 240px/150px caps, a project floor of four letters plus the ellipsis, and worktree metadata in the Checkout menu. The old separator padding, worktree shrink weight, and inherited text geometry are intentionally removed.",
 	"src/lib/frontend/components/input/ContextBar.svelte :: bg-border,context-mini-bar,context-mini-fill,context-mini-label,contextFillColor,contextLabelColor,duration-300,ease-out,flex,flex-1,font-mono,font-semibold,gap-2,h-1,h-full,items-center,min-w-6,pb-1.5,px-2,rounded-[2px],text-xs,whitespace-nowrap": "conduit-test-dfvd.9 intentionally removes the mini context meter and its fill/label expressions. InputArea now shows a configurable warning bar above the composer, with amber usage text in the Words row and model picker. Meter geometry, animation and fixed color thresholds are removed.",
 	"src/lib/frontend/components/input/ContextBar.svelte :: transition-[width,background-color]": "The deleted mini meter no longer animates its fill width or color. The replacement context warning is a discrete threshold bar.",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border-0,border-r,border-solid,flex-row,h-10,h-[22px],h-[376px],max-sm:bottom-2,max-sm:fixed,max-sm:h-[70vh],max-sm:inset-x-2,max-sm:max-w-none,max-sm:w-auto,mb-0.5,mr-0.5,mr-1,mx-2,opacity-0,opacity-100,p-1,right-1,rounded-l-[3px],top-0,top-1/2,transition-opacity,translate-y-1/2,w-12,w-[3px],w-[404px]": "The approved P2 picker replaces the 48px rail, its selected edge marker and fixed-height 404px popover with full-width drill-down rows, a 300px desktop popover and an edge-to-edge phone Dialog sheet. Rail geometry, indicator opacity and old row spacing are intentionally removed.",
@@ -331,5 +332,21 @@
 	"src/lib/frontend/components/input/AttachMenu.svelte :: bg-bg-alt,h-7,rounded-md,w-7": "conduit-test-3oqa: the final composer design makes attach a borderless 32px ghost square with radius 10, so the 28px filled rounded-md chip is gone.",
 	"src/lib/frontend/components/input/InputArea.svelte :: h-8,min-h-6,w-8": "conduit-test-3oqa: send and stop become literal 32px squares (root font is 12px, so h-8/w-8 rendered 24px) and the field floor is 32px to centre the placeholder on the controls row.",
 	"src/lib/frontend/components/model/AgentSelector.svelte :: agent-dropdown-panel,flex-1,font-bold,font-brand,font-medium,font-semibold,gap-[2px],h-9,max-w-[160px],max-w-[calc(100vw-16px)],min-w-0,ml-auto,opacity-50,pb-1.5,pt-1,px-2,px-3.5,py-1.5,py-4,rounded-panel,text-accent,text-center,text-ellipsis,text-sm,text-text-dimmer,text-xs,tracking-[0.5px],uppercase,w-[12px],whitespace-nowrap": "conduit-test-3oqa: the final composer design moves agent choice into the model picker's Agent row, so the standalone AgentSelector component is deleted.",
-	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label."
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
+		"requires": "size=\"segment\""
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
+		"requires": "size=\"segment\""
+	},
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
+		"requires": "size=\"segment\""
+	},
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\"."
 }

@@ -44,21 +44,21 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		name: "choose session view",
 		match: /^I choose the (Chat|Terminal) session view$/,
 		run: async ({ world, match }) => {
-			await world.page.getByTestId("session-bar-views-button").click();
+			await world.page.getByTestId("session-bar-island-overflow").click();
 			await world.page
-				.getByTestId(`session-bar-view-${match[1]?.toLowerCase()}`)
+				.getByTestId(`overflow-view-${match[1]?.toLowerCase()}`)
 				.click();
 		},
 	},
 	{
-		name: "remember session views from Views sheet",
-		match: /^I remember the session views from the Views sheet$/,
+		name: "remember session views from expanded overflow",
+		match: /^I remember the session views from the expanded bar overflow$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("session-bar-views-button").click();
+			await world.page.getByTestId("session-bar-island-overflow").click();
 			rememberedSessionViews.set(
 				world.page,
 				await world.page
-					.getByTestId("session-bar-views-sheet")
+					.getByTestId("session-bar-island-menu")
 					.getByRole("menuitemradio")
 					.evaluateAll((items) =>
 						items.map((item) => item.textContent?.trim() ?? ""),
@@ -89,7 +89,8 @@ export const sessionPresentationHandlers: StepHandler[] = [
 	},
 	{
 		name: "menu lists same session views",
-		match: /^the menu lists the same session views as the Views sheet$/,
+		match:
+			/^the menu lists the same session views as the expanded bar overflow$/,
 		run: async ({ world }) => {
 			const expected = rememberedSessionViews.get(world.page);
 			if (!expected?.length)
@@ -104,7 +105,7 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				);
 			if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 				throw new Error(
-					`menu views ${JSON.stringify(actual)} differ from Views sheet ${JSON.stringify(expected)}`,
+					`menu views ${JSON.stringify(actual)} differ from the expanded bar overflow ${JSON.stringify(expected)}`,
 				);
 			}
 		},
@@ -139,17 +140,9 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		name: "session view is selected",
 		match: /^the (Chat|Terminal) session view is selected$/,
 		run: async ({ world, match }) => {
-			const expanded =
-				(await world.page.getByTestId("session-bar-views-button").count()) > 0;
-			await world.page
-				.getByTestId(
-					expanded ? "session-bar-views-button" : "session-bar-island-overflow",
-				)
-				.click();
+			await world.page.getByTestId("session-bar-island-overflow").click();
 			const selected = await world.page
-				.getByTestId(
-					`${expanded ? "session-bar-view" : "overflow-view"}-${match[1]?.toLowerCase()}`,
-				)
+				.getByTestId(`overflow-view-${match[1]?.toLowerCase()}`)
 				.getAttribute("aria-checked");
 			await world.page.keyboard.press("Escape");
 			if (selected !== "true")
@@ -255,34 +248,34 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "phone first row reads back, identity, Views",
+		name: "phone first row reads back, identity, overflow",
 		match:
-			/^the session bar's first row reads back, identity and Views from left to right$/,
+			/^the session bar's first row reads back, identity and the overflow menu from left to right$/,
 		run: async ({ world }) => {
 			const boxes = await Promise.all(
 				[
 					"[data-testid='session-bar-back']",
 					"#session-bar-meta",
-					"[data-testid='session-bar-views-button']",
+					"[data-testid='session-bar-island-overflow']",
 				].map((selector) => world.page.locator(selector).boundingBox()),
 			);
-			const [back, identity, views] = boxes;
-			if (!back || !identity || !views) {
+			const [back, identity, overflow] = boxes;
+			if (!back || !identity || !overflow) {
 				throw new Error(
 					`first-row control has no layout box: ${JSON.stringify(boxes)}`,
 				);
 			}
 			const middle = (box: { y: number; height: number }) =>
 				box.y + box.height / 2;
-			const oneRow = [identity, views].every(
+			const oneRow = [identity, overflow].every(
 				(box) => Math.abs(middle(box) - middle(back)) < 8,
 			);
 			const ordered =
 				back.x + back.width <= identity.x + 1 &&
-				identity.x + identity.width <= views.x + 1;
+				identity.x + identity.width <= overflow.x + 1;
 			if (!oneRow || !ordered) {
 				throw new Error(
-					`first row out of order: ${JSON.stringify({ back, identity, views })}`,
+					`first row out of order: ${JSON.stringify({ back, identity, overflow })}`,
 				);
 			}
 		},

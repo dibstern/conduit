@@ -45,6 +45,7 @@ describe("assembleContext", () => {
 			lastSSEEventAt: 900,
 			isSubagent: true,
 			hasViewers: true,
+			providerStreamsLifecycle: false,
 		});
 	});
 
@@ -273,6 +274,7 @@ function ctx(overrides: Partial<SessionEvalContext> = {}): SessionEvalContext {
 		lastSSEEventAt: undefined,
 		isSubagent: false,
 		hasViewers: false,
+		providerStreamsLifecycle: false,
 		...overrides,
 	};
 }
@@ -317,6 +319,124 @@ it("notifies parent idle once, only after the last busy descendant finishes", ()
 });
 
 describe("evaluateSession", () => {
+	it.each([
+		"busy",
+		"retry",
+	] as const)("reports %s for a provider-streamed session without starting a poller", (type) => {
+		const result = evaluateSession(
+			"claude-1",
+			{ phase: "idle" },
+			ctx({
+				status:
+					type === "retry"
+						? { type, attempt: 1, message: "retrying", next: 2000 }
+						: { type },
+				sseConnected: false,
+				providerStreamsLifecycle: true,
+			}),
+			DEFAULT_CONFIG,
+		);
+		expect(result.phase).toEqual({
+			phase: "busy-provider-covered",
+			busySince: 1000,
+		});
+		expect(result.effects).toEqual([
+			{ effect: "notify-busy", sessionId: "claude-1" },
+		]);
+	});
+
+	it("keeps provider lifecycle coverage after grace and SSE deadlines expire", () => {
+		const busy = ctx({
+			status: { type: "busy" },
+			sseConnected: false,
+			providerStreamsLifecycle: true,
+		});
+		const initial = evaluateSession(
+			"claude-1",
+			{ phase: "idle" },
+			busy,
+			DEFAULT_CONFIG,
+		);
+		const later = evaluateSession(
+			"claude-1",
+			initial.phase,
+			{ ...busy, now: 100_000 },
+			DEFAULT_CONFIG,
+		);
+		expect(later.phase).toBe(initial.phase);
+		expect(later.effects).toEqual([]);
+	});
+
+	it("stops an existing OpenCode poller when the provider covers lifecycle", () => {
+		const result = evaluateSession(
+			"claude-1",
+			{ phase: "busy-polling", busySince: 1, pollerStartedAt: 2 },
+			ctx({ status: { type: "busy" }, providerStreamsLifecycle: true }),
+			DEFAULT_CONFIG,
+		);
+		expect(result.phase).toEqual({
+			phase: "busy-provider-covered",
+			busySince: 1,
+		});
+		expect(result.effects).toEqual([
+			{
+				effect: "stop-poller",
+				sessionId: "claude-1",
+				reason: "provider-now-covering",
+			},
+		]);
+	});
+
+	it("clears idle bookkeeping without synthesizing provider completion", () => {
+		const result = evaluateSession(
+			"claude-1",
+			{ phase: "busy-sse-covered", busySince: 1, lastSSEAt: 1 },
+			ctx({ providerStreamsLifecycle: true }),
+			DEFAULT_CONFIG,
+		);
+		expect(result.phase).toEqual({ phase: "idle" });
+		expect(result.effects).toEqual([
+			{ effect: "clear-processing", sessionId: "claude-1" },
+		]);
+	});
+
+	it("clears a deleted provider-streamed session without a synthetic done", () => {
+		const busy = evaluateAll(
+			initialMonitoringState(),
+			new Map([
+				[
+					"claude-1",
+					ctx({ status: { type: "busy" }, providerStreamsLifecycle: true }),
+				],
+			]),
+			DEFAULT_CONFIG,
+		);
+		const deleted = evaluateAll(busy.state, new Map(), DEFAULT_CONFIG);
+		expect(deleted.state.sessions.size).toBe(0);
+		expect(deleted.effects).toEqual([
+			{ effect: "clear-processing", sessionId: "claude-1" },
+		]);
+	});
+
+	it("provider-streamed sessions do not consume the OpenCode poller cap", () => {
+		const result = evaluateAll(
+			initialMonitoringState(),
+			new Map([
+				[
+					"claude-1",
+					ctx({ status: { type: "busy" }, providerStreamsLifecycle: true }),
+				],
+			]),
+			{ ...DEFAULT_CONFIG, maxPollers: 0 },
+		);
+		expect(result.state.sessions.get("claude-1")?.phase).toBe(
+			"busy-provider-covered",
+		);
+		expect(result.effects).toEqual([
+			{ effect: "notify-busy", sessionId: "claude-1" },
+		]);
+	});
+
 	it("idle + idle status → idle, no effects", () => {
 		const result = evaluateSession(
 			"s1",

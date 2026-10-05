@@ -28,6 +28,8 @@ export {
 	DeleteSession,
 	DetectProxy,
 	type DetectProxyResponse,
+	FindFolders,
+	type FindFoldersResponse,
 	ForkSession,
 	type ForkSessionResponse,
 	GetAgents,
@@ -216,6 +218,7 @@ export type DaemonRpcName =
 	| "ScanNow"
 	| "DetectProxy"
 	| "ListDirectories"
+	| "FindFolders"
 	| "ListDaemonSessions"
 	| "SetLogLevel"
 	| "ResolveSession";

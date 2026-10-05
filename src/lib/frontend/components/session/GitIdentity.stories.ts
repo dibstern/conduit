@@ -1,12 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import GitIdentity from "./GitIdentity.svelte";
 
 const meta = {
 	title: "Session/GitIdentity",
 	component: GitIdentity,
 	tags: ["autodocs"],
-	args: { project: "conduit", git: undefined },
+	args: { directory: "/src/conduit", git: undefined },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+	},
 } satisfies Meta<typeof GitIdentity>;
 
 export default meta;
@@ -30,7 +34,7 @@ export const Dirty: Story = {
 
 export const Narrow: Story = {
 	args: {
-		project: "conduit-project-with-a-very-long-name",
+		directory: "/src/conduit-project-with-a-very-long-name",
 		git: {
 			branch: "feature/git-ui",
 			worktree: "linked-worktree-with-a-long-name",
@@ -51,9 +55,78 @@ export const Narrow: Story = {
 			container.getBoundingClientRect().right,
 		);
 		expect(project.scrollWidth).toBeGreaterThan(project.clientWidth);
+		expect(project.getBoundingClientRect().width).toBeGreaterThanOrEqual(
+			Number.parseFloat(getComputedStyle(project).minWidth),
+		);
 		expect(branch.scrollWidth).toBe(branch.clientWidth);
 		await expect(
 			within(identity).getByText("Uncommitted changes"),
 		).toBeInTheDocument();
+	},
+};
+
+export const AheadBehind: Story = {
+	args: { git: { branch: "main", ahead: 3, behind: 1 } },
+};
+
+export const Detached: Story = { args: { git: { head: "a1b2c3d" } } };
+
+export const Rebasing: Story = {
+	args: { git: { branch: "feat/x", operation: "rebase", dirty: true } },
+};
+
+export const Merged: Story = {
+	args: { git: { branch: "feat/x", merged: true } },
+};
+
+export const DetailsOpen: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		git: {
+			branch: "fix/draft-menus",
+			worktree: "conduit-wt-draft",
+			ahead: 3,
+			behind: 1,
+			dirty: true,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		await expect(
+			within(document.body).getByRole("menu", { name: "Checkout" }),
+		).toHaveTextContent("/src/conduit");
+	},
+};
+
+export const Phone: Story = {
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+	args: {
+		git: {
+			branch: "fix/draft-menus",
+			worktree: "conduit-wt-draft",
+			dirty: true,
+		},
+	},
+};
+
+export const LongNames: Story = {
+	args: {
+		directory: "/src/spm-architecture-deepening",
+		git: { branch: "docs/architecture-deepening-design", dirty: true },
+	},
+	play: async ({ canvasElement }) => {
+		const project = within(canvasElement)
+			.getByTestId("session-bar-identity")
+			.querySelector('[data-part="project"]');
+		expect(project).not.toBeNull();
+		if (!project) return;
+		expect(project.getBoundingClientRect().width).toBeCloseTo(
+			Number.parseFloat(getComputedStyle(project).minWidth),
+			0,
+		);
 	},
 };

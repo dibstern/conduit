@@ -1,7 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -29,6 +32,17 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 			)
 			.all(sessionId) as Array<{ command_id: string; status: string }>;
 		return {
+			session: db
+				.prepare("SELECT status FROM sessions WHERE id = ?")
+				.get(sessionId) as { status: string },
+			turns: db
+				.prepare(
+					"SELECT state, assistant_message_id FROM turns WHERE session_id = ?",
+				)
+				.all(sessionId) as Array<{
+				state: string;
+				assistant_message_id: string | null;
+			}>,
 			commands,
 			events: events.map((event) => ({
 				...event,
@@ -39,6 +53,14 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 	} finally {
 		db.close();
 	}
+}
+
+function sdkProof(harness: ProcessHarness): ProcessMark[] {
+	return readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as ProcessMark);
 }
 
 // Preserve payloads and ID relationships while removing opaque IDs, clocks,
@@ -386,6 +408,160 @@ describe("Claude session process runner", () => {
 			);
 		}
 	}, 45_000);
+
+	it.each([
+		"interrupt",
+		"interrupt-before-snapshot",
+	] as const)("settles a notification-driven parent turn without a send waiter on %s", async (action) => {
+		const harness = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+		});
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		await browser.setAutoSettle(null);
+		const sessionId = await browser.createSession("Notification interrupt");
+		const prompt =
+			action === "interrupt-before-snapshot"
+				? "notification-parent-turn-before-snapshot"
+				: "notification-parent-turn";
+		expect((await browser.send(sessionId, prompt)).chunks).toEqual(
+			responseChunks(prompt),
+		);
+		await settled(harness, sessionId, 1);
+		const runner = harness.marks.find(
+			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
+		);
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing notification runner proof");
+		writeFileSync(join(harness.root, "release-notification-parent"), "release");
+		await vi.waitFor(() => {
+			const state = persisted(harness, sessionId);
+			expect(state.session.status).toBe("busy");
+			expect(state.turns).toMatchObject([{ state: "running" }]);
+			expect(
+				state.events.some(
+					(event) =>
+						event.type === "text.delta" &&
+						typeof event.data === "object" &&
+						event.data !== null &&
+						"text" in event.data &&
+						event.data.text === "Notification parent message.",
+				),
+			).toBe(true);
+		});
+		const held = persisted(harness, sessionId);
+		if (action === "interrupt-before-snapshot") {
+			await vi.waitFor(() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) =>
+							mark.kind === "notification-turn" && mark.phase === "stream-held",
+					),
+				).toBe(true),
+			);
+			const streamHeld = sdkProof(harness).find(
+				(mark) =>
+					mark.kind === "notification-turn" && mark.phase === "stream-held",
+			);
+			if (streamHeld?.kind !== "notification-turn")
+				throw new Error("Missing pre-snapshot notification proof");
+			expect(streamHeld.snapshotUuid).toEqual(expect.any(String));
+			expect(streamHeld.snapshotUuid).not.toBe(streamHeld.messageId);
+			expect(held.turns[0]?.assistant_message_id).toBe(streamHeld.messageId);
+			expect(
+				sdkProof(harness).filter(
+					(mark) =>
+						mark.kind === "notification-turn" && mark.phase === "snapshot",
+				),
+			).toEqual([]);
+			expect(
+				existsSync(join(harness.root, "release-notification-snapshot")),
+			).toBe(false);
+		}
+		expect(held.commands).toEqual([
+			{ command_id: expect.any(String), status: "completed" },
+		]);
+		const cancelCommandIds = [randomUUID(), randomUUID()];
+		try {
+			expect(new Set(cancelCommandIds).size).toBe(2);
+			await Promise.all(
+				cancelCommandIds.map((commandId) =>
+					Effect.runPromise(
+						browser.rpc.CancelSession({
+							projectSlug: "process-test",
+							sessionId,
+							commandId,
+						}),
+					),
+				),
+			);
+			await vi.waitFor(
+				() => {
+					const state = persisted(harness, sessionId);
+					expect(state.session.status).toBe("idle");
+					expect(state.turns).toMatchObject([{ state: "interrupted" }]);
+					expect(state.turns[0]?.assistant_message_id).toBe(
+						held.turns[0]?.assistant_message_id,
+					);
+					expect(state.commands).toEqual(held.commands);
+					expect(
+						state.events.filter((event) => event.type === "turn.interrupted"),
+					).toEqual([
+						expect.objectContaining({
+							data: expect.objectContaining({
+								messageId: held.turns[0]?.assistant_message_id,
+							}),
+						}),
+					]);
+					expect(
+						state.events.filter((event) => event.type === "turn.completed"),
+					).toHaveLength(1);
+					expect(
+						state.events.filter((event) => event.type === "turn.error"),
+					).toEqual([]);
+				},
+				{ timeout: 10_000 },
+			);
+			const terminal = persisted(harness, sessionId);
+			// Repeated browser cancellation cannot interrupt the completed first
+			// turn or add another terminal event after notification cleanup.
+			await Effect.runPromise(
+				browser.rpc.CancelSession({
+					projectSlug: "process-test",
+					sessionId,
+					commandId: randomUUID(),
+				}),
+			);
+			expect(
+				persisted(harness, sessionId).events.filter(
+					(event) => event.type === "turn.interrupted",
+				),
+			).toHaveLength(1);
+			await harness.kill();
+			await harness.restart();
+			await harness.connect(sessionId);
+			expect(persisted(harness, sessionId)).toEqual(terminal);
+		} finally {
+			mkdirSync("test-results/process-harness", { recursive: true });
+			writeFileSync(
+				`test-results/process-harness/nzjt-notification-${action}.json`,
+				JSON.stringify(
+					{
+						action,
+						cancelCommandIds,
+						runner,
+						held: normalize(held, harness.root),
+						terminal: normalize(persisted(harness, sessionId), harness.root),
+						process: harness.proof(),
+						sdk: sdkProof(harness),
+					},
+					null,
+					2,
+				),
+			);
+		}
+	}, 40_000);
 
 	it("stops a runner waiting for approval and settles its unowned turn on restart", async () => {
 		const harness = await ProcessHarness.start();

@@ -974,21 +974,13 @@ export const makeTurnProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				// Stop is recorded by the Claude runtime, which only knows the
-				// SDK's message uuid, never conduit's assistant message id. When
-				// the id matches nothing, the interrupted turn is the session's
-				// open one (exact while one turn is in flight, as below).
+				// An empty id means the turn stopped before naming its reply.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
-						WHERE id = COALESCE(
-							(SELECT id FROM turns
-								WHERE session_id = ${event.sessionId}
-								AND assistant_message_id = ${event.data.messageId}),
-							(SELECT id FROM turns
-								WHERE session_id = ${event.sessionId}
-								AND state IN ('pending', 'running')
-								ORDER BY requested_at DESC, rowid DESC LIMIT 1))
+						WHERE session_id = ${event.sessionId}
+						AND (assistant_message_id = ${event.data.messageId}
+							OR (${event.data.messageId} = '' AND state = 'running'))
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}

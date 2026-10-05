@@ -284,6 +284,12 @@ function modelExecutionInitMessages(
 		{ type: "model_info", model: "opus[1m]", provider: "claude" },
 		{ type: "model_list", providers: modelExecutionProviders },
 		claudeAgentList,
+		// The header's git pill names the project's primary folder.
+		{
+			type: "project_list",
+			projects: [{ slug: "myapp", title: "myapp", directory: "/src/myapp" }],
+			current: "myapp",
+		},
 	];
 }
 

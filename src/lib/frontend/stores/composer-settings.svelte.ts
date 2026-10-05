@@ -268,7 +268,7 @@ export const model: ComposerSetting<ComposerModel> = {
 					(response) => {
 						applyModelSwitched(response);
 						void getAgentsRpc({ projectSlug, sessionId })
-							.then(applyGetAgentsResponse)
+							.then((response) => applyGetAgentsResponse(response, sessionId))
 							.catch(() => undefined);
 					},
 				),

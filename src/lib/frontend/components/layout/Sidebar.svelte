@@ -7,6 +7,7 @@
 	import SessionList from "../session/SessionList.svelte";
 	import SessionGroupMenu from "../session/SessionGroupMenu.svelte";
 	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
+	import ProjectDialog from "../project/ProjectDialog.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
 	import {
 		uiState,
@@ -14,7 +15,9 @@
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
+	import { applyProjectMutationResponse, projectState } from "../../stores/project.svelte.js";
+	import { setSessionScope } from "../../stores/session-scope.js";
+	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
@@ -29,11 +32,18 @@
 	let { listScreen = false }: { listScreen?: boolean } = $props();
 
 	let projectsOpen = $state(false);
+	let addProjectOpen = $state(false);
 	let listMenuOpen = $state(false);
 	let projectContextMenuOpen = $state(false);
 
 	function handleCloseSidebar() {
 		collapseSidebar();
+	}
+
+	function handleProjectAdded(response: SaveProjectResponse) {
+		applyProjectMutationResponse(response);
+		setSessionScope(response.savedSlug);
+		addProjectOpen = false;
 	}
 
 	// Settled sessions are never counted: that set only grows.
@@ -255,7 +265,7 @@
 		>
 			<!-- Session list -->
 			<div id="session-list-container" class="flex-1 flex flex-col overflow-hidden">
-				<SessionList onaddproject={() => { projectsOpen = true; }} />
+				<SessionList onaddproject={() => { addProjectOpen = true; }} />
 			</div>
 		</div>
 
@@ -278,3 +288,13 @@
 	</nav>
 
 </div>
+
+{#if addProjectOpen}
+	<ProjectDialog
+		open
+		projects={projectState.projects}
+		onclose={() => { addProjectOpen = false; }}
+		onsaved={handleProjectAdded}
+		returnFocus={() => document.querySelector('[data-testid="session-scope-chip"]')}
+	/>
+{/if}

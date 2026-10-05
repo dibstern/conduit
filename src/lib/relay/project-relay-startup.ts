@@ -370,6 +370,7 @@ function startMonitoringAndPollers(
 			pollerManager,
 			sseStream,
 			config: {
+				...(config.configDir != null && { configDir: config.configDir }),
 				...(config.pollerGatingConfig != null && {
 					pollerGatingConfig: config.pollerGatingConfig,
 				}),

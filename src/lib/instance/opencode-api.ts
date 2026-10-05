@@ -1,4 +1,4 @@
-// Unified namespaced API wrapping the @opencode-ai/sdk client and gap endpoints.
+// Unified namespaced API wrapping the @opencode-ai/sdk/v2 client.
 // Callers use `api.session.list()` instead of `client.session.list({ ... })`.
 //
 // Error strategy (Audit v3): SDK uses default throwOnError: false.
@@ -10,10 +10,11 @@
 // Message shape: session.messages() normalizes SDK's nested `{ info, parts }`
 // shape into flat `{ ...info, parts }` messages for relay callers.
 
+import type { OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type {
+	ConfigUpdateData,
 	Event as OpenCodeEvent,
-	OpencodeClient,
-} from "@opencode-ai/sdk/client";
+} from "@opencode-ai/sdk/v2/types";
 import {
 	decodeOpenCodeAgentListResponse,
 	decodeOpenCodeBooleanResponse,
@@ -30,43 +31,34 @@ import {
 	decodeOpenCodeMessageListResponse,
 	decodeOpenCodeMessageWithPartsResponse,
 	decodeOpenCodePathResponse,
+	decodeOpenCodePendingPermissionListResponse,
+	decodeOpenCodePendingQuestionListResponse,
 	decodeOpenCodeProjectListResponse,
 	decodeOpenCodeProviderListResponse,
 	decodeOpenCodePtyListResponse,
 	decodeOpenCodePtyResponse,
+	decodeOpenCodeQuestionActionResponse,
+	decodeOpenCodeQuestionReplyBody,
 	decodeOpenCodeSessionDetailResponse,
 	decodeOpenCodeSessionListResponse,
 	decodeOpenCodeSessionResponse,
 	decodeOpenCodeSessionStatusMap,
 	decodeOpenCodeShareResponse,
+	decodeOpenCodeSkillListResponse,
 	decodeOpenCodeUndefinedResponse,
 	decodeOpenCodeVcsResponse,
+	type OpenCodeMessageWithParts,
 } from "../contracts/providers/opencode-sdk.js";
 import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
-import type { GapEndpoints } from "./gap-endpoints.js";
 import type {
 	Agent,
 	Message,
+	PermissionRuleset,
 	Provider,
 	ProviderListResult,
 	SessionDetail,
 	SessionStatus,
 } from "./sdk-types.js";
-
-/**
- * Simplified result shape for the sdk() wrapper.
- *
- * The SDK's RequestResult type uses complex conditional types based on
- * ThrowOnError and TResponseStyle generic parameters. With the defaults
- * (throwOnError: false, responseStyle: "fields"), results conform to this
- * shape. We use this type alias to avoid `as any` casts throughout.
- */
-type SdkResult<T> = Promise<
-	{ data: T | undefined; error: unknown } & {
-		request: Request;
-		response: Response;
-	}
->;
 
 type DecodeResponse<T> = (raw: unknown) => T;
 
@@ -79,7 +71,6 @@ const decodeSessionListResponse: DecodeResponse<SessionDetail[]> = (raw) =>
 
 export interface OpenCodeAPIOptions {
 	sdk: OpencodeClient;
-	gapEndpoints: GapEndpoints;
 	baseUrl: string;
 	authHeaders: Record<string, string>;
 }
@@ -87,13 +78,12 @@ export interface OpenCodeAPIOptions {
 /**
  * Unified namespaced API adapter for OpenCode.
  *
- * Wraps the @opencode-ai/sdk OpencodeClient and GapEndpoints into a
+ * Wraps the @opencode-ai/sdk/v2 OpencodeClient into a
  * clean, caller-friendly interface. All SDK calls pass through the
  * private `sdk()` helper which handles error translation.
  */
 export class OpenCodeAPI {
 	private readonly client: OpencodeClient;
-	private readonly gaps: GapEndpoints;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
 
@@ -110,7 +100,6 @@ export class OpenCodeAPI {
 
 	constructor(options: OpenCodeAPIOptions) {
 		this.client = options.sdk;
-		this.gaps = options.gapEndpoints;
 		this._baseUrl = options.baseUrl;
 		this._authHeaders = options.authHeaders;
 
@@ -141,7 +130,7 @@ export class OpenCodeAPI {
 	 *
 	 * The SDK's default throwOnError: false means successful calls return
 	 * `{ data, error: undefined }` and failures return `{ data: undefined, error }`.
-	 * Network errors (TypeError: fetch failed, etc.) throw directly.
+	 * Network errors may throw or arrive without a response in v2.
 	 *
 	 * This helper:
 	 * 1. Catches thrown errors → OpenCodeConnectionError
@@ -152,20 +141,21 @@ export class OpenCodeAPI {
 		label: string,
 		decodeResponse: DecodeResponse<T>,
 		fn: () => Promise<{
-			data: unknown;
-			error: unknown;
-			response: { status: number; url?: string } | Response;
+			data?: unknown;
+			error?: unknown;
+			response?: { status: number; url?: string } | undefined;
 		}>,
 	): Promise<T> {
 		let result: {
-			data: unknown;
-			error: unknown;
-			response: { status: number; url?: string } | Response;
+			data?: unknown;
+			error?: unknown;
+			response?: { status: number; url?: string } | undefined;
 		};
 
 		try {
 			result = await fn();
 		} catch (err) {
+			if (err instanceof OpenCodeApiError) throw err;
 			// Network-level failure (fetch failed, DNS error, timeout, etc.)
 			const cause = err instanceof Error ? err : new Error(String(err));
 			throw new OpenCodeConnectionError({
@@ -175,6 +165,18 @@ export class OpenCodeAPI {
 		}
 
 		if (result.error !== undefined) {
+			if (result.error instanceof OpenCodeApiError) throw result.error;
+			// v2 returns network failures as error results without a response.
+			if (!result.response) {
+				const cause =
+					result.error instanceof Error
+						? result.error
+						: new Error(String(result.error));
+				throw new OpenCodeConnectionError({
+					message: `OpenCode unreachable during ${label}: ${cause.message}`,
+					cause,
+				});
+			}
 			const status =
 				result.response && "status" in result.response
 					? result.response.status
@@ -192,7 +194,13 @@ export class OpenCodeAPI {
 		}
 
 		try {
-			return decodeResponse(result.data);
+			const data: unknown =
+				typeof result.data === "string"
+					? result.data === ""
+						? undefined
+						: JSON.parse(result.data)
+					: result.data;
+			return decodeResponse(data);
 		} catch (err) {
 			const cause = err instanceof Error ? err : new Error(String(err));
 			const status =
@@ -219,43 +227,15 @@ export class OpenCodeAPI {
 	get _sdk(): OpencodeClient {
 		return this.client;
 	}
-
-	/** Access internal gap endpoints (for namespaces) */
-	get _gaps(): GapEndpoints {
-		return this.gaps;
-	}
 }
 
-// The SDK's RequestResult uses complex conditional types; this helper performs
-// a single cast point so namespace methods stay clean.
-
-function call<T>(promise: Promise<unknown>): SdkResult<T> {
-	return promise as SdkResult<T>;
+// Response schemas validate the SDK's nested message envelope before flattening.
+function flattenMessage(message: OpenCodeMessageWithParts): Message {
+	return { ...message.info, parts: [...message.parts] } as Message;
 }
 
-// The SDK returns messages as `{ info: Message, parts: Part[] }`.
-// Callers expect flat messages with `.id`, `.role`, `.parts` at the top level.
-// These helpers handle both nested and already-flat shapes gracefully.
-
-/**
- * Flatten a single message from SDK shape `{ info, parts }` to flat `{ ...info, parts }`.
- * If the message is already flat (has `id` at top level), returns it as-is.
- */
-// biome-ignore lint/suspicious/noExplicitAny: runtime shape detection for SDK compat
-function flattenMessage(m: any): Message {
-	if (m.info && typeof m.info === "object") {
-		return { ...m.info, parts: m.parts ?? [] };
-	}
-	return m as Message;
-}
-
-/**
- * Flatten an array of messages from SDK shape to flat messages.
- */
-// biome-ignore lint/suspicious/noExplicitAny: runtime shape detection for SDK compat
-function flattenMessages(data: any): Message[] {
-	const arr = Array.isArray(data) ? data : [];
-	return arr.map(flattenMessage);
+function flattenMessages(data: readonly OpenCodeMessageWithParts[]): Message[] {
+	return data.map(flattenMessage);
 }
 
 class SessionNamespace {
@@ -266,28 +246,13 @@ class SessionNamespace {
 		limit?: number;
 	}): Promise<SessionDetail[]> {
 		return this.api.sdk("session.list", decodeSessionListResponse, () =>
-			call(
-				this.api._sdk.session.list({
-					...(options != null
-						? {
-								query: {
-									...(options.roots !== undefined
-										? { roots: String(options.roots) }
-										: {}),
-									...(options.limit !== undefined
-										? { limit: String(options.limit) }
-										: {}),
-								} as Record<string, string>,
-							}
-						: {}),
-				}),
-			),
+			this.api._sdk.session.list(options),
 		);
 	}
 
 	async get(id: string): Promise<SessionDetail> {
 		return this.api.sdk("session.get", decodeSessionDetailResponse, () =>
-			call(this.api._sdk.session.get({ path: { id } })),
+			this.api._sdk.session.get({ sessionID: id }),
 		);
 	}
 
@@ -296,45 +261,34 @@ class SessionNamespace {
 		parentID?: string;
 	}): Promise<SessionDetail> {
 		return this.api.sdk("session.create", decodeSessionDetailResponse, () =>
-			call(
-				this.api._sdk.session.create(options != null ? { body: options } : {}),
-			),
+			this.api._sdk.session.create(options),
 		);
 	}
 
 	async delete(id: string): Promise<void> {
 		await this.api.sdk("session.delete", decodeOpenCodeBooleanResponse, () =>
-			call(this.api._sdk.session.delete({ path: { id } })),
+			this.api._sdk.session.delete({ sessionID: id }),
 		);
 	}
 
-	async update(id: string, options: { title?: string }): Promise<void> {
+	async update(
+		id: string,
+		options: { title?: string; permission?: PermissionRuleset },
+	): Promise<void> {
 		await this.api.sdk("session.update", decodeOpenCodeSessionResponse, () =>
-			call(
-				this.api._sdk.session.update({
-					path: { id },
-					body: options,
-				}),
-			),
+			this.api._sdk.session.update({ sessionID: id, ...options }),
 		);
 	}
 
-	/** Get statuses for all sessions. Returns `Record<string, SessionStatus>`. */
 	async statuses(): Promise<Record<string, SessionStatus>> {
 		return this.api.sdk(
 			"session.statuses",
 			decodeOpenCodeSessionStatusMap,
-			() => call(this.api._sdk.session.status()),
+			() => this.api._sdk.session.status(),
 		);
 	}
 
-	/**
-	 * List messages for a session.
-	 *
-	 * The SDK returns `Array<{ info: Message, parts: Part[] }>`.
-	 * This method flattens to `Array<{ ...info, parts }>` so callers
-	 * get flat messages with `.id`, `.role`, `.parts` at the top level.
-	 */
+	/** Flatten the SDK's validated `{ info, parts }` message envelopes. */
 	async messages(
 		sessionId: string,
 		options?: { limit?: number; signal?: AbortSignal },
@@ -343,90 +297,77 @@ class SessionNamespace {
 			"session.messages",
 			decodeOpenCodeMessageListResponse,
 			() =>
-				call(
-					this.api._sdk.session.messages({
-						path: { id: sessionId },
-						...(options?.signal ? { signal: options.signal } : {}),
-						...(options?.limit != null
-							? { query: { limit: options.limit } }
-							: {}),
-					}),
+				this.api._sdk.session.messages(
+					{
+						sessionID: sessionId,
+						...(options?.limit != null ? { limit: options.limit } : {}),
+					},
+					options?.signal ? { signal: options.signal } : undefined,
 				),
 		);
 		return flattenMessages(data);
 	}
 
-	/**
-	 * Paginated message retrieval (gap endpoint).
-	 * Returns messages before the given cursor.
-	 *
-	 * The gap endpoint returns the same nested `{ info, parts }` shape.
-	 * This method flattens to flat messages.
-	 */
+	/** Cursor paging uses the same endpoint and parameters as the former gap. */
 	async messagesPage(
 		sessionId: string,
 		options?: { limit?: number; before?: string },
 	): Promise<Message[]> {
-		const data = (await this.api._gaps.getMessagesPage(
-			sessionId,
-			options,
-		)) as unknown[];
+		const data = await this.api.sdk(
+			"session.messagesPage",
+			decodeOpenCodeMessageListResponse,
+			() =>
+				this.api._sdk.session.messages(
+					{
+						sessionID: sessionId,
+						...(options?.limit ? { limit: options.limit } : {}),
+						...(options?.before ? { before: options.before } : {}),
+					},
+					{
+						// Gap calls were unscoped, even when the SDK had a default directory.
+						headers: { "x-opencode-directory": null },
+					},
+				),
+		);
 		return flattenMessages(data);
 	}
 
-	/**
-	 * Get a single message with its parts.
-	 *
-	 * The SDK returns `{ info: Message, parts: Part[] }`.
-	 * This method flattens to `{ ...info, parts }`.
-	 */
 	async message(sessionId: string, messageId: string): Promise<Message> {
 		const data = await this.api.sdk(
 			"session.message",
 			decodeOpenCodeMessageWithPartsResponse,
 			() =>
-				call(
-					this.api._sdk.session.message({
-						path: { id: sessionId, messageID: messageId },
-					}),
-				),
+				this.api._sdk.session.message({
+					sessionID: sessionId,
+					messageID: messageId,
+				}),
 		);
 		return flattenMessage(data);
 	}
 
-	/**
-	 * Send a prompt to a session (fire-and-forget via promptAsync).
-	 * Builds TextPartInput from text string for convenience.
-	 */
 	async prompt(
 		sessionId: string,
 		options: {
 			text: string;
+			system?: string;
 			model?: { providerID: string; modelID: string };
 			agent?: string;
 		},
 	): Promise<void> {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
-			call(
-				this.api._sdk.session.promptAsync({
-					path: { id: sessionId },
-					body: {
-						parts: [{ type: "text" as const, text: options.text }],
-						...(options.model != null ? { model: options.model } : {}),
-						...(options.agent != null ? { agent: options.agent } : {}),
-					},
-				}),
-			),
+			this.api._sdk.session.promptAsync({
+				sessionID: sessionId,
+				parts: [{ type: "text", text: options.text }],
+				...(options.system !== undefined ? { system: options.system } : {}),
+				...(options.model != null ? { model: options.model } : {}),
+				...(options.agent != null ? { agent: options.agent } : {}),
+			}),
 		);
 	}
 
 	async abort(sessionId: string): Promise<void> {
 		await this.api.sdk("session.abort", decodeOpenCodeBooleanResponse, () =>
-			call(
-				this.api._sdk.session.abort({
-					path: { id: sessionId },
-				}),
-			),
+			this.api._sdk.session.abort({ sessionID: sessionId }),
 		);
 	}
 
@@ -435,12 +376,7 @@ class SessionNamespace {
 		options?: { messageID?: string },
 	): Promise<SessionDetail> {
 		return this.api.sdk("session.fork", decodeSessionDetailResponse, () =>
-			call(
-				this.api._sdk.session.fork({
-					path: { id: sessionId },
-					...(options != null ? { body: options } : {}),
-				}),
-			),
+			this.api._sdk.session.fork({ sessionID: sessionId, ...options }),
 		);
 	}
 
@@ -449,32 +385,19 @@ class SessionNamespace {
 		options: { messageID: string; partID?: string },
 	): Promise<void> {
 		await this.api.sdk("session.revert", decodeOpenCodeSessionResponse, () =>
-			call(
-				this.api._sdk.session.revert({
-					path: { id: sessionId },
-					body: options,
-				}),
-			),
+			this.api._sdk.session.revert({ sessionID: sessionId, ...options }),
 		);
 	}
 
 	async unrevert(sessionId: string): Promise<void> {
 		await this.api.sdk("session.unrevert", decodeOpenCodeSessionResponse, () =>
-			call(
-				this.api._sdk.session.unrevert({
-					path: { id: sessionId },
-				}),
-			),
+			this.api._sdk.session.unrevert({ sessionID: sessionId }),
 		);
 	}
 
 	async share(sessionId: string): Promise<{ url: string }> {
 		return this.api.sdk("session.share", decodeOpenCodeShareResponse, () =>
-			call(
-				this.api._sdk.session.share({
-					path: { id: sessionId },
-				}),
-			),
+			this.api._sdk.session.share({ sessionID: sessionId }),
 		);
 	}
 
@@ -483,12 +406,7 @@ class SessionNamespace {
 		options?: { providerID: string; modelID: string },
 	): Promise<void> {
 		await this.api.sdk("session.summarize", decodeOpenCodeBooleanResponse, () =>
-			call(
-				this.api._sdk.session.summarize({
-					path: { id: sessionId },
-					...(options != null ? { body: options } : {}),
-				}),
-			),
+			this.api._sdk.session.summarize({ sessionID: sessionId, ...options }),
 		);
 	}
 
@@ -502,24 +420,13 @@ class SessionNamespace {
 		}>;
 	}> {
 		return this.api.sdk("session.diff", decodeOpenCodeDiffResponse, () =>
-			call(
-				this.api._sdk.session.diff({
-					path: { id: sessionId },
-					...(options?.messageID != null
-						? { query: { messageID: options.messageID } }
-						: {}),
-				}),
-			),
+			this.api._sdk.session.diff({ sessionID: sessionId, ...options }),
 		);
 	}
 
 	async children(sessionId: string): Promise<SessionDetail[]> {
 		return this.api.sdk("session.children", decodeSessionListResponse, () =>
-			call(
-				this.api._sdk.session.children({
-					path: { id: sessionId },
-				}),
-			),
+			this.api._sdk.session.children({ sessionID: sessionId }),
 		);
 	}
 }
@@ -527,33 +434,32 @@ class SessionNamespace {
 class PermissionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
-	/** List pending permissions (gap endpoint). */
 	async list(): Promise<
 		Array<{ [key: string]: unknown; id: string; permission: string }>
 	> {
-		return this.api._gaps.listPendingPermissions() as Promise<
-			Array<{ [key: string]: unknown; id: string; permission: string }>
-		>;
+		const permissions = await this.api.sdk(
+			"permission.list",
+			decodeOpenCodePendingPermissionListResponse,
+			() =>
+				this.api._sdk.permission.list(undefined, {
+					headers: { "x-opencode-directory": null },
+				}),
+		);
+		return [...permissions];
 	}
 
-	/**
-	 * Reply to a permission request (SDK).
-	 * @param sessionId - Session ID
-	 * @param permissionId - Permission ID
-	 * @param response - "once" | "always" | "reject"
-	 */
+	/** Keep the existing session-scoped endpoint and response body. */
 	async reply(
 		sessionId: string,
 		permissionId: string,
 		response: "once" | "always" | "reject",
 	): Promise<void> {
 		await this.api.sdk("permission.reply", decodeOpenCodeBooleanResponse, () =>
-			call(
-				this.api._sdk.postSessionIdPermissionsPermissionId({
-					path: { id: sessionId, permissionID: permissionId },
-					body: { response },
-				}),
-			),
+			this.api._sdk.permission.respond({
+				sessionID: sessionId,
+				permissionID: permissionId,
+				response,
+			}),
 		);
 	}
 }
@@ -561,21 +467,55 @@ class PermissionNamespace {
 class QuestionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
-	/** List pending questions (gap endpoint). */
 	async list(): Promise<Array<{ [key: string]: unknown; id: string }>> {
-		return this.api._gaps.listPendingQuestions() as Promise<
-			Array<{ [key: string]: unknown; id: string }>
-		>;
+		const questions = await this.api.sdk(
+			"question.list",
+			decodeOpenCodePendingQuestionListResponse,
+			() =>
+				this.api._sdk.question.list(undefined, {
+					headers: { "x-opencode-directory": null },
+				}),
+		);
+		return [...questions];
 	}
 
-	/** Reply to a question (gap endpoint). */
-	async reply(id: string, answers: string[][]) {
-		return this.api._gaps.replyQuestion(id, answers);
+	async reply(id: string, answers: string[][]): Promise<void> {
+		try {
+			decodeOpenCodeQuestionReplyBody({ answers });
+		} catch (err) {
+			const cause = err instanceof Error ? err : new Error(String(err));
+			const path = `/question/${id}/reply`;
+			const parseDetails = cause.message.slice(0, 2000);
+			throw new OpenCodeApiError({
+				message: `Malformed OpenCode request during POST ${path}`,
+				endpoint: path,
+				responseStatus: 400,
+				responseBody: { parseDetails },
+				cause,
+				context: { method: "POST", path, parseDetails },
+			});
+		}
+		await this.api.sdk(
+			"question.reply",
+			decodeOpenCodeQuestionActionResponse,
+			() =>
+				this.api._sdk.question.reply(
+					{ requestID: id, answers },
+					{ headers: { "x-opencode-directory": null } },
+				),
+		);
 	}
 
-	/** Reject a question (gap endpoint). */
-	async reject(id: string) {
-		return this.api._gaps.rejectQuestion(id);
+	async reject(id: string): Promise<void> {
+		await this.api.sdk(
+			"question.reject",
+			decodeOpenCodeQuestionActionResponse,
+			() =>
+				this.api._sdk.question.reject(
+					{ requestID: id },
+					{ headers: { "x-opencode-directory": null } },
+				),
+		);
 	}
 }
 
@@ -584,14 +524,15 @@ class ConfigNamespace {
 
 	async get(): Promise<Record<string, unknown>> {
 		return this.api.sdk("config.get", decodeOpenCodeConfigResponse, () =>
-			call(this.api._sdk.config.get()),
+			this.api._sdk.config.get(),
 		);
 	}
 
 	async update(body: Record<string, unknown>): Promise<void> {
 		await this.api.sdk("config.update", decodeOpenCodeConfigResponse, () =>
-			// biome-ignore lint/suspicious/noExplicitAny: Config body type is complex; callers pass partial config objects
-			call(this.api._sdk.config.update({ body: body as any })),
+			this.api._sdk.config.update({
+				config: body as NonNullable<ConfigUpdateData["body"]>,
+			}),
 		);
 	}
 }
@@ -612,7 +553,7 @@ class ProviderNamespace {
 		const data = await this.api.sdk(
 			"provider.list",
 			decodeOpenCodeProviderListResponse,
-			() => call(this.api._sdk.provider.list()),
+			() => this.api._sdk.provider.list(),
 		);
 		// Normalize SDK shape → ProviderListResult
 		const providers: Provider[] = data.all.map((p) => ({
@@ -641,7 +582,7 @@ class PtyNamespace {
 		ReadonlyArray<{ readonly id: string; readonly [key: string]: unknown }>
 	> {
 		return this.api.sdk("pty.list", decodeOpenCodePtyListResponse, () =>
-			call(this.api._sdk.pty.list()),
+			this.api._sdk.pty.list(),
 		);
 	}
 
@@ -653,25 +594,23 @@ class PtyNamespace {
 		env?: Record<string, string>;
 	}): Promise<{ id: string; [key: string]: unknown }> {
 		return this.api.sdk("pty.create", decodeOpenCodePtyResponse, () =>
-			call(this.api._sdk.pty.create(options != null ? { body: options } : {})),
+			this.api._sdk.pty.create(options),
 		);
 	}
 
 	async delete(id: string): Promise<void> {
 		await this.api.sdk("pty.delete", decodeOpenCodeBooleanResponse, () =>
-			call(this.api._sdk.pty.remove({ path: { id } })),
+			this.api._sdk.pty.remove({ ptyID: id }),
 		);
 	}
 
 	/** Resize a PTY session. Maps to sdk.pty.update() with size body. */
 	async resize(id: string, rows: number, cols: number): Promise<void> {
 		await this.api.sdk("pty.resize", decodeOpenCodePtyResponse, () =>
-			call(
-				this.api._sdk.pty.update({
-					path: { id },
-					body: { size: { rows, cols } },
-				}),
-			),
+			this.api._sdk.pty.update({
+				ptyID: id,
+				size: { rows, cols },
+			}),
 		);
 	}
 }
@@ -687,11 +626,11 @@ class FileNamespace {
 			"file.list",
 			decodeOpenCodeFileEntryListResponse,
 			() =>
-				call(
-					this.api._sdk.file.list({
-						query: { path },
-						...(options?.signal ? { signal: options.signal } : {}),
-					}),
+				this.api._sdk.file.list(
+					{
+						path,
+					},
+					options?.signal ? { signal: options.signal } : undefined,
 				),
 		);
 		return entries.map((entry) => ({
@@ -708,11 +647,11 @@ class FileNamespace {
 			"file.read",
 			decodeOpenCodeFileReadResponse,
 			() =>
-				call(
-					this.api._sdk.file.read({
-						query: { path },
-						...(options?.signal ? { signal: options.signal } : {}),
-					}),
+				this.api._sdk.file.read(
+					{
+						path,
+					},
+					options?.signal ? { signal: options.signal } : undefined,
 				),
 		);
 		return {
@@ -732,7 +671,7 @@ class FileNamespace {
 		return this.api.sdk(
 			"file.status",
 			decodeOpenCodeFileStatusListResponse,
-			() => call(this.api._sdk.file.status()),
+			() => this.api._sdk.file.status(),
 		);
 	}
 }
@@ -742,7 +681,7 @@ class FindNamespace {
 
 	async text(pattern: string): Promise<readonly unknown[]> {
 		return this.api.sdk("find.text", decodeOpenCodeFindTextResponse, () =>
-			call(this.api._sdk.find.text({ query: { pattern } })),
+			this.api._sdk.find.text({ pattern }),
 		);
 	}
 
@@ -753,20 +692,16 @@ class FindNamespace {
 		let dirs: "true" | "false" | undefined;
 		if (options?.dirs != null) dirs = options.dirs ? "true" : "false";
 		return this.api.sdk("find.files", decodeOpenCodeFindFilesResponse, () =>
-			call(
-				this.api._sdk.find.files({
-					query: {
-						query,
-						...(dirs === undefined ? {} : { dirs }),
-					},
-				}),
-			),
+			this.api._sdk.find.files({
+				query,
+				...(dirs === undefined ? {} : { dirs }),
+			}),
 		);
 	}
 
 	async symbols(query: string): Promise<readonly unknown[]> {
 		return this.api.sdk("find.symbols", decodeOpenCodeFindSymbolsResponse, () =>
-			call(this.api._sdk.find.symbols({ query: { query } })),
+			this.api._sdk.find.symbols({ query }),
 		);
 	}
 }
@@ -778,7 +713,7 @@ class AppNamespace {
 		const agents = await this.api.sdk(
 			"app.agents",
 			decodeOpenCodeAgentListResponse,
-			() => call(this.api._sdk.app.agents()),
+			() => this.api._sdk.app.agents(),
 		);
 		return agents.map((agent) => ({
 			id: agent.name,
@@ -797,20 +732,24 @@ class AppNamespace {
 		}>
 	> {
 		return this.api.sdk("app.commands", decodeOpenCodeCommandListResponse, () =>
-			call(this.api._sdk.command.list()),
+			this.api._sdk.command.list(),
 		);
 	}
 
-	/** List skills (gap endpoint). */
+	/** List skills through the compatibility /skill endpoint. */
 	async skills(directory?: string) {
-		return this.api._gaps.listSkills(directory);
+		return this.api.sdk("app.skills", decodeOpenCodeSkillListResponse, () =>
+			this.api._sdk.app.skills(directory ? { directory } : undefined, {
+				headers: { "x-opencode-directory": null },
+			}),
+		);
 	}
 
 	async path(): Promise<{ cwd: string }> {
 		const path = await this.api.sdk(
 			"app.path",
 			decodeOpenCodePathResponse,
-			() => call(this.api._sdk.path.get()),
+			() => this.api._sdk.path.get(),
 		);
 		return { cwd: path.directory };
 	}
@@ -820,7 +759,7 @@ class AppNamespace {
 		readonly dirty?: boolean | undefined;
 	}> {
 		return this.api.sdk("app.vcs", decodeOpenCodeVcsResponse, () =>
-			call(this.api._sdk.vcs.get()),
+			this.api._sdk.vcs.get(),
 		);
 	}
 
@@ -833,7 +772,7 @@ class AppNamespace {
 		}>
 	> {
 		return this.api.sdk("app.projects", decodeOpenCodeProjectListResponse, () =>
-			call(this.api._sdk.project.list()),
+			this.api._sdk.project.list(),
 		);
 	}
 
@@ -845,7 +784,7 @@ class AppNamespace {
 		return this.api.sdk(
 			"app.currentProject",
 			decodeOpenCodeCurrentProjectResponse,
-			() => call(this.api._sdk.project.current()),
+			() => this.api._sdk.project.current(),
 		);
 	}
 }
@@ -873,14 +812,12 @@ class EventNamespace {
 	}): Promise<{
 		stream: AsyncGenerator<OpenCodeEvent, void, unknown>;
 	}> {
-		return this.api._sdk.event.subscribe({
+		return this.api._sdk.event.subscribe(undefined, {
 			...(options?.signal ? { signal: options.signal } : {}),
 			...(options?.sseMaxRetryAttempts !== undefined
 				? { sseMaxRetryAttempts: options.sseMaxRetryAttempts }
 				: {}),
 			...(options?.onSseError ? { onSseError: options.onSseError } : {}),
-		}) as Promise<{
-			stream: AsyncGenerator<OpenCodeEvent, void, unknown>;
-		}>;
+		});
 	}
 }

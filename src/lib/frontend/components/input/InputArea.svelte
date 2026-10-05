@@ -804,9 +804,12 @@
 	</div>
 {/if}
 
+<!-- While the textarea is focused the keyboard covers the home indicator, but iOS
+     keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
+     keyboard. Drop the inset then. -->
 <div
 	id="input-area"
-	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)]"
+	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] has-[textarea:focus]:pb-[12px] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->

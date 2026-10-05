@@ -1,5 +1,5 @@
 import type {
-	PostSessionIdPermissionsPermissionIdData,
+	PermissionRespondData,
 	Agent as SdkAgent,
 	Command as SdkCommand,
 	Config as SdkConfig,
@@ -23,7 +23,7 @@ import type {
 	SessionCreateData,
 	SessionPromptAsyncData,
 	SessionUpdateData,
-} from "@opencode-ai/sdk/client";
+} from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 
 type AssertExtends<_A extends B, B> = true;
@@ -45,11 +45,13 @@ type NormalizeSchemaType<T> =
 			: T;
 
 const OpenCodeFileDiffSchema = Schema.Struct({
-	file: Schema.String,
-	before: Schema.String,
-	after: Schema.String,
+	file: Schema.optional(Schema.String),
+	before: Schema.optional(Schema.String),
+	after: Schema.optional(Schema.String),
+	patch: Schema.optional(Schema.String),
 	additions: Schema.Number,
 	deletions: Schema.Number,
+	status: Schema.optional(Schema.Literal("added", "deleted", "modified")),
 });
 
 const OpenCodeSessionTimeSchema = Schema.Struct({
@@ -93,7 +95,7 @@ type _OpenCodeSdkSessionCoversSchema = AssertExtends<
 >;
 type _OpenCodeSessionCoversSdkSession = AssertExtends<
 	NormalizeSchemaType<OpenCodeSession>,
-	SdkSession
+	Omit<SdkSession, "slug">
 >;
 
 export const OpenCodeSessionDetailSchema = Schema.Struct({
@@ -103,6 +105,15 @@ export const OpenCodeSessionDetailSchema = Schema.Struct({
 	agentID: Schema.optional(Schema.String),
 	slug: Schema.optional(Schema.String),
 	archived: Schema.optional(Schema.Boolean),
+	permission: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				permission: Schema.String,
+				pattern: Schema.String,
+				action: Schema.Literal("allow", "deny", "ask"),
+			}),
+		),
+	),
 });
 
 export type OpenCodeSessionDetail = Schema.Schema.Type<
@@ -153,7 +164,7 @@ export type OpenCodePath = Schema.Schema.Type<typeof OpenCodePathSchema>;
 type _OpenCodeSdkPathCoversSchema = AssertExtends<SdkPath, OpenCodePath>;
 type _OpenCodePathCoversSdkPath = AssertExtends<
 	NormalizeSchemaType<OpenCodePath>,
-	SdkPath
+	Pick<SdkPath, keyof OpenCodePath>
 >;
 
 export const OpenCodeFileStatusEntrySchema = Schema.Struct({
@@ -415,7 +426,7 @@ type _OpenCodeSdkCommandCoversSchema = AssertExtends<
 >;
 type _OpenCodeCommandCoversSdkCommand = AssertExtends<
 	NormalizeSchemaType<OpenCodeCommand>,
-	SdkCommand
+	Pick<SdkCommand, keyof OpenCodeCommand>
 >;
 
 export const OpenCodeAgentListResponseSchema =
@@ -443,7 +454,9 @@ type _OpenCodeSdkProjectCoversSchema = AssertExtends<
 >;
 type _OpenCodeProjectCoversSdkProject = AssertExtends<
 	NormalizeSchemaType<OpenCodeProject>,
-	SdkProject
+	Pick<SdkProject, "id" | "worktree" | "vcs"> & {
+		time: Pick<SdkProject["time"], "created" | "initialized">;
+	}
 >;
 
 export const OpenCodeProjectListResponseSchema = Schema.Array(
@@ -580,6 +593,21 @@ const OpenCodeMessageErrorSchema = Schema.Union(
 	OpenCodeMessageOutputLengthErrorSchema,
 	OpenCodeMessageAbortedErrorSchema,
 	OpenCodeApiErrorSchema,
+	Schema.Struct({
+		name: Schema.Literal("StructuredOutputError"),
+		data: Schema.Struct({ message: Schema.String, retries: Schema.Number }),
+	}),
+	Schema.Struct({
+		name: Schema.Literal("ContextOverflowError"),
+		data: Schema.Struct({
+			message: Schema.String,
+			responseBody: Schema.optional(Schema.String),
+		}),
+	}),
+	Schema.Struct({
+		name: Schema.Literal("ContentFilterError"),
+		data: Schema.Struct({ message: Schema.String }),
+	}),
 );
 
 const OpenCodeTokensSchema = Schema.Struct({
@@ -648,7 +676,8 @@ type _OpenCodeSdkMessageCoversSchema = AssertExtends<
 >;
 type _OpenCodeMessageCoversSdkMessage = AssertExtends<
 	NormalizeSchemaType<OpenCodeMessage>,
-	SdkMessage
+	| Extract<SdkMessage, { role: "user" }>
+	| Omit<Extract<SdkMessage, { role: "assistant" }>, "agent">
 >;
 
 export const OpenCodePartSchema = Schema.Struct({
@@ -688,19 +717,9 @@ export const OpenCodeMessageListResponseSchema = Schema.Array(
 );
 
 type OpenCodeSdkEventType = SdkEvent["type"];
-// Gap events: the SDK's generated Event union either omits these entirely
-// (message.created, message.part.delta, permission.asked, question.asked) or
-// declares a shape that disagrees with the real server binary. permission.replied
-// is the latter case — the npm SDK types say { sessionID, permissionID, response }
-// but a live opencode 1.17.18 server emits { sessionID, requestID, reply } (wire
-// verified). Excluding it here keeps our schema following the wire instead of the
-// incorrect SDK type in the conformance check below.
-type OpenCodeGapEventType =
-	| "message.created"
-	| "message.part.delta"
-	| "permission.asked"
-	| "permission.replied"
-	| "question.asked";
+// v2 includes the consumed permission/question/delta event shapes. The legacy
+// message.created event remains a wire-compatible extension of the SDK union.
+type OpenCodeGapEventType = "message.created";
 
 export const OPEN_CODE_CONSUMED_EVENT_TYPES = [
 	"message.created",
@@ -822,9 +841,7 @@ const OpenCodePermissionAskedEventSchema = Schema.Struct({
 
 const OpenCodePermissionRepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.replied"),
-	// Wire-verified against opencode 1.17.18 (see OpenCodeGapEventType note):
-	// the real event is { sessionID, requestID, reply }, not the SDK's
-	// { sessionID, permissionID, response }.
+	// The v2 event matches the wire: { sessionID, requestID, reply }.
 	properties: Schema.Struct({
 		sessionID: Schema.String,
 		requestID: Schema.String,
@@ -1771,6 +1788,16 @@ const OpenCodeFilePartInputSchema = Schema.Struct({
 				name: Schema.String,
 				kind: Schema.Number,
 			}),
+			Schema.Struct({
+				text: Schema.Struct({
+					value: Schema.String,
+					start: Schema.Number,
+					end: Schema.Number,
+				}),
+				type: Schema.Literal("resource"),
+				clientName: Schema.String,
+				uri: Schema.String,
+			}),
 		),
 	),
 });
@@ -1837,12 +1864,12 @@ export type OpenCodePermissionReplyRequest = Schema.Schema.Type<
 >;
 
 type _OpenCodeSdkPermissionReplyRequestCoversSchema = AssertExtends<
-	NonNullable<PostSessionIdPermissionsPermissionIdData["body"]>,
+	Required<NonNullable<PermissionRespondData["body"]>>,
 	OpenCodePermissionReplyRequest
 >;
 type _OpenCodePermissionReplyRequestCoversSdk = AssertExtends<
 	NormalizeSchemaType<OpenCodePermissionReplyRequest>,
-	NonNullable<PostSessionIdPermissionsPermissionIdData["body"]>
+	NonNullable<PermissionRespondData["body"]>
 >;
 
 export const OpenCodeQuestionReplyRequestSchema = Schema.Struct({
@@ -1851,12 +1878,6 @@ export const OpenCodeQuestionReplyRequestSchema = Schema.Struct({
 
 export type OpenCodeQuestionReplyRequest = Schema.Schema.Type<
 	typeof OpenCodeQuestionReplyRequestSchema
->;
-
-export const OpenCodeQuestionRejectRequestSchema = Schema.Struct({});
-
-export type OpenCodeQuestionRejectRequest = Schema.Schema.Type<
-	typeof OpenCodeQuestionRejectRequestSchema
 >;
 
 export const OpenCodeBooleanResponseSchema = Schema.Boolean;
@@ -1871,6 +1892,11 @@ const OpenCodeEmptyObjectResponseSchema = Schema.Struct({}).pipe(
 export const OpenCodeUndefinedResponseSchema = Schema.Union(
 	Schema.Undefined,
 	OpenCodeEmptyObjectResponseSchema,
+);
+
+// v2 documents boolean replies; older servers also return void envelopes.
+export const decodeOpenCodeQuestionActionResponse = Schema.decodeUnknownSync(
+	Schema.Union(Schema.Boolean, OpenCodeUndefinedResponseSchema),
 );
 
 export const OpenCodeShareResponseSchema = Schema.Struct({
@@ -2032,13 +2058,4 @@ export const encodeOpenCodePermissionReplyBody = Schema.encodeUnknownSync(
 );
 export const decodeOpenCodeQuestionReplyBody = Schema.decodeUnknownSync(
 	OpenCodeQuestionReplyRequestSchema,
-);
-export const encodeOpenCodeQuestionReplyBody = Schema.encodeUnknownSync(
-	OpenCodeQuestionReplyRequestSchema,
-);
-export const decodeOpenCodeQuestionRejectBody = Schema.decodeUnknownSync(
-	OpenCodeQuestionRejectRequestSchema,
-);
-export const encodeOpenCodeQuestionRejectBody = Schema.encodeUnknownSync(
-	OpenCodeQuestionRejectRequestSchema,
 );

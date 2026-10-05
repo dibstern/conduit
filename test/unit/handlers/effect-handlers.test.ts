@@ -1019,6 +1019,7 @@ describe("switchModelForSession", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -1533,6 +1534,7 @@ describe("handleGetToolContent", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -2798,6 +2800,7 @@ describe("handleNewSession", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -2896,6 +2899,7 @@ describe("handleNewSession", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -2913,6 +2917,21 @@ describe("handleNewSession", () => {
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const sessionManagerService = makeMockSessionManagerService({
+				getSessionFamily: vi.fn(() =>
+					Effect.succeed({
+						type: "session_family" as const,
+						rootId: "session-in-flight",
+						sessions: [
+							{
+								id: "session-in-flight",
+								title: "In flight",
+								status: "busy" as const,
+								updatedAt: 0,
+								messageCount: 0,
+							},
+						],
+					}),
+				),
 				loadPreRenderedHistory: vi.fn(() =>
 					Effect.succeed({
 						messages: [],
@@ -2935,12 +2954,7 @@ describe("handleNewSession", () => {
 						dispatchEffect,
 					}),
 				),
-				Layer.succeed(
-					StatusPollerTag,
-					makeMockStatusPoller({
-						isProcessing: vi.fn(() => Effect.succeed(true)),
-					}),
-				),
+				Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
 				Layer.succeed(PollerManagerTag, {
 					on: vi.fn(),
 					isPolling: vi.fn(() => false),
@@ -3288,6 +3302,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -4229,6 +4244,7 @@ describe("handleMessage", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -4537,6 +4553,7 @@ describe("handleMessage", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),

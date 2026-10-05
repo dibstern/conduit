@@ -324,8 +324,12 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
  * a call site cannot reliably override that (see component-conventions.mdx:
  * consumer `class` is additive; beating a size utility needs `h-auto!`).
  * Without this, migrating the codebase onto Button means 64 `!` overrides.
+ *
+ * `segment` is one cell of a bordered segmented group (the session header's
+ * skills | checkout | Settle): square corners, because the group owns the
+ * border and radius.
  */
-export type ButtonSize = "sm" | "md" | "content";
+export type ButtonSize = "sm" | "md" | "segment" | "content";
 
 export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 
@@ -458,13 +462,15 @@ export function buttonClasses({
 	const sizeClasses =
 		size === "content"
 			? ""
-			: iconOnly
-				? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-				: `${
-						size === "sm"
-							? "h-8 px-3 text-xs gap-1.5"
-							: "h-9 px-4 text-sm gap-2"
-					} ${SHARED_SIZE_CLASSES}`;
+			: size === "segment"
+				? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
+				: iconOnly
+					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+					: `${
+							size === "sm"
+								? "h-8 px-3 text-xs gap-1.5"
+								: "h-9 px-4 text-sm gap-2"
+						} ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a

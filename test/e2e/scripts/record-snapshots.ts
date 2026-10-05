@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import {
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	rmSync,
 	unlinkSync,
 	writeFileSync,
@@ -28,7 +29,6 @@ import WebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { createLogger, createSilentLogger } from "../../../src/lib/logger.js";
 import { createRelayStack } from "../../../src/lib/relay/relay-stack.js";
-import { switchModelViaWs } from "../../helpers/opencode-utils.js";
 import { RecordingProxy } from "../../helpers/recording-proxy.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import type {
@@ -59,6 +59,7 @@ interface RecordedTurn {
 }
 
 const RECORD_PROJECT_SLUG = "e2e-record";
+const EXTRA_FOLDER_MARKER = "CONDUIT-EXTRA-FOLDER-MARKER-7f3a";
 
 interface RecordingWebSocket extends WebSocket {
 	readonly clientId: string;
@@ -76,7 +77,7 @@ type RecordingRpcClient = RpcClient.FromGroup<typeof WsRpcGroup, unknown>;
  */
 function trimProviderResponse(interactions: OpenCodeInteraction[]): void {
 	for (const ix of interactions) {
-		if (ix.kind !== "rest" || ix.path !== "/provider") continue;
+		if (ix.kind !== "rest" || ix.path.split("?")[0] !== "/provider") continue;
 		const body = ix.responseBody as Record<string, unknown> | null;
 		if (!body || typeof body !== "object") continue;
 
@@ -116,6 +117,8 @@ const POST_IDLE_MS = 500;
 interface ScenarioDefinition {
 	/** Output filename (without .json) */
 	name: string;
+	/** Create an isolated main folder and an extra folder holding marker.txt. */
+	multiFolderProject?: boolean;
 	/** Prompts to send sequentially. */
 	prompts: string[];
 	/** If true, all prompts happen in the same session (multi-turn). */
@@ -129,6 +132,13 @@ interface ScenarioDefinition {
 }
 
 const SCENARIOS: ScenarioDefinition[] = [
+	{
+		name: "multi-folder-project",
+		multiFolderProject: true,
+		prompts: [
+			"Use the Read tool to read marker.txt in the additional project folder, then reply with its contents.",
+		],
+	},
 	{
 		name: "chat-simple",
 		prompts: [
@@ -446,14 +456,27 @@ function recordTurn(
 /**
  * Request a new session via RPC and retain its ID for subsequent turns.
  */
-async function requestNewSession(ws: RecordingWebSocket): Promise<void> {
+async function requestNewSession(
+	ws: RecordingWebSocket,
+	providerId: string,
+	modelId: string,
+): Promise<void> {
 	const response = await runRecordingRpc(ws, (client) =>
 		client.CreateSession({
 			projectSlug: ws.projectSlug,
+			providerId,
 			originId: ws.clientId,
 		}),
 	);
 	ws.activeSessionId = response.sessionId;
+	await runRecordingRpc(ws, (client) =>
+		client.SwitchModel({
+			projectSlug: ws.projectSlug,
+			sessionId: response.sessionId,
+			providerId,
+			modelId,
+		}),
+	);
 }
 
 /**
@@ -565,23 +588,33 @@ async function main(): Promise<void> {
 			let relayStack: Awaited<ReturnType<typeof createRelayStack>> | undefined;
 			const dbDir = mkdtempSync(path.join(tmpdir(), "e2e-record-relay-"));
 			try {
+				const projectDir = scenario.multiFolderProject
+					? path.join(realpathSync(dbDir), "main")
+					: process.cwd();
+				const extraFolders = scenario.multiFolderProject
+					? [path.join(realpathSync(dbDir), "extra")]
+					: [];
+				if (scenario.multiFolderProject) {
+					mkdirSync(projectDir);
+					for (const folder of extraFolders) {
+						mkdirSync(folder);
+						writeFileSync(path.join(folder, "marker.txt"), EXTRA_FOLDER_MARKER);
+					}
+				}
 				// Create a fresh RelayStack for this scenario
 				console.log("  Creating RelayStack...");
 				relayStack = await createRelayStack({
 					persistenceDbPath: path.join(dbDir, "events.db"),
 					port: 0, // Ephemeral port
 					opencodeUrl: proxy.url,
-					projectDir: process.cwd(),
+					projectDir,
+					extraFolders,
+					configDir: path.join(dbDir, "config"),
 					slug: "e2e-record",
 					log: verbose ? createLogger("e2e-record") : createSilentLogger(),
 				});
 				const relayPort = relayStack.getPort();
 				console.log(`  Relay listening on port ${relayPort}`);
-
-				// Switch to the recording model
-				console.log(`  Switching model to ${providerId}/${modelId}...`);
-				await switchModelViaWs(relayPort, modelId, providerId);
-				console.log("  Model switched.");
 
 				const ws = await connectWs(relayPort);
 
@@ -589,7 +622,8 @@ async function main(): Promise<void> {
 					// Collect init messages
 					const initMessages = await collectMessages(ws, INIT_SETTLE_MS);
 					console.log(`  Init messages: ${initMessages.length}`);
-					await requestNewSession(ws);
+					await requestNewSession(ws, providerId, modelId);
+					console.log(`  Selected model: ${providerId}/${modelId}`);
 
 					const turns: RecordedTurn[] = [];
 
@@ -641,7 +675,7 @@ async function main(): Promise<void> {
 							if (i > 0) {
 								// Create a new session for each prompt after the first.
 								// The first prompt uses the explicitly created session.
-								await requestNewSession(ws);
+								await requestNewSession(ws, providerId, modelId);
 								await collectMessages(ws, 1_000);
 							}
 
@@ -651,7 +685,8 @@ async function main(): Promise<void> {
 							const turn = await recordTurn(
 								ws,
 								prompt,
-								scenario.needsPermissionApproval === true,
+								scenario.needsPermissionApproval === true ||
+									(scenario.multiFolderProject === true && needsPermissions),
 							);
 							console.log(`    Events: ${turn.events.length}`);
 							turns.push(turn);
@@ -673,6 +708,20 @@ async function main(): Promise<void> {
 							await fetch(`${proxy.url}/session/${sid}/message`);
 							console.log(`  Captured message history for ${sid}`);
 						}
+					}
+
+					if (
+						scenario.multiFolderProject &&
+						!turns
+							.flatMap(({ events }) => events)
+							.filter((event) => event.type === "delta")
+							.map((event) => String(event["text"] ?? ""))
+							.join("")
+							.includes(EXTRA_FOLDER_MARKER)
+					) {
+						throw new Error(
+							"Multi-folder turn did not return the marker contents",
+						);
 					}
 
 					// Build and save fixture

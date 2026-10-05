@@ -114,6 +114,7 @@ import {
 	setClientCount,
 	showBanner,
 	showToast,
+	uiState,
 	updateContextPercent,
 } from "./ui.svelte.js";
 
@@ -436,7 +437,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleServerUpdate(msg.restartAvailable);
 			break;
 		case "connection_status":
-			handleConnectionStatus(msg);
+			uiState.opencodeConnectionStatus = msg.status;
 			break;
 		case "banner":
 		case "skip_permissions":
@@ -661,36 +662,6 @@ function handleChatError(
 
 	// Chat errors
 	handleError(activity, messages, msg);
-}
-
-/** Connection status: show/remove reconnection banner. */
-const CONNECTION_BANNER_ID = "opencode-connection-status";
-
-function handleConnectionStatus(
-	msg: Extract<RelayMessage, { type: "connection_status" }>,
-): void {
-	if (msg.status === "connected") {
-		removeBanner(CONNECTION_BANNER_ID);
-	} else {
-		const text =
-			msg.status === "reconnecting"
-				? "Reconnecting to OpenCode\u2026"
-				: "OpenCode server disconnected";
-		const summary =
-			msg.status === "reconnecting"
-				? "OpenCode reconnecting\u2026"
-				: "OpenCode disconnected";
-		// Remove first so text updates if status changes (e.g. disconnected -> reconnecting)
-		removeBanner(CONNECTION_BANNER_ID);
-		showBanner({
-			id: CONNECTION_BANNER_ID,
-			variant: "warning",
-			icon: "alert-triangle",
-			text,
-			summary,
-			dismissible: false,
-		});
-	}
 }
 
 /** The daemon sends protocol_version on connect. An older daemon needs a

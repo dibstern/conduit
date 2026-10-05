@@ -42,6 +42,7 @@ export type StatusPollerShape = Pick<
 	| "clearMessageActivity"
 	| "drain"
 	| "getCurrentStatuses"
+	| "getSessionProviders"
 	| "isProcessing"
 	| "markMessageActivity"
 	| "notifySSEIdle"
@@ -122,9 +123,6 @@ export type OpenCodeFileContent = Awaited<
 export type OpenCodeProviderList = Awaited<
 	ReturnType<OpenCodeAPI["provider"]["list"]>
 >;
-export type OpenCodeSessionDetail = Awaited<
-	ReturnType<OpenCodeAPI["session"]["get"]>
->;
 export type OpenCodeCommandList = Awaited<
 	ReturnType<OpenCodeAPI["app"]["commands"]>
 >;
@@ -165,9 +163,6 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 
 export interface OpenCodeModelService {
 	listProviders(): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
-	getSession(
-		sessionId: string,
-	): Effect.Effect<OpenCodeSessionDetail, Cause.UnknownException>;
 	persistDefaultModel(
 		providerID: string,
 		modelID: string,
@@ -190,8 +185,6 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 		const log = yield* LoggerTag;
 		return {
 			listProviders: () => Effect.tryPromise(() => client.provider.list()),
-			getSession: (sessionId: string) =>
-				Effect.tryPromise(() => client.session.get(sessionId)),
 			persistDefaultModel: (providerID: string, modelID: string) =>
 				Effect.tryPromise(async () => {
 					await client.config.update({ model: `${providerID}/${modelID}` });

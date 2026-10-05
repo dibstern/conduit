@@ -1,3 +1,4 @@
+import type { OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -132,149 +133,155 @@ function makeProviderWithCurrentModelShape() {
 	});
 }
 
+type SdkResponse = {
+	data: unknown;
+	error: unknown;
+	response: { status: number; url?: string };
+};
+
 // Stub SDK client — test that methods delegate correctly
 function makeStubSdk() {
-	return {
+	const sdk = {
 		session: {
-			list: vi.fn(async () => ({
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [makeSession()],
 				error: undefined,
 				response: { status: 200 },
 			})),
-			get: vi.fn(async () => ({
+			get: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeSession(),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			create: vi.fn(async () => ({
+			create: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeSession({ id: "s2", title: "new" }),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			delete: vi.fn(async () => ({
+			delete: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: true,
 				error: undefined,
 				response: { status: 200 },
 			})),
-			update: vi.fn(async () => ({
+			update: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeSession({ title: "updated" }),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			status: vi.fn(async () => ({
+			status: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { s1: { type: "idle" } },
 				error: undefined,
 				response: { status: 200 },
 			})),
-			messages: vi.fn(async () => ({
+			messages: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [],
 				error: undefined,
 				response: { status: 200 },
 			})),
-			message: vi.fn(async () => ({
+			message: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { info: { id: "m1" }, parts: [] },
 				error: undefined,
 				response: { status: 200 },
 			})),
-			abort: vi.fn(async () => ({
+			abort: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: true,
 				error: undefined,
 				response: { status: 200 },
 			})),
-			fork: vi.fn(async () => ({
+			fork: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeSession({ id: "s3" }),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			revert: vi.fn(async () => ({
+			revert: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeSession({ revert: { messageID: "m1" } }),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			unrevert: vi.fn(async () => ({
+			unrevert: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeSession(),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			share: vi.fn(async () => ({
+			share: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { url: "https://share.test" },
 				error: undefined,
 				response: { status: 200 },
 			})),
-			summarize: vi.fn(async () => ({
+			summarize: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: true,
 				error: undefined,
 				response: { status: 200 },
 			})),
-			diff: vi.fn(async () => ({
+			diff: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { diffs: [] },
 				error: undefined,
 				response: { status: 200 },
 			})),
-			promptAsync: vi.fn(async () => ({
+			promptAsync: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: undefined,
 				error: undefined,
 				response: { status: 204 },
 			})),
-			prompt: vi.fn(async () => ({
+			prompt: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { info: { id: "m1" }, parts: [] },
 				error: undefined,
 				response: { status: 200 },
 			})),
-			children: vi.fn(async () => ({
+			children: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [],
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		config: {
-			get: vi.fn(async () => ({
+			get: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: {},
 				error: undefined,
 				response: { status: 200 },
 			})),
-			update: vi.fn(async () => ({
+			update: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: {},
 				error: undefined,
 				response: { status: 200 },
 			})),
-			providers: vi.fn(async () => ({
+			providers: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { providers: [], default: {} },
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		provider: {
-			list: vi.fn(async () => ({
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { all: [], default: {}, connected: [] },
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		pty: {
-			list: vi.fn(async () => ({
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [makePty()],
 				error: undefined,
 				response: { status: 200 },
 			})),
-			create: vi.fn(async () => ({
+			create: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makePty(),
 				error: undefined,
 				response: { status: 200 },
 			})),
-			remove: vi.fn(async () => ({
+			remove: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: true,
 				error: undefined,
 				response: { status: 200 },
 			})),
-			update: vi.fn(async () => ({
+			update: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makePty(),
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		file: {
-			list: vi.fn(async () => ({
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [
 					{
 						name: "app.ts",
@@ -287,12 +294,12 @@ function makeStubSdk() {
 				error: undefined,
 				response: { status: 200 },
 			})),
-			read: vi.fn(async () => ({
+			read: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { type: "text", content: "hello" },
 				error: undefined,
 				response: { status: 200 },
 			})),
-			status: vi.fn(async () => ({
+			status: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [
 					{
 						path: "src/app.ts",
@@ -306,7 +313,7 @@ function makeStubSdk() {
 			})),
 		},
 		find: {
-			text: vi.fn(async () => ({
+			text: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [
 					{
 						path: { text: "src/app.ts" },
@@ -319,12 +326,12 @@ function makeStubSdk() {
 				error: undefined,
 				response: { status: 200 },
 			})),
-			files: vi.fn(async () => ({
+			files: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: ["src/app.ts"],
 				error: undefined,
 				response: { status: 200 },
 			})),
-			symbols: vi.fn(async () => ({
+			symbols: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [
 					{
 						name: "main",
@@ -343,7 +350,7 @@ function makeStubSdk() {
 			})),
 		},
 		path: {
-			get: vi.fn(async () => ({
+			get: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: {
 					state: "/state",
 					config: "/config",
@@ -355,21 +362,26 @@ function makeStubSdk() {
 			})),
 		},
 		vcs: {
-			get: vi.fn(async () => ({
+			get: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: { branch: "main" },
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		app: {
-			agents: vi.fn(async () => ({
+			skills: vi.fn<() => Promise<SdkResponse>>(async () => ({
+				data: [],
+				error: undefined,
+				response: { status: 200 },
+			})),
+			agents: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [makeAgent()],
 				error: undefined,
 				response: { status: 200 },
 			})),
 		},
 		command: {
-			list: vi.fn(async () => ({
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [
 					{
 						name: "fix",
@@ -382,12 +394,12 @@ function makeStubSdk() {
 			})),
 		},
 		project: {
-			list: vi.fn(async () => ({
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: [makeProject()],
 				error: undefined,
 				response: { status: 200 },
 			})),
-			current: vi.fn(async () => ({
+			current: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: makeProject(),
 				error: undefined,
 				response: { status: 200 },
@@ -398,34 +410,45 @@ function makeStubSdk() {
 				stream: (async function* () {})(),
 			})),
 		},
-		postSessionIdPermissionsPermissionId: vi.fn(async () => ({
-			data: true,
-			error: undefined,
-			response: { status: 200 },
-		})),
-		// biome-ignore lint/suspicious/noExplicitAny: test stub for OpencodeClient
-	} as any;
-}
-
-function makeStubGaps() {
-	return {
-		listPendingPermissions: vi.fn(async () => []),
-		listPendingQuestions: vi.fn(async () => []),
-		replyQuestion: vi.fn(async () => {}),
-		rejectQuestion: vi.fn(async () => {}),
-		listSkills: vi.fn(async () => []),
-		getMessagesPage: vi.fn(async () => []),
-		// biome-ignore lint/suspicious/noExplicitAny: test stub for GapEndpoints
-	} as any;
+		permission: {
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
+				data: [],
+				error: undefined,
+				response: { status: 200 },
+			})),
+			respond: vi.fn<() => Promise<SdkResponse>>(async () => ({
+				data: true,
+				error: undefined,
+				response: { status: 200 },
+			})),
+		},
+		question: {
+			list: vi.fn<() => Promise<SdkResponse>>(async () => ({
+				data: [],
+				error: undefined,
+				response: { status: 200 },
+			})),
+			reply: vi.fn<() => Promise<SdkResponse>>(async () => ({
+				data: true,
+				error: undefined,
+				response: { status: 200 },
+			})),
+			reject: vi.fn<() => Promise<SdkResponse>>(async () => ({
+				data: true,
+				error: undefined,
+				response: { status: 200 },
+			})),
+		},
+	};
+	// Expose mocks while standing in for the generated client in adapter tests.
+	return sdk as typeof sdk & OpencodeClient;
 }
 
 describe("OpenCodeAPI", () => {
 	it("session.list() delegates to sdk.session.list()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -438,10 +461,8 @@ describe("OpenCodeAPI", () => {
 
 	it("event.subscribe() forwards SSE retry-ownership options to the SDK", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -454,7 +475,7 @@ describe("OpenCodeAPI", () => {
 		});
 		// If the wrapper stops forwarding these, the SDK silently retries
 		// forever again and transport errors never surface (bd n2x).
-		expect(sdk.event.subscribe).toHaveBeenCalledWith({
+		expect(sdk.event.subscribe).toHaveBeenCalledWith(undefined, {
 			signal: controller.signal,
 			sseMaxRetryAttempts: 1,
 			onSseError,
@@ -463,17 +484,15 @@ describe("OpenCodeAPI", () => {
 
 	it("session.get() delegates to sdk.session.get()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		const result = await api.session.get("s1");
 		expect(sdk.session.get).toHaveBeenCalledWith(
 			expect.objectContaining({
-				path: { id: "s1" },
+				sessionID: "s1",
 			}),
 		);
 		expect(result).toEqual(
@@ -483,17 +502,15 @@ describe("OpenCodeAPI", () => {
 
 	it("session.create() delegates to sdk.session.create()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		const result = await api.session.create({ title: "new session" });
 		expect(sdk.session.create).toHaveBeenCalledWith(
 			expect.objectContaining({
-				body: { title: "new session" },
+				title: "new session",
 			}),
 		);
 		expect(result).toEqual(expect.objectContaining({ id: "s2", title: "new" }));
@@ -501,90 +518,86 @@ describe("OpenCodeAPI", () => {
 
 	it("session.messages() flattens SDK shape and delegates to sdk.session.messages()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		const result = await api.session.messages("s1");
 		expect(sdk.session.messages).toHaveBeenCalledWith(
 			expect.objectContaining({
-				path: { id: "s1" },
+				sessionID: "s1",
 			}),
+			undefined,
 		);
 		expect(result).toEqual([]);
 	});
 
-	it("permission.list() delegates to gapEndpoints", async () => {
+	it("permission.list() delegates to sdk.permission.list()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
-		gaps.listPendingPermissions.mockResolvedValue([{ id: "p1" }]);
+		sdk.permission.list.mockResolvedValue({
+			data: [{ id: "p1", sessionID: "s1", permission: "bash" }],
+			error: undefined,
+			response: { status: 200 },
+		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		const result = await api.permission.list();
-		expect(gaps.listPendingPermissions).toHaveBeenCalled();
-		expect(result).toEqual([{ id: "p1" }]);
+		expect(sdk.permission.list).toHaveBeenCalled();
+		expect(result).toEqual([{ id: "p1", sessionID: "s1", permission: "bash" }]);
 	});
 
-	it("question.reply() delegates to gapEndpoints", async () => {
+	it("question.reply() delegates to sdk.question.reply()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		await api.question.reply("q1", [["yes"]]);
-		expect(gaps.replyQuestion).toHaveBeenCalledWith("q1", [["yes"]]);
+		expect(sdk.question.reply).toHaveBeenCalledWith(
+			{ requestID: "q1", answers: [["yes"]] },
+			expect.any(Object),
+		);
 	});
 
 	it("session.prompt() builds parts array from text", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		await api.session.prompt("s1", { text: "hello" });
 		expect(sdk.session.promptAsync).toHaveBeenCalledWith(
 			expect.objectContaining({
-				body: expect.objectContaining({
-					parts: [{ type: "text", text: "hello" }],
-				}),
+				parts: [{ type: "text", text: "hello" }],
 			}),
 		);
 	});
 
 	it("permission.reply() maps decision and delegates to SDK", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		await api.permission.reply("s1", "perm1", "once");
-		expect(sdk.postSessionIdPermissionsPermissionId).toHaveBeenCalledWith(
+		expect(sdk.permission.respond).toHaveBeenCalledWith(
 			expect.objectContaining({
-				path: { id: "s1", permissionID: "perm1" },
-				body: { response: "once" },
+				sessionID: "s1",
+				permissionID: "perm1",
+				response: "once",
 			}),
 		);
 	});
 
 	it("provider.list() delegates to sdk.provider.list()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.provider.list.mockResolvedValue({
 			data: {
 				all: [makeProvider()],
@@ -596,7 +609,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -624,7 +636,6 @@ describe("OpenCodeAPI", () => {
 
 	it("provider.list() accepts the current nested model capabilities shape", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.provider.list.mockResolvedValue({
 			data: {
 				all: [makeProviderWithCurrentModelShape()],
@@ -636,7 +647,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -665,7 +675,6 @@ describe("OpenCodeAPI", () => {
 
 	it("provider.list() rejects provider entries missing SDK-required fields", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.provider.list.mockResolvedValue({
 			data: {
 				all: [{ name: "Anthropic", models: {} }],
@@ -677,7 +686,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -691,10 +699,8 @@ describe("OpenCodeAPI", () => {
 
 	it("file.status() decodes SDK file status arrays", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -711,7 +717,6 @@ describe("OpenCodeAPI", () => {
 
 	it("file.status() rejects non-array status responses", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.file.status.mockResolvedValue({
 			data: {},
 			error: undefined,
@@ -719,7 +724,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -733,7 +737,6 @@ describe("OpenCodeAPI", () => {
 
 	it("session.prompt() rejects malformed non-void promptAsync responses", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.session.promptAsync.mockResolvedValue({
 			data: { accepted: true },
 			error: undefined,
@@ -741,7 +744,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -757,7 +759,6 @@ describe("OpenCodeAPI", () => {
 
 	it("session.delete() rejects malformed non-boolean responses", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.session.delete.mockResolvedValue({
 			data: { deleted: true },
 			error: undefined,
@@ -765,7 +766,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -779,7 +779,6 @@ describe("OpenCodeAPI", () => {
 
 	it("pty.delete() rejects malformed non-boolean responses", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.pty.remove.mockResolvedValue({
 			data: { deleted: true },
 			error: undefined,
@@ -787,7 +786,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -801,7 +799,6 @@ describe("OpenCodeAPI", () => {
 
 	it("file.list() accepts the name/type envelope Conduit reads", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.file.list.mockResolvedValue({
 			data: [{ name: "app.ts", type: "file" }],
 			error: undefined,
@@ -809,7 +806,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -821,7 +817,6 @@ describe("OpenCodeAPI", () => {
 
 	it("file.read() rejects legacy content-only responses", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.file.read.mockResolvedValue({
 			data: { content: "hello" },
 			error: undefined,
@@ -829,7 +824,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -843,7 +837,6 @@ describe("OpenCodeAPI", () => {
 
 	it("find.text() rejects malformed match entries", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.find.text.mockResolvedValue({
 			data: [{ path: "src/app.ts" }],
 			error: undefined,
@@ -851,7 +844,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -865,7 +857,6 @@ describe("OpenCodeAPI", () => {
 
 	it("find.files() rejects non-string file entries", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.find.files.mockResolvedValue({
 			data: [123],
 			error: undefined,
@@ -873,7 +864,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -887,10 +877,8 @@ describe("OpenCodeAPI", () => {
 
 	it("app.agents() decodes SDK agents without id and normalizes public agent ids from names", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -907,7 +895,6 @@ describe("OpenCodeAPI", () => {
 
 	it("app.agents() accepts provider-owned permission shapes", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.app.agents.mockResolvedValue({
 			data: [
 				makeAgent({
@@ -922,7 +909,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -939,7 +925,6 @@ describe("OpenCodeAPI", () => {
 
 	it("app.agents() accepts nullable OpenCode agent config fields", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.app.agents.mockResolvedValue({
 			data: [
 				makeAgent({
@@ -955,7 +940,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -972,10 +956,8 @@ describe("OpenCodeAPI", () => {
 
 	it("app.commands() decodes SDK commands with required templates", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -991,7 +973,6 @@ describe("OpenCodeAPI", () => {
 
 	it("app.commands() rejects commands missing SDK-required templates", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.command.list.mockResolvedValue({
 			data: [{ name: "fix" }],
 			error: undefined,
@@ -999,7 +980,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1013,10 +993,8 @@ describe("OpenCodeAPI", () => {
 
 	it("app.path() decodes SDK path responses and normalizes to cwd", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1026,7 +1004,6 @@ describe("OpenCodeAPI", () => {
 
 	it("app.path() rejects legacy cwd-only responses before normalization", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.path.get.mockResolvedValue({
 			data: { cwd: "/test" },
 			error: undefined,
@@ -1034,7 +1011,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1048,43 +1024,41 @@ describe("OpenCodeAPI", () => {
 
 	it("pty.resize() delegates to sdk.pty.update() with size", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		await api.pty.resize("pty1", 24, 80);
 		expect(sdk.pty.update).toHaveBeenCalledWith(
 			expect.objectContaining({
-				path: { id: "pty1" },
-				body: { size: { rows: 24, cols: 80 } },
+				ptyID: "pty1",
+				size: { rows: 24, cols: 80 },
 			}),
 		);
 	});
 
-	it("app.skills() delegates to gapEndpoints.listSkills()", async () => {
+	it("app.skills() delegates to sdk.app.skills()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
-		gaps.listSkills.mockResolvedValue([{ name: "test-skill" }]);
+		sdk.app.skills.mockResolvedValue({
+			data: [{ name: "test-skill" }],
+			error: undefined,
+			response: { status: 200 },
+		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
 		const result = await api.app.skills();
-		expect(gaps.listSkills).toHaveBeenCalled();
+		expect(sdk.app.skills).toHaveBeenCalled();
 		expect(result).toEqual([{ name: "test-skill" }]);
 	});
 
 	it("getBaseUrl() returns configured base URL", () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: { Authorization: "Basic abc" },
 		});
@@ -1093,10 +1067,8 @@ describe("OpenCodeAPI", () => {
 
 	it("getAuthHeaders() returns configured auth headers", () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: { Authorization: "Basic abc" },
 		});
@@ -1107,7 +1079,6 @@ describe("OpenCodeAPI", () => {
 
 	it("sdk error result throws OpenCodeApiError", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.session.get.mockResolvedValue({
 			data: undefined,
 			error: { name: "NotFoundError", data: { message: "not found" } },
@@ -1115,7 +1086,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1124,11 +1094,9 @@ describe("OpenCodeAPI", () => {
 
 	it("sdk network error throws OpenCodeConnectionError", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.session.list.mockRejectedValue(new TypeError("fetch failed"));
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1137,7 +1105,6 @@ describe("OpenCodeAPI", () => {
 
 	it("session.get() rejects malformed SDK data as an OpenCode API error", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		sdk.session.get.mockResolvedValue({
 			data: { id: "s1", title: "missing required fields" },
 			error: undefined,
@@ -1145,7 +1112,6 @@ describe("OpenCodeAPI", () => {
 		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1162,35 +1128,37 @@ describe("OpenCodeAPI", () => {
 		await expect(rejected).rejects.toBeInstanceOf(OpenCodeApiError);
 	});
 
-	it("session.messagesPage() delegates to gapEndpoints", async () => {
+	it("session.messagesPage() delegates to sdk.session.messages()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
-		gaps.getMessagesPage.mockResolvedValue([
-			{
-				info: {
-					id: "m1",
-					sessionID: "s1",
-					role: "assistant",
-					time: { created: 1, completed: 2 },
-					parentID: "m0",
-					modelID: "claude-sonnet-4",
-					providerID: "anthropic",
-					mode: "build",
-					path: { cwd: "/test", root: "/test" },
-					cost: 0,
-					tokens: {
-						input: 1,
-						output: 2,
-						reasoning: 0,
-						cache: { read: 0, write: 0 },
+		sdk.session.messages.mockResolvedValue({
+			data: [
+				{
+					info: {
+						id: "m1",
+						sessionID: "s1",
+						role: "assistant",
+						time: { created: 1, completed: 2 },
+						parentID: "m0",
+						modelID: "claude-sonnet-4",
+						providerID: "anthropic",
+						mode: "build",
+						path: { cwd: "/test", root: "/test" },
+						cost: 0,
+						tokens: {
+							input: 1,
+							output: 2,
+							reasoning: 0,
+							cache: { read: 0, write: 0 },
+						},
 					},
+					parts: [{ id: "part-1", type: "text", text: "hello" }],
 				},
-				parts: [{ id: "part-1", type: "text", text: "hello" }],
-			},
-		]);
+			],
+			error: undefined,
+			response: { status: 200 },
+		});
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1198,10 +1166,10 @@ describe("OpenCodeAPI", () => {
 			limit: 10,
 			before: "m5",
 		});
-		expect(gaps.getMessagesPage).toHaveBeenCalledWith("s1", {
-			limit: 10,
-			before: "m5",
-		});
+		expect(sdk.session.messages).toHaveBeenCalledWith(
+			{ sessionID: "s1", limit: 10, before: "m5" },
+			expect.any(Object),
+		);
 		expect(result).toEqual([
 			expect.objectContaining({
 				id: "m1",
@@ -1213,10 +1181,8 @@ describe("OpenCodeAPI", () => {
 
 	it("app.projects() delegates to sdk.project.list()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});
@@ -1227,10 +1193,8 @@ describe("OpenCodeAPI", () => {
 
 	it("app.currentProject() delegates to sdk.project.current()", async () => {
 		const sdk = makeStubSdk();
-		const gaps = makeStubGaps();
 		const api = new OpenCodeAPI({
 			sdk,
-			gapEndpoints: gaps,
 			baseUrl: "http://localhost:4096",
 			authHeaders: {},
 		});

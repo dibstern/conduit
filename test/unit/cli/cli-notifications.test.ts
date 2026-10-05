@@ -483,7 +483,7 @@ describe("HTTPS section", () => {
 describe("setup QR section", () => {
 	it("uses the ts.net URL for the QR and skips mkcert setup", async () => {
 		const io = createMockIO();
-		const url = "https://machine.example.ts.net";
+		const url = "https://machine.example.ts.net:2633";
 		const generateQR = vi.fn(() => "QR art");
 		const hasMkcert = vi.fn(() => false);
 		const restartWithTLS = vi.fn();

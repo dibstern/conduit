@@ -920,7 +920,7 @@ export function switchToSession(
 					clientSession.currentId === sessionId &&
 					getCurrentSlug() === slug
 				)
-					applyGetAgentsResponse(response);
+					applyGetAgentsResponse(response, sessionId);
 			})
 			.catch(() => undefined);
 		void getCommandsRpc({ projectSlug: slug, sessionId })

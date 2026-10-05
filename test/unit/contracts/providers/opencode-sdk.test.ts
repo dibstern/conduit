@@ -16,7 +16,6 @@ import {
 	OpenCodePermissionReplyRequestSchema,
 	OpenCodeProjectSchema,
 	OpenCodeProviderListResponseSchema,
-	OpenCodeQuestionRejectRequestSchema,
 	OpenCodeQuestionReplyRequestSchema,
 	OpenCodeSessionDetailSchema,
 	OpenCodeSessionPromptRequestSchema,
@@ -77,6 +76,19 @@ describe("OpenCode provider contract schemas", () => {
 	});
 
 	it("decodes relay session-detail extension fields returned by OpenCode", () => {
+		const permission = [
+			{
+				permission: "external_directory",
+				pattern: "/extra/*",
+				action: "allow",
+			},
+			{ permission: "edit", pattern: "*", action: "deny" },
+			{
+				permission: "external_directory",
+				pattern: "/removed/*",
+				action: "ask",
+			},
+		];
 		const result = Schema.decodeUnknownEither(OpenCodeSessionDetailSchema)({
 			id: "ses_1",
 			projectID: "proj_1",
@@ -89,9 +101,32 @@ describe("OpenCode provider contract schemas", () => {
 			agentID: "build",
 			slug: "test-session",
 			archived: false,
+			permission,
 		});
 
 		expect(Either.isRight(result)).toBe(true);
+		if (Either.isRight(result)) {
+			expect(result.right).toHaveProperty("permission", permission);
+		}
+	});
+
+	it("rejects invalid session permission actions", () => {
+		const result = Schema.decodeUnknownEither(OpenCodeSessionDetailSchema)({
+			id: "ses_1",
+			projectID: "proj_1",
+			directory: "/workspace/project",
+			title: "Test session",
+			version: "1.0.0",
+			time: { created: 1, updated: 2 },
+			permission: [
+				{
+					permission: "external_directory",
+					pattern: "/extra/*",
+					action: "once",
+				},
+			],
+		});
+		expect(Either.isLeft(result)).toBe(true);
 	});
 
 	it("validates OpenCode session status variants", () => {
@@ -517,14 +552,9 @@ describe("OpenCode provider contract schemas", () => {
 				}),
 			),
 		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeQuestionRejectRequestSchema)({}),
-			),
-		).toBe(true);
 	});
 
-	it("validates gap endpoint response envelopes Conduit reads", () => {
+	it("validates permission and question response envelopes Conduit reads", () => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodePendingPermissionSchema)({

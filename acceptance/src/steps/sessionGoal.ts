@@ -327,6 +327,17 @@ export const sessionGoalHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const facts = goals.get(world.page);
 			if (!facts) throw new Error("No goal was set");
+			// The daemon restores a goal through the session row and the /ws
+			// metadata push, in either order. A row without goalState arriving
+			// after the push would clear the goal.
+			const rpc = requireRpcControl(world.page);
+			rpc.setShellRows(
+				(rpc.shellRows ?? []).map((row) =>
+					(row as { id?: string }).id === facts.sessionId
+						? { ...(row as object), goalState: facts }
+						: row,
+				),
+			);
 			await world.page.reload();
 			await expect(world.page.locator("#input")).toBeVisible();
 			requireRelayControl(world.page).sendMessage({

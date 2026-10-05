@@ -41,11 +41,11 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		// Bumped from 0.3.258: 0.3.280's vendored CLI (Claude Code 2.1.280) is the
+		// Floor is 0.3.280: its vendored CLI (Claude Code 2.1.280) is the
 		// first whose catalog resolves Opus to `claude-opus-5-5[1m]`, and it
 		// advertises the alias as `opus[1m]` rather than bare `opus`. Below this
 		// floor conduit's Opus rows describe the previous model.
-		expect(pinnedVersion).toBe("0.3.280");
+		expect(pinnedVersion).toBe("0.3.289");
 	});
 
 	it("locks the installed OpenCode SDK to the pinned dependency version", () => {
@@ -56,7 +56,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("1.18.32");
+		expect(pinnedVersion).toBe("1.18.34");
 	});
 
 	// conduit-test-o6r: @anthropic-ai/sdk is a transitive dep (via the Claude
@@ -80,7 +80,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(peerRange).toBe(">=0.93.0");
-		expect(installedSdkVersion).toBe("0.111.0");
+		expect(installedSdkVersion).toBe("0.131.0");
 		expect(satisfiesMinFloor(installedSdkVersion ?? "", peerRange ?? "")).toBe(
 			true,
 		);

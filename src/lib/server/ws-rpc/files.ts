@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
+import { formatErrorDetail } from "../../errors.js";
 import {
 	getFileContentResponse,
 	getFileListResponse,
@@ -13,6 +14,18 @@ import { getToolContentValue } from "../../handlers/tool-content.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const filesHandlers = {
+	FindFolders: (request) =>
+		Effect.gen(function* () {
+			const directoryListing = yield* DirectoryListingServiceTag;
+			return yield* directoryListing.find(request.query);
+		}).pipe(
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `FindFolders failed: ${formatErrorDetail(error)}`,
+					}),
+			),
+		),
 	ListDirectories: (request) =>
 		Effect.gen(function* () {
 			const directoryListing = yield* DirectoryListingServiceTag;
@@ -136,6 +149,7 @@ export const filesHandlers = {
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "ListDirectories"
+	| "FindFolders"
 	| "GetTodo"
 	| "GetFileTree"
 	| "GetFileList"

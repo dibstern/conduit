@@ -6,9 +6,7 @@ import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-i
 import {
 	ConfigTag,
 	LoggerTag,
-	OpenCodeModelServiceTag,
 	PollerManagerTag,
-	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
@@ -48,7 +46,7 @@ interface ForkSessionPayload {
 }
 
 /**
- * Send metadata (model info, permissions, questions, viewed family) to a client.
+ * Send metadata (permissions, questions, viewed family) to a client.
  * These are supplementary data to the transcript and selection RPCs.
  */
 const sendSessionMetadata = (clientId: string, id: string) =>
@@ -56,7 +54,6 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const modelService = yield* OpenCodeModelServiceTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const family = yield* sessionManagerService.getSessionFamily(id);
@@ -74,27 +71,6 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 		// Run all metadata sends concurrently, catching errors individually
 		yield* Effect.all(
 			[
-				// Model info
-				Effect.gen(function* () {
-					const session = yield* modelService.getSession(id);
-					if (session.modelID) {
-						wsHandler.sendTo(clientId, {
-							type: "model_info",
-							sessionId: id,
-							model: session.modelID,
-							provider: session.providerID ?? "",
-						});
-					}
-				}).pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to get model info for ${id}: ${err instanceof Error ? err.message : err}`,
-							),
-						),
-					),
-				),
-
 				// Pending permissions (service + API)
 				Effect.gen(function* () {
 					const bridgePending =
@@ -243,7 +219,6 @@ const switchClientToSession = (
 		if (!sessionId) return;
 
 		const wsHandler = yield* WebSocketHandlerTag;
-		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
 		const hasActiveTimeout = yield* hasActiveProcessingTimeout(sessionId);
 
@@ -253,14 +228,13 @@ const switchClientToSession = (
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
 
-		// The poller is cold until its first poll and never starts without
-		// OpenCode, so the persisted family (children included) also counts.
+		// The persisted family (children included) is the live status. The
+		// poller only holds a copy up to one poll old, which would leave a
+		// just-stopped session reading busy after a reload.
 		const isProcessing =
 			busySessionIds(
 				new Map(family.sessions.map((session) => [session.id, session])),
-			).has(sessionId) ||
-			(yield* statusPoller.isProcessing(sessionId)) ||
-			hasActiveTimeout;
+			).has(sessionId) || hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,

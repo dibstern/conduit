@@ -590,6 +590,30 @@ describe("ReadQueryEffect session lookups", () => {
 		}).pipe(Effect.provide(testLayer)),
 	);
 
+	it.effect(
+		"reads all providers alongside statuses without changing status consumers",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
+					('claude-1', 'claude', 'Claude', 'busy', 2, 2),
+					('unknown-1', 'unknown', 'Unknown', 'idle', 3, 3)`;
+				const readQuery = yield* makeReadQueryEffect;
+				expect(yield* readQuery.getAllSessionStatusesWithProviders()).toEqual([
+					{ id: "opencode-1", status: "busy", provider: "opencode" },
+					{ id: "claude-1", status: "busy", provider: "claude" },
+					{ id: "unknown-1", status: "idle", provider: "unknown" },
+				]);
+				expect(yield* readQuery.getAllSessionStatuses()).toEqual({
+					"opencode-1": "busy",
+					"claude-1": "busy",
+					"unknown-1": "idle",
+				});
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect("lists nothing for an empty store", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

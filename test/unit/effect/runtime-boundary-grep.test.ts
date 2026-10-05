@@ -37,7 +37,7 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	{
 		path: "src/lib/instance/sdk-factory.ts",
 		linePattern: /Effect\.runPromise\(/,
-		reason: "OpenCode SDK and GapEndpoints require a Promise-shaped fetch",
+		reason: "OpenCode SDK requires a Promise-shaped fetch",
 	},
 	{
 		path: "src/lib/frontend/transport/runtime.ts",
@@ -1370,25 +1370,6 @@ describe("Effect runtime boundary grep", () => {
 			/throw new Error\(\s*`Max instances reached/,
 			/throw new Error\(`Invalid URL for instance "\$\{id\}"/,
 			/throw new Error\("Cannot start external instance"\)/,
-		] as const;
-
-		const hits = patterns.flatMap((pattern) =>
-			Array.from(source.matchAll(new RegExp(pattern, "g")), (match) => ({
-				path,
-				line: source.slice(0, match.index).split("\n").length,
-				source: match[0].split("\n")[0]?.trim(),
-			})),
-		);
-
-		expect(hits).toEqual([]);
-	});
-
-	it("does not throw plain Error for gap endpoint HTTP failures", () => {
-		const path = "src/lib/instance/gap-endpoints.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
-		const patterns = [
-			/throw new Error\(`GET \$\{path\} failed: \$\{res\.status\}`\)/,
-			/throw new Error\(`POST \$\{path\} failed: \$\{res\.status\}`\)/,
 		] as const;
 
 		const hits = patterns.flatMap((pattern) =>

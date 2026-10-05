@@ -163,8 +163,8 @@ export const makeRelayCacheService = (
 			slug: string,
 			entry: CacheEntry,
 		): Effect.Effect<void> =>
-			Effect.exit(
-				Effect.uninterruptibleMask((restore) =>
+			Effect.uninterruptibleMask((restore) =>
+				Effect.exit(
 					Effect.gen(function* () {
 						const relay = yield* restore(factory(slug));
 						yield* ScopedRef.set(
@@ -176,15 +176,15 @@ export const makeRelayCacheService = (
 						);
 						return relay;
 					}),
-				),
-			).pipe(
-				Effect.flatMap((exit) =>
-					Exit.isSuccess(exit)
-						? Deferred.succeed(entry.ready, exit.value).pipe(Effect.asVoid)
-						: removeEntryIfCurrent(slug, entry).pipe(
-								Effect.zipRight(Deferred.failCause(entry.ready, exit.cause)),
-								Effect.asVoid,
-							),
+				).pipe(
+					Effect.flatMap((exit) =>
+						Exit.isSuccess(exit)
+							? Deferred.succeed(entry.ready, exit.value).pipe(Effect.asVoid)
+							: removeEntryIfCurrent(slug, entry).pipe(
+									Effect.zipRight(Deferred.failCause(entry.ready, exit.cause)),
+									Effect.asVoid,
+								),
+					),
 				),
 			);
 
@@ -216,8 +216,9 @@ export const makeRelayCacheService = (
 							yield* Ref.update(cacheRef, (m) =>
 								HashMap.set(m, slug, newEntry),
 							);
-							const fiber = yield* Effect.fork(
+							const fiber = yield* Effect.forkIn(
 								Effect.interruptible(runRelayCreation(slug, newEntry)),
+								layerScope,
 							);
 							yield* Deferred.succeed(creationFiber, fiber);
 							return newEntry;
@@ -253,11 +254,11 @@ export const makeRelayCacheService = (
 				if (Option.isSome(existing)) {
 					const entry = existing.value;
 					const fiber = yield* Deferred.await(entry.creationFiber);
-					yield* Fiber.interrupt(fiber);
 					yield* Deferred.fail(
 						entry.ready,
 						new RelayCreationInvalidatedError({ slug }),
 					);
+					yield* Fiber.interrupt(fiber);
 
 					// Set ScopedRef to null — triggers previous scope close,
 					// which runs relay.stop() via the registered finalizer

@@ -2,7 +2,7 @@
   SessionBar — the session's top bar on phones and desktop (design bar 20).
 
   One component for both layouts. On phones the expanded form has a row of
-  back, identity and Views, then a title row; at the bottom of the transcript
+  back, the segmented group and overflow, then a title row; at the bottom of the transcript
   it floats as an island outside the layout. Desktop keeps one row regardless
   of position: title on the left, identity grouped with the controls on the right.
 
@@ -195,14 +195,10 @@
 		}
 	});
 
-	// The project list arrives after the bar can render, so use the slug until then.
-	const identity = $derived(
-		projectState.projects.find((p) => p.slug === getCurrentSlug())?.title ??
-			getCurrentSlug(),
-	);
-	const git = $derived(
-		projectState.projects.find((p) => p.slug === getCurrentSlug())?.git,
-	);
+	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
+	// The project list can arrive after the bar; the git pill waits for its directory.
+	const directory = $derived(project?.directory);
+	const git = $derived(session?.git ?? project?.git);
 
 	const attentionCount = $derived(
 		getAttentionSessions(sessionState.currentId, getDescendantSessionIds).size,
@@ -302,28 +298,99 @@
 	{/each}
 {/snippet}
 
-<!--
-	Where you are. Identity is the first thing to give: it truncates while the
-	back control stays whole, because losing the way out is worse than losing
-	the project's name. On phones it sits on the first row between back and
-	Views and is gone when collapsed; on desktop it follows the title, pushed
-	right to group with the controls. Rendered from one snippet in
-	either position so DOM order always matches visual order.
+{#snippet overflowMenu()}
+	<Menu
+		bind:open={overflowOpen}
+		onopenchange={(open) => { if (open) overflowSelected = false; }}
+		presentation={sessionViewState.compact ? "sheet" : "popover"}
+		ariaLabel="More actions"
+		align="end"
+		onCloseAutoFocus={(event) => {
+			if (overflowSelected) { event.preventDefault(); return; }
+			const opener = overflowOpener;
+			if (opener?.isConnected) {
+				event.preventDefault();
+				// Yield to an item that moved focus on purpose: the Terminal view
+				// focuses xterm once its lazily loaded tab mounts, which can land
+				// either side of this restore.
+				setTimeout(() => {
+					requestAnimationFrame(() => {
+						if (opener.isConnected && document.activeElement === document.body) opener.focus();
+					});
+				}, 0);
+			}
+		}}
+		data-testid={sessionViewState.compact ? "session-bar-island-menu" : "session-bar-overflow-menu"}
+	>
+		{#snippet trigger({ props })}
+			<Button
+				{...props}
+				id="session-bar-more"
+				variant="ghost"
+				size="content"
+				icon="ellipsis"
+				iconSize={17}
+				touchTarget
+				class="relative shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+				title="More actions"
+				ariaLabel="More actions"
+				aria-describedby={sessionViewState.compact && viewBadgeCount > 0 ? "session-bar-view-badge" : undefined}
+				data-testid={sessionViewState.compact ? "session-bar-island-overflow" : "session-bar-overflow"}
+				onpointerdowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
+				onkeydowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
+			>
+				{#if sessionViewState.compact && viewBadgeCount > 0}
+					<span id="session-bar-view-badge" data-testid="session-bar-view-badge" class="pointer-events-none absolute right-0 top-0 flex h-[12px] min-w-[12px] items-center justify-center rounded-full bg-accent px-[3px] text-[8px] font-bold tabular-nums text-bg">{viewBadgeCount}<span class="sr-only"> unread view updates</span></span>
+				{/if}
+			</Button>
+		{/snippet}
 
-	The instance badge sits beside the identity: which instance this project
-	runs on is part of where you are. Absent with a single instance. It keeps
-	the pill recipe's 18px height rather than the bar's 44px touch target,
-	because a 44px rounded-full pill reads as a rendering fault; the real fix is
-	a small-paint/large-hit-area capability on ui/Button (tracked in conduit-test-lciu).
--->
+		{#if sessionViewState.compact}
+			<MenuGroup label="Views">
+				{@render viewItems("overflow-view")}
+			</MenuGroup>
+			<MenuSeparator />
+			{#if session}
+				<MenuGroup label="Session">
+					<SessionVerbItems {verbs} presentation="sheet" onselect={selectOverflow} />
+				</MenuGroup>
+			{/if}
+		{/if}
+		{#if sessionViewState.compact}<MenuSeparator />{/if}
+		{#if sessionViewState.compact}
+			<MenuGroup label="More actions">{@render globalActionItems()}</MenuGroup>
+		{:else}
+			<div role="group" aria-label="More actions">{@render globalActionItems()}</div>
+		{/if}
+	</Menu>
+{/snippet}
+
+<!-- One border for the controls; the instance picker stays beside it. -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
-		<!-- Inside meta on phones so the chip rides the 1fr track beside identity
-		     instead of adding a grid column that costs a gap when it is absent. -->
-		{#if sessionViewState.compact}<SessionSkillsChip presentation="sheet" />{/if}
-		{#if identity}
-			<GitIdentity project={identity} {git} />
-		{/if}
+		<div class="session-bar-segments inline-flex h-[24px] min-w-0 items-stretch rounded-lg border border-border">
+			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
+			{#if directory}<GitIdentity {directory} {git} />{/if}
+			{#if !sessionViewState.compact && settleVerb}
+				<Tooltip side="bottom">
+					{#snippet trigger({ props })}<Button
+						{...props}
+						id="session-bar-settle"
+						variant="ghost"
+						tone="default"
+						size="segment"
+						icon={settleVerb.icon ?? "check"}
+						class="shrink-0"
+						disabled={settleVerb.disabledReason != null}
+						title={settleVerb.disabledReason ?? undefined}
+						ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
+						data-testid="session-bar-settle"
+						onclick={() => settleVerb.run()}
+					><span id="session-bar-settle-label">{settleVerb.label}</span></Button>{/snippet}
+					{#snippet children()}{settleVerb.label}{#if settleVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(settleVerb.keys)}</span>{/if}{/snippet}
+				</Tooltip>
+			{/if}
+		</div>
 		<InstanceBadgeMenu />
 	</div>
 {/snippet}
@@ -358,7 +425,7 @@
 		size="content"
 		icon="chevron-left"
 		iconSize={17}
-		class="shrink-0 min-h-[44px] gap-1.5 rounded-lg pl-1 pr-2 text-base font-semibold"
+		class="shrink-0 min-h-[44px] gap-1.5 rounded-lg text-base font-semibold pl-1 pr-2"
 		data-testid="session-bar-back"
 		onclick={sessionViewState.compact ? backToSessions : expandSidebar}
 	>
@@ -376,33 +443,9 @@
 	</Button>
 	{/if}
 
-	{#if sessionViewState.compact}{@render identityBlock()}{/if}
-
-	<!-- Views ends the phone's first row, after identity, so DOM order matches
-	     visual order. The island has no room for it; Views moves into ⋯ there. -->
-	{#if sessionViewState.compact && !collapsed}
-		<Menu presentation="sheet" ariaLabel="Views" data-testid="session-bar-views-sheet">
-			{#snippet trigger({ props })}
-				<Button
-					{...props}
-					id="session-bar-views-button"
-					variant="secondary"
-					size="sm"
-					icon="panels-top-left"
-					touchTarget
-					class="shrink-0"
-					data-testid="session-bar-views-button"
-				>
-					Views
-					{#if viewBadgeCount > 0}
-						<Badge variant="accent-solid" size="count" shape="pill">{viewBadgeCount}</Badge>
-					{/if}
-				</Button>
-			{/snippet}
-			<MenuGroup label="Views">
-				{@render viewItems("session-bar-view")}
-			</MenuGroup>
-		</Menu>
+	{#if sessionViewState.compact}
+		{@render identityBlock()}
+		{#if !collapsed}{@render overflowMenu()}{/if}
 	{/if}
 
 	<!-- The session title, and the only string in the bar allowed to ellipse. It
@@ -432,7 +475,7 @@
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		{#if goalShown}
-			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; goalDetails.open = !goalDetails.open; }}>
+			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full mt-[2px] gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; goalDetails.open = !goalDetails.open; }}>
 				<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
 				<span class="min-w-0 truncate">{goal.subtitle}</span>
 				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
@@ -524,34 +567,13 @@
 	</div>
 	{/if}
 
-	<!-- A sibling, not inside meta: desktop meta clips and yields first. -->
-	{#if !sessionViewState.compact}<SessionSkillsChip presentation="popover" />{@render identityBlock()}{/if}
-
-	{#if !sessionViewState.compact && settleVerb}
-		<Tooltip side="bottom">
-			{#snippet trigger({ props })}<Button
-			{...props}
-			id="session-bar-settle"
-			variant="secondary"
-			size="sm"
-			icon={settleVerb.icon ?? "check"}
-			disabled={settleVerb.disabledReason != null}
-			title={settleVerb.disabledReason ?? undefined}
-			ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
-			data-testid="session-bar-settle"
-			onclick={() => settleVerb.run()}
-		>
-			<span id="session-bar-settle-label">{settleVerb.label}</span>
-		</Button>{/snippet}
-			{#snippet children()}{settleVerb.label}{#if settleVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(settleVerb.keys)}</span>{/if}{/snippet}
-		</Tooltip>
-	{/if}
+	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
 
 	{#if !sessionViewState.compact}
-		<div id="session-bar-connection" class="flex shrink-0 items-center gap-1.5 text-xs text-text-muted">
-			<span id="status" class="status-dot size-[7px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
+		<div id="session-bar-connection" class="flex shrink-0 items-center gap-[5px] px-[4px] text-[10px] text-text-muted">
+			<span id="status" class="status-dot size-[6px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
 			{#if uiState.clientCount > 1}
-				<Badge id="client-count-badge" variant="accent-solid" size="count" shape="pill">{uiState.clientCount}</Badge>
+				<span id="client-count-badge" class="tabular-nums">{uiState.clientCount}</span>
 			{/if}
 		</div>
 	{/if}
@@ -576,81 +598,13 @@
 		/>
 	{/if}
 
-	{#if collapsed || !sessionViewState.compact}
-		<!--
-		The phone island and the desktop bar use this overflow. Expanded
-		phone actions remain in the title menu.
-
-		Deliberately not here: the connection status dot and the client count,
-		which are ambient signals rather than actions and say nothing once
-		they are hidden behind a closed menu.
-		-->
-	<Menu
-		bind:open={overflowOpen}
-		onopenchange={(open) => { if (open) overflowSelected = false; }}
-		presentation={sessionViewState.compact ? "sheet" : "popover"}
-		ariaLabel="More actions"
-		align="end"
-		onCloseAutoFocus={(event) => {
-			if (overflowSelected) { event.preventDefault(); return; }
-			const opener = overflowOpener;
-			if (opener?.isConnected) {
-				event.preventDefault();
-				// Yield to an item that moved focus on purpose: the Terminal view
-				// focuses xterm once its lazily loaded tab mounts, which can land
-				// either side of this restore.
-				setTimeout(() => {
-					requestAnimationFrame(() => {
-						if (opener.isConnected && document.activeElement === document.body) opener.focus();
-					});
-				}, 0);
-			}
-		}}
-		data-testid={sessionViewState.compact ? "session-bar-island-menu" : "session-bar-overflow-menu"}
-	>
-		{#snippet trigger({ props })}
-			<Button
-				{...props}
-				id="session-bar-more"
-				variant="ghost"
-				size="content"
-				iconOnly
-				icon="ellipsis"
-				iconSize={17}
-				class="shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
-				title="More actions"
-				ariaLabel="More actions"
-				data-testid={sessionViewState.compact ? "session-bar-island-overflow" : "session-bar-overflow"}
-				onpointerdowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
-				onkeydowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
-			/>
-		{/snippet}
-
-		{#if sessionViewState.compact}
-			<MenuGroup label="Views">
-				{@render viewItems("overflow-view")}
-			</MenuGroup>
-			<MenuSeparator />
-			{#if session}
-				<MenuGroup label="Session">
-					<SessionVerbItems {verbs} presentation="sheet" onselect={selectOverflow} />
-				</MenuGroup>
-			{/if}
-		{/if}
-		{#if sessionViewState.compact}<MenuSeparator />{/if}
-		{#if sessionViewState.compact}
-			<MenuGroup label="More actions">{@render globalActionItems()}</MenuGroup>
-		{:else}
-			<div role="group" aria-label="More actions">{@render globalActionItems()}</div>
-		{/if}
-	</Menu>
-	{/if}
+	{#if collapsed || !sessionViewState.compact}{@render overflowMenu()}{/if}
 
 	{#if titleMenuOpen && titleMenuAnchor && session}
 		<SessionContextMenu
 			{session}
 			anchor={titleMenuAnchor}
-			projectLabel={identity ?? undefined}
+			projectLabel={project?.title ?? getCurrentSlug() ?? undefined}
 			branch={session.git?.branch}
 			presentation={sessionViewState.compact ? "sheet" : "menu"}
 			now={sessionState.now}
@@ -720,6 +674,10 @@
 </div>
 
 <style>
+	.session-bar-segments { flex-shrink: 1; }
+	.session-bar-segments:not(:has(> :global(*))) { display: none; }
+	.session-bar-segments > :global(* + *) { border-left: 1px solid var(--color-border); }
+	:global(#session-bar[data-compact="true"][data-collapsed="false"] #session-bar-more) { min-width: 24px; min-height: 24px; width: 24px; height: 24px; }
 	.goal-details-check {
 		display: grid;
 		grid-template-columns: 14px 32px minmax(0, 1fr);

@@ -30,19 +30,12 @@ const readSnapshots = (): Record<string, RecordedWebSocketCall[]> =>
 	>;
 
 describe("session handler wire snapshots", () => {
-	it("keeps the ViewSession model metadata envelope stable", async () => {
+	it("keeps the ViewSession metadata envelopes stable without OpenCode model lookup", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const api = makeMockOpenCodeAPI();
-		vi.spyOn(api.session, "get").mockResolvedValue({
-			id: "session-1",
-			projectID: "project-1",
-			directory: "/tmp/project",
-			title: "Session 1",
-			version: "1.0.0",
-			time: { created: 0, updated: 0 },
-			modelID: "gpt-4",
-			providerID: "openai",
-		});
+		vi.spyOn(api.session, "get").mockRejectedValue(
+			new Error("ViewSession metadata must not query OpenCode session models"),
+		);
 		vi.spyOn(api.permission, "list").mockResolvedValue([]);
 		vi.spyOn(api.question, "list").mockResolvedValue([]);
 		const sessionMgr = makeMockSessionManagerShape({
@@ -60,12 +53,8 @@ describe("session handler wire snapshots", () => {
 			),
 		);
 
-		const modelInfoCalls = calls.filter(
-			(call) => call.message.type === "model_info",
-		);
-		expect(modelInfoCalls).toEqual(
-			readSnapshots()["view_session_model_info_success"],
-		);
+		expect(api.session.get).not.toHaveBeenCalled();
+		expect(calls).toEqual(readSnapshots()["view_session_metadata_success"]);
 	});
 
 	it("keeps the CreateSession metadata envelopes stable", async () => {

@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { createOpencodeClient } from "@opencode-ai/sdk/client";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { Cause, Effect, Fiber, Layer, Option, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import { GetFileTree } from "../../../src/lib/contracts/ws-rpc.js";
@@ -14,7 +14,6 @@ import {
 	getFileTreeEntries,
 	handleGetFileTree,
 } from "../../../src/lib/handlers/files.js";
-import { GapEndpoints } from "../../../src/lib/instance/gap-endpoints.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
 import {
@@ -225,7 +224,6 @@ describe("file tree time limits", () => {
 			});
 			const api = new OpenCodeAPI({
 				sdk,
-				gapEndpoints: new GapEndpoints({ baseUrl }),
 				baseUrl,
 				authHeaders: {},
 			});
@@ -271,7 +269,6 @@ describe("file tree time limits", () => {
 			});
 			const api = new OpenCodeAPI({
 				sdk,
-				gapEndpoints: new GapEndpoints({ baseUrl }),
 				baseUrl,
 				authHeaders: {},
 			});

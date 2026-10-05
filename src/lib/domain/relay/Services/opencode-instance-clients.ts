@@ -14,7 +14,6 @@ import {
 	loadDaemonConfig,
 	resolveOpenCodeInstanceUrl,
 } from "../../../daemon/config-persistence.js";
-import { GapEndpoints } from "../../../instance/gap-endpoints.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
@@ -111,11 +110,7 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 				}
 
 				// Same construction as OpenCodeAPILive, with the instance's URL.
-				const {
-					client: sdkClient,
-					fetch: sdkFetch,
-					authHeaders,
-				} = createSdkClient({
+				const { client: sdkClient, authHeaders } = createSdkClient({
 					baseUrl: url,
 					...(auth !== undefined ? { auth } : {}),
 					...(config.noServer && config.projectDir != null
@@ -124,11 +119,6 @@ export const OpenCodeInstanceClientsLive: Layer.Layer<
 				});
 				const api = new OpenCodeAPI({
 					sdk: sdkClient,
-					gapEndpoints: new GapEndpoints({
-						baseUrl: url,
-						fetch: sdkFetch,
-						headers: authHeaders,
-					}),
 					baseUrl: url,
 					authHeaders,
 				});

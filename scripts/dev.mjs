@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { statSync, watch } from "node:fs";
+import { readFileSync, statSync, watch } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
 const args = process.argv.slice(2);
@@ -10,6 +10,7 @@ let stopping = false;
 let pending = false;
 let timer;
 let activeBuild;
+let lastBuildId;
 let builder;
 let child;
 let childClosed;
@@ -155,6 +156,17 @@ async function startVite() {
 	vite.once("error", fail);
 }
 
+function readBuildId() {
+	try {
+		const buildId = JSON.parse(
+			readFileSync("dist/build-ready.json", "utf8"),
+		)?.buildId;
+		return typeof buildId === "string" && buildId ? buildId : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 async function rebuild() {
 	do {
 		pending = false;
@@ -188,6 +200,7 @@ async function rebuild() {
 				};
 			}
 			if (stopping) return;
+			lastBuildId = readBuildId();
 			await restart();
 			if (!stopping) {
 				log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
@@ -198,6 +211,11 @@ async function rebuild() {
 }
 
 function runBuild() {
+	if (stopping) return;
+	if (activeBuild) {
+		pending = true;
+		return activeBuild;
+	}
 	activeBuild = rebuild()
 		.catch(fail)
 		.finally(() => {
@@ -239,6 +257,28 @@ try {
 	);
 	for (const watcher of watchers) watcher.on("error", fail);
 	await runBuild();
+	if (!stopping) {
+		watchers.push(
+			watch("dist", (_event, filename) => {
+				if (filename !== "build-ready.json" || stopping || activeBuild) return;
+				const buildId = readBuildId();
+				if (!buildId || buildId === lastBuildId) return;
+				lastBuildId = buildId;
+				log(`external build ${buildId.slice(0, 8)} detected`);
+				activeBuild = restart()
+					.then(() => {
+						if (!stopping) {
+							log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
+						}
+					})
+					.catch(fail)
+					.finally(() => {
+						activeBuild = undefined;
+						if (pending && !stopping) runBuild();
+					});
+			}).on("error", fail),
+		);
+	}
 	await stopped;
 } catch (error) {
 	fail(error);

@@ -1,6 +1,6 @@
 import { seedSessions } from "../stores/session-fixtures.js";
 // Gap 1: handleToolContentResponse — tool_content message updates chat state
-// Gap 2: handleConnectionStatus — connection_status → banner lifecycle
+// Gap 2: connection_status → stored OpenCode connection status
 //
 // Tests the handleMessage() dispatch for two message types that previously
 // had zero test coverage.
@@ -71,6 +71,7 @@ vi.mock("dompurify", () => ({
 
 // Mock ui.svelte.js to capture showBanner/removeBanner calls
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
+	uiState: { opencodeConnectionStatus: null },
 	showToast: showToastMock,
 	showBanner: showBannerMock,
 	removeBanner: removeBannerMock,
@@ -90,6 +91,7 @@ import {
 	instanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
@@ -116,6 +118,7 @@ beforeEach(() => {
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
+	uiState.opencodeConnectionStatus = null;
 });
 
 afterEach(() => {
@@ -291,113 +294,71 @@ describe("input_sync dispatch", () => {
 	});
 });
 
-// Gap 2: connection_status → banner lifecycle (AC1/AC2)
+// Gap 2: connection_status → stored status (AC1/AC2)
 
-describe("handleConnectionStatus via handleMessage (AC1/AC2)", () => {
-	it("shows warning banner on disconnected status", () => {
+describe("connection_status via handleMessage (AC1/AC2)", () => {
+	it("stores disconnected status without showing an ungated banner", () => {
 		handleMessage({
 			type: "connection_status",
 			status: "disconnected",
 		});
 
-		expect(showBannerMock).toHaveBeenCalledWith(
-			expect.objectContaining({
-				id: "opencode-connection-status",
-				variant: "warning",
-				text: "OpenCode server disconnected",
-				dismissible: false,
-			}),
-		);
+		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
+		expect(showBannerMock).not.toHaveBeenCalled();
 	});
 
-	it("shows reconnecting banner text", () => {
+	it("stores reconnecting status without showing an ungated banner", () => {
 		handleMessage({
 			type: "connection_status",
 			status: "reconnecting",
 		});
 
-		expect(showBannerMock).toHaveBeenCalledWith(
-			expect.objectContaining({
-				id: "opencode-connection-status",
-				text: "Reconnecting to OpenCode…",
-			}),
-		);
+		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
+		expect(showBannerMock).not.toHaveBeenCalled();
 	});
 
-	it("removes banner on connected status without showing a new one", () => {
+	it("stores connected status without directly changing banners", () => {
 		handleMessage({
 			type: "connection_status",
 			status: "connected",
 		});
 
-		expect(removeBannerMock).toHaveBeenCalledWith("opencode-connection-status");
+		expect(uiState.opencodeConnectionStatus).toBe("connected");
+		expect(removeBannerMock).not.toHaveBeenCalled();
 		expect(showBannerMock).not.toHaveBeenCalled();
 	});
 
-	it("updates banner text when transitioning from disconnected to reconnecting", () => {
+	it("replaces disconnected status with reconnecting", () => {
 		handleMessage({
 			type: "connection_status",
 			status: "disconnected",
 		});
-		expect(showBannerMock).toHaveBeenCalledWith(
-			expect.objectContaining({ text: "OpenCode server disconnected" }),
-		);
-
-		showBannerMock.mockClear();
-		removeBannerMock.mockClear();
+		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
 
 		handleMessage({
 			type: "connection_status",
 			status: "reconnecting",
 		});
 
-		// Should remove old banner first, then show with updated text
-		expect(removeBannerMock).toHaveBeenCalledWith("opencode-connection-status");
-		expect(showBannerMock).toHaveBeenCalledWith(
-			expect.objectContaining({ text: "Reconnecting to OpenCode…" }),
-		);
+		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
 	});
 
 	it("handles full lifecycle: connected → disconnected → reconnecting → connected", () => {
-		// 1. connected — removes (nothing to remove, but idempotent)
 		handleMessage({ type: "connection_status", status: "connected" });
-		expect(removeBannerMock).toHaveBeenCalledTimes(1);
-		expect(showBannerMock).not.toHaveBeenCalled();
+		expect(uiState.opencodeConnectionStatus).toBe("connected");
 
-		removeBannerMock.mockClear();
-		showBannerMock.mockClear();
-
-		// 2. disconnected — remove + show warning
 		handleMessage({ type: "connection_status", status: "disconnected" });
-		expect(removeBannerMock).toHaveBeenCalledWith("opencode-connection-status");
-		expect(showBannerMock).toHaveBeenCalledWith(
-			expect.objectContaining({
-				text: "OpenCode server disconnected",
-				variant: "warning",
-			}),
-		);
+		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
 
-		removeBannerMock.mockClear();
-		showBannerMock.mockClear();
-
-		// 3. reconnecting — remove + show reconnecting
 		handleMessage({
 			type: "connection_status",
 			status: "reconnecting",
 		});
-		expect(removeBannerMock).toHaveBeenCalledWith("opencode-connection-status");
-		expect(showBannerMock).toHaveBeenCalledWith(
-			expect.objectContaining({
-				text: "Reconnecting to OpenCode…",
-			}),
-		);
+		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
 
-		removeBannerMock.mockClear();
-		showBannerMock.mockClear();
-
-		// 4. connected — removes banner, no new show
 		handleMessage({ type: "connection_status", status: "connected" });
-		expect(removeBannerMock).toHaveBeenCalledWith("opencode-connection-status");
+		expect(uiState.opencodeConnectionStatus).toBe("connected");
+		expect(removeBannerMock).not.toHaveBeenCalled();
 		expect(showBannerMock).not.toHaveBeenCalled();
 	});
 });

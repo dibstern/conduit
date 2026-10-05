@@ -55,6 +55,15 @@ export type ProcessMark =
 			at: string;
 	  }
 	| {
+			kind: "notification-turn";
+			phase: "stream-held" | "snapshot" | "held" | "completed";
+			queryId: string;
+			pid: number;
+			messageId: string;
+			snapshotUuid?: string;
+			at: string;
+	  }
+	| {
 			kind:
 				| "initialization-held"
 				| "initialization-ready"
@@ -606,7 +615,10 @@ function query(params: {
 				prompt.startsWith("approval-failure-")
 			)
 				throw new Error("Harness adapter failure");
-			if (prompt === "upgrade-background-work") {
+			if (
+				prompt === "upgrade-background-work" ||
+				prompt.startsWith("notification-parent-turn")
+			) {
 				mark({
 					kind: "background-work",
 					phase: "started",
@@ -624,7 +636,7 @@ function query(params: {
 							task_id: "upgrade-background-task",
 							task_type: "local_bash",
 							description: "Live background task",
-							ambient: false,
+							ambient: prompt === "notification-parent-turn-during-warm",
 						},
 					],
 				} as unknown as SDKMessage;
@@ -691,6 +703,52 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
+			if (prompt === "restart-background-work") {
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: [
+						{
+							task_id: "restart-background-task",
+							task_type: "local_bash",
+							description: "Background restart proof",
+							ambient: false,
+						},
+					],
+				} as unknown as SDKMessage;
+				mark({
+					kind: "background-work",
+					phase: "started",
+					queryId,
+					pid: process.pid,
+					at: process.hrtime.bigint().toString(),
+				});
+				if (proof) {
+					const change = join(dirname(proof), "restart-background-change");
+					while (!existsSync(change) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed || readFileSync(change, "utf8") === "end") return;
+					yield {
+						type: "system",
+						subtype: "background_tasks_changed",
+						session_id: sessionId,
+						uuid: randomUUID(),
+						tasks:
+							readFileSync(change, "utf8") === "replace"
+								? [
+										{
+											task_id: "replacement-background-task",
+											task_type: "local_agent",
+											description: "Latest background snapshot",
+											ambient: false,
+										},
+									]
+								: [],
+					} as unknown as SDKMessage;
+				}
+			}
 			if (prompt === "upgrade-background-work" && proof) {
 				const release = join(dirname(proof), "release-upgrade-background");
 				while (!existsSync(release) && !closed)
@@ -708,6 +766,149 @@ function query(params: {
 					phase: "completed",
 					queryId,
 					pid: process.pid,
+					at: process.hrtime.bigint().toString(),
+				});
+			}
+			if (prompt.startsWith("notification-parent-turn") && proof) {
+				const release = join(dirname(proof), "release-notification-parent");
+				while (!existsSync(release) && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: [],
+				} as unknown as SDKMessage;
+				yield {
+					type: "system",
+					subtype: "task_notification",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					task_id: "upgrade-background-task",
+					status: "completed",
+					output_file: join(dirname(proof), "notification-parent.output"),
+					summary: "Background task complete; parent is continuing",
+				} as unknown as SDKMessage;
+				mark({
+					kind: "background-work",
+					phase: "completed",
+					queryId,
+					pid: process.pid,
+					at: process.hrtime.bigint().toString(),
+				});
+				const resultRelease = join(
+					dirname(proof),
+					"release-notification-result",
+				);
+				let parentMessageId = "";
+				for (const text of [
+					"Notification parent message.",
+					"Notification parent finished.",
+				]) {
+					const beforeSnapshot =
+						prompt === "notification-parent-turn-before-snapshot";
+					parentMessageId = beforeSnapshot
+						? `msg_${randomUUID()}`
+						: randomUUID();
+					const snapshotUuid = beforeSnapshot ? randomUUID() : parentMessageId;
+					yield stream(sessionId, {
+						type: "message_start",
+						message: { id: parentMessageId, role: "assistant", content: [] },
+					});
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "text", text: "" },
+					});
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "text_delta", text },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index: 0 });
+					yield stream(sessionId, { type: "message_stop" });
+					if (beforeSnapshot && text === "Notification parent message.") {
+						mark({
+							kind: "notification-turn",
+							phase: "stream-held",
+							queryId,
+							pid: process.pid,
+							messageId: parentMessageId,
+							snapshotUuid,
+							at: process.hrtime.bigint().toString(),
+						});
+						const snapshotRelease = join(
+							dirname(proof),
+							"release-notification-snapshot",
+						);
+						while (!existsSync(snapshotRelease) && !closed)
+							await new Promise<void>((done) => setTimeout(done, 20));
+						if (closed) return;
+					}
+					yield {
+						type: "assistant",
+						uuid: snapshotUuid,
+						session_id: sessionId,
+						parent_tool_use_id: null,
+						message: {
+							id: parentMessageId,
+							role: "assistant",
+							content: [{ type: "text", text }],
+						},
+					} as unknown as SDKMessage;
+					if (beforeSnapshot)
+						mark({
+							kind: "notification-turn",
+							phase: "snapshot",
+							queryId,
+							pid: process.pid,
+							messageId: parentMessageId,
+							snapshotUuid,
+							at: process.hrtime.bigint().toString(),
+						});
+					if (text === "Notification parent message.") {
+						mark({
+							kind: "notification-turn",
+							phase: "held",
+							queryId,
+							pid: process.pid,
+							messageId: parentMessageId,
+							at: process.hrtime.bigint().toString(),
+						});
+						while (!existsSync(resultRelease) && !closed)
+							await new Promise<void>((done) => setTimeout(done, 20));
+						if (closed) return;
+					}
+				}
+				yield {
+					type: "result",
+					subtype: "success",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: false,
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: 1,
+					result: "Notification parent finished.",
+					stop_reason: "end_turn",
+					total_cost_usd: 0,
+					usage: {
+						input_tokens: 1,
+						output_tokens: 3,
+						cache_read_input_tokens: 0,
+						cache_creation_input_tokens: 0,
+					},
+					modelUsage: {},
+					permission_denials: [],
+				} as unknown as SDKMessage;
+				mark({
+					kind: "notification-turn",
+					phase: "completed",
+					queryId,
+					pid: process.pid,
+					messageId: parentMessageId,
 					at: process.hrtime.bigint().toString(),
 				});
 			}

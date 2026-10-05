@@ -2,7 +2,7 @@
 # transitive @anthropic-ai/sdk otherwise resolves to 0.81.0. Pinned to the
 # latest at time of upgrade so the read schemas track the current SDK shape.
 overrides:
-  '@anthropic-ai/sdk': 0.111.0
+  '@anthropic-ai/sdk': 0.131.0
 
 allowBuilds:
   '@evilmartians/lefthook': false

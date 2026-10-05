@@ -128,23 +128,29 @@ const reconcile = (port: number, enabled: boolean) =>
 					}),
 			),
 		);
-		const root = serve.Web?.[`${dnsName}:443`]?.Handlers?.["/"];
+		const root = serve.Web?.[`${dnsName}:${port}`]?.Handlers?.["/"];
 		const proxy = `http://127.0.0.1:${port}`;
 		if (!enabled) {
 			if (root?.Proxy === proxy) {
-				yield* cli.exec(["serve", "--https=443", "--set-path=/", "off"]);
+				yield* cli.exec(["serve", `--https=${port}`, "--set-path=/", "off"]);
 			}
 			return undefined;
 		}
 		if (root !== undefined && root.Proxy !== proxy) {
 			return yield* new TailscaleServeError({
-				message: `Tailscale Serve conflict: '/' on ${dnsName}:443 already serves ${root.Proxy ?? "a file or text handler"}. Move that '/' handler to another path or port.`,
+				message: `Tailscale Serve conflict: '/' on ${dnsName}:${port} already serves ${root.Proxy ?? "a file or text handler"}. Move that '/' handler to another path or port.`,
 			});
 		}
 		if (root === undefined) {
-			yield* cli.exec(["serve", "--bg", "--https=443", "--set-path=/", proxy]);
+			yield* cli.exec([
+				"serve",
+				"--bg",
+				`--https=${port}`,
+				"--set-path=/",
+				proxy,
+			]);
 		}
-		return { url: `https://${dnsName}` };
+		return { url: `https://${dnsName}:${port}` };
 	});
 
 /** Runs after HTTP binds; shutdown deliberately leaves tailscaled's mapping alone. */

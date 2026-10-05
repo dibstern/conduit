@@ -15,11 +15,9 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	getContextWindow,
 	getDefaultContextWindow,
@@ -36,7 +34,7 @@ import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-se
 import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
-import { findContextWindowOptions } from "../shared-types.js";
+import { findCatalogModel } from "../shared-types.js";
 import type { OpenCodeInstance, ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
@@ -127,7 +125,6 @@ const switchClientToSessionForInitEffect = (
 		if (!sessionId) return;
 
 		const wsHandler = yield* WebSocketHandlerTag;
-		const statusPoller = yield* StatusPollerTag;
 		const hasActiveTimeout = yield* hasActiveProcessingTimeout(sessionId);
 
 		wsHandler.setClientSession(clientId, sessionId);
@@ -135,14 +132,13 @@ const switchClientToSessionForInitEffect = (
 		const sessionService = yield* SessionManagerServiceTag;
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
-		// The poller is cold until its first poll and never starts without
-		// OpenCode, so the persisted family (children included) also counts.
+		// The persisted family (children included) is the live status. The
+		// poller only holds a copy up to one poll old, which would leave a
+		// just-stopped session reading busy after a reload.
 		const isProcessing =
 			busySessionIds(
 				new Map(family.sessions.map((session) => [session.id, session])),
-			).has(sessionId) ||
-			(yield* statusPoller.isProcessing(sessionId)) ||
-			hasActiveTimeout;
+			).has(sessionId) || hasActiveTimeout;
 		wsHandler.sendTo(clientId, {
 			type: "status",
 			sessionId,
@@ -159,7 +155,6 @@ const resolveAndReplaySessionEffect = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionService = yield* SessionManagerServiceTag;
-		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
 
 		// An unknown requested id selects no session, never the default: the
@@ -202,7 +197,6 @@ const resolveAndReplaySessionEffect = (
 		}
 
 		const familyIds = new Set<string>(activeId ? [activeId] : []);
-		let activeSessionModel: ModelOverride | undefined;
 		if (activeId) {
 			const family = yield* switchClientToSessionForInitEffect(
 				clientId,
@@ -210,48 +204,14 @@ const resolveAndReplaySessionEffect = (
 			);
 			for (const session of family?.sessions ?? []) familyIds.add(session.id);
 
-			const sessionInfoResult = yield* Effect.either(
-				modelService.getSession(activeId),
-			);
-			if (sessionInfoResult._tag === "Right") {
-				const session = sessionInfoResult.right;
-				if (session.modelID) {
-					activeSessionModel = {
-						modelID: session.modelID,
-						providerID: session.providerID ?? "",
-					};
-					wsHandler.sendTo(clientId, {
-						type: "model_info",
-						sessionId: activeId,
-						model: session.modelID,
-						provider: session.providerID ?? "",
-					});
-				} else {
-					const fallbackModel = yield* getModel(activeId);
-					if (fallbackModel) {
-						wsHandler.sendTo(clientId, {
-							type: "model_info",
-							sessionId: activeId,
-							model: fallbackModel.modelID,
-							provider: fallbackModel.providerID,
-						});
-					}
-				}
-			} else {
-				yield* Effect.sync(() =>
-					log.warn(
-						`Failed to load session info for ${activeId}: ${sessionInfoResult.left}`,
-					),
-				);
-				const fallbackModel = yield* getModel(activeId);
-				if (fallbackModel) {
-					wsHandler.sendTo(clientId, {
-						type: "model_info",
-						sessionId: activeId,
-						model: fallbackModel.modelID,
-						provider: fallbackModel.providerID,
-					});
-				}
+			const sessionModel = yield* getModel(activeId);
+			if (sessionModel) {
+				wsHandler.sendTo(clientId, {
+					type: "model_info",
+					sessionId: activeId,
+					model: sessionModel.modelID,
+					provider: sessionModel.providerID,
+				});
 			}
 		}
 
@@ -259,7 +219,6 @@ const resolveAndReplaySessionEffect = (
 			activeId,
 			validatedRequestedSessionId,
 			familyIds,
-			activeSessionModel,
 		};
 	});
 
@@ -455,7 +414,6 @@ const sendAgentListEffect = (clientId: string, activeId: string | undefined) =>
 const sendProvidersAndSettingsEffect = (
 	clientId: string,
 	activeId: string | undefined,
-	activeSessionModel: ModelOverride | undefined,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -502,37 +460,23 @@ const sendProvidersAndSettingsEffect = (
 				const currentVariant = activeId
 					? yield* getVariant(activeId)
 					: yield* getDefaultVariant();
-				const activeModelOverride = activeId
+				const activeModel = activeId
 					? yield* getModel(activeId)
 					: yield* getDefaultModel();
-				const activeModel = activeId
-					? (activeModelOverride ?? activeSessionModel)
-					: activeModelOverride;
-				const activeModelId = activeModel?.modelID;
-				let availableVariants: string[] = [];
-				if (activeModelId) {
-					for (const p of providers) {
-						const model = p.models.find(
-							(m: { id: string; variants?: string[] }) =>
-								m.id === activeModelId,
-						);
-						if (model?.variants) {
-							availableVariants = model.variants;
-							break;
-						}
-					}
-				}
+				// After a restart this snapshot is all an open tab gets, and a
+				// session restored from `opus[1m]` must still find today's `opus`.
+				const catalogModel = findCatalogModel(providers, activeModel);
 				wsHandler.sendTo(clientId, {
 					type: "variant_info",
 					variant: currentVariant,
-					variants: availableVariants,
+					variants: catalogModel?.variants ?? [],
 				});
 				wsHandler.sendTo(clientId, {
 					type: "context_window_info",
 					contextWindow: activeId
 						? yield* getContextWindow(activeId)
 						: yield* getDefaultContextWindow(),
-					options: findContextWindowOptions(providers, activeModelId),
+					options: catalogModel?.contextWindowOptions ?? [],
 				});
 				wsHandler.sendTo(clientId, {
 					type: "permission_mode_info",
@@ -678,20 +622,15 @@ export const handleClientConnectedEffect = (
 	options: ClientInitEffectOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const { activeId, familyIds, activeSessionModel } =
-			yield* resolveAndReplaySessionEffect(
-				clientId,
-				requestedSessionId,
-				options,
-			);
+		const { activeId, familyIds } = yield* resolveAndReplaySessionEffect(
+			clientId,
+			requestedSessionId,
+			options,
+		);
 		yield* pushViewedFamiliesForInitEffect(clientId);
 		yield* replayPendingPermissionsEffect(clientId);
 		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
 		yield* sendAgentListEffect(clientId, activeId);
-		yield* sendProvidersAndSettingsEffect(
-			clientId,
-			activeId,
-			activeSessionModel,
-		);
+		yield* sendProvidersAndSettingsEffect(clientId, activeId);
 		yield* replayTerminalsInstancesAndUpdateEffect(clientId, options);
 	});

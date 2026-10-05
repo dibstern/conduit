@@ -607,6 +607,17 @@ export const ListDirectoriesResponseSchema = Schema.Struct({
 	entries: Schema.Array(Schema.String),
 });
 
+export const FindFoldersResponseSchema = Schema.Struct({
+	entries: Schema.Array(
+		Schema.Struct({
+			path: Schema.String,
+			isGitRepo: Schema.Boolean,
+			reason: Schema.Literal("match"),
+			exists: Schema.Boolean,
+		}),
+	),
+});
+
 export const GetTodoResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	items: Schema.Array(TodoItemSchema),
@@ -679,6 +690,7 @@ export type DetectProxyResponse = typeof DetectProxyResponseSchema.Type;
 export type PtyInfo = typeof PtyInfoSchema.Type;
 export type PtyListResponse = typeof PtyListResponseSchema.Type;
 export type ListDirectoriesResponse = typeof ListDirectoriesResponseSchema.Type;
+export type FindFoldersResponse = typeof FindFoldersResponseSchema.Type;
 export type TodoItem = typeof TodoItemSchema.Type;
 export type GetTodoResponse = typeof GetTodoResponseSchema.Type;
 export type GetFileTreeResponse = typeof GetFileTreeResponseSchema.Type;
@@ -1057,6 +1069,18 @@ export class ListDirectories extends Schema.TaggedRequest<ListDirectories>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			path: Schema.String,
+		},
+	},
+) {}
+
+export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
+	"FindFolders",
+	{
+		failure: WsRpcError,
+		success: FindFoldersResponseSchema,
+		payload: {
+			projectSlug: Schema.optional(NonEmptyString),
+			query: Schema.String,
 		},
 	},
 ) {}
@@ -1724,6 +1748,7 @@ export const WsRpcRequest = Schema.Union(
 	GetCommands,
 	GetProjects,
 	ListDirectories,
+	FindFolders,
 	GetTodo,
 	SwitchAgent,
 	SwitchContextWindow,
@@ -1831,6 +1856,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),
 	Rpc.fromTaggedRequest(ListDirectories),
+	Rpc.fromTaggedRequest(FindFolders),
 	Rpc.fromTaggedRequest(GetTodo),
 	Rpc.fromTaggedRequest(SwitchAgent),
 	Rpc.fromTaggedRequest(SwitchContextWindow),

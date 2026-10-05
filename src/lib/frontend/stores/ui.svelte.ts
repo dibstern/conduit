@@ -1,6 +1,12 @@
 // Global UI state: sidebar, modals, toasts, scroll, rewind, plan mode, banners.
 
-import type { BannerConfig, PanelId, Toast, ToastVariant } from "../types.js";
+import type {
+	BannerConfig,
+	PanelId,
+	RelayMessage,
+	Toast,
+	ToastVariant,
+} from "../types.js";
 import { generateUuid } from "../utils/format.js";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
@@ -45,6 +51,9 @@ export const uiState = $state({
 
 	// Banners
 	banners: [] as BannerConfig[],
+	opencodeConnectionStatus: null as
+		| Extract<RelayMessage, { type: "connection_status" }>["status"]
+		| null,
 
 	// Rewind mode
 	rewindActive: false,
@@ -290,4 +299,5 @@ export function resetProjectUI(): void {
 	uiState.fileViewerPath = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
+	uiState.opencodeConnectionStatus = null;
 }

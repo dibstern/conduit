@@ -49,9 +49,9 @@ export function buildClaudeQueryOptions(
 		model,
 		// Opt in so the live query can later choose the full-access mode.
 		allowDangerouslySkipPermissions: true,
-		...(input.permissionMode
-			? { permissionMode: toSdkPermissionMode(input.permissionMode) }
-			: {}),
+		// Always send a mode: since SDK 0.3.286 an omitted one defers to the
+		// user's settings defaultMode, which can be auto and skip conduit's asks.
+		permissionMode: toSdkPermissionMode(input.permissionMode ?? "ask"),
 		...(resumeSessionId ? { resume: resumeSessionId } : {}),
 		...(input.agent ? { agent: input.agent } : {}),
 		...(input.variant

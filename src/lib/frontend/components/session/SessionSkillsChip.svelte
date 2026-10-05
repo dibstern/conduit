@@ -182,12 +182,12 @@
 		data-testid="session-skills-menu"
 	>
 		{#snippet trigger({ props })}
-			<!-- Sized like Views beside it; touchTarget gives the 44px phone hit area. -->
+			<!-- The group owns the border; the phone hit area stays 44px. -->
 			<Button
 				{...props}
 				id="session-skills-chip"
-				variant="secondary"
-				size="sm"
+				variant="ghost"
+				size="segment"
 				icon="sparkles"
 				touchTarget
 				class="shrink-0 tabular-nums"

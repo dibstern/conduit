@@ -125,6 +125,7 @@ const meta = {
 		sessionViewState.filesEverOpened = false;
 		sessionSkillsState.sessionId = null;
 		sessionSkillsState.loads = [];
+		uiState.clientCount = 1;
 		destroyAll();
 		return () => {
 			attachedProjectState.slug = null;
@@ -156,7 +157,7 @@ export const Default: Story = {
 		);
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
 		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
-		expect(canvas.getByTestId("session-bar-views-button")).toBeVisible();
+		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
 		expect(canvas.queryByTestId("instance-badge")).toBeNull();
@@ -493,9 +494,9 @@ export const ViewsSheetOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("session-bar-views-button"));
+		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
 		const sheet = await within(document.body).findByTestId(
-			"session-bar-views-sheet",
+			"session-bar-island-menu",
 		);
 		await expect(sheet).toBeVisible();
 		// Accessible names, in order: the shortcut hints are aria-hidden.
@@ -518,7 +519,7 @@ export const WithViewBadge: Story = {
 	beforeEach: emitOutputFromTwoTerminals,
 	play: async ({ canvasElement }) => {
 		const button = within(canvasElement).getByTestId(
-			"session-bar-views-button",
+			"session-bar-island-overflow",
 		);
 		await expect(button).toHaveTextContent("2");
 	},
@@ -529,7 +530,7 @@ export const OpeningTerminalClearsBadge: Story = {
 	beforeEach: emitOutputFromTwoTerminals,
 	play: async ({ canvasElement }) => {
 		const button = within(canvasElement).getByTestId(
-			"session-bar-views-button",
+			"session-bar-island-overflow",
 		);
 		await expect(button).toHaveTextContent("2");
 		openPanel();
@@ -537,10 +538,10 @@ export const OpeningTerminalClearsBadge: Story = {
 		await expect(button).not.toHaveTextContent("2");
 		await userEvent.click(button);
 		const sheet = await within(document.body).findByTestId(
-			"session-bar-views-sheet",
+			"session-bar-island-menu",
 		);
 		await expect(
-			within(sheet).getByTestId("session-bar-view-terminal"),
+			within(sheet).getByTestId("overflow-view-terminal"),
 		).toHaveAttribute("aria-checked", "true");
 		expect(terminalState.unreadPtyIds.size).toBe(0);
 	},
@@ -827,6 +828,7 @@ export const DesktopGitIdentity: Story = {
 	args: { width: 900 },
 	beforeEach: () => {
 		sessionViewState.compact = false;
+		uiState.clientCount = 2;
 		projectState.projects = [
 			{
 				slug: "conduit",
@@ -841,11 +843,14 @@ export const DesktopGitIdentity: Story = {
 		const bar = canvas.getByTestId("session-bar");
 		await expect(bar).toHaveAttribute("data-compact", "false");
 		await expect(canvas.getByTestId("session-bar-identity")).toHaveTextContent(
-			/conduit.*feature\/17xt.*linked-15/,
+			/conduit.*feature\/17xt/,
 		);
 		await expect(canvas.getByTitle("Uncommitted changes")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
+		const count = canvasElement.querySelector("#client-count-badge");
+		expect(count?.textContent).toBe("2");
+		expect(count?.tagName).toBe("SPAN");
 	},
 };
 
@@ -917,6 +922,58 @@ export const DesktopWithSkills: Story = {
 		await expect(
 			within(document.body).getByRole("menu", { name: "Skills used" }),
 		).toBeVisible();
+	},
+};
+
+function seedHeaderGit(): void {
+	projectState.projects = [
+		{
+			slug: "conduit",
+			title: "conduit",
+			directory: "/src/conduit",
+			git: { branch: "main", dirty: true },
+		},
+	];
+}
+
+export const PhoneGitIdentity: Story = {
+	beforeEach: seedHeaderGit,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
+		const pill = canvas.getByTestId("session-bar-identity");
+		const git = pill.getBoundingClientRect();
+		const more = canvas
+			.getByTestId("session-bar-island-overflow")
+			.getBoundingClientRect();
+		await expect(pill).toHaveAttribute("title", "conduit / main");
+		expect(back.right).toBeLessThanOrEqual(git.left);
+		expect(git.right).toBeLessThanOrEqual(more.left);
+		expect(
+			Math.abs(git.y + git.height / 2 - more.y - more.height / 2),
+		).toBeLessThan(1);
+		expect(canvas.queryByTestId("session-skills-chip")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-views-button")).toBeNull();
+	},
+};
+
+export const PhoneGitIdentityWithSkills: Story = {
+	beforeEach: () => {
+		seedHeaderGit();
+		seedSkills();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const chip = canvas.getByTestId("session-skills-chip");
+		const pill = canvas.getByTestId("session-bar-identity");
+		await expect(chip).toBeVisible();
+		await expect(pill).toBeVisible();
+		// The pill sits in a grid wrapper that carries its width floor.
+		const segment = pill.parentElement;
+		expect(chip.parentElement).toBe(segment?.parentElement);
+		expect(chip.getBoundingClientRect().right).toBe(
+			segment?.getBoundingClientRect().left,
+		);
 	},
 };
 
@@ -1185,6 +1242,33 @@ export const DesktopBackgroundTasks: Story = {
 			),
 		).toBe(true);
 		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(3);
-		expect(box(canvas.getByTestId("session-bar")).height).toBe(48);
+		expect(
+			chips.top - box(canvas.getByTestId("session-bar-title")).bottom,
+		).toBeGreaterThanOrEqual(6);
+	},
+};
+
+export const BackgroundTasks: Story = {
+	beforeEach: () => {
+		seedSessions([
+			{
+				...mockSession,
+				backgroundTasks: [
+					{
+						id: "t1",
+						type: "local_bash",
+						description: "Run full gate with baseline orphan check",
+						firstSeenAt: Date.now() - 6 * 60_000,
+					},
+				],
+			},
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const box = (id: string) => canvas.getByTestId(id).getBoundingClientRect();
+		expect(
+			box("background-task-chip").top - box("session-bar-title").bottom,
+		).toBeGreaterThanOrEqual(6);
 	},
 };

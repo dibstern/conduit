@@ -1,0 +1,553 @@
+{
+	"name": "multi-folder-project",
+	"model": "opencode/big-pickle",
+	"recordedAt": "2026-10-05T01:41:48.901Z",
+	"initMessages": [
+		{
+			"type": "project_attached",
+			"slug": "e2e-record"
+		},
+		{
+			"type": "protocol_version",
+			"version": 3,
+			"buildId": "dev"
+		},
+		{
+			"type": "server_update",
+			"restartAvailable": false
+		},
+		{
+			"type": "client_count",
+			"count": 1
+		},
+		{
+			"type": "session_family",
+			"rootId": "ses_32f2380f78054fc58e29736edf3be1ca",
+			"sessions": [
+				{
+					"id": "ses_32f2380f78054fc58e29736edf3be1ca",
+					"title": "Untitled",
+					"status": "idle",
+					"createdAt": 1791164416744,
+					"updatedAt": 1791164416744,
+					"messageCount": 0,
+					"attention": "idle"
+				}
+			]
+		},
+		{
+			"type": "status",
+			"sessionId": "ses_32f2380f78054fc58e29736edf3be1ca",
+			"status": "idle"
+		},
+		{
+			"type": "connection_status",
+			"status": "connected"
+		},
+		{
+			"type": "agent_list",
+			"providerScope": {
+				"id": "claude",
+				"name": "Claude"
+			},
+			"agents": [
+				{
+					"id": "claude",
+					"name": "claude",
+					"description": "Catch-all for any task that doesn't fit a more specific agent. FleetView's default when no agent name is typed."
+				},
+				{
+					"id": "Explore",
+					"name": "Explore",
+					"description": "Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions.",
+					"model": "inherit"
+				},
+				{
+					"id": "general-purpose",
+					"name": "general-purpose",
+					"description": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you."
+				},
+				{
+					"id": "Plan",
+					"name": "Plan",
+					"description": "Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs.",
+					"model": "inherit"
+				},
+				{
+					"id": "statusline-setup",
+					"name": "statusline-setup",
+					"description": "Use this agent to configure the user's Claude Code status line setting.",
+					"model": "sonnet"
+				}
+			]
+		},
+		{
+			"type": "model_list",
+			"providers": [
+				{
+					"id": "claude",
+					"name": "Anthropic - claude",
+					"configured": true,
+					"models": [
+						{
+							"id": "default",
+							"name": "Default (recommended)",
+							"provider": "claude",
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"xhigh",
+								"max"
+							]
+						},
+						{
+							"id": "opus[1m]",
+							"name": "Opus",
+							"provider": "claude",
+							"limit": {
+								"context": 1000000,
+								"output": 32000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"xhigh",
+								"max"
+							],
+							"contextWindowOptions": [
+								{
+									"value": "200k",
+									"label": "200k"
+								},
+								{
+									"value": "1m",
+									"label": "1M",
+									"isDefault": true
+								}
+							]
+						},
+						{
+							"id": "claude-fable-5-1",
+							"name": "Fable",
+							"provider": "claude",
+							"limit": {
+								"context": 200000,
+								"output": 128000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"xhigh",
+								"max"
+							],
+							"contextWindowOptions": [
+								{
+									"value": "200k",
+									"label": "200k"
+								},
+								{
+									"value": "1m",
+									"label": "1M",
+									"isDefault": true
+								}
+							]
+						},
+						{
+							"id": "sonnet",
+							"name": "Sonnet",
+							"provider": "claude",
+							"limit": {
+								"context": 200000,
+								"output": 64000
+							},
+							"variants": [
+								"low",
+								"medium",
+								"high",
+								"xhigh",
+								"max"
+							],
+							"contextWindowOptions": [
+								{
+									"value": "200k",
+									"label": "200k",
+									"isDefault": true
+								},
+								{
+									"value": "1m",
+									"label": "1M"
+								}
+							]
+						},
+						{
+							"id": "haiku",
+							"name": "Haiku",
+							"provider": "claude",
+							"limit": {
+								"context": 200000,
+								"output": 8192
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"type": "variant_info",
+			"variant": "",
+			"variants": []
+		},
+		{
+			"type": "context_window_info",
+			"contextWindow": "",
+			"options": []
+		},
+		{
+			"type": "permission_mode_info",
+			"mode": "ask"
+		},
+		{
+			"type": "default_permission_mode_info",
+			"mode": "ask"
+		},
+		{
+			"type": "model_info",
+			"model": "default",
+			"provider": "claude"
+		}
+	],
+	"turns": [
+		{
+			"prompt": "Use the Read tool to read marker.txt in the additional project folder, then reply with its contents.",
+			"events": [
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"text": "Use the Read tool to read marker.txt in the additional project folder, then reply with its contents.",
+					"originId": "record-70df97ec-9501-4d6f-b11e-2b4177a103ef"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "New session - 2026-10-05T01:40:18.779Z",
+							"status": "idle",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164419102,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "New session - 2026-10-05T01:40:18.779Z",
+							"status": "idle",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164419151,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "New session - 2026-10-05T01:40:18.779Z",
+							"status": "idle",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164419158,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "New session - 2026-10-05T01:40:18.779Z",
+							"status": "busy",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164419187,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "New session - 2026-10-05T01:40:18.779Z",
+							"status": "busy",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164419888,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "Read marker.txt contents",
+							"status": "busy",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164423262,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"status": "processing"
+				},
+				{
+					"type": "delta",
+					"text": "I'll",
+					"partId": "prt_109b8f74c001wcArpLff78x8Xs",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": " read marker",
+					"partId": "prt_109b8f74c001wcArpLff78x8Xs",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": ".txt from the extra",
+					"partId": "prt_109b8f74c001wcArpLff78x8Xs",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": " folder.",
+					"partId": "prt_109b8f74c001wcArpLff78x8Xs",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "tool_start",
+					"id": "c3fa27a4-ef6c-4909-abff-bd3cc82e118f",
+					"name": "Read",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "tool_executing",
+					"id": "c3fa27a4-ef6c-4909-abff-bd3cc82e118f",
+					"name": "Read",
+					"input": {
+						"filePath": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/e2e-record-relay-Zcm6ev/extra/marker.txt"
+					},
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "tool_result",
+					"id": "c3fa27a4-ef6c-4909-abff-bd3cc82e118f",
+					"content": "<path>/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/e2e-record-relay-Zcm6ev/extra/marker.txt</path>\n<type>file</type>\n<content>\n1: CONDUIT-EXTRA-FOLDER-MARKER-7f3a\n\n(End of file - total 1 lines)\n</content>",
+					"is_error": false,
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 16575,
+						"output": 73,
+						"cache_read": 98,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 61509,
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 16575,
+						"output": 73,
+						"cache_read": 98,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 61509,
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"messageId": "msg_109b80c44001zGqxZwdMEtk5m4"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "Read marker.txt contents",
+							"status": "busy",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164480670,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 19,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "Read marker.txt contents",
+							"status": "busy",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164480672,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 19,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "CONDUIT",
+					"partId": "prt_109b967010012LgPcgqtYMoGfJ",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": "-EXTRA-F",
+					"partId": "prt_109b967010012LgPcgqtYMoGfJ",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": "OLDER-MARKER",
+					"partId": "prt_109b967010012LgPcgqtYMoGfJ",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": "-7f3",
+					"partId": "prt_109b967010012LgPcgqtYMoGfJ",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "delta",
+					"text": "a",
+					"partId": "prt_109b967010012LgPcgqtYMoGfJ",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh",
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 167,
+						"output": 23,
+						"cache_read": 16672,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 89163,
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 167,
+						"output": 23,
+						"cache_read": 16672,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 89163,
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"messageId": "msg_109b8fc8b001kq9uMtYFmhHhCh"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef647f525ffen53fbXebU5yQvP"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "Read marker.txt contents",
+							"status": "idle",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164508397,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 30,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef647f525ffen53fbXebU5yQvP",
+					"sessions": [
+						{
+							"id": "ses_ef647f525ffen53fbXebU5yQvP",
+							"title": "Read marker.txt contents",
+							"status": "idle",
+							"createdAt": 1791164418784,
+							"updatedAt": 1791164508398,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 30,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		}
+	]
+}

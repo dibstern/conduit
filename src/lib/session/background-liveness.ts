@@ -19,6 +19,8 @@ export type BackgroundTaskTransition =
 				id: string;
 				type: string;
 				description: string;
+				// Stamped by the runner; absent from runners that predate it.
+				readonly firstSeenAt?: number;
 			}[];
 	  }
 	| {
@@ -54,7 +56,8 @@ export function makeSessionBackgroundLiveness(
 			const tasks = input.tasks
 				.map((task) => ({
 					...task,
-					firstSeenAt: previousById.get(task.id)?.firstSeenAt ?? now(),
+					firstSeenAt:
+						task.firstSeenAt ?? previousById.get(task.id)?.firstSeenAt ?? now(),
 				}))
 				.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
 			if (
@@ -63,7 +66,8 @@ export function makeSessionBackgroundLiveness(
 					const before = previousById.get(task.id);
 					return (
 						before?.type === task.type &&
-						before.description === task.description
+						before.description === task.description &&
+						before.firstSeenAt === task.firstSeenAt
 					);
 				})
 			)

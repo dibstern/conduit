@@ -1,34 +1,34 @@
 // Single import point for types from @opencode-ai/sdk.
 // All relay code should import SDK types from here, not directly from the SDK.
 //
-// SessionDetail extends SDK Session with extra fields that the OpenCode REST
-// API returns at runtime but the SDK's generated types don't include.
-// These will be cleaned up as the SDK types catch up.
+// SessionDetail keeps compatibility with older server session fields and slugs.
 
-import type { Session } from "@opencode-ai/sdk/client";
+import type { PermissionRuleset, Session } from "@opencode-ai/sdk/v2/types";
+
+export type { PermissionRuleset };
 
 /**
  * Extended session type that includes fields present in OpenCode API responses
- * but missing from the SDK's generated Session type.
+ * and permits the missing slug returned by older servers.
  *
  * The relay accesses these fields (modelID, providerID, agentID, slug, archived)
  * when reading session details from the API. They are optional because not all
  * sessions have them set.
  *
- * This type will converge to just `Session` as the SDK types catch up or as
- * handlers are refactored to obtain model/provider info from messages instead.
  */
-export type SessionDetail = Session & {
+export type SessionDetail = Omit<Session, "slug"> & {
 	/** Model ID set on the session (from API, not in SDK types) */
 	modelID?: string;
 	/** Provider ID set on the session (from API, not in SDK types) */
 	providerID?: string;
 	/** Agent ID set on the session (from API, not in SDK types) */
 	agentID?: string;
-	/** URL slug for the session (from API, not in SDK types) */
+	/** Optional for compatibility with sessions returned by older servers */
 	slug?: string;
 	/** Whether the session is archived (from API, not in SDK types) */
 	archived?: boolean;
+	/** Session permission rules, appended by OpenCode on each update. */
+	permission?: PermissionRuleset;
 };
 
 export type {
@@ -42,14 +42,13 @@ export type {
 	EventFileWatcherUpdated,
 	EventInstallationUpdateAvailable,
 	EventInstallationUpdated,
-	EventLspClientDiagnostics,
 	EventLspUpdated,
 	EventMessagePartRemoved,
 	EventMessagePartUpdated,
 	EventMessageRemoved,
 	EventMessageUpdated,
+	EventPermissionAsked,
 	EventPermissionReplied,
-	EventPermissionUpdated,
 	EventPtyCreated,
 	EventPtyDeleted,
 	EventPtyExited,
@@ -74,7 +73,7 @@ export type {
 	Part,
 	PatchPart,
 	// Permission types
-	Permission,
+	PermissionRequest,
 	Project,
 	Pty,
 	ReasoningPart,
@@ -97,7 +96,7 @@ export type {
 	ToolStateRunning,
 	// Message types
 	UserMessage,
-} from "@opencode-ai/sdk/client";
+} from "@opencode-ai/sdk/v2/types";
 
 // These replace the hand-maintained string unions in shared-types.ts with
 // types derived directly from the SDK's discriminated unions.
@@ -105,7 +104,7 @@ export type {
 import type {
 	Part as _Part,
 	ToolState as _ToolState,
-} from "@opencode-ai/sdk/client";
+} from "@opencode-ai/sdk/v2/types";
 
 /**
  * Part type discriminant — derived from SDK `Part["type"]`.
@@ -126,6 +125,7 @@ export type ToolStatus = _ToolState["status"];
 
 export interface PromptOptions {
 	text: string;
+	system?: string;
 	images?: string[];
 	agent?: string;
 	model?: { providerID: string; modelID: string };

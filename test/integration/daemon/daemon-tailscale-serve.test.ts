@@ -31,7 +31,6 @@ import {
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 
 const dnsName = "conduit-test.example.ts.net";
-const url = `https://${dnsName}`;
 const fakeScript = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
@@ -51,10 +50,12 @@ if (JSON.stringify(args) === JSON.stringify(["status", "--json"])) {
   const config = JSON.parse(read("serve.json"));
   const dns = JSON.parse(read("status.json")).Self.DNSName.replace(/\\.$/, "");
   const web = config.Web ??= {};
-  const server = web[dns + ":443"] ??= { Handlers: {} };
-  if (args.length === 5 && args.slice(0, 4).join(" ") === "serve --bg --https=443 --set-path=/") {
+  const https = args.find(arg => arg.startsWith("--https="));
+  const port = https?.slice("--https=".length);
+  const server = web[dns + ":" + port] ??= { Handlers: {} };
+  if (args.length === 5 && args.slice(0, 4).join(" ") === "serve --bg " + https + " --set-path=/") {
     server.Handlers["/"] = { Proxy: args[4] };
-  } else if (args.join(" ") === "serve --https=443 --set-path=/ off") {
+  } else if (args.join(" ") === "serve " + https + " --set-path=/ off") {
     delete server.Handlers["/"];
   } else {
     process.stderr.write("unexpected fake Tailscale command: " + JSON.stringify(args));
@@ -82,14 +83,22 @@ describe("daemon Tailscale Serve", () => {
 					.map((line) => JSON.parse(line))
 			: [];
 	};
-	const otherHandlers = () => ({
+	const otherHandlers = (port?: number) => ({
 		Web: {
 			[`${dnsName}:443`]: {
-				Handlers: { "/composer-designs": { Proxy: "http://127.0.0.1:9000" } },
+				Handlers: {
+					"/": { Proxy: `http://127.0.0.1:${port ?? 9000}` },
+					"/composer-designs": { Proxy: "http://127.0.0.1:9002" },
+				},
 			},
 			[`${dnsName}:8443`]: {
 				Handlers: { "/": { Proxy: "http://127.0.0.1:9001" } },
 			},
+			...(port !== undefined && {
+				[`${dnsName}:${port}`]: {
+					Handlers: { "/composer-designs": { Proxy: "http://127.0.0.1:9003" } },
+				},
+			}),
 		},
 	});
 	const start = async (options: DaemonOptions = {}) => {
@@ -141,9 +150,11 @@ describe("daemon Tailscale Serve", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	it("claims only / on 443 using the actual bound port and keeps HTTP on loopback", async () => {
+	it("claims only / on the actual bound port and keeps HTTP on loopback", async () => {
+		const initial = await start({ port: 0 });
+		await initial.stop();
+		writeJson("serve.json", otherHandlers(initial.port));
 		const daemon = await start({
-			port: 0,
 			tailscaleServe: true,
 			tlsEnabled: true,
 		});
@@ -160,20 +171,29 @@ describe("daemon Tailscale Serve", () => {
 			[
 				"serve",
 				"--bg",
-				"--https=443",
+				`--https=${daemon.port}`,
 				"--set-path=/",
 				`http://127.0.0.1:${daemon.port}`,
 			],
 		]);
+		const url = `https://${dnsName}:${daemon.port}`;
 		expect(daemon.getStatus().tailscaleServe).toEqual({ url });
 		const status = await sendRpcRequest(
 			join(configDir, "relay.sock"),
 			new GetStatus({}),
 		);
 		expect(status.tailscaleServe).toEqual({ url });
-		expect(
-			JSON.parse(readFileSync(join(root, "serve.json"), "utf8")),
-		).toMatchObject(otherHandlers());
+		expect(JSON.parse(readFileSync(join(root, "serve.json"), "utf8"))).toEqual({
+			Web: {
+				...otherHandlers(daemon.port).Web,
+				[`${dnsName}:${daemon.port}`]: {
+					Handlers: {
+						"/composer-designs": { Proxy: "http://127.0.0.1:9003" },
+						"/": { Proxy: `http://127.0.0.1:${daemon.port}` },
+					},
+				},
+			},
+		});
 		expect(existsSync(join(configDir, "certs"))).toBe(false);
 	});
 
@@ -189,7 +209,9 @@ describe("daemon Tailscale Serve", () => {
 		expect(beforeRestart).toHaveLength(3);
 		const restarted = await start({ tlsEnabled: true });
 		await expectHttp(restarted);
-		expect(restarted.getStatus().tailscaleServe).toEqual({ url });
+		expect(restarted.getStatus().tailscaleServe).toEqual({
+			url: `https://${dnsName}:${restarted.port}`,
+		});
 		expect(invocations().slice(beforeRestart.length)).toEqual([
 			["status", "--json"],
 			["serve", "status", "--json"],
@@ -200,11 +222,13 @@ describe("daemon Tailscale Serve", () => {
 		writeJson("serve.json", {});
 		const daemon = await start({ port: 0, tailscaleServe: true });
 		await expectHttp(daemon);
-		expect(daemon.getStatus().tailscaleServe).toEqual({ url });
+		expect(daemon.getStatus().tailscaleServe).toEqual({
+			url: `https://${dnsName}:${daemon.port}`,
+		});
 		expect(invocations().at(-1)).toEqual([
 			"serve",
 			"--bg",
-			"--https=443",
+			`--https=${daemon.port}`,
 			"--set-path=/",
 			`http://127.0.0.1:${daemon.port}`,
 		]);
@@ -213,23 +237,33 @@ describe("daemon Tailscale Serve", () => {
 	it.each([
 		{ Proxy: "http://127.0.0.1:9999" },
 		{ Path: "/a/foreign/directory" },
-	])("preserves a foreign / handler (%j) and reports a conflict without stopping HTTP", async (handler) => {
-		writeJson("serve.json", {
-			Web: { [`${dnsName}:443`]: { Handlers: { "/": handler } } },
-		});
+	])("preserves a foreign / handler on the bound port (%j) and reports a conflict without stopping HTTP", async (handler) => {
+		const initial = await start({ port: 0 });
+		await initial.stop();
+		const foreign = {
+			Web: {
+				...otherHandlers().Web,
+				[`${dnsName}:${initial.port}`]: { Handlers: { "/": handler } },
+			},
+		};
+		writeJson("serve.json", foreign);
 		const daemon = await start({
-			port: 0,
 			tailscaleServe: true,
 			tlsEnabled: true,
 		});
 		await expectHttp(daemon);
 		expect(daemon.getStatus().tailscaleServe).toEqual({
-			error: expect.stringMatching(/conflict.*\/.*443/i),
+			error: expect.stringContaining(
+				`conflict: '/' on ${dnsName}:${daemon.port}`,
+			),
 		});
 		expect(invocations()).toEqual([
 			["status", "--json"],
 			["serve", "status", "--json"],
 		]);
+		expect(JSON.parse(readFileSync(join(root, "serve.json"), "utf8"))).toEqual(
+			foreign,
+		);
 	});
 
 	it.each([
@@ -305,8 +339,11 @@ describe("daemon Tailscale Serve", () => {
 		expect(invocations()).toHaveLength(3);
 	});
 
-	it("--no-tailscale-serve removes only our / on 443 and persists the disabled choice", async () => {
-		const first = await start({ port: 0, tailscaleServe: true });
+	it("--no-tailscale-serve removes only our / on the bound port and persists the disabled choice", async () => {
+		const initial = await start({ port: 0 });
+		await initial.stop();
+		writeJson("serve.json", otherHandlers(initial.port));
+		const first = await start({ tailscaleServe: true });
 		await first.stop();
 		const beforeDisable = invocations().length;
 		const args = parseArgs(["serve", "--no-tailscale-serve", "--no-https"]);
@@ -317,10 +354,10 @@ describe("daemon Tailscale Serve", () => {
 		expect(invocations().slice(beforeDisable)).toEqual([
 			["status", "--json"],
 			["serve", "status", "--json"],
-			["serve", "--https=443", "--set-path=/", "off"],
+			["serve", `--https=${disabled.port}`, "--set-path=/", "off"],
 		]);
 		expect(JSON.parse(readFileSync(join(root, "serve.json"), "utf8"))).toEqual(
-			otherHandlers(),
+			otherHandlers(disabled.port),
 		);
 		await disabled.stop();
 		expect(loadDaemonConfig(configDir)?.tailscaleServe).toBe(false);
@@ -335,7 +372,8 @@ describe("daemon Tailscale Serve", () => {
 		await first.stop();
 		const foreign = {
 			Web: {
-				[`${dnsName}:443`]: {
+				...otherHandlers().Web,
+				[`${dnsName}:${first.port}`]: {
 					Handlers: { "/": { Proxy: "http://127.0.0.1:9999" } },
 				},
 			},
@@ -382,11 +420,14 @@ describe("daemon Tailscale Serve", () => {
 		expect(invocations().slice(beforeRetry)).toEqual([
 			["status", "--json"],
 			["serve", "status", "--json"],
-			["serve", "--https=443", "--set-path=/", "off"],
+			["serve", `--https=${retried.port}`, "--set-path=/", "off"],
 		]);
-		expect(JSON.parse(readFileSync(join(root, "serve.json"), "utf8"))).toEqual(
-			otherHandlers(),
-		);
+		expect(JSON.parse(readFileSync(join(root, "serve.json"), "utf8"))).toEqual({
+			Web: {
+				...otherHandlers().Web,
+				[`${dnsName}:${retried.port}`]: { Handlers: {} },
+			},
+		});
 		await retried.stop();
 		expect(
 			loadDaemonConfig(configDir)?.tailscaleServeCleanupPending,
@@ -402,7 +443,7 @@ describe("daemon Tailscale Serve", () => {
 		expect(daemon.getStatus()).toMatchObject({
 			host: "0.0.0.0",
 			tlsEnabled: false,
-			tailscaleServe: { url },
+			tailscaleServe: { url: `https://${dnsName}:${daemon.port}` },
 		});
 	});
 
