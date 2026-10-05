@@ -481,6 +481,52 @@ describe("HTTPS section", () => {
 });
 
 describe("setup QR section", () => {
+	it("uses the ts.net URL for the QR and skips mkcert setup", async () => {
+		const io = createMockIO();
+		const url = "https://machine.example.ts.net";
+		const generateQR = vi.fn(() => "QR art");
+		const hasMkcert = vi.fn(() => false);
+		const restartWithTLS = vi.fn();
+		void showNotificationWizard(
+			io.opts({
+				config: { tls: false, port: 2633, tailscaleServe: { url } },
+				getTailscaleIP: () => "100.64.1.5",
+				generateQR,
+				hasMkcert,
+				restartWithTLS,
+			}),
+		);
+		await tick();
+		await sendKeys(io.stdin, ["y", "\r", "y", "\r"]);
+		expect(generateQR).toHaveBeenCalledExactlyOnceWith(url);
+		expect(io.text()).toContain(url);
+		expect(hasMkcert).not.toHaveBeenCalled();
+		expect(restartWithTLS).not.toHaveBeenCalled();
+		io.stdin.emit("data", "\x03");
+		await tick();
+	});
+
+	it("prints a Serve failure and fix instead of generating a setup QR", async () => {
+		const io = createMockIO();
+		const error =
+			"Tailscale is not Running. Sign in and restart conduit with --tailscale-serve.";
+		const generateQR = vi.fn();
+		const onBack = vi.fn();
+		void showNotificationWizard(
+			io.opts({
+				config: { tls: false, port: 2633, tailscaleServe: { error } },
+				getTailscaleIP: () => "100.64.1.5",
+				generateQR,
+				onBack,
+			}),
+		);
+		await tick();
+		await sendKeys(io.stdin, ["y", "\r", "\r"]);
+		expect(io.text()).toContain(error);
+		expect(generateQR).not.toHaveBeenCalled();
+		expect(onBack).toHaveBeenCalledOnce();
+	});
+
 	it("displays URL", async () => {
 		const io = createMockIO();
 		void showNotificationWizard(

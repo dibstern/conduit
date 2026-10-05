@@ -132,6 +132,10 @@ import {
 	StorageMonitorLive,
 	StorageMonitorTag,
 } from "./storage-monitor-layer.js";
+import {
+	TailscaleCliLive,
+	TailscaleServeLive,
+} from "./tailscale-serve-layer.js";
 import { EnsureCertsLive, TlsCertLive, TlsCertTag } from "./tls-cert-layer.js";
 import { makeDaemonTracingLive } from "./tracing.js";
 import {
@@ -843,9 +847,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.staticDir);
 	const http = HttpServerLive.pipe(Layer.provideMerge(httpRequestHandler));
 
-	const servers = OnboardingServerLive(options.staticDir).pipe(
+	const tailscale = TailscaleServeLive.pipe(
+		Layer.provide(TailscaleCliLive),
 		Layer.provideMerge(http),
 		Layer.provideMerge(withDaemonControl),
+	);
+	const servers = OnboardingServerLive(options.staticDir).pipe(
+		Layer.provideMerge(tailscale),
 	);
 
 	const withDaemonWiring = Layer.merge(

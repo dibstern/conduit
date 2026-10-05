@@ -88,6 +88,63 @@ describe("serve handler", () => {
 		mockEnv.opencodeUrl = undefined;
 	});
 
+	it.each([
+		true,
+		false,
+	])("forwards an explicit Serve choice (%s)", async (enabled) => {
+		await run(
+			["serve", enabled ? "--tailscale-serve" : "--no-tailscale-serve"],
+			createMockIO(),
+		);
+		expect(mockStartForegroundDaemon).toHaveBeenCalledWith(
+			expect.objectContaining({ tailscaleServe: enabled }),
+		);
+	});
+
+	it("prints and encodes the ts.net URL after Serve succeeds", async () => {
+		const url = "https://machine.example.ts.net";
+		mockStartForegroundDaemon.mockResolvedValueOnce({
+			port: 2633,
+			stopped: Promise.resolve(),
+			getStatus: () => ({
+				tlsEnabled: false,
+				host: "127.0.0.1",
+				tailscaleServe: { url },
+			}),
+		});
+		const io = createMockIO();
+		await run(["serve", "--tailscale-serve"], io);
+		expect(io.output.join("")).toContain(`Relay:    ${url}`);
+		expect(io.output.join("")).toContain(`[QR:${url}]`);
+		expect(io.errors).toEqual([]);
+	});
+
+	it("prints a Serve error and still reports the running loopback server", async () => {
+		const error =
+			"HTTPS certificates are disabled. Enable them in the tailnet DNS page.";
+		mockStartForegroundDaemon.mockResolvedValueOnce({
+			port: 2633,
+			stopped: Promise.resolve(),
+			getStatus: () => ({
+				tlsEnabled: false,
+				host: "127.0.0.1",
+				tailscaleServe: { error },
+			}),
+		});
+		const io = createMockIO();
+		await run(["serve", "--tailscale-serve"], io);
+		expect(io.output.join("")).toContain("http://127.0.0.1:2633");
+		expect(io.output.join("")).toContain("Ready.");
+		expect(io.errors.join("")).toContain(error);
+		expect(io.exit).toHaveBeenCalledWith(0);
+	});
+
+	it("suggests Serve in the foreground banner when Tailscale is detected", async () => {
+		const io = { ...createMockIO(), getTailscaleIP: () => "100.64.1.5" };
+		await run(["serve"], io);
+		expect(io.output.join("")).toContain("--tailscale-serve");
+	});
+
 	it("starts daemon in foreground and writes expected output", async () => {
 		const io = createMockIO("/test/project");
 

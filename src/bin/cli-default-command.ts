@@ -62,16 +62,25 @@ async function showProject(ctx: CommandContext): Promise<void> {
 	const tsIP = getTsIP();
 	const lanIP = getAddr();
 	const primaryIP = tsIP ?? lanIP ?? "localhost";
-	const url = `${scheme}://${primaryIP}:${port}`;
+	const tailscale = statusResponse.tailscaleServe;
+	const tailscaleUrl =
+		tailscale && "url" in tailscale ? tailscale.url : undefined;
+	const url =
+		tailscaleUrl ??
+		(tailscale
+			? `http://127.0.0.1:${port}`
+			: `${scheme}://${primaryIP}:${port}`);
 	const tlsActive = statusResponse["tlsEnabled"] === true;
 
-	if (primaryIP !== "localhost") {
-		const qrUrl = tlsActive ? `http://${primaryIP}:${port + 1}/setup` : url;
+	if (tailscaleUrl || (!tailscale && primaryIP !== "localhost")) {
+		const qrUrl =
+			tailscaleUrl ??
+			(tlsActive ? `http://${primaryIP}:${port + 1}/setup` : url);
 		const qrCode = qr(qrUrl);
 		if (qrCode) {
 			stdout.write("\n");
 			stdout.write(qrCode);
-			if (tlsActive) {
+			if (tlsActive && !tailscaleUrl) {
 				stdout.write(
 					`  Scan or visit: http://${primaryIP}:${port + 1}/setup\n`,
 				);
@@ -83,8 +92,17 @@ async function showProject(ctx: CommandContext): Promise<void> {
 	stdout.write("\n");
 	stdout.write("conduit\n");
 	stdout.write(`  URL: ${url}\n`);
-	if (tsIP && lanIP && tsIP !== lanIP) {
+	if (tailscaleUrl) {
+		stdout.write(`  Local: http://localhost:${port}\n`);
+	} else if (!tailscale && tsIP && lanIP && tsIP !== lanIP) {
 		stdout.write(`  Local: ${scheme}://${lanIP}:${port}\n`);
+	}
+	if (tailscale && "error" in tailscale) {
+		stderr.write(`  Tailscale Serve: ${tailscale.error}\n`);
+	} else if (!tailscale && tsIP) {
+		stdout.write(
+			"  Tip: Use conduit serve --tailscale-serve for trusted HTTPS on your tailnet.\n",
+		);
 	}
 
 	if (slug) {

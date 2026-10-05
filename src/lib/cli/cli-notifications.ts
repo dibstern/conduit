@@ -2,6 +2,7 @@
 // Two-toggle flow → conditional Tailscale/HTTPS/QR sections. Ported from
 // claude-relay/bin/cli.js lines 1684-1851 (showSetupGuide).
 
+import type { DaemonStatus } from "../daemon/daemon-types.js";
 import { printLogo } from "./cli-setup.js";
 import type { PromptOptions, SelectPromptOptions } from "./prompts.js";
 import { promptSelect, promptToggle } from "./prompts.js";
@@ -21,6 +22,7 @@ export interface NotificationWizardOptions extends PromptOptions {
 	config: {
 		tls: boolean;
 		port: number;
+		tailscaleServe?: DaemonStatus["tailscaleServe"];
 	};
 	/** Restart daemon with TLS */
 	restartWithTLS?: () => Promise<{
@@ -114,6 +116,11 @@ export async function showNotificationWizard(
 		await opts.onBack();
 		return;
 	}
+	if (config.tailscaleServe && "error" in config.tailscaleServe) {
+		log(`${sym.bar}  Tailscale Serve: ${config.tailscaleServe.error}`, stdout);
+		await opts.onBack();
+		return;
+	}
 
 	if (wantRemote) {
 		await renderTailscale();
@@ -126,9 +133,13 @@ export async function showNotificationWizard(
 
 		log(`${sym.pointer}  ${a.bold}Tailscale Setup${a.reset}`, stdout);
 
-		if (tsIP) {
+		const tailscaleUrl =
+			config.tailscaleServe && "url" in config.tailscaleServe
+				? config.tailscaleServe.url
+				: undefined;
+		if (tsIP || tailscaleUrl) {
 			log(
-				`${sym.bar}  ${a.green}Tailscale is running${a.reset}${a.dim} \u00B7 ${tsIP}${a.reset}`,
+				`${sym.bar}  ${a.green}Tailscale is running${a.reset}${a.dim} \u00B7 ${tailscaleUrl ?? tsIP}${a.reset}`,
 				stdout,
 			);
 			log(sym.bar, stdout);
@@ -186,7 +197,7 @@ export async function showNotificationWizard(
 	}
 
 	async function renderHttps(): Promise<void> {
-		if (!wantPush) {
+		if (!wantPush || config.tailscaleServe) {
 			await showSetupQR();
 			return;
 		}
@@ -268,10 +279,15 @@ export async function showNotificationWizard(
 		const setupIP = wantRemote ? tsIP || "localhost" : lanIP || "localhost";
 		const setupQuery = wantRemote ? "" : "?mode=lan";
 
-		// Always use HTTP onboarding URL for QR/setup when TLS is active
-		const setupUrl = config.tls
-			? `http://${setupIP}:${config.port + 1}/setup${setupQuery}`
-			: `http://${setupIP}:${config.port}/setup${setupQuery}`;
+		const tailscaleUrl =
+			config.tailscaleServe && "url" in config.tailscaleServe
+				? config.tailscaleServe.url
+				: undefined;
+		const setupUrl =
+			tailscaleUrl ??
+			(config.tls
+				? `http://${setupIP}:${config.port + 1}/setup${setupQuery}`
+				: `http://${setupIP}:${config.port}/setup${setupQuery}`);
 
 		log(`${sym.pointer}  ${a.bold}Continue on your device${a.reset}`, stdout);
 		log(sym.bar, stdout);

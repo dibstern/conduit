@@ -46,6 +46,7 @@ export interface ParsedArgs {
 	instanceUrl?: string;
 	serviceAction?: string;
 	noHttps: boolean;
+	tailscaleServe?: boolean;
 	skipPerms: boolean;
 	/** Claude Code config dir (CLAUDE_CONFIG_DIR) for Claude SDK subprocesses; persisted in daemon.json. */
 	claudeConfigDir?: string;
@@ -181,6 +182,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 			case "--no-https":
 				result.noHttps = true;
+				break;
+
+			case "--tailscale-serve":
+				result.tailscaleServe = true;
+				break;
+
+			case "--no-tailscale-serve":
+				result.tailscaleServe = false;
 				break;
 
 			case "--dangerously-skip-permissions":
@@ -354,6 +363,8 @@ Options:
   --log-level <level>   Set log level: error, warn, info (default), verbose, debug
   --log-format <format> Set output format: pretty (default), json
   --no-https            Disable TLS
+  --tailscale-serve      Serve loopback HTTP behind Tailscale HTTPS
+  --no-tailscale-serve   Disable Tailscale Serve and remove our root handler
   --dangerously-skip-permissions
                         Skip permission prompts (requires --pin)
   -h, --help            Show this help

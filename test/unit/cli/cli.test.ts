@@ -23,6 +23,7 @@ import {
 	parseArgs,
 	run,
 } from "../../../src/bin/cli-core.js";
+import { foregroundArguments } from "../../../src/bin/cli-service.js";
 import { HELP_TEXT } from "../../../src/bin/cli-utils.js";
 import {
 	WsRpcError,
@@ -33,6 +34,78 @@ import type { ForegroundDaemonHandle } from "../../../src/lib/domain/daemon/Laye
 
 const SEED = 42;
 const NUM_RUNS = 100;
+
+describe("Tailscale Serve CLI", () => {
+	it("keeps an unspecified choice unset and parses both flags in argument order", () => {
+		expect(parseArgs([]).tailscaleServe).toBeUndefined();
+		expect(parseArgs(["--tailscale-serve"]).tailscaleServe).toBe(true);
+		expect(parseArgs(["--no-tailscale-serve"]).tailscaleServe).toBe(false);
+		expect(
+			parseArgs(["--tailscale-serve", "--no-tailscale-serve"]).tailscaleServe,
+		).toBe(false);
+		expect(
+			parseArgs(["--no-tailscale-serve", "--tailscale-serve"]).tailscaleServe,
+		).toBe(true);
+		expect(HELP_TEXT).toContain("--tailscale-serve");
+		expect(HELP_TEXT).toContain("--no-tailscale-serve");
+	});
+
+	it.each([
+		"--tailscale-serve",
+		"--no-tailscale-serve",
+	])("forwards %s to the installed service", (flag) => {
+		expect(
+			foregroundArguments(parseArgs(["service", "install", flag])),
+		).toContain(flag);
+	});
+
+	it("uses the ts.net URL in the project banner and QR", async () => {
+		const url = "https://machine.example.ts.net";
+		const qr = vi.fn((value: string) => `[QR:${value}]`);
+		const cli = createMockCLI({
+			generateQR: qr,
+			getTailscaleIP: () => "100.64.1.5",
+			sendRPC: async (request) =>
+				request._tag === "GetStatus"
+					? { port: 2633, tlsEnabled: false, tailscaleServe: { url } }
+					: { projects: [] },
+		});
+		await run([], cli);
+		expect(cli.state.output).toContain(`URL: ${url}`);
+		expect(qr).toHaveBeenCalledExactlyOnceWith(url);
+		expect(cli.state.output).not.toContain("--tailscale-serve");
+	});
+
+	it("shows a Serve error and its fix without advertising an unreachable share URL", async () => {
+		const error =
+			"Tailscale is not Running. Sign in and restart conduit with --tailscale-serve.";
+		const qr = vi.fn();
+		const cli = createMockCLI({
+			generateQR: qr,
+			getTailscaleIP: () => "100.64.1.5",
+			sendRPC: async (request) =>
+				request._tag === "GetStatus"
+					? { port: 2633, tlsEnabled: false, tailscaleServe: { error } }
+					: { projects: [] },
+		});
+		await run([], cli);
+		expect(cli.state.output + cli.state.errors).toContain(error);
+		expect(cli.state.output).toContain("URL: http://127.0.0.1:2633");
+		expect(qr).not.toHaveBeenCalled();
+	});
+
+	it("suggests Serve when the mode is off and a Tailscale IP is detected", async () => {
+		const cli = createMockCLI({
+			getTailscaleIP: () => "100.64.1.5",
+			sendRPC: async (request) =>
+				request._tag === "GetStatus"
+					? { port: 2633, tlsEnabled: false }
+					: { projects: [] },
+		});
+		await run([], cli);
+		expect(cli.state.output).toContain("--tailscale-serve");
+	});
+});
 
 /** Captured state from mock CLI */
 interface MockCLIState {
@@ -1400,6 +1473,8 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		"--oc-port",
 		"--claude-config-dir",
 		"--no-https",
+		"--tailscale-serve",
+		"--no-tailscale-serve",
 		"--dangerously-skip-permissions",
 		"--managed",
 		"--url",

@@ -203,6 +203,9 @@ export const DaemonHandleLive: Layer.Layer<
 					clientCount: lifecycleContext.clientCount,
 					pinEnabled: config.pinHash !== null,
 					tlsEnabled: config.tlsEnabled,
+					...(config.tailscaleServe !== undefined && {
+						tailscaleServe: config.tailscaleServe,
+					}),
 					keepAwake: config.keepAwake,
 					projects: sortedStatusProjects(projects),
 				} satisfies DaemonStatus;

@@ -213,6 +213,10 @@ export function foregroundArguments(args: ParsedArgs): string[] {
 	if (args.claudeConfigDir)
 		flags.push("--claude-config-dir", args.claudeConfigDir);
 	if (args.noHttps) flags.push("--no-https");
+	if (args.tailscaleServe !== undefined)
+		flags.push(
+			args.tailscaleServe ? "--tailscale-serve" : "--no-tailscale-serve",
+		);
 	if (args.logFormat) flags.push("--log-format", args.logFormat);
 	return flags;
 }

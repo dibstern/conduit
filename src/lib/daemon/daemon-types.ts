@@ -13,6 +13,7 @@ export interface DaemonOptions {
 	socketPath?: string;
 	pinHash?: string;
 	tlsEnabled?: boolean;
+	tailscaleServe?: boolean;
 	keepAwake?: boolean;
 	/** User-provided keep-awake command (overrides auto-detection). */
 	keepAwakeCommand?: string;
@@ -55,6 +56,7 @@ export interface DaemonStatus {
 	clientCount: number;
 	pinEnabled: boolean;
 	tlsEnabled: boolean;
+	tailscaleServe?: { url: string } | { error: string };
 	keepAwake: boolean;
 	projects: Array<{
 		slug: string;
