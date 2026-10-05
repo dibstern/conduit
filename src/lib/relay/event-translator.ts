@@ -11,8 +11,6 @@ import type {
 } from "../types.js";
 import type { KnownOpenCodeEventType, SSEEvent } from "./opencode-events.js";
 import {
-	isFileEvent,
-	isInstallationUpdateEvent,
 	isMessageCreatedEvent,
 	isMessageRemovedEvent,
 	isMessageUpdatedEvent,
@@ -47,16 +45,20 @@ type _HandledByTranslator =
 	| "pty.created"
 	| "pty.exited"
 	| "pty.deleted"
-	| "file.edited"
-	| "file.watcher.updated"
-	| "installation.update-available"
 	| "todo.updated";
 
 type _HandledByBridge = "permission.replied";
 
+// Known upstream events conduit deliberately drops: nothing in the UI consumes
+// file-change or OpenCode-installation-update notices.
+type _DeliberatelyIgnored =
+	| "file.edited"
+	| "file.watcher.updated"
+	| "installation.update-available";
+
 type _MissingTypes = Exclude<
 	KnownOpenCodeEventType,
-	_HandledByTranslator | _HandledByBridge
+	_HandledByTranslator | _HandledByBridge | _DeliberatelyIgnored
 >;
 type _AssertAllHandled = _MissingTypes extends never
 	? true
@@ -587,25 +589,6 @@ export function translatePtyEvent(
 	return null;
 }
 
-/** Translate file.* events */
-export function translateFileEvent(
-	event: SSEEvent,
-): UntaggedRelayMessage | null {
-	// OpenCode uses `file` (not `path`) as the property name for file events
-	if (!isFileEvent(event)) return null;
-	const { properties: props } = event;
-
-	if (event.type === "file.edited") {
-		return { type: "file_changed", path: props.file, changeType: "edited" };
-	}
-
-	if (event.type === "file.watcher.updated") {
-		return { type: "file_changed", path: props.file, changeType: "external" };
-	}
-
-	return null;
-}
-
 export type TranslateResult =
 	| { ok: true; messages: UntaggedRelayMessage[] }
 	| { ok: false; reason: string };
@@ -789,14 +772,6 @@ export function createTranslator(
 				);
 			}
 
-			// File events
-			if (eventType.startsWith("file.")) {
-				return wrapResult(
-					translateFileEvent(event),
-					"file event: unhandled file event type",
-				);
-			}
-
 			// Session error (quota exhausted, model failure, etc.)
 			if (eventType === "session.error") {
 				if (!isSessionErrorEvent(event)) {
@@ -812,26 +787,6 @@ export function createTranslator(
 							code: errName,
 							message: errMsg,
 							alertId: crypto.randomUUID(),
-						},
-					],
-				};
-			}
-
-			// Installation update available
-			if (eventType === "installation.update-available") {
-				if (!isInstallationUpdateEvent(event)) {
-					return {
-						ok: false,
-						reason: "installation update: invalid event",
-					};
-				}
-				const version = event.properties.version;
-				return {
-					ok: true,
-					messages: [
-						{
-							type: "update_available",
-							...(version != null && { version }),
 						},
 					],
 				};
@@ -855,6 +810,14 @@ export function createTranslator(
 					ok: false,
 					reason: `${eventType} handled by bridge`,
 				};
+			}
+
+			if (
+				eventType === "file.edited" ||
+				eventType === "file.watcher.updated" ||
+				eventType === "installation.update-available"
+			) {
+				return { ok: false, reason: `${eventType} deliberately ignored` };
 			}
 
 			// Unknown event type

@@ -68,7 +68,7 @@ function bottomRightFrame(): () => void {
 
 /** Seed a single configured Anthropic provider with Sonnet selected. */
 function seedClaude(): void {
-	handleModelList({ type: "model_list", providers: [anthropic] });
+	handleModelList({ providers: [anthropic] });
 	handleModelInfo({
 		type: "model_info",
 		model: "claude-sonnet-4-5",
@@ -262,7 +262,7 @@ export const SingleContextWindow: Story = {
 	// Storybook reads tags statically; a spread does not carry them.
 	tags: ["viewport-capture"],
 	beforeEach: () => {
-		handleModelList({ type: "model_list", providers: [opencode] });
+		handleModelList({ providers: [opencode] });
 		handleModelInfo({
 			type: "model_info",
 			model: "gpt-5",
@@ -305,7 +305,6 @@ export const PremiumContextDefault: Story = {
 			isDefault: option.value === "1m",
 		}));
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					...anthropic,
@@ -361,7 +360,7 @@ export const UnlockedHarnesses: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
-		handleModelList({ type: "model_list", providers: [anthropic, opencode] });
+		handleModelList({ providers: [anthropic, opencode] });
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -411,7 +410,6 @@ export const RoutingOptions: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					...anthropic,
@@ -474,7 +472,6 @@ export const Locked: Story = {
 	beforeEach: () => {
 		seedClaude();
 		handleModelList({
-			type: "model_list",
 			providers: [
 				anthropic,
 				{
@@ -529,7 +526,6 @@ export const UnconfiguredProvider: Story = {
 		// real shape: an OpenCode instance exposes whatever providers it knows
 		// about, set up or not.
 		handleModelList({
-			type: "model_list",
 			providers: [
 				anthropic,
 				{

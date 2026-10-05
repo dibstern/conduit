@@ -5,6 +5,7 @@ import {
 	openSessionRoute,
 	requireRelayControl,
 	requireRpcControl,
+	serveModelCatalog,
 } from "./shared.js";
 
 const claudeSettingsSessionId = "sess-claude-settings";
@@ -41,18 +42,18 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		match:
 			/^the default model is Claude Sonnet 4 with a thinking level of high$/,
 		run: async ({ world }) => {
+			await serveModelCatalog(world.page, {
+				providers: dualDriverProviders.map((provider) => ({
+					...provider,
+					models: provider.models.map((model) =>
+						model.id === "claude-sonnet-4"
+							? { ...model, name: "Claude Sonnet 4" }
+							: model,
+					),
+				})),
+				active: { model: "claude-sonnet-4", provider: "anthropic" },
+			});
 			await requireRelayControl(world.page).sendMessages([
-				{
-					type: "model_list",
-					providers: dualDriverProviders.map((provider) => ({
-						...provider,
-						models: provider.models.map((model) =>
-							model.id === "claude-sonnet-4"
-								? { ...model, name: "Claude Sonnet 4" }
-								: model,
-						),
-					})),
-				},
 				{
 					type: "default_model_info",
 					model: "claude-sonnet-4",

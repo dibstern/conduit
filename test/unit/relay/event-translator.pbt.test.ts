@@ -26,7 +26,7 @@
 // P12: Part removal clears tracking state
 //      → Source: AC10
 // P13: translatePtyEvent handles pty.created, pty.exited, pty.deleted, unknown
-// P14: translateFileEvent handles file.edited, file.watcher.updated, unknown, missing path
+// P14: upstream file.* and installation.update-available events are dropped
 // P15: translateMessageRemoved handles valid messageID and missing messageID
 
 import fc from "fast-check";
@@ -34,7 +34,6 @@ import { assert, describe, expect, it } from "vitest";
 import {
 	createTranslator,
 	mapToolName,
-	translateFileEvent,
 	translateMessageRemoved,
 	translateMessageUpdated,
 	translatePartDelta,
@@ -922,87 +921,20 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	describe("P14: translateFileEvent handles file event types", () => {
-		it("file.edited returns file_changed with changeType 'edited'", () => {
+	describe("P14: upstream file and installation-update events are dropped", () => {
+		it.each([
+			"file.edited",
+			"file.watcher.updated",
+			"installation.update-available",
+		])("%s translates to nothing", (type) => {
 			const event: OpenCodeEvent = {
-				type: "file.edited",
-				properties: { file: "/src/main.ts" },
+				type,
+				properties: { file: "/src/main.ts", version: "1.2.3" },
 			};
-			const result = translateFileEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated file event");
-			expect(result.type).toBe("file_changed");
-			if (result.type === "file_changed") {
-				expect(result.path).toBe("/src/main.ts");
-				expect(result.changeType).toBe("edited");
-			}
-		});
-
-		it("file.watcher.updated returns file_changed with changeType 'external'", () => {
-			const event: OpenCodeEvent = {
-				type: "file.watcher.updated",
-				properties: { file: "/src/index.ts" },
-			};
-			const result = translateFileEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated file event");
-			expect(result.type).toBe("file_changed");
-			if (result.type === "file_changed") {
-				expect(result.path).toBe("/src/index.ts");
-				expect(result.changeType).toBe("external");
-			}
-		});
-
-		it("unknown file event returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "file.created",
-				properties: { file: "/src/new.ts" },
-			};
-			const result = translateFileEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("file.edited with missing path returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "file.edited",
-				properties: {},
-			};
-			const result = translateFileEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("file.watcher.updated with missing path returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "file.watcher.updated",
-				properties: { content: "data but no path" },
-			};
-			const result = translateFileEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("property: file events with arbitrary properties never throw", () => {
-			fc.assert(
-				fc.property(
-					fc.constantFrom(
-						"file.edited",
-						"file.watcher.updated",
-						"file.created",
-						"file.deleted",
-					),
-					fc.dictionary(
-						fc.string({ minLength: 1, maxLength: 10 }),
-						fc.jsonValue(),
-					),
-					(eventType, props) => {
-						const event: OpenCodeEvent = { type: eventType, properties: props };
-						const result = translateFileEvent(event);
-						if (result !== null) {
-							expect(result.type).toBe("file_changed");
-						}
-					},
-				),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
+			expect(createTranslator().translate(event)).toEqual({
+				ok: false,
+				reason: `${type} deliberately ignored`,
+			});
 		});
 	});
 

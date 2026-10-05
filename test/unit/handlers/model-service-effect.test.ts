@@ -23,6 +23,7 @@ import {
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
+	getModelsResponse,
 	sendModelsStateToClient,
 	setDefaultModelForRelay,
 	switchModelForSession,
@@ -165,12 +166,13 @@ describe("model handlers with Effect-native model service", () => {
 					providerID: "claude",
 					modelID: "sonnet",
 				});
-				yield* sendModelsStateToClient("client-1");
+				const response = yield* getModelsResponse({
+					clientId: "client-1",
+					sessionId: "session-1",
+				});
 
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_list",
-					providers: [
+				expect(response.providers).toEqual([
 						{
 							id: "openai",
 							name: "OpenAI",
@@ -195,8 +197,7 @@ describe("model handlers with Effect-native model service", () => {
 								},
 							],
 						},
-					],
-				});
+				]);
 			}).pipe(Effect.provide(layer));
 		},
 	);

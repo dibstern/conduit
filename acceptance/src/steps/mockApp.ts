@@ -307,7 +307,9 @@ export const mockAppHandlers: StepHandler[] = [
 								? payload["instanceId"]
 								: payload["sessionId"] === "sess-first-send"
 									? createdSessionInstance
-									: undefined;
+									: payload["sessionId"] === "sess-bound-claude"
+										? "claude"
+										: undefined;
 						const claude = instanceId === "claude";
 						return {
 							projectSlug: "myapp",

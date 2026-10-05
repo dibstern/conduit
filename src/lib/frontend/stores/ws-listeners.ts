@@ -2,12 +2,21 @@
 // Some messages are best handled by the component that renders them,
 // rather than stored globally. Components subscribe via these registries.
 
+import type {
+	GetFileContentResponse,
+	GetFileListResponse,
+} from "../transport/ws-rpc.js";
 import type { RelayMessage } from "../types.js";
 
 export type MessageListener = (msg: RelayMessage) => void;
 
-export const fileBrowserListeners = new Set<MessageListener>();
-export const fileHistoryListeners = new Set<MessageListener>();
+/** File-browser RPC replies, fanned out to the panels that rendered the request. */
+export type FileBrowserReply =
+	| { readonly kind: "list"; readonly response: GetFileListResponse }
+	| { readonly kind: "content"; readonly response: GetFileContentResponse };
+export type FileBrowserListener = (reply: FileBrowserReply) => void;
+
+export const fileBrowserListeners = new Set<FileBrowserListener>();
 export const projectListeners = new Set<MessageListener>();
 export const projectAttachedListeners = new Set<(slug: string) => void>();
 
@@ -17,16 +26,10 @@ export function onProjectAttached(fn: (slug: string) => void): () => void {
 	return () => projectAttachedListeners.delete(fn);
 }
 
-/** Subscribe to file browser messages. Returns unsubscribe function. */
-export function onFileBrowser(fn: MessageListener): () => void {
+/** Subscribe to file browser RPC replies. Returns unsubscribe function. */
+export function onFileBrowser(fn: FileBrowserListener): () => void {
 	fileBrowserListeners.add(fn);
 	return () => fileBrowserListeners.delete(fn);
-}
-
-/** Subscribe to file history messages. Returns unsubscribe function. */
-export function onFileHistory(fn: MessageListener): () => void {
-	fileHistoryListeners.add(fn);
-	return () => fileHistoryListeners.delete(fn);
 }
 
 /** Subscribe to project messages. Returns unsubscribe function. */

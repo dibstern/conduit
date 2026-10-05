@@ -11,6 +11,7 @@ import {
 	getCommandsRpc,
 	getModelsRpc,
 	listDaemonSessionsRpc,
+	reloadProviderSessionRpc,
 	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
@@ -953,6 +954,29 @@ export function switchToSession(
 			})
 			.catch(() => undefined);
 	}
+}
+
+/**
+ * Reload the provider session so it picks up skills/commands added on disk,
+ * then refetch the command and model catalogs it changes.
+ */
+export async function reloadProviderSession(
+	projectSlug: string,
+	sessionId: string,
+): Promise<void> {
+	await reloadProviderSessionRpc({
+		projectSlug,
+		sessionId,
+		commandId: crypto.randomUUID(),
+	});
+	const [commands, models] = await Promise.all([
+		getCommandsRpc({ projectSlug, sessionId }),
+		getModelsRpc({ projectSlug, sessionId }),
+	]);
+	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
+		return;
+	applyGetCommandsResponse(commands);
+	applyGetModelsResponse(models);
 }
 
 /** Clear all session state (for project switch). */

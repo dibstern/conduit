@@ -1,6 +1,9 @@
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import {
+	AgentServiceTag,
+	filterAgents,
+} from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	PendingSendOwnershipLive,
 	PendingSendOwnershipTag,
@@ -20,6 +23,7 @@ import { join } from "node:path";
 import { describe, it, layer } from "@effect/vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { GetAgents, GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	PendingInteractionServiceLive,
@@ -43,7 +47,6 @@ import {
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
-	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
@@ -83,16 +86,9 @@ import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
 } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
+import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import {
-	filterAgents,
-	handleGetAgents,
-} from "../../../src/lib/handlers/agent.js";
-import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
-import {
-	handleGetFileContent,
-	handleGetFileList,
-} from "../../../src/lib/handlers/files.js";
-import {
+	getModelsResponse,
 	sendModelsStateToClient,
 	switchModelForSession,
 	switchVariantForSession,
@@ -120,10 +116,6 @@ import {
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
-import {
-	handleGetCommands,
-	handleGetProjects,
-} from "../../../src/lib/handlers/settings.js";
 import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -150,6 +142,8 @@ import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
 import { diffAndSynthesize } from "../../../src/lib/relay/message-poller.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
+import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -238,14 +232,6 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 		time: { created: 0 },
 		...overrides,
 	};
-}
-
-function openCodeFileLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
-	return Layer.merge(
-		apiLayer,
-		OpenCodeFileServiceLive.pipe(Layer.provide(apiLayer)),
-	);
 }
 
 function openCodeModelLayer(client: OpenCodeAPI) {
@@ -337,9 +323,9 @@ const persistentHandlerPersistence = Layer.merge(
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 layer(Layer.mergeAll(persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, PendingSendOwnershipLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
-describe("handleGetAgents", () => {
+describe("GetAgents", () => {
 	it.effect(
-		"fetches agents via OpenCodeAPI and sends filtered list to client",
+		"fetches agents via OpenCodeAPI and returns the filtered list",
 		() => {
 			const ws = mockWsHandler();
 			const mockAgents = [
@@ -351,48 +337,23 @@ describe("handleGetAgents", () => {
 				app: { agents: vi.fn(async () => mockAgents) },
 			});
 
-			return handleGetAgents("client-1", {}).pipe(
-				Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
-				Effect.tap(() => {
-					expect(client.app.agents).toHaveBeenCalledOnce();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "agent_list",
-						providerScope: { id: "opencode", name: "OpenCode" },
-						agents: filterAgents(mockAgents),
-					});
-				}),
-			);
+			return modelsHandlers
+				.GetAgents(new GetAgents({ projectSlug: "test-project" }))
+				.pipe(
+					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
+					Effect.tap((reply) => {
+						expect(client.app.agents).toHaveBeenCalledOnce();
+						expect(reply).toMatchObject({
+							providerScope: { id: "opencode", name: "OpenCode" },
+							agents: filterAgents(mockAgents),
+						});
+					}),
+				);
 		},
 	);
 });
 
-describe("handleGetCommands", () => {
-	it.effect("fetches commands and sends to client", () => {
-		const ws = mockWsHandler();
-		const mockCommands = [{ name: "test" }];
-		const client = makeHandlerOpenCodeAPI({
-			app: { commands: vi.fn(async () => mockCommands) },
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeSettingsLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetCommands("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.app.commands).toHaveBeenCalledOnce();
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "command_list",
-					commands: mockCommands,
-				});
-			}),
-		);
-	});
-});
-
-describe("handleGetProjects", () => {
+describe("GetProjects", () => {
 	it.effect("uses config.getProjects when available", () => {
 		const ws = mockWsHandler();
 		const projects = [
@@ -408,11 +369,11 @@ describe("handleGetProjects", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		return handleGetProjects("client-1", {}).pipe(
+		return projectsHandlers.GetProjects(new GetProjects({ projectSlug: "test-project" })).pipe(
 			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "project_list",
+			Effect.tap((reply) => {
+				expect(reply).toEqual({
+					projectSlug: "test-project",
 					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
 					current: "test-project",
 				});
@@ -438,12 +399,12 @@ describe("handleGetProjects", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 			);
 
-			return handleGetProjects("client-1", {}).pipe(
+			return projectsHandlers.GetProjects(new GetProjects({ projectSlug: "test-project" })).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.tap((reply) => {
 					expect(client.app.projects).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "project_list",
+					expect(reply).toEqual({
+						projectSlug: "test-project",
 						projects: [],
 						current: "test-project",
 					});
@@ -451,89 +412,6 @@ describe("handleGetProjects", () => {
 			);
 		},
 	);
-});
-
-describe("handleGetFileContent", () => {
-	it.effect("reads file content and sends to client", () => {
-		const ws = mockWsHandler();
-		const client = makeHandlerOpenCodeAPI({
-			file: {
-				read: vi.fn(async () => ({ content: "hello world" })),
-			},
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeFileLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetFileContent("client-1", { path: "README.md" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.file.read).toHaveBeenCalledWith("README.md", expect.anything());
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "file_content",
-					path: "README.md",
-					content: "hello world",
-				});
-			}),
-		);
-	});
-
-	it.effect("does nothing when path is empty", () => {
-		const ws = mockWsHandler();
-		const client = makeHandlerOpenCodeAPI({
-			file: { read: vi.fn() },
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeFileLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetFileContent("client-1", { path: "" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.file.read).not.toHaveBeenCalled();
-				expect(ws.sendTo).not.toHaveBeenCalled();
-			}),
-		);
-	});
-});
-
-describe("handleGetFileList", () => {
-	it.effect("lists files and filters with gitignore rules", () => {
-		const ws = mockWsHandler();
-		const client = makeHandlerOpenCodeAPI({
-			file: {
-				list: vi.fn(async () => [
-					{ name: "src", type: "directory" },
-					{ name: ".git", type: "directory" },
-					{ name: "README.md", type: "file" },
-				]),
-				read: vi.fn(async () => ({ content: "" })),
-			},
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeFileLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetFileList("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "file_list",
-					path: ".",
-					entries: [
-						{ name: "src", type: "directory" },
-						{ name: "README.md", type: "file" },
-					],
-				});
-			}),
-		);
-	});
 });
 
 describe("reloadProviderSessionForClient", () => {
@@ -595,7 +473,7 @@ describe("reloadProviderSessionForClient", () => {
 });
 
 describe("sendModelsStateToClient", () => {
-	it.effect("fetches providers and sends model_list to client", () => {
+	it.effect("fetches providers into the model catalog", () => {
 		const ws = mockWsHandler();
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
@@ -625,26 +503,19 @@ describe("sendModelsStateToClient", () => {
 			makeOverridesStateLive(),
 		);
 
-		return sendModelsStateToClient("client-1").pipe(
+		return getModelsResponse({ clientId: "client-1" }).pipe(
 			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.tap((response) => {
 				expect(client.provider.list).toHaveBeenCalledOnce();
-				// Verify model_list was sent with correct providers
-				expect(ws.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "model_list",
-						providers: expect.arrayContaining([
+				expect(response.providers).toEqual(expect.arrayContaining([
 							expect.objectContaining({ id: "openai" }),
-						]),
-					}),
-				);
+						]));
 			}),
 		);
 	});
 
 	it.effect(
-		"includes variants and contextWindowOptions in claude provider entries in model_list",
+		"includes variants and contextWindowOptions in claude provider entries",
 		() => {
 			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
@@ -682,14 +553,10 @@ describe("sendModelsStateToClient", () => {
 				makeOverridesStateLive(),
 			);
 
-			return sendModelsStateToClient("client-1").pipe(
+			return getModelsResponse({ clientId: "client-1" }).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({
-							type: "model_list",
-							providers: [
+				Effect.tap((response) => {
+					expect(response.providers).toEqual([
 								{
 									id: "claude",
 									name: "Anthropic - claude",
@@ -707,15 +574,13 @@ describe("sendModelsStateToClient", () => {
 										},
 									],
 								},
-							],
-						}),
-					);
+							]);
 				}),
 			);
 		},
 	);
 	it.effect(
-		"sends Claude models when OpenCode provider discovery fails",
+		"returns Claude models when OpenCode provider discovery fails",
 		() => {
 			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
@@ -747,12 +612,10 @@ describe("sendModelsStateToClient", () => {
 				makeOverridesStateLive(),
 			);
 
-			return sendModelsStateToClient("client-1").pipe(
+			return getModelsResponse({ clientId: "client-1" }).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "model_list",
-						providers: [
+				Effect.tap((response) => {
+					expect(response.providers).toEqual([
 							{
 								id: "claude",
 								name: "Anthropic - claude",
@@ -765,8 +628,7 @@ describe("sendModelsStateToClient", () => {
 									},
 								],
 							},
-						],
-					});
+						]);
 				}),
 			);
 		},
@@ -876,13 +738,14 @@ describe("sendModelsStateToClient", () => {
 					providerID: "claude",
 					modelID: "claude-opus-4-7",
 				});
-				yield* sendModelsStateToClient("client-1", "session-1");
+				const response = yield* getModelsResponse({
+					clientId: "client-1",
+					sessionId: "session-1",
+				});
 
 				expect(client.provider.list).toHaveBeenCalledOnce();
 				expect(client.session.get).not.toHaveBeenCalled();
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_list",
-					providers: [
+				expect(response.providers).toEqual([
 						{
 							id: "openai",
 							name: "OpenAI",
@@ -907,11 +770,8 @@ describe("sendModelsStateToClient", () => {
 								},
 							],
 						},
-					],
-				});
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_info",
-					sessionId: "session-1",
+					]);
+				expect(response.active).toEqual({
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
@@ -1270,7 +1130,7 @@ describe("switchVariantForSession", () => {
 	);
 });
 
-describe("handleSwitchContextWindow", () => {
+describe("switchContextWindowForSession", () => {
 	it.effect(
 		"persists supported Claude context window and echoes available options",
 		() => {
@@ -1307,7 +1167,9 @@ describe("handleSwitchContextWindow", () => {
 					providerID: "claude",
 					modelID: "claude-sonnet-4-7",
 				});
-				yield* handleSwitchContextWindow("client-1", {
+				yield* switchContextWindowForSession({
+					clientId: "client-1",
+					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("1m");
@@ -1356,7 +1218,9 @@ describe("handleSwitchContextWindow", () => {
 					modelID: "claude-haiku-4-7",
 				});
 				yield* setContextWindow("session-42", "200k");
-				yield* handleSwitchContextWindow("client-1", {
+				yield* switchContextWindowForSession({
+					clientId: "client-1",
+					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("200k");

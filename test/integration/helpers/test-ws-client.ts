@@ -14,6 +14,7 @@ import {
 	type GetFileContentResponse,
 	type GetFileListResponse,
 	type GetFileTreeResponse,
+	type GetModelsResponse,
 	type GetProjectsResponse,
 	type GetTodoResponse,
 	type LoadMoreHistoryResponse,
@@ -549,6 +550,33 @@ export class TestWsClient {
 		}
 	}
 
+	async getModels(
+		sessionId = this.getActiveSessionId(),
+	): Promise<GetModelsResponse> {
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			return await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						return yield* client.GetModels({
+							projectSlug: "integration-test",
+							...(sessionId ? { sessionId } : {}),
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
 	async getProjects(): Promise<GetProjectsResponse> {
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -844,8 +872,6 @@ export class TestWsClient {
 		await Promise.all([
 			this.waitFor("status", { timeout }),
 			this.waitFor("session_family", { timeout }),
-			this.waitFor("agent_list", { timeout }),
-			this.waitFor("model_list", { timeout }),
 		]);
 		const sessionId = this.getActiveSessionId();
 		if (sessionId) await this.viewSession(sessionId);

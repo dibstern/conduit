@@ -168,19 +168,8 @@
 				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
 			case "default_model_info":
 				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
-			case "model_list": {
-				if (!Array.isArray(properties["providers"])) return "";
-				const counts = (properties["providers"] as Array<{ name?: string; models?: unknown[] }>)
-					.map((prov) => `${prov.name ?? "?"}: ${Array.isArray(prov.models) ? prov.models.length : 0}`)
-					.join(", ");
-				return counts;
-			}
 			case "project_list":
 				return Array.isArray(properties["projects"]) ? `${properties["projects"].length} projects${properties["current"] ? ` current=${properties["current"]}` : ""}` : "";
-			case "command_list":
-				return Array.isArray(properties["commands"]) ? `${properties["commands"].length} commands` : "";
-			case "agent_list":
-				return Array.isArray(properties["agents"]) ? `${properties["agents"].length} agents${properties["activeAgentId"] ? ` active=${properties["activeAgentId"]}` : ""}` : "";
 			default:
 				return "";
 		}

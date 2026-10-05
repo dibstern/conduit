@@ -223,7 +223,7 @@ function createInitMessages(turnCount: number): MockMessage[] {
 			],
 		},
 		{
-			type: "model_list",
+			type: "mock_model_catalog",
 			providers: [
 				{
 					id: "anthropic",
@@ -240,7 +240,7 @@ function createInitMessages(turnCount: number): MockMessage[] {
 			],
 		},
 		{
-			type: "agent_list",
+			type: "mock_agent_catalog",
 			providerScope: { id: "opencode", name: "OpenCode" },
 			agents: [
 				{
@@ -787,7 +787,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 						],
 					},
 					{
-						type: "model_list",
+						type: "mock_model_catalog",
 						providers: [
 							{
 								id: "anthropic",
@@ -804,7 +804,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 						],
 					},
 					{
-						type: "agent_list",
+						type: "mock_agent_catalog",
 						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [
 							{
@@ -960,7 +960,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					],
 				},
 				{
-					type: "model_list",
+					type: "mock_model_catalog",
 					providers: [
 						{
 							id: "anthropic",
@@ -977,7 +977,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 					],
 				},
 				{
-					type: "agent_list",
+					type: "mock_agent_catalog",
 					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [
 						{
@@ -1218,7 +1218,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 						],
 					},
 					{
-						type: "model_list",
+						type: "mock_model_catalog",
 						providers: [
 							{
 								id: "anthropic",
@@ -1235,7 +1235,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 						],
 					},
 					{
-						type: "agent_list",
+						type: "mock_agent_catalog",
 						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [
 							{

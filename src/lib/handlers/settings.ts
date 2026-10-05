@@ -1,10 +1,8 @@
 import { Effect } from "effect";
-import { ProjectManagementServiceTag } from "../domain/relay/Services/project-management-service.js";
 import {
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import type { TodoItem } from "../shared-types.js";
 
@@ -19,17 +17,6 @@ const OPENCODE_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
 
 export const normalizeProjectTitle = (title: string): string =>
 	title.trim().slice(0, MAX_PROJECT_TITLE_LENGTH);
-
-export const handleGetCommands = (
-	clientId: string,
-	_payload: Record<string, never>,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const activeSessionId = wsHandler.getClientSession(clientId);
-		const commands = yield* getCommandsForSession(activeSessionId);
-		wsHandler.sendTo(clientId, { type: "command_list", commands });
-	});
 
 export const getCommandsForSession = (activeSessionId: string | undefined) =>
 	Effect.gen(function* () {
@@ -116,24 +103,6 @@ export const getSkillNamesForSession = (sessionId: string) =>
 				)
 				.map((command) => command.name),
 		);
-	});
-
-export const handleGetProjects = (
-	clientId: string,
-	_payload: Record<string, never>,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const projectService = yield* ProjectManagementServiceTag;
-		const projects = yield* projectService
-			.list()
-			.pipe(Effect.mapError((error) => error.cause));
-		const current = yield* projectService.currentSlug();
-		wsHandler.sendTo(clientId, {
-			type: "project_list",
-			projects,
-			current,
-		});
 	});
 
 export const getTodoState = (): Effect.Effect<readonly TodoItem[]> =>

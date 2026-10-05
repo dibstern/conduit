@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	applyGetFileTreeResponse,
 	buildMentionInsertion,
 	extractAtQuery,
 	fileTreeState,
 	filterFiles,
-	handleFileTree,
 } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
 
 beforeEach(() => {
@@ -106,20 +106,15 @@ describe("filterFiles", () => {
 	});
 });
 
-describe("handleFileTree", () => {
+describe("applyGetFileTreeResponse", () => {
 	it("populates entries and sets loaded", () => {
-		handleFileTree({
-			type: "file_tree" as const,
+		applyGetFileTreeResponse({
+			projectSlug: "demo",
 			entries: ["a.ts", "b.ts", "src/"],
 		});
 		expect(fileTreeState.entries).toEqual(["a.ts", "b.ts", "src/"]);
 		expect(fileTreeState.loaded).toBe(true);
 		expect(fileTreeState.loading).toBe(false);
-	});
-
-	it("ignores non-array entries", () => {
-		handleFileTree({ type: "file_tree" as const, entries: "bad" as unknown });
-		expect(fileTreeState.entries).toHaveLength(0);
 	});
 });
 

@@ -492,18 +492,6 @@ export interface ProjectInfo {
 	instanceId?: string;
 }
 
-/** A file version from file history */
-export interface FileVersion {
-	id: string;
-	path: string;
-	content: string;
-	timestamp: number;
-	source: "edit" | "write" | "external";
-	toolName?: string;
-	description?: string;
-	[key: string]: unknown;
-}
-
 // Schema definitions for each RelayMessage variant. Built with @effect/schema
 // to provide runtime validation and type derivation.
 
@@ -536,56 +524,6 @@ const ContextWindowOptionSchema = Schema.Struct({
 	isDefault: Schema.optional(Schema.Boolean),
 });
 
-const ProviderInfoSchema = Schema.Struct({
-	id: Schema.String,
-	instanceId: Schema.optional(Schema.String),
-	name: Schema.String,
-	configured: Schema.Boolean,
-	models: Schema.Array(
-		Schema.Struct({
-			id: Schema.String,
-			name: Schema.String,
-			provider: Schema.String,
-			cost: Schema.optional(
-				Schema.Struct({
-					input: Schema.optional(Schema.Number),
-					output: Schema.optional(Schema.Number),
-				}),
-			),
-			limit: Schema.optional(
-				Schema.Struct({
-					context: Schema.optional(Schema.Number),
-					output: Schema.optional(Schema.Number),
-				}),
-			),
-			variants: Schema.optional(Schema.Array(Schema.String)),
-			contextWindowOptions: Schema.optional(
-				Schema.Array(ContextWindowOptionSchema),
-			),
-			routingOptions: Schema.optional(Schema.Array(ContextWindowOptionSchema)),
-		}),
-	),
-});
-
-const AgentInfoSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	model: Schema.optional(Schema.String),
-});
-
-const AgentProviderScopeSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-});
-
-const CommandInfoSchema = Schema.Struct({
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	args: Schema.optional(Schema.String),
-	builtin: Schema.optional(Schema.Boolean),
-});
-
 const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
@@ -596,13 +534,6 @@ const ProjectInfoSchema = Schema.Struct({
 	instanceId: Schema.optional(Schema.String),
 });
 
-const FileEntrySchema = Schema.Struct({
-	name: Schema.String,
-	type: Schema.Literal("file", "directory"),
-	size: Schema.optional(Schema.Number),
-	modified: Schema.optional(Schema.Number),
-});
-
 const PtyInfoSchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
@@ -610,16 +541,6 @@ const PtyInfoSchema = Schema.Struct({
 	cwd: Schema.String,
 	status: Schema.Literal("running", "exited"),
 	pid: Schema.Number,
-});
-
-const FileVersionSchema = Schema.Struct({
-	id: Schema.String,
-	path: Schema.String,
-	content: Schema.String,
-	timestamp: Schema.Number,
-	source: Schema.Literal("edit", "write", "external"),
-	toolName: Schema.optional(Schema.String),
-	description: Schema.optional(Schema.String),
 });
 
 const InstanceStatusSchema = Schema.Literal(
@@ -840,20 +761,6 @@ const DefaultPermissionModeInfoSchema = Schema.Struct({
 	mode: SessionPermissionModeSchema,
 });
 
-const ModelListSchema = Schema.Struct({
-	type: Schema.Literal("model_list"),
-	instanceId: Schema.optional(Schema.String),
-	providers: Schema.Array(ProviderInfoSchema),
-});
-
-const AgentListSchema = Schema.Struct({
-	type: Schema.Literal("agent_list"),
-	instanceId: Schema.optional(Schema.String),
-	providerScope: AgentProviderScopeSchema,
-	agents: Schema.Array(AgentInfoSchema),
-	activeAgentId: Schema.optional(Schema.String),
-});
-
 const VisibilityInfoSchema = Schema.Struct({
 	type: Schema.Literal("visibility_info"),
 	hiddenModels: Schema.Array(Schema.String),
@@ -863,11 +770,6 @@ const VisibilityInfoSchema = Schema.Struct({
 const ClaudeSettingsInfoSchema = Schema.Struct({
 	type: Schema.Literal("claude_settings_info"),
 	overrides: ClaudeSettingsOverridesSchema,
-});
-
-const CommandListSchema = Schema.Struct({
-	type: Schema.Literal("command_list"),
-	commands: Schema.Array(CommandInfoSchema),
 });
 
 const ProjectListSchema = Schema.Struct({
@@ -883,30 +785,6 @@ const DaemonSessionsChangedSchema = Schema.Struct({
 const ProjectAttachedSchema = Schema.Struct({
 	type: Schema.Literal("project_attached"),
 	slug: Schema.String,
-});
-
-const FileListSchema = Schema.Struct({
-	type: Schema.Literal("file_list"),
-	path: Schema.String,
-	entries: Schema.Array(FileEntrySchema),
-});
-
-const FileContentSchema = Schema.Struct({
-	type: Schema.Literal("file_content"),
-	path: Schema.String,
-	content: Schema.String,
-	binary: Schema.optional(Schema.Boolean),
-});
-
-const FileTreeSchema = Schema.Struct({
-	type: Schema.Literal("file_tree"),
-	entries: Schema.Array(Schema.String),
-});
-
-const FileChangedSchema = Schema.Struct({
-	type: Schema.Literal("file_changed"),
-	path: Schema.String,
-	changeType: Schema.Literal("edited", "external"),
 });
 
 const PartRemovedSchema = Schema.Struct({
@@ -954,27 +832,6 @@ const PtyListSchema = Schema.Struct({
 const ConnectionStatusSchema = Schema.Struct({
 	type: Schema.Literal("connection_status"),
 	status: Schema.Literal("disconnected", "reconnecting", "connected"),
-});
-
-const SkipPermissionsSchema = Schema.Struct({
-	type: Schema.Literal("skip_permissions"),
-});
-
-const BannerSchema = Schema.Struct({
-	type: Schema.Literal("banner"),
-	config: Schema.Struct({
-		id: Schema.optional(Schema.String),
-		variant: Schema.optional(Schema.String),
-		icon: Schema.optional(Schema.String),
-		text: Schema.optional(Schema.String),
-		dismissible: Schema.optional(Schema.Boolean),
-	}),
-});
-
-const FileHistoryResultSchema = Schema.Struct({
-	type: Schema.Literal("file_history_result"),
-	path: Schema.String,
-	versions: Schema.Array(FileVersionSchema),
 });
 
 const UserMessageSchema = Schema.Struct({
@@ -1038,20 +895,9 @@ const InputSyncSchema = Schema.Struct({
 	from: Schema.optional(Schema.String),
 });
 
-const UpdateAvailableSchema = Schema.Struct({
-	type: Schema.Literal("update_available"),
-	version: Schema.optional(Schema.String),
-});
-
 const InstanceListSchema = Schema.Struct({
 	type: Schema.Literal("instance_list"),
 	instances: Schema.Array(OpenCodeInstanceSchema),
-});
-
-const InstanceStatusMsgSchema = Schema.Struct({
-	type: Schema.Literal("instance_status"),
-	instanceId: Schema.String,
-	status: InstanceStatusSchema,
 });
 
 const InstanceUpdateSchema = Schema.Struct({
@@ -1089,19 +935,6 @@ const PermissionModeInfoSchema = Schema.Struct({
 const SessionGoalChangedSchema = Schema.Struct({
 	type: Schema.Literal("session.goal_changed"),
 	...SessionGoalChangedPayloadSchema.fields,
-});
-
-const ProxyDetectedSchema = Schema.Struct({
-	type: Schema.Literal("proxy_detected"),
-	found: Schema.Boolean,
-	port: Schema.Number,
-});
-
-const ScanResultSchema = Schema.Struct({
-	type: Schema.Literal("scan_result"),
-	discovered: Schema.Array(Schema.Number),
-	lost: Schema.Array(Schema.Number),
-	active: Schema.Array(Schema.Number),
 });
 
 const NotificationEventSchema = Schema.Struct({
@@ -1143,20 +976,12 @@ export const RelayMessageSchema = Schema.Union(
 	ModelInfoMsgSchema,
 	DefaultModelInfoSchema,
 	DefaultPermissionModeInfoSchema,
-	ModelListSchema,
-	AgentListSchema,
 	VisibilityInfoSchema,
 	ClaudeSettingsInfoSchema,
-	CommandListSchema,
 	// Projects
 	ProjectListSchema,
 	DaemonSessionsChangedSchema,
 	ProjectAttachedSchema,
-	// File browser
-	FileListSchema,
-	FileContentSchema,
-	FileTreeSchema,
-	FileChangedSchema,
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
@@ -1168,11 +993,6 @@ export const RelayMessageSchema = Schema.Union(
 	PtyListSchema,
 	// Connection status
 	ConnectionStatusSchema,
-	// Banners
-	SkipPermissionsSchema,
-	BannerSchema,
-	// File history
-	FileHistoryResultSchema,
 	// Cache / Replay
 	UserMessageSchema,
 	// Session deletion
@@ -1184,10 +1004,8 @@ export const RelayMessageSchema = Schema.Union(
 	ProtocolVersionSchema,
 	ServerUpdateSchema,
 	InputSyncSchema,
-	UpdateAvailableSchema,
 	// Instance Management
 	InstanceListSchema,
-	InstanceStatusMsgSchema,
 	InstanceUpdateSchema,
 	// Provider session reload
 	ProviderSessionReloadedSchema,
@@ -1196,8 +1014,6 @@ export const RelayMessageSchema = Schema.Union(
 	ContextWindowInfoSchema,
 	PermissionModeInfoSchema,
 	SessionGoalChangedSchema,
-	ProxyDetectedSchema,
-	ScanResultSchema,
 	// Cross-session notifications
 	NotificationEventSchema,
 );

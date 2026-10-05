@@ -536,16 +536,17 @@ export function toProviderCommands(
 	);
 }
 
-export function handleAgentList(
-	msg: Extract<RelayMessage, { type: "agent_list" }>,
-): void {
-	const { agents, activeAgentId, providerScope } = msg;
-	if (Array.isArray(agents)) {
-		serverDiscovery.agents = agents;
-	}
-	if (providerScope) {
-		serverDiscovery.agentProviderScope = providerScope;
-	}
+export function handleAgentList({
+	agents,
+	activeAgentId,
+	providerScope,
+}: {
+	readonly agents: readonly AgentInfo[];
+	readonly providerScope: AgentProviderScope;
+	readonly activeAgentId?: string;
+}): void {
+	serverDiscovery.agents = [...agents];
+	serverDiscovery.agentProviderScope = providerScope;
 	if (activeAgentId) {
 		serverDiscovery.activeAgentId = activeAgentId;
 	} else {
@@ -559,7 +560,6 @@ export function applyGetAgentsResponse(
 	sessionId?: string,
 ): void {
 	handleAgentList({
-		type: "agent_list",
 		providerScope: response.providerScope,
 		agents: response.agents.map((agent) => ({
 			id: agent.id,
@@ -578,18 +578,16 @@ export function applyGetAgentsResponse(
 	}
 }
 
-export function handleModelList(
-	msg: Extract<RelayMessage, { type: "model_list" }>,
-): void {
-	const { providers } = msg;
-	if (Array.isArray(providers)) {
-		serverDiscovery.providers = providers;
-	}
+export function handleModelList({
+	providers,
+}: {
+	readonly providers: readonly ProviderInfo[];
+}): void {
+	serverDiscovery.providers = [...providers];
 }
 
 export function applyGetModelsResponse(response: GetModelsResponse): void {
 	handleModelList({
-		type: "model_list",
 		providers: providersFromGetModelsResponse(response.providers),
 	});
 	if (response.active) {
@@ -641,19 +639,17 @@ export function handleModelInfo(
 	choice.providerId = null;
 }
 
-export function handleCommandList(
-	msg: Extract<RelayMessage, { type: "command_list" }>,
-): void {
-	const { commands } = msg;
-	if (Array.isArray(commands)) {
-		serverDiscovery.commands = commands;
-		serverDiscovery.commandsFetched = true;
-	}
+export function handleCommandList({
+	commands,
+}: {
+	readonly commands: readonly CommandInfo[];
+}): void {
+	serverDiscovery.commands = [...commands];
+	serverDiscovery.commandsFetched = true;
 }
 
 export function applyGetCommandsResponse(response: GetCommandsResponse): void {
 	handleCommandList({
-		type: "command_list",
 		commands: response.commands.map((command) => ({
 			name: command.name,
 			...(command.description != null

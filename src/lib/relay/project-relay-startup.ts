@@ -271,9 +271,6 @@ function wireStartupCallbacks(
 				...(config.getInstances != null && {
 					getInstances: config.getInstances,
 				}),
-				...(config.getCachedUpdate != null && {
-					getCachedUpdate: config.getCachedUpdate,
-				}),
 			},
 		});
 	});

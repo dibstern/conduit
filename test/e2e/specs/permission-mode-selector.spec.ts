@@ -34,7 +34,7 @@ const sessionList: MockMessage = {
 };
 
 const modelList: MockMessage = {
-	type: "model_list",
+	type: "mock_model_catalog",
 	providers: [
 		{
 			id: "anthropic",

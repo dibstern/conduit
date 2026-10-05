@@ -396,32 +396,6 @@ describe("instance messages", () => {
 		}
 	});
 
-	it("instance_status is a valid RelayMessage type", () => {
-		const msg: import("../../../src/lib/shared-types.js").RelayMessage = {
-			type: "instance_status",
-			instanceId: "personal",
-			status: "healthy",
-		};
-		expect(msg.type).toBe("instance_status");
-		if (msg.type === "instance_status") {
-			expect(msg.instanceId).toBe("personal");
-			expect(msg.status).toBe("healthy");
-		}
-	});
-
-	it("instance_status supports all status values", () => {
-		const statuses: import("../../../src/lib/shared-types.js").InstanceStatus[] =
-			["starting", "healthy", "unhealthy", "stopped"];
-		for (const status of statuses) {
-			const msg: import("../../../src/lib/shared-types.js").RelayMessage = {
-				type: "instance_status",
-				instanceId: "test",
-				status,
-			};
-			expect(msg.type).toBe("instance_status");
-		}
-	});
-
 	it("receiving instance_list message populates instanceState via handleMessage", () => {
 		handleMessage({
 			type: "instance_list",
@@ -455,39 +429,6 @@ describe("instance messages", () => {
 		expect(personal.id).toBe("personal");
 		expect(work.id).toBe("work");
 	});
-
-	it("receiving instance_status message updates instance status via handleMessage", () => {
-		// Seed the store with an initial list
-		handleMessage({
-			type: "instance_list",
-			instances: [
-				{
-					id: "personal",
-					name: "Personal",
-					port: 4096,
-					managed: true,
-					status: "healthy",
-					restartCount: 0,
-					createdAt: Date.now(),
-				},
-			],
-		});
-
-		const personal = instanceState.instances[0];
-		assert.exists(personal, "expected personal instance");
-		expect(personal.status).toBe("healthy");
-
-		// Now dispatch a status update
-		handleMessage({
-			type: "instance_status",
-			instanceId: "personal",
-			status: "unhealthy",
-		});
-
-		const updatedPersonal = instanceState.instances[0];
-		assert.exists(updatedPersonal, "expected personal instance");
-		expect(updatedPersonal.status).toBe("unhealthy");
-	});
 });
 
 describe("instance WS message contracts", () => {
@@ -513,72 +454,5 @@ describe("instance WS message contracts", () => {
 			name: "Test",
 			status: "healthy",
 		});
-	});
-
-	it("instance_status message updates the correct instance", () => {
-		// Pre-populate
-		handleMessage({
-			type: "instance_list",
-			instances: [
-				{
-					id: "a",
-					name: "A",
-					port: 1,
-					managed: true,
-					status: "healthy" as const,
-					restartCount: 0,
-					createdAt: 1,
-				},
-				{
-					id: "b",
-					name: "B",
-					port: 2,
-					managed: true,
-					status: "stopped" as const,
-					restartCount: 0,
-					createdAt: 2,
-				},
-			],
-		});
-
-		handleMessage({
-			type: "instance_status",
-			instanceId: "b",
-			status: "starting",
-		});
-
-		expect(instanceState.instances.find((i) => i.id === "b")?.status).toBe(
-			"starting",
-		);
-		// 'a' unchanged
-		expect(instanceState.instances.find((i) => i.id === "a")?.status).toBe(
-			"healthy",
-		);
-	});
-
-	it("instance_status for unknown instance is a no-op", () => {
-		handleMessage({
-			type: "instance_list",
-			instances: [
-				{
-					id: "a",
-					name: "A",
-					port: 1,
-					managed: true,
-					status: "healthy" as const,
-					restartCount: 0,
-					createdAt: 1,
-				},
-			],
-		});
-
-		handleMessage({
-			type: "instance_status",
-			instanceId: "nonexistent",
-			status: "stopped",
-		});
-
-		expect(instanceState.instances).toHaveLength(1);
-		expect(instanceState.instances[0]?.status).toBe("healthy");
 	});
 });

@@ -4,6 +4,7 @@ import {
 	effortOptions,
 	openModelPicker,
 	requireRelayControl,
+	serveModelCatalog,
 } from "./shared.js";
 
 const levels = ["low", "medium", "high", "xhigh", "max"];
@@ -61,8 +62,8 @@ export async function seedComposerPickerCatalog(
 	const model = claude ? "claude-sonnet-5" : "claude-sonnet-4";
 	const provider = claude ? "claude" : "anthropic";
 	const sessionId = new URL(page.url()).pathname.split("/")[2];
+	await serveModelCatalog(page, { providers, active: { model, provider } });
 	await requireRelayControl(page).sendMessages([
-		{ type: "model_list", providers },
 		{ type: "default_model_info", model, provider },
 		// An open session shows its own model, not the default.
 		...(sessionId ? [{ type: "model_info", sessionId, model, provider }] : []),

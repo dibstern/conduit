@@ -113,10 +113,7 @@ describe("InstanceModelPicker", () => {
 			provider: "claude",
 			variant: "",
 		});
-		handleModelList({
-			type: "model_list",
-			providers: [CLAUDE_PROVIDER],
-		});
+		handleModelList({ providers: [CLAUDE_PROVIDER] });
 		sessionState.currentId = "session-1";
 	});
 
@@ -158,7 +155,6 @@ describe("InstanceModelPicker", () => {
 	])("labels a restored 1M-window model by its catalog entry at width %i", async (width, expected) => {
 		window.innerWidth = width;
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					...CLAUDE_PROVIDER,
@@ -298,7 +294,6 @@ describe("InstanceModelPicker", () => {
 
 	it("locks the harness to the bound instance for an existing session", async () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				CLAUDE_PROVIDER,
 				{

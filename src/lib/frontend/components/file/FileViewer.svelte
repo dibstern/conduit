@@ -2,7 +2,6 @@
 
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import type { RelayMessage } from "../../types.js";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
@@ -152,9 +151,11 @@
 
 	$effect(() => {
 		if (!visible) return;
-		const unsub = onFileBrowser((msg: RelayMessage) => {
-			if (msg.type === "file_content" && (!uiState.fileViewerPath || msg.path === uiState.fileViewerPath)) {
-				const rawContent = msg.content ?? "";
+		const unsub = onFileBrowser((reply) => {
+			if (reply.kind !== "content") return;
+			const msg = reply.response;
+			if (!uiState.fileViewerPath || msg.path === uiState.fileViewerPath) {
+				const rawContent = msg.content;
 				filePath = msg.path;
 				binary = msg.binary ?? false;
 				const isTruncated = rawContent.length > 50_000;

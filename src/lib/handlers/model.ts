@@ -236,58 +236,6 @@ export function groupGeoRoutingModels<T extends { id: string; name: string }>(
 	return result;
 }
 
-const toSharedProviders = (
-	providers: GetModelsResponse["providers"],
-): ProviderInfo[] =>
-	providers.map((provider) => ({
-		id: provider.id,
-		...(provider.instanceId === undefined
-			? {}
-			: { instanceId: provider.instanceId }),
-		name: provider.name,
-		configured: provider.configured,
-		models: provider.models.map((model) => ({
-			id: model.id,
-			name: model.name,
-			provider: model.provider,
-			...(model.cost
-				? {
-						cost: {
-							...(model.cost.input != null ? { input: model.cost.input } : {}),
-							...(model.cost.output != null
-								? { output: model.cost.output }
-								: {}),
-						},
-					}
-				: {}),
-			...(model.limit
-				? {
-						limit: {
-							...(model.limit.context != null
-								? { context: model.limit.context }
-								: {}),
-							...(model.limit.output != null
-								? { output: model.limit.output }
-								: {}),
-						},
-					}
-				: {}),
-			...(model.variants ? { variants: [...model.variants] } : {}),
-			...(model.contextWindowOptions
-				? {
-						contextWindowOptions:
-							cloneContextWindowOptions(model.contextWindowOptions) ?? [],
-					}
-				: {}),
-			...(model.routingOptions
-				? {
-						routingOptions:
-							cloneContextWindowOptions(model.routingOptions) ?? [],
-					}
-				: {}),
-		})),
-	}));
-
 export const getModelsResponse = (
 	input: {
 		readonly projectSlug?: string;
@@ -548,13 +496,6 @@ export const sendModelsStateToClient = (
 		});
 		const wsHandler = yield* WebSocketHandlerTag;
 
-		wsHandler.sendTo(clientId, {
-			type: "model_list",
-			...(response.instanceId === undefined
-				? {}
-				: { instanceId: response.instanceId }),
-			providers: toSharedProviders(response.providers),
-		});
 		if (response.active) {
 			wsHandler.sendTo(clientId, {
 				type: "model_info",

@@ -97,7 +97,6 @@ describe("shouldCache", () => {
 
 	it("returns false for non-chat types", async () => {
 		const nonCacheable = [
-			"file_changed",
 			"permission_request",
 			"permission_resolved",
 			"pty_created",
@@ -420,19 +419,19 @@ describe("handleSSEEventEffect", () => {
 	it("does not record non-cacheable events to cache", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
-			type: "file_changed",
-			path: "/foo.ts",
-			changeType: "edited",
+			type: "compaction",
 			sessionId: "active-session",
-		} as RelayMessage;
+			state: "started",
+			detail: "",
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
 		});
 
 		const event: OpenCodeEvent = {
-			type: "file.edited",
-			properties: { sessionID: "active-session", file: "/foo.ts" },
+			type: "session.compacted",
+			properties: { sessionID: "active-session" },
 		};
 		await runSSEEvent(deps, event);
 

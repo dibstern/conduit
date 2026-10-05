@@ -1,6 +1,6 @@
 import { seedSessions } from "../stores/session-fixtures.js";
 // Verifies that the scanInFlight flag is properly managed across all outcomes:
-// success (scan_result), error (INSTANCE_ERROR), and state reset.
+// success (ScanNow reply), error (INSTANCE_ERROR), and state reset.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,10 +10,10 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
+	applyScanNowResponse,
 	beginScan,
 	clearInstanceState,
 	getScanResult,
-	handleScanResult,
 	isScanInFlight,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -36,13 +36,13 @@ describe("scanInFlight state management", () => {
 		expect(isScanInFlight()).toBe(true);
 	});
 
-	it("handleScanResult clears scanInFlight", () => {
+	it("applyScanNowResponse clears scanInFlight", () => {
 		clearInstanceState();
 		beginScan();
 		expect(isScanInFlight()).toBe(true);
 
-		handleScanResult({
-			type: "scan_result",
+		applyScanNowResponse({
+			projectSlug: "demo",
 			discovered: [4098],
 			lost: [],
 			active: [4096, 4098],
@@ -60,8 +60,8 @@ describe("scanInFlight state management", () => {
 		clearInstanceState();
 		beginScan();
 
-		handleScanResult({
-			type: "scan_result",
+		applyScanNowResponse({
+			projectSlug: "demo",
 			discovered: [],
 			lost: [],
 			active: [4096, 4097],
@@ -81,7 +81,7 @@ describe("scanInFlight state management", () => {
 		beginScan();
 		expect(isScanInFlight()).toBe(true);
 
-		// Server sends error instead of scan_result.
+		// Server sends error instead of a scan reply.
 		const errorMsg: RelayMessage = {
 			type: "system_error",
 			code: "INSTANCE_ERROR",

@@ -1,7 +1,7 @@
 // Verifies Bug C: when a browser connects, the relay sends all the initial
 // state needed for the UI to populate (session, agents, models, etc.)
 
-import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -42,19 +42,12 @@ describe("Integration: Initial State on Connect", () => {
 		await client.close();
 	});
 
-	it("sends agent_list on connect", async () => {
+	it("serves agents over GetAgents after connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		await client.waitFor("agent_list");
-		const msg = client.getReceivedOfType("agent_list");
-		expect(msg.length).toBeGreaterThan(0);
-		const agentList = msg[0];
-		assert.exists(agentList, "expected an agent list message");
-		const agents = agentList["agents"] as Array<{ id: string; name: string }>;
-		expect(Array.isArray(agents)).toBe(true);
+		const { agents } = await client.getAgents();
 		// OpenCode should have at least one agent
 		expect(agents.length).toBeGreaterThan(0);
-		// Each agent should have id and name
 		for (const a of agents) {
 			expect(a.id).toBeTruthy();
 			expect(a.name).toBeTruthy();
@@ -62,20 +55,10 @@ describe("Integration: Initial State on Connect", () => {
 		await client.close();
 	});
 
-	it("sends model_list on connect", async () => {
+	it("serves models over GetModels after connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		await client.waitFor("model_list");
-		const msg = client.getReceivedOfType("model_list");
-		expect(msg.length).toBeGreaterThan(0);
-		const modelList = msg[0];
-		assert.exists(modelList, "expected a model list message");
-		const providers = modelList["providers"] as Array<{
-			id: string;
-			name: string;
-			models: unknown[];
-		}>;
-		expect(Array.isArray(providers)).toBe(true);
+		const { providers } = await client.getModels();
 		expect(providers.length).toBeGreaterThan(0);
 		await client.close();
 	});

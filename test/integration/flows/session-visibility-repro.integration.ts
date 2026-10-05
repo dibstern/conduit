@@ -248,15 +248,11 @@ async function bindOpenCodeSession(
 	client: TestWsClient,
 	title: string,
 ): Promise<string> {
-	const modelList = await client.waitFor("model_list");
-	const providers = modelList["providers"] as Array<{
-		id: string;
-		models: Array<{ id: string }>;
-	}>;
-	const provider = providers?.find(
+	const { providers } = await client.getModels();
+	const provider = providers.find(
 		(candidate) => candidate.id !== "claude" && candidate.models.length > 0,
 	);
-	if (!provider) throw new Error("model_list has no OpenCode provider");
+	if (!provider) throw new Error("GetModels has no OpenCode provider");
 	const model = provider.models[0];
 	if (!model) throw new Error("OpenCode provider has no models");
 
@@ -464,13 +460,10 @@ describe("Integration: Session Visibility Repros", () => {
 		const detourId = client1.getActiveSessionId();
 		if (!detourId) throw new Error("No initial session");
 
-		// Providers come from the init model_list broadcast.
-		const modelList = await client1.waitFor("model_list");
-		const providers = modelList["providers"] as Array<{
-			id: string;
-			models: Array<{ id: string }>;
-		}>;
-		const provider = providers?.find((p) => p.models.length > 0);
+		const { providers } = await client1.getModels();
+		const provider = providers.find(
+			(p) => p.id !== "claude" && p.models.length > 0,
+		);
 		expect(provider).toBeDefined();
 		assert.exists(provider, "expected a provider with models");
 		const model = provider.models[0];

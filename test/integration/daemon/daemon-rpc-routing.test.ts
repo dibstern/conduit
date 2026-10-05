@@ -326,18 +326,20 @@ describe("daemon shared RPC routing", () => {
 					return yield* Effect.fail(new Error("Expected both relays to start"));
 				}
 				handlerA.broadcast({
-					type: "banner",
-					config: { id: "from-a", text: "from-a" },
+					type: "system_error",
+					code: "from-a",
+					message: "from-a",
 				});
 				handlerB.broadcast({
-					type: "banner",
-					config: { id: "from-b", text: "from-b" },
+					type: "system_error",
+					code: "from-b",
+					message: "from-b",
 				});
 				yield* waitFor(() => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "banner" &&
+								message["type"] === "system_error" &&
 								JSON.stringify(message).includes("from-b"),
 						),
 					).toBe(true);
@@ -345,7 +347,7 @@ describe("daemon shared RPC routing", () => {
 				expect(
 					eventMessages.some(
 						(message) =>
-							message["type"] === "banner" &&
+							message["type"] === "system_error" &&
 							JSON.stringify(message).includes("from-a"),
 					),
 				).toBe(false);

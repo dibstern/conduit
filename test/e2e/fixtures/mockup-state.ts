@@ -87,7 +87,7 @@ export const initMessages: MockMessage[] = [
 		],
 	},
 	{
-		type: "model_list",
+		type: "mock_model_catalog",
 		providers: [
 			{
 				id: "anthropic",
@@ -109,14 +109,14 @@ export const initMessages: MockMessage[] = [
 		],
 	},
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
 		],
 	},
 	{
-		type: "command_list",
+		type: "mock_command_catalog",
 		commands: [
 			{ name: "code-review", description: "Review the current diff" },
 			{ name: "commit", description: "Create a git commit" },
@@ -164,7 +164,7 @@ export const dualDriverProviders = [
 ];
 
 export const dualDriverModelList: MockMessage = {
-	type: "model_list",
+	type: "mock_model_catalog",
 	providers: dualDriverProviders,
 };
 
@@ -180,13 +180,13 @@ export const openCodeInstanceAgents = [
 ];
 
 export const claudeAgentList: MockMessage = {
-	type: "agent_list",
+	type: "mock_agent_catalog",
 	providerScope: { id: "claude", name: "Claude" },
 	agents: claudeInstanceAgents,
 };
 
 export const openCodeAgentList: MockMessage = {
-	type: "agent_list",
+	type: "mock_agent_catalog",
 	providerScope: { id: "opencode", name: "OpenCode" },
 	agents: openCodeInstanceAgents,
 };
@@ -196,7 +196,7 @@ export const openCodeAgentList: MockMessage = {
  *  composer's first send creates the session (CreateSession + instanceId). */
 export const unboundInitMessages: MockMessage[] = [
 	...initMessages.filter(
-		(m) => m.type !== "model_list" && m.type !== "agent_list",
+		(m) => m.type !== "mock_model_catalog" && m.type !== "mock_agent_catalog",
 	),
 	dualDriverModelList,
 	openCodeAgentList,
@@ -278,11 +278,11 @@ function modelExecutionInitMessages(
 		...unboundInitMessages.filter(
 			(message) =>
 				message.type !== "model_info" &&
-				message.type !== "model_list" &&
-				message.type !== "agent_list",
+				message.type !== "mock_model_catalog" &&
+				message.type !== "mock_agent_catalog",
 		),
 		{ type: "model_info", model: "opus[1m]", provider: "claude" },
-		{ type: "model_list", providers: modelExecutionProviders },
+		{ type: "mock_model_catalog", providers: modelExecutionProviders },
 		claudeAgentList,
 		// The header's git pill names the project's primary folder.
 		{
@@ -342,7 +342,8 @@ export const modelExecutionMockups = {
 	},
 };
 
-/** Bind an existing session to the Claude harness (locked-rail mode). */
+/** Bind an existing session to the Claude harness (locked-rail mode).
+ *  Its agents come from GetAgents, which resolves the session's instance. */
 export const claudeBoundSessionMessages: MockMessage[] = [
 	{
 		type: "model_info",
@@ -350,7 +351,6 @@ export const claudeBoundSessionMessages: MockMessage[] = [
 		model: "claude-sonnet-4-5",
 		provider: "claude",
 	},
-	claudeAgentList,
 ];
 
 /** Bind an existing session to the OpenCode harness (locked-rail mode). */
@@ -361,7 +361,6 @@ export const openCodeBoundSessionMessages: MockMessage[] = [
 		model: "claude-sonnet-4",
 		provider: "anthropic",
 	},
-	openCodeAgentList,
 ];
 
 // Turn 1 response (completed)
@@ -547,33 +546,20 @@ export const singleInstanceList: MockMessage = {
 	],
 };
 
-/** Status update: "work" becomes healthy */
-export const workInstanceHealthy: MockMessage = {
-	type: "instance_status",
-	instanceId: "work",
-	status: "healthy",
-};
-
-/** Status update: "personal" becomes unhealthy */
-export const personalInstanceUnhealthy: MockMessage = {
-	type: "instance_status",
-	instanceId: "personal",
-	status: "unhealthy",
-};
-
-/** Status update: "work" becomes stopped */
-export const workInstanceStopped: MockMessage = {
-	type: "instance_status",
-	instanceId: "work",
-	status: "stopped",
-};
-
-/** Status update: "work" becomes starting */
-export const workInstanceStarting: MockMessage = {
-	type: "instance_status",
-	instanceId: "work",
-	status: "starting",
-};
+/** `multiInstanceList`'s instances with the given statuses replaced. */
+export function instancesWith(
+	statuses: Record<string, string>,
+): Array<{ id: string; name: string; status: string }> {
+	const instances = multiInstanceList["instances"] as Array<{
+		id: string;
+		name: string;
+		status: string;
+	}>;
+	return instances.map((instance) => ({
+		...instance,
+		status: statuses[instance.id] ?? instance.status,
+	}));
+}
 
 /** Project list with instanceId bindings — use with multi-instance init */
 export const multiInstanceProjectList: MockMessage = {
@@ -723,7 +709,7 @@ export const singleInstanceInitMessages: MockMessage[] = [
 
 /** Model list with variants (thinking levels) on one model. */
 export const variantModelList: MockMessage = {
-	type: "model_list",
+	type: "mock_model_catalog",
 	providers: [
 		{
 			id: "anthropic",
@@ -789,7 +775,7 @@ export const variantInitMessages: MockMessage[] = [
 	},
 	variantModelList,
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
@@ -833,7 +819,7 @@ export const noVariantInitMessages: MockMessage[] = [
 	},
 	variantModelList,
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
@@ -849,7 +835,7 @@ export const noVariantInitMessages: MockMessage[] = [
 
 /** Model list with Claude context-window options on one Sonnet model. */
 export const contextWindowModelList: MockMessage = {
-	type: "model_list",
+	type: "mock_model_catalog",
 	providers: [
 		{
 			id: "anthropic",
@@ -905,7 +891,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 	},
 	contextWindowModelList,
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
@@ -952,7 +938,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 	},
 	contextWindowModelList,
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },

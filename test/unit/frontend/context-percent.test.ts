@@ -35,13 +35,9 @@ function _resultMsg(usage: {
 // The probe's model rows carry fields the frontend `ModelInfo` does not
 // declare, so this goes in through the wire shape like the real thing does.
 function setClaudeProvider(
-	models: Extract<
-		RelayMessage,
-		{ type: "model_list" }
-	>["providers"][number]["models"],
+	models: Parameters<typeof handleModelList>[0]["providers"][number]["models"],
 ): void {
 	handleModelList({
-		type: "model_list",
 		providers: [{ id: "claude", name: "Claude", configured: true, models }],
 	});
 }

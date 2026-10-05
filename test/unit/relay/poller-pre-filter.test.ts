@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyPollerBatch } from "../../../src/lib/relay/poller-pre-filter.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import {
+	classifyPollerBatch,
+	METADATA_TYPES,
+} from "../../../src/lib/relay/poller-pre-filter.js";
+import {
+	KNOWN_RELAY_MESSAGE_TYPES,
+	type RelayMessage,
+} from "../../../src/lib/shared-types.js";
 
 describe("classifyPollerBatch", () => {
 	it("returns hasContentActivity true for delta messages", () => {
@@ -58,5 +64,19 @@ describe("classifyPollerBatch", () => {
 	it("returns hasContentActivity false for client_count", () => {
 		const events = [{ type: "client_count" }] as RelayMessage[];
 		expect(classifyPollerBatch(events).hasContentActivity).toBe(false);
+	});
+
+	// file_changed was never metadata, and poller batches (message-poller
+	// output) never carried it; deleting it changes no classification. The
+	// set must only name live frames so a retired type cannot linger here.
+	it("classifies only live relay message types as metadata", () => {
+		expect(
+			[...METADATA_TYPES].filter(
+				(type) => !KNOWN_RELAY_MESSAGE_TYPES.has(type),
+			),
+		).toEqual([]);
+		expect(METADATA_TYPES.has("file_changed" as RelayMessage["type"])).toBe(
+			false,
+		);
 	});
 });

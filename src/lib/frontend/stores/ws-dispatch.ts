@@ -47,25 +47,15 @@ import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
 	applyDefaultPermissionMode,
-	handleAgentList,
-	handleCommandList,
 	handleContextWindowInfo,
 	handleDefaultModelInfo,
 	handleModelInfo,
-	handleModelList,
 	handlePermissionModeInfo,
 	handleVariantInfo,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
-import { handleFileTree } from "./file-tree.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
-import {
-	clearScanInFlight,
-	handleInstanceList,
-	handleInstanceStatus,
-	handleProxyDetected,
-	handleScanResult,
-} from "./instance.svelte.js";
+import { clearScanInFlight, handleInstanceList } from "./instance.svelte.js";
 import {
 	handleAskUser,
 	handleAskUserError,
@@ -116,7 +106,6 @@ import {
 
 import {
 	fileBrowserListeners,
-	fileHistoryListeners,
 	projectAttachedListeners,
 	projectListeners,
 } from "./ws-listeners.js";
@@ -369,12 +358,6 @@ export function handleMessage(msg: RelayMessage): void {
 			handlePtyDeleted(msg);
 			break;
 
-		case "agent_list":
-			handleAgentList(msg);
-			break;
-		case "model_list":
-			handleModelList(msg);
-			break;
 		case "visibility_info":
 			handleVisibilityInfo(msg);
 			break;
@@ -405,9 +388,6 @@ export function handleMessage(msg: RelayMessage): void {
 		case "context_window_info":
 			handleContextWindowInfo(msg);
 			break;
-		case "command_list":
-			handleCommandList(msg);
-			break;
 
 		// Now routed through routePerSession (per-session events).
 
@@ -425,33 +405,9 @@ export function handleMessage(msg: RelayMessage): void {
 		case "connection_status":
 			uiState.opencodeConnectionStatus = msg.status;
 			break;
-		case "banner":
-		case "skip_permissions":
-		case "update_available":
-			handleBannerMessage(msg);
-			break;
 		case "input_sync":
 			if (isOwnBrowserClientId(msg.from)) break;
 			handleInputSyncReceived(msg);
-			break;
-
-		// File Tree (@ autocomplete)
-		case "file_tree":
-			handleFileTree(msg as { type: "file_tree"; entries: unknown });
-			break;
-
-		case "file_list":
-		case "file_content":
-			for (const fn of fileBrowserListeners) fn(msg);
-			break;
-
-		// File Changes (routed to both browser and history)
-		case "file_changed":
-			for (const fn of fileBrowserListeners) fn(msg);
-			for (const fn of fileHistoryListeners) fn(msg);
-			break;
-		case "file_history_result":
-			for (const fn of fileHistoryListeners) fn(msg);
 			break;
 
 		case "project_list":
@@ -466,15 +422,6 @@ export function handleMessage(msg: RelayMessage): void {
 
 		case "instance_list":
 			handleInstanceList(msg);
-			break;
-		case "instance_status":
-			handleInstanceStatus(msg);
-			break;
-		case "proxy_detected":
-			handleProxyDetected(msg);
-			break;
-		case "scan_result":
-			handleScanResult(msg);
 			break;
 		case "system_error":
 			log.warn("System error:", msg.code, msg.message, msg.details ?? {});
@@ -580,28 +527,13 @@ export function applyToolContentResponse(msg: {
 }
 
 export function applyGetFileListResponse(response: GetFileListResponse): void {
-	const msg = {
-		type: "file_list" as const,
-		path: response.path,
-		entries: response.entries.map((entry) => ({
-			name: entry.name,
-			type: entry.type,
-			...(entry.size != null ? { size: entry.size } : {}),
-		})),
-	};
-	for (const fn of fileBrowserListeners) fn(msg);
+	for (const fn of fileBrowserListeners) fn({ kind: "list", response });
 }
 
 export function applyGetFileContentResponse(
 	response: GetFileContentResponse,
 ): void {
-	const msg = {
-		type: "file_content" as const,
-		path: response.path,
-		content: response.content,
-		...(response.binary != null ? { binary: response.binary } : {}),
-	};
-	for (const fn of fileBrowserListeners) fn(msg);
+	for (const fn of fileBrowserListeners) fn({ kind: "content", response });
 }
 
 /** Error routing: PTY errors vs chat errors. */
@@ -809,47 +741,5 @@ function handleProtocolVersion(version: number): void {
 			dismissible: true,
 			action: { label: "Reload", run: () => location.reload() },
 		});
-	}
-}
-
-/** Banner messages: update_available, skip_permissions, custom banners. */
-function handleBannerMessage(msg: RelayMessage): void {
-	switch (msg.type) {
-		case "update_available": {
-			const ver = msg.version ?? "new version";
-			showBanner({
-				id: "update-available",
-				variant: "update",
-				icon: "arrow-up-circle",
-				text: `Update available: v${ver}`,
-				dismissible: true,
-				link: "https://www.npmjs.com/package/conduit-code",
-			});
-			break;
-		}
-		case "skip_permissions":
-			showBanner({
-				id: "skip-permissions",
-				variant: "skip-permissions",
-				icon: "shield-off",
-				text: "Permissions are being skipped",
-				summary: "Permissions skipped",
-				dismissible: true,
-			});
-			break;
-		case "banner":
-			showBanner({
-				id: msg.config.id ?? "custom",
-				variant:
-					(msg.config.variant as
-						| "update"
-						| "onboarding"
-						| "skip-permissions"
-						| "warning") ?? "onboarding",
-				icon: msg.config.icon ?? "info",
-				text: msg.config.text ?? "",
-				dismissible: msg.config.dismissible ?? true,
-			});
-			break;
 	}
 }

@@ -26,7 +26,6 @@ export type {
 	ContextWindowOption,
 	DaemonSessionCursor,
 	FileEntry,
-	FileVersion,
 	HistoryMessage,
 	HistoryMessagePart,
 	InstanceStatus,
@@ -382,8 +381,6 @@ export interface SplitRow {
 	newLineNo: number | null;
 	newLine: string | null;
 }
-
-// FileVersion is re-exported from shared-types.ts above.
 
 // ProjectInfo is re-exported from shared-types.ts above.
 

@@ -1,6 +1,6 @@
 // User-facing action: end the provider's session-level state so the next
-// prompt picks up newly-added skills/commands from disk. Also refreshes the
-// models and commands lists so the client's command palette stays current.
+// prompt picks up newly-added skills/commands from disk. The client refetches
+// the command and model lists (GetCommands/GetModels) once this returns.
 
 import { Effect } from "effect";
 import {
@@ -10,7 +10,6 @@ import {
 } from "../domain/relay/Services/services.js";
 import { formatErrorDetail } from "../errors.js";
 import { sendModelsStateToClient } from "./model.js";
-import { getCommandsForSession } from "./settings.js";
 
 export interface ReloadProviderSessionInput {
 	readonly clientId: string;
@@ -44,8 +43,6 @@ export const reloadProviderSessionForClient = (
 		}
 
 		yield* sendModelsStateToClient(input.clientId, input.sessionId);
-		const commands = yield* getCommandsForSession(input.sessionId);
-		wsHandler.sendTo(input.clientId, { type: "command_list", commands });
 
 		wsHandler.sendTo(input.clientId, {
 			type: "provider_session_reloaded",

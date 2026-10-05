@@ -372,7 +372,7 @@ describe("handleClientConnectedEffect — session selection", () => {
 		);
 	});
 
-	it("a sessionless daemon attach sends lists without selecting or creating a session", async () => {
+	it("a sessionless daemon attach sends settings without selecting or creating a session", async () => {
 		const getDefaultSessionId = vi.fn(() =>
 			Effect.succeed("unrequested-session"),
 		);
@@ -398,7 +398,7 @@ describe("handleClientConnectedEffect — session selection", () => {
 		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
 		);
-		for (const type of ["agent_list", "model_list"]) {
+		for (const type of ["variant_info", "permission_mode_info"]) {
 			expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 				"client-1",
 				expect.objectContaining({ type }),
@@ -495,23 +495,6 @@ describe("handleClientConnectedEffect — model info", () => {
 			sessionId: "session-1",
 			model: "gpt-4",
 			provider: "openai",
-		});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_list",
-			providers: [
-				{
-					id: "openai",
-					name: "OpenAI",
-					configured: true,
-					models: [
-						{
-							id: "gpt-4",
-							name: "GPT-4",
-							provider: "openai",
-						},
-					],
-				},
-			],
 		});
 	});
 
@@ -649,181 +632,8 @@ describe("handleClientConnectedEffect — viewed families", () => {
 	});
 });
 
-describe("handleClientConnectedEffect — agent list", () => {
-	it("sends agent_list filtering internal agents", async () => {
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "agent_list",
-			providerScope: { id: "opencode", name: "OpenCode" },
-			agents: [{ id: "coder", name: "coder", description: "Main agent" }],
-		});
-	});
-
-	it("sends Claude agents for a Claude-bound active session", async () => {
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-		vi.mocked(deps.agentService.listAgents).mockReturnValue(
-			Effect.succeed({
-				providerScope: { id: "claude", name: "Claude" },
-				agents: [
-					{ id: "Explore", name: "Explore", description: "Explorer" },
-					{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-					{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
-				],
-				activeAgentId: "Explore",
-			}),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.client.app.agents).not.toHaveBeenCalled();
-		expect(deps.agentService.listAgents).toHaveBeenCalledWith("session-1");
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "agent_list",
-			providerScope: { id: "claude", name: "Claude" },
-			agents: [
-				{ id: "Explore", name: "Explore", description: "Explorer" },
-				{ id: "OpusOnly", name: "OpusOnly", model: "opus" },
-				{ id: "HaikuWorker", name: "HaikuWorker", model: "haiku" },
-			],
-			activeAgentId: "Explore",
-		});
-	});
-
-	it("clears stale agent during Claude-bound client init", async () => {
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-		vi.mocked(deps.agentService.listAgents).mockReturnValue(
-			Effect.succeed({
-				providerScope: { id: "claude", name: "Claude" },
-				agents: [{ id: "Explore", name: "Explore" }],
-			}),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.agentService.listAgents).toHaveBeenCalledWith("session-1");
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "agent_list",
-			providerScope: { id: "claude", name: "Claude" },
-			agents: [{ id: "Explore", name: "Explore" }],
-		});
-	});
-
-	it("sends INIT_FAILED when listAgents throws", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.agentService.listAgents).mockReturnValue(
-			Effect.fail(new Cause.UnknownException(new Error("agents fail"))),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
-		);
-	});
-});
-
-// Model list (providers)
-
 describe("handleClientConnectedEffect — model list", () => {
-	it("sends model_list with only configured providers", async () => {
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_list",
-			providers: [
-				{
-					id: "openai",
-					name: "OpenAI",
-					configured: true,
-					models: [{ id: "gpt-4", name: "GPT-4", provider: "openai" }],
-				},
-			],
-		});
-	});
-
-	it("sends OpenCode model_list before slow Claude discovery finishes", async () => {
-		let resolveDiscovery: (value: ProviderCapabilities) => void = () => {};
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-		deps.discoverClaudeCapabilities.mockImplementation(() =>
-			Effect.promise(
-				() =>
-					new Promise((resolve) => {
-						resolveDiscovery = resolve;
-					}),
-			),
-		);
-
-		const initPromise = runClientInit(deps, "client-1");
-		await vi.waitFor(() =>
-			expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-				type: "model_list",
-				providers: [
-					{
-						id: "openai",
-						name: "OpenAI",
-						configured: true,
-						models: [{ id: "gpt-4", name: "GPT-4", provider: "openai" }],
-					},
-				],
-			}),
-		);
-
-		resolveDiscovery(makeClaudeCapabilities());
-		await initPromise;
-	});
-
-	it("includes contextWindowOptions on Claude entries in model_list", async () => {
-		const contextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		];
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-		deps.discoverClaudeCapabilities.mockReturnValue(
-			Effect.succeed(
-				makeClaudeCapabilities({
-					models: [
-						{
-							id: "claude-sonnet-4-7",
-							name: "Claude Sonnet 4.7",
-							providerId: "claude",
-							contextWindowOptions,
-						},
-					],
-				}),
-			),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		const modelLists = vi
-			.mocked(deps.wsHandler.sendTo)
-			.mock.calls.map((call) => call[1])
-			.filter((msg) => (msg as { type?: string }).type === "model_list");
-		expect(modelLists).toContainEqual(
-			expect.objectContaining({
-				type: "model_list",
-				providers: expect.arrayContaining([
-					expect.objectContaining({
-						id: "claude",
-						models: [
-							expect.objectContaining({
-								id: "claude-sonnet-4-7",
-								contextWindowOptions,
-							}),
-						],
-					}),
-				]),
-			}),
-		);
-	});
-
-	it("sends Claude model_list when OpenCode provider discovery fails", async () => {
+	it("does not report INIT_FAILED when only OpenCode provider discovery fails", async () => {
 		const deps = applyTestDefaults(makeClientInitEffectLayer());
 		deps.discoverClaudeCapabilities.mockReturnValue(
 			Effect.succeed(
@@ -844,22 +654,10 @@ describe("handleClientConnectedEffect — model list", () => {
 
 		await runClientInit(deps, "client-1");
 
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_list",
-			providers: [
-				{
-					id: "claude",
-					name: "Anthropic - claude",
-					configured: true,
-					models: [
-						{
-							id: "claude-sonnet-4-7",
-							name: "Claude Sonnet 4.7",
-							provider: "claude",
-						},
-					],
-				},
-			],
+		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
+			type: "model_info",
+			model: "claude-sonnet-4-7",
+			provider: "claude",
 		});
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
@@ -1122,11 +920,7 @@ describe("handleClientConnectedEffect — no active session", () => {
 		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "agent_list" }),
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "model_list" }),
+			expect.objectContaining({ type: "variant_info" }),
 		);
 	});
 });
@@ -1445,11 +1239,7 @@ describe("handleClientConnectedEffect — error resilience", () => {
 		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "agent_list" }),
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "model_list" }),
+			expect.objectContaining({ type: "variant_info" }),
 		);
 	});
 
@@ -1463,10 +1253,8 @@ describe("handleClientConnectedEffect — error resilience", () => {
 				}),
 			),
 		);
-		vi.mocked(deps.agentService.listAgents).mockReturnValue(
-			Effect.fail(new Cause.UnknownException(new Error("fail"))),
-		);
-		vi.mocked(deps.modelService.listProviders).mockReturnValue(
+		// No cached OpenCode catalog and no Claude models: no providers at all.
+		deps.discoverClaudeCapabilities.mockReturnValue(
 			Effect.fail(new Cause.UnknownException(new Error("fail"))),
 		);
 

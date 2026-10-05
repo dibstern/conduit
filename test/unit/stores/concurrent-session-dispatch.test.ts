@@ -244,16 +244,12 @@ describe("isPerSessionEvent — runtime guard", () => {
 	it("returns false for global event types", () => {
 		const globalTypes = [
 			"session_list",
-			"model_list",
 			"model_info",
-			"agent_list",
-			"command_list",
 			"client_count",
 			"connection_status",
 			"notification_event",
 			"pty_list",
 			"pty_created",
-			"file_tree",
 		];
 		for (const type of globalTypes) {
 			const msg = { type } as RelayMessage;

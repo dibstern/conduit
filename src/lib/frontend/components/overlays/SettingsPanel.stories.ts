@@ -160,7 +160,6 @@ export const VisibilityPopulated: Story = {
 	args: { initialTab: "visibility" },
 	beforeEach: () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "anthropic",
@@ -187,7 +186,6 @@ export const VisibilityPopulated: Story = {
 			hiddenAgents: ["anthropic/review"],
 		});
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "anthropic", name: "Anthropic" },
 			agents: [
 				{

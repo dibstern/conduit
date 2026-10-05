@@ -1,12 +1,6 @@
 // Re-exports all handler functions and builds the EFFECT_MESSAGE_HANDLERS
 // dispatch table. This module replaces the monolithic message-handlers.ts.
 
-export { filterAgents, handleGetAgents } from "./agent.js";
-export { handleSwitchContextWindow } from "./context-window.js";
-export {
-	handleGetFileContent,
-	handleGetFileList,
-} from "./files.js";
 export {
 	setDefaultModelForRelay,
 	switchModelForSession,
@@ -29,10 +23,6 @@ export {
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 } from "./session.js";
-export {
-	handleGetCommands,
-	handleGetProjects,
-} from "./settings.js";
 export { handlePtyInput } from "./terminal.js";
 export { handleGetToolContent } from "./tool-content.js";
 

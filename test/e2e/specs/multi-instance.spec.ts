@@ -7,13 +7,11 @@
 
 import { expect, test } from "@playwright/test";
 import {
+	instancesWith,
+	type MockMessage,
 	multiInstanceInitMessages,
 	noInstanceInitMessages,
-	personalInstanceUnhealthy,
 	singleInstanceInitMessages,
-	workInstanceHealthy,
-	workInstanceStarting,
-	workInstanceStopped,
 } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -21,6 +19,14 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
+
+/** Health changes reach the browser as a full instance_list. */
+const instanceListMessage = (
+	statuses: Record<string, string>,
+): MockMessage => ({
+	type: "instance_list",
+	instances: instancesWith(statuses),
+});
 
 /** The project URL for multi-instance tests (must match fixture's current slug). */
 const PROJECT_URL = "/?p=myapp";
@@ -108,22 +114,28 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 			}),
 			StartInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [personalInstanceUnhealthy, workInstanceStarting],
+				instances: instancesWith({ personal: "unhealthy", work: "starting" }),
 			}),
 			StopInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [personalInstanceUnhealthy, workInstanceStopped],
+				instances: instancesWith({ personal: "unhealthy", work: "stopped" }),
 			}),
 			RemoveInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [personalInstanceUnhealthy],
+				instances: instancesWith({ personal: "unhealthy" }).filter(
+					(instance) => instance.id === "personal",
+				),
 			}),
 			RenameInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [
-					personalInstanceUnhealthy,
-					{ ...workInstanceHealthy, name: String(params["name"] ?? "Work") },
-				],
+				instances: instancesWith({
+					personal: "unhealthy",
+					work: "healthy",
+				}).map((instance) =>
+					instance.id === "work"
+						? { ...instance, name: String(params["name"] ?? "Work") }
+						: instance,
+				),
 			}),
 			ScanNow: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
@@ -221,10 +233,7 @@ test.describe("Header: Instance Badge", () => {
 		await expect(dot).toHaveClass(/bg-green-500/);
 	});
 
-	test("badge updates on instance_status message", async ({
-		page,
-		baseURL,
-	}) => {
+	test("badge updates on instance_list message", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		const badge = page.locator("[data-testid='instance-badge']");
@@ -232,7 +241,7 @@ test.describe("Header: Instance Badge", () => {
 		await expect(dot).toHaveClass(/bg-green-500/);
 
 		// Send: Personal becomes unhealthy
-		control.sendMessage(personalInstanceUnhealthy);
+		control.sendMessage(instanceListMessage({ personal: "unhealthy" }));
 		await expect(dot).toHaveClass(/bg-red-500/);
 	});
 });
@@ -287,7 +296,7 @@ test.describe("Instance Store: Reactivity", () => {
 		await expect(dropdown.getByRole("menuitemradio")).toHaveCount(2);
 	});
 
-	test("instance_status updates single instance without affecting others", async ({
+	test("instance_list status change updates only that instance", async ({
 		page,
 		baseURL,
 	}) => {
@@ -301,7 +310,7 @@ test.describe("Instance Store: Reactivity", () => {
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// Update only Work to healthy
-		control.sendMessage(workInstanceHealthy);
+		control.sendMessage(instanceListMessage({ work: "healthy" }));
 		await expect(workDot).toHaveClass(/bg-green-500/);
 
 		// Personal should STILL be green, in the dropdown and on the badge
@@ -339,15 +348,15 @@ test.describe("Status Color Mapping", () => {
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// starting = yellow
-		control.sendMessage(workInstanceStarting);
+		control.sendMessage(instanceListMessage({ work: "starting" }));
 		await expect(workDot).toHaveClass(/bg-yellow-500/);
 
 		// healthy = green
-		control.sendMessage(workInstanceHealthy);
+		control.sendMessage(instanceListMessage({ work: "healthy" }));
 		await expect(workDot).toHaveClass(/bg-green-500/);
 
 		// stopped = zinc/gray
-		control.sendMessage(workInstanceStopped);
+		control.sendMessage(instanceListMessage({ work: "stopped" }));
 		await expect(workDot).toHaveClass(/bg-zinc-500/);
 	});
 });
@@ -588,7 +597,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		control.sendMessage(personalInstanceUnhealthy);
+		control.sendMessage(instanceListMessage({ personal: "unhealthy" }));
 		await expect(
 			page.locator("[data-testid='instance-status-dot']"),
 		).toHaveClass(/bg-red-500/);
@@ -604,7 +613,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		control.sendMessage(personalInstanceUnhealthy);
+		control.sendMessage(instanceListMessage({ personal: "unhealthy" }));
 		await expect(
 			page.locator("[data-testid='instance-status-dot']"),
 		).toHaveClass(/bg-red-500/);
@@ -741,12 +750,8 @@ test.describe("Session List: Instance Status Banner", () => {
 		const banner = page.getByText("No healthy OpenCode instances");
 		await expect(banner).toBeVisible({ timeout: 10_000 });
 
-		// Send instance_status to make it healthy (simulates health poll succeeding)
-		control.sendMessage({
-			type: "instance_status",
-			instanceId: "personal",
-			status: "healthy",
-		});
+		// A healthy instance_list clears the banner (simulates health poll succeeding)
+		control.sendMessage(instanceListMessage({ personal: "healthy" }));
 
 		// Banner should disappear
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
@@ -812,7 +817,7 @@ test.describe("Instance Selector: Rebind Project", () => {
 });
 
 test.describe("Settings: Instance Status Updates", () => {
-	test("instance_status message updates status color in settings panel", async ({
+	test("instance_list message updates status color in settings panel", async ({
 		page,
 		baseURL,
 	}) => {
@@ -831,22 +836,14 @@ test.describe("Settings: Instance Status Updates", () => {
 		const workDot = workRow.locator(".w-2.h-2.rounded-full");
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
-		// Send instance_status to make Work "starting" (yellow)
-		control.sendMessage({
-			type: "instance_status",
-			instanceId: "work",
-			status: "starting",
-		});
+		// Work becomes "starting" (yellow)
+		control.sendMessage(instanceListMessage({ work: "starting" }));
 
 		// Dot should turn yellow
 		await expect(workDot).toHaveClass(/bg-yellow-500/, { timeout: 3_000 });
 
-		// Send instance_status to make Work "healthy" (green)
-		control.sendMessage({
-			type: "instance_status",
-			instanceId: "work",
-			status: "healthy",
-		});
+		// Work becomes "healthy" (green)
+		control.sendMessage(instanceListMessage({ work: "healthy" }));
 
 		// Dot should turn green
 		await expect(workDot).toHaveClass(/bg-green-500/, { timeout: 3_000 });

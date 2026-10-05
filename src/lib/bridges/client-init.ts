@@ -6,7 +6,6 @@
 // independently testable and relay-stack stays slim.
 
 import { Effect, Option } from "effect";
-import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import type { OpenCodeProviderList } from "../domain/relay/Services/services.js";
 import {
@@ -61,8 +60,8 @@ function toConfiguredOpenCodeProviders(
 function addClaudeProvider(
 	providers: ProviderInfo[],
 	capabilities: ProviderCapabilities,
-): boolean {
-	if (capabilities.models.length === 0) return false;
+): void {
+	if (capabilities.models.length === 0) return;
 	for (const p of providers) {
 		if (p.id === "anthropic") {
 			p.name = "Anthropic - opencode";
@@ -93,7 +92,6 @@ function addClaudeProvider(
 				: {}),
 		})),
 	});
-	return true;
 }
 
 export interface ClientInitEffectOptions {
@@ -101,7 +99,6 @@ export interface ClientInitEffectOptions {
 	readonly getInstances?: () =>
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
-	readonly getCachedUpdate?: () => string | null | PromiseLike<string | null>;
 }
 
 const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
@@ -290,30 +287,6 @@ const replayPendingQuestionsEffect = (
 		}
 	});
 
-const sendAgentListEffect = (clientId: string, activeId: string | undefined) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const agentService = yield* AgentServiceTag;
-
-		const agentResult = yield* Effect.either(agentService.listAgents(activeId));
-		if (agentResult._tag === "Right") {
-			wsHandler.sendTo(clientId, {
-				type: "agent_list",
-				providerScope: agentResult.right.providerScope,
-				agents: [...agentResult.right.agents],
-				...(agentResult.right.activeAgentId
-					? { activeAgentId: agentResult.right.activeAgentId }
-					: {}),
-			});
-		} else {
-			yield* sendInitErrorEffect(
-				clientId,
-				agentResult.left,
-				"Failed to list agents",
-			);
-		}
-	});
-
 const sendProvidersAndSettingsEffect = (
 	clientId: string,
 	activeId: string | undefined,
@@ -326,16 +299,13 @@ const sendProvidersAndSettingsEffect = (
 
 		const providerResult = yield* Effect.either(
 			Effect.gen(function* () {
-				// Attach never contacts OpenCode: send the cached catalog, if any.
+				// Attach never contacts OpenCode: use the cached catalog, if any.
 				// The model picker refreshes it through GetModels.
 				const openCodeCatalog = yield* modelService.cachedProviders();
 				const providers = Option.match(openCodeCatalog, {
 					onNone: () => [],
 					onSome: toConfiguredOpenCodeProviders,
 				});
-				if (Option.isSome(openCodeCatalog)) {
-					wsHandler.sendTo(clientId, { type: "model_list", providers });
-				}
 
 				const claudeCapsResult = yield* Effect.either(
 					engine.dispatchEffect({
@@ -343,11 +313,8 @@ const sendProvidersAndSettingsEffect = (
 						providerId: "claude",
 					}),
 				);
-				if (
-					claudeCapsResult._tag === "Right" &&
-					addClaudeProvider(providers, claudeCapsResult.right)
-				) {
-					wsHandler.sendTo(clientId, { type: "model_list", providers });
+				if (claudeCapsResult._tag === "Right") {
+					addClaudeProvider(providers, claudeCapsResult.right);
 				}
 				if (claudeCapsResult._tag === "Left" && providers.length === 0) {
 					return yield* Effect.fail(claudeCapsResult.left);
@@ -461,7 +428,7 @@ const sendProvidersAndSettingsEffect = (
 		}
 	});
 
-const replayTerminalsInstancesAndUpdateEffect = (
+const replayTerminalsAndInstancesEffect = (
 	clientId: string,
 	options: ClientInitEffectOptions,
 ) =>
@@ -490,22 +457,6 @@ const replayTerminalsInstancesAndUpdateEffect = (
 			);
 			wsHandler.sendTo(clientId, { type: "instance_list", instances });
 		}
-
-		if (options.getCachedUpdate) {
-			const version = yield* Effect.tryPromise({
-				try: () => Promise.resolve(options.getCachedUpdate?.() ?? null),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to replay update").pipe(
-						Effect.as(null),
-					),
-				),
-			);
-			if (version) {
-				wsHandler.sendTo(clientId, { type: "update_available", version });
-			}
-		}
 	});
 
 /**
@@ -525,9 +476,6 @@ export const handleClientConnectedEffect = (
 		yield* pushViewedFamiliesForInitEffect(clientId);
 		yield* replayPendingPermissionsEffect(clientId);
 		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
-		// Providers first: with no default yet, this picks one, which scopes the
-		// agent list to its provider.
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
-		yield* sendAgentListEffect(clientId, activeId);
-		yield* replayTerminalsInstancesAndUpdateEffect(clientId, options);
+		yield* replayTerminalsAndInstancesEffect(clientId, options);
 	});

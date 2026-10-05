@@ -102,7 +102,6 @@ describe("shouldCache", () => {
 		const nonCacheable = [
 			"permission_request",
 			"permission_resolved",
-			"file_changed",
 			"session_list",
 			"pty_created",
 			"pty_output",
@@ -182,9 +181,10 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("does not cache non-cacheable types", () => {
 		const msg: RelayMessage = {
-			type: "file_changed",
-			path: "/foo.ts",
-			changeType: "edited",
+			type: "compaction",
+			sessionId: "ses_abc",
+			state: "started",
+			detail: "",
 		};
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.cache).toBe(false);

@@ -80,7 +80,6 @@ describe("formatModelName", () => {
 describe("getModelDisplayName", () => {
 	it("resolves catalog names and falls back to the raw id", () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "claude",
@@ -170,7 +169,6 @@ describe("handleAgentList", () => {
 			{ id: "a2", name: "Agent 2" },
 		];
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents,
 			activeAgentId: "a1",
@@ -200,24 +198,17 @@ describe("handleAgentList", () => {
 
 	it("clears stale active agent when a scoped list has no active override", () => {
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents: [],
 			activeAgentId: "missing",
 		});
 
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents: [{ id: "Explore", name: "Explore" }],
 		});
 
 		expect(discoveryState.activeAgentId).toBeNull();
-	});
-
-	it("ignores non-array agents", () => {
-		handleAgentList(msg({ type: "agent_list", agents: "bad" }));
-		expect(discoveryState.agents).toHaveLength(0);
 	});
 });
 
@@ -231,16 +222,11 @@ describe("handleModelList", () => {
 				models: [{ id: "m1", name: "Claude", provider: "anthropic" }],
 			},
 		];
-		handleModelList({ type: "model_list", providers });
+		handleModelList({ providers });
 		expect(discoveryState.providers).toHaveLength(1);
 		const firstProvider = discoveryState.providers[0];
 		assert.exists(firstProvider, "expected discovered provider");
 		expect(firstProvider.models).toHaveLength(1);
-	});
-
-	it("ignores non-array providers", () => {
-		handleModelList(msg({ type: "model_list", providers: null }));
-		expect(discoveryState.providers).toHaveLength(0);
 	});
 });
 
@@ -438,22 +424,15 @@ describe("handleCommandList", () => {
 		const commands: CommandInfo[] = [
 			{ name: "help", description: "Show help" },
 		];
-		handleCommandList({ type: "command_list", commands });
+		handleCommandList({ commands });
 		expect(discoveryState.commands).toHaveLength(1);
 		expect(discoveryState.commandsFetched).toBe(true);
-	});
-
-	it("ignores non-array commands", () => {
-		handleCommandList(msg({ type: "command_list", commands: 42 }));
-		expect(discoveryState.commands).toHaveLength(0);
-		expect(discoveryState.commandsFetched).toBe(false);
 	});
 });
 
 describe("getActiveModel", () => {
 	it("resolves a grouped model when the active id is a routing option", () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "amazon-bedrock",
@@ -598,26 +577,23 @@ describe("getActiveContextWindowOptions", () => {
 			{ value: "200k", label: "200k" },
 			{ value: "1m", label: "1M", isDefault: true },
 		];
-		handleModelList(
-			msg({
-				type: "model_list",
-				providers: [
-					{
-						id: "claude",
-						name: "Claude",
-						configured: true,
-						models: [
-							{
-								id: "claude-opus-5",
-								name: "Opus 5",
-								provider: "claude",
-								contextWindowOptions: modelOptions,
-							},
-						],
-					},
-				],
-			}),
-		);
+		handleModelList({
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{
+							id: "claude-opus-5",
+							name: "Opus 5",
+							provider: "claude",
+							contextWindowOptions: modelOptions,
+						},
+					],
+				},
+			],
+		});
 		handleModelInfo({
 			type: "model_info",
 			model: "claude-opus-5",
@@ -634,21 +610,18 @@ describe("getActiveContextWindowOptions", () => {
 	});
 
 	it("falls back to the server list when the active model has no options", () => {
-		handleModelList(
-			msg({
-				type: "model_list",
-				providers: [
-					{
-						id: "claude",
-						name: "Claude",
-						configured: true,
-						models: [
-							{ id: "claude-haiku-4-5", name: "Haiku", provider: "claude" },
-						],
-					},
-				],
-			}),
-		);
+		handleModelList({
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{ id: "claude-haiku-4-5", name: "Haiku", provider: "claude" },
+					],
+				},
+			],
+		});
 		handleModelInfo({
 			type: "model_info",
 			model: "claude-haiku-4-5",
@@ -669,7 +642,6 @@ describe("getActiveContextWindowOptions", () => {
 describe("clearDiscoveryState", () => {
 	it("resets provider-scoped agent state on project switch", () => {
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents: [{ id: "Explore", name: "Explore" }],
 			activeAgentId: "Explore",

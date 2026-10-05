@@ -35,11 +35,10 @@ import {
 export { handleMessage } from "./ws-dispatch.js";
 
 export {
+	type FileBrowserReply,
 	fileBrowserListeners,
-	fileHistoryListeners,
 	type MessageListener,
 	onFileBrowser,
-	onFileHistory,
 	onProject,
 	onProjectAttached,
 	projectListeners,

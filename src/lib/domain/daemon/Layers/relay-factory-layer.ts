@@ -64,7 +64,6 @@ import {
 } from "../Services/project-registry-service.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
-import { VersionCheckerTag } from "./version-checker-layer.js";
 
 export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
 	reason: string;
@@ -153,7 +152,6 @@ export const RelayFactoryLive = (
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
-	| VersionCheckerTag
 	| PushManagerTag
 	| OpenCodeInstancesTag
 > =>
@@ -172,7 +170,6 @@ export const RelayFactoryLive = (
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
-			const versionChecker = yield* VersionCheckerTag;
 			const pushManager = yield* PushManagerTag;
 			const openCodeInstances = yield* OpenCodeInstancesTag;
 			const runtime = yield* Effect.runtime<never>();
@@ -304,9 +301,6 @@ export const RelayFactoryLive = (
 				runCallback(provideInstanceDeps(persistEffectInstanceConfig));
 
 			const triggerScan = () => runCallback(portScanner.scanNow());
-
-			const getCachedUpdate = () =>
-				runCallback(versionChecker.getLatestKnown());
 
 			return {
 				create: (
@@ -442,7 +436,6 @@ export const RelayFactoryLive = (
 									updateInstance,
 									persistConfig,
 									triggerScan,
-									getCachedUpdate,
 									...(relayPushSender != null && {
 										pushManager: relayPushSender,
 									}),

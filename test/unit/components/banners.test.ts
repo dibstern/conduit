@@ -73,7 +73,7 @@ describe("Banners", () => {
 
 	it("does not show the OpenCode health warning when Claude is available", async () => {
 		instanceState.instances = [unhealthyInstance];
-		handleModelList({ type: "model_list", providers: [claudeProvider] });
+		handleModelList({ providers: [claudeProvider] });
 		handleModelInfo({ type: "model_info", model: "", provider: "claude" });
 
 		await renderBanners();
@@ -83,10 +83,7 @@ describe("Banners", () => {
 
 	it("shows the OpenCode health warning when the active provider needs OpenCode", async () => {
 		instanceState.instances = [unhealthyInstance];
-		handleModelList({
-			type: "model_list",
-			providers: [claudeProvider, opencodeProvider],
-		});
+		handleModelList({ providers: [claudeProvider, opencodeProvider] });
 		handleModelInfo({ type: "model_info", model: "", provider: "openai" });
 
 		await renderBanners();

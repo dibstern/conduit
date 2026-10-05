@@ -7,9 +7,42 @@ import type { MockMessage } from "../fixtures/mockup-state.js";
 import { projectLegacyRelayMessage } from "./detail-projection-mock.js";
 import {
 	ensureMockTranscriptRpc,
+	type MockCatalog,
 	sendMockShellSnapshot,
+	setMockRpcCatalog,
 	setMockRpcProjectSlug,
 } from "./rpc-mock.js";
+
+/** Mock-only inputs served over GetModels/GetAgents/GetCommands, never over /ws. */
+const CATALOG_MESSAGE_TYPES = new Set([
+	"mock_model_catalog",
+	"mock_agent_catalog",
+	"mock_command_catalog",
+]);
+
+function mockCatalog(messages: readonly MockMessage[]): MockCatalog | null {
+	const last = (type: string) => messages.filter((m) => m.type === type).at(-1);
+	const models = last("mock_model_catalog");
+	const commands = last("mock_command_catalog");
+	const agents = messages.flatMap((m) =>
+		m.type === "mock_agent_catalog"
+			? [
+					{
+						providerScope: (m["providerScope"] as
+							| { id: string; name: string }
+							| undefined) ?? { id: "opencode", name: "OpenCode" },
+						agents: m["agents"] as unknown[],
+					},
+				]
+			: [],
+	);
+	if (!models && !commands && agents.length === 0) return null;
+	return {
+		...(models ? { providers: models["providers"] as unknown[] } : {}),
+		...(commands ? { commands: commands["commands"] as unknown[] } : {}),
+		...(agents.length > 0 ? { agents } : {}),
+	};
+}
 
 export interface WsMockOptions {
 	/** Messages to send immediately on WebSocket connect */
@@ -126,8 +159,11 @@ export async function mockRelayWebSocket(
 			].includes(message.type),
 		),
 	);
+	const catalog = mockCatalog(options.initMessages);
+	if (catalog) setMockRpcCatalog(page, catalog);
 	if (
 		streamedTranscript ||
+		catalog ||
 		options.initMessages.some((message) =>
 			["shell_snapshot", "mock_transcript_snapshot"].includes(message.type),
 		)
@@ -174,7 +210,11 @@ export async function mockRelayWebSocket(
 				: options.initMessages.filter(
 						(message) => !SESSION_SCOPED_MESSAGE_TYPES.has(message.type),
 					)
-		).filter((message) => message.type !== "shell_snapshot");
+		).filter(
+			(message) =>
+				message.type !== "shell_snapshot" &&
+				!CATALOG_MESSAGE_TYPES.has(message.type),
+		);
 		void sendSequence(control, initMessages, initDelay);
 
 		// Listen for frontend messages and respond
@@ -193,15 +233,6 @@ export async function mockRelayWebSocket(
 					const response = options.responses.get(parsed.text);
 					if (response) {
 						void sendSequence(control, response, msgDelay);
-					}
-				}
-
-				if (parsed.type === "get_agents") {
-					const agentList = options.initMessages.find(
-						(m) => m.type === "agent_list",
-					);
-					if (agentList) {
-						ws.send(JSON.stringify(agentList));
 					}
 				}
 			} catch {
