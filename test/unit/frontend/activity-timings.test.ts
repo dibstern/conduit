@@ -5,9 +5,9 @@ import { createToolRegistry } from "../../../src/lib/frontend/stores/tool-regist
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	fmtDuration,
-	segmentDuration,
 	segmentTurns,
 	stepDurations,
+	workingTime,
 } from "../../../src/lib/frontend/utils/turns.js";
 import type {
 	MessagePartRow,
@@ -181,7 +181,7 @@ describe("activity timings", () => {
 		]);
 		// The header still reads the turn's wall clock, which overlapping steps
 		// must not be summed into.
-		expect(segmentDuration(seg, turn, true, T0 + 20_000)).toBe(20_000);
+		expect(workingTime(turn, T0 + 20_000)).toBe(20_000);
 	});
 
 	it("keeps sub-second steps legible instead of rounding them to 0.0s", () => {

@@ -25,8 +25,6 @@ import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
 	phase: ChatPhase;
-	/** Wall-clock start of the active turn, retained across view remounts. */
-	turnStartedAt: number | null;
 	turnEpoch: number;
 	turnGeneration: number;
 	endedGeneration: number;
@@ -72,7 +70,6 @@ export type SessionChatState = SessionActivity & SessionMessages;
 export function createEmptySessionActivity(): SessionActivity {
 	return {
 		phase: "idle",
-		turnStartedAt: null,
 		turnEpoch: 0,
 		turnGeneration: 0,
 		endedGeneration: -1,
@@ -395,7 +392,6 @@ export function isLoading(): boolean {
 /** Session is idle — no LLM activity, no streaming. */
 export function phaseToIdle(activity: SessionActivity): void {
 	activity.phase = "idle";
-	activity.turnStartedAt = null;
 }
 
 /** LLM is active, awaiting first delta. */
@@ -403,7 +399,6 @@ export function phaseToProcessing(activity: SessionActivity): void {
 	if (activity.phase === "idle") {
 		activity.turnGeneration++;
 	}
-	activity.turnStartedAt ??= Date.now();
 	activity.phase = "processing";
 }
 
@@ -412,7 +407,6 @@ export function phaseToStreaming(activity: SessionActivity): void {
 	if (activity.phase === "idle") {
 		activity.turnGeneration++;
 	}
-	activity.turnStartedAt ??= Date.now();
 	activity.phase = "streaming";
 }
 
@@ -1150,7 +1144,6 @@ export function clearMessages(): void {
 		const activity = sessionActivity.get(currentId);
 		if (activity) {
 			activity.phase = "idle";
-			activity.turnStartedAt = null;
 			activity.turnEpoch = 0;
 			activity.turnGeneration = 0;
 			activity.endedGeneration = -1;

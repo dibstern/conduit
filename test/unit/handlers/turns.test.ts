@@ -26,8 +26,8 @@ import {
 	skillName,
 	stepDurations,
 	stepWeights,
-	turnDuration,
 	turnStats,
+	workingTime,
 } from "../../../src/lib/frontend/utils/turns.js";
 
 let seq = 0;
@@ -218,7 +218,7 @@ describe("segmentTurns", () => {
 		expect(turn.segments[1]?.activity).toEqual([next]);
 		expect(lastResult(turn)).toBe(end);
 		expect(economics(turn, 500).cost).toBe(0.02);
-		expect(turnDuration(turn, 500)).toBe(500);
+		expect(workingTime(turn, 500)).toBe(500);
 	});
 
 	it("settles again after resumed work finishes", () => {
@@ -710,15 +710,15 @@ describe("stepWeights", () => {
 	});
 });
 
-describe("turnDuration", () => {
-	it("prefers the duration the provider reported", () => {
+describe("workingTime", () => {
+	it("uses stamped work instead of the duration the provider reported", () => {
 		const turns = segmentTurns(
 			[user(undefined, 0), read("/a.ts", 1_000), result({ duration: 42_300 })],
 			false,
 		);
 		const [turn] = turns;
 		assert.exists(turn, "expected turn");
-		expect(turnDuration(turn, 0)).toBe(42_300);
+		expect(workingTime(turn, 0)).toBe(1_000);
 	});
 
 	it("measures against now while live", () => {
@@ -728,34 +728,34 @@ describe("turnDuration", () => {
 		);
 		const [turn] = turns;
 		assert.exists(turn, "expected turn");
-		expect(turnDuration(turn, 6_000)).toBe(5_000);
+		expect(workingTime(turn, 6_000)).toBe(5_000);
 	});
 
 	it("is unknown when nothing carries a timestamp", () => {
 		const turns = segmentTurns([user(), read("/a.ts")], false);
 		const [turn] = turns;
 		assert.exists(turn, "expected turn");
-		expect(turnDuration(turn, 0)).toBeUndefined();
+		expect(workingTime(turn, 0)).toBeUndefined();
 	});
 
-	it("keeps a reported duration of zero instead of re-deriving one", () => {
+	it("does not replace stamped work with a provider duration of zero", () => {
 		const turns = segmentTurns(
 			[user(undefined, 0), read("/a.ts", 1_000), result({ duration: 0 })],
 			false,
 		);
 		const [turn] = turns;
 		assert.exists(turn, "expected turn");
-		expect(turnDuration(turn, 0)).toBe(0);
+		expect(workingTime(turn, 0)).toBe(1_000);
 	});
 
-	it("is unknown rather than negative when stamps arrive out of order", () => {
+	it("uses the latest stamp when messages arrive out of order", () => {
 		const turns = segmentTurns(
 			[user(undefined, 5_000), read("/a.ts", 6_000), say("d", 1_000)],
 			false,
 		);
 		const [turn] = turns;
 		assert.exists(turn, "expected turn");
-		expect(turnDuration(turn, 0)).toBeUndefined();
+		expect(workingTime(turn, 0)).toBe(1_000);
 	});
 });
 

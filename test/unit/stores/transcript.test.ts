@@ -261,27 +261,42 @@ describe("transcript detail reducer", () => {
 		});
 	});
 
-	it("infers queued user only for a live new row", () => {
+	it("infers queued user only for a live new row behind a running turn", () => {
+		const running: HistoryMessage = {
+			id: "r",
+			role: "user",
+			parts: [{ id: "rp", type: "text", text: "first" }],
+			turnTiming: { startedAt: 1, waits: [] },
+		};
 		const user: HistoryMessage = {
 			id: "u",
 			role: "user",
 			parts: [{ id: "p", type: "text", text: "hello" }],
 		};
-		const state = applyTranscriptEnvelope(entry(), snapshot([user], 1));
+		const alone = deriveTranscriptMessages(
+			applyTranscriptEnvelope(entry(), snapshot([user], 1)),
+			[],
+			{ live: true, active: true, turnEpoch: 2, newUserIds: new Set(["u"]) },
+		);
+		expect(alone[0]).not.toHaveProperty("sentDuringEpoch");
+		const state = applyTranscriptEnvelope(
+			entry(),
+			snapshot([running, user], 1),
+		);
 		const catchup = deriveTranscriptMessages(state, [], {
 			live: false,
 			active: true,
 			turnEpoch: 2,
 			newUserIds: new Set(["u"]),
 		});
-		expect(catchup[0]).not.toHaveProperty("sentDuringEpoch");
+		expect(catchup[1]).not.toHaveProperty("sentDuringEpoch");
 		const live = deriveTranscriptMessages(state, [], {
 			live: true,
 			active: true,
 			turnEpoch: 2,
 			newUserIds: new Set(["u"]),
 		});
-		expect(live[0]).toMatchObject({ sentDuringEpoch: 2 });
+		expect(live[1]).toMatchObject({ sentDuringEpoch: 2 });
 		const optimistic: ChatMessage = {
 			type: "user",
 			uuid: "local",
@@ -293,8 +308,8 @@ describe("transcript detail reducer", () => {
 			active: true,
 			turnEpoch: 3,
 		});
-		expect(reconciled).toHaveLength(2);
-		expect(reconciled[1]).toBe(optimistic);
+		expect(reconciled).toHaveLength(3);
+		expect(reconciled[2]).toBe(optimistic);
 	});
 
 	// After a reload nothing local remembers the send; the rows still show it.

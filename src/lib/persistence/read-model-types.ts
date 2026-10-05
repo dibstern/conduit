@@ -1,5 +1,7 @@
 // SQLite projection row types returned by the Effect read services.
 
+import type { HistoryMessage } from "../shared-types.js";
+
 export interface SessionRow {
 	id: string;
 	version: number;
@@ -93,6 +95,7 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {
 		requestedModel?: string;
 		expectedModel?: string;

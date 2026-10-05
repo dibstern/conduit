@@ -453,6 +453,11 @@ export interface HistoryMessage {
 	finish?: string;
 	error?: unknown;
 	modelExecution?: ModelExecution;
+	turnTiming?: {
+		startedAt: number;
+		endedAt?: number;
+		waits: { id: string; from: number; to?: number }[];
+	};
 	[key: string]: unknown;
 }
 

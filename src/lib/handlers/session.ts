@@ -624,7 +624,9 @@ export const loadMoreHistoryForSession = ({
 		});
 		return {
 			sessionId,
-			messages: messageRowsToHistory(page.messages, { pageSize: 50 }).messages,
+			messages: messageRowsToHistory(page.messages, {
+				pageSize: page.messages.length,
+			}).messages,
 			hasMore: page.hasMore,
 		};
 	});

@@ -23,6 +23,17 @@ import { messageRowsToHistory } from "../session-history-adapter.js";
 const decodeGoalState = Schema.decodeUnknownSync(
 	Schema.parseJson(SessionGoalChangedPayloadSchema),
 );
+const decodeTurnWaits = Schema.decodeUnknownSync(
+	Schema.parseJson(
+		Schema.Array(
+			Schema.Struct({
+				id: Schema.String,
+				from: Schema.Number,
+				to: Schema.NullOr(Schema.Number),
+			}),
+		),
+	),
+);
 
 export const sessionGoalState = (
 	row: Pick<SessionRow, "id" | "goal_state">,
@@ -374,30 +385,13 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 	ReadQueryEffect
 >() {}
 
-/** Attach each part to its message, preserving message and part order. */
-function groupMessagesWithParts(
-	messages: readonly MessageRow[],
-	parts: readonly MessagePartRow[],
-): MessageWithParts[] {
-	const partsByMessage = new Map<string, MessagePartRow[]>();
-	for (const part of parts) {
-		let existing = partsByMessage.get(part.message_id);
-		if (!existing) {
-			existing = [];
-			partsByMessage.set(part.message_id, existing);
-		}
-		existing.push(part);
-	}
-	return messages.map((message) => ({
-		...message,
-		parts: partsByMessage.get(message.id) ?? [],
-	}));
-}
-
 type MessageWithTurnModelRow = MessageRow & {
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
+	turn_requested_at: number | null;
+	turn_completed_at: number | null;
+	turn_waits: string;
 };
 
 function groupMessagesWithPartsAndTurnModels(
@@ -415,11 +409,29 @@ function groupMessagesWithPartsAndTurnModels(
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
+			turn_requested_at,
+			turn_completed_at,
+			turn_waits,
 			...messageRow
 		} = message;
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(message.role === "user" && turn_requested_at !== null
+				? {
+						turnTiming: {
+							startedAt: turn_requested_at,
+							...(turn_completed_at === null
+								? {}
+								: { endedAt: turn_completed_at }),
+							waits: decodeTurnWaits(turn_waits).map(({ id, from, to }) => ({
+								id,
+								from,
+								...(to === null ? {} : { to }),
+							})),
+						},
+					}
+				: {}),
 			...(turn_actual_model === null
 				? {}
 				: {
@@ -439,6 +451,19 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const turnTimingColumns = sql`
+		t.requested_at AS turn_requested_at,
+		t.completed_at AS turn_completed_at,
+		(SELECT json_group_array(json_object(
+			'id', pa.id, 'from', pa.created_at, 'to', pa.resolved_at
+		))
+		FROM (
+			SELECT id, created_at, resolved_at FROM pending_approvals
+			WHERE session_id = t.session_id
+				AND created_at >= t.requested_at
+				AND (t.completed_at IS NULL OR created_at <= t.completed_at)
+			ORDER BY created_at ASC, id ASC
+		) pa) AS turn_waits`;
 
 	const getToolContent = (
 		toolId: string,
@@ -729,9 +754,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT messages.*,
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
-					turns.actual_model AS turn_actual_model
+					turns.actual_model AS turn_actual_model,
+					${turnTimingColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
+				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 				WHERE messages.session_id = ${sessionId}
 				ORDER BY messages.created_at ASC, messages.id ASC`;
 			if (messages.length === 0) return [];
@@ -853,25 +880,47 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
-									turns.actual_model AS turn_actual_model
+									turns.actual_model AS turn_actual_model,
+									${turnTimingColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
+								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
 									AND (messages.created_at < ${cursor.created_at}
 										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT ${options.limit + 1}`
 						: yield* sql<MessageWithTurnModelRow>`
+								WITH latest_user AS (
+									SELECT created_at, id FROM messages
+									WHERE session_id = ${sessionId} AND role = 'user'
+									ORDER BY created_at DESC, id DESC
+									LIMIT 1
+								)
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
-									turns.actual_model AS turn_actual_model
+									turns.actual_model AS turn_actual_model,
+									${turnTimingColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
+								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
 								ORDER BY messages.created_at DESC, messages.id DESC
-								LIMIT ${options.limit + 1}`;
-					const page = rows.slice(0, options.limit).reverse();
+								LIMIT (
+									SELECT MAX(${options.limit}, COUNT(*)) + 1
+									FROM messages m JOIN latest_user u
+										ON m.created_at > u.created_at
+											OR (m.created_at = u.created_at AND m.id >= u.id)
+									WHERE m.session_id = ${sessionId}
+								)`;
+					const pageLimit = cursor
+						? options.limit
+						: Math.max(
+								options.limit,
+								rows.findIndex((message) => message.role === "user") + 1,
+							);
+					const page = rows.slice(0, pageLimit).reverse();
 					const parts = page.length
 						? yield* sql<MessagePartRow>`
 								SELECT * FROM message_parts
@@ -880,7 +929,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						: [];
 					return {
 						messages: groupMessagesWithPartsAndTurnModels(page, parts),
-						hasMore: rows.length > options.limit,
+						hasMore: rows.length > pageLimit,
 						version,
 					};
 				}),
@@ -1015,11 +1064,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
-					const messages = yield* sql<MessageRow>`
-						SELECT * FROM messages
-						WHERE session_id = ${sessionId}
-							AND version > ${floor} AND version <= ${ceiling}
-						ORDER BY created_at ASC, id ASC`;
+					const messages = yield* sql<MessageWithTurnModelRow>`
+						SELECT messages.*,
+							turns.requested_model AS turn_requested_model,
+							turns.expected_model AS turn_expected_model,
+							turns.actual_model AS turn_actual_model,
+							${turnTimingColumns}
+						FROM messages
+						LEFT JOIN turns ON turns.id = messages.turn_id
+						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
+						WHERE messages.session_id = ${sessionId}
+							AND messages.version > ${floor} AND messages.version <= ${ceiling}
+						ORDER BY messages.created_at ASC, messages.id ASC`;
 
 					let parts: readonly MessagePartRow[] = [];
 					if (messages.length > 0) {
@@ -1045,7 +1101,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						ORDER BY version, message_id`;
 
 					return {
-						messages: groupMessagesWithParts(messages, parts),
+						messages: groupMessagesWithPartsAndTurnModels(messages, parts),
 						version,
 						...(removed === undefined ? {} : { removed }),
 					};
