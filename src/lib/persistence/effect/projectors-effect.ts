@@ -902,6 +902,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 								WHERE messages.id = ${event.data.messageId}
 								AND turns.session_id = ${event.sessionId}`
 							: [];
+				// Without a key, a signal belongs to the newest turn, except that
+				// a prompt queued behind a running turn must not take over that
+				// turn's busy and tool signals. A new reply is what starts the
+				// queued turn. A turn still running from before a later one
+				// settled is a crash leftover, so it never wins.
 				const [turn] = parentTurn.length
 					? parentTurn
 					: yield* sql<{
@@ -912,8 +917,23 @@ export const makeTurnProjector = (): EffectProjector => ({
 					SELECT id, state, assistant_message_id FROM turns
 					WHERE session_id = ${event.sessionId}
 					AND requested_at <= ${event.createdAt}
-					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+					ORDER BY (${isEventType(event, "message.created") ? 0 : 1}
+						AND state = 'running'
+						AND requested_at >= (SELECT COALESCE(MAX(requested_at), 0) FROM turns
+							WHERE session_id = ${event.sessionId}
+							AND state NOT IN ('pending', 'running'))) DESC,
+						requested_at DESC, rowid DESC LIMIT 1`;
 				if (!turn) return { sessions: [], messages: [] };
+				// Turns run one at a time, so a reply starting ends every earlier
+				// turn. Claude never closes a turn whose queued successor took
+				// over its streaming SDK turn.
+				const superseded = isEventType(event, "message.created")
+					? yield* sql<OwnedRow & { id: string }>`
+						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
+						WHERE session_id = ${event.sessionId} AND state = 'running'
+						AND requested_at < (SELECT requested_at FROM turns WHERE id = ${turn.id})
+						RETURNING id, session_id`
+					: [];
 				if (isEventType(event, "message.created")) {
 					yield* sql`UPDATE messages SET turn_id = ${turn.id},
 						parent_id = COALESCE(parent_id, ${turn.id})
@@ -929,7 +949,10 @@ export const makeTurnProjector = (): EffectProjector => ({
 							assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
 						WHERE id = ${turn.id}
 						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
+				return {
+					sessions: owners([...written, ...superseded]),
+					messages: ids([...written, ...superseded]),
+				};
 			}
 
 			// These three find their turn by assistant message id, so the owning
@@ -974,13 +997,15 @@ export const makeTurnProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				// An empty id means the turn stopped before naming its reply.
+				// Stop ends the session's work, so whatever is still running stops
+				// with the named turn. That also covers an empty id (stopped before
+				// naming its reply) and an id no turn owns.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
 						WHERE session_id = ${event.sessionId}
 						AND (assistant_message_id = ${event.data.messageId}
-							OR (${event.data.messageId} = '' AND state = 'running'))
+							OR state = 'running')
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}

@@ -394,7 +394,7 @@ type MessageWithTurnModelRow = MessageRow & {
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
-	turn_requested_at: number | null;
+	turn_started_at: number | null;
 	turn_completed_at: number | null;
 	turn_waits: string;
 };
@@ -414,7 +414,7 @@ function groupMessagesWithPartsAndTurnModels(
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
-			turn_requested_at,
+			turn_started_at,
 			turn_completed_at,
 			turn_waits,
 			...messageRow
@@ -422,10 +422,10 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
-			...(message.role === "user" && turn_requested_at !== null
+			...(message.role === "user" && turn_started_at !== null
 				? {
 						turnTiming: {
-							startedAt: turn_requested_at,
+							startedAt: turn_started_at,
 							...(turn_completed_at === null
 								? {}
 								: { endedAt: turn_completed_at }),
@@ -456,8 +456,12 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	// A prompt queued behind a running turn starts working when that turn
+	// ends, not when it was sent: waiting in the queue is not work.
 	const turnTimingColumns = sql`
-		t.requested_at AS turn_requested_at,
+		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
+			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
+		) AS turn_started_at,
 		t.completed_at AS turn_completed_at,
 		(SELECT json_group_array(json_object(
 			'id', pa.id, 'from', pa.created_at, 'to', pa.resolved_at
@@ -892,6 +896,24 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							before: options.before,
 						});
 					}
+					// The first page reaches back to the newest prompt, or further to
+					// the prompt still running, which a prompt queued behind it would
+					// otherwise push off the page. A turn left running before a later
+					// one settled is a crash leftover and is ignored.
+					const [anchor] = cursor
+						? []
+						: yield* sql<{ created_at: number; id: string }>`
+								SELECT created_at, id FROM messages
+								WHERE session_id = ${sessionId} AND role = 'user'
+								ORDER BY id IS (
+									SELECT id FROM turns
+									WHERE session_id = ${sessionId} AND state = 'running'
+									AND requested_at >= (SELECT COALESCE(MAX(requested_at), 0) FROM turns
+										WHERE session_id = ${sessionId}
+										AND state NOT IN ('pending', 'running'))
+									ORDER BY requested_at ASC, rowid ASC LIMIT 1
+								) DESC, created_at DESC, id DESC
+								LIMIT 1`;
 					const rows = cursor
 						? yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
@@ -908,12 +930,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT ${options.limit + 1}`
 						: yield* sql<MessageWithTurnModelRow>`
-								WITH latest_user AS (
-									SELECT created_at, id FROM messages
-									WHERE session_id = ${sessionId} AND role = 'user'
-									ORDER BY created_at DESC, id DESC
-									LIMIT 1
-								)
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
@@ -926,16 +942,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT (
 									SELECT MAX(${options.limit}, COUNT(*)) + 1
-									FROM messages m JOIN latest_user u
-										ON m.created_at > u.created_at
-											OR (m.created_at = u.created_at AND m.id >= u.id)
+									FROM messages m
 									WHERE m.session_id = ${sessionId}
+										AND (m.created_at > ${anchor?.created_at ?? null}
+											OR (m.created_at = ${anchor?.created_at ?? null} AND m.id >= ${anchor?.id ?? null}))
 								)`;
 					const pageLimit = cursor
 						? options.limit
 						: Math.max(
 								options.limit,
-								rows.findIndex((message) => message.role === "user") + 1,
+								rows.findIndex((message) => message.id === anchor?.id) + 1,
 							);
 					const page = rows.slice(0, pageLimit).reverse();
 					const parts = page.length

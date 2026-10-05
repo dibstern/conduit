@@ -1100,6 +1100,45 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 			]);
 		}).pipe(Effect.provide(testLayer)),
 	);
+
+	it.effect(
+		"anchors the first page at the running prompt, not one queued behind it",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("s1");
+				const sql = yield* SqlClient.SqlClient;
+				// A crash left 'stale' running before 'done' settled; it never wins.
+				yield* sql`
+					INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					VALUES
+					('stale', 's1', 'running', 'stale', 1),
+					('done', 's1', 'completed', 'done', 2),
+					('a', 's1', 'running', 'a', 3),
+					('b', 's1', 'pending', 'b', 6)`;
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, created_at, updated_at)
+					VALUES
+					('stale', 's1', 'user', 'stale', 1, 1),
+					('done', 's1', 'user', 'done', 2, 2),
+					('a', 's1', 'user', 'a', 3, 3),
+					('a-reply-1', 's1', 'assistant', 'a1', 4, 4),
+					('a-reply-2', 's1', 'assistant', 'a2', 5, 5),
+					('b', 's1', 'user', 'b', 6, 6)`;
+				const readQuery = yield* makeReadQueryEffect;
+				const first = yield* readQuery.readSessionTranscriptPage("s1", {
+					limit: 1,
+				});
+				expect(first.messages.map((message) => message.id)).toEqual([
+					"a",
+					"a-reply-1",
+					"a-reply-2",
+					"b",
+				]);
+				expect(first.hasMore).toBe(true);
+			}).pipe(Effect.provide(testLayer)),
+	);
 });
 
 // The session list reads (ni8.5 T-1)

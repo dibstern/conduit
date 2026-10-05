@@ -94,9 +94,13 @@ test.describe("AttachMenu", () => {
 		await attachBtn.click();
 		await expect(attachMenu).toBeVisible();
 
-		// Click outside (on the textarea area)
-		await page.locator("#input").click();
-		await expect(attachMenu).toBeHidden();
+		// bits-ui arms outside-click dismissal on a timer after the menu
+		// mounts, so a click landing just after it becomes visible is ignored.
+		// Retry the outside click: still fails if the menu never closes.
+		await expect(async () => {
+			await page.locator("#input").click();
+			await expect(attachMenu).toBeHidden({ timeout: 250 });
+		}).toPass();
 	});
 });
 

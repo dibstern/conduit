@@ -42,6 +42,12 @@ export interface ClaudeReplayPlan {
 	 * the test decides when.
 	 */
 	readonly holdAfterResult?: boolean;
+	/**
+	 * A prompt sent mid-turn joins the open SDK turn, as the real SDK does:
+	 * the next model round answers it, with no result in between. Without
+	 * this, prompts play strictly one after another.
+	 */
+	readonly joinOpenTurn?: boolean;
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
 	/** Claude model catalog to advertise instead of the bare trace model. */
@@ -147,7 +153,17 @@ export function createClaudeTraceReplayer(
 		let aborted = new AbortController();
 
 		async function* replay(): AsyncGenerator<SDKMessage, void> {
-			for await (const _prompt of prompt) {
+			const prompts = (async function* () {
+				yield* prompt;
+			})();
+			let joining = false;
+			for (let next = prompts.next(); !(await next).done; ) {
+				next = prompts.next();
+				let queued = false;
+				if (plan.joinOpenTurn)
+					void next.then((result) => {
+						queued = !result.done;
+					});
 				sent += 1;
 				const trace = traces[sent - 1];
 				if (!trace) {
@@ -159,9 +175,23 @@ export function createClaudeTraceReplayer(
 				interrupted = false;
 				aborted = new AbortController();
 				const messages = freshTurn(trace, sessionId);
+				const isRoundStart = (message: SDKMessage) =>
+					message.type === "stream_event" &&
+					message.event.type === "message_start";
+				// A joined turn has no startup of its own (hooks, init).
+				const from = joining
+					? Math.max(0, messages.findIndex(isRoundStart))
+					: 0;
+				joining = false;
 				for (const [index, message] of messages.entries()) {
+					if (index < from) continue;
 					if (plan.delayMs) await sleep(plan.delayMs);
 					if (interrupted) break;
+					// The queued prompt takes over at the next model round.
+					if (queued && index > from && isRoundStart(message)) {
+						joining = true;
+						break;
+					}
 					yield message;
 					if (
 						plan.holdAfterResult &&
