@@ -149,3 +149,38 @@ test.describe("Claude session effort and context window across a relay restart",
 		}
 	});
 });
+
+test.describe("Claude session model with a renamed catalog id", () => {
+	test.use({ claudeReplay: { turns: ["pong-thinking-text-turn"] } });
+
+	// Catalog ids drift: Opus was once advertised as `opus[1m]` and is now
+	// `opus`. A session whose turns stored the old id must still resolve to the
+	// catalog model, or the chip loses its name and the effort control.
+	test("a stored id with a stale [1m] marker still names the model", async ({
+		page,
+		relayUrl,
+		harness,
+	}) => {
+		const app = new AppPage(page);
+		const trigger = page.getByTestId("model-picker-trigger");
+		await app.goto(relayUrl);
+		await app.sendMessage("One");
+		await new ChatPage(page).waitForStreamingComplete();
+		await expect(page.getByTestId("variant-badge")).toBeVisible();
+
+		await harness.restart(() => {
+			const db = new DatabaseSync(harness.eventsDbPath);
+			try {
+				db.exec("UPDATE turns SET requested_model = requested_model || '[1m]'");
+			} finally {
+				db.close();
+			}
+		});
+		await gotoRelay(page, relayUrl);
+		await expect(page.locator("#connect-overlay")).toBeHidden({
+			timeout: 30_000,
+		});
+		await expect(trigger).toHaveAttribute("aria-label", /Fable 5/);
+		await expect(page.getByTestId("variant-badge")).toBeVisible();
+	});
+});

@@ -220,6 +220,8 @@ export async function createReplayHarness(
 					id: CLAUDE_TRACE_MODEL,
 					name: "Claude Fable 5",
 					providerId: "claude",
+					// The real catalog advertises effort levels for Fable.
+					variants: { low: {}, medium: {}, high: {} },
 				},
 			],
 			commands: [],
