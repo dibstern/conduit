@@ -39,7 +39,6 @@ import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Servic
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
 import { OpenCodeInstanceClientsLive } from "../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { PendingSendOwnershipLive } from "../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
@@ -952,7 +951,6 @@ export function makeTestHandlerLayer(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
-	const pendingSendOwnershipLayer = PendingSendOwnershipLive;
 	const openCodeInstanceClientsLayer = OpenCodeInstanceClientsLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
 	);
@@ -1023,7 +1021,6 @@ export function makeTestHandlerLayer(
 						openCodeInstanceClientsLayer,
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						overridesStateLayer,
-						pendingSendOwnershipLayer,
 						sessionManagerOrchestrationLayer,
 						persistenceLayer,
 					),
@@ -1044,7 +1041,6 @@ export function makeTestHandlerLayer(
 				configLayer,
 				sessionManagerServiceLayer,
 				PendingInteractionServiceLive,
-				pendingSendOwnershipLayer,
 				overridesStateLayer,
 				orchestrationLayer,
 				providerTurnPersistenceLayer,
@@ -1069,7 +1065,6 @@ export function makeTestHandlerLayer(
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,
-		pendingSendOwnershipLayer,
 		providerTurnServiceLayer,
 		sessionManagerServiceLayer,
 		...(opts?.persistenceLayer ? [persistenceLayer] : []),

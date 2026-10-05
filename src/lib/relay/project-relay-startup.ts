@@ -297,6 +297,8 @@ function acquireStartupServices(inputs: StartupInputs) {
 						client.session.messages(sessionId, { signal }),
 					);
 				}),
+			(sessionId, messageId) =>
+				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
 		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {

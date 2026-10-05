@@ -3,6 +3,7 @@
 // The replay fixture fails the test unless exactly the planned turns are sent.
 
 import { DatabaseSync } from "node:sqlite";
+import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -18,6 +19,42 @@ function countEvents(dbPath: string | undefined, type: string): number {
 	} finally {
 		db.close();
 	}
+}
+
+type Send = { commandId: string; sessionId: string; text: string };
+
+/** Records the browser's SendMessage requests. Register before navigation so
+ *  even the first RPC socket is observed. */
+function recordSends(page: Page): Send[] {
+	const sends: Send[] = [];
+	page.on("websocket", (ws) => {
+		ws.on("framesent", ({ payload }) => {
+			if (typeof payload !== "string") return;
+			const frame: {
+				_tag?: string;
+				tag?: string;
+				payload?: {
+					commandId?: unknown;
+					sessionId?: unknown;
+					text?: unknown;
+				};
+			} = JSON.parse(payload);
+			if (frame?._tag !== "Request" || frame.tag !== "SendMessage") return;
+			const input = frame.payload;
+			if (
+				typeof input?.commandId === "string" &&
+				typeof input.sessionId === "string" &&
+				typeof input.text === "string"
+			) {
+				sends.push({
+					commandId: input.commandId,
+					sessionId: input.sessionId,
+					text: input.text,
+				});
+			}
+		});
+	});
+	return sends;
 }
 
 test.describe("Claude replay lane", () => {
@@ -51,36 +88,7 @@ test.describe("Claude replay lane", () => {
 			const sessionId = decodeURIComponent(
 				harness.projectUrl.slice("/s/".length),
 			);
-			const sends: { commandId: string; sessionId: string; text: string }[] =
-				[];
-			// Register before navigation so even the first RPC socket is observed.
-			page.on("websocket", (ws) => {
-				ws.on("framesent", ({ payload }) => {
-					if (typeof payload !== "string") return;
-					const frame: {
-						_tag?: string;
-						tag?: string;
-						payload?: {
-							commandId?: unknown;
-							sessionId?: unknown;
-							text?: unknown;
-						};
-					} = JSON.parse(payload);
-					if (frame?._tag !== "Request" || frame.tag !== "SendMessage") return;
-					const input = frame.payload;
-					if (
-						typeof input?.commandId === "string" &&
-						typeof input.sessionId === "string" &&
-						typeof input.text === "string"
-					) {
-						sends.push({
-							commandId: input.commandId,
-							sessionId: input.sessionId,
-							text: input.text,
-						});
-					}
-				});
-			});
+			const sends = recordSends(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			await app.goto(relayUrl);
@@ -113,7 +121,7 @@ test.describe("Claude replay lane", () => {
 				// links the completion back to this browser input in the same session.
 				const stored = db.prepare(`
 					SELECT outbox.command_id, outbox.session_id, user.id AS user_message_id,
-						user.text, turn.id AS turn_id, turn.user_message_id AS turn_user_message_id,
+						user.input_id, user.text, turn.id AS turn_id, turn.user_message_id AS turn_user_message_id,
 						assistant.id AS assistant_message_id, assistant.turn_id AS completed_turn_id,
 						completion.sequence AS completion_sequence
 					FROM provider_command_outbox outbox
@@ -149,6 +157,7 @@ test.describe("Claude replay lane", () => {
 							command_id: commandId,
 							session_id: sessionId,
 							user_message_id: commandId,
+							input_id: commandId,
 							text,
 							turn_id: commandId,
 							turn_user_message_id: commandId,
@@ -160,6 +169,75 @@ test.describe("Claude replay lane", () => {
 				}
 			} finally {
 				db.close();
+			}
+		});
+	});
+
+	test.describe("two browsers sending identical text", () => {
+		test.use({
+			claudeReplay: {
+				turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+			},
+		});
+
+		test("each browser's send is placed once, tagged with its own input id", async ({
+			page,
+			browser,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			const sessionId = decodeURIComponent(
+				harness.projectUrl.slice("/s/".length),
+			);
+			const context = await browser.newContext({
+				viewport: page.viewportSize(),
+			});
+			try {
+				const pages = [page, await context.newPage()];
+				const sends = pages.map(recordSends);
+				const apps = pages.map((p) => new AppPage(p));
+				const chats = pages.map((p) => new ChatPage(p));
+				for (const app of apps) await app.goto(relayUrl);
+
+				// Sent back to back, the second send normally lands mid-turn, so the runner
+				// holds it and places it at gate release.
+				for (const app of apps) await app.sendMessage("Same");
+				for (const recorded of sends) {
+					await expect.poll(() => recorded.length).toBe(1);
+				}
+				await expect
+					.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
+					.toBe(2);
+				for (const chat of chats) {
+					await chat.waitForStreamingComplete();
+					await expect(chat.userMessages).toHaveText([/\bSame\b/, /\bSame\b/]);
+					await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
+				}
+
+				const commandIds = sends.map((recorded) => recorded[0]?.commandId);
+				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+				try {
+					const rows = db
+						.prepare(
+							`SELECT id, input_id, text FROM messages
+							WHERE session_id = ? AND role = 'user'`,
+						)
+						.all(sessionId);
+					await testInfo.attach("two-browser-input-id-proof.json", {
+						body: JSON.stringify({ commandIds, rows }, null, 2),
+						contentType: "application/json",
+					});
+					expect(rows).toHaveLength(2);
+					expect(rows).toEqual(
+						expect.arrayContaining(
+							commandIds.map((id) => ({ id, input_id: id, text: "Same" })),
+						),
+					);
+				} finally {
+					db.close();
+				}
+			} finally {
+				await context.close();
 			}
 		});
 	});

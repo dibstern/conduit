@@ -318,6 +318,16 @@ export const makeMessageProjector = (): EffectProjector => ({
 						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
 				if (rows[0]?.rest_digest != null) {
 					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
+					// A late provider echo still tags the snapshot row with its send.
+					if (isEventType(event, "message.created") && event.data.inputId) {
+						return ids(
+							yield* sql<{
+								id: string;
+							}>`UPDATE messages SET input_id = ${event.data.inputId}
+								WHERE id = ${event.data.messageId} AND input_id IS NULL
+								RETURNING id`,
+						);
+					}
 					return [];
 				}
 			}
@@ -427,12 +437,14 @@ export const makeMessageProjector = (): EffectProjector => ({
 				return ids(
 					yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null})
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null})
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
-							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END
+							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
+							input_id = COALESCE(messages.input_id, excluded.input_id)
 						WHERE messages.role <> excluded.role
+							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
 						RETURNING id`,
 				);
 			}

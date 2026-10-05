@@ -407,11 +407,6 @@ export function translateSessionStatus(
 /** Translate message.created event → user_message (for TUI-originated messages) */
 export function translateMessageCreated(
 	event: SSEEvent,
-	resolveOrigin?: (
-		sessionId: string | undefined,
-		messageId: string | undefined,
-		text: string,
-	) => string | undefined,
 ): UntaggedRelayMessage | null {
 	if (!isMessageCreatedEvent(event)) return null;
 	const { properties: props } = event;
@@ -433,13 +428,11 @@ export function translateMessageCreated(
 		.join("\n");
 
 	if (!text) return null;
-	const originId = resolveOrigin?.(props.sessionID, props.messageID, text);
 
 	return {
 		type: "user_message",
 		text,
 		...(props.messageID != null ? { messageId: props.messageID } : {}),
-		...(originId != null ? { originId } : {}),
 	};
 }
 
@@ -648,13 +641,7 @@ export interface Translator {
 	): void;
 }
 
-export function createTranslator(
-	resolveOrigin?: (
-		sessionId: string | undefined,
-		messageId: string | undefined,
-		text: string,
-	) => string | undefined,
-): Translator {
+export function createTranslator(): Translator {
 	const DEFAULT_SESSION = "__default__";
 	const sessionParts = new Map<
 		string,
@@ -732,7 +719,7 @@ export function createTranslator(
 			// Message created (user messages from TUI)
 			if (eventType === "message.created") {
 				return wrapResult(
-					translateMessageCreated(event, resolveOrigin),
+					translateMessageCreated(event),
 					"message created: missing id, not a user message, or no text",
 				);
 			}

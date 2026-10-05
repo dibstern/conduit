@@ -279,16 +279,11 @@ function synthesizeResultEvent(
 /**
  * Compare current messages against previous snapshot, synthesize events
  * for any changes detected. Returns a new snapshot without mutating the old
- * snapshot. New user messages also resolve their pending send's owner.
+ * snapshot.
  */
 export function diffAndSynthesize(
 	previousSnapshot: Map<string, MessageSnapshot>,
 	messages: Message[],
-	resolveOrigin?: (
-		sessionId: string | undefined,
-		messageId: string | undefined,
-		text: string,
-	) => string | undefined,
 ): {
 	events: UntaggedRelayMessage[];
 	newSnapshot: Map<string, MessageSnapshot>;
@@ -311,12 +306,10 @@ export function diffAndSynthesize(
 		if (!prevMsg && msg.role === "user") {
 			const text = extractUserText(msg);
 			if (text) {
-				const originId = resolveOrigin?.(msg.sessionID, msgId, text);
 				events.push({
 					type: "user_message",
 					text,
 					messageId: msgId,
-					...(originId != null ? { originId } : {}),
 				});
 			}
 		}

@@ -60,7 +60,22 @@ export class OpenCodeRuntimeEventTranslator {
 	 *  cannot interleave with a translation that is already in flight. */
 	private epoch = 0;
 
-	constructor(private readonly log: Logger = defaultLog) {}
+	constructor(
+		private readonly log: Logger = defaultLog,
+		/** The send a new user message echo belongs to, if the adapter knows. */
+		private readonly inputIdForUserEcho?: (
+			sessionId: string,
+			messageId: string,
+		) => string | undefined,
+	) {}
+
+	private userEchoInputId(
+		sessionId: string,
+		messageId: string,
+	): { inputId?: string } {
+		const inputId = this.inputIdForUserEcho?.(sessionId, messageId);
+		return inputId ? { inputId } : {};
+	}
 
 	/** Translate and keep what was learned. Callers that persist the events must
 	 *  use `forkSession`/`translateInto`/`commitSession` instead, so translation
@@ -262,6 +277,7 @@ export class OpenCodeRuntimeEventTranslator {
 				role,
 				sessionId,
 				...(parentID ? { parentID } : {}),
+				...(role === "user" ? this.userEchoInputId(sessionId, messageId) : {}),
 			}),
 		];
 	}
@@ -573,6 +589,9 @@ export class OpenCodeRuntimeEventTranslator {
 					sessionId,
 					...(msg.role === "assistant" && msg.parentID
 						? { parentID: msg.parentID }
+						: {}),
+					...(msg.role === "user"
+						? this.userEchoInputId(sessionId, messageId)
 						: {}),
 				}),
 			);

@@ -3,10 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
 import {
-	PendingSendOwnershipLive,
-	PendingSendOwnershipTag,
-} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
-import {
 	ConfigTag,
 	LoggerTag,
 	type PollerManagerShape,
@@ -65,16 +61,13 @@ async function buildLayerHarness(options?: {
 	);
 	const layer = makeMessagePollerManagerLive({
 		...(options?.hasViewers != null && { hasViewers: options.hasViewers }),
-	}).pipe(
-		Layer.provide(dependencyLayer),
-		Layer.merge(PendingSendOwnershipLive),
-	);
+	}).pipe(Layer.provide(dependencyLayer));
 	const scope = await Effect.runPromise(Scope.make());
 	const context = await Effect.runPromise(
 		Layer.buildWithScope(Layer.fresh(layer), scope),
 	);
 	const runWithContext = <A, E>(
-		effect: Effect.Effect<A, E, PollerManagerTag | PendingSendOwnershipTag>,
+		effect: Effect.Effect<A, E, PollerManagerTag>,
 	) => Effect.runPromise(Effect.provide(effect, context));
 	const close = () => Effect.runPromise(Scope.close(scope, Exit.void));
 
@@ -82,49 +75,6 @@ async function buildLayerHarness(options?: {
 }
 
 describe("MessagePollerManagerLive", () => {
-	it("shares pending ownership with REST polling within each relay and isolates other relays", async () => {
-		vi.useFakeTimers({ now: 1_000 });
-		const message: Message = {
-			id: "user-1",
-			sessionID: "s1",
-			role: "user",
-			parts: [{ id: "text-1", type: "text", text: "Hello" }],
-		};
-		const first = await buildLayerHarness({ messages: async () => [message] });
-		const second = await buildLayerHarness({ messages: async () => [message] });
-		try {
-			for (const [harness, originId] of [
-				[first, "browser-a"],
-				[second, "browser-b"],
-			] as const) {
-				const ownership = await harness.runWithContext(PendingSendOwnershipTag);
-				ownership.register("s1", {
-					commandId: "send-1",
-					originId,
-					text: "Hello",
-				});
-				const manager = await harness.runWithContext(PollerManagerTag);
-				expectRealManager(manager);
-				const events: unknown[] = [];
-				manager.on("events", (batch) => events.push(...batch));
-				manager.startPolling("s1", [textMessage("s1", "seed")]);
-				await flushMicrotasks();
-				expect(events).toContainEqual({
-					type: "user_message",
-					sessionId: "s1",
-					messageId: "user-1",
-					text: "Hello",
-					originId,
-				});
-				expect(ownership.resolve("s1", "user-1", "Hello")).toBe(originId);
-				expect(ownership.resolve("s1", "user-2", "Hello")).toBeUndefined();
-			}
-		} finally {
-			await first.close();
-			await second.close();
-		}
-	});
-
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();

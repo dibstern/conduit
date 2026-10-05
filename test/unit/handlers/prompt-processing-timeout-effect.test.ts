@@ -4,10 +4,6 @@ import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import {
-	PendingSendOwnershipLive,
-	PendingSendOwnershipTag,
-} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -85,7 +81,6 @@ describe("prompt processing timeouts through Effect state", () => {
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
@@ -107,15 +102,6 @@ describe("prompt processing timeouts through Effect state", () => {
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
 			yield* TestClock.adjust("120 seconds");
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-			const ownership = yield* PendingSendOwnershipTag;
-			ownership.register("session-1", {
-				commandId: "cmd-next-send",
-				originId: "origin-next-send",
-				text: "next message",
-			});
-			expect(
-				ownership.resolve("session-1", "next-provider-message", "next message"),
-			).toBe("origin-next-send");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -137,7 +123,6 @@ describe("prompt processing timeouts through Effect state", () => {
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),

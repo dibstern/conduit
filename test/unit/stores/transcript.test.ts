@@ -126,6 +126,7 @@ describe("transcript detail reducer", () => {
 		const user: HistoryMessage = {
 			id: "user-1",
 			role: "user",
+			inputId: "input-1",
 			time: { created: 2 },
 			parts: [{ id: "text", type: "text", text: "hello" }],
 		};
@@ -148,7 +149,7 @@ describe("transcript detail reducer", () => {
 			type: "user",
 			uuid: "optimistic",
 			text: "hello",
-			originId: "browser",
+			inputId: "input-1",
 			sentDuringEpoch: 3,
 		};
 		const next = applyTranscriptEnvelope(initial, {
@@ -172,14 +173,14 @@ describe("transcript detail reducer", () => {
 			"user-1/user",
 		]);
 		expect(projected[2]).toMatchObject({
-			originId: "browser",
+			inputId: "input-1",
 			sentDuringEpoch: 3,
 		});
 		const replayed = deriveTranscriptMessages(
 			{
 				...next,
 				carriedUsers: new Map([
-					["user-1", { originId: "browser", sentDuringEpoch: 3 }],
+					["user-1", { inputId: "input-1", sentDuringEpoch: 3 }],
 				]),
 			},
 			projected,
@@ -286,7 +287,7 @@ describe("transcript detail reducer", () => {
 			type: "user",
 			uuid: "local",
 			text: "hello",
-			originId: "browser",
+			inputId: "input-local",
 		};
 		const reconciled = deriveTranscriptMessages(state, [...live, optimistic], {
 			live: true,
@@ -350,6 +351,7 @@ describe("transcript detail reducer", () => {
 		const user = (id: string): HistoryMessage => ({
 			id,
 			role: "user",
+			inputId: `input-${id}`,
 			parts: [{ id: `${id}-text`, type: "text", text: "yes" }],
 		});
 		const first = applyTranscriptEnvelope(entry(), snapshot([user("old")], 1));
@@ -358,6 +360,7 @@ describe("transcript detail reducer", () => {
 			type: "user",
 			uuid: "local",
 			text: "yes",
+			inputId: "input-new",
 		};
 		const waiting = derive(first, [...shown.messages, optimistic], {
 			live: true,
@@ -387,11 +390,16 @@ describe("transcript detail reducer", () => {
 	});
 
 	it("adopts a send whose row is created before its text part", () => {
-		const optimistic: ChatMessage = { type: "user", uuid: "local", text: "hi" };
+		const optimistic: ChatMessage = {
+			type: "user",
+			uuid: "local",
+			text: "hi",
+			inputId: "input-u",
+		};
 		const created = applyTranscriptEnvelope(entry(), {
 			_tag: "upsert",
 			sequence: 1,
-			item: item({ id: "u", role: "user", parts: [] }),
+			item: item({ id: "u", role: "user", inputId: "input-u", parts: [] }),
 		});
 		const waiting = derive(created, [optimistic], {
 			live: true,
@@ -405,6 +413,7 @@ describe("transcript detail reducer", () => {
 			item: item({
 				id: "u",
 				role: "user",
+				inputId: "input-u",
 				parts: [{ id: "u-text", type: "text", text: "hi" }],
 			}),
 		});

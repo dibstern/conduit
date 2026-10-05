@@ -523,14 +523,15 @@
 			}
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
-		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		const commandId = crypto.randomUUID();
+		addUserMessage(activity, messages, messageText, imageUrls, isProcessing(), commandId);
 		const sentToSessionId = sid;
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
 				projectSlug,
 				sessionId: sentToSessionId,
 				text: messageText,
-				commandId: crypto.randomUUID(),
+				commandId,
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {

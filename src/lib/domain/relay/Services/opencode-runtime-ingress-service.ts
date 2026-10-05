@@ -80,6 +80,11 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 		providerInstanceId: string,
 		signal: AbortSignal,
 	) => Effect.Effect<readonly Message[], unknown>;
+	/** The send a user message echo belongs to, from the OpenCode adapter. */
+	readonly inputIdForUserEcho?: (
+		sessionId: string,
+		messageId: string,
+	) => string | undefined;
 }
 
 const BACKFILL_TIMEOUT = "15 seconds";
@@ -125,7 +130,7 @@ export class EffectOpenCodeRuntimeIngress
 	private readonly fetchSessionMessages:
 		| EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"]
 		| undefined;
-	private readonly translator = new OpenCodeRuntimeEventTranslator();
+	private readonly translator: OpenCodeRuntimeEventTranslator;
 	private readonly seenSessions = new Set<string>();
 	/** Parents named by `session.created`, which translates to nothing, kept
 	 *  until the session's first translatable event seeds it. A sub-agent seeded
@@ -173,6 +178,10 @@ export class EffectOpenCodeRuntimeIngress
 		this.ingestion = opts.ingestion;
 		this.log = opts.log;
 		this.fetchSessionMessages = opts.fetchSessionMessages;
+		this.translator = new OpenCodeRuntimeEventTranslator(
+			undefined,
+			opts.inputIdForUserEcho,
+		);
 	}
 
 	private withSql<A, E>(
@@ -876,6 +885,7 @@ export class EffectOpenCodeRuntimeIngress
 export const makeEffectOpenCodeRuntimeIngress = (
 	log: OpenCodeRuntimeIngressLog,
 	fetchSessionMessages?: EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"],
+	inputIdForUserEcho?: EffectOpenCodeRuntimeIngressOptions["inputIdForUserEcho"],
 ): Effect.Effect<
 	EffectOpenCodeRuntimeIngress,
 	ProjectionRunnerError | SqlError,
@@ -891,6 +901,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			ingestion,
 			log,
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
+			...(inputIdForUserEcho ? { inputIdForUserEcho } : {}),
 		});
 		yield* ingress.recoverEffect();
 		// Reconciliation proof is valid only for the process that fetched REST.

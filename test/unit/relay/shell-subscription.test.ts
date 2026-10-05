@@ -16,7 +16,6 @@ import {
 } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
@@ -105,7 +104,6 @@ const makeShellTestLayer = (
 		),
 	);
 	return Layer.mergeAll(
-		PendingSendOwnershipLive,
 		RelayStatusSnapshotLive,
 		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		persistenceLayer,

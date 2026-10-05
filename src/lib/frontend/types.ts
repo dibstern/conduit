@@ -100,7 +100,8 @@ export interface UserMessage {
 	type: "user";
 	uuid: string;
 	messageId?: string;
-	originId?: string;
+	/** The send this message belongs to; the placed row carries the same id. */
+	inputId?: string;
 	text: string;
 	images?: string[];
 	/** The `turnEpoch` at which this message was sent, present only when it

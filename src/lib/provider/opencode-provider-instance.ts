@@ -78,11 +78,35 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			inFlight: number;
 		}
 	>();
+	/** Sends handed to OpenCode whose user echo is not yet seen, in handoff
+	 *  order. OpenCode picks its own message ids, so echoes match by order. */
+	private readonly unechoedInputs = new Map<string, string[]>();
+	/** Echo message id to send, so a retried translation tags the same send. */
+	private readonly echoInputIds = new Map<string, string>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
 		this.clientForSession = options.clientForSession;
+	}
+
+	/** The send a new user message echo belongs to: the oldest unechoed one. */
+	inputIdForUserEcho(sessionId: string, messageId: string): string | undefined {
+		const tagged = this.echoInputIds.get(messageId);
+		if (tagged) return tagged;
+		const inputId = this.unechoedInputs.get(sessionId)?.shift();
+		if (inputId) this.echoInputIds.set(messageId, inputId);
+		return inputId;
+	}
+
+	private forgetInput(sessionId: string, inputId: string): void {
+		const queue = this.unechoedInputs.get(sessionId) ?? [];
+		const remaining = queue.filter((id) => id !== inputId);
+		if (remaining.length > 0) this.unechoedInputs.set(sessionId, remaining);
+		else this.unechoedInputs.delete(sessionId);
+		for (const [messageId, id] of this.echoInputIds) {
+			if (id === inputId) this.echoInputIds.delete(messageId);
+		}
 	}
 
 	/**
@@ -236,6 +260,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 			const cleanup = Effect.sync(() => {
 				abortSignal.removeEventListener("abort", onAbort);
+				this.forgetInput(sessionId, input.inputId);
 				pendingTurn.inFlight -= 1;
 				if (
 					pendingTurn.inFlight === 0 &&
@@ -301,8 +326,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 							if (permission.length > 0) {
 								await client.session.update(sessionId, { permission });
 							}
-							if (!abortSignal.aborted)
+							if (!abortSignal.aborted) {
+								const queue = this.unechoedInputs.get(sessionId) ?? [];
+								queue.push(input.inputId);
+								this.unechoedInputs.set(sessionId, queue);
 								await client.session.prompt(sessionId, promptOptions);
+							}
 						},
 						catch: (cause) => cause,
 					}),

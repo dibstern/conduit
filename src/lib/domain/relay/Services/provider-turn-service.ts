@@ -7,7 +7,6 @@ import type {
 	PendingInteractionServiceTag,
 	PendingQuestion,
 } from "./pending-interaction-service.js";
-import type { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import type { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnDispatchFibersTag,
@@ -103,7 +102,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| ConfigTag
 		| SessionManagerServiceTag
 		| PendingInteractionServiceTag
-		| PendingSendOwnershipTag
 		| OverridesStateTag
 		| OrchestrationEngineTag
 		| ReadQueryEffectTag
@@ -147,7 +145,6 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| ConfigTag
 	| SessionManagerServiceTag
 	| PendingInteractionServiceTag
-	| PendingSendOwnershipTag
 	| OverridesStateTag
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag

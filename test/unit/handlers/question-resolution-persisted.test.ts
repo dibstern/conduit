@@ -21,10 +21,6 @@ import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import {
-	PendingSendOwnershipLive,
-	type PendingSendOwnershipTag,
-} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -97,7 +93,6 @@ type HandlerStack =
 	| SessionEventBusTag
 	| ConfigTag
 	| PendingInteractionServiceTag
-	| PendingSendOwnershipTag
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag
@@ -135,7 +130,6 @@ const withHandlerStack = async (
 		bus,
 		Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
 		PendingInteractionServiceLive,
-		PendingSendOwnershipLive,
 		Layer.succeed(OpenCodeAPITag, client),
 		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 		Layer.succeed(LoggerTag, createSilentLogger()),

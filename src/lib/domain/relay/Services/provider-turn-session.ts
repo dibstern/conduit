@@ -11,7 +11,6 @@ import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
 } from "./pending-interaction-service.js";
-import { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
 	CLAUDE_PROVIDER_ID,
@@ -247,8 +246,6 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 		const wsHandler = yield* WebSocketHandlerTag;
 		const config = yield* ConfigTag;
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
-		const ownership = yield* PendingSendOwnershipTag;
-		ownership.clear(input.sessionId);
 		yield* clearProcessingTimeout(input.sessionId);
 
 		const engine = yield* OrchestrationEngineTag;

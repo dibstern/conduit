@@ -46,10 +46,12 @@ import {
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
+	type ClaudeEventPersistFailure,
 } from "../../persistence/effect/claude-event-persist-effect.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import { ProviderInstanceFailure } from "../errors.js";
@@ -187,6 +189,7 @@ export interface ClaudeProviderInstanceDeps {
 		input: MaterializeClaudeSubagentsInput,
 	) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError>;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
 	/** Tests can host the session engine locally; production defaults to a process. */
@@ -380,6 +383,8 @@ function sessionFailure(
 export class ClaudeProviderRuntime {
 	readonly providerId = "claude";
 	private readonly sinks = new Map<string, EventSink>();
+	/** Sends handed to the runner and not yet finished, per session. */
+	private readonly sendsInFlight = new Map<string, number>();
 	private detachingInteractions = false;
 	private recoveredSink: ((sessionId: string) => EventSink) | undefined;
 	private readonly recoveredSinkIds = new Set<string>();
@@ -526,32 +531,103 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
-			const sinkId = claudeRunnerSinkId(input.inputId, input.commandAttempt);
-			this.sinks.set(sinkId, eventSink);
-			this.reportSinkForTesting("allocated", sinkId, input.sessionId);
-			const aborted = Effect.async<void>((resume) => {
-				const onAbort = () => resume(Effect.void);
-				if (abortSignal.aborted) onAbort();
-				else abortSignal.addEventListener("abort", onAbort, { once: true });
-				return Effect.sync(() =>
-					abortSignal.removeEventListener("abort", onAbort),
-				);
-			});
-			yield* FiberMap.run(
-				this.abortFibers,
-				sinkId,
-				aborted.pipe(
-					Effect.andThen(this.runner.executeEffect({ type: "abort", sinkId })),
-					Effect.ignore,
+			const { sessionId } = input;
+			return yield* Effect.acquireUseRelease(
+				Effect.sync(() => {
+					const inFlight = this.sendsInFlight.get(sessionId) ?? 0;
+					this.sendsInFlight.set(sessionId, inFlight + 1);
+					return inFlight;
+				}),
+				(inFlight) =>
+					Effect.gen(this, function* () {
+						// An idle send is placed before the runner hop, as fast as a
+						// local write; the runner places a held send at gate release.
+						if (inFlight === 0)
+							yield* this.placeUserMessageEffect({
+								sessionId,
+								inputId: input.inputId,
+								text: input.prompt,
+							}).pipe(
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: this.providerId,
+											operation: "sendTurn",
+											cause,
+										}),
+								),
+							);
+						const sinkId = claudeRunnerSinkId(
+							input.inputId,
+							input.commandAttempt,
+						);
+						this.sinks.set(sinkId, eventSink);
+						this.reportSinkForTesting("allocated", sinkId, sessionId);
+						const aborted = Effect.async<void>((resume) => {
+							const onAbort = () => resume(Effect.void);
+							if (abortSignal.aborted) onAbort();
+							else
+								abortSignal.addEventListener("abort", onAbort, { once: true });
+							return Effect.sync(() =>
+								abortSignal.removeEventListener("abort", onAbort),
+							);
+						});
+						yield* FiberMap.run(
+							this.abortFibers,
+							sinkId,
+							aborted.pipe(
+								Effect.andThen(
+									this.runner.executeEffect({ type: "abort", sinkId }),
+								),
+								Effect.ignore,
+							),
+						);
+						return yield* this.commandEffect({
+							type: "send-turn",
+							sinkId,
+							aborted: abortSignal.aborted,
+							claudeSettingsOverrides,
+							input: turn,
+						});
+					}),
+				() =>
+					Effect.sync(() => {
+						const remaining = (this.sendsInFlight.get(sessionId) ?? 1) - 1;
+						if (remaining > 0) this.sendsInFlight.set(sessionId, remaining);
+						else this.sendsInFlight.delete(sessionId);
+					}),
+			);
+		});
+	}
+
+	/** Places a send's user message once; only a missing session fails it. */
+	private placeUserMessageEffect(input: {
+		readonly sessionId: string;
+		readonly inputId: string;
+		readonly text: string;
+	}): Effect.Effect<void, ClaudeEventPersistFailure> {
+		return Effect.gen(this, function* () {
+			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
+			const persistUserMessage =
+				this.deps.persistUserMessage ??
+				(persist._tag === "Some"
+					? persist.value.persistUserMessage
+					: undefined);
+			if (!persistUserMessage) return;
+			yield* persistUserMessage(input.sessionId, input.text, {
+				messageId: input.inputId,
+				inputId: input.inputId,
+			}).pipe(
+				Effect.catchIf(
+					(error) => error._tag !== "ClaudeSessionLifecycleError",
+					(error) =>
+						Effect.sync(() =>
+							log.warn(
+								`Non-fatal persistence error for Claude user message: ${formatErrorDetail(error)}`,
+							),
+						),
 				),
 			);
-			return yield* this.commandEffect({
-				type: "send-turn",
-				sinkId,
-				aborted: abortSignal.aborted,
-				claudeSettingsOverrides,
-				input: turn,
-			});
 		});
 	}
 
@@ -881,6 +957,10 @@ export class ClaudeProviderRuntime {
 						.pipe(
 							Effect.mapError((cause) => sessionFailure(output.type, cause)),
 						) ?? Effect.succeed([]);
+				case "place-user-message":
+					return yield* this.placeUserMessageEffect(output.input).pipe(
+						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					);
 				case "ensure-subagent-session": {
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
@@ -1355,6 +1435,32 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
+	/** The server places the message before this turn may produce output. */
+	private placeUserMessageEffect(
+		input: SendTurnInput,
+	): Effect.Effect<void, ClaudeAdapterError> {
+		const sinkId = this.sinkId(input.eventSink);
+		if (!sinkId) return Effect.void;
+		return this.emit({
+			type: "place-user-message",
+			sinkId,
+			input: {
+				sessionId: input.sessionId,
+				inputId: input.inputId,
+				text: input.prompt,
+			},
+		}).pipe(
+			Effect.asVoid,
+			Effect.mapError(
+				(cause) =>
+					new ClaudeBoundaryError({
+						operation: "placeUserMessage",
+						cause: new Error(cause.message),
+					}),
+			),
+		);
+	}
+
 	private ensureSubagentSessionEffect(
 		ctx: ClaudeSessionContext,
 		input: Parameters<
@@ -1594,6 +1700,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
+				yield* this.placeUserMessageEffect(input);
 				const bridge = this.getPermissionBridge();
 				let ctx: ClaudeSessionContext | undefined;
 				const canUseTool: CanUseTool = async (
@@ -1965,6 +2072,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						variant: input.variant,
 					});
 					setExpectedApiModelId(ctx, expectedApiModelId);
+					yield* this.placeUserMessageEffect(input);
 
 					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
 					yield* Effect.uninterruptible(

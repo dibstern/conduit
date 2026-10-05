@@ -142,6 +142,15 @@ export type ClaudeSessionOutput =
 					};
 			  }
 			| {
+					/** Places a send's user message before the query admits it. */
+					readonly type: "place-user-message";
+					readonly input: {
+						readonly sessionId: string;
+						readonly inputId: string;
+						readonly text: string;
+					};
+			  }
+			| {
 					readonly type: "ensure-subagent-session";
 					readonly input: {
 						readonly childSessionId: string;

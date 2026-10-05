@@ -49,6 +49,7 @@ function snapshotRowToHistory(
 		role: parsed.role,
 		parts,
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+		...(row.input_id ? { inputId: row.input_id } : {}),
 	};
 }
 
@@ -190,6 +191,7 @@ export function messageRowsToHistory(
 			id: row.id,
 			role: row.role as "user" | "assistant",
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+			...(row.input_id ? { inputId: row.input_id } : {}),
 			time: {
 				created: row.created_at,
 				completed: row.updated_at,

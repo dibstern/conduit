@@ -109,6 +109,7 @@ describe("Schema Migration", () => {
 					table: "message_tombstones",
 					unique: false,
 				},
+				{ name: "idx_messages_input_id", table: "messages", unique: false },
 				{
 					name: "idx_messages_session_created",
 					table: "messages",

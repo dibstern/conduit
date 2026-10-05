@@ -32,7 +32,6 @@ import {
 	OpenCodeHistoryReconcileTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
-import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
@@ -336,12 +335,7 @@ export function createProjectRelayLayers({
 		AgentServiceLive,
 		relayStateBridgesAndStatus,
 	);
-	const translatorLayer = Layer.effect(
-		TranslatorTag,
-		Effect.map(PendingSendOwnershipTag, (ownership) =>
-			createTranslator(ownership.resolve),
-		),
-	);
+	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
 	const baseLayers = Layer.provideMerge(
 		translatorLayer,
 		relayStateServicesAndBridges,

@@ -14,6 +14,7 @@ import {
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	MESSAGES_INPUT_ID_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -994,6 +995,12 @@ export const effectMigrationEntries = {
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (columns.some((column) => column.name === "goal_state")) return;
 		yield* executeSqlStatements(readMigrationSql(SESSION_GOALS_MIGRATION));
+	}),
+	"0031_messages_input_id": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
+		if (columns.some((column) => column.name === "input_id")) return;
+		yield* executeSqlStatements(readMigrationSql(MESSAGES_INPUT_ID_MIGRATION));
 	}),
 } satisfies Record<
 	string,

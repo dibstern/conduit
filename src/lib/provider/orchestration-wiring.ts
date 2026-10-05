@@ -202,6 +202,7 @@ const createOrchestrationComponentsEffect = (
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
 			materializeSubagents,
+			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
 				: {}),

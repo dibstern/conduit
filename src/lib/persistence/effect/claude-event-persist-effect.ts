@@ -48,7 +48,13 @@ export interface ClaudeEventPersistEffect {
 	readonly persistUserMessage: (
 		sessionId: string,
 		text: string,
-		options?: { readonly publish?: boolean; readonly messageId?: string },
+		options?: {
+			readonly publish?: boolean;
+			readonly messageId?: string;
+			/** The send that placed this message; an existing row for it wins. */
+			readonly inputId?: string;
+			readonly provider?: string;
+		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistClaudeSubagent: (input: {
@@ -212,7 +218,12 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const persistUserMessage = (
 		sessionId: string,
 		text: string,
-		options?: { readonly publish?: boolean; readonly messageId?: string },
+		options?: {
+			readonly publish?: boolean;
+			readonly messageId?: string;
+			readonly inputId?: string;
+			readonly provider?: string;
+		},
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		commitAndSignal
 			.write(
@@ -224,14 +235,19 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							"existing-session",
 						);
 						// The check and append share the seam's transaction on redispatch.
-						if (options?.messageId) {
+						const messageId = options?.messageId;
+						const inputId = options?.inputId;
+						if (messageId || inputId) {
 							const existing = yield* sql<{ readonly id: string }>`
-								SELECT id FROM messages WHERE id = ${options.messageId} LIMIT 1`;
+								SELECT id FROM messages
+								WHERE id = ${messageId ?? null} OR input_id = ${inputId ?? null}
+								LIMIT 1`;
 							if (existing.length > 0) return;
 						}
 
 						const now = Date.now();
-						const userMsgId = options?.messageId ?? crypto.randomUUID();
+						const userMsgId = messageId ?? crypto.randomUUID();
+						const provider = options?.provider ?? "claude";
 						const stored = yield* eventStore.appendBatch([
 							canonicalEvent(
 								"message.created",
@@ -240,8 +256,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 									messageId: userMsgId,
 									role: "user",
 									sessionId,
+									...(inputId ? { inputId } : {}),
 								},
-								{ provider: "claude", createdAt: now },
+								{ provider, createdAt: now },
 							),
 							canonicalEvent(
 								"text.delta",
@@ -251,7 +268,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 									partId: `${userMsgId}-0`,
 									text,
 								},
-								{ provider: "claude", createdAt: now },
+								{ provider, createdAt: now },
 							),
 						]);
 						yield* project(stored);

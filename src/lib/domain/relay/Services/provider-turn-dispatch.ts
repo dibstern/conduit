@@ -17,7 +17,6 @@ import { messageRowsToHistory } from "../../../persistence/session-history-adapt
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
-import { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceSendInput } from "./provider-turn-service.js";
 import {
@@ -153,42 +152,29 @@ const loadClaudeHistory = (sessionId: string) =>
 		return { history: [], loaded: false };
 	});
 
-const maybePersistClaudeUserMessage = (input: {
-	readonly sessionId: string;
-	readonly text: string;
-	readonly isFirstClaudeMessage: boolean;
-	readonly messageId?: string;
-}) =>
+/** A handoff that ended before its message was placed still shows the send. */
+const placeUnplacedUserMessage = (
+	input: ProviderTurnServiceSendInput,
+	driver: ProviderDriverKind,
+) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
-
-		const persistResult = yield* Effect.either(
-			input.messageId
-				? persist.persistUserMessage(input.sessionId, input.text, {
-						messageId: input.messageId,
-					})
-				: persist.persistUserMessage(input.sessionId, input.text),
-		);
-		const titleService = yield* SessionTitleServiceTag;
-		if (input.isFirstClaudeMessage && persistResult._tag === "Right") {
-			yield* titleService.startForFirstClaudeMessage({
-				sessionId: input.sessionId,
-				firstMessage: input.text,
-			});
-		}
-		if (persistResult._tag === "Left") {
-			const error = persistResult.left;
-			if (error._tag === "ClaudeSessionLifecycleError") {
-				log.error(
-					`Claude turn persistence rejected by session lifecycle: session=${error.sessionId} operation=${error.operation} role=${error.role} reason=${error.reason}`,
-				);
-				return yield* error;
-			}
-			log.warn(
-				`Non-fatal persistence error for Claude user message: ${formatErrorDetail(error)}`,
+		yield* persist
+			.persistUserMessage(input.sessionId, input.text, {
+				messageId: input.commandId,
+				inputId: input.commandId,
+				provider: driver,
+			})
+			.pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`session=${input.sessionId} Failed to place unsent user message: ${formatErrorDetail(error)}`,
+						),
+					),
+				),
 			);
-		}
 	});
 
 const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
@@ -256,12 +242,12 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 const handleDispatchFailure = (
 	input: ProviderTurnServiceSendInput,
 	sendErr: unknown,
+	driver: ProviderDriverKind | undefined,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const ownership = yield* PendingSendOwnershipTag;
-		ownership.remove(input.sessionId, input.commandId);
+		if (driver !== undefined) yield* placeUnplacedUserMessage(input, driver);
 		log.warn(
 			`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 			formatErrorDetail(sendErr),
@@ -286,6 +272,7 @@ const handleDispatchFailure = (
 const handleDispatchResult = (
 	input: ProviderTurnServiceSendInput,
 	result: TurnResult,
+	driver: ProviderDriverKind,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -300,8 +287,7 @@ const handleDispatchResult = (
 		// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
 		// the reason.
 		if (result.status !== "completed") {
-			const ownership = yield* PendingSendOwnershipTag;
-			ownership.remove(input.sessionId, input.commandId);
+			yield* placeUnplacedUserMessage(input, driver);
 			const msg =
 				result.error?.message ??
 				(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
@@ -365,8 +351,6 @@ const resolveClaudeModel = (
 			const inferred =
 				models.find((model) => model.id === "default") ?? models[0];
 			if (inferred === undefined) {
-				const ownership = yield* PendingSendOwnershipTag;
-				ownership.remove(input.sessionId, input.commandId);
 				const reason =
 					discovery._tag === "Left"
 						? `discovery failed: ${formatErrorDetail(discovery.left)}`
@@ -441,15 +425,13 @@ const prepareEngineTurnInput = (
 			priorHistoryResult.loaded &&
 			priorHistory.length === 0;
 		const inputId = resolvedInput.commandId;
-
-		yield* isClaudeDriver(driver)
-			? maybePersistClaudeUserMessage({
-					sessionId: resolvedInput.sessionId,
-					text: resolvedInput.text,
-					isFirstClaudeMessage,
-					messageId: inputId,
-				})
-			: Effect.void;
+		if (isFirstClaudeMessage) {
+			const titleService = yield* SessionTitleServiceTag;
+			yield* titleService.startForFirstClaudeMessage({
+				sessionId: resolvedInput.sessionId,
+				firstMessage: resolvedInput.text,
+			});
+		}
 
 		const providerStateEffect = yield* ProviderStateEffectTag;
 		const providerState = yield* providerStateEffect.getState(
@@ -518,6 +500,7 @@ const prepareEngineTurnInput = (
 const dispatchEngineTurn = (
 	resolvedInput: ProviderTurnServiceSendInput,
 	providerId: string,
+	driver: ProviderDriverKind,
 	sendTurnInput: SendTurnInput,
 ) =>
 	Effect.gen(function* () {
@@ -552,10 +535,12 @@ const dispatchEngineTurn = (
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.flatten,
-			Effect.flatMap((result) => handleDispatchResult(resolvedInput, result)),
+			Effect.flatMap((result) =>
+				handleDispatchResult(resolvedInput, result, driver),
+			),
 			Effect.catchAll((error) =>
 				restorePreviousBinding.pipe(
-					Effect.zipRight(handleDispatchFailure(resolvedInput, error)),
+					Effect.zipRight(handleDispatchFailure(resolvedInput, error, driver)),
 				),
 			),
 			Effect.onInterrupt(() => restorePreviousBinding),
@@ -585,11 +570,11 @@ const sendViaEngine = (
 			Effect.catchIf(
 				(cause) =>
 					cause instanceof RelayError && cause.code === "FILE_NOT_FOUND",
-				(cause) => handleDispatchFailure(resolvedInput, cause),
+				(cause) => handleDispatchFailure(resolvedInput, cause, driver),
 			),
 		);
 		if (!sendTurnInput) return;
-		yield* dispatchEngineTurn(resolvedInput, providerId, sendTurnInput);
+		yield* dispatchEngineTurn(resolvedInput, providerId, driver, sendTurnInput);
 	});
 
 export const sendTurn = (input: ProviderTurnServiceSendInput) =>
@@ -609,6 +594,7 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 				new Error(
 					`Cannot resolve provider instance for turn routing: ${providerId}`,
 				),
+				undefined,
 			);
 			return;
 		}

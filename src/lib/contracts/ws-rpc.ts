@@ -221,6 +221,7 @@ export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
 	isBackfilled: Schema.optional(Schema.Boolean),
+	inputId: Schema.optional(Schema.String),
 	text: Schema.optional(Schema.String),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
 	time: Schema.optional(

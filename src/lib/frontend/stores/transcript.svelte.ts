@@ -122,6 +122,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 		parts: _sourceParts,
 		tokens: sourceTokens,
 		isBackfilled,
+		inputId,
 		time,
 		cost,
 		modelExecution,
@@ -132,6 +133,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 	return {
 		...base,
 		...(isBackfilled === undefined ? {} : { isBackfilled }),
+		...(inputId === undefined ? {} : { inputId }),
 		...(parts === undefined ? {} : { parts }),
 		...(time === undefined
 			? {}
@@ -336,16 +338,16 @@ export function deriveTranscriptMessages(
 		for (const item of items) {
 			let next = mergeSticky(item, previousByUuid.get(item.uuid));
 			if (next.type === "user") {
-				const userText = next.text;
+				const inputId = row.inputId;
 				let carried = entry.carriedUsers.get(row.id);
 				const optimistic =
 					!previousByUuid.has(item.uuid) &&
 					!carried &&
+					inputId !== undefined &&
 					previous.find(
 						(old): old is UserMessage =>
 							old.type === "user" &&
-							!old.messageId &&
-							old.text === userText &&
+							old.inputId === inputId &&
 							!adoptedUuids.has(old.uuid),
 					);
 				if (optimistic) {
@@ -355,9 +357,9 @@ export function deriveTranscriptMessages(
 						...(optimistic.sentDuringEpoch === undefined
 							? {}
 							: { sentDuringEpoch: optimistic.sentDuringEpoch }),
-						...(optimistic.originId === undefined
+						...(optimistic.inputId === undefined
 							? {}
-							: { originId: optimistic.originId }),
+							: { inputId: optimistic.inputId }),
 						...(optimistic.images === undefined
 							? {}
 							: { images: optimistic.images }),

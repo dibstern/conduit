@@ -17,7 +17,6 @@ import type {
 } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { getBrowserClientId } from "./client-identity.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
@@ -53,7 +52,7 @@ export type SessionMessages = {
 		project: string;
 		carriedUsers: Map<
 			string,
-			Pick<UserMessage, "sentDuringEpoch" | "originId" | "images">
+			Pick<UserMessage, "sentDuringEpoch" | "inputId" | "images">
 		>;
 	} | null;
 	currentAssistantText: string;
@@ -975,9 +974,6 @@ export function handleCompaction(
 	}
 }
 
-// Keep per-origin FIFO entries even when a provisional bubble is removed.
-const pendingUserMessages = new WeakMap<SessionMessages, Map<string, string>>();
-
 /** Add a user message to the chat.
  *  When `sentWhileProcessing` is true the message records the current
  *  `turnEpoch` in `sentDuringEpoch` — a write-once, immutable fact.
@@ -995,39 +991,8 @@ export function addUserMessage(
 	text: string,
 	images?: string[],
 	sentWhileProcessing?: boolean,
-	messageId?: string,
-	isOwnMessage = true,
-	originId = isOwnMessage ? getBrowserClientId() : undefined,
+	inputId?: string,
 ): void {
-	if (messageId) {
-		const current = getMessages(messages);
-		if (
-			current.some(
-				(message) => message.type === "user" && message.messageId === messageId,
-			)
-		)
-			return;
-		const pendingIds = pendingUserMessages.get(messages);
-		const pendingId = originId
-			? [...(pendingIds ?? [])].find(([, origin]) => origin === originId)?.[0]
-			: undefined;
-		if (pendingId) pendingIds?.delete(pendingId);
-		const pending = current.find(
-			(message) =>
-				message.type === "user" &&
-				!message.messageId &&
-				message.uuid === pendingId,
-		);
-		if (pending?.type === "user" && pending.text === text) {
-			setMessages(
-				messages,
-				current.map((message) =>
-					message.uuid === pending.uuid ? { ...pending, messageId } : message,
-				),
-			);
-			return;
-		}
-	}
 	// Finalize the in-progress assistant message only during replay,
 	// where user_message events can appear between delta events without
 	// an intervening done event.  During live streaming the assistant
@@ -1038,18 +1003,10 @@ export function addUserMessage(
 		phaseToIdle(activity);
 	}
 
-	const uuid = generateUuid();
-	if (originId && !messageId) {
-		const pendingIds =
-			pendingUserMessages.get(messages) ?? new Map<string, string>();
-		pendingIds.set(uuid, originId);
-		pendingUserMessages.set(messages, pendingIds);
-	}
 	const msg: UserMessage = {
 		type: "user",
-		uuid,
-		...(messageId != null && { messageId }),
-		...(originId != null && { originId }),
+		uuid: generateUuid(),
+		...(inputId != null && { inputId }),
 		text,
 		createdAt: Date.now(),
 		...(images != null && { images }),

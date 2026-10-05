@@ -1,7 +1,6 @@
 import { Data, Effect } from "effect";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
@@ -54,7 +53,6 @@ export interface SendMessageToSessionInput {
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const ownership = yield* PendingSendOwnershipTag;
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
@@ -149,7 +147,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		});
 		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
 			Effect.sync(() => {
-				ownership.remove(activeId, input.commandId);
 				log.warn(
 					`client=${clientId} session=${activeId} Processing timeout (120s) — broadcasting done`,
 				);
@@ -168,32 +165,19 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			}),
 		);
 
-		ownership.register(activeId, {
-			commandId: input.commandId,
+		yield* providerTurnService.sendTurn({
+			clientId,
+			sessionId: activeId,
 			text,
-			originId: originalActiveId === activeId ? originId : undefined,
+			commandId: input.commandId,
+			...(imageList ? { images: imageList } : {}),
+			...(sessionModel ? { model: sessionModel } : {}),
+			modelUserSelected: sessionModelUserSelected,
+			...(sessionAgent ? { agent: sessionAgent } : {}),
+			...(variant ? { variant } : {}),
+			...(contextWindow ? { contextWindow } : {}),
+			...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
 		});
-		yield* providerTurnService
-			.sendTurn({
-				clientId,
-				sessionId: activeId,
-				text,
-				commandId: input.commandId,
-				...(imageList ? { images: imageList } : {}),
-				...(sessionModel ? { model: sessionModel } : {}),
-				modelUserSelected: sessionModelUserSelected,
-				...(sessionAgent ? { agent: sessionAgent } : {}),
-				...(variant ? { variant } : {}),
-				...(contextWindow ? { contextWindow } : {}),
-				...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
-			})
-			.pipe(
-				Effect.onError(() =>
-					Effect.sync(() => {
-						ownership.remove(activeId, input.commandId);
-					}),
-				),
-			);
 		return activeId;
 	});
 

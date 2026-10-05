@@ -9,7 +9,6 @@ import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -157,7 +156,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 						persistenceDbPath: filename,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, engine),
@@ -255,7 +253,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(AgentServiceTag, makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, engine),
@@ -326,88 +323,100 @@ describe("handleMessage with Effect provider state persistence", () => {
 		);
 	});
 
-	it.effect("persists Claude user messages through Effect persistence", () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-user-effect-"));
-		const filename = join(dir, "events.db");
-		const ws = mockWsHandler("session-claude-user-effect");
-		const log = createSilentLogger();
-		const client = makeHandlerOpenCodeAPI({
-			session: {
-				messagesPage: vi.fn(async () => []),
-			},
-		});
-		const engine = withDispatchEffect({
-			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-			dispatch: vi.fn(async () => ({
-				status: "completed" as const,
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-			})),
-		});
-		const persistence = makePersistenceEffectLayer(filename);
-		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
-				),
-				Layer.succeed(ConfigTag, {
-					httpServer: createServer(),
-					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: MOCK_PROJECT_DIR,
-					slug: "claude-user-effect-test",
-					persistenceDbPath: filename,
-				} satisfies ProjectRelayConfig),
-				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				persistence,
-				makeIngestionLayer(persistence, ws),
-				makeOverridesStateLive(),
-			),
-		);
-
-		return Effect.gen(function* () {
-			yield* establishClaudeSession("session-claude-user-effect");
-			yield* setClaudeModel("session-claude-user-effect");
-			yield* handleMessage("client-1", {
-				text: "persist this through effect",
-				commandId: "cmd-provider-state-persist-effect",
+	it.effect(
+		"places a Claude user message whose turn fails, tagged with its input id",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-user-effect-"));
+			const filename = join(dir, "events.db");
+			const ws = mockWsHandler("session-claude-user-effect");
+			const log = createSilentLogger();
+			const client = makeHandlerOpenCodeAPI({
+				session: {
+					messagesPage: vi.fn(async () => []),
+				},
 			});
-
-			const readQuery = yield* ReadQueryEffectTag;
-			const messages = yield* readQuery.getSessionMessagesWithParts(
-				"session-claude-user-effect",
+			const engine = withDispatchEffect({
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
+				dispatch: vi.fn(async () => ({
+					status: "error" as const,
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					error: {
+						code: "send_failed" as const,
+						message: "runner unavailable",
+					},
+				})),
+			});
+			const persistence = makePersistenceEffectLayer(filename);
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(
+						SessionManagerServiceTag,
+						makeMockSessionManagerService(),
+					),
+					Layer.succeed(ConfigTag, {
+						httpServer: createServer(),
+						opencodeUrl: "http://127.0.0.1:1",
+						projectDir: MOCK_PROJECT_DIR,
+						slug: "claude-user-effect-test",
+						persistenceDbPath: filename,
+					} satisfies ProjectRelayConfig),
+					PendingInteractionServiceLive,
+					Layer.succeed(AgentServiceTag, makeMockAgentService()),
+					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
+					Layer.succeed(OrchestrationEngineTag, engine),
+					persistence,
+					makeIngestionLayer(persistence, ws),
+					makeOverridesStateLive(),
+				),
 			);
 
-			expect(messages).toHaveLength(1);
-			expect(messages[0]).toMatchObject({
-				session_id: "session-claude-user-effect",
-				role: "user",
-				text: "persist this through effect",
-			});
-			expect(messages[0]?.parts).toEqual([
-				expect.objectContaining({
-					type: "text",
+			return Effect.gen(function* () {
+				yield* establishClaudeSession("session-claude-user-effect");
+				yield* setClaudeModel("session-claude-user-effect");
+				yield* handleMessage("client-1", {
 					text: "persist this through effect",
-				}),
-			]);
-		}).pipe(
-			Effect.provide(layer),
-			Effect.ensuring(
-				Effect.sync(() => {
-					rmSync(dir, { recursive: true, force: true });
-				}),
-			),
-		);
-	});
+					commandId: "cmd-provider-state-persist-effect",
+				});
+				// The dispatch runs on a forked fiber; let it reach the failure path.
+				yield* Effect.promise<void>(
+					() => new Promise((resolve) => setImmediate(resolve)),
+				);
+
+				const readQuery = yield* ReadQueryEffectTag;
+				const messages = yield* readQuery.getSessionMessagesWithParts(
+					"session-claude-user-effect",
+				);
+
+				expect(messages).toHaveLength(1);
+				expect(messages[0]).toMatchObject({
+					id: "cmd-provider-state-persist-effect",
+					input_id: "cmd-provider-state-persist-effect",
+					session_id: "session-claude-user-effect",
+					role: "user",
+					text: "persist this through effect",
+				});
+				expect(messages[0]?.parts).toEqual([
+					expect.objectContaining({
+						type: "text",
+						text: "persist this through effect",
+					}),
+				]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => {
+						rmSync(dir, { recursive: true, force: true });
+					}),
+				),
+			);
+		},
+	);
 
 	it.effect(
 		"persists Claude event sink messages through Effect persistence",
@@ -479,7 +488,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 						persistenceDbPath: filename,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, engine),
@@ -622,7 +630,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					persistenceDbPath: filename,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(AgentServiceTag, makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, engine),

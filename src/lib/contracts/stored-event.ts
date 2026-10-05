@@ -81,6 +81,8 @@ export interface MessageCreatedPayload {
 	readonly sessionId: string;
 	readonly parentID?: string;
 	readonly turnId?: string;
+	/** The browser send this user message was placed for. */
+	readonly inputId?: string;
 	/** Imported from the provider's own record rather than observed streaming
 	 *  (OpenCode history backfill, conduit-test-iea). */
 	readonly backfilled?: true;
@@ -545,6 +547,7 @@ const MessageCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	parentID: Schema.optionalWith(Schema.String, { exact: true }),
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
+	inputId: Schema.optionalWith(Schema.String, { exact: true }),
 	backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 });
 
