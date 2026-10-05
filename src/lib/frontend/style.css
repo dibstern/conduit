@@ -678,7 +678,7 @@ body:has(dialog:modal) {
 	flex: 0 1 auto;
 }
 /* The markup's negative block margin stays: the target overhangs instead of
-   making the title line taller, which keeps title + task line inside 48px. */
+   making the title line taller than its text. */
 #session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
 	min-width: 30px;
 	min-height: 32px;

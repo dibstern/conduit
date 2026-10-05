@@ -1185,6 +1185,33 @@ export const DesktopBackgroundTasks: Story = {
 			),
 		).toBe(true);
 		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(3);
-		expect(box(canvas.getByTestId("session-bar")).height).toBe(48);
+		expect(
+			chips.top - box(canvas.getByTestId("session-bar-title")).bottom,
+		).toBeGreaterThanOrEqual(6);
+	},
+};
+
+export const BackgroundTasks: Story = {
+	beforeEach: () => {
+		seedSessions([
+			{
+				...mockSession,
+				backgroundTasks: [
+					{
+						id: "t1",
+						type: "local_bash",
+						description: "Run full gate with baseline orphan check",
+						firstSeenAt: Date.now() - 6 * 60_000,
+					},
+				],
+			},
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const box = (id: string) => canvas.getByTestId(id).getBoundingClientRect();
+		expect(
+			box("background-task-chip").top - box("session-bar-title").bottom,
+		).toBeGreaterThanOrEqual(6);
 	},
 };

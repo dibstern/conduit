@@ -432,7 +432,7 @@
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		{#if goalShown}
-			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; goalDetails.open = !goalDetails.open; }}>
+			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full mt-[2px] gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; goalDetails.open = !goalDetails.open; }}>
 				<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
 				<span class="min-w-0 truncate">{goal.subtitle}</span>
 				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
