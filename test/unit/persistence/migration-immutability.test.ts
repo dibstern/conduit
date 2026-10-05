@@ -81,6 +81,8 @@ const SHIPPED_MIGRATION_HASHES = {
 		"1bd0eede9404bc58e9e376877996da89ccd6627d907c1e22316b33687d55ae43",
 	"0030_startup_restore_indexes.sql":
 		"84bf88279447e47eccb1e0c167865ece044ebdf5a61b026fb244df1490c6cb24",
+	"0031_tool_call_index.sql":
+		"6aeb7378d45a6fd2f2efe26390fb45a7573cd3ba833c21d6a10ced32aa89de96",
 } satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {

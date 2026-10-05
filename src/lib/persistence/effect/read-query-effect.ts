@@ -18,7 +18,10 @@ import type {
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
 import { sessionFamilyQuery } from "../session-family-query.js";
-import { messageRowsToHistory } from "../session-history-adapter.js";
+import {
+	messageRowsToHistory,
+	toolOutputText,
+} from "../session-history-adapter.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
 const decodeGoalState = Schema.decodeUnknownSync(
@@ -477,7 +480,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const rows = yield* sql<{ content: string }>`
 				SELECT content FROM tool_content WHERE tool_id = ${toolId}`;
-			return rows[0]?.content;
+			if (rows[0]) return rows[0].content;
+			// Nothing writes tool_content any more: the part keeps the whole
+			// output, and transcripts ship a preview of it.
+			const parts = yield* sql<{ result: string }>`
+				SELECT result FROM message_parts
+				WHERE type = 'tool' AND call_id = ${toolId} AND result IS NOT NULL
+				LIMIT 1`;
+			return parts[0] && toolOutputText(parts[0].result);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError

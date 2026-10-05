@@ -33,6 +33,7 @@ import {
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
+	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -998,6 +999,9 @@ export const effectMigrationEntries = {
 	}),
 	"0031_startup_restore_indexes": executeSqlStatements(
 		readMigrationSql(STARTUP_RESTORE_INDEXES_MIGRATION),
+	),
+	"0032_tool_call_index": executeSqlStatements(
+		readMigrationSql(TOOL_CALL_INDEX_MIGRATION),
 	),
 } satisfies Record<
 	string,

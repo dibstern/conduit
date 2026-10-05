@@ -48,6 +48,7 @@ export const MESSAGE_TOMBSTONES_MIGRATION = "0028_message_tombstones.sql";
 export const SESSION_GOALS_MIGRATION = "0029_session_goals.sql";
 export const STARTUP_RESTORE_INDEXES_MIGRATION =
 	"0030_startup_restore_indexes.sql";
+export const TOOL_CALL_INDEX_MIGRATION = "0031_tool_call_index.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

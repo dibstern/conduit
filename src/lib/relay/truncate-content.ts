@@ -1,5 +1,5 @@
 // Utilities for truncating large tool result content before relay to clients.
-// Full content is preserved in the SQLite tool_content table for on-demand fetch.
+// The full output stays in message_parts; GetToolContent serves it on demand.
 
 import type { RelayMessage } from "../shared-types.js";
 

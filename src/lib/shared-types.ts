@@ -420,6 +420,9 @@ export interface HistoryMessagePart {
 		status?: ToolStatus;
 		input?: unknown;
 		output?: string;
+		/** `output` is a preview; GetToolContent serves the full text. */
+		isTruncated?: boolean;
+		fullContentLength?: number;
 		error?: string;
 		[key: string]: unknown;
 	};

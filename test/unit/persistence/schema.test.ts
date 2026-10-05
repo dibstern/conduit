@@ -110,6 +110,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_message_parts_tool_call",
+					table: "message_parts",
+					unique: false,
+				},
+				{
 					name: "idx_message_tombstones_session_version",
 					table: "message_tombstones",
 					unique: false,

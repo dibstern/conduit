@@ -241,6 +241,12 @@ function convertAssistantParts(
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
 						...(toolResult != null && { result: toolResult }),
+						...(state?.isTruncated === true && {
+							isTruncated: true,
+							...(state.fullContentLength != null && {
+								fullContentLength: state.fullContentLength,
+							}),
+						}),
 						isError,
 						...(toolInput !== undefined && { input: toolInput }),
 						...(toolMetadata !== undefined && { metadata: toolMetadata }),
