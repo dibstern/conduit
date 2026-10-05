@@ -112,8 +112,7 @@ export interface ConnectionHealth {
 
 export interface StoredProject {
 	readonly slug: string;
-	readonly directory: string;
-	readonly folders: readonly string[];
+	readonly folders: readonly [string, ...string[]];
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
@@ -170,8 +169,7 @@ export interface ProjectRelayConfig {
 		ReadonlyArray<{
 			slug: string;
 			title: string;
-			directory: string;
-			folders?: readonly string[];
+			folders: readonly [string, ...string[]];
 			instanceId?: string;
 		}>
 	>;

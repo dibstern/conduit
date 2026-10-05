@@ -189,7 +189,6 @@ describe("prefetchSessionCounts", () => {
 									project: {
 										slug: "missing",
 										title: "Missing",
-										directory: join(directory, "missing"),
 										folders: [join(directory, "missing")],
 										instanceId: "i1",
 									},
@@ -237,7 +236,6 @@ describe("prefetchSessionCounts", () => {
 									_tag: "Ready" as const,
 									project: {
 										slug: "my-project",
-										directory,
 										folders: [directory],
 										title: "My Project",
 										lastUsed: Date.now(),
@@ -269,7 +267,6 @@ describe("prefetchSessionCounts", () => {
 									_tag: "Ready" as const,
 									project: {
 										slug: "orphan",
-										directory,
 										folders: [directory],
 										title: "Orphan",
 										lastUsed: Date.now(),
@@ -313,7 +310,6 @@ describe("prefetchSessionCounts", () => {
 										_tag: "Ready" as const,
 										project: {
 											slug: "my-project",
-											directory,
 											folders: [directory],
 											title: "My Project",
 											lastUsed: Date.now(),
@@ -365,6 +361,7 @@ describe("prefetchSessionCounts", () => {
 									{
 										slug: "seeded-project",
 										path: directory,
+										folders: [directory],
 										title: "Seeded Project",
 										addedAt: 1,
 										instanceId: "default",
@@ -422,7 +419,6 @@ describe("prefetchSessionCounts", () => {
 											_tag: "Ready" as const,
 											project: {
 												slug: "proj-a",
-												directory,
 												folders: [directory],
 												title: "Project A",
 												lastUsed: Date.now(),
@@ -436,7 +432,6 @@ describe("prefetchSessionCounts", () => {
 											_tag: "Ready" as const,
 											project: {
 												slug: "proj-b",
-												directory,
 												folders: [directory],
 												title: "Project B",
 												lastUsed: Date.now(),
@@ -477,7 +472,6 @@ describe("prefetchSessionCounts", () => {
 										_tag: "Ready" as const,
 										project: {
 											slug: "proj",
-											directory,
 											folders: [directory],
 											title: "Proj",
 											lastUsed: Date.now(),

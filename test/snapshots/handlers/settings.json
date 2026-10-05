@@ -43,7 +43,6 @@
 					{
 						"slug": "proj-1",
 						"title": "Project 1",
-						"directory": "/work/proj",
 						"folders": ["/work/proj"],
 						"instanceId": "inst-1",
 						"missing": true

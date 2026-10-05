@@ -188,9 +188,7 @@ export const NewFolder: Story = {
 
 export const Errors: Story = {
 	args: {
-		projects: [
-			{ slug: "conduit", title: "Conduit", directory: app, folders: [app] },
-		],
+		projects: [{ slug: "conduit", title: "Conduit", folders: [app] }],
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
@@ -319,8 +317,7 @@ export const SuggestionsOpen: Story = {
 const editedProject = {
 	slug: "conduit",
 	title: "Conduit",
-	directory: app,
-	folders: [app, docs],
+	folders: [app, docs] as const,
 };
 
 export const Edit: Story = {

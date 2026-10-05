@@ -195,9 +195,7 @@ export async function handleAdd(ctx: CommandContext): Promise<void> {
 
 	try {
 		const { projects } = await rpcSend(new GetProjects({}));
-		const existing = projects.find(
-			(project) => (project.folders?.[0] ?? project.directory) === addDir,
-		);
+		const existing = projects.find((project) => project.folders[0] === addDir);
 		const response = await rpcSend(
 			new SaveProject({
 				...(existing ? { slug: existing.slug } : {}),
@@ -232,7 +230,7 @@ export async function handleRemove(ctx: CommandContext): Promise<void> {
 		exit(1);
 		return;
 	}
-	const match = listResponse.projects.find((p) => p.directory === cwd);
+	const match = listResponse.projects.find((p) => p.folders[0] === cwd);
 
 	if (!match) {
 		stderr.write(`Current directory is not registered: ${cwd}\n`);
@@ -279,7 +277,7 @@ export async function handleList(ctx: CommandContext): Promise<void> {
 	stdout.write(`Projects (${projects.length}):\n`);
 	for (const p of projects) {
 		const label = p.title ? `${p.slug} (${p.title})` : p.slug;
-		stdout.write(`  ${label}\n    ${p.directory}\n`);
+		stdout.write(`  ${label}\n    ${p.folders[0]}\n`);
 	}
 	return;
 }
@@ -311,7 +309,7 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 		return;
 	}
 	const match = listResponse.projects.find(
-		(project) => (project.folders?.[0] ?? project.directory) === resolve(cwd),
+		(project) => project.folders[0] === resolve(cwd),
 	);
 
 	if (!match) {
@@ -325,7 +323,7 @@ export async function handleTitle(ctx: CommandContext): Promise<void> {
 			new SaveProject({
 				slug: match.slug,
 				title: args.title,
-				folders: match.folders ?? [match.directory],
+				folders: match.folders,
 			}),
 		);
 		stdout.write(`Title updated: ${args.title}\n`);

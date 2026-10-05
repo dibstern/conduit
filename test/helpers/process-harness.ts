@@ -237,7 +237,6 @@ export class ProcessHarness {
 					? [
 							{
 								path: this.projectDir,
-								directory: this.projectDir,
 								folders: [this.projectDir],
 								slug: "process-test",
 								addedAt: Date.now(),
@@ -804,7 +803,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 								ready({
 									pid: child.pid,
 									port: status.port,
-									projects: status.projects.map((project) => project.directory),
+									projects: status.projects.map(
+										(project) => project.folders[0],
+									),
 									instances: instances.instances.map((instance) => ({
 										managed: instance.managed,
 										...(instance.url !== undefined

@@ -139,8 +139,7 @@ describe("RelayFactoryTag", () => {
 			const factory = yield* RelayFactoryTag;
 			const project = {
 				slug: "test-project",
-				directory: "/tmp/test-project",
-				folders: ["/tmp/test-project"],
+				folders: ["/tmp/test-project"] as const,
 				title: "Test Project",
 			};
 
@@ -174,7 +173,6 @@ describe("RelayFactoryTag", () => {
 						{
 							slug: "missing",
 							title: "Missing",
-							directory: missingDirectory,
 							folders: [missingDirectory],
 						},
 						"http://localhost:4096",
@@ -210,8 +208,7 @@ describe("RelayFactoryTag", () => {
 			const project = {
 				slug: "git-project",
 				title: "Git Project",
-				directory,
-				folders: [directory],
+				folders: [directory] as const,
 			};
 			yield* addWithoutRelay(project);
 			const subscription = yield* subscribeToDaemonEvents;

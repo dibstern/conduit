@@ -46,7 +46,7 @@ test("detail feed renders streamed text once and resumes cached content across s
 			{
 				type: "project_list",
 				projects: [
-					{ slug: project, title: project, directory: "/tmp/e2e-replay" },
+					{ slug: project, title: project, folders: ["/tmp/e2e-replay"] },
 				],
 				current: project,
 			},
@@ -169,7 +169,7 @@ test("detail catch-up removes a message after returning to a session", async ({
 			{
 				type: "project_list",
 				projects: [
-					{ slug: project, title: project, directory: "/tmp/e2e-replay" },
+					{ slug: project, title: project, folders: ["/tmp/e2e-replay"] },
 				],
 				current: project,
 			},

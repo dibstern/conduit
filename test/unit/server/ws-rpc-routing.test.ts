@@ -234,7 +234,7 @@ describe("routed RPC server", () => {
 								config: makeMockConfig({
 									slug,
 									getProjects: () => [
-										{ slug, title: slug, directory: `/tmp/${slug}` },
+										{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
 									],
 								}),
 							}),

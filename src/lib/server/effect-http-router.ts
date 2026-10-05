@@ -48,7 +48,7 @@ import { getVersion } from "../version.js";
 /** Project data provider — returns the current project list. */
 export interface RouterProjectInfo {
 	slug: string;
-	directory: string;
+	folders: readonly [string, ...string[]];
 	title: string;
 	status?: "registering" | "ready" | "error";
 	error?: string;
@@ -115,7 +115,7 @@ export class ProjectApiDelegateProvider extends Context.Tag(
 function serializeProject(p: RouterProjectInfo): DashboardProjectResponse {
 	return {
 		slug: p.slug,
-		path: p.directory,
+		path: p.folders[0],
 		title: p.title || "",
 		status: p.status ?? "ready",
 		...(p.error != null && { error: p.error }),

@@ -26,7 +26,9 @@ async function sendFromAddedProject(
 		throw new Error("SaveProject did not return the new project's slug");
 	expect(slug).not.toBe("process-test");
 	expect(added.projects).toEqual(
-		expect.arrayContaining([expect.objectContaining({ directory, slug })]),
+		expect.arrayContaining([
+			expect.objectContaining({ folders: [directory], slug }),
+		]),
 	);
 
 	const app = new AppPage(page);

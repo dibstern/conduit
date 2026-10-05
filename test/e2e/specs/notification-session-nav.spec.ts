@@ -80,7 +80,7 @@ const twoSessionInit: MockMessage[] = [
 			{
 				slug: PROJECT_SLUG,
 				title: PROJECT_SLUG,
-				directory: "/src/test-project",
+				folders: ["/src/test-project"],
 			},
 		],
 		current: PROJECT_SLUG,

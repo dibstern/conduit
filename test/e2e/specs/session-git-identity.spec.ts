@@ -5,7 +5,7 @@ import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 const project: ProjectInfo = {
 	slug: "e2e-replay",
 	title: "Conduit Project With A Long Name",
-	directory: "/work/conduit",
+	folders: ["/work/conduit"],
 };
 
 // Keep the replay relay for the session; replace only its project-list RPC response.

@@ -124,7 +124,7 @@ describe("settings handler wire snapshots", () => {
 								{
 									slug: "proj-1",
 									title: "Project 1",
-									directory: "/work/proj",
+									folders: ["/work/proj"] as const,
 									instanceId: "inst-1",
 								},
 							],

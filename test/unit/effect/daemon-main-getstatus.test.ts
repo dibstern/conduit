@@ -174,6 +174,7 @@ describe("daemon main runtime config status", () => {
 				projects: [
 					{
 						path: projectPath,
+						folders: [projectPath],
 						slug: "persisted-project",
 						title: "Persisted Project",
 						addedAt: 456,
@@ -223,7 +224,7 @@ describe("daemon main runtime config status", () => {
 		};
 		daemon = await startForegroundDaemon(options);
 		const project = await daemon.addProject(projectPath);
-		expect(daemon.getProjects().map((entry) => entry.directory)).toEqual([
+		expect(daemon.getProjects().map((entry) => entry.folders[0])).toEqual([
 			projectPath,
 		]);
 		await daemon.removeProject(project.slug);
@@ -232,7 +233,7 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon(options);
 		expect(daemon.getProjects()).toEqual([]);
 		const added = await daemon.addProject(projectPath);
-		expect(added.directory).toBe(projectPath);
+		expect(added.folders[0]).toBe(projectPath);
 		expect(daemon.getProjects()).toEqual([added]);
 		await daemon.stop();
 		daemon = null;

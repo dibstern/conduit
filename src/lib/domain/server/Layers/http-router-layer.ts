@@ -204,7 +204,7 @@ const makeDaemonProjectsReader = (deps: {
 						0;
 					return {
 						slug,
-						directory: entry.project.directory,
+						folders: entry.project.folders,
 						title: entry.project.title,
 						status: routerStatusForProjectState(entry),
 						...(entry._tag === "Error" && { error: entry.error }),

@@ -96,7 +96,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 						"http://localhost:4096",
@@ -151,7 +150,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							{
 								slug: "effect-project",
 								title: "Effect Project",
-								directory: projectDir,
 								folders: [projectDir],
 								instanceId: "opencode",
 							},
@@ -184,7 +182,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 							instanceId: "opencode",
 						},
@@ -229,7 +226,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 						instanceId: "opencode",
 						missing: false,
@@ -283,7 +279,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 					]),
@@ -303,7 +298,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 					},
 					"http://localhost:4096",
@@ -415,7 +409,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 					]),
@@ -453,7 +446,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 					},
 					"http://localhost:4096",
@@ -525,7 +517,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 					]),
@@ -545,7 +536,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 					},
 					"http://localhost:4096",
@@ -594,7 +584,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 						instanceId: "opencode",
 					},
@@ -666,7 +655,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(added).toEqual(
 					expect.objectContaining({
 						title: "added",
-						directory: join(dir, "added"),
+						folders: [join(dir, "added")],
 						instanceId: "remote",
 					}),
 				);
@@ -675,7 +664,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					try: () =>
 						saveProject({
 							slug: added.slug,
-							folders: added.folders ?? [added.directory],
+							folders: added.folders,
 							title: "Added Project",
 						}),
 					catch: (cause) => cause,

@@ -31,7 +31,7 @@ async function openHeader(
 		{
 			slug: "e2e-replay",
 			title: "Display title differs",
-			directory,
+			folders: [directory],
 			...(options.git ? { git: options.git } : {}),
 		},
 	];

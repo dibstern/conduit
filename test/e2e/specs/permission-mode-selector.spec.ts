@@ -53,7 +53,7 @@ const modelList: MockMessage = {
 
 const projectList: MockMessage = {
 	type: "project_list",
-	projects: [{ slug: "myapp", title: "myapp", directory: "/tmp/myapp" }],
+	projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 	current: "myapp",
 };
 
@@ -120,7 +120,7 @@ async function setup(
 			}),
 			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
 			GetProjects: () => ({
-				projects: [{ slug: "myapp", title: "myapp", directory: "/tmp/myapp" }],
+				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 				current: "myapp",
 			}),
 			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),

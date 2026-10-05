@@ -316,9 +316,9 @@ export const RelayFactoryLive = (
 						}
 
 						// Create persistence DB directory and open SQLite
-						if (!existsSync(project.directory)) {
+						if (!existsSync(project.folders[0])) {
 							return yield* new RelayFactoryError({
-								reason: `Project directory does not exist: ${project.directory}`,
+								reason: `Project directory does not exist: ${project.folders[0]}`,
 							});
 						}
 						const dbPath = projectEventsDbPath({ configDir, ...project });
@@ -329,7 +329,7 @@ export const RelayFactoryLive = (
 								writeProjectStorageOwner(
 									configDir,
 									project.slug,
-									project.directory,
+									project.folders[0],
 								);
 							},
 							catch: (cause) =>
@@ -385,7 +385,7 @@ export const RelayFactoryLive = (
 									)
 								: selectedInstance?.env,
 						);
-						envResolver?.register(project.directory, project.shellEnv);
+						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
 						);
@@ -404,7 +404,7 @@ export const RelayFactoryLive = (
 										? { openCodeInstances }
 										: {}),
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
-									projectDir: project.directory,
+									projectDir: project.folders[0],
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {
 										shellEnv: (directory: string) => envResolver.get(directory),
@@ -421,7 +421,7 @@ export const RelayFactoryLive = (
 									broadcastSessionListChanged,
 									refreshSessionGit: async () => {
 										const git = await daemonSessionGitCache.refresh(
-											project.directory,
+											project.folders[0],
 										);
 										if (isDeepStrictEqual(git, lastPublishedGit)) return;
 										await publishProjectList();
@@ -483,7 +483,7 @@ export const RelayFactoryLive = (
 						Effect.withSpan("RelayFactory.create", {
 							attributes: {
 								slug: project.slug,
-								directory: project.directory,
+								mainFolder: project.folders[0],
 							},
 						}),
 					),

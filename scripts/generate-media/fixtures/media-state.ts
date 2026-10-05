@@ -61,7 +61,7 @@ const projectList: RelayMessage = {
 		{
 			slug: "myapp",
 			title: "My App",
-			directory: "/Users/dev/projects/myapp",
+			folders: ["/Users/dev/projects/myapp"],
 		},
 	],
 	current: "myapp",

@@ -111,7 +111,7 @@ const meta = {
 		routerState.search = "";
 		attachedProjectState.slug = "conduit";
 		projectState.projects = [
-			{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
+			{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 		];
 		seedSessions([mockSession, mockSessionLongTitle]);
 		sessionState.currentId = mockSession.id;
@@ -683,7 +683,7 @@ export const WithInstanceBadge: Story = {
 			{
 				slug: "conduit",
 				title: "conduit",
-				directory: "/src/conduit",
+				folders: ["/src/conduit"],
 				instanceId: "inst-personal",
 			},
 		];
@@ -833,7 +833,7 @@ export const DesktopGitIdentity: Story = {
 			{
 				slug: "conduit",
 				title: "conduit",
-				directory: "/src/conduit",
+				folders: ["/src/conduit"],
 				git: { branch: "feature/17xt", worktree: "linked-15", dirty: true },
 			},
 		];
@@ -930,7 +930,7 @@ function seedHeaderGit(): void {
 		{
 			slug: "conduit",
 			title: "conduit",
-			directory: "/src/conduit",
+			folders: ["/src/conduit"],
 			git: { branch: "main", dirty: true },
 		},
 	];

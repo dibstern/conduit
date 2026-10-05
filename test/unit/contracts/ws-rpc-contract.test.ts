@@ -1,6 +1,6 @@
 import { type Rpc, RpcClient, type RpcGroup, RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Schema, type Scope, Stream } from "effect";
+import { Array as Arr, Effect, Schema, type Scope, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
@@ -137,7 +137,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							{
 								slug: "demo",
 								title: "Demo",
-								directory: "/tmp/demo",
 								folders: ["/tmp/demo"],
 							},
 						],
@@ -158,26 +157,26 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						hasMore: false,
 						nextCursor: null,
 					}),
-				SaveProject: (request) =>
-					Effect.succeed({
+				SaveProject: (request) => {
+					const folders = request.folders.map((folder) =>
+						typeof folder === "string" ? folder : folder.path,
+					);
+					if (!Arr.isNonEmptyReadonlyArray(folders))
+						return Effect.die("SaveProject needs a folder");
+					return Effect.succeed({
 						projectSlug: request.projectSlug,
 						projects: [
 							{
 								slug: request.slug ?? "new-project",
 								title: request.title ?? "New Project",
-								directory:
-									typeof request.folders[0] === "string"
-										? request.folders[0]
-										: (request.folders[0]?.path ?? ""),
-								folders: request.folders.map((folder) =>
-									typeof folder === "string" ? folder : folder.path,
-								),
+								folders,
 							},
 						],
 						current: "demo",
 						savedSlug: request.slug ?? "new-project",
 						warnings: [],
-					}),
+					});
+				},
 				RemoveProject: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -191,7 +190,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							{
 								slug: request.slug,
 								title: "Demo",
-								directory: "/tmp/demo",
 								folders: ["/tmp/demo"],
 								instanceId: request.instanceId,
 							},
@@ -871,7 +869,6 @@ describe("browser WebSocket RPC contract", () => {
 						{
 							slug: "demo",
 							title: "Demo",
-							directory: "/tmp/demo",
 							folders: ["/tmp/demo"],
 						},
 					],
@@ -905,7 +902,7 @@ describe("browser WebSocket RPC contract", () => {
 					instanceId: "inst-1",
 				});
 				expect(addedProject.savedSlug).toBe("new-project");
-				expect(addedProject.projects[0]?.directory).toBe("/tmp/new-project");
+				expect(addedProject.projects[0]?.folders[0]).toBe("/tmp/new-project");
 
 				expect(
 					yield* client.RemoveProject({

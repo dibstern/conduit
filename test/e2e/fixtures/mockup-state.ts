@@ -287,7 +287,7 @@ function modelExecutionInitMessages(
 		// The header's git pill names the project's primary folder.
 		{
 			type: "project_list",
-			projects: [{ slug: "myapp", title: "myapp", directory: "/src/myapp" }],
+			projects: [{ slug: "myapp", title: "myapp", folders: ["/src/myapp"] }],
 			current: "myapp",
 		},
 	];
@@ -582,19 +582,19 @@ export const multiInstanceProjectList: MockMessage = {
 		{
 			slug: "myapp",
 			title: "myapp",
-			directory: "/src/myapp",
+			folders: ["/src/myapp"],
 			instanceId: "personal",
 		},
 		{
 			slug: "mylib",
 			title: "mylib",
-			directory: "/src/mylib",
+			folders: ["/src/mylib"],
 			instanceId: "personal",
 		},
 		{
 			slug: "company-api",
 			title: "company-api",
-			directory: "/src/company-api",
+			folders: ["/src/company-api"],
 			instanceId: "work",
 		},
 	],
@@ -608,12 +608,12 @@ export const singleInstanceProjectList: MockMessage = {
 		{
 			slug: "myapp",
 			title: "myapp",
-			directory: "/src/myapp",
+			folders: ["/src/myapp"],
 		},
 		{
 			slug: "mylib",
 			title: "mylib",
-			directory: "/src/mylib",
+			folders: ["/src/mylib"],
 		},
 	],
 	current: "myapp",
@@ -753,7 +753,7 @@ const variantProjectList: MockMessage = {
 		{
 			slug: "myapp",
 			title: "myapp",
-			directory: "/src/myapp",
+			folders: ["/src/myapp"],
 		},
 	],
 	current: "myapp",

@@ -60,7 +60,7 @@ export const prefetchSessionCounts: Effect.Effect<
 	let fetched = 0;
 
 	for (const [slug, entry] of HashMap.entries(registryState)) {
-		if (!existsSync(entry.project.directory)) continue;
+		if (!existsSync(entry.project.folders[0])) continue;
 		// Skip if we already have persisted counts
 		if (config.persistedSessionCounts.has(slug)) continue;
 
@@ -84,7 +84,7 @@ export const prefetchSessionCounts: Effect.Effect<
 		const password = env?.["OPENCODE_SERVER_PASSWORD"] ?? globalPassword;
 		const username = env?.["OPENCODE_SERVER_USERNAME"] ?? globalUsername;
 		const headers: Record<string, string> = {
-			"x-opencode-directory": entry.project.directory,
+			"x-opencode-directory": entry.project.folders[0],
 		};
 		if (password) {
 			headers["Authorization"] =

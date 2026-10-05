@@ -49,6 +49,7 @@ describe("conduit doctor", () => {
 				projects: [
 					{
 						path: project,
+						folders: [project],
 						slug: "working",
 						addedAt: 1,
 						shellEnv: {
@@ -56,7 +57,12 @@ describe("conduit doctor", () => {
 							overrides: { PATH: bin, PRIVATE_ENV: "never-print-this" },
 						},
 					},
-					{ path: join(home, "missing-project"), slug: "missing", addedAt: 2 },
+					{
+						path: join(home, "missing-project"),
+						folders: [join(home, "missing-project")],
+						slug: "missing",
+						addedAt: 2,
+					},
 				],
 			},
 			configDir,

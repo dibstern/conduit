@@ -78,11 +78,11 @@ async function mockSessions(
 			{
 				type: "project_list",
 				projects: [
-					{ slug: LOCAL, title: LOCAL, directory: `/tmp/${LOCAL}` },
+					{ slug: LOCAL, title: LOCAL, folders: [`/tmp/${LOCAL}`] },
 					{
 						slug: "other-proj",
 						title: "other-proj",
-						directory: "/tmp/other-proj",
+						folders: ["/tmp/other-proj"],
 					},
 				],
 				current: LOCAL,

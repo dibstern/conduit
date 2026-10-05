@@ -717,6 +717,7 @@ describe("managed OpenCode survives server replacement", () => {
 		if (!config) throw new Error("Missing config");
 		config.projects.push({
 			path: projectDir,
+			folders: [projectDir],
 			slug: "prefetch-opencode",
 			instanceId: "managed-test",
 			addedAt: Date.now(),

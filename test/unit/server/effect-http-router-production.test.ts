@@ -21,7 +21,7 @@ let staticDir = "";
 const oneProject: RouterProjectInfo[] = [
 	{
 		slug: "test-project",
-		directory: "/tmp/test-project",
+		folders: ["/tmp/test-project"],
 		title: "Test Project",
 		status: "ready",
 	},
@@ -31,7 +31,7 @@ const multiProject: RouterProjectInfo[] = [
 	...oneProject,
 	{
 		slug: "other",
-		directory: "/tmp/other",
+		folders: ["/tmp/other"],
 		title: "Other Project",
 		status: "registering",
 	},

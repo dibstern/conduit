@@ -92,8 +92,7 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			const sessionCount =
 				runtime.persistedSessionCounts.get(project.slug) ?? 0;
 			return {
-				path: project.directory,
-				directory: project.directory,
+				path: project.folders[0],
 				folders: project.folders,
 				slug: project.slug,
 				title: project.title,

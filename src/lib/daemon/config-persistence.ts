@@ -62,8 +62,7 @@ export interface DaemonConfig {
 	claudeConfigDir?: string;
 	projects: Array<{
 		path: string;
-		directory?: string;
-		folders?: readonly string[];
+		folders: readonly [string, ...string[]];
 		slug: string;
 		title?: string;
 		addedAt: number;
@@ -87,10 +86,9 @@ export interface DaemonConfig {
 	}>;
 }
 
-const PersistedProjectSchema = Schema.Struct({
+const ProjectSchema = Schema.Struct({
 	path: Schema.String,
-	directory: Schema.optional(Schema.String),
-	folders: Schema.optional(Schema.NonEmptyArray(Schema.String)),
+	folders: Schema.NonEmptyArray(Schema.String),
 	slug: Schema.String,
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
@@ -99,9 +97,23 @@ const PersistedProjectSchema = Schema.Struct({
 	sessionCount: Schema.optional(Schema.Number),
 });
 
+/** A project as any daemon version wrote it; older ones have no `folders`, only `directory` or `path`. */
+const PersistedProjectSchema = Schema.Struct({
+	...ProjectSchema.fields,
+	directory: Schema.optional(Schema.String),
+	folders: Schema.optional(Schema.NonEmptyArray(Schema.String)),
+});
+export type PersistedProject = Omit<
+	DaemonConfig["projects"][number],
+	"folders"
+> & {
+	directory?: string;
+	folders?: readonly string[];
+};
+
 const DaemonProjectSchema = Schema.transform(
 	PersistedProjectSchema,
-	Schema.typeSchema(PersistedProjectSchema),
+	Schema.typeSchema(ProjectSchema),
 	{
 		strict: true,
 		decode: (project) => migrateProjectFolders(project),
@@ -109,24 +121,23 @@ const DaemonProjectSchema = Schema.transform(
 	},
 );
 
+/** Resolve a project's folders, reading a legacy `directory` or `path` when `folders` is absent. Drops `directory`. */
 export const migrateProjectFolders = <
 	T extends {
 		readonly path: string;
 		readonly directory?: string | undefined;
 		readonly folders?: readonly string[] | undefined;
 	},
->(
-	project: T,
-) => {
-	const directory = resolve(
-		project.folders?.[0] ?? project.directory ?? project.path,
-	);
+>({
+	directory: legacyDirectory,
+	...project
+}: T) => {
+	const main = resolve(project.folders?.[0] ?? legacyDirectory ?? project.path);
 	return {
 		...project,
-		path: directory,
-		directory,
+		path: main,
 		folders: [
-			directory,
+			main,
 			...(project.folders?.slice(1) ?? []).map((folder) => resolve(folder)),
 		] as const,
 	};

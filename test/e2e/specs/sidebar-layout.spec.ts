@@ -40,7 +40,7 @@ test("shell feed adds and removes sidebar roots", async ({
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -116,7 +116,7 @@ test("shell feed warns after a failed grace period and clears on recovery", asyn
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -173,7 +173,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -222,7 +222,7 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",

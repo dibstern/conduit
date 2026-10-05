@@ -57,7 +57,7 @@ describe("Instance types", () => {
 	it("ProjectInfo has optional instanceId", () => {
 		const project: ProjectInfo = {
 			slug: "myapp",
-			directory: "/src/myapp",
+			folders: ["/src/myapp"],
 			title: "myapp",
 			instanceId: "personal",
 		};
@@ -67,7 +67,7 @@ describe("Instance types", () => {
 	it("ProjectInfo works without instanceId (backward compat)", () => {
 		const project: ProjectInfo = {
 			slug: "myapp",
-			directory: "/src/myapp",
+			folders: ["/src/myapp"],
 			title: "myapp",
 		};
 		expect(project.instanceId).toBeUndefined();

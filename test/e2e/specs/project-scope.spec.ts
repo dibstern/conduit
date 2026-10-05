@@ -145,7 +145,6 @@ async function setupWithProjectManagement(
 								{
 									slug,
 									title,
-									directory: folders[0] ?? "/src/new-project",
 									folders,
 								},
 							],
@@ -192,12 +191,12 @@ function baseProjects() {
 		{
 			slug: "myapp",
 			title: "myapp",
-			directory: "/src/myapp",
+			folders: ["/src/myapp"],
 		},
 		{
 			slug: "mylib",
 			title: "mylib",
-			directory: "/src/mylib",
+			folders: ["/src/mylib"],
 		},
 	];
 }

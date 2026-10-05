@@ -87,7 +87,7 @@ export const migrateForkLineage = (configDir: string) =>
 				const projects = new Map(
 					loadDaemonConfig(configDir)?.projects.map((project) => [
 						project.path,
-						{ slug: project.slug, directory: project.path },
+						{ slug: project.slug, folders: project.folders },
 					]),
 				);
 				const recentPath = join(configDir, "recent.json");
@@ -96,7 +96,10 @@ export const migrateForkLineage = (configDir: string) =>
 						readFileSync(recentPath, "utf8"),
 					)) {
 						if (!projects.has(project.directory)) {
-							projects.set(project.directory, project);
+							projects.set(project.directory, {
+								slug: project.slug,
+								folders: [project.directory],
+							});
 						}
 					}
 				}

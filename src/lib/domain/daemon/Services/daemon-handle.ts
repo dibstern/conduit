@@ -179,7 +179,7 @@ export const DaemonHandleLive: Layer.Layer<
 						0;
 					projects.push({
 						slug,
-						directory: entry.project.directory,
+						folders: entry.project.folders,
 						title: entry.project.title,
 						status: entry._tag.toLowerCase(),
 						...(entry.project.lastUsed !== undefined && {

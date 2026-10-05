@@ -29,16 +29,13 @@ const withFolders = (
 /** An empty draft for Add, or one prefilled from an existing project for Edit. */
 export const createDraft = (project?: {
 	title: string;
-	folders?: readonly string[];
-	directory?: string;
+	folders: readonly string[];
 }): ProjectDraft => {
 	if (!project) return { name: "", nameEdited: false, folders: [] };
-	const folders =
-		project.folders ?? (project.directory ? [project.directory] : []);
 	return {
-		name: project.title || mainName(folders),
+		name: project.title || mainName(project.folders),
 		nameEdited: true,
-		folders,
+		folders: project.folders,
 	};
 };
 
@@ -75,18 +72,10 @@ export const check = (
 	draft: ProjectDraft,
 	otherProjects: readonly {
 		slug: string;
-		folders?: readonly string[];
-		directory?: string;
+		folders: readonly string[];
 	}[],
 ) => ({
-	...checkFolders(
-		draft.folders.map(folderPath),
-		otherProjects.map((project) => ({
-			slug: project.slug,
-			folders:
-				project.folders ?? (project.directory ? [project.directory] : []),
-		})),
-	),
+	...checkFolders(draft.folders.map(folderPath), otherProjects),
 	nameError:
 		draft.folders.length > 0 && !draft.name.trim()
 			? "Give this project a name."

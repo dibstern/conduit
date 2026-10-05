@@ -41,14 +41,14 @@ export const writeProjectStorageOwner = (
 
 export const chooseProjectSlug = ({
 	configDir,
-	directory,
+	mainFolder,
 	liveSlugs,
 }: {
 	readonly configDir: string;
-	readonly directory: string;
+	readonly mainFolder: string;
 	readonly liveSlugs: ReadonlySet<string>;
 }): string => {
-	const normalizedDirectory = resolve(directory);
+	const normalizedDirectory = resolve(mainFolder);
 	const reservedSlugs = new Set(liveSlugs);
 	const storageRoot = resolve(configDir, "projects");
 	let reusableSlug: string | undefined;
@@ -71,12 +71,12 @@ export const chooseProjectSlug = ({
 export const projectEventsDbPath = (project: {
 	readonly configDir: string;
 	readonly slug: string;
-	readonly directory: string;
+	readonly folders: readonly [string, ...string[]];
 }): string => {
 	const current = resolve(
 		projectStorageDir(project.configDir, project.slug),
 		"events.db",
 	);
-	const legacy = resolve(project.directory, ".conduit", "events.db");
+	const legacy = resolve(project.folders[0], ".conduit", "events.db");
 	return !existsSync(current) && existsSync(legacy) ? legacy : current;
 };

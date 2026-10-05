@@ -127,13 +127,11 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "git-project",
 						title: "Git",
-						directory: gitProject,
 						folders: [gitProject],
 					},
 					{
 						slug: "plain-project",
 						title: "Plain",
-						directory: plainProject,
 						folders: [plainProject],
 					},
 				]),
@@ -187,7 +185,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -253,7 +250,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -308,7 +304,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -392,7 +387,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -488,31 +482,26 @@ describe("listDaemonSessions", () => {
 						{
 							slug: "project-a",
 							title: "Project A",
-							directory: projectA,
 							folders: [projectA],
 						},
 						{
 							slug: "project-b",
 							title: "Project B",
-							directory: projectB,
 							folders: [projectB],
 						},
 						{
 							slug: "no-store",
 							title: "No store",
-							directory: noStore,
 							folders: [noStore],
 						},
 						{
 							slug: "unreadable-store",
 							title: "Unreadable store",
-							directory: unreadableStore,
 							folders: [unreadableStore],
 						},
 						{
 							slug: "missing",
 							title: "Missing",
-							directory: missing,
 							folders: [missing],
 						},
 					]),
@@ -546,19 +535,16 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project-a",
 				title: "project-a",
-				directory: projectA,
 				folders: [projectA],
 			},
 			{
 				slug: "project-b",
 				title: "project-b",
-				directory: projectB,
 				folders: [projectB],
 			},
 			{
 				slug: "project-c",
 				title: "project-c",
-				directory: projectC,
 				folders: [projectC],
 			},
 		]);
@@ -641,7 +627,6 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project",
 				title: "Project",
-				directory: project,
 				folders: [project],
 			},
 		]);
@@ -704,19 +689,16 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project-a",
 				title: "project-a",
-				directory: projectA,
 				folders: [projectA],
 			},
 			{
 				slug: "project-b",
 				title: "project-b",
-				directory: projectB,
 				folders: [projectB],
 			},
 			{
 				slug: "project-c",
 				title: "project-c",
-				directory: projectC,
 				folders: [projectC],
 			},
 		]);
@@ -772,13 +754,11 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project-a",
 				title: "project-a",
-				directory: projectA,
 				folders: [projectA],
 			},
 			{
 				slug: "project-b",
 				title: "project-b",
-				directory: projectB,
 				folders: [projectB],
 			},
 		]);
@@ -849,19 +829,16 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project-a",
 						title: "A",
-						directory: projectA,
 						folders: [projectA],
 					},
 					{
 						slug: "project-b",
 						title: "B",
-						directory: projectB,
 						folders: [projectB],
 					},
 					{
 						slug: "project-c",
 						title: "C",
-						directory: projectC,
 						folders: [projectC],
 					},
 				]),
@@ -912,19 +889,16 @@ describe("listDaemonSessions", () => {
 						{
 							slug: "project-a",
 							title: "A",
-							directory: projectA,
 							folders: [projectA],
 						},
 						{
 							slug: "project-b",
 							title: "B",
-							directory: projectB,
 							folders: [projectB],
 						},
 						{
 							slug: "unavailable",
 							title: "Unavailable",
-							directory: unavailable,
 							folders: [unavailable],
 						},
 					]),
@@ -942,11 +916,10 @@ describe("ResolveSession", () => {
 			const projects = ["project-a", "project-b"].map((slug) => ({
 				slug,
 				title: slug,
-				directory: join(root, slug),
-				folders: [join(root, slug)],
+				folders: [join(root, slug)] as const,
 			}));
 			for (const project of projects) {
-				makeProjectStore(project.directory, [
+				makeProjectStore(project.folders[0], [
 					{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
 				]);
 			}

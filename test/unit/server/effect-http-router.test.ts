@@ -26,7 +26,7 @@ import {
 const testProjects: RouterProjectInfo[] = [
 	{
 		slug: "test-project",
-		directory: "/tmp/test-project",
+		folders: ["/tmp/test-project"],
 		title: "Test Project",
 		status: "ready",
 		clients: 2,

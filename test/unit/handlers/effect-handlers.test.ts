@@ -387,7 +387,7 @@ describe("handleGetProjects", () => {
 	it.effect("uses config.getProjects when available", () => {
 		const ws = mockWsHandler();
 		const projects = [
-			{ slug: "proj-1", title: "Project 1", directory: "/path" },
+			{ slug: "proj-1", title: "Project 1", folders: ["/path"] as const },
 		];
 		const config = mockConfig({
 			getProjects: () => projects,

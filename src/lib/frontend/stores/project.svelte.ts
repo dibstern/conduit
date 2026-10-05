@@ -110,8 +110,7 @@ const toProjectInfoList = (
 	projects.map((project) => ({
 		slug: project.slug,
 		title: project.title,
-		directory: project.directory,
-		...(project.folders != null ? { folders: [...project.folders] } : {}),
+		folders: project.folders,
 		...(project.git != null ? { git: project.git } : {}),
 		...(project.clientCount != null
 			? { clientCount: project.clientCount }

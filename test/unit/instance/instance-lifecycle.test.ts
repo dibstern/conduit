@@ -67,6 +67,7 @@ describe("instance lifecycle integration", () => {
 			projects: [
 				{
 					path: "/src/app",
+					folders: ["/src/app"],
 					slug: "app",
 					addedAt: Date.now(),
 					instanceId: "personal",

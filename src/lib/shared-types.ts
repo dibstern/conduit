@@ -478,8 +478,8 @@ export interface HistoryMessage {
 export interface ProjectInfo {
 	slug: string;
 	title: string;
-	directory: string;
-	folders?: readonly string[];
+	/** folders[0] is the main folder, where sessions run. */
+	folders: readonly [string, ...string[]];
 	missing?: boolean;
 	git?: SessionGit;
 	clientCount?: number;
@@ -583,8 +583,7 @@ const CommandInfoSchema = Schema.Struct({
 const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
-	directory: Schema.String,
-	folders: Schema.optional(Schema.Array(Schema.String)),
+	folders: Schema.NonEmptyArray(Schema.String),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),

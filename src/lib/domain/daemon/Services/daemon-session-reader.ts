@@ -51,13 +51,16 @@ interface ProjectSessionCandidate {
 }
 
 const readProjectSessions = (
-	project: Pick<StoredProject, "slug" | "directory">,
+	project: Pick<StoredProject, "slug" | "folders">,
 	configDir: string,
 	options: DaemonSessionQueryOptions,
 	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
-		const { slug: projectSlug, directory: projectDirectory } = project;
+		const {
+			slug: projectSlug,
+			folders: [projectDirectory],
+		} = project;
 		const directory = yield* Effect.try({
 			try: () => statSync(projectDirectory),
 			catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
@@ -122,7 +125,7 @@ const readProjectSessions = (
 
 /** Check outstanding Claude admissions without acquiring the project's relay. */
 export const hasRunningClaudeTurn = (
-	project: Pick<StoredProject, "slug" | "directory">,
+	project: Pick<StoredProject, "slug" | "folders">,
 	configDir: string,
 ) =>
 	Effect.gen(function* () {
@@ -154,7 +157,7 @@ export const hasRunningClaudeTurn = (
 
 /** Count busy/retry sessions and admitted turns awaiting their first provider event. */
 export const countRunningProjectSessions = (
-	project: Pick<StoredProject, "slug" | "directory">,
+	project: Pick<StoredProject, "slug" | "folders">,
 	configDir: string,
 ) =>
 	Effect.gen(function* () {
@@ -188,7 +191,7 @@ export const countRunningProjectSessions = (
 
 /** Use the same read-only SQLite path as the daemon-wide session list. */
 export const hasColdAutoSettleCandidate = (
-	project: Pick<StoredProject, "slug" | "directory">,
+	project: Pick<StoredProject, "slug" | "folders">,
 	configDir: string,
 	now: number,
 	idleWindowMs: number,

@@ -463,6 +463,7 @@ describe("migrateLegacyInstanceIds", () => {
 			projects: [
 				{
 					path: "/tmp/app",
+					folders: ["/tmp/app"],
 					slug: "app",
 					title: "App",
 					addedAt: 1,
@@ -553,6 +554,7 @@ describe("migrateLegacyInstanceIds", () => {
 			projects: [
 				{
 					path: "/tmp/app",
+					folders: ["/tmp/app"],
 					slug: "app",
 					title: "App",
 					addedAt: 1,

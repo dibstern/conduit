@@ -145,8 +145,7 @@ export const CommandInfoSchema = Schema.Struct({
 export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
-	directory: Schema.String,
-	folders: Schema.optional(Schema.Array(Schema.String)),
+	folders: Schema.NonEmptyArray(Schema.String),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
@@ -561,7 +560,7 @@ export const GetStatusResponseSchema = Schema.Struct({
 	projects: Schema.Array(
 		Schema.Struct({
 			slug: Schema.String,
-			directory: Schema.String,
+			folders: Schema.NonEmptyArray(Schema.String),
 			title: Schema.String,
 			status: Schema.optional(Schema.String),
 			lastUsed: Schema.optional(Schema.Number),

@@ -17,8 +17,7 @@ const rpcClient = Effect.gen(function* () {
 const project = {
 	slug: "proj-1",
 	title: "Project 1",
-	directory: "/work/proj-1",
-	folders: ["/work/proj-1"],
+	folders: ["/work/proj-1"] as const,
 	instanceId: "inst-1",
 	missing: true,
 };

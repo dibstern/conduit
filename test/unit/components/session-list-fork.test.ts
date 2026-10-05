@@ -45,7 +45,7 @@ describe("SessionList fork", () => {
 		});
 		attachedProjectState.slug = "current-project";
 		projectState.projects = [
-			{ slug: "current-project", title: "Current", directory: "/current" },
+			{ slug: "current-project", title: "Current", folders: ["/current"] },
 		];
 		seedRootSessions([
 			{ id: "open", title: "Open work" },

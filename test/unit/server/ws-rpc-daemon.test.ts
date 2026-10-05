@@ -145,12 +145,12 @@ describe("daemon RPC handlers", () => {
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
 				yield* client.SaveProject({ folders: [directory] });
 				expect((yield* client.GetProjects({})).projects).toMatchObject([
-					{ directory },
+					{ folders: [directory] },
 				]);
 			}).pipe(
 				Effect.provide(
 					makeDaemonRpcTestLayer([
-						{ slug: "gone", title: "gone", directory, folders: [directory] },
+						{ slug: "gone", title: "gone", folders: [directory] },
 					]),
 				),
 			);
@@ -169,8 +169,7 @@ describe("daemon RPC handlers", () => {
 				return {
 					slug,
 					title: slug,
-					directory: projectDir,
-					folders: [projectDir],
+					folders: [projectDir] as const,
 				};
 			});
 			const factory = vi.fn((slug: string) =>

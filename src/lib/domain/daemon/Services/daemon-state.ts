@@ -15,8 +15,7 @@ import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 /** Project entry stored in daemon config. */
 export interface DaemonProject {
 	path: string;
-	directory?: string;
-	folders?: readonly string[];
+	folders: readonly [string, ...string[]];
 	slug: string;
 	title?: string;
 	addedAt: number;

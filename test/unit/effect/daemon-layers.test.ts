@@ -192,21 +192,18 @@ describe("DaemonHandleTag", () => {
 				makeProjectRegistryLive([
 					{
 						slug: "existing",
-						directory: "/tmp/existing",
 						folders: ["/tmp/existing"],
 						title: "Existing",
 						lastUsed: 100,
 					},
 					{
 						slug: "second",
-						directory: "/tmp/second",
 						folders: ["/tmp/second"],
 						title: "Second",
 						lastUsed: 90,
 					},
 					{
 						slug: "uncached",
-						directory: "/tmp/uncached",
 						folders: ["/tmp/uncached"],
 						title: "Uncached",
 						lastUsed: 80,

@@ -42,12 +42,12 @@ describe("SessionList daemon sessions", () => {
 			{
 				slug: "current-project",
 				title: "Current project",
-				directory: "/projects/current",
+				folders: ["/projects/current"],
 			},
 			{
 				slug: "another-project",
 				title: "Another project",
-				directory: "/projects/another",
+				folders: ["/projects/another"],
 			},
 		];
 	});
@@ -131,7 +131,7 @@ describe("SessionList daemon sessions", () => {
 			{
 				slug: "current-project",
 				title: "Current project",
-				directory: "/projects/current",
+				folders: ["/projects/current"],
 			},
 		];
 

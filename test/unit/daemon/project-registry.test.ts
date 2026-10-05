@@ -12,7 +12,6 @@ import {
 function makeProject(slug: string, dir?: string): StoredProject {
 	return {
 		slug,
-		directory: dir ?? `/test/${slug}`,
 		folders: [dir ?? `/test/${slug}`],
 		title: slug,
 		lastUsed: Date.now(),
@@ -926,7 +925,7 @@ describe("ProjectRegistry — Stateful model tests", () => {
 
 	type ModelEntry = {
 		slug: string;
-		directory: string;
+		mainFolder: string;
 		title: string;
 		status: "registering" | "ready" | "error";
 	};
@@ -946,7 +945,7 @@ describe("ProjectRegistry — Stateful model tests", () => {
 			// Model: add as registering (will become ready after flush)
 			m.set(this.slug, {
 				slug: this.slug,
-				directory: dir,
+				mainFolder: dir,
 				title: this.slug,
 				status: "registering",
 			});
@@ -981,7 +980,7 @@ describe("ProjectRegistry — Stateful model tests", () => {
 			reg.add(makeProject(this.slug, dir), failingRelayFactory("model-fail"));
 			m.set(this.slug, {
 				slug: this.slug,
-				directory: dir,
+				mainFolder: dir,
 				title: this.slug,
 				status: "registering",
 			});
@@ -1122,7 +1121,7 @@ describe("ProjectRegistry — Stateful model tests", () => {
 				expect(regEntry).toBeDefined();
 				expect(regEntry?.status).toBe(entry.status);
 				expect(regEntry?.project.title).toBe(entry.title);
-				expect(regEntry?.project.directory).toBe(entry.directory);
+				expect(regEntry?.project.folders[0]).toBe(entry.mainFolder);
 
 				if (entry.status === "ready") {
 					expect(reg.getRelay(slug)).toBeDefined();

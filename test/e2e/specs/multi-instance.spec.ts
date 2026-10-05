@@ -137,13 +137,13 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 					{
 						slug: "myapp",
 						title: "myapp",
-						directory: "/src/myapp",
+						folders: ["/src/myapp"],
 						instanceId: String(params["instanceId"] ?? "personal"),
 					},
 					{
 						slug: "company-api",
 						title: "company-api",
-						directory: "/src/company-api",
+						folders: ["/src/company-api"],
 						instanceId: "work",
 					},
 				],
@@ -787,19 +787,19 @@ test.describe("Instance Selector: Rebind Project", () => {
 				{
 					slug: "myapp",
 					title: "myapp",
-					directory: "/src/myapp",
+					folders: ["/src/myapp"],
 					instanceId: "work",
 				},
 				{
 					slug: "mylib",
 					title: "mylib",
-					directory: "/src/mylib",
+					folders: ["/src/mylib"],
 					instanceId: "personal",
 				},
 				{
 					slug: "company-api",
 					title: "company-api",
-					directory: "/src/company-api",
+					folders: ["/src/company-api"],
 					instanceId: "work",
 				},
 			],

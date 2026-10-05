@@ -79,14 +79,14 @@ describe("daemon control through the shared RPC group", () => {
 					{
 						slug: "cold",
 						title: "Cold",
-						directory: "/tmp/cold",
+						folders: ["/tmp/cold"],
 						status: "registering",
 						lastUsed: 2000,
 					},
 					{
 						slug: "cached",
 						title: "Cached",
-						directory: "/tmp/cached",
+						folders: ["/tmp/cached"],
 						status: "registering",
 						lastUsed: 1000,
 						sse,
@@ -99,14 +99,12 @@ describe("daemon control through the shared RPC group", () => {
 							{
 								slug: "cached",
 								title: "Cached",
-								directory: "/tmp/cached",
 								folders: ["/tmp/cached"],
 								lastUsed: 1000,
 							},
 							{
 								slug: "cold",
 								title: "Cold",
-								directory: "/tmp/cold",
 								folders: ["/tmp/cold"],
 								lastUsed: 2000,
 							},
