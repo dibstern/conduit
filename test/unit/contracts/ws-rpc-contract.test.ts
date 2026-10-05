@@ -328,7 +328,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				RespondPermission: () => Effect.succeed({ ok: true as const }),
 				AnswerQuestion: () => Effect.succeed({ ok: true as const }),
 				RejectQuestion: () => Effect.succeed({ ok: true as const }),
-				FindFolders: () => Effect.succeed({ entries: [] }),
+				FindFolders: () => Effect.succeed({ home: "/home/test", entries: [] }),
 				SwitchAgent: () => Effect.succeed({ ok: true as const }),
 				SwitchContextWindow: (request) =>
 					Effect.succeed({

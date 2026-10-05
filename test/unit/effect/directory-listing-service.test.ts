@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
@@ -50,6 +50,7 @@ describe("DirectoryListingService", () => {
 				const service = yield* DirectoryListingServiceTag;
 
 				expect(yield* service.find(`${root}/wo`)).toEqual({
+					home: homedir(),
 					entries: [
 						match(`${root}/work`),
 						match(`${root}/workspace`),
@@ -70,9 +71,11 @@ describe("DirectoryListingService", () => {
 				const service = yield* DirectoryListingServiceTag;
 
 				expect(yield* service.find(`${root}/`)).toEqual({
+					home: homedir(),
 					entries: [match(root), match(`${root}/cache`)],
 				});
 				expect(yield* service.find(`${root}/.c`)).toEqual({
+					home: homedir(),
 					entries: [match(`${root}/.cache`), match(`${root}/.c`, false)],
 				});
 			}).pipe(Effect.scoped, Effect.provide(DirectoryListingServiceLive)),
@@ -86,6 +89,7 @@ describe("DirectoryListingService", () => {
 
 				expect(yield* service.find("/definitely/missing/conduit-path")).toEqual(
 					{
+						home: homedir(),
 						entries: [match("/definitely/missing/conduit-path", false)],
 					},
 				);

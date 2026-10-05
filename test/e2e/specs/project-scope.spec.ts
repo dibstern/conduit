@@ -119,6 +119,7 @@ async function setupWithProjectManagement(
 			},
 			// Every query names one existing folder: the one typed.
 			FindFolders: (params) => ({
+				home: "/home/test",
 				entries: [
 					{
 						path: String(params["query"]),

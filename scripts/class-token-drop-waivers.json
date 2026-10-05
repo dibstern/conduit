@@ -339,5 +339,6 @@
 		"movedTo": "src/lib/frontend/components/chat/ToolOutputMore.svelte",
 		"requires": "<ToolOutputMore",
 		"reason": "The \"Show full output\" row moved verbatim into ToolOutputMore, shared with ActivityRow."
-	}
+	},
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: text-text-dimmer": "conduit-test-r9h8: the session-skills hint moves from text-text-dimmer (#676e79, 3.24:1) to text-text-muted so the SessionBar 'With Skills' stories pass the axe AA colour-contrast check."
 }

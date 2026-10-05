@@ -16,6 +16,7 @@ import {
 	Runtime,
 	Stream,
 } from "effect";
+import { migrateDaemonConfigFolders } from "../../../daemon/config-persistence.js";
 import {
 	closeHttpServer,
 	closeOnboardingServer,
@@ -704,7 +705,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
 		Layer.effectDiscard(
-			migrateProjectStorage(configDir).pipe(
+			migrateDaemonConfigFolders(configDir).pipe(
+				Effect.andThen(migrateProjectStorage(configDir)),
 				Effect.andThen(migrateForkLineage(configDir)),
 			),
 		),

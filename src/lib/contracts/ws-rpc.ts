@@ -601,6 +601,8 @@ export const PtyListResponseSchema = Schema.Struct({
 });
 
 export const FindFoldersResponseSchema = Schema.Struct({
+	/** The server's home folder, so paths can be shown as ~/... */
+	home: Schema.String,
 	entries: Schema.Array(
 		Schema.Struct({
 			path: Schema.String,

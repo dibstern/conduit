@@ -43,6 +43,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 
 			expect(yield* client.FindFolders({ query: `${root}/p` })).toEqual({
+				home: homedir(),
 				entries: [
 					{
 						path: `${root}/personal`,
@@ -76,6 +77,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 			expect(
 				yield* client.FindFolders({ query: `${root}/work/../work` }),
 			).toEqual({
+				home: homedir(),
 				entries: [
 					{
 						path: `${root}/work`,
@@ -166,8 +168,12 @@ describe("WsRpcServerLayer FindFolders", () => {
 		Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 
-			expect(yield* client.FindFolders({ query: "" })).toEqual({ entries: [] });
+			expect(yield* client.FindFolders({ query: "" })).toEqual({
+				home: homedir(),
+				entries: [],
+			});
 			expect(yield* client.FindFolders({ query: "project" })).toEqual({
+				home: homedir(),
 				entries: [],
 			});
 		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
@@ -180,6 +186,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 			const path = join(root, "missing-parent", "notes");
 
 			expect(yield* client.FindFolders({ query: path })).toEqual({
+				home: homedir(),
 				entries: [{ path, isGitRepo: false, reason: "match", exists: false }],
 			});
 		}).pipe(Effect.scoped, Effect.provide(rpcLayer)),

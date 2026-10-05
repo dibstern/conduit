@@ -62,6 +62,7 @@
 	let draft = $state<ProjectDraft>(createDraft());
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
+	let home = $state("");
 	let activeIndex = $state(0);
 	let gitInit = $state(true);
 	let searching = $state(false);
@@ -153,6 +154,7 @@
 				(response) => {
 					if (version !== lookupVersion) return;
 					entries = response.entries;
+					home = response.home;
 					searching = false;
 				},
 				(error: unknown) => {
@@ -254,10 +256,11 @@
 	}
 </script>
 
-{#snippet pathLabel(path: string)}
+{#snippet pathLabel(path: string, highlighted = false)}
 	<!-- Dim parent, bright name: the name is what tells sibling folders apart. -->
-	{@const cut = path.lastIndexOf("/", path.length - 2) + 1}
-	<span class="flex min-w-0 flex-1" title={path}><span class="min-w-0 truncate text-text-secondary">{path.slice(0, cut)}</span><span class="min-w-0 max-w-full shrink-0 truncate text-text">{path.slice(cut)}</span></span>
+	{@const shown = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path}
+	{@const cut = shown.lastIndexOf("/", shown.length - 2) + 1}
+	<span class="flex min-w-0 flex-1" title={path}><span class="min-w-0 truncate {highlighted ? 'text-text-secondary' : 'text-text-muted'}">{shown.slice(0, cut)}</span><span class="min-w-0 max-w-full shrink-0 truncate text-text">{shown.slice(cut)}</span></span>
 {/snippet}
 
 <Dialog {open} {onclose} {returnFocus} labelledBy={titleId} describedBy={hintId} placement={isPhone ? "sheet" : "top"} dismissible={!saving}>
@@ -313,7 +316,7 @@
 										{@const meta = [entry.reason === "recent" && "recent", entry.isGitRepo && "git"].filter(Boolean).join(" · ")}
 										<Button role="option" id={optionId(index)} aria-selected={activeIndex === index} tabindex={-1} ariaLabel={entry.path} variant={activeIndex === index ? "accent-soft" : "ghost"} tone="default" size="content" align="start" class="w-full min-h-[30px] gap-[7px] px-[8px] py-[6px] text-left font-mono text-[11px] max-md:min-h-[44px]" onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = index} onclick={() => choose(entry)}>
 											<Icon name={entry.isGitRepo ? "git-branch" : "folder"} size={13} class="shrink-0 text-text-muted" />
-											{@render pathLabel(entry.path)}
+											{@render pathLabel(entry.path, activeIndex === index)}
 											{#if meta}<span class="shrink-0 text-[10px] text-text-secondary">{meta}</span>{/if}
 										</Button>
 									{/each}

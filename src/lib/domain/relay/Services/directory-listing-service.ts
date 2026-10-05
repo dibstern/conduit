@@ -127,7 +127,7 @@ export interface FolderSuggestionSources {
 const suggestFolders = (
 	text: string,
 	sources: FolderSuggestionSources,
-): Effect.Effect<FindFoldersResponse> =>
+): Effect.Effect<Pick<FindFoldersResponse, "entries">> =>
 	Effect.gen(function* () {
 		const needle = text.toLowerCase();
 		const named = (path: string) =>
@@ -252,7 +252,7 @@ export const findFolders = (
 			});
 		}
 		return { entries };
-	});
+	}).pipe(Effect.map((result) => ({ home: homedir(), ...result })));
 
 export const DirectoryListingServiceLive: Layer.Layer<DirectoryListingServiceTag> =
 	Layer.succeed(DirectoryListingServiceTag, {

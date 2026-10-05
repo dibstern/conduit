@@ -1,6 +1,7 @@
 import {
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
@@ -78,6 +79,21 @@ describe("project storage migration through the daemon", () => {
 		const history = await before.history(sessionId);
 		await harness.terminate();
 		stageLegacyStore(harness);
+		// Write the project the way a pre-folders daemon did: directory, no folders.
+		const configFile = join(harness.configDir, "daemon.json");
+		const config: { projects: { folders: string[] }[] } = JSON.parse(
+			readFileSync(configFile, "utf8"),
+		);
+		writeFileSync(
+			configFile,
+			JSON.stringify({
+				...config,
+				projects: config.projects.map(({ folders, ...project }) => ({
+					...project,
+					directory: folders[0],
+				})),
+			}),
+		);
 
 		await harness.restart();
 		const after = await harness.connect(sessionId);
@@ -88,11 +104,28 @@ describe("project storage migration through the daemon", () => {
 		expect(readProjectStorageOwner(harness.configDir, "process-test")).toBe(
 			harness.projectDir,
 		);
+		const migratedProjects: Record<string, unknown>[] = JSON.parse(
+			readFileSync(configFile, "utf8"),
+		).projects;
+		expect(migratedProjects).toEqual([
+			expect.objectContaining({
+				slug: "process-test",
+				folders: [harness.projectDir],
+			}),
+		]);
+		expect(migratedProjects[0]).not.toHaveProperty("directory");
+		// The log entry spans lines, so match from its message to the project slug.
+		const migrationLog = harness.logTail.match(
+			/Migrated project history[\s\S]*?process-test/g,
+		);
+		expect(migrationLog).toHaveLength(1);
 		evidence = {
 			sessionId,
 			history,
 			archived: true,
 			owner: harness.projectDir,
+			migratedProjects,
+			migrationLog,
 		};
 	}, 60_000);
 
@@ -228,7 +261,12 @@ describe("project storage migration through the daemon", () => {
 		expect(secondSlug).not.toBe(firstSlug);
 		expect(readProjectStorageOwner(harness.configDir, firstSlug)).toBe(first);
 		const other = await harness.connect(undefined, undefined, secondSlug);
-		expect(readProjectStorageOwner(harness.configDir, secondSlug)).toBe(second);
+		// The WS opens before the new project's relay finishes starting and writes its owner.
+		const { configDir } = harness;
+		await vi.waitFor(
+			() => expect(readProjectStorageOwner(configDir, secondSlug)).toBe(second),
+			{ timeout: 15_000 },
+		);
 		expect(await other.history(sessionId)).toEqual([]);
 		expect(existsSync(join(second, ".conduit"))).toBe(false);
 		evidence = {

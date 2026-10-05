@@ -7,7 +7,8 @@ import {
 import type { FindFoldersRpcInput } from "../../transport/ws-rpc-client.js";
 import ProjectDialog from "./ProjectDialog.svelte";
 
-const root = "/Users/dev/src";
+const home = "/Users/dev";
+const root = `${home}/src`;
 const app = `${root}/conduit`;
 const docs = `${root}/conduit-docs`;
 const site = `${root}/conduit-site`;
@@ -17,8 +18,9 @@ const existing = [app, docs, site, `${app}/packages/sdk`];
 async function findFolders({
 	query,
 }: FindFoldersRpcInput): Promise<FindFoldersResponse> {
-	if (!/^[/~]/.test(query)) return { entries: [] };
+	if (!/^[/~]/.test(query)) return { home, entries: [] };
 	return {
+		home,
 		entries: [
 			...existing
 				.filter((path) => path.startsWith(query))
@@ -285,6 +287,7 @@ export const KeyboardSave: Story = {
 export const SuggestionsOpen: Story = {
 	args: {
 		findFolders: async ({ query }: FindFoldersRpcInput) => ({
+			home,
 			entries: suggestions.filter((entry) =>
 				entry.path.toLowerCase().includes(query.toLowerCase()),
 			),

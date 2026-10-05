@@ -119,7 +119,7 @@
 				iconSize={11}
 				touchTarget
 				class="h-[16px] w-[16px] shrink-0 rounded-full md:pointer-fine:invisible md:group-hover:visible md:group-data-highlighted:visible"
-				title="Edit project"
+				title="Edit project (F2)"
 				ariaLabel="Edit {project.title || project.slug}"
 				aria-hidden="true"
 				tabindex={-1}

@@ -495,6 +495,35 @@ export async function saveDaemonConfig(
 	await rename(tmpPath, finalPath);
 }
 
+/** Rewrite daemon.json once at startup when a project still has the pre-folders shape (`directory`, no `folders`). */
+export const migrateDaemonConfigFolders = (configDir?: string) =>
+	Effect.gen(function* () {
+		const raw = yield* Effect.try(
+			() =>
+				JSON.parse(
+					readFileSync(join(resolveDir(configDir), "daemon.json"), "utf-8"),
+				) as unknown,
+		).pipe(Effect.orElseSucceed(() => undefined));
+		const legacy =
+			isRecord(raw) &&
+			Array.isArray(raw["projects"]) &&
+			raw["projects"].some(
+				(project) =>
+					isRecord(project) &&
+					(!("folders" in project) || "directory" in project),
+			);
+		const config = legacy ? loadDaemonConfig(configDir) : null;
+		if (!config) return;
+		yield* Effect.promise(() => saveDaemonConfig(config, configDir));
+		yield* Effect.logInfo("Migrated project config to folders", {
+			projects: config.projects.map((project) => project.slug),
+		});
+	}).pipe(
+		Effect.catchAllCause((cause) =>
+			Effect.logWarning("Project config migration failed", { cause }),
+		),
+	);
+
 /** Remove daemon.json and relay.sock. Ignores ENOENT. */
 export function clearDaemonConfig(configDir?: string): void {
 	const dir = resolveDir(configDir);
