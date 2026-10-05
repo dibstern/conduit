@@ -2,10 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import {
-	PendingInteractionServiceLive,
-	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
 	PollerManagerShape,
 	SessionManagerShape,
@@ -38,7 +35,6 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { PermissionId } from "../../../src/lib/shared-types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockConfig,
@@ -205,6 +201,9 @@ describe("session handler metadata", () => {
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+			readPendingApprovals: vi.fn(() =>
+				Effect.succeed({ rows: [], version: 0 }),
+			),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// A complete OpenCode projection carries message text and backfill origin.
 			readSessionTranscript: vi.fn(() =>
@@ -320,158 +319,7 @@ describe("session handler metadata", () => {
 	);
 
 	it.effect(
-		"replays pending permissions from PendingInteractionService",
-		() => {
-			const { wsHandler, layer } = makeSessionMetadataLayer({});
-
-			return Effect.gen(function* () {
-				const pendingInteractions = yield* PendingInteractionServiceTag;
-				yield* pendingInteractions.recordPermissionRequest({
-					requestId: "perm-1" as PermissionId,
-					sessionId: "session-1",
-					toolName: "Bash",
-					toolInput: {
-						patterns: ["git *"],
-						metadata: { command: "git status" },
-					},
-					always: [],
-				});
-
-				yield* handleViewSession("client-1", { sessionId: "session-1" });
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "permission_request",
-						sessionId: "session-1",
-						requestId: "perm-1",
-						toolName: "Bash",
-						toolInput: {
-							patterns: ["git *"],
-							metadata: { command: "git status" },
-						},
-						always: [],
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"sends family before switching and replays descendant permissions",
-		() => {
-			const sessions = [
-				{
-					id: "session-1",
-					title: "Root",
-					status: "idle" as const,
-					updatedAt: 0,
-					messageCount: 0,
-				},
-				{
-					id: "child",
-					parentID: "session-1",
-					title: "Child",
-					status: "idle" as const,
-					updatedAt: 0,
-					messageCount: 0,
-				},
-				{
-					id: "grandchild",
-					parentID: "child",
-					title: "Grandchild",
-					status: "idle" as const,
-					updatedAt: 0,
-					messageCount: 0,
-				},
-			];
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				sessionManagerService: makeMockSessionManagerService({
-					getSessionFamily: () =>
-						Effect.succeed({
-							type: "session_family",
-							rootId: "session-1",
-							sessions,
-						}),
-				}),
-			});
-			return Effect.gen(function* () {
-				const pending = yield* PendingInteractionServiceTag;
-				for (const sessionId of ["grandchild", "unrelated"]) {
-					yield* pending.recordPermissionRequest({
-						requestId: sessionId as PermissionId,
-						sessionId,
-						toolName: "Bash",
-						toolInput: {},
-						always: [],
-					});
-				}
-				yield* handleViewSession("client-1", { sessionId: "session-1" });
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "permission_request",
-						sessionId: "grandchild",
-					}),
-				);
-				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "permission_request",
-						sessionId: "unrelated",
-					}),
-				);
-				const messages = vi
-					.mocked(wsHandler.sendTo)
-					.mock.calls.map((call) => call[1].type);
-				expect(messages).toContain("session_family");
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect("replays pending questions from PendingInteractionService", () => {
-		const { wsHandler, layer } = makeSessionMetadataLayer({});
-
-		return Effect.gen(function* () {
-			const pendingInteractions = yield* PendingInteractionServiceTag;
-			yield* pendingInteractions.recordQuestionRequest({
-				requestId: "question-1",
-				sessionId: "session-1",
-				questions: [
-					{
-						question: "Continue?",
-						header: "Confirm",
-						options: [{ label: "Yes", description: "Continue" }],
-						multiSelect: false,
-					},
-				],
-				toolCallId: "toolu-1",
-			});
-
-			yield* handleViewSession("client-1", { sessionId: "session-1" });
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "ask_user",
-					sessionId: "session-1",
-					toolId: "question-1",
-					questions: [
-						{
-							question: "Continue?",
-							header: "Confirm",
-							options: [{ label: "Yes", description: "Continue" }],
-							multiSelect: false,
-						},
-					],
-					toolUseId: "toolu-1",
-				});
-			}),
-		);
-	});
-
-	it.effect(
-		"logs permission metadata lookup failures and still sends session lists",
+		"reads no permission metadata and still sends session lists",
 		() => {
 			const legacySendSessionLists = vi.fn(async () => {
 				throw new Error("legacy session manager sendDual should not be called");
@@ -499,11 +347,9 @@ describe("session handler metadata", () => {
 			return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(logger.warn).toHaveBeenCalledWith(
-						expect.stringContaining(
-							"Failed to replay pending permissions for session-1:",
-						),
-					);
+					// Approvals come from the approvals subscription, not a replay.
+					expect(api.permission.list).not.toHaveBeenCalled();
+					expect(logger.warn).not.toHaveBeenCalled();
 					expect(wsHandler.sendTo).not.toHaveBeenCalledWith("client-1", {
 						type: "model_info",
 						model: "gpt-4",

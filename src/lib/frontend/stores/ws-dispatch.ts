@@ -56,13 +56,6 @@ import {
 } from "./discovery.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
 import { clearScanInFlight, handleInstanceList } from "./instance.svelte.js";
-import {
-	handleAskUser,
-	handleAskUserError,
-	handleAskUserResolved,
-	handlePermissionRequest,
-	handlePermissionResolved,
-} from "./permissions.svelte.js";
 import { handleProjectList } from "./project.svelte.js";
 import {
 	attachedProjectState,
@@ -103,7 +96,6 @@ import {
 	projectListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
-import { wsSend } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
@@ -128,11 +120,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"user_message",
 		"part_removed",
 		"message_removed",
-		"ask_user",
-		"ask_user_resolved",
-		"ask_user_error",
-		"permission_request",
-		"permission_resolved",
 		"session_forked",
 		"provider_session_reloaded",
 		"session_deleted",
@@ -171,30 +158,12 @@ function routePerSession(event: PerSessionEvent): void {
 		return;
 	}
 
-	// Lives outside chat slots and accepts sessions not yet in membership
-	// (a new child's first question). Never allocate a slot here:
-	// resolutions are broadcast to every client, and a slot per unrelated
-	// session would evict cached transcripts from the LRU.
+	// Lives outside chat slots and accepts sessions not yet in membership.
+	// Never allocate a slot here: a slot per unrelated session would evict
+	// cached transcripts from the LRU.
 	switch (event.type) {
 		case "session.goal_changed":
 			handleGoalChanged(event);
-			return;
-		case "permission_request":
-			handlePermissionRequest(event, wsSend);
-			triggerNotifications(event);
-			return;
-		case "permission_resolved":
-			handlePermissionResolved(event);
-			return;
-		case "ask_user":
-			handleAskUser(event, event.sessionId);
-			triggerNotifications(event);
-			return;
-		case "ask_user_resolved":
-			handleAskUserResolved(event);
-			return;
-		case "ask_user_error":
-			handleAskUserError(event);
 			return;
 	}
 
@@ -437,8 +406,7 @@ export function handleMessage(msg: RelayMessage): void {
 			// between tool rounds (e.g. after a bash call completes), causing
 			// spurious "Response complete" toasts mid-turn. Users still get sound,
 			// browser/push notifications, and the sidebar green dot for
-			// genuine completions. Skip ask_user and ask_user_resolved since
-			// the AttentionBanner already handles those.
+			// genuine completions.
 			if (!isSubagentDone && msg.eventType === "error") {
 				const content = notificationContent(syntheticMsg);
 				if (content) {

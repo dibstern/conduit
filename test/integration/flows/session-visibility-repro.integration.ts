@@ -1039,13 +1039,27 @@ describe("Integration: Session Visibility Repros", () => {
 				localId,
 				"List the files in the current directory using bash: ls -la",
 			);
-			const requested = await client1.waitFor("permission_request", {
-				timeout: 15_000,
-			});
-			await client1.respondPermission(
-				requested["requestId"] as string,
-				"allow",
+			// The card reaches browsers through the approvals subscription (ni8.9),
+			// which reads this row; this harness serves the socket, not /rpc. The
+			// recording may resolve it first, so the row's status is not asserted.
+			const requestId = await vi.waitFor(
+				async () => {
+					const [row] = await readStore(
+						dbPath,
+						Effect.flatMap(
+							SqlClient.SqlClient,
+							(sql) =>
+								sql<{
+									id: string;
+								}>`SELECT id FROM pending_approvals WHERE session_id = ${sessionId}`,
+						),
+					);
+					if (!row) throw new Error("permission not asked yet");
+					return row.id;
+				},
+				{ timeout: 15_000 },
 			);
+			await client1.respondPermission(requestId, "allow");
 			await client1.waitFor("tool_result", { timeout: 20_000 });
 			await vi.waitFor(
 				async () => {

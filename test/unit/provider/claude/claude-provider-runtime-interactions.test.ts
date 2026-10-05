@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import {
 	Cause,
+	type Context,
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	Schedule,
 	Scope,
 } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -362,10 +364,22 @@ describe("Claude runner interaction transport", () => {
 	});
 });
 
+// The approval reaching the browser is its pending_approvals row.
+const awaitPendingApproval = (
+	readQuery: Context.Tag.Service<typeof ReadQueryEffectTag>,
+) =>
+	readQuery.countPendingApprovalsBySession().pipe(
+		Effect.repeat({
+			until: (rows) => rows.length > 0,
+			schedule: Schedule.spaced("10 millis"),
+		}),
+		Effect.timeout("5 seconds"),
+	);
+
 describe("Claude durable interaction resolution", () => {
 	const interactions = [
-		{ toolName: "Bash", kind: "permission", message: "permission_request" },
-		{ toolName: "AskUserQuestion", kind: "question", message: "ask_user" },
+		{ toolName: "Bash", kind: "permission" },
+		{ toolName: "AskUserQuestion", kind: "question" },
 	] as const;
 
 	it.each(
@@ -373,7 +387,6 @@ describe("Claude durable interaction resolution", () => {
 	)("resolves a $kind approval when cancel-interaction interrupts its waiter", async ({
 		toolName,
 		kind,
-		message,
 	}) => {
 		const f = await persistentInteractions();
 		const abort = new AbortController();
@@ -402,13 +415,7 @@ describe("Claude durable interaction resolution", () => {
 							}),
 						),
 					);
-					yield* Effect.tryPromise(() =>
-						vi.waitFor(() =>
-							expect(f.send).toHaveBeenCalledWith(
-								expect.objectContaining({ type: message }),
-							),
-						),
-					);
+					yield* awaitPendingApproval(f.readQuery);
 					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual([
 						{ session_id: "session-1", type: kind, pending_count: 1 },
 					]);
@@ -453,7 +460,6 @@ describe("Claude durable interaction resolution", () => {
 		]),
 	)("keeps a $kind approval pending when its $shutdownPath scope closes", async ({
 		kind,
-		message,
 		shutdownPath,
 	}) => {
 		const f = await persistentInteractions();
@@ -512,13 +518,7 @@ describe("Claude durable interaction resolution", () => {
 									},
 								},
 					);
-					yield* Effect.tryPromise(() =>
-						vi.waitFor(() =>
-							expect(f.send).toHaveBeenCalledWith(
-								expect.objectContaining({ type: message }),
-							),
-						),
-					);
+					yield* awaitPendingApproval(f.readQuery);
 					yield* Scope.close(relayScope, Exit.void);
 				}),
 			),
@@ -545,7 +545,6 @@ describe("Claude durable interaction resolution", () => {
 		interactions,
 	)("persists a completed $kind answer when detachment races its finalizer", async ({
 		kind,
-		message,
 	}) => {
 		const f = await persistentInteractions();
 		const permissionReply: PermissionResponse = {
@@ -614,13 +613,7 @@ describe("Claude durable interaction resolution", () => {
 									})
 									.pipe(Effect.asVoid),
 					);
-					yield* Effect.tryPromise(() =>
-						vi.waitFor(() =>
-							expect(f.send).toHaveBeenCalledWith(
-								expect.objectContaining({ type: message }),
-							),
-						),
-					);
+					yield* awaitPendingApproval(f.readQuery);
 					yield* kind === "permission"
 						? sink.resolvePermission("request-1", permissionReply)
 						: sink.resolveQuestion("request-1", answers);
@@ -655,7 +648,6 @@ describe("Claude durable interaction resolution", () => {
 		interactions,
 	)("resolves a $kind approval when its live waiter fails", async ({
 		kind,
-		message,
 	}) => {
 		const f = await persistentInteractions();
 		await f.persistence.runPromise(
@@ -682,13 +674,7 @@ describe("Claude durable interaction resolution", () => {
 									})
 									.pipe(Effect.asVoid),
 					);
-					yield* Effect.tryPromise(() =>
-						vi.waitFor(() =>
-							expect(f.send).toHaveBeenCalledWith(
-								expect.objectContaining({ type: message }),
-							),
-						),
-					);
+					yield* awaitPendingApproval(f.readQuery);
 					yield* f.pending.cancelSessionInteractions(
 						"session-1",
 						"live failure",
@@ -726,13 +712,7 @@ describe("Claude durable interaction resolution", () => {
 							toolInput: { command: "pwd" },
 						}),
 					);
-					yield* Effect.tryPromise(() =>
-						vi.waitFor(() =>
-							expect(f.send).toHaveBeenCalledWith(
-								expect.objectContaining({ type: "permission_request" }),
-							),
-						),
-					);
+					yield* awaitPendingApproval(f.readQuery);
 					expect(yield* f.pending.takeTimedOutPermissions()).toHaveLength(1);
 					expect(Exit.isFailure(yield* Fiber.await(request))).toBe(true);
 					expect(

@@ -1,14 +1,8 @@
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
-import type { PermissionId, UntaggedRelayMessage } from "../shared-types.js";
-import type {
-	AskUserQuestion,
-	PartType,
-	RelayMessage,
-	ToolName,
-	ToolStatus,
-} from "../types.js";
+import type { UntaggedRelayMessage } from "../shared-types.js";
+import type { PartType, RelayMessage, ToolName, ToolStatus } from "../types.js";
 import type { KnownOpenCodeEventType, SSEEvent } from "./opencode-events.js";
 import {
 	isMessageCreatedEvent,
@@ -17,8 +11,6 @@ import {
 	isPartDeltaEvent,
 	isPartRemovedEvent,
 	isPartUpdatedEvent,
-	isPermissionAskedEvent,
-	isQuestionAskedEvent,
 	isSessionErrorEvent,
 	isSessionStatusEvent,
 	sessionErrorText,
@@ -36,14 +28,16 @@ type _HandledByTranslator =
 	| "message.removed"
 	| "session.status"
 	| "session.error"
-	| "permission.asked"
-	| "question.asked"
 	| "pty.created"
 	| "pty.exited"
 	| "pty.deleted"
 	| "todo.updated";
 
-type _HandledByBridge = "permission.replied";
+// Approvals reach the browser through the approvals subscription (ni8.9).
+type _HandledByBridge =
+	| "permission.asked"
+	| "permission.replied"
+	| "question.asked";
 
 // Known upstream events conduit deliberately drops: nothing in the UI consumes
 // file-change or OpenCode-installation-update notices.
@@ -235,56 +229,6 @@ export function translateReasoningPartUpdated(
 	}
 
 	return null;
-}
-
-/** Translate permission.asked event */
-export function translatePermission(
-	event: SSEEvent,
-	sessionId?: string,
-): Extract<RelayMessage, { type: "permission_request" }> | null {
-	if (!isPermissionAskedEvent(event)) return null;
-	if (!sessionId) return null;
-	const { properties: props } = event;
-
-	return {
-		type: "permission_request",
-		sessionId,
-		requestId: props.id as PermissionId,
-		toolName: props.permission,
-		toolInput: {
-			patterns: props.patterns ?? [],
-			metadata: props.metadata ?? {},
-		},
-		always: props.always ?? [],
-		...(props.tool?.callID ? { toolUseId: props.tool.callID } : {}),
-	};
-}
-
-/** Translate question.asked event */
-export function translateQuestion(
-	event: SSEEvent,
-): UntaggedRelayMessage | null {
-	if (!isQuestionAskedEvent(event)) return null;
-	const { properties: props } = event;
-
-	const questions: AskUserQuestion[] = props.questions.map((q) => ({
-		question: q.question ?? "",
-		header: q.header ?? "",
-		options: (q.options ?? []).map((o) => ({
-			label: o.label ?? "",
-			description: o.description ?? "",
-		})),
-		multiSelect: q.multiple ?? false,
-		custom: q.custom ?? true,
-	}));
-
-	return {
-		type: "ask_user",
-		toolId: props.id,
-		questions,
-		providerId: "opencode",
-		...(props.tool?.callID ? { toolUseId: props.tool.callID } : {}),
-	};
 }
 
 /** Format a human-readable retry message with proper delay display */
@@ -699,24 +643,6 @@ export function createTranslator(
 				);
 			}
 
-			// Permission
-			if (eventType === "permission.asked") {
-				return wrapResult(
-					translatePermission(event, context?.sessionId),
-					context?.sessionId
-						? "permission asked: invalid event"
-						: "permission asked: no sessionId in context",
-				);
-			}
-
-			// Question
-			if (eventType === "question.asked") {
-				return wrapResult(
-					translateQuestion(event),
-					"question asked: invalid event",
-				);
-			}
-
 			// Terminals stream from the relay's PtyManager through the project's
 			// PTY subscription (conduit-test-ni8.11), not from OpenCode's SSE.
 			if (eventType.startsWith("pty.")) {
@@ -757,7 +683,9 @@ export function createTranslator(
 
 			// Known event types handled by bridge/SSE wiring, not translator
 			if (
+				eventType === "permission.asked" ||
 				eventType === "permission.replied" ||
+				eventType === "question.asked" ||
 				eventType === "session.updated"
 			) {
 				return {

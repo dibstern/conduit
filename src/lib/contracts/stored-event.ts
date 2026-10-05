@@ -378,11 +378,24 @@ export const SessionGoalChangedPayloadSchema = Schema.Struct({
 export type SessionGoalChangedPayload =
 	typeof SessionGoalChangedPayloadSchema.Type;
 
+/**
+ * Everything the approval card shows rides the asked event: the approvals
+ * subscription serves the card from the pending_approvals row, which keeps
+ * these as its `details` (ni8.9).
+ */
 export interface PermissionAskedPayload {
 	readonly id: string;
 	readonly sessionId: string;
 	readonly toolName: string;
 	readonly input: unknown;
+	readonly toolUseId?: string;
+	readonly always?: readonly string[];
+	/** ProviderPermissionUpdate[]; decoded where it is shown. */
+	readonly permissionSuggestions?: readonly unknown[];
+	readonly permissionTitle?: string;
+	readonly permissionDisplayName?: string;
+	readonly permissionDescription?: string;
+	readonly permissionReason?: string;
 }
 
 export interface PermissionResolvedPayload {
@@ -395,6 +408,8 @@ export interface QuestionAskedPayload {
 	readonly id: string;
 	readonly sessionId: string;
 	readonly questions: unknown;
+	readonly toolUseId?: string;
+	readonly providerId?: string;
 }
 
 export interface QuestionResolvedPayload {
@@ -858,11 +873,27 @@ const SessionPermissionModeChangedPayloadSchema = Schema.Struct({
 	mode: Schema.Literal(...SESSION_PERMISSION_MODES),
 });
 
+const optionalString = Schema.optionalWith(Schema.String, { exact: true });
+
+/** The optional card fields of a permission.asked payload (ni8.9). */
+export const PermissionAskedDetailsSchema = Schema.Struct({
+	toolUseId: optionalString,
+	always: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
+	permissionSuggestions: Schema.optionalWith(Schema.Array(Schema.Unknown), {
+		exact: true,
+	}),
+	permissionTitle: optionalString,
+	permissionDisplayName: optionalString,
+	permissionDescription: optionalString,
+	permissionReason: optionalString,
+});
+
 const PermissionAskedPayloadSchema = Schema.Struct({
 	id: Schema.String,
 	sessionId: Schema.String,
 	toolName: Schema.String,
 	input: Schema.Unknown,
+	...PermissionAskedDetailsSchema.fields,
 });
 
 const PermissionResolvedPayloadSchema = Schema.Struct({
@@ -871,10 +902,17 @@ const PermissionResolvedPayloadSchema = Schema.Struct({
 	resolvedBy: Schema.optionalWith(Schema.Literal("auto"), { exact: true }),
 });
 
+/** The optional card fields of a question.asked payload (ni8.9). */
+export const QuestionAskedDetailsSchema = Schema.Struct({
+	toolUseId: optionalString,
+	providerId: optionalString,
+});
+
 const QuestionAskedPayloadSchema = Schema.Struct({
 	id: Schema.String,
 	sessionId: Schema.String,
 	questions: Schema.Unknown,
+	...QuestionAskedDetailsSchema.fields,
 });
 
 const QuestionResolvedPayloadSchema = Schema.Struct({

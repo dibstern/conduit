@@ -52,6 +52,7 @@
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
+	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
@@ -359,6 +360,7 @@
 			// First page only. The cross-project read is keyset-paged now; the
 			// sidebar's scroll sentinel asks for the rest.
 			attachSessionList(slug);
+			attachApprovals(slug);
 		});
 		const unsubscribeShell = onShellSynchronized((slug) => {
 			if (slug !== previousSlug) return;
@@ -416,6 +418,7 @@
 		return () => {
 			attachGeneration++;
 			detachSessionList();
+			detachApprovals();
 			unsubscribe();
 			unsubscribeShell();
 			clearNavigateToSession();

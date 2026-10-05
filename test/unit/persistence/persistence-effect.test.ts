@@ -280,6 +280,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 30, name: "session_goals" },
 				{ migration_id: 31, name: "startup_restore_indexes" },
 				{ migration_id: 32, name: "tool_call_index" },
+				{ migration_id: 33, name: "pending_approvals_version" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

@@ -127,16 +127,6 @@
 			case "tool_content":
 				return `id=${id(properties["toolId"])}`;
 
-			case "permission_request":
-				return `${properties["toolName"] ?? "?"} sess=${id(properties["sessionId"])} req=${id(properties["requestId"])}`;
-			case "permission_resolved":
-				return `${properties["decision"]} req=${id(properties["requestId"])}`;
-			case "ask_user":
-				return `tool=${id(properties["toolId"])}`;
-			case "ask_user_resolved":
-			case "ask_user_error":
-				return `tool=${id(properties["toolId"])}`;
-
 			case "result":
 				return `sess=${id(properties["sessionId"])} cost=$${typeof properties["cost"] === "number" ? properties["cost"].toFixed(4) : "?"}`;
 			case "done":

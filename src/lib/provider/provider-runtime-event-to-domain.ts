@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Either, Option, Schema } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	type CanonicalEvent,
@@ -9,7 +9,9 @@ import {
 	type EventMetadata,
 	type MessageRole,
 	type MessageSnapshotPayload,
+	PermissionAskedDetailsSchema,
 	type PermissionDecision,
+	QuestionAskedDetailsSchema,
 	SESSION_PERMISSION_MODES,
 	type SessionCreatedPayload,
 	SessionGoalChangedPayloadSchema,
@@ -449,6 +451,7 @@ export function translateProviderRuntimeEventToDomain(
 				sessionId: event.sessionId,
 				toolName: stringField(data["toolName"]) ?? "Unknown",
 				input: data["input"],
+				...cardDetails(PermissionAskedDetailsSchema, data),
 			});
 		}
 
@@ -467,6 +470,7 @@ export function translateProviderRuntimeEventToDomain(
 				id: requestId(event, data),
 				sessionId: event.sessionId,
 				questions: data["questions"],
+				...cardDetails(QuestionAskedDetailsSchema, data),
 			});
 		}
 
@@ -529,6 +533,14 @@ function isSessionPermissionMode(
 	value: string | undefined,
 ): value is SessionPermissionModeValue {
 	return value != null && sessionPermissionModes.has(value);
+}
+
+/** What an approval card shows beyond the ask itself; none of it if malformed. */
+function cardDetails<A, I>(
+	schema: Schema.Schema<A, I>,
+	data: Record<string, unknown>,
+): A | Record<never, never> {
+	return Option.getOrElse(Schema.decodeUnknownOption(schema)(data), () => ({}));
 }
 
 function singleEvent<K extends CanonicalEventType>(

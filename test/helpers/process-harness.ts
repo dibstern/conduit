@@ -1556,6 +1556,7 @@ export class ProcessBrowser {
 	private closed = false;
 	private failure: Error | undefined;
 	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private constructor(
 		private readonly ws: WebSocket,
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
@@ -1595,6 +1596,7 @@ export class ProcessBrowser {
 			`ws://127.0.0.1:${port}/ws?p=${projectSlug}&client=${originId}${sessionId ? `&session=${sessionId}` : ""}`,
 		);
 		const browser = new ProcessBrowser(ws, runtime, rpc, originId, projectSlug);
+		browser.watchApprovals();
 		try {
 			await new Promise<void>((done, fail) => {
 				const timer = setTimeout(
@@ -1646,6 +1648,30 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "pty" && message["_tag"] === "synchronized",
 			cursor,
+		);
+	}
+
+	// The approvals subscription, recorded as frames in the harness's own
+	// vocabulary: `permission_pending` / `question_pending` carry the card, and
+	// `approval_removed` its resolution.
+	private watchApprovals(): void {
+		this.approvals = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeApprovals({ projectSlug: this.projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						const items =
+							envelope._tag === "snapshot"
+								? envelope.rows
+								: envelope._tag === "upsert"
+									? [envelope.item]
+									: [];
+						for (const item of items)
+							this.record({ ...item, type: `${item._tag}_pending` });
+						if (envelope._tag === "remove")
+							this.record({ type: "approval_removed", id: envelope.id });
+					}),
+			).pipe(Effect.ignore),
 		);
 	}
 
@@ -1916,6 +1942,8 @@ export class ProcessBrowser {
 	async close(): Promise<void> {
 		if (!this.closed) this.ws.terminate();
 		if (this.ptys) await Effect.runPromise(Fiber.interrupt(this.ptys));
+		if (this.approvals)
+			await Effect.runPromise(Fiber.interrupt(this.approvals));
 		await this.runtime.dispose();
 		this.closed = true;
 	}

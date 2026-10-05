@@ -148,8 +148,12 @@ export interface PendingInteractionService {
 	recoverPendingPermissions(
 		permissions: readonly PendingPermissionRecoveryInput[],
 	): Effect.Effect<PendingPermission[]>;
+	/**
+	 * Drop permissions pending past the timeout. `awaited` says a provider turn
+	 * was waiting on it: that turn now fails and records the resolution itself.
+	 */
 	takeTimedOutPermissions(): Effect.Effect<
-		Array<{ id: string; sessionId: string }>
+		Array<{ id: string; sessionId: string; awaited: boolean }>
 	>;
 	recordQuestionRequest(
 		input: PendingQuestionInput,
@@ -602,6 +606,7 @@ export const makePendingInteractionServiceLive = (
 						return timedOut.map((entry) => ({
 							id: entry.requestId,
 							sessionId: entry.sessionId,
+							awaited: entry.waiter !== undefined,
 						}));
 					}),
 				recordQuestionRequest,

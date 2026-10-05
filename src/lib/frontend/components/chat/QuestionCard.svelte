@@ -19,14 +19,13 @@
 		formatQuestionHeader,
 		isValidSubmission,
 		removeQuestion,
-		permissionsState,
 	} from "../../stores/permissions.svelte.js";
 
 	let { request, inline = false, synthetic = false }: {
 		request: QuestionRequest;
 		inline?: boolean | undefined;
 		/** True when this question was reconstructed from tool input data
-		 *  rather than received via a live `ask_user` WebSocket event.
+		 *  rather than received from the approvals subscription.
 		 *  This happens when viewing a session started outside this browser
 		 *  (e.g. from the terminal). The answer may not be deliverable. */
 		synthetic?: boolean | undefined;
@@ -51,20 +50,6 @@
 
 	// For single-select: track which option is selected per question
 	let singleSelected = $state(new Map<number, string>());
-
-	$effect(() => {
-		const err = permissionsState.questionErrors.get(request.toolId);
-		if (err) {
-			errorMessage = err;
-			// Revert to allow retry
-			if (resolved === "submitting") {
-				resolved = null;
-			}
-			clearTimeout(submitTimeout);
-			// Clean up — don't keep showing on re-render
-			permissionsState.questionErrors.delete(request.toolId);
-		}
-	});
 
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
 	const canSkip = $derived(request.providerId !== "claude");
@@ -177,10 +162,10 @@
 						: "No response from server. You can try again, or send a follow-up message to continue.";
 				clearTimeout(submitTimeout);
 			});
-		// Show "submitting" state until the server confirms with ask_user_resolved
-		// (which removes this question from pendingQuestions, unmounting us).
-		// If the server fails, an ask_user_error message will revert us immediately.
-		// As a safety net, also revert after 10s if nothing happens.
+		// Show "submitting" state until the server confirms the answer; the
+		// approvals subscription then removes this question. A refusal comes back
+		// as the RPC's error and reverts us immediately. As a safety net, also
+		// revert after 10s if nothing happens.
 		resolved = "submitting";
 		clearTimeout(submitTimeout);
 		submitTimeout = setTimeout(() => {
@@ -195,11 +180,16 @@
 		if (resolved) return;
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
+		errorMessage = null;
 		void rejectQuestionRpc({
 			projectSlug,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
+		}).catch((error) => {
+			if (resolved === "skipped") resolved = null;
+			errorMessage =
+				error instanceof Error ? error.message : "Could not skip this question.";
 		});
 		resolved = "skipped";
 	}

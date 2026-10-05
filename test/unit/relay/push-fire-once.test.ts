@@ -39,6 +39,7 @@ import type {
 } from "../../../src/lib/server/push.js";
 import { PushNotificationManager } from "../../../src/lib/server/push.js";
 import {
+	type Approval,
 	PermissionId,
 	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
@@ -122,14 +123,14 @@ const done: RelayMessage = {
 	code: 0,
 	alertId: "turn-1",
 };
-const askUser = (toolId: string): RelayMessage => ({
-	type: "ask_user",
+const askUser = (toolId: string): Approval => ({
+	_tag: "question",
 	sessionId: "s1",
 	toolId,
 	questions: [],
 });
-const permission = (requestId: string): RelayMessage => ({
-	type: "permission_request",
+const permission = (requestId: string): Approval => ({
+	_tag: "permission",
 	sessionId: "s1",
 	requestId: PermissionId.make(requestId),
 	toolName: "bash",

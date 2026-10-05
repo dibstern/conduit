@@ -358,19 +358,6 @@ test.describe("Scroll Stability — Mobile", () => {
 		const scrollBefore = await getScrollTop(page);
 
 		// Rapid burst of events that change tracked reactive deps
-		wsMock.sendMessage({
-			type: "permission_request",
-			id: "perm-burst-001",
-			sessionId: "sess-scroll-001",
-			toolName: "Read",
-			description: "Read src/index.ts",
-		});
-		wsMock.sendMessage({
-			type: "permission_resolved",
-			id: "perm-burst-001",
-			sessionId: "sess-scroll-001",
-			approved: true,
-		});
 		// user_message changes chatState.messages.length
 		wsMock.sendMessage({
 			type: "user_message",
@@ -703,19 +690,6 @@ test.describe("Scroll Stability — Desktop", () => {
 		const scrollBefore = await getScrollTop(page);
 
 		// Inject events that change the tracked reactive deps
-		wsMock.sendMessage({
-			type: "permission_request",
-			id: "perm-desk-001",
-			sessionId: "sess-scroll-001",
-			toolName: "Write",
-			description: "Write to test.ts",
-		});
-		wsMock.sendMessage({
-			type: "permission_resolved",
-			id: "perm-desk-001",
-			sessionId: "sess-scroll-001",
-			approved: true,
-		});
 		wsMock.sendMessage({
 			type: "user_message",
 			text: "Desktop burst message",

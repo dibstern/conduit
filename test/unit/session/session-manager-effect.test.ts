@@ -538,6 +538,9 @@ describe("SessionManager Effect", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() =>
+					Effect.succeed({ rows: [], version: 0 }),
+				),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptPage: vi.fn(() =>

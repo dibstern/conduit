@@ -1,5 +1,5 @@
 // Tests the full question/answer lifecycle via WS mock:
-//   1. Agent asks a question → QuestionCard appears
+//   1. Agent asks a question (an approvals-subscription upsert) → QuestionCard appears
 //   2. User selects an option and submits
 //   3. Frontend sends AnswerQuestion RPC back to the relay
 //   4. Agent continues processing after the answer → more deltas/done arrive
@@ -54,8 +54,15 @@ const questionResponseMessages: MockMessage[] = [
 			],
 		},
 	},
-	{
-		type: "ask_user",
+];
+
+/** The question as the approvals subscription announces it. */
+const questionAsked = {
+	_tag: "upsert",
+	sequence: 1,
+	item: {
+		_tag: "question",
+		sessionId: "sess-mockup-001",
 		toolId: "que_question_001",
 		toolUseId: "toolu_question_001",
 		questions: [
@@ -74,14 +81,10 @@ const questionResponseMessages: MockMessage[] = [
 			},
 		],
 	},
-];
+};
 
 /** Messages that simulate the agent continuing after the answer */
 const postAnswerMessages: MockMessage[] = [
-	{
-		type: "ask_user_resolved",
-		toolId: "que_question_001",
-	},
 	{
 		type: "tool_result",
 		id: "toolu_question_001",
@@ -106,10 +109,17 @@ test.describe("Question/Answer Flow", () => {
 			handlers: {
 				SendMessage: async () => {
 					await relay?.sendMessages(questionResponseMessages);
+					rpc.sendChunk("SubscribeApprovals", [questionAsked]);
 					return { ok: true };
 				},
 				AnswerQuestion: () => ({ ok: true }),
 				RejectQuestion: () => ({ ok: true }),
+			},
+			streams: {
+				SubscribeApprovals: () => [
+					{ _tag: "snapshot", rows: [], sequence: 0 },
+					{ _tag: "synchronized" },
+				],
 			},
 		});
 		relay = await mockRelayWebSocket(page, {
@@ -224,7 +234,11 @@ test.describe("Question/Answer Flow", () => {
 
 		// NOW simulate the agent continuing after the answer
 		// (in the real system, the relay receives OpenCode SSE events
-		// and forwards them to the browser)
+		// and forwards them to the browser). The resolved question leaves the
+		// approvals subscription first.
+		control.rpc.sendChunk("SubscribeApprovals", [
+			{ _tag: "remove", id: "que_question_001", sequence: 2 },
+		]);
 		await control.sendMessages(postAnswerMessages, 50);
 
 		// The assistant should show the post-answer response text

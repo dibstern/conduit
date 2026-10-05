@@ -15,10 +15,8 @@
 //     → Source: AC13
 // P7: Session status mapping: busy/retry→processing, idle→done
 //     → Source: AC8
-// P8: Permission event translation preserves all field mappings
-//     → Source: AC4
-// P9: Question event translation maps 'multiple'→'multiSelect'
-//     → Source: AC5
+// P8, P9: retired with the permission/question pushes (ni8.9); approvals are
+//     read from pending_approvals.
 // P10: Stateful translator tracks part IDs — no duplicate starts after rebuild
 //      → Source: AC14, AC15
 // P11: message.updated only emits result for assistant messages
@@ -37,8 +35,6 @@ import {
 	translateMessageRemoved,
 	translateMessageUpdated,
 	translatePartDelta,
-	translatePermission,
-	translateQuestion,
 	translateReasoningPartUpdated,
 	translateSessionStatus,
 	translateToolPartUpdated,
@@ -55,8 +51,6 @@ import {
 	knownToolName,
 	messageUpdatedEvent,
 	partDeltaEvent,
-	permissionAskedEvent,
-	questionAskedEvent,
 	sessionStatusEvent,
 	timestamp,
 	unknownEvent,
@@ -455,93 +449,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 							type: "done",
 							code: 0,
 						});
-					}
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	describe("P8: Permission event translation preserves fields (AC4)", () => {
-		it("property: permission_request has requestId, toolName, toolInput, sessionId", () => {
-			fc.assert(
-				fc.property(permissionAskedEvent, idString, (event, sessionId) => {
-					const result = translatePermission(event, sessionId);
-					const props = event.properties as {
-						id?: string;
-						permission?: string;
-					};
-
-					if (props.id && props.permission && sessionId) {
-						expect(result).not.toBeNull();
-						if (result && result.type === "permission_request") {
-							expect(result.requestId).toBe(props.id);
-							expect(result.toolName).toBe(props.permission);
-							expect(result.toolInput).toHaveProperty("patterns");
-							expect(result.toolInput).toHaveProperty("metadata");
-							expect(result.sessionId).toBe(sessionId);
-							expect(result.always).toEqual(
-								(event.properties as Record<string, unknown>)["always"] ?? [],
-							);
-						}
-					}
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: permission.asked without sessionId context returns ok: false", () => {
-			fc.assert(
-				fc.property(permissionAskedEvent, (event) => {
-					const translator = createTranslator();
-					const result = translator.translate(event); // no context
-					expect(result.ok).toBe(false);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: permission.asked with empty sessionId returns null", () => {
-			fc.assert(
-				fc.property(permissionAskedEvent, (event) => {
-					const result = translatePermission(event, "");
-					expect(result).toBeNull();
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	describe("P9: Question event maps 'multiple' → 'multiSelect' (AC5)", () => {
-		it("property: question.asked → ask_user with multiSelect field", () => {
-			fc.assert(
-				fc.property(questionAskedEvent, (event) => {
-					const result = translateQuestion(event);
-					const props = event.properties as {
-						id?: string;
-						questions?: Array<{ multiple?: boolean; custom?: boolean }>;
-					};
-
-					if (props.id && props.questions) {
-						expect(result).not.toBeNull();
-						if (result && result.type === "ask_user") {
-							expect(result.toolId).toBe(props.id);
-							expect(result.questions).toHaveLength(props.questions.length);
-
-							// Verify field mapping: multiple → multiSelect
-							for (const [
-								i,
-								translatedQuestion,
-							] of result.questions.entries()) {
-								const question = props.questions.at(i);
-								assert.exists(question, "expected source question");
-								expect(translatedQuestion.multiSelect).toBe(
-									question.multiple ?? false,
-								);
-								// custom defaults to true when undefined
-								expect(translatedQuestion.custom).toBe(question.custom ?? true);
-							}
-						}
 					}
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },

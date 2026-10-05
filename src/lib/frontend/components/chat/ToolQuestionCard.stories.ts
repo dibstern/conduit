@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { permissionsState } from "../../stores/permissions.svelte.js";
+import { clearAllPermissions } from "../../stores/permissions.svelte.js";
 import {
 	mockQuestionAnswered,
 	mockQuestionPending,
@@ -13,8 +13,7 @@ const meta = {
 	component: ToolQuestionCard,
 	tags: ["autodocs"],
 	beforeEach: () => {
-		permissionsState.pendingQuestions = [];
-		permissionsState.questionErrors.clear();
+		clearAllPermissions();
 	},
 } satisfies Meta<typeof ToolQuestionCard>;
 

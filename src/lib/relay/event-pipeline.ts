@@ -88,10 +88,8 @@ const _assertPersistedTypes: _AssertPersistedSubset = true;
  * When the pipeline drops one of these because no viewers are on the session,
  * the server broadcasts a `notification_event` so clients can still fire
  * sound/browser notifications without updating chat state.
- *
- * NOTE: permission_request and ask_user are already broadcast/session-routed
- * separately in sse-wiring.ts (they bypass the pipeline), so only done and
- * error need the notification_event fallback.
+ * Permissions and questions reach every browser through the approvals
+ * subscription, so only done and error need the notification_event fallback.
  */
 export const NOTIFICATION_EVENT_TYPES: ReadonlySet<RelayMessage["type"]> =
 	new Set(["done", "error"]);
@@ -123,10 +121,6 @@ export function resolveTimeout(
 ): "clear" | "reset" | "none" {
 	if (!sessionId) return "none";
 	if (msgType === "done") return "clear";
-	// When a question is asked, the model is idle waiting for user input —
-	// clear the processing timeout so it doesn't fire while the user types.
-	// The timeout is restarted when the question is answered/rejected.
-	if (msgType === "ask_user") return "clear";
 	return "reset";
 }
 

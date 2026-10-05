@@ -57,6 +57,7 @@ const makeReadQuery = (
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
+	readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),

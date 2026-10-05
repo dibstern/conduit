@@ -4,11 +4,6 @@ import { handleClientConnectedEffect } from "../../../src/lib/bridges/client-ini
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { AgentService } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import type {
-	PendingInteractionService,
-	PendingQuestion,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { OpenCodeModelService } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	OpenCodeModelServiceTag,
@@ -35,7 +30,6 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
-import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -45,10 +39,6 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
-import { partialFake } from "../../helpers/partial-fake.js";
-
-/** Cast a plain string to PermissionId for test data. */
-const pid = (s: string) => s as PermissionId;
 
 // The shared factory provides minimal defaults. These helpers set the richer
 // mock return values that this test file's assertions depend on.
@@ -144,6 +134,7 @@ function makeReadQuery(
 		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 		getSessionFamily: () => Effect.succeed([]),
 		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+		readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 		readSessionTranscriptPage: () =>
@@ -186,27 +177,6 @@ function makeClientInitEffectLayer(
 		getActiveAgent: vi.fn(() => Effect.succeed(undefined)),
 		switchAgent: vi.fn(() => Effect.void),
 	};
-	const pendingQuestions: PendingQuestion[] = [];
-	const pendingInteractions = partialFake<PendingInteractionService>({
-		listPendingPermissions: vi.fn<
-			PendingInteractionService["listPendingPermissions"]
-		>(() => Effect.succeed([])),
-		recoverPendingPermissions: vi.fn<
-			PendingInteractionService["recoverPendingPermissions"]
-		>(() => Effect.succeed([])),
-		listPendingQuestions: vi.fn<
-			PendingInteractionService["listPendingQuestions"]
-		>(() => Effect.succeed(pendingQuestions)),
-		recordQuestionRequest: vi.fn<
-			PendingInteractionService["recordQuestionRequest"]
-		>((input) =>
-			Effect.sync(() => {
-				const question = { ...input, timestamp: Date.now() };
-				pendingQuestions.push(question);
-				return question;
-			}),
-		),
-	});
 	const discoverClaudeCapabilities = vi.fn(
 		(): Effect.Effect<ProviderCapabilities, unknown> =>
 			Effect.succeed(makeClaudeCapabilities()),
@@ -223,7 +193,6 @@ function makeClientInitEffectLayer(
 		statusPoller,
 		modelService,
 		agentService,
-		pendingInteractions,
 		discoverClaudeCapabilities,
 		orchestrationEngine,
 		log,
@@ -243,7 +212,6 @@ function makeClientInitEffectLayer(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(AgentServiceTag, agentService),
-				Layer.succeed(PendingInteractionServiceTag, pendingInteractions),
 				Layer.succeed(StatusPollerTag, statusPoller),
 			),
 		),
@@ -908,307 +876,6 @@ describe("handleClientConnectedEffect — no active session", () => {
 	});
 });
 
-describe("handleClientConnectedEffect — pending permissions", () => {
-	it("sends pending permission requests to reconnecting client", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("perm-1"),
-					sessionId: "ses-1",
-					toolName: "file_write",
-					toolInput: { patterns: ["/tmp/*"], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-				{
-					requestId: pid("perm-2"),
-					sessionId: "ses-1",
-					toolName: "shell_exec",
-					toolInput: { patterns: [], metadata: { command: "rm -rf" } },
-					always: ["shell_exec"],
-					timestamp: 2000,
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("perm-1"),
-			toolName: "file_write",
-			toolInput: { patterns: ["/tmp/*"], metadata: {} },
-			always: [],
-		});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("perm-2"),
-			toolName: "shell_exec",
-			toolInput: { patterns: [], metadata: { command: "rm -rf" } },
-			always: ["shell_exec"],
-		});
-	});
-
-	it("does not send permission_request when no pending permissions", async () => {
-		const deps = makeClientInitEffectLayer();
-		// listPendingPermissions returns [] by default
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const permCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "permission_request",
-		);
-		expect(permCalls).toHaveLength(0);
-	});
-
-	it("replayed permissions include sessionId", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("perm-1"),
-					sessionId: "ses-xyz",
-					toolName: "Bash",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "ses-xyz",
-			requestId: pid("perm-1"),
-			toolName: "Bash",
-			toolInput: { patterns: [], metadata: {} },
-			always: [],
-		});
-	});
-});
-
-describe("handleClientConnectedEffect — pending questions", () => {
-	it("replays grandchild questions after publishing the reconnect family", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.sessionService.getSessionFamily).mockReturnValue(
-			Effect.succeed({
-				type: "session_family",
-				rootId: "session-1",
-				sessions: [
-					{
-						id: "session-1",
-						title: "Root",
-						status: "idle",
-						updatedAt: 0,
-						messageCount: 0,
-					},
-					{
-						id: "child",
-						parentID: "session-1",
-						title: "Child",
-						status: "idle",
-						updatedAt: 0,
-						messageCount: 0,
-					},
-					{
-						id: "grandchild",
-						parentID: "child",
-						title: "Grandchild",
-						status: "idle",
-						updatedAt: 0,
-						messageCount: 0,
-					},
-				],
-			}),
-		);
-		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: "service-question",
-					timestamp: 0,
-					sessionId: "grandchild",
-					questions: [
-						{
-							question: "Continue?",
-							header: "Confirm",
-							options: [],
-							multiSelect: false,
-						},
-					],
-				},
-				{
-					requestId: "unrelated-question",
-					timestamp: 0,
-					sessionId: "unrelated",
-					questions: [{ question: "Proceed?", header: "Confirm", options: [] }],
-				},
-			]),
-		);
-		await runClientInit(deps, "client-1");
-		expect(
-			deps.pendingInteractions.listPendingQuestions,
-		).toHaveBeenCalledWith();
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "ask_user",
-				sessionId: "grandchild",
-				toolId: "service-question",
-			}),
-		);
-		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ toolId: "unrelated-question" }),
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "session_family" }),
-		);
-		const sentTypes = vi
-			.mocked(deps.wsHandler.sendTo)
-			.mock.calls.map(([, message]) => message.type);
-		expect(sentTypes.indexOf("session_family")).toBeLessThan(
-			sentTypes.indexOf("ask_user"),
-		);
-	});
-
-	it("sends pending questions to reconnecting client", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: "que_tool1",
-					timestamp: 0,
-					sessionId: "session-1",
-					questions: [
-						{
-							question: "Which option?",
-							header: "Select",
-							options: [
-								{ label: "A", description: "Option A" },
-								{ label: "B", description: "Option B" },
-							],
-							multiSelect: false,
-						},
-					],
-					toolCallId: "toolu_abc123",
-					providerId: "opencode",
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "ask_user",
-			sessionId: "session-1",
-			toolId: "que_tool1",
-			questions: [
-				{
-					question: "Which option?",
-					header: "Select",
-					options: [
-						{ label: "A", description: "Option A" },
-						{ label: "B", description: "Option B" },
-					],
-					multiSelect: false,
-				},
-			],
-			providerId: "opencode",
-			toolUseId: "toolu_abc123",
-		});
-	});
-
-	it("does not send ask_user when no pending questions", async () => {
-		const deps = makeClientInitEffectLayer();
-		// listPendingQuestions returns [] by default
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const askCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "ask_user",
-		);
-		expect(askCalls).toHaveLength(0);
-	});
-
-	it("sends both pending permissions and questions together", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("perm-1"),
-					sessionId: "ses-1",
-					toolName: "file_write",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
-		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: "que_tool1",
-					timestamp: 0,
-					sessionId: "session-1",
-					questions: [{ question: "Continue?", header: "", options: [] }],
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const permCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "permission_request",
-		);
-		const askCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "ask_user",
-		);
-		expect(permCalls).toHaveLength(1);
-		expect(askCalls).toHaveLength(1);
-	});
-
-	it("filters out questions from other sessions", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: "que_this",
-					timestamp: 0,
-					sessionId: "session-1", // matches default activeId
-					questions: [{ question: "Q1?", header: "H", options: [] }],
-				},
-				{
-					requestId: "que_other",
-					timestamp: 0,
-					sessionId: "session-OTHER",
-					questions: [{ question: "Q2?", header: "H", options: [] }],
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const askCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "ask_user",
-		);
-		// Only the question matching the active session should be sent
-		expect(askCalls).toHaveLength(1);
-		const askCall = askCalls[0];
-		assert.exists(askCall, "expected ask call");
-		expect((askCall[1] as { toolId: string }).toolId).toBe("que_this");
-	});
-});
-
 describe("handleClientConnectedEffect — error resilience", () => {
 	it("continues sending remaining data when OpenCode session reads are unavailable", async () => {
 		const deps = makeClientInitEffectLayer();
@@ -1252,96 +919,6 @@ describe("handleClientConnectedEffect — error resilience", () => {
 				(c[1] as { code: string }).code === "INIT_FAILED",
 		);
 		expect(errorCalls.length).toBeGreaterThanOrEqual(2);
-	});
-});
-
-// Permissions and questions are replayed from the Effect-owned pending
-// interaction port. Attach never asks OpenCode: reconcile on stream connect
-// recovers OpenCode's pending interactions into that port.
-
-describe("handleClientConnectedEffect — pending interaction integration", () => {
-	it("replays permission from the pending interaction port", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("perm-real-1"),
-					sessionId: "",
-					toolName: "file_write",
-					toolInput: { patterns: ["/tmp/test.txt"], metadata: { foo: "bar" } },
-					always: ["shell_exec"],
-					timestamp: 1000,
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		// Verify the exact message shape sent to the client
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "",
-			requestId: pid("perm-real-1"),
-			toolName: "file_write",
-			toolInput: { patterns: ["/tmp/test.txt"], metadata: { foo: "bar" } },
-			always: ["shell_exec"],
-		});
-	});
-
-	it("replays multiple pending permissions and questions simultaneously", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("perm-r1"),
-					sessionId: "",
-					toolName: "shell_exec",
-					toolInput: { patterns: [], metadata: { cmd: "npm install" } },
-					always: [],
-					timestamp: 1000,
-				},
-				{
-					requestId: pid("perm-r2"),
-					sessionId: "",
-					toolName: "file_write",
-					toolInput: { patterns: ["/src/**"], metadata: {} },
-					always: [],
-					timestamp: 1001,
-				},
-			]),
-		);
-
-		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: "q-r1",
-					timestamp: 0,
-					sessionId: "",
-					questions: [{ question: "Continue?", header: "Confirm" }],
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const permCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "permission_request",
-		);
-		const askCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "ask_user",
-		);
-
-		expect(permCalls).toHaveLength(2);
-		expect(askCalls).toHaveLength(1);
-
-		// Verify specific fields from real bridge data shapes
-		const perm1Msg = permCalls.find(
-			(c) => (c[1] as { requestId: string }).requestId === "perm-r1",
-		);
-		expect(perm1Msg).toBeDefined();
-		assert.exists(perm1Msg, "expected permission message");
-		expect((perm1Msg[1] as { toolName: string }).toolName).toBe("shell_exec");
 	});
 });
 

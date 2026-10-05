@@ -6,7 +6,6 @@
 // independently testable and relay-stack stays slim.
 
 import { Effect, Option } from "effect";
-import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import type { OpenCodeProviderList } from "../domain/relay/Services/services.js";
 import {
 	LoggerTag,
@@ -190,13 +189,8 @@ const resolveAndReplaySessionEffect = (
 			);
 		}
 
-		const familyIds = new Set<string>(activeId ? [activeId] : []);
 		if (activeId) {
-			const family = yield* switchClientToSessionForInitEffect(
-				clientId,
-				activeId,
-			);
-			for (const session of family?.sessions ?? []) familyIds.add(session.id);
+			yield* switchClientToSessionForInitEffect(clientId, activeId);
 
 			const sessionModel = yield* getModel(activeId);
 			if (sessionModel) {
@@ -212,7 +206,6 @@ const resolveAndReplaySessionEffect = (
 		return {
 			activeId,
 			validatedRequestedSessionId,
-			familyIds,
 		};
 	});
 
@@ -228,62 +221,6 @@ const pushViewedFamiliesForInitEffect = (clientId: string) =>
 				Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
 			),
 		);
-	});
-
-const replayPendingPermissionsEffect = (clientId: string) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
-
-		const servicePending = yield* pendingInteractions.listPendingPermissions();
-		for (const { timestamp: _, ...perm } of servicePending) {
-			// Spread, not a field list: a reload must rebuild the same card the
-			// live prompt showed (title, description, reason).
-			wsHandler.sendTo(clientId, { type: "permission_request", ...perm });
-		}
-	});
-
-const replayPendingQuestionsEffect = (
-	clientId: string,
-	activeId: string | undefined,
-	familyIds: ReadonlySet<string>,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const log = yield* LoggerTag;
-
-		const questionReplayResult = yield* Effect.either(
-			Effect.gen(function* () {
-				const servicePendingQuestions =
-					yield* pendingInteractions.listPendingQuestions();
-				for (const pq of servicePendingQuestions) {
-					if (pq.sessionId && activeId && !familyIds.has(pq.sessionId))
-						continue;
-					wsHandler.sendTo(clientId, {
-						type: "ask_user",
-						sessionId: pq.sessionId || activeId || "",
-						toolId: pq.requestId,
-						questions: pq.questions.map((q) => ({
-							question: q.question,
-							header: q.header ?? "",
-							options: (q.options ?? []) as Array<{
-								label: string;
-								description?: string;
-							}>,
-							multiSelect: q.multiSelect ?? false,
-						})),
-						...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
-						...(pq.providerId ? { providerId: pq.providerId } : {}),
-					});
-				}
-			}),
-		);
-		if (questionReplayResult._tag === "Left") {
-			log.warn(
-				`Failed to replay pending questions: ${formatErrorDetail(questionReplayResult.left)}`,
-			);
-		}
 	});
 
 const sendProvidersAndSettingsEffect = (
@@ -458,14 +395,12 @@ export const handleClientConnectedEffect = (
 	options: ClientInitEffectOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const { activeId, familyIds } = yield* resolveAndReplaySessionEffect(
+		const { activeId } = yield* resolveAndReplaySessionEffect(
 			clientId,
 			requestedSessionId,
 			options,
 		);
 		yield* pushViewedFamiliesForInitEffect(clientId);
-		yield* replayPendingPermissionsEffect(clientId);
-		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
 		yield* replayInstancesEffect(clientId, options);
 	});

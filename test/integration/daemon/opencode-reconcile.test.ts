@@ -39,14 +39,11 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		return result.savedSlug;
 	}
 
-	function requests(browser: ProcessBrowser, id: string, cursor = 0) {
-		return browser.frames
-			.slice(cursor)
-			.filter(
-				({ message }) =>
-					message["type"] === "permission_request" &&
-					message["requestId"] === id,
-			).length;
+	function requests(browser: ProcessBrowser, id: string) {
+		return browser.frames.filter(
+			({ message }) =>
+				message["type"] === "permission_pending" && message["requestId"] === id,
+		).length;
 	}
 
 	function persistedStatus(
@@ -98,7 +95,9 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		}
 	});
 
-	it("re-delivers each project's pending prompt once after a reconnect, never across projects", async () => {
+	// The card is a pending_approvals row, so the reconnect's re-emitted ask is
+	// idempotent: each browser holds its own prompt exactly once (ni8.9).
+	it("keeps each project's pending prompt once across a reconnect, never across projects", async () => {
 		const fixture = await start("reconnect");
 		const a = await fixture.connect();
 		const sessionA = await a.createSession("Project A", "opencode", "opencode");
@@ -132,8 +131,6 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			},
 			{ timeout: 15_000 },
 		);
-		await a.waitFor((message) => message["requestId"] === "pa4-a", cursorA);
-		await b.waitFor((message) => message["requestId"] === "pa4-b", cursorB);
 		// Live events after recovery are the barrier for the exactly-once counts.
 		await fixture.emitOpenCodeEvent({
 			directory: realpathSync(fixture.projectDir),
@@ -161,11 +158,11 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		);
 		const counts = {
 			a: {
-				own: requests(a, "pa4-a", cursorA),
+				own: requests(a, "pa4-a"),
 				other: requests(a, "pa4-b"),
 			},
 			b: {
-				own: requests(b, "pa4-b", cursorB),
+				own: requests(b, "pa4-b"),
 				other: requests(b, "pa4-a"),
 			},
 		};

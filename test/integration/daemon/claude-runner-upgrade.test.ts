@@ -631,7 +631,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const prompt = "approval-upgrade-mismatch";
 		const pending = initial.send(sessionId, prompt).catch(() => undefined);
 		const request = await initial.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		const old = runnerFor(harness, sessionId);
 		await harness.kill();

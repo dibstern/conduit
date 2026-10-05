@@ -1,3 +1,4 @@
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -898,6 +899,7 @@ describe("switchModelForSession", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1404,6 +1406,7 @@ describe("handleGetToolContent", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1819,13 +1822,6 @@ describe("handlePermissionResponse", () => {
 						"perm-1",
 						"once",
 					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "permission_resolved",
-							requestId: "perm-1",
-							decision: "once",
-						}),
-					);
 				}),
 			);
 		},
@@ -1874,14 +1870,6 @@ describe("handlePermissionResponse", () => {
 						"permission-session",
 						"perm-cross-session",
 						"once",
-					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "permission_resolved",
-							sessionId: "permission-session",
-							requestId: "perm-cross-session",
-							decision: "once",
-						}),
 					);
 				}),
 			);
@@ -2046,7 +2034,7 @@ describe("handlePermissionResponse", () => {
 			}),
 	);
 
-	it.effect("processes permission response and broadcasts resolution", () => {
+	it.effect("processes permission response", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2082,12 +2070,6 @@ describe("handlePermissionResponse", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "permission_resolved",
-						requestId: "perm-1",
-					}),
-				);
 			}),
 		);
 	});
@@ -2146,7 +2128,7 @@ describe("handleQuestionReject", () => {
 		);
 	});
 
-	it.effect("rejects question via REST API and broadcasts resolution", () => {
+	it.effect("rejects question via REST API", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2168,12 +2150,6 @@ describe("handleQuestionReject", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.question.reject).toHaveBeenCalledWith("que-1");
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "ask_user_resolved",
-						toolId: "que-1",
-					}),
-				);
 			}),
 		);
 	});
@@ -2218,29 +2194,22 @@ describe("handleQuestionReject", () => {
 					sessionId: "question-session",
 					questions: [{ question: "Continue?" }],
 				});
-				yield* handleQuestionReject("client-1", { toolId: "que-claude" });
+				const refusal = yield* Effect.flip(
+					handleQuestionReject("client-1", { toolId: "que-claude" }),
+				);
 				const pending = yield* pendingInteractions.listPendingQuestions();
-				return pending;
+				return { refusal, pending };
 			}).pipe(
 				Effect.provide(layer),
-				Effect.tap((pending) => {
+				Effect.tap(({ refusal, pending }) => {
 					expect(client.question.reject).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
-					expect(ws.sendTo).toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({
-							type: "ask_user_error",
-							toolId: "que-claude",
-							sessionId: "question-session",
-						}),
-					);
-					expect(ws.broadcast).not.toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "ask_user_resolved",
-							toolId: "que-claude",
-						}),
+					// The refusal travels the RejectQuestion RPC's error channel.
+					expect(refusal).toBeInstanceOf(WsRpcError);
+					expect(refusal.message).toContain(
+						"Claude questions require an answer",
 					);
 					expect(pending).toHaveLength(1);
 					expect(pending[0]?.requestId).toBe("que-claude");
@@ -2307,17 +2276,11 @@ describe("handleAskUserResponse", () => {
 						text: 'Answer to your question "Which colour?": red',
 					}),
 				);
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "ask_user_resolved",
-						toolId: "toolu-1",
-					}),
-				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
 			}).pipe(Effect.provide(layer));
 		},
 	);
-	it.effect("answers question via REST API and broadcasts resolution", () => {
+	it.effect("answers question via REST API", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2351,12 +2314,6 @@ describe("handleAskUserResponse", () => {
 					["Yes"],
 					["Approve"],
 				]);
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "ask_user_resolved",
-						toolId: "que-1",
-					}),
-				);
 			}),
 		);
 	});
@@ -2415,13 +2372,6 @@ describe("handleAskUserResponse", () => {
 					expect(client.question.reply).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
-					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "ask_user_resolved",
-							toolId: "que-claude",
-							sessionId: "question-session",
-						}),
 					);
 				}),
 			);
@@ -2636,6 +2586,7 @@ describe("handleNewSession", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2736,6 +2687,7 @@ describe("handleNewSession", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -3169,6 +3121,7 @@ describe("loadMoreHistoryForSession", () => {
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+			readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -4087,6 +4040,7 @@ describe("handleMessage", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -4397,6 +4351,7 @@ describe("handleMessage", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;

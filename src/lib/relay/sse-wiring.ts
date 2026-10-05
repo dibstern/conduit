@@ -25,7 +25,11 @@ import type {
 	PushNotificationSender,
 } from "../server/push.js";
 import { describeDelivery } from "../server/push.js";
-import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
+import type {
+	Approval,
+	PermissionId,
+	SessionPermissionMode,
+} from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
 import type { PendingPermission, RelayMessage } from "../types.js";
 import { applyPipelineResultEffect, processEvent } from "./event-pipeline.js";
@@ -162,15 +166,16 @@ function buildPushContext(slug?: string, sessionId?: string): PushEventContext {
  */
 export function sendPushForEvent(
 	pushManager: PushSender,
-	msg: RelayMessage,
+	msg: RelayMessage | Approval,
 	log: Logger,
 	context?: PushEventContext,
 ): void {
 	const content = notificationContent(msg);
 	if (!content) return;
+	const kind = pushKind(msg);
 	pushManager
 		.sendToAll({
-			type: msg.type,
+			type: kind,
 			...content,
 			...(context?.slug != null && { slug: context.slug }),
 			...(context?.sessionId != null && { sessionId: context.sessionId }),
@@ -178,13 +183,23 @@ export function sendPushForEvent(
 		.then((report) => {
 			if (report.delivered.length === 0)
 				log.warn(
-					`Push (${msg.type}) reached no device: ${describeDelivery(report)}`,
+					`Push (${kind}) reached no device: ${describeDelivery(report)}`,
 				);
 		})
-		.catch((err: unknown) =>
-			log.warn(`Push send failed (${msg.type}): ${err}`),
-		);
+		.catch((err: unknown) => log.warn(`Push send failed (${kind}): ${err}`));
 }
+
+/**
+ * The push payload's `type`. Approvals keep the names the old relay messages
+ * had, because the service worker (sw.ts) and the alert ledger's persisted
+ * kinds still key on them.
+ */
+const pushKind = (msg: RelayMessage | Approval): string =>
+	"_tag" in msg
+		? msg._tag === "permission"
+			? "permission_request"
+			: "ask_user"
+		: msg.type;
 
 /** A push that did not reach the push layer. Tagged so the ledger's own failures are distinguishable. */
 class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
@@ -201,10 +216,24 @@ class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
  * Anonymous idle hints cannot identify a completed turn and do not claim one.
  */
 const pushAlert = (
-	msg: RelayMessage,
+	msg: RelayMessage | Approval,
 	sessionId: string | undefined,
 ): SessionAlert | undefined => {
 	if (sessionId == null) return undefined;
+	if ("_tag" in msg)
+		return msg._tag === "permission"
+			? {
+					sessionId,
+					kind: "permission_request",
+					originId: `${sessionId}:permission:${msg.requestId}`,
+					detail: msg.requestId,
+				}
+			: {
+					sessionId,
+					kind: "ask_user",
+					originId: `${sessionId}:question:${msg.toolId}`,
+					detail: msg.toolId,
+				};
 	switch (msg.type) {
 		case "done":
 			return msg.alertId
@@ -219,20 +248,6 @@ const pushAlert = (
 						detail: msg.message ?? "",
 					}
 				: undefined;
-		case "ask_user":
-			return {
-				sessionId,
-				kind: "ask_user",
-				originId: `${sessionId}:question:${msg.toolId}`,
-				detail: msg.toolId,
-			};
-		case "permission_request":
-			return {
-				sessionId,
-				kind: "permission_request",
-				originId: `${sessionId}:permission:${msg.requestId}`,
-				detail: msg.requestId,
-			};
 		default:
 			return undefined;
 	}
@@ -254,13 +269,14 @@ const pushAlert = (
  */
 export const sendPushForEventEffect = (
 	pushManager: PushSender,
-	msg: RelayMessage,
+	msg: RelayMessage | Approval,
 	log: Logger,
 	context?: PushEventContext,
 ): Effect.Effect<void> =>
 	Effect.gen(function* () {
 		const content = notificationContent(msg);
 		if (!content) return;
+		const kind = pushKind(msg);
 
 		// Persist one claim per recipient so a retry reaches only devices whose
 		// previous delivery failed. The real adapter always exposes this seam.
@@ -283,7 +299,7 @@ export const sendPushForEventEffect = (
 
 		const baseAlert = pushAlert(msg, context?.sessionId);
 		const payload = {
-			type: msg.type,
+			type: kind,
 			alertId: baseAlert?.originId,
 			...content,
 			...(context?.slug != null && { slug: context.slug }),
@@ -321,7 +337,7 @@ export const sendPushForEventEffect = (
 		if (alert === undefined || Option.isNone(ledger)) {
 			yield* Effect.sync(() =>
 				log.warn(
-					`Push (${msg.type}) deferred without a durable delivery claim (` +
+					`Push (${kind}) deferred without a durable delivery claim (` +
 						`${alert === undefined ? "no immutable alert identity" : "alert ledger unwired"}` +
 						`) — delivery requires the alert ledger`,
 				),
@@ -335,14 +351,14 @@ export const sendPushForEventEffect = (
 					? Effect.void
 					: Effect.sync(() =>
 							log.verbose(
-								`Push (${msg.type}) already delivered or in flight for this origin`,
+								`Push (${kind}) already delivered or in flight for this origin`,
 							),
 						),
 			),
 			Effect.catchTag("PushSendFailure", (failure) =>
 				Effect.sync(() =>
 					log.warn(
-						`Push send failed (${msg.type}): ${failure.cause} — ` +
+						`Push send failed (${kind}): ${failure.cause} — ` +
 							`the claim was released, the next path to notice will retry`,
 					),
 				),
@@ -351,7 +367,7 @@ export const sendPushForEventEffect = (
 			Effect.catchAll((sqlError) =>
 				Effect.sync(() =>
 					log.error(
-						`Alert ledger unavailable (${msg.type}); delivery deferred: ${sqlError}`,
+						`Alert ledger unavailable (${kind}); delivery deferred: ${sqlError}`,
 					),
 				),
 			),
@@ -417,32 +433,26 @@ function opencodeModeCoversAsk(
 }
 
 /**
- * Broadcast a permission request and hand back the ding it deserves.
+ * The ding a permission request deserves. Browsers see the card itself through
+ * the approvals subscription (ni8.9); this is only what the push says.
  *
- * Returning the message instead of pushing it is what lets the caller choose
+ * Returning the approval instead of pushing it is what lets the caller choose
  * the sender: the live relay is the Effect wiring, and only the Effect sender
- * takes a durable delivery claim. While this function pushed on its own it always used
- * the unguarded twin, so every approval and question re-dinged on reconnect —
- * the exact thing the ledger exists to stop (ni8.23 delta 1, P2-8).
+ * takes a durable delivery claim (ni8.23 delta 1, P2-8).
  */
-function broadcastPermissionAsked(
-	deps: SSEWiringDeps,
+function permissionAskedPush(
 	event: SSEEvent,
 	eventSessionId: string | undefined,
 	pending: PendingPermission | null,
-): Extract<RelayMessage, { type: "permission_request" }> {
-	const { wsHandler } = deps;
+): Approval {
 	if (pending) {
-		const permMsg: Extract<RelayMessage, { type: "permission_request" }> = {
-			type: "permission_request",
+		return {
+			_tag: "permission",
 			sessionId: pending.sessionId,
 			requestId: pending.requestId,
 			toolName: pending.toolName,
 			toolInput: pending.toolInput,
-			always: pending.always ?? [],
 		};
-		wsHandler.broadcast(permMsg);
-		return permMsg;
 	}
 	// Bridge rejected (missing id/permission) — still worth a ding. The id on
 	// the raw event is the alert identity even when the bridge would not take
@@ -453,7 +463,7 @@ function broadcastPermissionAsked(
 	const tool =
 		typeof props["permission"] === "string" ? props["permission"] : "A tool";
 	return {
-		type: "permission_request",
+		_tag: "permission",
 		sessionId: eventSessionId ?? "",
 		requestId: id as PermissionId,
 		toolName: tool,
@@ -473,7 +483,7 @@ function questionAskedPush(
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
-): Extract<RelayMessage, { type: "ask_user" }> {
+): Approval {
 	deps.log.debug(`question.asked: event received`);
 	if (!isQuestionAskedEvent(event)) {
 		const id = "id" in event.properties ? event.properties.id : undefined;
@@ -481,19 +491,17 @@ function questionAskedPush(
 			`question.asked without an id or questions — sending available request details`,
 		);
 		return {
-			type: "ask_user",
+			_tag: "question",
 			sessionId: eventSessionId ?? "",
 			toolId: typeof id === "string" ? id : "",
 			questions: [],
 		};
 	}
-	const toolCallId = event.properties.tool?.callID;
 	return {
-		type: "ask_user",
+		_tag: "question",
 		sessionId: eventSessionId ?? "",
 		toolId: event.properties.id,
 		questions: mapQuestionFields(event.properties.questions),
-		...(toolCallId ? { toolUseId: toolCallId } : {}),
 	};
 }
 
@@ -579,47 +587,6 @@ const handleSSEEventAfterPendingEffect = (
 				: (m as RelayMessage),
 		);
 		for (let msg of toSend) {
-			if (
-				msg.type === "permission_request" ||
-				msg.type === "permission_resolved"
-			) {
-				yield* Effect.sync(() => wsHandler.broadcast(msg));
-				continue;
-			}
-
-			if (msg.type === "ask_user" || msg.type === "ask_user_resolved") {
-				if (msg.type === "ask_user") {
-					const askMsg = msg as Extract<RelayMessage, { type: "ask_user" }>;
-					yield* Effect.sync(() =>
-						log.debug(
-							`Routing ask_user to session=${targetSessionId ?? "?"}: toolId=${askMsg.toolId} questionCount=${askMsg.questions?.length ?? 0}`,
-						),
-					);
-				}
-				if (targetSessionId) {
-					yield* Effect.sync(() => {
-						// Resolutions go to everyone: family viewers hold replayed copies.
-						if (msg.type === "ask_user_resolved") wsHandler.broadcast(msg);
-						else wsHandler.sendToSession(targetSessionId, msg);
-						wsHandler.broadcast({
-							type: "notification_event",
-							eventType: msg.type,
-							...(msg.type === "ask_user"
-								? {
-										alertId: `${targetSessionId}:question:${msg.toolId}`,
-									}
-								: {}),
-							...(targetSessionId != null
-								? { sessionId: targetSessionId }
-								: {}),
-						});
-					});
-				} else {
-					yield* Effect.sync(() => wsHandler.broadcast(msg));
-				}
-				continue;
-			}
-
 			const viewers = targetSessionId
 				? wsHandler.getClientsForSession(targetSessionId)
 				: [];
@@ -711,14 +678,11 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 				const pending = input
 					? yield* pendingInteractions.recordPermissionRequest(input)
 					: null;
-				const permMsg = yield* Effect.sync(() =>
-					broadcastPermissionAsked(deps, event, eventSessionId, pending),
-				);
 				const pushManager = deps.pushManager;
 				if (pushManager)
 					yield* sendPushForEventEffect(
 						pushManager,
-						permMsg,
+						permissionAskedPush(event, eventSessionId, pending),
 						deps.log,
 						buildPushContext(deps.slug, pending?.sessionId ?? eventSessionId),
 					);

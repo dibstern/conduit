@@ -14,6 +14,7 @@ import {
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	PENDING_APPROVALS_VERSION_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -1002,6 +1003,11 @@ export const effectMigrationEntries = {
 	),
 	"0032_tool_call_index": executeSqlStatements(
 		readMigrationSql(TOOL_CALL_INDEX_MIGRATION),
+	),
+	"0033_pending_approvals_version": runAddColumnMigrationIfMissing(
+		"pending_approvals",
+		"version",
+		readMigrationSql(PENDING_APPROVALS_VERSION_MIGRATION),
 	),
 } satisfies Record<
 	string,

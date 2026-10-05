@@ -167,6 +167,11 @@ vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 	refreshSessionList: vi.fn(async () => {}),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/approvals.js", () => ({
+	attachApprovals: vi.fn(),
+	detachApprovals: vi.fn(),
+}));
+
 vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 	clearAllPermissions: vi.fn(),
 }));

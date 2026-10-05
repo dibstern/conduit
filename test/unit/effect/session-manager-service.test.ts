@@ -205,6 +205,7 @@ function makeReadQueryEffect(
 		countPendingApprovalsBySession: vi.fn(() =>
 			Effect.succeed(pendingApprovalCounts),
 		),
+		readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 		readSessionTranscriptPage: vi.fn(() =>

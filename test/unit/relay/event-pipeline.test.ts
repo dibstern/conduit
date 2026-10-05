@@ -100,8 +100,6 @@ describe("shouldCache", () => {
 
 	it("returns false for non-chat event types", () => {
 		const nonCacheable = [
-			"permission_request",
-			"permission_resolved",
 			"session_list",
 			// status events are sent directly via wsHandler, never through the
 			// pipeline — so they should NOT be cacheable.
@@ -116,10 +114,6 @@ describe("shouldCache", () => {
 describe("resolveTimeout", () => {
 	it("returns clear for done events with sessionId", () => {
 		expect(resolveTimeout("done", "ses_abc")).toBe("clear");
-	});
-
-	it("returns clear for ask_user events with sessionId", () => {
-		expect(resolveTimeout("ask_user", "ses_abc")).toBe("clear");
 	});
 
 	it("returns reset for non-done events with sessionId", () => {

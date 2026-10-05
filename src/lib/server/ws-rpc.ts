@@ -1,6 +1,7 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
 import { type Context, Effect, type Layer, Stream } from "effect";
 import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
@@ -165,6 +166,21 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					(error) =>
 						new WsRpcError({
 							message: `SubscribeShell failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribeApprovals: (request) =>
+		Rpc.fork(
+			subscribeApprovals(
+				request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence },
+			).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeApprovals failed: ${String(error)}`,
 						}),
 				),
 			),
@@ -352,6 +368,14 @@ export const makeRoutedWsRpcServerLayer = (
 		SubscribeShell: (request) =>
 			routeStream(request.projectSlug, () =>
 				subscribeShell(
+					request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence },
+				),
+			),
+		SubscribeApprovals: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeApprovals(
 					request.resumeFromSequence === undefined
 						? {}
 						: { resumeFromSequence: request.resumeFromSequence },

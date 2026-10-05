@@ -17,6 +17,7 @@ import type {
 	MessageRow,
 	MessageWithParts,
 	PendingApprovalCountRow,
+	PendingApprovalRow,
 	PendingClaudeQuestionToolRow,
 	SessionRow,
 	TurnModelExecutionRow,
@@ -301,6 +302,19 @@ export interface ReadQueryEffect {
 
 	readonly countPendingApprovalsBySession: () => Effect.Effect<
 		readonly PendingApprovalCountRow[],
+		ReadQueryEffectError | SqlError
+	>;
+	/**
+	 * The approvals subscription's read (ni8.9), in the shape of
+	 * {@link readSessionList}. A base read (no `range`) is every pending
+	 * approval; a windowed read is every approval that moved inside it,
+	 * resolved ones included, because a resolution is a removal to announce.
+	 */
+	readonly readPendingApprovals: (range?: {
+		readonly after?: number;
+		readonly through?: number;
+	}) => Effect.Effect<
+		{ readonly rows: readonly PendingApprovalRow[]; readonly version: number },
 		ReadQueryEffectError | SqlError
 	>;
 	readonly listPendingClaudeQuestionTools?: () => Effect.Effect<
@@ -1180,6 +1194,40 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const readPendingApprovals: ReadQueryEffect["readPendingApprovals"] = (
+		range,
+	) =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const floor = range?.after ?? BEFORE_FIRST_VERSION;
+					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const rows =
+						range === undefined
+							? yield* sql<PendingApprovalRow>`
+								SELECT id, session_id, type, status, tool_name, input, details, version
+								FROM pending_approvals
+								WHERE status = 'pending'
+								ORDER BY created_at, id`
+							: yield* sql<PendingApprovalRow>`
+								SELECT id, session_id, type, status, tool_name, input, details, version
+								FROM pending_approvals
+								WHERE version > ${floor} AND version <= ${ceiling}
+								ORDER BY version, created_at, id`;
+					return { rows, version };
+				}),
+			)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({
+							operation: "readPendingApprovals",
+							cause,
+						}),
+				),
+			);
+
 	const readSessionTranscript = (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
@@ -1369,6 +1417,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSessionFamily,
 		getSessionsForReconciliation,
 		countPendingApprovalsBySession,
+		readPendingApprovals,
 		listPendingClaudeQuestionTools,
 		getPendingClaudeQuestionTool,
 		getSessionMessagesWithParts,

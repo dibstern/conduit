@@ -14,7 +14,10 @@ import {
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
-import { RelayMessageSchema } from "../../../src/lib/shared-types.js";
+import {
+	PermissionId,
+	RelayMessageSchema,
+} from "../../../src/lib/shared-types.js";
 import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";
 
 const session = {
@@ -307,8 +310,63 @@ const ptyEnvelopes = [
 	{ _tag: "remove", id: "pty-1" },
 ] as const;
 
+// Every optional field set, so a field the schema forgot is stripped and fails
+// the equality below rather than vanishing silently.
+const approvalEnvelopes = [
+	{
+		_tag: "snapshot",
+		sequence: 40,
+		rows: [
+			{
+				_tag: "question",
+				sessionId: "session-1",
+				toolId: "que-1",
+				toolUseId: "call-1",
+				providerId: "opencode",
+				questions: [
+					{
+						question: 'Pick "one"\n雪',
+						header: "Choice",
+						options: [{ label: "A", description: "first" }, { label: "B" }],
+						multiSelect: true,
+						custom: false,
+					},
+				],
+			},
+		],
+	},
+	{ _tag: "synchronized" },
+	{
+		_tag: "upsert",
+		sequence: 41,
+		item: {
+			_tag: "permission",
+			sessionId: "child-1",
+			requestId: PermissionId.make("perm-1"),
+			toolName: "Bash",
+			toolInput: { command: "rm -rf build", nested: { flag: true } },
+			toolUseId: "toolu-1",
+			always: ["rm *"],
+			permissionSuggestions: [
+				{
+					type: "addRules",
+					rules: [{ toolName: "Bash", ruleContent: "rm:*" }],
+					behavior: "allow",
+					destination: "localSettings",
+				},
+			],
+			permissionTitle: "Claude wants to run rm",
+			permissionDisplayName: "Run rm",
+			permissionDescription: "Deletes the build directory",
+			permissionReason: "Cleanup",
+		},
+	},
+	{ _tag: "remove", sequence: 42, id: "perm-1" },
+] as const;
+
 const group = RpcGroup.make(
 	Contracts.SubscribeShell,
+	Contracts.SubscribeApprovals,
 	Contracts.SubscribeSessionDetail,
 	Contracts.SubscribeSessionTodos,
 	Contracts.SubscribePtys,
@@ -321,6 +379,12 @@ const group = RpcGroup.make(
 	SessionListProbe,
 );
 const handlers = group.toLayer({
+	SubscribeApprovals: (payload) => {
+		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
+		return Rpc.fork(
+			Stream.fromIterable(approvalEnvelopes).pipe(Stream.rechunk(1)),
+		);
+	},
 	SessionListProbe: () => Effect.succeed(sessionList),
 	RewindSession: (payload) => {
 		expect(payload).toEqual({
@@ -499,6 +563,28 @@ it("SubscribeSessionDetail preserves transcript, model identity and stored tool 
 				expect(serverFrames.map((frame) => JSON.parse(frame))).toContainEqual(
 					expect.objectContaining({ _tag: "Chunk", values: detailEnvelopes }),
 				);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribeApprovals preserves both approval kinds and every envelope variant through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, serverFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribeApprovals({
+						projectSlug: "project",
+						resumeFromSequence: 39,
+					}),
+				);
+				expect(Array.from(result)).toEqual(approvalEnvelopes);
+				for (const envelope of approvalEnvelopes) {
+					expect(serverFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+						expect.objectContaining({ _tag: "Chunk", values: [envelope] }),
+					);
+				}
 			}),
 		).pipe(Effect.timeout("3 seconds")),
 	);

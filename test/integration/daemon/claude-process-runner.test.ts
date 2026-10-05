@@ -139,7 +139,7 @@ describe("Claude session process runner", () => {
 		const cursor = browser.frames.length;
 		const pending = browser.send(sessionId, "approval-parity");
 		const request = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
 		expect(request["toolInput"]).toEqual({
@@ -152,13 +152,12 @@ describe("Claude session process runner", () => {
 		).toBe(false);
 		await browser.answerApproval(request, decision);
 		expect((await pending).chunks).toEqual(responseChunks("approval-parity"));
-		const resolved = await browser.waitFor(
+		await browser.waitFor(
 			(message) =>
-				message["type"] === "permission_resolved" &&
-				message["requestId"] === request["requestId"],
+				message["type"] === "approval_removed" &&
+				message["id"] === request["requestId"],
 			cursor,
 		);
-		expect(resolved["decision"]).toBe(decision === "allow" ? "once" : "reject");
 		const result = await browser.waitFor(
 			(message) => message["type"] === "tool_result",
 			cursor,
@@ -572,7 +571,7 @@ describe("Claude session process runner", () => {
 			.send(sessionId, "approval-shutdown")
 			.catch(() => undefined);
 		await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")

@@ -631,8 +631,10 @@ const ToolContentSchema = Schema.Struct({
 	content: Schema.String,
 });
 
-const PermissionRequestSchema = Schema.Struct({
-	type: Schema.Literal("permission_request"),
+// What the approvals subscription serves (ni8.9): the pending permission
+// requests and questions of every session in the project, each keyed by the id
+// its answer is sent back with.
+export const PermissionApprovalSchema = Schema.TaggedStruct("permission", {
 	sessionId: Schema.String,
 	requestId: PermissionId,
 	toolName: Schema.String,
@@ -648,15 +650,7 @@ const PermissionRequestSchema = Schema.Struct({
 	permissionReason: Schema.optional(Schema.String),
 });
 
-const PermissionResolvedSchema = Schema.Struct({
-	type: Schema.Literal("permission_resolved"),
-	sessionId: Schema.String,
-	requestId: PermissionId,
-	decision: Schema.String,
-});
-
-const AskUserSchema = Schema.Struct({
-	type: Schema.Literal("ask_user"),
+export const QuestionApprovalSchema = Schema.TaggedStruct("question", {
 	sessionId: Schema.String,
 	toolId: Schema.String,
 	questions: Schema.Array(AskUserQuestionSchema),
@@ -664,18 +658,11 @@ const AskUserSchema = Schema.Struct({
 	providerId: Schema.optional(Schema.String),
 });
 
-const AskUserResolvedSchema = Schema.Struct({
-	type: Schema.Literal("ask_user_resolved"),
-	toolId: Schema.String,
-	sessionId: Schema.String,
-});
-
-const AskUserErrorSchema = Schema.Struct({
-	type: Schema.Literal("ask_user_error"),
-	sessionId: Schema.String,
-	toolId: Schema.String,
-	message: Schema.String,
-});
+export const ApprovalSchema = Schema.Union(
+	PermissionApprovalSchema,
+	QuestionApprovalSchema,
+);
+export type Approval = typeof ApprovalSchema.Type;
 
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
@@ -921,11 +908,6 @@ export const RelayMessageSchema = Schema.Union(
 	ToolResultSchema,
 	ToolContentSchema,
 	// Permissions / Questions
-	PermissionRequestSchema,
-	PermissionResolvedSchema,
-	AskUserSchema,
-	AskUserResolvedSchema,
-	AskUserErrorSchema,
 	// Session lifecycle
 	ResultSchema,
 	StatusSchema,
@@ -1004,11 +986,6 @@ export type PerSessionEventType =
 	| "user_message"
 	| "part_removed"
 	| "message_removed"
-	| "ask_user"
-	| "ask_user_resolved"
-	| "ask_user_error"
-	| "permission_request"
-	| "permission_resolved"
 	| "session_forked"
 	| "provider_session_reloaded"
 	| "session_deleted";

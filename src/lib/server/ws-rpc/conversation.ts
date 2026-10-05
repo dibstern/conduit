@@ -96,13 +96,7 @@ export const conversationHandlers = {
 			answers: request.answers,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `AnswerQuestion failed: ${String(error)}`,
-					}),
-				),
-			),
+			Effect.catchAll(mapRpcFailure("AnswerQuestion")),
 		),
 	RejectQuestion: (request) =>
 		handleQuestionReject(request.originId, {
@@ -110,13 +104,7 @@ export const conversationHandlers = {
 			commandId: request.commandId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `RejectQuestion failed: ${String(error)}`,
-					}),
-				),
-			),
+			Effect.catchAll(mapRpcFailure("RejectQuestion")),
 		),
 	SendMessage: (request) =>
 		Effect.gen(function* () {

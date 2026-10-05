@@ -96,11 +96,7 @@ describe("shouldCache", () => {
 	});
 
 	it("returns false for non-chat types", async () => {
-		const nonCacheable = [
-			"permission_request",
-			"permission_resolved",
-			"status",
-		] as const;
+		const nonCacheable = ["status"] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}
@@ -320,80 +316,6 @@ describe("handleSSEEventEffect", () => {
 		});
 	});
 
-	it("broadcast permission_request includes sessionId from the event", async () => {
-		const deps = createMockSSEWiringDeps();
-
-		const event: OpenCodeEvent = {
-			type: "permission.asked",
-			properties: {
-				id: "perm-1",
-				permission: "Bash",
-				sessionID: "ses-abc",
-			},
-		};
-		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				sessionId: "ses-abc",
-			}),
-		);
-	});
-
-	it("translates and routes question.asked events to the question's session", async () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "que_q1",
-			questions: [],
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "question.asked",
-			properties: { id: "q-1", questions: [], sessionID: "active-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		// ask_user messages are routed to the question's session, not broadcast
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(translated);
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: "active-session",
-			alertId: "active-session:question:que_q1",
-		});
-	});
-
-	it("broadcasts question resolutions so family viewers drop replayed questions", async () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "ask_user_resolved",
-			sessionId: "child-session",
-			toolId: "que_q1",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		await runSSEEvent(deps, {
-			type: "question.replied",
-			properties: { sessionID: "child-session", requestID: "que_q1" },
-		});
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(translated);
-	});
-
 	it("routes permission.replied events to pending permission state", async () => {
 		const deps = createMockSSEWiringDeps();
 		const services = makeSSETestServices();
@@ -539,53 +461,6 @@ describe("handleSSEEventEffect", () => {
 		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-
-	it("broadcasts permission_request even when sessionID is missing from SSE event", async () => {
-		const deps = createMockSSEWiringDeps();
-
-		const event: OpenCodeEvent = {
-			type: "permission.asked",
-			properties: {
-				id: "perm-1",
-				permission: "Bash",
-				metadata: { command: "git status" },
-			},
-			// No sessionID!
-		};
-		await runSSEEvent(deps, event);
-
-		// The permission MUST be broadcast even without sessionID
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				requestId: "perm-1",
-				toolName: "Bash",
-			}),
-		);
-	});
-
-	it("broadcasts permission_request with sessionID when present in SSE event", async () => {
-		const deps = createMockSSEWiringDeps();
-
-		const event: OpenCodeEvent = {
-			type: "permission.asked",
-			properties: {
-				id: "perm-2",
-				permission: "Write",
-				sessionID: "sess-abc",
-			},
-		};
-		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				requestId: "perm-2",
-				sessionId: "sess-abc",
-				toolName: "Write",
-			}),
-		);
 	});
 
 	it("sends push notification for permission.asked", async () => {

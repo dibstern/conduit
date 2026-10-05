@@ -85,6 +85,16 @@ const makeSubscriptions = (
 					: { onTransportDrop: options.onTransportDrop }),
 			},
 		),
+	/** The project's pending permissions and questions, on the control socket. */
+	approvals: (options: { readonly onTransportDrop?: () => void } = {}) =>
+		resumeStream(
+			(resumeFromSequence) =>
+				sockets.control.SubscribeApprovals({
+					projectSlug,
+					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+				}),
+			options,
+		),
 	/** One session's transcript. Hot, so it rides the stream socket. */
 	sessionDetail: (options: {
 		readonly sessionId: string;

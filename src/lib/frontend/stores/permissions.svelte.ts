@@ -1,26 +1,110 @@
 // Pending permission requests and user questions.
 
+import type { Approval } from "../../shared-types.js";
+import {
+	type Change,
+	emptySubscription,
+	reduce,
+	type SubscriptionState,
+} from "../transport/subscription-state.js";
 import type {
 	AskUserQuestion,
 	PermissionRequest,
 	QuestionRequest,
-	RelayMessage,
 } from "../types.js";
-import { createFrontendLogger } from "../utils/logger.js";
 import { sessionState } from "./session.svelte.js";
 
-const log = createFrontendLogger("permissions");
-
 // This store has no client half: every entry is a request the server is waiting
-// on. Which option the user has highlighted lives in the card component until
-// it is submitted.
+// on, as the approvals subscription (ni8.9) reports it. Which option the user
+// has highlighted lives in the card component until it is submitted.
 
 export const permissionsState = $state({
 	pendingPermissions: [] as (PermissionRequest & { id: string })[],
 	pendingQuestions: [] as QuestionRequest[],
-	/** Error messages for questions that could not be delivered, keyed by toolId. */
-	questionErrors: new Map<string, string>(),
 });
+
+// The authoritative copy; the two lists above are views of it.
+let approvals: SubscriptionState<Approval> = emptySubscription();
+
+const approvalId = (approval: Approval): string =>
+	approval._tag === "permission" ? approval.requestId : approval.toolId;
+
+const toPermission = (
+	approval: Extract<Approval, { _tag: "permission" }>,
+): PermissionRequest & { id: string } => ({
+	id: approval.requestId,
+	requestId: approval.requestId,
+	sessionId: approval.sessionId,
+	toolName: approval.toolName,
+	toolInput: approval.toolInput,
+	...(approval.toolUseId != null && { toolUseId: approval.toolUseId }),
+	...(approval.always != null && { always: [...approval.always] }),
+	...(approval.permissionSuggestions != null && {
+		permissionSuggestions: [...approval.permissionSuggestions],
+	}),
+	...(approval.permissionTitle != null && {
+		permissionTitle: approval.permissionTitle,
+	}),
+	...(approval.permissionDisplayName != null && {
+		permissionDisplayName: approval.permissionDisplayName,
+	}),
+	...(approval.permissionDescription != null && {
+		permissionDescription: approval.permissionDescription,
+	}),
+	...(approval.permissionReason != null && {
+		permissionReason: approval.permissionReason,
+	}),
+});
+
+const toQuestion = (
+	approval: Extract<Approval, { _tag: "question" }>,
+): QuestionRequest => ({
+	toolId: approval.toolId,
+	sessionId: approval.sessionId,
+	...(approval.toolUseId != null && { toolUseId: approval.toolUseId }),
+	...(approval.providerId != null && { providerId: approval.providerId }),
+	questions: approval.questions.map((question) => ({
+		question: question.question,
+		header: question.header,
+		multiSelect: question.multiSelect,
+		...(question.custom != null && { custom: question.custom }),
+		options: question.options.map(({ label, description }) => ({
+			label,
+			...(description != null && { description }),
+		})),
+	})),
+});
+
+const publish = (next: SubscriptionState<Approval>): void => {
+	approvals = next;
+	const rows = [...next.rows.values()];
+	permissionsState.pendingPermissions = rows.flatMap((approval) =>
+		approval._tag === "permission" ? [toPermission(approval)] : [],
+	);
+	permissionsState.pendingQuestions = rows.flatMap((approval) =>
+		approval._tag === "question" ? [toQuestion(approval)] : [],
+	);
+};
+
+/**
+ * Fold one approvals envelope into the store. Returns the approvals that were
+ * not pending before it, which are the ones worth a notification: a replayed
+ * upsert or a reconnect snapshot re-reports what the user was already told.
+ */
+export function applyApprovalEnvelope(change: Change<Approval>): Approval[] {
+	const before = approvals;
+	const next = reduce(before, change, approvalId);
+	if (next === before) return [];
+	publish(next);
+	return [...next.rows].flatMap(([id, approval]) =>
+		before.rows.has(id) ? [] : [approval],
+	);
+}
+
+/** Whether an approval is still waiting on the user. */
+export function isApprovalPending(id: string): boolean {
+	return approvals.rows.has(id);
+}
 
 // Components should wrap in $derived() for reactive caching.
 
@@ -147,151 +231,36 @@ export function formatQuestionHeader(header: string): string {
 	return header.charAt(0).toUpperCase() + header.slice(1);
 }
 
-export function handlePermissionRequest(
-	msg: Extract<RelayMessage, { type: "permission_request" }>,
-	_sendFn?: (data: Record<string, unknown>) => void,
-): void {
-	const { requestId, toolName, toolInput } = msg;
-
-	if (!requestId || !toolName) return;
-	if (
-		permissionsState.pendingPermissions.some(
-			(permission) => permission.requestId === requestId,
-		)
-	)
-		return;
-
-	const permission: PermissionRequest & { id: string } = {
-		id: requestId,
-		requestId,
-		sessionId: msg.sessionId,
-		toolName,
-		toolInput,
-		...(msg.always != null && { always: [...msg.always] }),
-		...(msg.permissionSuggestions != null && {
-			permissionSuggestions: [...msg.permissionSuggestions],
-		}),
-		...(msg.permissionTitle != null && {
-			permissionTitle: msg.permissionTitle,
-		}),
-		...(msg.permissionDisplayName != null && {
-			permissionDisplayName: msg.permissionDisplayName,
-		}),
-		...(msg.permissionDescription != null && {
-			permissionDescription: msg.permissionDescription,
-		}),
-		...(msg.permissionReason != null && {
-			permissionReason: msg.permissionReason,
-		}),
-	};
-
-	permissionsState.pendingPermissions = [
-		...permissionsState.pendingPermissions,
-		permission,
-	];
-}
-
-export function handlePermissionResolved(
-	msg: Extract<RelayMessage, { type: "permission_resolved" }>,
-): void {
-	const { requestId } = msg;
-	if (!requestId) return;
-
-	permissionsState.pendingPermissions =
-		permissionsState.pendingPermissions.filter(
-			(p) => p.requestId !== requestId,
-		);
-}
-
-export function handleAskUser(
-	msg: Extract<RelayMessage, { type: "ask_user" }>,
-	sessionId?: string,
-): void {
-	const { toolId, questions, toolUseId, providerId } = msg;
-
-	if (!toolId || !Array.isArray(questions)) {
-		log.warn("handleAskUser: dropped — invalid payload", {
-			toolId,
-			questionsType: typeof questions,
-			msg,
-		});
-		return;
-	}
-
-	// Deduplicate: skip if this question is already pending.
-	// This can happen when ask_user arrives via both SSE + API replay
-	// (e.g., reconnect, session switch, or the SSE connected handler).
-	const isDuplicate = permissionsState.pendingQuestions.some(
-		(q) => q.toolId === toolId,
-	);
-	if (isDuplicate) return;
-
-	const request: QuestionRequest = {
-		toolId,
-		sessionId: sessionId ?? "",
-		...(toolUseId != null && { toolUseId }),
-		...(providerId != null && { providerId }),
-		questions,
-	};
-	permissionsState.pendingQuestions = [
-		...permissionsState.pendingQuestions,
-		request,
-	];
-}
-
-export function handleAskUserResolved(
-	msg: Extract<RelayMessage, { type: "ask_user_resolved" }>,
-): void {
-	const { toolId } = msg;
-	if (!toolId) return;
-
-	// Remove from pending questions
-	permissionsState.pendingQuestions = permissionsState.pendingQuestions.filter(
-		(q) => q.toolId !== toolId,
-	);
-}
-
 /**
- * Handle a question error — the server could not deliver the user's answer.
- * Records the error message so the QuestionCard can display it.
+ * Take an answered approval down before the server confirms it. The
+ * subscription's remove follows; until then the row is kept out of the view
+ * so a recompute does not bring the card back.
  */
-export function handleAskUserError(
-	msg: Extract<RelayMessage, { type: "ask_user_error" }>,
-): void {
-	const { toolId, message } = msg;
-	if (!toolId) return;
-
-	// Store the error keyed by toolId so components can react
-	permissionsState.questionErrors.set(toolId, message);
-}
+const dismiss = (id: string): void => {
+	if (!approvals.rows.has(id)) return;
+	const rows = new Map(approvals.rows);
+	rows.delete(id);
+	publish({ ...approvals, rows });
+};
 
 /** Remove a permission request (after responding). */
 export function removePermission(requestId: string): void {
-	permissionsState.pendingPermissions =
-		permissionsState.pendingPermissions.filter(
-			(p) => p.requestId !== requestId,
-		);
+	dismiss(requestId);
 }
 
 /** Remove a question request (after responding). */
 export function removeQuestion(toolId: string): void {
-	permissionsState.pendingQuestions = permissionsState.pendingQuestions.filter(
-		(q) => q.toolId !== toolId,
-	);
+	dismiss(toolId);
 }
 
 /** Clear all pending items (e.g. on disconnect).
  *  Cross-session indicators need no clearing: they are on the session rows, and
  *  the next snapshot replaces them wholesale. */
 export function clearAll(): void {
-	permissionsState.pendingPermissions = [];
-	permissionsState.pendingQuestions = [];
-	permissionsState.questionErrors = new Map();
+	publish(emptySubscription());
 }
 
 /** Clear all permissions state (for project switch). */
 export function clearAllPermissions(): void {
-	permissionsState.pendingPermissions = [];
-	permissionsState.pendingQuestions = [];
-	permissionsState.questionErrors = new Map();
+	publish(emptySubscription());
 }

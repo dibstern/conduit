@@ -55,7 +55,7 @@ describe("daemon shared OpenCode global stream", () => {
 	function requests(browser: ProcessBrowser, prefix: string) {
 		return browser.frames.filter(
 			({ message }) =>
-				message["type"] === "permission_request" &&
+				message["type"] === "permission_pending" &&
 				String(message["requestId"]).startsWith(prefix),
 		).length;
 	}

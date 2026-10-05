@@ -2,6 +2,7 @@ import { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
+	ApprovalSchema,
 	SessionGitSchema,
 	type SessionInfo,
 	SessionInfoSchema,
@@ -1901,11 +1902,28 @@ export const SubscribePtys = Rpc.make("SubscribePtys", {
 	stream: true,
 });
 
+/**
+ * Every pending permission request and question in the project (ni8.9). The
+ * scope is the project, not a session: a subagent's approval renders inline in
+ * its parent, and another session's in the attention banner. Removal ids are
+ * the requestId or toolId the item carries.
+ */
+export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
+	payload: {
+		projectSlug: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(ApprovalSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,
 	SubscribePtys,
+	SubscribeApprovals,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),

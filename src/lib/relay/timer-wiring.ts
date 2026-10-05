@@ -6,23 +6,24 @@
 
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
-import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
-import type { PermissionId } from "../shared-types.js";
+import type { LoggerTag } from "../domain/relay/Services/services.js";
+import { recordPermissionTimedOut } from "../handlers/permissions.js";
 
 /**
- * Scoped Layer that checks for timed-out permissions every 30 seconds
- * and broadcasts resolution messages to all connected clients.
+ * Scoped Layer that checks for timed-out permissions every 30 seconds and
+ * records the ones no provider turn was waiting on as rejected, which takes
+ * their cards down through the approvals subscription. An awaited one fails
+ * its turn, and the turn records the resolution itself.
  *
- * Requires: PendingInteractionServiceTag, WebSocketHandlerTag.
+ * Requires: PendingInteractionServiceTag, LoggerTag.
  */
 export const PermissionTimeoutLive: Layer.Layer<
 	never,
 	never,
-	PendingInteractionServiceTag | WebSocketHandlerTag
+	PendingInteractionServiceTag | LoggerTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 
 		yield* Effect.forkScoped(
 			Effect.repeat(
@@ -30,12 +31,7 @@ export const PermissionTimeoutLive: Layer.Layer<
 					const timedOutPerms =
 						yield* pendingInteractions.takeTimedOutPermissions();
 					for (const entry of timedOutPerms) {
-						wsHandler.broadcast({
-							type: "permission_resolved",
-							sessionId: entry.sessionId,
-							requestId: entry.id as PermissionId,
-							decision: "timeout",
-						});
+						if (!entry.awaited) yield* recordPermissionTimedOut(entry);
 					}
 				}),
 				Schedule.fixed(Duration.seconds(30)),

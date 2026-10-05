@@ -77,16 +77,11 @@ export interface MockRelayProtocolContext {
 }
 
 const SESSION_SCOPED_MESSAGE_TYPES = new Set([
-	"ask_user",
-	"ask_user_error",
-	"ask_user_resolved",
 	"delta",
 	"done",
 	"error",
 	"message_removed",
 	"part_removed",
-	"permission_request",
-	"permission_resolved",
 	"provider_session_reloaded",
 	"result",
 	"session_deleted",

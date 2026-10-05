@@ -208,6 +208,7 @@ const makeReadQuery = (
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
 	readSessionTranscriptPage: vi.fn(() =>
@@ -1467,7 +1468,7 @@ describe("ProviderTurnService", () => {
 			() => {
 				const engine = makeEngine({ providerId });
 				const ingestion = makeIngestion();
-				const { layer, wsHandler } = serviceLayer({ engine, ingestion });
+				const { layer } = serviceLayer({ engine, ingestion });
 
 				return Effect.gen(function* () {
 					const interactions = yield* PendingInteractionServiceTag;
@@ -1502,11 +1503,6 @@ describe("ProviderTurnService", () => {
 							.mocked(engine.dispatchEffect)
 							.mock.calls.some(([call]) => call.type === "interrupt_turn"),
 					).toBe(interrupts);
-					expect(
-						vi
-							.mocked(wsHandler.broadcast)
-							.mock.calls.some(([msg]) => msg.type === "ask_user_resolved"),
-					).toBe(interrupts || recoveredCount > 0);
 					expect(vi.mocked(ingestion.ingestBatch).mock.calls).toHaveLength(
 						recoveredCount,
 					);

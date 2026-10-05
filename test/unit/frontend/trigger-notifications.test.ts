@@ -7,7 +7,11 @@
 // (which rely on the real getNotifSettings reading from localStorage).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import {
+	type Approval,
+	PermissionId,
+	type RelayMessage,
+} from "../../../src/lib/shared-types.js";
 
 // Hoisted mocks (run before imports)
 
@@ -120,8 +124,8 @@ describe("triggerNotifications", () => {
 			browser: false,
 			sound: true,
 		});
-		const question: RelayMessage = {
-			type: "ask_user",
+		const question: Approval = {
+			_tag: "question",
 			sessionId: "s1",
 			toolId: "q-crash",
 			questions: [],
@@ -181,8 +185,8 @@ describe("triggerNotifications", () => {
 		const tabB = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
-		const question: RelayMessage = {
-			type: "ask_user",
+		const question: Approval = {
+			_tag: "question",
 			sessionId: "s1",
 			toolId: "q-quota",
 			questions: [],
@@ -250,16 +254,18 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances[0]?.options.body).toBe("Something broke");
 	});
 
-	it("fires browser notification for 'permission_request' message", async () => {
+	it("fires browser notification for a permission approval", async () => {
 		const mod = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
 		await mod.triggerNotifications({
-			type: "permission_request",
+			_tag: "permission",
+			sessionId: "test-session",
 			toolName: "bash",
-			requestId: "req-123",
-		} as RelayMessage);
+			requestId: PermissionId.make("req-123"),
+			toolInput: {},
+		});
 
 		expect(notificationInstances).toHaveLength(1);
 		expect(notificationInstances[0]?.title).toBe("Permission Needed");
@@ -267,19 +273,19 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances[0]?.options.tag).toBe("perm-req-123");
 	});
 
-	it("fires browser notification for 'ask_user' message", async () => {
+	it("fires browser notification for a question approval", async () => {
 		const mod = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
 		await mod.triggerNotifications({
-			type: "ask_user",
+			_tag: "question",
 			sessionId: "test-session",
 			toolId: "q-456",
 			questions: [
 				{ question: "What?", header: "", options: [], multiSelect: false },
 			],
-		} as RelayMessage);
+		});
 
 		expect(notificationInstances).toHaveLength(1);
 		expect(notificationInstances[0]?.title).toBe("Question from Agent");
