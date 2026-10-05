@@ -382,7 +382,7 @@
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetAgentsResponse(response);
+					if (generation === attachGeneration) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
 			void getModelsRpc({

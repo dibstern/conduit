@@ -139,6 +139,8 @@ const serverDiscovery = $state({
 	providers: [] as ProviderInfo[],
 	currentModelId: "" as string,
 	currentProviderId: "" as string,
+	/** Retain session-scoped metadata so a switch never uses the previous provider. */
+	sessionProviderIds: {} as Record<string, string>,
 	commands: [] as CommandInfo[],
 	commandsFetched: false,
 	defaultModelId: "" as string,
@@ -206,6 +208,9 @@ export const discoveryState = {
 	},
 	get providers(): readonly Immutable<ProviderInfo>[] {
 		return serverDiscovery.providers;
+	},
+	get sessionProviderIds(): Readonly<Record<string, string>> {
+		return serverDiscovery.sessionProviderIds;
 	},
 	get commands(): readonly Immutable<CommandInfo>[] {
 		return serverDiscovery.commands;
@@ -549,7 +554,10 @@ export function handleAgentList(
 	choice.agentId = null;
 }
 
-export function applyGetAgentsResponse(response: GetAgentsResponse): void {
+export function applyGetAgentsResponse(
+	response: GetAgentsResponse,
+	sessionId?: string,
+): void {
 	handleAgentList({
 		type: "agent_list",
 		providerScope: response.providerScope,
@@ -563,6 +571,8 @@ export function applyGetAgentsResponse(response: GetAgentsResponse): void {
 			? { activeAgentId: response.activeAgentId }
 			: {}),
 	});
+	if (sessionId)
+		serverDiscovery.sessionProviderIds[sessionId] = response.providerScope.id;
 	if (response.hiddenAgents) {
 		serverDiscovery.hiddenAgents = [...response.hiddenAgents];
 	}
@@ -908,6 +918,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.providers = [];
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
+	serverDiscovery.sessionProviderIds = {};
 	serverDiscovery.commands = [];
 	serverDiscovery.commandsFetched = false;
 	serverDiscovery.defaultModelId = "";
