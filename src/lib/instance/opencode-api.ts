@@ -280,11 +280,14 @@ class SessionNamespace {
 		);
 	}
 
-	async statuses(): Promise<Record<string, SessionStatus>> {
+	async statuses(directory?: string): Promise<Record<string, SessionStatus>> {
 		return this.api.sdk(
 			"session.statuses",
 			decodeOpenCodeSessionStatusMap,
-			() => this.api._sdk.session.status(),
+			() =>
+				this.api._sdk.session.status(
+					directory === undefined ? undefined : { directory },
+				),
 		);
 	}
 
@@ -434,16 +437,21 @@ class SessionNamespace {
 class PermissionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
-	async list(): Promise<
+	/** OpenCode scopes pending permissions by directory; unscoped lists are empty. */
+	async list(
+		directory?: string,
+	): Promise<
 		Array<{ [key: string]: unknown; id: string; permission: string }>
 	> {
 		const permissions = await this.api.sdk(
 			"permission.list",
 			decodeOpenCodePendingPermissionListResponse,
 			() =>
-				this.api._sdk.permission.list(undefined, {
-					headers: { "x-opencode-directory": null },
-				}),
+				directory === undefined
+					? this.api._sdk.permission.list(undefined, {
+							headers: { "x-opencode-directory": null },
+						})
+					: this.api._sdk.permission.list({ directory }),
 		);
 		return [...permissions];
 	}
@@ -467,14 +475,19 @@ class PermissionNamespace {
 class QuestionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
-	async list(): Promise<Array<{ [key: string]: unknown; id: string }>> {
+	/** OpenCode scopes pending questions by directory; unscoped lists are empty. */
+	async list(
+		directory?: string,
+	): Promise<Array<{ [key: string]: unknown; id: string }>> {
 		const questions = await this.api.sdk(
 			"question.list",
 			decodeOpenCodePendingQuestionListResponse,
 			() =>
-				this.api._sdk.question.list(undefined, {
-					headers: { "x-opencode-directory": null },
-				}),
+				directory === undefined
+					? this.api._sdk.question.list(undefined, {
+							headers: { "x-opencode-directory": null },
+						})
+					: this.api._sdk.question.list({ directory }),
 		);
 		return [...questions];
 	}

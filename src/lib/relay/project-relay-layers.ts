@@ -61,6 +61,7 @@ import {
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createSdkClientEffect } from "../instance/sdk-factory.js";
 import {
 	makePersistenceEffectLayer,
@@ -231,8 +232,13 @@ export function createProjectRelayLayers({
 					baseUrl: config.opencodeUrl,
 					...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
 				}).pipe(
-					Effect.map(({ client }) => ({
+					Effect.map(({ client, authHeaders }) => ({
 						event: { subscribe: (options) => client.global.event(options) },
+						reconcile: new OpenCodeAPI({
+							sdk: client,
+							baseUrl: config.opencodeUrl,
+							authHeaders,
+						}),
 					})),
 				),
 				config.log?.child("opencode"),

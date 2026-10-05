@@ -98,7 +98,6 @@ interface LegacyStatusPollerPort {
 	markMessageActivity?(sessionId: string): void;
 	clearMessageActivity(sessionId: string): void;
 	notifySSEIdle?(sessionId: string): void;
-	reconcileNow?(): Promise<void>;
 }
 
 export interface MonitoringWiringDeps {

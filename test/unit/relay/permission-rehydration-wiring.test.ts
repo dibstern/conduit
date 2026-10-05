@@ -1,10 +1,8 @@
-// Verifies that createProjectRelay wires listPendingPermissions into the SSE
-// consumer, so pending permissions are rehydrated from the OpenCode API on
-// SSE connect. Uses a mock OpenCode server — no real OpenCode required.
-//
-// This is the integration-level companion to the unit tests in sse-wiring.test.ts
-// that prove wireSSEConsumerEffect handles listPendingPermissions correctly. This test
-// proves relay-stack.ts actually passes the function through.
+// Verifies that a standalone createProjectRelay recovers pending permissions on
+// stream connect: OpenCode Instances lists them from the OpenCode API and
+// re-emits them as ordinary permission.asked events, which reach the Effect
+// service and connected WS clients. Uses a mock OpenCode server — no real
+// OpenCode required.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import {

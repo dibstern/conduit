@@ -438,8 +438,6 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			listPendingQuestions: () => api.question.list(),
-			listPendingPermissions: () => api.permission.list(),
 			replyPermission: (
 				sessionId: string,
 				permissionId: string,
@@ -456,8 +454,9 @@ function startSseConsumers(
 		// Named OpenCode instances: lazily created
 		// per-instance SSE streams join the SAME pipeline — turn
 		// completion via wireSSEToInstance, streaming/persistence via
-		// wireSSEConsumerEffect. Pending permission/question recovery
-		// lists stay on the default api (accepted degradation), and the
+		// wireSSEConsumerEffect. Pending prompt and status recovery runs in
+		// OpenCode Instances for the default instance only (accepted
+		// degradation), and the
 		// ingress translator reset stays owned by the default stream's
 		// reconnects so a named stream's (re)connect cannot reset
 		// in-flight default-session ingestion state.

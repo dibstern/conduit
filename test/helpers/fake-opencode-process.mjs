@@ -44,6 +44,53 @@ const sessions = () =>
 	existsSync(sessionsFile)
 		? JSON.parse(readFileSync(sessionsFile, "utf8"))
 		: [];
+// Per-directory status and pending prompts, kept in a file so they survive a
+// managed restart like sessions do. Idle sessions are absent, as in OpenCode.
+const stateFile = join(configDir, "fake-opencode-state.json");
+const readState = () =>
+	existsSync(stateFile)
+		? JSON.parse(readFileSync(stateFile, "utf8"))
+		: { statuses: {}, permissions: {}, questions: {}, drops: [] };
+const updateState = (update) => {
+	const state = readState();
+	update(state);
+	writeFileSync(stateFile, JSON.stringify(state));
+};
+const canonical = (directory) => {
+	try {
+		return realpathSync(directory);
+	} catch {
+		return directory;
+	}
+};
+// A drop rule matches on event type and, for session.status, the status type.
+const dropped = (payload) =>
+	readState().drops.some(
+		(rule) =>
+			rule.type === payload.type &&
+			(rule.status === undefined ||
+				rule.status === payload.properties?.status?.type),
+	);
+const emit = (envelope) => {
+	if (envelope?.payload && dropped(envelope.payload)) {
+		appendFileSync(
+			join(configDir, "fake-opencode-dropped-events.jsonl"),
+			`${JSON.stringify({ pid: process.pid, at: Date.now(), ...envelope })}\n`,
+		);
+		return;
+	}
+	for (const [client, stream] of streams) {
+		if (stream.path === "/global/event")
+			client.write(`data: ${JSON.stringify(envelope)}\n\n`);
+		else if (stream.directory === envelope.directory)
+			client.write(`data: ${JSON.stringify(envelope.payload)}\n\n`);
+	}
+};
+const emitTyped = (directory, type, properties) =>
+	emit({
+		directory,
+		payload: { id: `evt_${randomUUID()}`, type, properties },
+	});
 const streamLog = (action, stream) =>
 	appendFileSync(
 		join(configDir, "fake-opencode-stream-connections.jsonl"),
@@ -81,13 +128,48 @@ const server = createServer(async (request, response) => {
 			`${JSON.stringify({ method: request.method, path, body })}\n`,
 		);
 	if (path === "/test/emit-event" && request.method === "POST") {
-		const envelope = JSON.parse(body);
-		for (const [client, stream] of streams) {
-			if (stream.path === "/global/event")
-				client.write(`data: ${JSON.stringify(envelope)}\n\n`);
-			else if (stream.directory === envelope.directory)
-				client.write(`data: ${JSON.stringify(envelope.payload)}\n\n`);
-		}
+		emit(JSON.parse(body));
+		response.end("{}");
+		return;
+	}
+	if (path === "/test/set-status" && request.method === "POST") {
+		const input = JSON.parse(body);
+		const target = canonical(input.directory);
+		updateState((state) => {
+			const statuses = (state.statuses[target] ??= {});
+			if (input.status.type === "idle") delete statuses[input.sessionID];
+			else statuses[input.sessionID] = input.status;
+		});
+		emitTyped(target, "session.status", {
+			sessionID: input.sessionID,
+			status: input.status,
+		});
+		response.end("{}");
+		return;
+	}
+	if (
+		(path === "/test/add-permission" || path === "/test/add-question") &&
+		request.method === "POST"
+	) {
+		const input = JSON.parse(body);
+		const target = canonical(input.directory);
+		const kind = path === "/test/add-permission" ? "permissions" : "questions";
+		updateState((state) => {
+			state[kind][target] = [...(state[kind][target] ?? []), input.item];
+		});
+		emitTyped(
+			target,
+			kind === "permissions" ? "permission.asked" : "question.asked",
+			input.item,
+		);
+		response.end("{}");
+		return;
+	}
+	if (path === "/test/drop-events" && request.method === "POST") {
+		const input = JSON.parse(body);
+		updateState((state) => {
+			state.drops = input.rules;
+		});
 		response.end("{}");
 		return;
 	}
@@ -172,7 +254,18 @@ const server = createServer(async (request, response) => {
 			streamLog("close", stream);
 		});
 	} else if (path === "/session/status") {
-		response.end("{}");
+		response.end(
+			JSON.stringify((directory && readState().statuses[directory]) || {}),
+		);
+	} else if (
+		(path === "/permission" || path === "/question") &&
+		request.method === "GET"
+	) {
+		// OpenCode 1.18.34 scopes pending prompts by directory; none without one.
+		const kind = path === "/permission" ? "permissions" : "questions";
+		response.end(
+			JSON.stringify((directory && readState()[kind][directory]) || []),
+		);
 	} else if (/^\/session\/[^/]+$/.test(path)) {
 		response.end(
 			JSON.stringify(
