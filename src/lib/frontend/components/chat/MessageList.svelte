@@ -442,16 +442,23 @@
 	{/if}
 	</div>
 
-	<!-- Cold open: message-shaped placeholders where the newest messages land. -->
+	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where
+	     the newest messages land; extra turns clip off the top. -->
 	{#if feed === "catchingUp" && !hasRows}
 		<div
-			class="transcript-skeleton absolute inset-x-0 bottom-3 max-w-[760px] mx-auto px-5 flex flex-col gap-3"
+			class="transcript-skeleton absolute inset-x-0 top-5 bottom-3 overflow-hidden max-w-[760px] mx-auto px-5 flex flex-col justify-end gap-6"
 			aria-hidden="true"
 			data-testid="transcript-skeleton"
 		>
-			<div class="h-14 rounded-lg border border-border bg-bg-alt motion-safe:animate-pulse"></div>
-			<div class="h-4 w-4/5 rounded-md bg-border motion-safe:animate-pulse"></div>
-			<div class="h-4 w-3/5 rounded-md bg-border motion-safe:animate-pulse"></div>
+			<!-- Enough turns to cover a tall monitor; varied line widths read as prose. -->
+			{#each { length: 12 }, i}
+				<div class="flex flex-col gap-3 shrink-0">
+					<div class="h-14 rounded-lg border border-border bg-bg-alt motion-safe:animate-pulse"></div>
+					{#each [["w-4/5", "w-3/5"], ["w-11/12", "w-4/5", "w-2/5"], ["w-3/4", "w-1/2"]][i % 3] as width}
+						<div class="h-4 {width} rounded-md bg-border motion-safe:animate-pulse"></div>
+					{/each}
+				</div>
+			{/each}
 		</div>
 	{/if}
 
@@ -494,5 +501,7 @@
 	}
 	.transcript-skeleton {
 		animation: session-fade-in 150ms ease-out 150ms both;
+		/* Softens the turn clipped at the top edge. */
+		mask-image: linear-gradient(to bottom, transparent, black 4rem);
 	}
 </style>
